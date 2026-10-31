@@ -6,23 +6,24 @@ import { LiveMenu } from "../plugin-ui/LiveMenu";
 import { useLiveFollow, writeLiveFollow } from "../plugin-ui/liveFollow";
 import { OPEN_TEAM_MODAL_EVENT } from "../plugin-ui/scopeActivity";
 import { groupName } from "../plugin-ui/scopeBarText";
+import { readActiveTeam, useActiveTeam } from "../plugin-ui/activeTeamStore";
 import { TeamModal, type TeamSection } from "../plugin-ui/TeamModal";
-import { useTeamScope } from "../plugin-ui/teamScopeStore";
 import type { LiveTeam, LiveTeamOnline } from "../types/panel";
 import { DropdownPanel } from "./DropdownPanel";
 import { LiveInvitePrompt } from "./LiveInvitePrompt";
 
 /**
  * Team and Live in the title bar, one button: green while this PC is live (with how many are
- * in its group), pulsing while it links to someone, a dot for the visible pane's team copy
- * (amber when someone live can't be reached or needs to update, red on an error) and the count
- * of what needs looking at (red with a conflict). The menu has the live groups and people per
- * team; Settings (always there) opens the Team modal, as does the activity tray
+ * in its group), pulsing while it links to someone, a dot for the team this PC works in (amber
+ * when someone live can't be reached or needs to update, red on an error) and the count of what
+ * needs looking at across the team's plugins (red with a conflict). The same on every tab: it
+ * reads the active team, never the plugin pane on screen. The menu has the live groups and people
+ * per team; Settings (always there) opens the Team modal, as does the activity tray
  * (`OPEN_TEAM_MODAL_EVENT`). Always shown, on the phone too (every call it makes is allowed off the PC).
  */
 export function TeamLiveDropdown() {
   const overview = useLiveOverview();
-  const scope = useTeamScope();
+  const team = useActiveTeam();
   const follow = useLiveFollow();
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<TeamSection | null>(null);
@@ -30,7 +31,9 @@ export function TeamLiveDropdown() {
   const [error, setError] = useState("");
   const anchorRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (open) void readLiveOverview(); // fresh when opened: who is live may have moved since
+    if (!open) return;
+    void readLiveOverview(); // fresh when opened: who is live may have moved since
+    void readActiveTeam();
   }, [open]);
   useEffect(() => {
     const onOpen = (event: Event) => {
@@ -53,11 +56,10 @@ export function TeamLiveDropdown() {
     : groupsLive
       ? `${groupsLive} live ${groupsLive === 1 ? "group" : "groups"} on your team`
       : "";
-  const label = scope ? (scope.shared ? scope.status.scope?.label || "Team" : "Local") : "";
-  const teamTitle = scope ? `${label} · ${scope.syncing ? "Syncing…" : scope.phrase.text}` : "";
+  const teamTitle = team ? `${team.shared ? team.label : "Local"} · ${team.phrase}` : "";
   const title = [teamTitle, liveTitle].filter(Boolean).join("\n") || "Team and Live";
-  const tone = scope?.notes.some((n) => n.tone === "error") ? "error" : warn ? "warn" : scope?.phrase.tone;
-  const dot = tone || (scope ? (scope.shared ? scope.variant : "local") : "");
+  const tone = team?.tone === "error" ? "error" : warn ? "warn" : team?.tone;
+  const dot = tone || (team ? (team.shared ? "shared" : "local") : "");
 
   const act = async (run: () => Promise<{ ok?: boolean; error?: string } | undefined>, keepOpen = false) => {
     setBusy(true);
@@ -79,11 +81,12 @@ export function TeamLiveDropdown() {
   // The menu stays open: the row turns to Invited, and more people can be asked.
   const invite = (team: LiveTeam, person: LiveTeamOnline) =>
     void act(async () => getApi()?.live_team_invite?.(team.account, team.space, person.device), true);
-  const use = (team: LiveTeam) => {
-    setOpen(false);
-    const choice = scope?.menu?.find((c) => c.id === team.space) ?? { id: team.space, kind: "shared" as const, label: team.label };
-    void scope?.actions.choose(choice);
-  };
+  // Every plugin moves to that team; each leaves its old team's live group at once.
+  const use = (picked: LiveTeam) => void act(async () => {
+    const out = await getApi()?.plugin_scope_set_all?.(picked.space);
+    await readActiveTeam();
+    return out?.errors?.length ? { ok: false, error: out.errors.map((e) => e.error).join(" ") } : out;
+  });
   const settings = () => {
     setOpen(false);
     setModal("overview");
@@ -105,15 +108,15 @@ export function TeamLiveDropdown() {
         <Icons.Users />
         {mine && mine.members.length > 1 ? <span className="live-trigger-count">{mine.members.length}</span> : null}
         {dot ? <span className={`plugin-scope-dot plugin-scope-dot--${dot} app-header-team-btn__dot`} aria-hidden /> : null}
-        {scope?.badge ? (
-          <span className={`plugin-scope-count app-header-team-btn__count${scope.conflicts ? " is-alert" : ""}`}>{scope.badge}</span>
+        {team?.badge ? (
+          <span className={`plugin-scope-count app-header-team-btn__count${team.conflicts ? " is-alert" : ""}`}>{team.badge}</span>
         ) : null}
       </button>
       <DropdownPanel anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} width={320} placement="bottom">
         {error ? <p className="plugin-scope-menu__note plugin-scope-menu__note--warn live-menu__error" role="alert">{error}</p> : null}
         {teams.length ? (
           <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} onInvite={invite} follow={follow} onFollow={writeLiveFollow}
-            current={scope?.current} onUse={scope ? use : undefined} />
+            current={team?.current} onUse={getApi()?.plugin_scope_set_all ? use : undefined} />
         ) : <div className="plugin-scope-menu__empty">No team yet.</div>}
         <div className="plugin-scope-menu__foot team-live-menu__foot">
           <span className="plugin-scope-menu__sub team-live-menu__status">{teamTitle}</span>

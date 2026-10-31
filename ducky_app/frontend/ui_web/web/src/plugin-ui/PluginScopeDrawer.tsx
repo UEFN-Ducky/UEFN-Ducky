@@ -611,7 +611,7 @@ export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownT
 
   const settingsTab = (
     <>
-      <Row name="Copy shown here" sub={`${scope?.kind === "shared" ? `${label}'s team copy` : "Local: only on this PC"}. Change it in the Team menu's Overview.`} />
+      <Row name="Copy shown here" sub={`${scope?.kind === "shared" ? `${label}'s team copy` : "Local: only on this PC"}. Change it under Your team in Team settings.`} />
       {v2 && !lost && api?.plugin_scope_mode ? (
         <Row name="Sending"
           sub={manual ? "Changes go out and come in only when you send or get them." : "Changes go out and come in by themselves."}

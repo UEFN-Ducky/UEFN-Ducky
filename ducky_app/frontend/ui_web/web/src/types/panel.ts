@@ -2939,6 +2939,37 @@ export interface PluginScopeChoice {
   slug?: string;
 }
 
+/** One plugin (or Workflows) on a team copy, as the Team modal lists it. */
+export interface TeamPluginRow {
+  pluginId: string;
+  label: string;
+  /** A data URL, or "" (Workflows and plugins with no icon). */
+  icon: string;
+  /** "store" | "local" | "ai" | "workflows". */
+  source: string;
+  incoming: number;
+  incomingBy: string[];
+  /** Incoming changes wait for Update now. */
+  held: boolean;
+  outgoing: PluginScopeOutgoing[];
+  pending: number;
+  conflicts: number;
+  blocked: { kind: string; key: string; name?: string; error?: string; attempts?: number }[];
+  state: string;
+  error: string;
+  /** Docs and files in the team copy. */
+  items: number;
+}
+
+/** The Team modal's team copy: `current` is a space id, or "personal" when no plugin shows a team. */
+export interface TeamOverview {
+  ok?: boolean;
+  current: string;
+  label: string;
+  plugins: TeamPluginRow[];
+  error?: string;
+}
+
 export interface ContextBreakdownSubItem {
   label: string;
   tokens: number;
@@ -4791,6 +4822,15 @@ export interface PanelApi {
     /** The team has some of the files already: `units` are the Local ones it lacks. */
     partial?: boolean;
     refused?: Record<string, string>;
+  }>;
+  /** The Team modal: one team copy ('' = the one most plugins show) and every plugin on it. */
+  plugin_team_overview?(space?: string): Promise<TeamOverview>;
+  /** Every plugin that can share shows Local or one team; each leaves its old live group at once.
+   * `pending`: team copies that need a first share (left as they were). */
+  plugin_scope_set_all?(scope_id: string): Promise<{
+    ok?: boolean; switched?: string[]; error?: string;
+    pending?: { plugin: string; team?: string; note?: string }[];
+    errors?: { plugin: string; error: string }[];
   }>;
   /** An error inside a plugin panel (bridge `panel.error`), for ducky_plugin_errors. */
   plugin_panel_error?(plugin_id: string, panel_id: string, kind: string, message: string, stack: string): Promise<{ ok?: boolean }>;

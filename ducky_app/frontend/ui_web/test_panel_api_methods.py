@@ -443,6 +443,8 @@ _PUBLIC_METHODS = frozenset({
     'plugin_scope_retry',
     'plugin_scope_save_unsent',
     'plugin_scope_set',
+    'plugin_scope_set_all',
+    'plugin_team_overview',
     'plugin_scope_status',
     'plugin_scope_sync',
     'plugin_scope_unlock',

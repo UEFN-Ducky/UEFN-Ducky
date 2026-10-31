@@ -101,6 +101,23 @@ def test_a_switch_waits_for_the_send_only_so_long_and_says_what_stayed(who, fake
     assert "unsent" not in out
 
 
+def test_one_pick_switches_every_plugin_and_the_overview_lists_them(who, fake: Sending, monkeypatch) -> None:
+    from backend.uefn_plugins import store
+
+    monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: [PLUGIN, "forge"])
+    aid = open_space(fake, who, "ana@x.org", "spaceT", "Alpha")
+    scopes.link_plugin("forge", "spaceT")
+    PluginData("forge").put("scene.one", {"name": "One"})
+    over = Api().plugin_team_overview()
+    assert (over["current"], over["label"]) == ("spaceT", "Alpha")
+    assert [r["pluginId"] for r in over["plugins"]] == [PLUGIN, "forge"]
+    out = Api().plugin_scope_set_all("personal")
+    assert out["ok"] and sorted(out["switched"]) == [PLUGIN, "forge"]
+    assert repo.link_get(aid, PLUGIN) == "personal" and repo.link_get(aid, "forge") == "personal"
+    assert Api().plugin_team_overview() == {"ok": True, "current": "personal", "label": "Local", "plugins": []}
+    assert Api().plugin_scope_set_all("")["ok"] is False
+
+
 def test_drop_clears_a_blocked_change_and_the_team_copy_comes_back(who, fake: Sending) -> None:
     aid = open_space(fake, who, "ana@x.org", "spaceT", "Alpha")
     data = PluginData(PLUGIN)

@@ -227,6 +227,20 @@ def _current(plugin: str) -> _State | None:
     return st
 
 
+def scope_switched(plugin: str) -> None:
+    """``plugin`` now shows another copy: it leaves its old team copy's group at once (never
+    on the next roster, so teammates stop seeing it now), this PC stops being live on that
+    copy when no plugin is left there, and on a copy this PC is live on it joins the group."""
+    with _lock:
+        st = _live.get(plugin)
+        own = plugin in _own
+    _current(plugin)
+    if st is not None and not own and _team(plugin) != (st.account, st.space):
+        if not _team_plugins(st.account, st.space)[0]:
+            leave_team(st.account, st.space)
+    _come_along(plugin)
+
+
 def is_live(plugin: str) -> bool:
     with _lock:
         return plugin in _live

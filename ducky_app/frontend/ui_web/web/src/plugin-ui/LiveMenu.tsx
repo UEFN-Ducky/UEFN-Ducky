@@ -25,9 +25,9 @@ type Props = {
   /** Each plugin's page goes to the leader's screen in a group this PC joined. */
   follow: boolean;
   onFollow: (on: boolean) => void;
-  /** The visible plugin pane's team copy (a space id, or "personal"); none: no pane can share. */
+  /** The team this PC works in (a space id, or "personal"), the same on every tab. */
   current?: string;
-  /** Show this team's data in the visible plugin pane. */
+  /** Work in this team: every plugin moves to it. */
   onUse?: (team: LiveTeam) => void;
 };
 
@@ -56,7 +56,7 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, o
         <div className="plugin-scope-menu__foot">
           <button type="button" role="menuitem" className="plugin-scope-btn plugin-scope-btn--block" disabled={busy}
             onClick={() => onUse(team)}>
-            Use for this plugin
+            Work in this team
           </button>
         </div>
       ) : null}
@@ -166,9 +166,9 @@ function headCount(team: LiveTeam): number {
 
 /**
  * The title bar's Team and Live menu. Tabs: Live (team copies where someone is live) and All.
- * Each team copy is an accordion (the visible pane's one, or the one this PC is live in, starts
- * open): its live groups (named by host, who is in which plugin) with Join / Leave, Same screen
- * as the group, who else is online with Invite, Start live, and Use for this plugin. Being live
+ * Each team copy is an accordion (your team, or the one this PC is live in, starts open): its
+ * live groups (named by host, who is in which plugin) with Join / Leave, Same screen as the
+ * group, who else is online with Invite, Start live, and Work in this team. Being live
  * covers every plugin on that team copy: people live together see each other's pointers, and
  * what one presses is greyed out for the others.
  */
@@ -208,7 +208,7 @@ export function LiveMenu({ teams, ...rest }: Props) {
                 <span className="plugin-scope-menu__name">{team.label}</span>
                 <span className="plugin-scope-menu__sub">
                   {people ? `${people} ${people === 1 ? "person" : "people"}` : "Nobody online"}
-                  {team.space === rest.current ? " · this plugin" : ""}
+                  {team.space === rest.current ? " · your team" : ""}
                 </span>
               </span>
               {team.groups.length ? <span className="plugin-scope-dot plugin-scope-dot--live" title="Someone is live" aria-hidden /> : null}

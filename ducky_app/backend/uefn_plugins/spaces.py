@@ -537,6 +537,53 @@ def scope_status(plugin: str) -> dict[str, Any]:
     return out
 
 
+def team_overview(space: str = "") -> dict[str, Any]:
+    """The Team modal, whatever tab is on screen: one team copy (``space``; '' picks the one
+    most plugins show) with each plugin on it (Workflows too): ``pluginId``, ``label``,
+    ``icon``, ``source``, ``incoming`` / ``incomingBy`` / ``held``, ``outgoing`` (rows),
+    ``pending``, ``conflicts``, ``blocked`` (downloads that failed), ``state``, ``error``.
+    No plugin on a team: ``current`` is ``personal`` and ``plugins`` is empty."""
+    from collections import Counter
+
+    from backend.store.repos import plugin_data as repo
+    from backend.uefn_plugins import scopes
+    from backend.uefn_plugins.store import get_enabled_plugin_ids, load_plugin_manifest, plugin_icon_data_url
+
+    account = scopes.account_id()
+    enabled = set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS}
+    links = {p: s for p, s in repo.links(account).items() if p in enabled and s != scopes.PERSONAL} \
+        if account != scopes.LOCAL else {}
+    space = str(space or "") or (Counter(links.values()).most_common(1)[0][0] if links else "")
+    if not space:
+        return {"ok": True, "current": scopes.PERSONAL, "label": "Local", "plugins": []}
+    rows: list[dict[str, Any]] = []
+    for pid in sorted(p for p, s in links.items() if s == space):
+        try:
+            st = scope_status(pid)
+        except Exception:  # noqa: BLE001 — one plugin's error never hides the others
+            _log.debug("team overview of %s failed", pid, exc_info=True)
+            continue
+        ch = st.get("changes") or {}
+        workflows = pid == WORKFLOW_DOCS
+        try:
+            manifest = {} if workflows else (load_plugin_manifest(pid) or {})
+        except ValueError:
+            manifest = {}
+        rows.append({
+            "pluginId": pid, "label": "Workflows" if workflows else str(st.get("pluginLabel") or pid),
+            "icon": "" if workflows else plugin_icon_data_url(pid) or "",
+            "source": "workflows" if workflows else str(manifest.get("source") or "local"),
+            "incoming": int(ch.get("incoming") or 0), "incomingBy": list(ch.get("incomingBy") or []),
+            "held": bool(ch.get("held")), "outgoing": list(ch.get("outgoing") or []),
+            "pending": int(st.get("pending") or 0), "conflicts": len(st.get("conflicts") or []),
+            "blocked": list(ch.get("blocked") or []), "state": str(st.get("state") or ""),
+            "error": str(st.get("error") or ""), "items": sum(int((st.get("current") or {}).get(k) or 0) for k in ("docs", "files")),
+        })
+    rows.sort(key=lambda r: (r["pluginId"] == WORKFLOW_DOCS, r["label"].casefold()))
+    label = str(repo.sync_get(account, space).get("label") or "") or "Team"
+    return {"ok": True, "current": space, "label": label, "plugins": rows}
+
+
 def _people(account: str, space: str, plugin: str) -> list[dict[str, Any]]:
     """The space's roster (the last heads or beat) as the bar reads it: each person's
     name, PC label and what they do in ``plugin``; ``me`` marks this PC's own row."""

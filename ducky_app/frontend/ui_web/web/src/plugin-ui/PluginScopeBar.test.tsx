@@ -54,8 +54,13 @@ const bar = (pluginId = "brainrot-tcg", onScopeChanged: () => void = () => {}) =
   );
 /** The bar published its copy (the Team modal is on screen). */
 const shown = () => waitFor(() => expect(getTeamScope()).not.toBeNull());
-/** A section in the Team modal's left nav. */
-const nav = (name: RegExp) => fireEvent.click(screen.getByRole("button", { name }));
+/** A section in the Team modal's left nav, with the plugin on screen slid in when it's listed. */
+const nav = (name: RegExp) => {
+  fireEvent.click(screen.getByRole("button", { name }));
+  const plugin = getTeamScope()?.plugin;
+  const open = plugin ? screen.queryByRole("button", { name: `Open ${plugin}` }) : null;
+  if (open) fireEvent.click(open);
+};
 /** The Overview's "Whose data" button. */
 const picker = () => screen.getByRole("button", { name: /^Whose data/ }) as HTMLButtonElement;
 /** Open the "Whose data" dropdown once its choices have loaded. */

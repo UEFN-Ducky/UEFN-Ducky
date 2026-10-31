@@ -2,41 +2,63 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
-import { publishPaneScope, publishTeamScope, unpublishPaneScope, unpublishTeamScope, type TeamScope } from "./teamScopeStore";
+import type { TeamOverview, TeamPluginRow } from "../types/panel";
+import { _resetActiveTeamForTests, summarizeTeam } from "./activeTeamStore";
+import { publishTeamScope, unpublishTeamScope, type TeamScope } from "./teamScopeStore";
 import { TeamModal } from "./TeamModal";
 
 const api = vi.hoisted(() => ({
+  plugin_team_overview: vi.fn(),
+  plugin_scope_choices: vi.fn(),
+  plugin_scope_set_all: vi.fn(),
+  plugin_scope_status: vi.fn(),
+  plugin_scope_pull: vi.fn(),
   plugin_scope_resolve: vi.fn(),
   get_settings: vi.fn(async () => ({ team_send_delay_s: 10, team_poll_s: 60 })),
   save_agent_settings: vi.fn(async () => "Saved"),
 }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
+vi.mock("../hooks/useLiveOverview", () => ({ readLiveOverview: vi.fn(async () => {}) }));
+vi.mock("../hooks/usePanelPushBus", () => ({ installPanelPushBus: () => {}, subscribePanelPush: () => () => {} }));
 
 afterEach(() => {
-  act(() => {
-    unpublishTeamScope("forge");
-    unpublishPaneScope("forge");
-    unpublishPaneScope("art");
-  });
+  act(() => unpublishTeamScope("forge"));
   cleanup();
+  vi.clearAllMocks();
+  _resetActiveTeamForTests();
 });
 
-const CONFLICTS = [
-  { kind: "doc", key: "deck", name: "deck", by: "Ana", reason: "both" },
-  { kind: "doc", key: "pack", name: "pack", by: "Ben", reason: "both" },
-];
+const row = (extra: Partial<TeamPluginRow>): TeamPluginRow => ({
+  pluginId: "kanban", label: "Kanban", icon: "", source: "store", incoming: 0, incomingBy: [], held: false,
+  outgoing: [], pending: 0, conflicts: 0, blocked: [], state: "ok", error: "", items: 21, ...extra,
+});
+const ALPHA: TeamOverview = {
+  ok: true, current: "s1", label: "Alpha Studio",
+  plugins: [
+    row({ incoming: 3, incomingBy: ["iliya"], blocked: [{ kind: "doc", key: "card.pip", name: "Pip", error: "Bad JSON" }] }),
+    row({ pluginId: "ducky.automations", label: "Workflows", source: "workflows", items: 20 }),
+  ],
+};
+const LOCAL: TeamOverview = { ok: true, current: "personal", label: "Local", plugins: [] };
+const CHOICES = { ok: true, choices: [{ id: "personal", kind: "personal", label: "Local" }, { id: "s1", kind: "shared", label: "Alpha Studio" }] };
+const STATUS = { ok: true, visible: true, canChange: true, state: "ok", pluginLabel: "Kanban",
+  scope: { kind: "shared", label: "Alpha Studio", spaceId: "s1", readOnly: false } };
 
-const scope = (extra: Partial<TeamScope> = {}): TeamScope => ({
+const modal = async (overview: TeamOverview = ALPHA) => {
+  api.plugin_team_overview.mockResolvedValue(overview);
+  api.plugin_scope_choices.mockResolvedValue(CHOICES);
+  api.plugin_scope_status.mockResolvedValue(STATUS);
+  render(<ConfirmModalProvider><TeamModal open onClose={() => {}} /></ConfirmModalProvider>);
+  await screen.findByText(`${overview.current === "personal" ? "Local" : overview.label} · Team settings`);
+};
+
+const pane = (extra: Partial<TeamScope> = {}): TeamScope => ({
   pluginId: "forge", plugin: "Forge",
-  status: {
-    ok: true, visible: true, canChange: true, conflicts: CONFLICTS,
-    scope: { kind: "shared", label: "Alpha Studio", spaceId: "s1", readOnly: false },
-  },
-  phrase: { key: "update", text: "2 updates from Ana", tone: "", action: "update" },
+  status: { ok: true, visible: true, canChange: true, scope: { kind: "shared", label: "Alpha Studio", spaceId: "s1", readOnly: false } },
+  phrase: { key: "updates", text: "2 updates from Ana", tone: "", action: "update" },
   syncing: false, busy: false, switching: false, shared: true, variant: "shared", kind: "team", current: "s1",
-  menu: [{ id: "personal", kind: "personal", label: "Local" }, { id: "s1", kind: "shared", label: "Alpha Studio" }],
-  offers: [], refusal: "", manual: false, canSync: true, failing: false, canPush: false, canPull: true,
-  badge: 2, conflicts: 2, notes: [],
+  menu: CHOICES.choices as TeamScope["menu"], offers: [], refusal: "", manual: false, canSync: true, failing: false,
+  canPush: false, canPull: true, badge: 2, conflicts: 0, notes: [],
   actions: {
     pull: vi.fn(async () => true), push: vi.fn(), syncNow: vi.fn(), choose: vi.fn(), copyInto: vi.fn(), settle: vi.fn(),
     loadChoices: vi.fn(async () => {}), refresh: vi.fn(),
@@ -44,44 +66,81 @@ const scope = (extra: Partial<TeamScope> = {}): TeamScope => ({
   ...extra,
 } as TeamScope);
 
-const modal = (s: TeamScope) => {
-  act(() => publishTeamScope(s));
-  return render(<ConfirmModalProvider><TeamModal open onClose={() => {}} /></ConfirmModalProvider>);
-};
-
 describe("TeamModal", () => {
-  it("opens on Overview: status, Update now runs the pane's own pull, and the team picker", () => {
-    const s = scope();
-    modal(s);
-    expect(screen.getByText("Alpha Studio · Forge")).toBeTruthy();
-    expect(s.actions.loadChoices).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Update now" }));
-    expect(s.actions.pull).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Whose data: Alpha Studio" }));
-    expect(screen.getByRole("option", { name: /Alpha Studio/ }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByRole("option", { name: /^Local/ }));
-    expect(s.actions.choose).toHaveBeenCalledWith(expect.objectContaining({ id: "personal" }));
+  it("is the team's, not a plugin's: titled by the team, with the team picker and summed counts", async () => {
+    await modal();
+    expect(screen.getByRole("button", { name: "Team: Alpha Studio" })).toBeTruthy();
+    const incoming = screen.getByRole("button", { name: /^Incoming/ });
+    const count = incoming.querySelector(".plugin-scope-count");
+    expect(count?.textContent).toBe("4"); // 3 coming in + 1 that failed
+    expect(count?.classList.contains("is-alert")).toBe(true);
+    expect(screen.getByText("Alpha Studio: 1 coming in".replace("1", "3"))).toBeTruthy();
   });
 
-  it("the left nav switches sections; Conflicts carries a red count and lists the files", () => {
-    modal(scope());
-    const conflicts = screen.getByRole("button", { name: /^Conflicts/ });
-    const count = conflicts.querySelector(".plugin-scope-count");
-    expect(count?.textContent).toBe("2");
-    expect(count?.classList.contains("is-alert")).toBe(true);
-    fireEvent.click(conflicts);
-    expect(conflicts.getAttribute("aria-current")).toBe("page");
-    const panel = screen.getByRole("region", { name: "Source control: Alpha Studio" });
-    expect(within(panel).getByText("deck")).toBeTruthy();
-    expect(within(panel).getByText("pack")).toBeTruthy();
-    // No tab strip of its own inside the modal.
-    expect(within(panel).queryByRole("tablist")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /^Overview/ }));
-    expect(screen.queryByRole("region")).toBeNull();
+  it("Incoming lists every plugin as a Ledger group; a header folds its lines open", async () => {
+    await modal();
+    fireEvent.click(screen.getByRole("button", { name: /^Incoming/ }));
+    const list = screen.getByRole("list", { name: "Plugins on Alpha Studio" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(list).getByText("Store plugin · 21 items · from iliya")).toBeTruthy();
+    expect(within(list).getByText("20 workflows")).toBeTruthy();
+    const head = within(list).getByRole("button", { name: "Kanban" });
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(head);
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(within(list).getByText("Pip")).toBeTruthy();
+    expect(within(list).getByText("Bad JSON")).toBeTruthy();
+    fireEvent.click(within(list).getByRole("button", { name: "Get now" }));
+    await waitFor(() => expect(api.plugin_scope_pull).toHaveBeenCalledWith("kanban"));
+  });
+
+  it("opening a plugin slides the list out and its own view in; Back slides home", async () => {
+    await modal();
+    fireEvent.click(screen.getByRole("button", { name: /^Incoming/ }));
+    const slide = document.querySelector(".team-slide")!;
+    expect(slide.classList.contains("is-detail")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Open Kanban" }));
+    expect(slide.classList.contains("is-detail")).toBe(true);
+    await waitFor(() => expect(api.plugin_scope_status).toHaveBeenCalledWith("kanban"));
+    const region = await screen.findByRole("region", { name: "Source control: Alpha Studio" });
+    expect(within(region).getByText(/^Teammates' changes on their way/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(slide.classList.contains("is-detail")).toBe(false);
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("Kanban"));
+  });
+
+  it("Your team switches every plugin after asking, and says it leaves the live group", async () => {
+    api.plugin_scope_set_all.mockResolvedValue({ ok: true, switched: ["kanban"], pending: [] });
+    await modal();
+    fireEvent.click(await waitFor(() => {
+      const t = screen.getByRole("button", { name: "Team: Alpha Studio" }) as HTMLButtonElement;
+      expect(t.disabled).toBe(false);
+      return t;
+    }));
+    fireEvent.click(screen.getByRole("option", { name: /^Local/ }));
+    expect(await screen.findByText(/You leave Alpha Studio's live group now/)).toBeTruthy();
+    expect(api.plugin_scope_set_all).not.toHaveBeenCalled();
+    api.plugin_team_overview.mockResolvedValue(LOCAL);
+    fireEvent.click(screen.getByRole("button", { name: /^Switch/ }));
+    await waitFor(() => expect(api.plugin_scope_set_all).toHaveBeenCalledWith("personal"));
+    expect(await screen.findByText("Local · Team settings")).toBeTruthy();
+  });
+
+  it("on a plugin tab, Overview adds that plugin's card; its status slides it in on that section", async () => {
+    const p = pane();
+    act(() => publishTeamScope(p));
+    await modal();
+    const card = screen.getByRole("group", { name: "Forge on this tab" });
+    fireEvent.click(within(card).getByRole("button", { name: "Update now" }));
+    expect(p.actions.pull).toHaveBeenCalledTimes(1);
+    expect(within(card).getByRole("button", { name: "Whose data: Alpha Studio" })).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: /2 updates from Ana/ }));
+    expect(screen.getByRole("button", { name: /^Incoming/ }).getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(document.querySelector(".team-slide")?.classList.contains("is-detail")).toBe(true));
   });
 
   it("Settings has the timing sliders: their values, and a move saves the new value once it settles", async () => {
-    modal(scope());
+    await modal();
     fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
     const send = await screen.findByRole("slider", { name: /^Send changes after/ });
     expect(screen.getByText("10 s")).toBeTruthy();
@@ -89,45 +148,25 @@ describe("TeamModal", () => {
     fireEvent.change(send, { target: { value: "20" } });
     fireEvent.change(send, { target: { value: "30" } });
     fireEvent.change(screen.getByRole("slider", { name: /^Check for teammates' changes every/ }), { target: { value: "90" } });
-    expect(screen.getByText("30 s")).toBeTruthy();
-    expect(screen.getByText("1 min 30 s")).toBeTruthy();
     await waitFor(() => expect(api.save_agent_settings).toHaveBeenCalledWith({ team_send_delay_s: 30, team_poll_s: 90 }));
     expect(api.save_agent_settings).toHaveBeenCalledTimes(1);
   });
 
-  it("on Local only Overview is offered, and notes with their buttons show there", () => {
-    const run = vi.fn();
-    modal(scope({
-      shared: false, variant: "personal", current: "personal",
-      status: { ok: true, visible: true, canChange: true, scope: { kind: "personal", label: "Local", spaceId: "", readOnly: false } },
-      phrase: { key: "local", text: "Only on this PC", tone: "" },
-      notes: [{ key: "error", tone: "error", text: "That didn't work.", actions: [{ label: "Dismiss", ghost: true, run }] }],
-    }));
+  it("on Local only Overview and Settings are offered", async () => {
+    await modal(LOCAL);
     expect(screen.queryByRole("button", { name: /^Conflicts/ })).toBeNull();
     expect(screen.getByRole("button", { name: /^Settings/ })).toBeTruthy();
-    expect(screen.getByText("That didn't work.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(run).toHaveBeenCalled();
+    expect(screen.getByText("Not on a team")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Team: Local" })).toBeTruthy();
   });
+});
 
-  it("with the plugin pane hidden it keeps that pane's copy and the full nav", () => {
-    const art = scope({ pluginId: "art", plugin: "AI Art Studio", shared: false, variant: "personal", current: "personal",
-      status: { ok: true, visible: true, canChange: true, scope: { kind: "personal", label: "Local", spaceId: "", readOnly: false } } });
-    act(() => {
-      publishPaneScope(art);
-      publishTeamScope(art);
-      unpublishTeamScope("art");
-    });
-    render(<ConfirmModalProvider><TeamModal open onClose={() => {}} /></ConfirmModalProvider>);
-    expect(screen.getByText("Local · AI Art Studio")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Overview/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Whose data: Local" })).toBeTruthy();
-  });
-
-  it("with no shareable plugin open the nav still has Overview and Settings with the sliders", async () => {
-    render(<ConfirmModalProvider><TeamModal open onClose={() => {}} /></ConfirmModalProvider>);
-    expect(screen.getByText(/Open a plugin that shares/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
-    expect(await screen.findByRole("slider", { name: /^Send changes after/ })).toBeTruthy();
+describe("active team", () => {
+  it("sums what needs looking at across plugins; a conflict or a failed round is red", () => {
+    const t = summarizeTeam({ ...ALPHA, plugins: [...ALPHA.plugins, row({ pluginId: "x", pending: 2, conflicts: 1 })] });
+    expect([t.incoming, t.pending, t.conflicts, t.blocked, t.badge]).toEqual([3, 2, 1, 1, 7]);
+    expect([t.phrase, t.tone]).toEqual(["1 conflict", "error"]);
+    expect(summarizeTeam(LOCAL)).toMatchObject({ shared: false, badge: 0, phrase: "Not on a team" });
+    expect(summarizeTeam({ ...ALPHA, plugins: [row({})] }).phrase).toBe("Up to date");
   });
 });

@@ -506,6 +506,191 @@
   gap: 6px;
   margin-left: auto;
 }
+.team-modal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Your team: the sidebar's own dropdown, above the sections. */
+.team-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 0 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border, #3a3a3a);
+}
+.team-picker__label {
+  padding: 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.team-picker .scope-picker {
+  width: 100%;
+  max-width: none;
+}
+.team-picker__msg {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.team-picker__msg--error {
+  color: var(--red);
+}
+
+/* The team's plugins as Ledger groups; a press slides the list out and the plugin in. */
+.team-slide {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.team-slide__track {
+  display: flex;
+  flex: 0 0 200%;
+  width: 200%;
+  min-height: 0;
+  transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.team-slide.is-detail .team-slide__track {
+  transform: translateX(-50%);
+}
+.team-slide__panel {
+  flex: 0 0 50%;
+  width: 50%;
+  min-width: 0;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 0 12px 12px;
+  transition: opacity 240ms ease, visibility 0s;
+}
+/* The panel slid away is out of reach (no tabbing into it) once it's gone. */
+.team-slide:not(.is-detail) .team-slide__panel--detail,
+.team-slide.is-detail .team-slide__panel--list {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 240ms ease, visibility 0s 240ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-slide__track,
+  .team-slide__panel {
+    transition: none;
+  }
+}
+.team-slide__intro {
+  margin: 0;
+  padding: 10px 2px;
+  color: var(--muted);
+}
+.team-ledger {
+  overflow: hidden;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 10px;
+}
+.team-ledger__group:first-child .team-ledger__head {
+  border-top: 0;
+}
+.team-ledger__head {
+  height: 52px;
+  gap: 10px;
+}
+.team-ledger__title {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.team-ledger__title .changes-run-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  font-size: 13px;
+}
+.team-ledger__head .changeset-badge {
+  flex: 0 0 auto;
+}
+.team-ledger__badge--warn {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+}
+.team-ledger__badge--error {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 45%, transparent);
+}
+.team-ledger__body {
+  padding: 4px 0 8px;
+  border-top: 1px solid var(--border, #3a3a3a);
+}
+.team-ledger__empty {
+  margin: 0;
+  padding: 6px 14px 6px 40px;
+  color: var(--muted);
+}
+.team-ledger__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 4px 14px 0;
+}
+.team-plugin-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--panel-bg, #1e1e1e);
+  border: 1px solid var(--border, #3a3a3a);
+  color: var(--fg);
+  font-weight: 700;
+}
+.team-plugin-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.team-plugin-icon svg {
+  width: 60%;
+  height: 60%;
+  color: var(--amber);
+}
+.team-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+}
+.team-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border, #3a3a3a);
+}
+.team-detail__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+.team-detail__title .changes-run-name {
+  color: var(--fg);
+  font-size: 13px;
+}
+.team-detail__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.team-detail .plugin-scope-panel {
+  max-height: none;
+  border-top: 0;
+}
 
 /* Every scope button, its menus and its tabs: one height, one look. */
 .plugin-scope-btn {

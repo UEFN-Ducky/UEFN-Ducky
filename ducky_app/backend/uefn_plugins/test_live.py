@@ -575,6 +575,15 @@ def test_switching_to_local_ends_live(team: dict[str, Any]) -> None:
     assert team["impl"].joined[-1] == (SPACE, PLUGIN, None)
 
 
+def test_a_switch_leaves_the_group_at_once_and_the_last_plugin_ends_live(team: dict[str, Any]) -> None:
+    live.join(PLUGIN)
+    assert (team["account"], SPACE) in live._teams
+    repo.link_set(team["account"], PLUGIN, scopes.PERSONAL)
+    live.scope_switched(PLUGIN)  # no status read, no roster: gone now
+    assert not live.is_live(PLUGIN) and team["impl"].joined[-1] == (SPACE, PLUGIN, None)
+    assert (team["account"], SPACE) not in live._teams
+
+
 def test_the_bar_shows_who_is_live_and_how_they_are_reached(team: dict[str, Any]) -> None:
     team["impl"].peers = [{**ALEX, "path": "direct"}, {"name": "Sam", "device": "d_sam", "path": "none"}]
     live.join(PLUGIN)

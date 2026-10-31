@@ -1098,6 +1098,51 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "choices": [], "error": str(exc)}
 
+    def plugin_team_overview(self, space: str = "") -> dict[str, Any]:
+        """The Team modal: one team copy and every plugin on it (:func:`spaces.team_overview`)."""
+        from backend.uefn_plugins.spaces import team_overview
+
+        try:
+            return team_overview(str(space or ""))
+        except Exception as exc:
+            return {"ok": False, "current": "personal", "label": "Local", "plugins": [], "error": str(exc)}
+
+    def plugin_scope_set_all(self, scope_id: str) -> dict[str, Any]:
+        """The Team modal's picker: every enabled plugin that can share (and Workflows) shows
+        Local or one team. Each goes through :meth:`plugin_scope_set`, so it leaves its old
+        team's live group at once. A team copy that needs a first share is left as it was
+        and named in ``pending``; ``errors`` says what didn't switch."""
+        from backend.store.repos import plugin_data as repo
+        from backend.uefn_plugins import scopes
+        from backend.uefn_plugins.spaces import WORKFLOW_DOCS
+        from backend.uefn_plugins.store import get_enabled_plugin_ids
+
+        target = str(scope_id or "")
+        if not target:
+            return {"ok": False, "error": "Pick Local or a team."}
+        account = scopes.account_id()
+        linked = repo.links(account) if account != scopes.LOCAL else {}
+        candidates = sorted(set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS} | set(linked))
+        switched: list[str] = []
+        pending: list[dict[str, Any]] = []
+        errors: list[dict[str, str]] = []
+        for pid in candidates:
+            try:
+                if scopes.active_scope(pid)["id"] == target:
+                    continue
+                if target != scopes.PERSONAL and not scopes.shareable(pid):
+                    continue
+            except Exception:  # noqa: BLE001 — a plugin that can't say is left alone
+                continue
+            out = self.plugin_scope_set(pid, target)
+            if out.get("needs") == "first_share":
+                pending.append({"plugin": pid, **{k: out[k] for k in ("units", "note", "team") if k in out}})
+            elif out.get("ok") is False:
+                errors.append({"plugin": pid, "error": str(out.get("error") or "")})
+            else:
+                switched.append(pid)
+        return {"ok": not errors, "switched": switched, "pending": pending, "errors": errors}
+
     def plugin_scope_set(self, plugin_id: str, scope_id: str, options: dict | None = None) -> dict[str, Any]:
         """Keep a plugin's data in Local or one shared space. Nothing moves: the plugin
         restarts on that scope's own copy, then its open panels reload (``switched``).
@@ -1136,6 +1181,12 @@ class PanelApiStoreMixin:
             out = link_scope(pid, target)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+        try:
+            from backend.uefn_plugins import live
+
+            live.scope_switched(pid)  # out of the old team's live group now, not on the next roster
+        except Exception:  # noqa: BLE001 — its next status read leaves it
+            pass
         if unsent is not None:
             out = {**out, "unsent": unsent, "unsentLabel": str(leaving["label"])}
         # Its bar reads the new scope; its panels start over with the "switched" push below.

@@ -3,10 +3,12 @@ import "./plugin-ui.css";
 import { Modal } from "../components/Modal";
 import { getApi } from "../hooks/usePanelApi";
 import type { PanelApi } from "../types/panel";
-import { PluginScopeDrawer, scopeTabs } from "./PluginScopeDrawer";
-import { phraseTab, type ScopeTab } from "./scopeBarText";
-import { ScopePicker } from "./ScopePicker";
-import { useTeamScopeOrLast, type TeamScope } from "./teamScopeStore";
+import { readActiveTeam, refreshActiveTeam, useActiveTeam, type ActiveTeam } from "./activeTeamStore";
+import { PaneCard } from "./PaneCard";
+import type { ScopeTab } from "./scopeBarText";
+import { TeamPicker } from "./TeamPicker";
+import { TeamPlugins } from "./TeamPlugins";
+import { useTeamScope, type TeamScope } from "./teamScopeStore";
 
 export type TeamSection = "overview" | ScopeTab;
 
@@ -82,100 +84,102 @@ function TimingSliders() {
   );
 }
 
-/** "!" / "↻" / "✓" / "•" before the status phrase. */
-function phraseIcon(scope: TeamScope): string {
-  const { phrase, syncing } = scope;
-  if (phrase.tone) return "!";
-  if (syncing) return "↻";
-  return phrase.key === "up_to_date" ? "✓" : "•";
+/** "!" / "✓" / "•" before the team's status phrase. */
+function phraseIcon(team: ActiveTeam): string {
+  if (team.tone) return "!";
+  return team.phrase === "Up to date" ? "✓" : "•";
 }
 
-/** Overview: whose data the plugin shows (the team picker), its status and buttons, and the
- * notes that need a decision. */
-function Overview({ scope, onSection }: { scope: TeamScope; onSection: (s: TeamSection) => void }) {
-  const { status, phrase, actions, shared, busy, refusal } = scope;
-  const label = status.scope?.label || "Local";
-  // The teams are read once per open (the actions object is new every render).
-  const load = useRef(actions.loadChoices);
-  useEffect(() => {
-    void load.current();
-  }, []);
-
+/** Overview: the team's status and, while a plugin tab is on screen, that plugin's own card. */
+function Overview({ team, pane, onSection, onPaneSection }: {
+  team: ActiveTeam; pane: TeamScope | null; onSection: (s: TeamSection) => void; onPaneSection: (s: ScopeTab) => void;
+}) {
   return (
     <div className="team-modal-overview">
       <div className="team-modal-status">
-        <button type="button" className={`plugin-scope-btn plugin-scope-btn--ghost plugin-scope-status${phrase.tone ? ` plugin-scope-status--${phrase.tone}` : ""}`}
-          aria-live="polite" title={phrase.text} disabled={!shared && !refusal}
-          onClick={() => onSection(phraseTab(phrase.key))}>
-          <span className="plugin-scope-status__icon" aria-hidden>{phraseIcon(scope)}</span>
-          <span className="plugin-scope-btn__label">{scope.syncing ? "Syncing…" : phrase.text}</span>
-        </button>
+        <span className={`plugin-scope-status${team.tone ? ` plugin-scope-status--${team.tone}` : ""}`}>
+          <span className="plugin-scope-status__icon" aria-hidden>{phraseIcon(team)}</span>
+          <span className="plugin-scope-btn__label">{team.shared ? `${team.label}: ${team.phrase}` : team.phrase}</span>
+        </span>
         <span className="team-modal-status__actions">
-          {scope.canSync && scope.manual ? (
-            <>
-              {scope.canPush ? (
-                <button type="button" className="plugin-scope-btn" disabled={busy} onClick={() => void actions.push()}
-                  title={`Send this PC's changes to ${label} now`}>Send</button>
-              ) : null}
-              {scope.canPull ? (
-                <button type="button" className="plugin-scope-btn" disabled={busy} onClick={() => void actions.pull()}
-                  title={`Get everyone else's changes from ${label} now`}>Get</button>
-              ) : null}
-            </>
-          ) : phrase.action === "update" ? (
-            <button type="button" className="plugin-scope-btn plugin-scope-btn--primary" disabled={busy} onClick={() => void actions.pull()}>
-              Update now
+          {team.conflicts ? (
+            <button type="button" className="plugin-scope-btn plugin-scope-btn--primary" onClick={() => onSection("conflicts")}>
+              Resolve
             </button>
-          ) : scope.canSync && scope.failing ? (
-            <button type="button" className="plugin-scope-btn" disabled={scope.syncing} onClick={() => void actions.syncNow()}>
-              Retry
-            </button>
+          ) : team.incoming ? (
+            <button type="button" className="plugin-scope-btn" onClick={() => onSection("incoming")}>See incoming</button>
           ) : null}
         </span>
       </div>
-      {scope.notes.map((n) => (
-        <div key={n.key} className={`plugin-scope-note${n.tone ? ` plugin-scope-note--${n.tone}` : ""}`}>
-          <span>{n.text}</span>
-          {n.actions?.map((a) => (
-            <button key={a.label} type="button" className={`plugin-scope-btn${a.ghost ? " plugin-scope-btn--ghost" : ""}`}
-              disabled={a.disabled} onClick={a.run}>{a.label}</button>
-          ))}
-        </div>
-      ))}
-      <div className="plugin-scope-subhead">Whose data {scope.plugin} shows</div>
-      <ScopePicker scope={scope} />
+      {team.shared ? null : (
+        <p className="plugin-scope-empty">Everything is on this PC. Pick a team under Your team to work with others.</p>
+      )}
+      {pane ? <PaneCard scope={pane} onSection={onPaneSection} /> : null}
     </div>
   );
 }
 
+const TEAM_TABS: { id: ScopeTab; label: string }[] = [
+  { id: "incoming", label: "Incoming" },
+  { id: "changes", label: "Changes" },
+  { id: "conflicts", label: "Conflicts" },
+  { id: "locks", label: "Locks" },
+  { id: "history", label: "History" },
+  { id: "people", label: "People" },
+  { id: "settings", label: "Settings" },
+];
+
 /**
- * The header's Team menu, in Ducky's modal look with Settings' left nav: Overview (whose data,
- * status, Update now / Send / Get / Retry, notes), Settings (timing; on a team copy also the
- * copy's own settings) and, on a team copy, every Source control section (Changes, Incoming,
- * Conflicts, Locks, History, People). It acts on the visible plugin pane's copy, or the last one
- * shown while that pane is hidden ({@link useTeamScopeOrLast}); the pane's own callbacks do the work.
+ * The header's Team menu, the same on every tab (a chat, a plugin, Settings): Ducky's modal with
+ * Settings' left nav. On top of the nav, Your team picks the team this PC works in, or Local
+ * ({@link TeamPicker}). Then Overview (the team's status; on a plugin tab that plugin's own card),
+ * and on a team Incoming, Changes, Conflicts, Locks, History, People and Settings: each lists the
+ * team's plugins as Ledger groups, and one opens by sliding in ({@link TeamPlugins}). Settings
+ * also has the timing sliders. It reads the active team ({@link useActiveTeam}); the plugin on
+ * screen only adds its own card and row.
  */
 export function TeamModal({ open, onClose, initial = "overview" }: Props) {
-  const scope = useTeamScopeOrLast();
+  const team = useActiveTeam();
+  const pane = useTeamScope();
   const [section, setSection] = useState<TeamSection>(initial);
+  // The plugin a status press asked for: its view slides in on that section.
+  const [focus, setFocus] = useState<string | null>(null);
   useEffect(() => {
-    if (open) setSection(initial);
+    if (!open) return;
+    setSection(initial);
+    setFocus(initial !== "overview" && pane ? pane.pluginId : null);
+    void readActiveTeam();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
+  // The plugin on screen moved to another copy: the team may have moved with it.
+  useEffect(() => {
+    if (open) refreshActiveTeam();
+  }, [open, pane?.current]);
 
-  const shared = Boolean(scope?.shared);
-  const label = scope ? (shared ? scope.status.scope?.label || "Team" : "Local") : "";
-  const tabs: { id: TeamSection; label: string; count?: number; alert?: boolean }[] =
-    scope && shared ? scopeTabs(scope.status, scope.pluginId) : [{ id: "settings", label: "Settings" }];
+  const shared = Boolean(team?.shared || pane?.shared);
+  const counts: Partial<Record<ScopeTab, { count: number; alert?: boolean }>> = team ? {
+    incoming: { count: team.incoming + team.blocked, alert: team.blocked > 0 },
+    changes: { count: team.pending },
+    conflicts: { count: Math.max(team.conflicts, pane?.conflicts ?? 0), alert: Math.max(team.conflicts, pane?.conflicts ?? 0) > 0 },
+  } : {};
+  const tabs = shared ? TEAM_TABS : TEAM_TABS.filter((t) => t.id === "settings");
   const shown: TeamSection = section === "overview" || tabs.some((t) => t.id === section) ? section : "overview";
-  const notes = scope?.notes ?? [];
+  const notes = pane?.notes ?? [];
   const overviewAlert = notes.some((n) => n.tone === "error");
+  const title = `${team?.shared ? team.label : team ? "Local" : "Team"} · Team settings`;
+  const paneSection = (s: ScopeTab) => {
+    setSection(s);
+    setFocus(pane?.pluginId ?? null);
+  };
+  const plugins = team ? <TeamPlugins team={team} section={shown} onSection={setSection} openId={focus}
+    onOpened={() => setFocus(null)} /> : null;
 
   return (
-    <Modal open={open} onClose={onClose} title={scope ? `${label} · ${scope.plugin}` : "Team"} width={860}
-      className="team-modal" bodyClassName="team-modal-body">
+    <Modal open={open} onClose={onClose} title={title} width={900} className="team-modal" bodyClassName="team-modal-body">
       <div className="team-modal-layout">
         <nav className="settings-view-sidebar-nav team-modal-nav" aria-label="Team">
-          {[{ id: "overview" as const, label: "Overview", count: notes.length, alert: overviewAlert }, ...tabs].map((t) => (
+          <TeamPicker team={team} />
+          {[{ id: "overview" as const, label: "Overview", count: notes.length, alert: overviewAlert }, ...tabs.map((t) => ({ ...t, ...counts[t.id] }))].map((t) => (
             <button key={t.id} type="button" aria-current={shown === t.id ? "page" : undefined}
               className={`settings-view-sidebar-tab${shown === t.id ? " is-active" : ""}`} onClick={() => setSection(t.id)}>
               <span>{t.label}</span>
@@ -184,22 +188,17 @@ export function TeamModal({ open, onClose, initial = "overview" }: Props) {
           ))}
         </nav>
         <div className="team-modal-pane">
-          {shown === "overview" ? (
-            scope ? (
-              <Overview scope={scope} onSection={setSection} />
-            ) : (
-              <div className="team-modal-overview">
-                <p className="plugin-scope-empty">Open a plugin that shares to see whose data it shows and its changes.</p>
-              </div>
-            )
+          {!team ? (
+            <div className="team-modal-overview"><p className="plugin-scope-empty">Loading…</p></div>
+          ) : shown === "overview" ? (
+            <>
+              <Overview team={team} pane={pane} onSection={setSection} onPaneSection={paneSection} />
+              {team.shared ? plugins : null}
+            </>
           ) : (
             <>
               {shown === "settings" ? <TimingSliders /> : null}
-              {scope && shared ? (
-                <PluginScopeDrawer pluginId={scope.pluginId} status={scope.status} tab={shown} onTab={setSection} hideTabs
-                  onJoin={scope.actions.joinLive ? (room) => void scope.actions.joinLive?.(room) : undefined}
-                  onChanged={(changed) => scope.actions.refresh(changed)} />
-              ) : null}
+              {shared ? plugins : null}
             </>
           )}
         </div>

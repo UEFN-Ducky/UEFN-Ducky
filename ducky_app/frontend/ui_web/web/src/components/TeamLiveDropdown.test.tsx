@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { _resetBackgroundActivityForTests, getBackgroundJobs } from "../hooks/backgroundActivity";
 import { _resetLiveOverviewForTests } from "../hooks/useLiveOverview";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
+import { _resetActiveTeamForTests } from "../plugin-ui/activeTeamStore";
 import { OPEN_TEAM_MODAL_EVENT } from "../plugin-ui/scopeActivity";
 import { publishTeamScope, unpublishTeamScope, type TeamScope } from "../plugin-ui/teamScopeStore";
 import type { LiveTeam } from "../types/panel";
@@ -14,6 +15,9 @@ const api = vi.hoisted(() => ({
   live_team_join: vi.fn(),
   live_team_leave: vi.fn(),
   live_team_invite: vi.fn(),
+  plugin_team_overview: vi.fn(),
+  plugin_scope_set_all: vi.fn(),
+  plugin_scope_choices: vi.fn(),
 }));
 const remote = vi.hoisted(() => ({ on: false }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => remote.on }));
@@ -34,7 +38,16 @@ afterEach(() => {
   remote.on = false;
   push.handlers.clear();
   _resetLiveOverviewForTests();
+  _resetActiveTeamForTests();
+  api.plugin_team_overview.mockReset();
   _resetBackgroundActivityForTests();
+});
+
+/** The team this PC works in: Mindful Path with one plugin (``extra`` on its row). */
+const mindful = (extra: Record<string, unknown> = {}) => api.plugin_team_overview.mockResolvedValue({
+  ok: true, current: "s1", label: "Mindful Path",
+  plugins: [{ pluginId: "kanban", label: "Kanban", icon: "", source: "store", incoming: 0, incomingBy: [], held: false,
+    outgoing: [], pending: 0, conflicts: 0, blocked: [], state: "ok", error: "", items: 3, ...extra }],
 });
 
 const ILIYA = { room: "h:d1", host: "iliya", hostDevice: "d1",
@@ -62,7 +75,7 @@ const scope = (extra: Partial<TeamScope> = {}): TeamScope => ({
 describe("Team and Live in the title bar", () => {
   it("is always there: no team copy and no sharing pane still has Settings, which opens the Team modal", async () => {
     api.live_overview.mockResolvedValue(overview());
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(api.live_overview).toHaveBeenCalled());
     fireEvent.click(trigger());
     expect(screen.getByText("No team yet.")).toBeTruthy();
@@ -74,36 +87,40 @@ describe("Team and Live in the title bar", () => {
     remote.on = true;
     api.live_overview.mockResolvedValue(overview(team({ groups: [ILIYA] })));
     api.live_team_join.mockResolvedValue({ ok: true });
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Join iliya" }));
     await waitFor(() => expect(api.live_team_join).toHaveBeenCalledWith("acct", "s1", "h:d1"));
   });
 
-  it("is one button: green with the live count, the team dot and a red conflict count", async () => {
+  it("is one button: green with the live count, the team dot and a red conflict count, on any tab", async () => {
     const mine = { ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", device: "me", me: true }] };
     api.live_overview.mockResolvedValue(overview(team({ on: true, groups: [mine] })));
-    render(<TeamLiveDropdown />);
-    act(() => publishTeamScope(scope({ badge: 2, conflicts: 2 })));
+    mindful({ conflicts: 2 });
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(trigger().className).toContain("is-live"));
+    await waitFor(() => expect(trigger().querySelector(".app-header-team-btn__count")?.textContent).toBe("2"));
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(trigger().querySelector(".live-trigger-count")?.textContent).toBe("3");
-    expect(trigger().querySelector(".plugin-scope-dot--shared")).toBeTruthy();
-    const count = trigger().querySelector(".app-header-team-btn__count");
-    expect(count?.textContent).toBe("2");
-    expect(count?.classList.contains("is-alert")).toBe(true);
-    expect(trigger().title).toBe("Mindful Path · Up to date\nLive with iliya in Alpha · 3 people");
+    expect(trigger().querySelector(".plugin-scope-dot--error")).toBeTruthy();
+    expect(trigger().querySelector(".app-header-team-btn__count")?.classList.contains("is-alert")).toBe(true);
+    expect(trigger().title).toBe("Mindful Path · 2 conflicts\nLive with iliya in Alpha · 3 people");
+    // A plugin pane on screen changes nothing: the button is the team's, not the pane's.
+    act(() => publishTeamScope(scope({ badge: 9, conflicts: 0 })));
+    expect(trigger().querySelector(".app-header-team-btn__count")?.textContent).toBe("2");
   });
 
-  it("shows with only a sharing pane; Settings opens the Team modal", async () => {
+  it("Settings opens the Team modal titled by the team, never by a plugin", async () => {
     api.live_overview.mockResolvedValue(overview());
-    render(<TeamLiveDropdown />);
+    mindful();
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(api.live_overview).toHaveBeenCalled());
     act(() => publishTeamScope(scope()));
     fireEvent.click(trigger());
     fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByText("Mindful Path · Island Media Kit")).toBeTruthy();
+    expect(await screen.findByText("Mindful Path · Team settings")).toBeTruthy();
+    expect(screen.queryByText("Mindful Path · Island Media Kit")).toBeNull();
   });
 
   it("the tray's Resolve opens the Team modal on Conflicts", async () => {
@@ -126,7 +143,7 @@ describe("Team and Live in the title bar", () => {
 
   it("shows up when a sync push comes after an empty first read", async () => {
     api.live_overview.mockResolvedValue(overview());
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(api.live_overview).toHaveBeenCalledTimes(1));
     api.live_overview.mockResolvedValue(overview(team()));
     push.handlers.forEach((fn) => fn({ type: "plugin_scope_changed", plugins: ["kanban"], synced: true }));
@@ -137,7 +154,7 @@ describe("Team and Live in the title bar", () => {
   it("lists each group with who's in which plugin; Join goes into it with every plugin", async () => {
     api.live_overview.mockResolvedValue(overview(team({ groups: [ILIYA] })));
     api.live_team_join.mockResolvedValue({ ok: true });
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     expect((await waitFor(trigger)).className).not.toContain("is-live");
     fireEvent.click(trigger());
     const menu = await screen.findByRole("menu", { name: "Live" });
@@ -153,7 +170,7 @@ describe("Team and Live in the title bar", () => {
     api.live_overview.mockResolvedValue(overview(team()));
     api.live_team_join.mockResolvedValue({ ok: true });
     api.live_team_leave.mockResolvedValue({ ok: true });
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     expect(await screen.findByText("Nobody's live in Alpha yet.")).toBeTruthy();
     const mine = { ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", device: "me", me: true }] };
@@ -171,7 +188,7 @@ describe("Team and Live in the title bar", () => {
   it("Same screen as the group is one setting for every plugin", async () => {
     const mine = { ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", device: "me", me: true }] };
     api.live_overview.mockResolvedValue(overview(team({ on: true, groups: [mine] })));
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     const box = await screen.findByRole("checkbox", { name: "Same screen as iliya" });
     expect((box as HTMLInputElement).checked).toBe(true);
@@ -183,7 +200,7 @@ describe("Team and Live in the title bar", () => {
   it("pulses while linking; the dot turns amber when someone can't be reached or needs to update", async () => {
     const mine = { ...ILIYA, mine: true, members: [...ILIYA.members, { name: "You", device: "me", me: true }] };
     api.live_overview.mockResolvedValue(overview(team({ on: true, groups: [mine], connecting: ["Mo"] })));
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(trigger().className).toContain("is-connecting"));
     expect(trigger().querySelector(".plugin-scope-dot--warn")).toBeNull();
     fireEvent.click(trigger());
@@ -192,7 +209,7 @@ describe("Team and Live in the title bar", () => {
     _resetLiveOverviewForTests();
     const older = { ...mine, members: [{ ...mine.members[0], partial: true }, mine.members[1], mine.members[2]] };
     api.live_overview.mockResolvedValue(overview(team({ on: true, groups: [older], unlinked: ["Mo"] })));
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(trigger().querySelector(".plugin-scope-dot--warn")).toBeTruthy());
     fireEvent.click(trigger());
     expect(await screen.findByText(/^Can't reach Mo on this network/)).toBeTruthy();
@@ -202,7 +219,7 @@ describe("Team and Live in the title bar", () => {
 
   it("says why a team copy can't go live", async () => {
     api.live_overview.mockResolvedValue(overview(team({ supported: false, reason: "This team service has no live editing." })));
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     expect(await screen.findByText("This team service has no live editing.")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Start live" })).toBeNull();
@@ -210,7 +227,7 @@ describe("Team and Live in the title bar", () => {
 
   it("reads again when who is live moved, and says so in the activity list when Live ended by itself", async () => {
     api.live_overview.mockResolvedValue(overview(team({ on: true, groups: [{ ...ILIYA, mine: true }] })));
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     await waitFor(() => expect(trigger().className).toContain("is-live"));
     api.live_overview.mockResolvedValue(overview(team()));
     push.handlers.forEach((fn) => fn({ type: "live_team", account: "acct", space: "s1", on: false, ended: "alone" }));
@@ -224,7 +241,7 @@ describe("Team and Live in the title bar", () => {
     const online = [{ name: "Bo", device: "d_bo" }, { name: "Mo", device: "d_mo", live: true, invited: true }];
     api.live_overview.mockResolvedValue(overview(team({ online })));
     api.live_team_invite.mockResolvedValue({ ok: true });
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     const menu = await screen.findByRole("menu", { name: "Live" });
     expect(within(menu).getByText("Online")).toBeTruthy();
@@ -240,7 +257,7 @@ describe("Team and Live in the title bar", () => {
     try {
       api.live_overview.mockResolvedValue(overview(team()));
       api.live_team_join.mockResolvedValue({ ok: true });
-      render(<TeamLiveDropdown />);
+      render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
       await waitFor(trigger);
       const send = (expires: number) =>
         act(() => push.handlers.forEach((fn) => fn({ type: "live_invite", account: "acct", space: "s1", room: "h:d_mo", from: "Mo", expires })));
@@ -260,7 +277,7 @@ describe("Team and Live in the title bar", () => {
 
   it("two team copies are two accordions; Live hides the one nobody is live in; All shows both", async () => {
     api.live_overview.mockResolvedValue(overview(team({ groups: [ILIYA] }), team({ space: "s2", label: "Beta", online: [{ name: "Bo", device: "d_bo" }] })));
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     const menu = await screen.findByRole("menu", { name: "Live" });
     expect(within(menu).getByRole("menuitem", { name: /^Alpha/ })).toBeTruthy();
@@ -275,26 +292,28 @@ describe("Team and Live in the title bar", () => {
     expect(within(menu).getByRole("menuitem", { name: "Invite Bo" })).toBeTruthy();
   });
 
-  it("the visible pane's team starts open; Use for this plugin switches another team in", async () => {
+  it("your team starts open; Work in this team moves every plugin to another team", async () => {
     api.live_overview.mockResolvedValue(overview(team(), team({ space: "s2", label: "Beta" })));
-    render(<TeamLiveDropdown />);
-    const s = scope();
-    act(() => publishTeamScope(s));
-    fireEvent.click(await waitFor(trigger));
+    api.plugin_scope_set_all.mockResolvedValue({ ok: true, switched: ["kanban"], pending: [] });
+    mindful();
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    await waitFor(() => expect(api.plugin_team_overview).toHaveBeenCalled());
+    await act(async () => {});
+    fireEvent.click(trigger());
     const menu = await screen.findByRole("menu", { name: "Live" });
     const alpha = within(menu).getByRole("menuitem", { name: /^Alpha/ });
     expect(alpha.getAttribute("aria-expanded")).toBe("true");
-    expect(alpha.textContent).toContain("this plugin");
-    expect(within(menu).queryByRole("menuitem", { name: "Use for this plugin" })).toBeNull();
+    expect(alpha.textContent).toContain("your team");
+    expect(within(menu).queryByRole("menuitem", { name: "Work in this team" })).toBeNull();
     fireEvent.click(within(menu).getByRole("menuitem", { name: /^Beta/ }));
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Use for this plugin" }));
-    expect(s.actions.choose).toHaveBeenCalledWith({ id: "s2", kind: "shared", label: "Beta" });
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Work in this team" }));
+    await waitFor(() => expect(api.plugin_scope_set_all).toHaveBeenCalledWith("s2"));
   });
 
   it("an error joining shows in the menu", async () => {
     api.live_overview.mockResolvedValue(overview(team()));
     api.live_team_join.mockResolvedValue({ ok: false, error: "Couldn't go live: no link" });
-    render(<TeamLiveDropdown />);
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
     fireEvent.click(await waitFor(trigger));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Start live" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Couldn't go live: no link");
