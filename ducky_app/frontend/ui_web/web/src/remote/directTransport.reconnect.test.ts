@@ -174,6 +174,50 @@ describe("a link that drops after it was live (a phone that slept)", () => {
     expect(t.status.state).toBe("reconnecting");
   });
 
+  it("asks again for a picture that was mid-download when the link dropped", async () => {
+    const t = await liveTransport();
+    const pic = t.fetchBlob("/chat-attachments/c1/s1.png");
+    const first = FakePc.all[0].channels.find((c) => c.label === "blob")!;
+    expect(JSON.parse(first.sent[0])).toMatchObject({ get: "/chat-attachments/c1/s1.png" });
+    FakePc.all[0].drop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flush();
+    const pc = FakePc.all[1];
+    pc.up();
+    const blob = pc.channels.find((c) => c.label === "blob")!;
+    const req = JSON.parse(blob.sent[0]) as { id: number; get: string };
+    expect(req.get).toBe("/chat-attachments/c1/s1.png");
+    blob.onmessage?.({ data: JSON.stringify({ id: req.id, status: 200, type: "image/png" }) });
+    const chunk = new Uint8Array([0, 0, 0, 0, 7, 8, 9]);
+    new DataView(chunk.buffer).setUint32(0, req.id);
+    blob.onmessage?.({ data: chunk.buffer });
+    blob.onmessage?.({ data: JSON.stringify({ id: req.id, done: true }) });
+    const res = await pic;
+    expect(res.status).toBe(200);
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([7, 8, 9]);
+  });
+
+  it("keeps a slow download going while bytes arrive; gives up after 60 s of silence", async () => {
+    const t = await liveTransport();
+    const video = t.fetchBlob("/generated-images/clip.mp4");
+    const blob = FakePc.all[0].channels.find((c) => c.label === "blob")!;
+    const id = (JSON.parse(blob.sent[0]) as { id: number }).id;
+    blob.onmessage?.({ data: JSON.stringify({ id, status: 200, type: "video/mp4" }) });
+    for (let i = 0; i < 4; i += 1) {
+      await vi.advanceTimersByTimeAsync(50_000); // 200 s in total: past the old flat 60 s limit
+      const chunk = new Uint8Array([0, 0, 0, 0, i]);
+      new DataView(chunk.buffer).setUint32(0, id);
+      blob.onmessage?.({ data: chunk.buffer });
+    }
+    blob.onmessage?.({ data: JSON.stringify({ id, done: true }) });
+    expect(Array.from(new Uint8Array(await (await video).arrayBuffer()))).toEqual([0, 1, 2, 3]);
+
+    const stalled = t.fetchBlob("/generated-images/stuck.mp4");
+    const caught = stalled.catch((e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(caught).resolves.toBe("blob timeout");
+  });
+
   it("a link that never went live still fails (wrong PC, PC offline)", async () => {
     const t = transport();
     await t.connect();

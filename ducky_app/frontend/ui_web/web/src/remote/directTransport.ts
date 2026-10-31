@@ -66,6 +66,8 @@ type Bridge = {
 const RPC_TIMEOUT_MS = 30_000;
 /** How long an asset asked for before the link is up waits for the blob channel. */
 const BLOB_WAIT_MS = 30_000;
+/** A download fails only after this long with no new bytes: a big video on mobile data takes minutes. */
+const BLOB_IDLE_MS = 60_000;
 const CONNECT_BUDGET_MS = 8_000;
 const ICE_GATHER_MS = 2_500;
 /** Redial backoff after a live link dropped: 1 s, 2 s, 4 s … capped. */
@@ -227,7 +229,20 @@ export class DirectTransport {
   private eventListeners = new Set<(event: AgentEvent) => void>();
   private statusListeners = new Set<(s: DirectStatus) => void>();
   private trackListeners = new Set<(s: MediaStream | null) => void>();
-  private blobWaiters = new Map<number, { header?: BlobHeader; chunks: Uint8Array[]; resolve: (r: Response) => void; reject: (e: Error) => void }>();
+  private blobWaiters = new Map<
+    number,
+    {
+      header?: BlobHeader;
+      chunks: Uint8Array[];
+      resolve: (r: Response) => void;
+      reject: (e: Error) => void;
+      /** Ask again (a fresh id) once a dropped link is back. */
+      resend: () => void;
+      /** Idle timer: reset whenever bytes arrive. */
+      timer: number;
+      alive: () => void;
+    }
+  >();
   private streamSockets = new Map<string, DirectStreamSocket>();
   private queuedInvokes: Array<() => void> = [];
   private queuedBlobs: Array<() => void> = [];
@@ -453,6 +468,15 @@ export class DirectTransport {
       p.reject(new Error(reason));
     }
     this.pending.clear();
+    // Pictures and videos mid-download: ask again once the redial is up (nothing else would,
+    // so they stayed broken after a phone slept or switched network); give up when not redialing.
+    const inflight = [...this.blobWaiters.values()];
+    this.blobWaiters.clear();
+    for (const w of inflight) {
+      window.clearTimeout(w.timer);
+      if (this.wasLive) this.queueBlob(w.resend, w.reject);
+      else w.reject(new Error(reason));
+    }
     if (this.wasLive) this.scheduleRedial();
   }
 
@@ -605,15 +629,18 @@ export class DirectTransport {
           return;
         }
         const id = this.nextId++;
-        this.blobWaiters.set(id, { chunks: [], resolve, reject });
-        ch.send(JSON.stringify({ id, get: path, etag }));
-        window.setTimeout(() => {
-          const w = this.blobWaiters.get(id);
-          if (w) {
+        const waiter = { chunks: [] as Uint8Array[], resolve, reject, resend: send, timer: 0, alive: () => {} };
+        waiter.alive = () => {
+          window.clearTimeout(waiter.timer);
+          waiter.timer = window.setTimeout(() => {
+            if (this.blobWaiters.get(id) !== waiter) return;
             this.blobWaiters.delete(id);
-            w.reject(new Error("blob timeout"));
-          }
-        }, 60_000);
+            reject(new Error("blob timeout"));
+          }, BLOB_IDLE_MS);
+        };
+        waiter.alive();
+        this.blobWaiters.set(id, waiter);
+        ch.send(JSON.stringify({ id, get: path, etag }));
       };
       if (this.blob?.readyState === "open") {
         send();
@@ -622,15 +649,20 @@ export class DirectTransport {
       // Pictures asked for while the link is still opening (a phone's first seconds,
       // "Connecting to …") wait for the blob channel: answered at once, the image
       // stayed broken, since nothing asks for it again once the link is up.
-      this.queuedBlobs.push(send);
-      window.setTimeout(() => {
-        const i = this.queuedBlobs.indexOf(send);
-        if (i >= 0) {
-          this.queuedBlobs.splice(i, 1);
-          reject(new Error("desktop not connected"));
-        }
-      }, BLOB_WAIT_MS);
+      this.queueBlob(send, reject);
     });
+  }
+
+  /** Hold a download until the blob channel opens; give up after BLOB_WAIT_MS. */
+  private queueBlob(send: () => void, reject: (e: Error) => void) {
+    this.queuedBlobs.push(send);
+    window.setTimeout(() => {
+      const i = this.queuedBlobs.indexOf(send);
+      if (i >= 0) {
+        this.queuedBlobs.splice(i, 1);
+        reject(new Error("desktop not connected"));
+      }
+    }, BLOB_WAIT_MS);
   }
 
   private flushBlobs() {
@@ -648,6 +680,7 @@ export class DirectTransport {
       }
       const w = this.blobWaiters.get(msg.id);
       if (!w) return;
+      window.clearTimeout(w.timer);
       if ("done" in msg) {
         this.blobWaiters.delete(msg.id);
         const h = w.header;
@@ -662,7 +695,9 @@ export class DirectTransport {
       if (msg.status === 304 || msg.status >= 400) {
         this.blobWaiters.delete(msg.id);
         w.resolve(new Response(null, { status: msg.status, headers: msg.etag ? { ETag: msg.etag } : {} }));
+        return;
       }
+      w.alive();
       return;
     }
     // Binary chunk: 4-byte big-endian id prefix, then bytes.
@@ -671,6 +706,7 @@ export class DirectTransport {
     const w = this.blobWaiters.get(id);
     if (!w) return;
     w.chunks.push(new Uint8Array(data, 4));
+    w.alive();
   }
 
   // ── input + video (window overlay) ───────────────────────────────────────

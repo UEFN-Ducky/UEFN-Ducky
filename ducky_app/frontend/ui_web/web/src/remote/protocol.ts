@@ -7,7 +7,8 @@ export const PROTOCOL_VERSION = 1;
 
 /** Safari drops DataChannel messages over 64 KiB; keep headroom for framing. */
 export const MAX_CHUNK_BYTES = 16 * 1024;
-export const BLOB_LOW_WATER_BYTES = 64 * 1024;
+/** Bytes the desktop keeps queued per blob channel: enough in flight that mobile round trips don't stall it. */
+export const BLOB_LOW_WATER_BYTES = 256 * 1024;
 
 export const CHANNEL_RPC = "rpc";
 export const CHANNEL_EVENTS = "events";

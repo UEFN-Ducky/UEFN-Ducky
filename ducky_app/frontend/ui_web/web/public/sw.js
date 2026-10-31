@@ -62,7 +62,8 @@ async function viaPage(event, key) {
   const etag = cached ? cached.headers.get("ETag") || "" : "";
   const reply = await new Promise((resolve) => {
     const mc = new MessageChannel();
-    const timer = setTimeout(() => resolve({ status: 504 }), 60000);
+    // The page fails a download after 60 s with no new bytes; this cap only catches a page that never answers.
+    const timer = setTimeout(() => resolve({ status: 504 }), 600000);
     mc.port1.onmessage = (ev) => {
       clearTimeout(timer);
       resolve(ev.data || { status: 502 });
