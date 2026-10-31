@@ -346,13 +346,16 @@ export function ComposerDraft({
       onClick={() => onCaret(composerCaret(ref.current))}
       onPaste={(event) => {
         event.preventDefault();
-        const text = event.clipboardData.getData("text/plain");
+        // Windows copies line ends as \r\n; the box keeps \n only.
+        const text = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
         if (!text || !ref.current) return;
-        const pos = composerCaret(ref.current);
         const current = readComposer(ref.current);
-        const next = current.slice(0, pos) + text + current.slice(pos);
+        const range = composerRange(ref.current);
+        // A paste replaces what is selected (a mention chip it cuts into goes whole).
+        const span = range.start !== range.end ? expandRangeToChips(current, range.start, range.end) : range;
+        const next = current.slice(0, span.start) + text + current.slice(span.end);
         painted.current = null;
-        onChange(next, pos + text.length);
+        onChange(next, span.start + text.length);
       }}
       onKeyDown={(event) => {
         if (event.key === "Backspace" || event.key === "Delete") {

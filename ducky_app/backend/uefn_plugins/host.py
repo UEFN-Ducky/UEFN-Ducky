@@ -1911,11 +1911,18 @@ def reload_single_plugin(plugin_id: str) -> None:
     with _LOCK:
         _strip_contributions_for(pid)
     # Fast path: UI contribs from plugin.json so install can paint before register().
+    lock = _plugin_load_lock(pid)
+    # Bounded like the waits above: a register() hung in another load must not stick the install.
+    got = lock.acquire(timeout=10.0)
     try:
-        _load_one(pid, root, manifest, register=False)
+        if got:
+            _load_one(pid, root, manifest, register=False)
     except Exception as exc:  # noqa: BLE001 — never kill Store install
         _log.exception("UEFN plugin %s contrib reload failed: %s", pid, exc)
         _record_plugin_load_error(pid, exc)
+    finally:
+        if got:
+            lock.release()
     # Store install/update: picker + LLMs see the gateway before register() finishes.
     _notify_uefn_plugins_changed()
 
@@ -2257,8 +2264,25 @@ def _record_plugin_load_error(pid: str, exc: BaseException | str) -> None:
         pass
 
 
+_PLUGIN_LOAD_LOCKS: dict[str, threading.RLock] = {}
+_PLUGIN_LOAD_LOCKS_GUARD = threading.Lock()
+
+
+def _plugin_load_lock(pid: str) -> threading.RLock:
+    """One loader per plugin at a time. Oct 29 2026: a Store reload and the repair worker both
+    loaded Blender; a compiled backend's module init can't run twice at once (access violation
+    in python313.dll), and two register() passes duplicated its contributions."""
+    with _PLUGIN_LOAD_LOCKS_GUARD:
+        return _PLUGIN_LOAD_LOCKS.setdefault(pid, threading.RLock())
+
+
 def _load_enabled_plugin(pid: str, root: Path, manifest: dict[str, Any]) -> None:
     """Load one enabled plugin. Keep plugin.json UI rows even if register() fails."""
+    with _plugin_load_lock(pid):
+        _load_enabled_plugin_locked(pid, root, manifest)
+
+
+def _load_enabled_plugin_locked(pid: str, root: Path, manifest: dict[str, Any]) -> None:
     try:
         _load_one(pid, root, manifest)
     except Exception as exc:  # noqa: BLE001 — never kill app startup
@@ -2372,17 +2396,22 @@ def _repair_missing_backends_once() -> None:
             repair_root: Path = child,
             repair_manifest: dict[str, Any] = manifest,
         ) -> None:
+            lock = _plugin_load_lock(repair_pid)
+            if not lock.acquire(blocking=False):
+                return  # another load of this plugin is running: it registers it
             try:
                 if repair_pid in _REGISTERED or not is_plugin_enabled(repair_pid):
                     return
                 # _load_one refreshes contribs; do not wipe first or a failed register
                 # leaves LLMs empty until the next app update.
-                _load_enabled_plugin(repair_pid, repair_root, repair_manifest)
+                _load_enabled_plugin_locked(repair_pid, repair_root, repair_manifest)
                 if repair_pid in _REGISTERED:
                     _REPAIR_ATTEMPTS.pop(repair_pid, None)
                     _notify_uefn_plugins_changed()
             except Exception:  # noqa: BLE001 — never kill repair coordinator siblings
                 _log.exception("Plugin %s repair register failed", repair_pid)
+            finally:
+                lock.release()
 
         # Not a toggle thread — wait_plugin_toggles must not join hung repairs.
         threading.Thread(

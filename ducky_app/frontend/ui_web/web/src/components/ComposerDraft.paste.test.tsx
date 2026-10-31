@@ -34,3 +34,34 @@ it("scrolls to the end of a long paste", () => {
   expect(box.textContent).toContain("line");
   expect(box.scrollTop).toBe(900);
 });
+
+function Seeded({ start }: { start: string }) {
+  const [value, setValue] = useState(start);
+  const [caret, setCaret] = useState(start.length);
+  return (
+    <ComposerDraft
+      value={value}
+      caret={caret}
+      onChange={(next, at) => {
+        setValue(next);
+        setCaret(at);
+      }}
+      onCaret={setCaret}
+    />
+  );
+}
+
+it("replaces the selected text and keeps Windows line ends as plain new lines", () => {
+  const { getByRole } = render(<Seeded start="hello world" />);
+  const box = getByRole("textbox");
+  box.focus();
+  const text = box.firstChild as Text;
+  const range = document.createRange();
+  range.setStart(text, 6);
+  range.setEnd(text, 11); // "world"
+  const sel = window.getSelection()!;
+  sel.removeAllRanges();
+  sel.addRange(range);
+  fireEvent.paste(box, { clipboardData: { getData: () => "there\r\nfriend" } });
+  expect(box.innerHTML).toBe("hello there<br>friend");
+});

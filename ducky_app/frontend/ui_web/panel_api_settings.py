@@ -830,11 +830,12 @@ class PanelApiSettingsMixin:
 
     def detect_coding_agent_cli(self, agent_id: str) -> dict[str, Any]:
         from backend.agent.coding_agents.base import (
+            coding_agent_plugin_id,
             get_adapter,
             invalidate_detect_cache,
             normalize_coding_agent,
         )
-        from backend.uefn_plugins.host import ensure_plugins_loaded, reload_plugins
+        from backend.uefn_plugins.host import ensure_plugins_loaded, reload_single_plugin, wait_plugin_toggles
 
         aid = normalize_coding_agent(agent_id)
         if aid == "ducky":
@@ -851,15 +852,19 @@ class PanelApiSettingsMixin:
         invalidate_detect_cache()
         adapter = get_adapter(aid)
         if adapter is None and aid not in self._coding_agent_reload_tried:
-            # Last-resort repair, once per agent per session: a full reload
-            # re-registers all 28 plugins (~2.6s) and the Settings tab polls
-            # Detect — unguarded this fired ~100x a session.
+            # Last-resort repair, once per agent per session: reload only the plugin that adds
+            # this agent. A full reload re-registered all 28 plugins (~2.6 s) for every agent
+            # checked, also ones whose plugin isn't installed (Oct 30 2026: 3 passes in 21 s
+            # while the window hung).
             self._coding_agent_reload_tried.add(aid)
-            try:
-                reload_plugins()
-                invalidate_detect_cache()
-            except Exception:
-                pass
+            pid = coding_agent_plugin_id(aid)
+            if pid:
+                try:
+                    reload_single_plugin(pid)
+                    wait_plugin_toggles(timeout=15.0)
+                    invalidate_detect_cache()
+                except Exception:
+                    pass
             adapter = get_adapter(aid)
         if adapter is None:
             return {
