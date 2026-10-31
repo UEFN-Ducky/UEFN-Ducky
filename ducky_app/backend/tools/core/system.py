@@ -49,9 +49,9 @@ def _window_mcp(result: dict[str, Any], *, pretty: bool) -> Any:
     if not path or not os.path.isfile(path):
         return text
     try:
-        from mcp.server.fastmcp import Image
+        from backend.tools.core.model_picture import model_picture
 
-        return [text, Image(path=path)]
+        return [text, model_picture(path)]
     except Exception:
         return text
 

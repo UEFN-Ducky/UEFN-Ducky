@@ -182,9 +182,9 @@ def sandbox_look(pid: int = 0, capture: bool = False, hwnd: int = 0, tail_chars:
     path = str(shot.get("path") or "")
     if path:
         try:
-            from mcp.server.fastmcp import Image
+            from backend.tools.core.model_picture import model_picture
 
-            return [tool_json(out, pretty=pretty), Image(path=path)]
+            return [tool_json(out, pretty=pretty), model_picture(path)]
         except Exception:
             pass
     return tool_json(out, pretty=pretty)

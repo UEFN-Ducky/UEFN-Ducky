@@ -602,9 +602,9 @@ def view_image(path: str, pretty: bool = False) -> Any:
     url = _picture_url(full)
     if url:
         out["media_url"] = url  # the chat's tool card shows the picture
-    from mcp.server.fastmcp import Image
+    from backend.tools.core.model_picture import model_picture
 
-    return [tool_json(out, pretty=pretty), Image(path=full)]
+    return [tool_json(out, pretty=pretty), model_picture(full)]
 
 
 _CHAT_PICTURE = re.compile(r"[\\/]conversations[\\/]([^\\/]+)[\\/]attachments[\\/]([^\\/]+\.(?:png|jpe?g|webp))$", re.IGNORECASE)
@@ -664,11 +664,11 @@ def ducky_generate_image(prompt: str, confirm_spend: bool = False, backend: str 
         if kept is None:
             kept = gen.save_generated_image(made.read_bytes(), prompt=text, gateway=row["id"],
                                             filename=made.name, mime=gen._mime_for(made), conv_id=chat)
-    from mcp.server.fastmcp import Image
+    from backend.tools.core.model_picture import model_picture
 
     out = {"path": str(kept["path"]).replace("\\", "/"), "media_url": str(kept.get("media_url") or ""),
            "backend": row["label"], "maker": row.get("plugin"), "cost": media.cost_text(row)}
-    return [tool_json(out, pretty=pretty), Image(path=str(kept["path"]))]
+    return [tool_json(out, pretty=pretty), model_picture(str(kept["path"]))]
 
 
 @mcp.tool()

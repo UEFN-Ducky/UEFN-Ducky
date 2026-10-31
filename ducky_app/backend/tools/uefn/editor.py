@@ -136,9 +136,9 @@ def _screenshot_mcp_payload(result: dict[str, Any], *, pretty: bool) -> Any:
     if not path or not Path(path).is_file():
         return text
     try:
-        from mcp.server.fastmcp import Image
+        from backend.tools.core.model_picture import model_picture
 
-        return [text, Image(path=path)]
+        return [text, model_picture(path)]
     except Exception:
         return text
 

@@ -343,6 +343,11 @@ def test_error_kind_comes_from_the_message_but_the_message_never_leaves(monkeypa
     from frontend import error_log
 
     assert ev.kind_of("Error code: 400 invalid_request_error") == "bad_request"
+    assert ev.kind_of("Error code: 400 prompt is too long: 210000 tokens > 200000 maximum") == "too_long"
+    assert ev.kind_of("Your input exceeds the context window of this model.") == "too_long"
+    assert ev.kind_of("messages.3.content.1.image.source.base64: image exceeds 5 MB maximum") == "bad_picture"
+    assert ev.kind_of("Invalid image format: application/octet-stream") == "bad_picture"
+    assert set(ev.ERROR_KINDS) >= {"too_long", "bad_picture"}
     assert ev.kind_of("session unavailable") == "session_dead"
     assert ev.kind_of("timed out waiting for listener idle") == "busy"
     assert ev.kind_of("something odd") == "other"

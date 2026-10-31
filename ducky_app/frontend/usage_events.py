@@ -41,8 +41,8 @@ MODEL_FAMILIES = ("claude", "gpt", "gemini", "ollama", "ducky_ai", "other")
 YES_NO = ("yes", "no")
 WHERE = ("agent", "ui", "bridge", "uefn", "store", "sync", "workflow", "other")
 # What kind of failure an error was, read from its message on the PC (the message never leaves).
-ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth", "bad_request",
-               "server_error", "memory", "permission", "not_found", "crash", "other")
+ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth", "too_long", "bad_picture",
+               "bad_request", "server_error", "memory", "permission", "not_found", "crash", "other")
 # boot_report stages (webview_app._boot_trace names); a run's last one is sent with app_unclean_exit.
 BOOT_STAGES = ("launch", "handoff", "handoff_exit", "reclaim_claim", "webview_import_patches",
                "import_panel_api", "panel_api_init", "http_server", "create_window",
@@ -265,6 +265,10 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("offline", r"not reachable|offline|connection (refused|reset|aborted)|winerror 100(54|61)"),
         ("rate_limit", r"\b429\b|rate.?limit|overloaded|usage limit"),
         ("auth", r"\b40[13]\b|unauthori[sz]ed|forbidden|not logged in|authentication|invalid api key"),
+        # Two 400s told apart from the rest: the chat outgrew the model's window, a picture was refused.
+        ("too_long", r"context.?(window|length)|prompt is too long|too many tokens|maximum context|string too long"),
+        ("bad_picture", r"\bimage\b.{0,80}(exceed|too (big|large)|invalid|dimension|format|could not|unsupported)"
+                        r"|invalid.?image|image_url|image\.source"),
         ("bad_request", r"\b400\b|invalid_request|bad request"),
         ("server_error", r"\b50[0-4]\b|internal server error|bad gateway"),
         ("memory", r"memoryerror|out of memory|\boom\b"),
