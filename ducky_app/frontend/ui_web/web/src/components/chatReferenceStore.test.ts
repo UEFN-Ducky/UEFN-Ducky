@@ -16,6 +16,16 @@ const api = vi.hoisted(() => ({
   list_plugin_references: vi.fn(),
 }));
 const push = vi.hoisted(() => ({ listener: null as ((event: PanelPushEvent) => void) | null }));
+// The agent bus: chats_changed, duckies_changed and plugins' own events arrive here.
+const agent = vi.hoisted(() => ({ listener: null as ((event: { type: string }) => void) | null }));
+vi.mock("../hooks/useAgentEventBus", () => ({
+  subscribeAgentEvents: (fn: (event: { type: string }) => void) => {
+    agent.listener = fn;
+    return () => {
+      agent.listener = null;
+    };
+  },
+}));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
 vi.mock("../hooks/usePanelPushBus", () => ({
   subscribePanelPush: (fn: (event: PanelPushEvent) => void) => {
@@ -91,7 +101,7 @@ it("duckies_changed refreshes the library duckies", async () => {
   ensureLoaded();
   await waitFor(() => expect(getChatReferenceSnapshot().status).toBe("ready"));
   vi.useFakeTimers();
-  push.listener?.({ type: "duckies_changed" as PanelPushEvent["type"] });
+  agent.listener?.({ type: "duckies_changed" });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
@@ -104,8 +114,8 @@ it("a plugin's own change event refreshes its live rows only", async () => {
   await waitFor(() => expect(getChatReferenceSnapshot().status).toBe("ready"));
   vi.useFakeTimers();
   const before = catalogCalls();
-  push.listener?.({ type: "kanban_changed" as PanelPushEvent["type"] });
-  push.listener?.({ type: "someone_elses_event" as PanelPushEvent["type"] });
+  agent.listener?.({ type: "kanban_changed" });
+  agent.listener?.({ type: "someone_elses_event" });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(1000);
   });
@@ -127,7 +137,7 @@ it("chats_changed refreshes only the chat list, once, after 1 s — five pushes 
   api.list_all_conversations.mockClear();
   const before = catalogCalls();
   for (let i = 0; i < 5; i += 1) {
-    push.listener?.({ type: "chats_changed" as PanelPushEvent["type"] });
+    agent.listener?.({ type: "chats_changed" });
     vi.advanceTimersByTime(100);
   }
   expect(api.list_all_conversations).not.toHaveBeenCalled();

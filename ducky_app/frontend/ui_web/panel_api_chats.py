@@ -1617,6 +1617,8 @@ class PanelApiChatsMixin:
         if conv:
             conv.title = title.strip() or conv.title
             _pa.save_conversation(conv)
+            # Other windows, @ mentions and search show the new name at once.
+            _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id, open_tab=False)
 
     def move_chats_to_project(
         self,

@@ -152,13 +152,32 @@ export function QuickOpenBridgeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
 
+    // VS Code's keys: Ctrl+P / Ctrl+E Go to File, Ctrl+Shift+P / F1 commands, Ctrl+Shift+F
+    // search in files, Ctrl+Shift+O symbols. Caught before the editor (capture phase), so
+    // Monaco's own palette never takes them.
     const onKeyDown = (e: KeyboardEvent) => {
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p" && !e.shiftKey) {
+      const key = e.key.toLowerCase();
+
+      if ((e.ctrlKey || e.metaKey) && (key === "p" || key === "e") && !e.shiftKey && !e.altKey) {
 
         e.preventDefault();
 
+        e.stopPropagation();
+
         openPalette({ mode: "file" });
+
+        return;
+
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && key === "f" && !e.altKey) {
+
+        e.preventDefault();
+
+        e.stopPropagation();
+
+        openPalette({ mode: "text", query: "%" });
 
         return;
 
@@ -167,6 +186,8 @@ export function QuickOpenBridgeProvider({ children }: { children: ReactNode }) {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "p") {
 
         e.preventDefault();
+
+        e.stopPropagation();
 
         openPalette({ mode: "command", query: ">" });
 
@@ -178,6 +199,8 @@ export function QuickOpenBridgeProvider({ children }: { children: ReactNode }) {
 
         e.preventDefault();
 
+        e.stopPropagation();
+
         openPalette({ mode: "symbol", query: "@" });
 
         return;
@@ -188,15 +211,17 @@ export function QuickOpenBridgeProvider({ children }: { children: ReactNode }) {
 
         e.preventDefault();
 
+        e.stopPropagation();
+
         openPalette({ mode: "command", query: ">" });
 
       }
 
     };
 
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
 
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
 
   }, [openPalette]);
 

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { getApi } from "../hooks/usePanelApi";
 import { subscribePanelPush } from "../hooks/usePanelPushBus";
+import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
 
 /**
  * The @ / slash catalog's raw lists, shared by every composer. Nothing loads on mount or
@@ -53,6 +54,7 @@ const listeners = new Set<() => void>();
 let pending = new Set<ChatReferenceList>();
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribePush: (() => void) | null = null;
+let unsubscribeAgent: (() => void) | null = null;
 
 function publish(next: ChatReferenceSnapshot) {
   snapshot = next;
@@ -106,6 +108,9 @@ export function ensureLoaded(): void {
     return;
   }
   unsubscribePush ??= subscribePanelPush(onPush);
+  // chats_changed, duckies_changed, skills_changed and plugins' own events (kanban_changed)
+  // arrive on the agent bus; only PANEL_PUSH_TYPES go to the panel bus.
+  unsubscribeAgent ??= subscribeAgentEvents(onPush);
   publish({ status: "loading", data: snapshot.data });
   void loadLists(all).then((data) => {
     loadedAt = Date.now();
@@ -132,6 +137,8 @@ export function _resetChatReferenceStoreForTests(): void {
   pending = new Set();
   unsubscribePush?.();
   unsubscribePush = null;
+  unsubscribeAgent?.();
+  unsubscribeAgent = null;
   snapshot = { status: "idle", data: {} };
   loadedAt = 0;
   reloading = false;
