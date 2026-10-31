@@ -1013,9 +1013,13 @@
   backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
   box-shadow: var(--shadow-md);
   transform: translateX(-50%);
-  animation: aw-canvas-menu-in 180ms var(--aw-ease, ease-out);
+  animation: aw-canvas-menu-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.12) both;
 }
-@keyframes aw-canvas-menu-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translateX(-50%); } }
+/* Zooms out of its button and back into it, like every menu (menu-pop), kept centred on it. */
+@keyframes aw-canvas-menu-in { from { opacity: 0; transform: translateX(-50%) scale(0.35); } 60% { opacity: 1; } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+@keyframes aw-canvas-menu-out { from { opacity: 1; transform: translateX(-50%) scale(1); } to { opacity: 0; transform: translateX(-50%) scale(0.35); } }
+.aw-canvas-menu.is-closing { animation: aw-canvas-menu-out 0.15s cubic-bezier(0.5, 0, 0.9, 0.5) both; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .aw-canvas-menu, .aw-canvas-menu.is-closing { animation-duration: 1ms; } }
 .aw-canvas-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .aw-canvas-menu > button:hover, .aw-canvas-menu > button:focus-visible { background: var(--bg-hover); color: var(--text); outline: none; }
 .aw-canvas-menu > button.is-checked { background: var(--bg-hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-light); }

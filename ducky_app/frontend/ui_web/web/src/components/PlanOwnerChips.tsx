@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useRef, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import { useMenuPop, usePopOrigin } from "./DropdownPanel";
 import type { AgentEvent, ChatPlan, GroupMemberDto, PlanNode } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
@@ -90,10 +91,13 @@ export function PlanAssignChip({ chatId, nodeId, planned, readOnly = false }: { 
   const chipRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<CSSProperties | null>(null);
+  const pop = useMenuPop(open);
+  usePopOrigin(menuRef, () => chipRef.current, pop.mounted);
   // The menu lives on document.body, placed from the chip: a low row's menu opens upward
-  // instead of running off the window or being clipped by the plan's scroll box.
+  // instead of running off the window or being clipped by the plan's scroll box. Closing
+  // keeps the last spot so it zooms back into the chip.
   useLayoutEffect(() => {
-    if (!open) { setPlace(null); return; }
+    if (!open) return;
     const update = () => {
       const rect = chipRef.current?.getBoundingClientRect();
       if (rect) setPlace(menuPlacement(rect, window.innerHeight, window.innerWidth));
@@ -144,7 +148,7 @@ export function PlanAssignChip({ chatId, nodeId, planned, readOnly = false }: { 
       aria-expanded={open} disabled={readOnly} title={who ? `Planned owner: ${name}` : "Pick who works on this sub plan"}>
       {who ? <><DuckyAvatar styleId={shown?.style} size={20} /><span>{name}</span><span className="plan-owner-activity">planned</span></> : "Assign"}
     </button>
-    {open && place ? createPortal(<div ref={menuRef} className="plan-assign-menu" role="menu" style={place}
+    {pop.mounted && place ? createPortal(<div ref={menuRef} className={`plan-assign-menu menu-pop${pop.closing ? " is-closing" : ""}`} role="menu" style={place}
       data-placement={place.top === "auto" ? "above" : "below"}>
       {choices.map(choice => <button key={choice.id} type="button" role="menuitem" className="plan-assign-item" onClick={() => void pick(choice.id)}>
         <DuckyAvatar styleId={choice.style} size={18} /><span>{choice.name}</span>

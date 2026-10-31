@@ -2613,6 +2613,7 @@ body.layout-sidebar-only .project-selector-title--sidebar-only {
   to { opacity: 0; transform: scale(0.35); }
 }
 .menu-pop { animation: menu-pop-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.12) both; }
+.context-menu.menu-pop { transform-origin: var(--context-menu-origin, 0 0); }
 .menu-pop.is-closing {
   animation: menu-pop-out 0.15s cubic-bezier(0.5, 0, 0.9, 0.5) both;
   pointer-events: none;

@@ -21,19 +21,27 @@ it("shows each row's icon and keeps a long menu inside the window", () => {
   expect(css).toContain(`--context-menu-max-height: ${Math.max(120, window.innerHeight - 16)}px`);
 });
 
-it("opens upward from a pointer near the bottom, sized by the drawn menu", () => {
-  const rect = HTMLElement.prototype.getBoundingClientRect;
-  // Rows drawn taller than the 32 px guess: 7 rows come out 300 px.
-  HTMLElement.prototype.getBoundingClientRect = function () {
-    return this.classList.contains("context-menu") ? ({ width: 240, height: 300 } as DOMRect) : rect.call(this);
+it("opens upward from a pointer near the bottom, sized by the laid-out menu", () => {
+  // Rows drawn taller than the 32 px guess: 7 rows come out 300 px. The size is the laid-out
+  // one (offset sizes): the opening zoom shrinks the drawn box on its first frame.
+  const size = (name: "offsetWidth" | "offsetHeight", menu: number) => {
+    const before = Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)!;
+    Object.defineProperty(HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) { return this.classList.contains("context-menu") ? menu : before.get!.call(this); },
+    });
+    return () => Object.defineProperty(HTMLElement.prototype, name, before);
   };
+  const restore = [size("offsetWidth", 240), size("offsetHeight", 300)];
   try {
     const y = window.innerHeight - 20;
     const items: ContextMenuItem[] = Array.from({ length: 7 }, (_, i) => ({ id: `b${i}`, label: `B${i}`, switch: true }));
     render(<ContextMenu x={10} y={y} items={items} onClose={() => {}} />);
     const css = Array.from(document.querySelectorAll("style")).map((s) => s.textContent).join("");
     expect(css).toContain(`--context-menu-top: ${y - 300}px`);
+    // It zooms out of the pointer: the origin is the pointer inside the moved-up menu.
+    expect(css).toContain(`--context-menu-origin: 0px 300px`);
   } finally {
-    HTMLElement.prototype.getBoundingClientRect = rect;
+    restore.forEach((undo) => undo());
   }
 });

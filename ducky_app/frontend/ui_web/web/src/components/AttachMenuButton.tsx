@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { getApi } from "../hooks/usePanelApi";
+import { useMenuPop, usePopOrigin } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import type { VideoSettingsDto } from "../types/panel";
@@ -87,6 +88,8 @@ export function AttachMenuButton({ disabled, onAddFiles }: AttachMenuButtonProps
     label: "Attach",
     route: "chat",
   });
+  const pop = useMenuPop(open);
+  usePopOrigin(flyoutRef, () => wrapRef.current?.querySelector(".attach-menu-trigger"), pop.mounted);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -219,8 +222,8 @@ export function AttachMenuButton({ disabled, onAddFiles }: AttachMenuButtonProps
       >
         <Icons.Paperclip />
       </button>
-      {open ? (
-        <div ref={flyoutRef} className="attach-menu-flyout" role="menu" aria-label="Attach">
+      {pop.mounted ? (
+        <div ref={flyoutRef} className={`attach-menu-flyout menu-pop${pop.closing ? " is-closing" : ""}`} role="menu" aria-label="Attach">
           {cameraError ? <div className="attach-menu-error">{cameraError}</div> : null}
           {stream ? (
             <>

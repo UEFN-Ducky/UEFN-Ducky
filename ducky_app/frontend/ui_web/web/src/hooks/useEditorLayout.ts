@@ -270,10 +270,11 @@ export function useEditorLayout(initialOpenTabs: EditorTab[] = []) {
   /** Groups agents' plugin pages were opened in: one column right of the person's group. */
   const sideColumnRef = useRef<string[]>([]);
 
-  /** An agent opened a plugin page (the Browser): show it in a column right of the person's
-   * group, never taking their focus. The next one stacks under it, up to SIDE_STACK_MAX;
-   * past that it joins the bottom one as a tab. Already on screen: it is shown in place. */
-  const openTabInSideColumn = useCallback((tab: EditorTab) => {
+  /** An agent opened a plugin page (the Browser), or the person opened a page from the header
+   * (Ledger, Workflows…): show it in a column right of their group. The next one stacks under
+   * it, up to SIDE_STACK_MAX; past that it joins the bottom one as a tab. Already on screen: it
+   * is shown in place. `focus` moves the focus to it (the person's own open); an agent's never does. */
+  const openTabInSideColumn = useCallback((tab: EditorTab, options?: { focus?: boolean }) => {
     setState(({ openTabs: prev, layout: prevLayout }) => {
       const keepFocus = prevLayout.focusedGroupId;
       const nextTabs = addOpenTab(prev, tab);
@@ -292,7 +293,8 @@ export function useEditorLayout(initialOpenTabs: EditorTab[] = []) {
         if (placed && placed !== keepFocus && !column.includes(placed)) column.push(placed);
       }
       sideColumnRef.current = column;
-      const focusedGroupId = next.groups[keepFocus] ? keepFocus : next.focusedGroupId;
+      const shown = findGroupForTab(next, tab.id);
+      const focusedGroupId = options?.focus && shown ? shown : next.groups[keepFocus] ? keepFocus : next.focusedGroupId;
       return { openTabs: nextTabs, layout: syncLayoutWithTabs({ ...next, focusedGroupId }, nextTabs) };
     });
   }, []);

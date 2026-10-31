@@ -252,24 +252,33 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     [openTab, promoteTab],
   );
 
+  // Ledger, Workflows, Settings, a plan or a usage page opened from the header goes beside the
+  // chat the person is in, never over it (narrow windows and non-chat panes: as before).
+  const openBesideChat = useCallback((tab: EditorTab) => {
+    const lay = layoutRef.current;
+    const onScreen = openTabsRef.current.find((t) => t.id === lay.groups[lay.focusedGroupId]?.activeTabId);
+    if (onScreen?.kind === "chat" && onScreen.id !== tab.id && window.innerWidth >= SIDE_COLUMN_MIN_WIDTH) {
+      openTabInSideColumn(tab, { focus: true });
+    } else {
+      openTab(tab, { activate: true });
+    }
+  }, [openTab, openTabInSideColumn, openTabsRef]);
+
   const openPlanTab = useCallback(
     (chatId: string, title?: string, projectRoot?: string) => {
       const id = planTabId(chatId);
       const name = (title || "Plan").trim() || "Plan";
       void openOrFocusTab(id, () =>
-        openTab(
-          {
-            id,
-            kind: "plan",
-            name,
-            chatId,
-            ...(projectRoot !== undefined ? { projectRoot } : {}),
-          },
-          { activate: true },
-        ),
+        openBesideChat({
+          id,
+          kind: "plan",
+          name,
+          chatId,
+          ...(projectRoot !== undefined ? { projectRoot } : {}),
+        }),
       );
     },
-    [openTab],
+    [openBesideChat],
   );
 
   useEffect(() => {
@@ -283,18 +292,15 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       const id = usageTabId(providerId);
       const name = `${(label || providerId).trim() || "Provider"} usage`;
       void openOrFocusTab(id, () =>
-        openTab(
-          {
-            id,
-            kind: "usage",
-            name,
-            path: providerId.trim().toLowerCase(),
-          },
-          { activate: true },
-        ),
+        openBesideChat({
+          id,
+          kind: "usage",
+          name,
+          path: providerId.trim().toLowerCase(),
+        }),
       );
     },
-    [openTab],
+    [openBesideChat],
   );
 
   useEffect(() => {
@@ -315,9 +321,9 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   const openSettingsTab = useCallback(() => {
     const id = settingsTabId();
     void openOrFocusTab(id, () =>
-      openTab({ id, kind: "settings", name: "Settings" }, { activate: true }),
+      openBesideChat({ id, kind: "settings", name: "Settings" }),
     );
-  }, [openTab]);
+  }, [openBesideChat]);
 
   useEffect(() => {
     return registerOpenSettingsEditorTab(openSettingsTab);
@@ -326,9 +332,9 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   const openChangesTab = useCallback(() => {
     const id = changesTabId();
     void openOrFocusTab(id, () =>
-      openTab({ id, kind: "changes", name: "Ledger" }, { activate: true }),
+      openBesideChat({ id, kind: "changes", name: "Ledger" }),
     );
-  }, [openTab]);
+  }, [openBesideChat]);
 
   useEffect(() => {
     return registerOpenChangesTab(openChangesTab);
@@ -337,9 +343,9 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
   const openWorkflowsTab = useCallback(() => {
     const id = workflowsTabId();
     void openOrFocusTab(id, () =>
-      openTab({ id, kind: "workflows", name: "Workflows" }, { activate: true }),
+      openBesideChat({ id, kind: "workflows", name: "Workflows" }),
     );
-  }, [openTab]);
+  }, [openBesideChat]);
 
   useEffect(() => {
     return registerOpenWorkflowsTab(openWorkflowsTab);

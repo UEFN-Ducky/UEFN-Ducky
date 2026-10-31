@@ -76,6 +76,27 @@ export function popOrigin(
   return `${x}px calc(100% + ${y - (window.innerHeight - (pos.bottom ?? 0))}px)`;
 }
 
+/** popOrigin for a menu its own CSS places: once it is on the page, its transform-origin goes
+ *  on the trigger's center. Measured from the menu's center, which the zoom never moves. */
+export function usePopOrigin(
+  menuRef: RefObject<HTMLElement | null>,
+  getTrigger: () => Element | null | undefined,
+  mounted: boolean,
+): void {
+  const getTriggerRef = useRef(getTrigger);
+  getTriggerRef.current = getTrigger;
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const trigger = getTriggerRef.current();
+    if (!mounted || !menu || !trigger) return;
+    const m = menu.getBoundingClientRect();
+    const t = trigger.getBoundingClientRect();
+    const left = m.left + m.width / 2 - menu.offsetWidth / 2;
+    const top = m.top + m.height / 2 - menu.offsetHeight / 2;
+    menu.style.transformOrigin = `${t.left + t.width / 2 - left}px ${t.top + t.height / 2 - top}px`;
+  }, [mounted, menuRef]);
+}
+
 /**
  * Closes a menu on a press outside it and its trigger, on Escape, and when the window loses focus
  * (a click inside a plugin iframe or on a window-drag area never reaches this document).

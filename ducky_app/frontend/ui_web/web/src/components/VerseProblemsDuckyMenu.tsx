@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { popOrigin, useMenuPop } from "./DropdownPanel";
 
 import { useProblemsDuckyBridge } from "../contexts/ProblemsDuckyBridge";
 import { Icons } from "../icons/Icons";
@@ -32,15 +33,14 @@ export function VerseProblemsDuckyMenu({ payload, disabled, onSent }: VerseProbl
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const pop = useMenuPop(open);
 
   const hasProblems = payload.errorCount + payload.warningCount > 0;
   const canUse = Boolean(handlers) && hasProblems && !disabled;
 
+  // Closing keeps the last spot so the menu zooms back into the button.
   useLayoutEffect(() => {
-    if (!open || !buttonRef.current) {
-      setMenuPos(null);
-      return;
-    }
+    if (!open || !buttonRef.current) return;
     const update = () => {
       const trigger = buttonRef.current;
       if (!trigger) return;
@@ -90,11 +90,11 @@ export function VerseProblemsDuckyMenu({ payload, disabled, onSent }: VerseProbl
   };
 
   const menu =
-    open && handlers && menuPos ? (
+    pop.mounted && handlers && menuPos ? (
       <div
         ref={panelRef}
-        className="verse-problems-ducky-dropdown verse-problems-ducky-dropdown--portaled no-drag"
-        style={{ top: menuPos.top, left: menuPos.left }}
+        className={`verse-problems-ducky-dropdown verse-problems-ducky-dropdown--portaled no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
+        style={{ top: menuPos.top, left: menuPos.left, transformOrigin: popOrigin(buttonRef.current, menuPos) }}
         data-dropdown-keep
       >
         <div className="verse-problems-ducky-dropdown-header">

@@ -69,3 +69,19 @@ it("opens an agent's plugin pages in a column right of the chat, stacked, withou
   expect(result.current.layout.groups[before.id].activeTabId).toBe("plugin:browser");
   expect(result.current.layout.focusedGroupId).toBe(chatGroup);
 });
+
+it("puts a page the person opens beside the chat and focuses it there", () => {
+  // Oct 31 2026: Ledger, Workflows… opened from the header covered the chat.
+  const page = (id: string, kind: EditorTab["kind"]): EditorTab => ({ id, kind, name: id });
+  const { result } = renderHook(() => useEditorLayout([tab("a")]));
+  const chatGroup = result.current.layout.focusedGroupId;
+  act(() => result.current.openTabInSideColumn(page("changes", "changes"), { focus: true }));
+  const ledgerGroup = Object.values(result.current.layout.groups).find((g) => g.tabIds.includes("changes"))!.id;
+  expect(ledgerGroup).not.toBe(chatGroup);
+  expect(result.current.layout.focusedGroupId).toBe(ledgerGroup);
+  expect(result.current.layout.groups[chatGroup].activeTabId).toBe("chat:a");
+  act(() => result.current.openTabInSideColumn(page("workflows", "workflows"), { focus: true }));
+  const flowGroup = Object.values(result.current.layout.groups).find((g) => g.tabIds.includes("workflows"))!.id;
+  expect(flowGroup).not.toBe(ledgerGroup);
+  expect(result.current.layout.focusedGroupId).toBe(flowGroup);
+});

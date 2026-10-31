@@ -30,9 +30,13 @@ interface ContextMenuProps {
   tourTarget?: string;
   /** Clicking a row leaves focus (and the caret) where it was: a text box's own menu. */
   keepFocus?: boolean;
+  /** Zooming back into the point it opened from (a button's menu kept on screen by useMenuPop). */
+  closing?: boolean;
+  /** The point it zooms out of when not (x, y): its button's center. */
+  from?: { x: number; y: number };
 }
 
-export function ContextMenu({ x, y, items, onClose, tourTarget, keepFocus }: ContextMenuProps) {
+export function ContextMenu({ x, y, items, onClose, tourTarget, keepFocus, closing, from }: ContextMenuProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const scopeClass = useScopedClass("context-menu");
   const tourRef = useUiTarget(tourTarget || "", {
@@ -60,10 +64,13 @@ export function ContextMenu({ x, y, items, onClose, tourTarget, keepFocus }: Con
 
   // The real size once drawn (switch rows are taller than the guess); the guess places the first frame.
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  // offset sizes: the opening zoom scales the drawn box, never the laid-out one.
   useLayoutEffect(() => {
-    const rect = panelRef.current?.getBoundingClientRect();
-    if (!rect?.height) return;
-    setSize((cur) => (cur && cur.w === rect.width && cur.h === rect.height ? cur : { w: rect.width, h: rect.height }));
+    const el = panelRef.current;
+    if (!el?.offsetHeight) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    setSize((cur) => (cur && cur.w === w && cur.h === h ? cur : { w, h }));
   });
 
   const panelW = 220;
@@ -88,9 +95,11 @@ export function ContextMenu({ x, y, items, onClose, tourTarget, keepFocus }: Con
           "--context-menu-top": `${top}px`,
           "--context-menu-min-width": `${panelW}px`,
           "--context-menu-max-height": `${maxHeight}px`,
+          // It zooms out of the point it opened from (the pointer, or its button).
+          "--context-menu-origin": `${(from?.x ?? x) - left}px ${(from?.y ?? y) - top}px`,
         }}
       />
-      <div ref={setPanelRef} className={`context-menu is-positioned ${scopeClass}`} role="menu">
+      <div ref={setPanelRef} className={`context-menu is-positioned menu-pop${closing ? " is-closing" : ""} ${scopeClass}`} role="menu">
         {items.map((item) =>
           item.separator ? (
             <div key={item.id} className="context-menu-separator" role="separator" />

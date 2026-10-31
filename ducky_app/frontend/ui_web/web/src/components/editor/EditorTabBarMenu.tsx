@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { ContextMenu, type ContextMenuItem } from "../ContextMenu";
+import { useMenuPop } from "../DropdownPanel";
 import { Icons } from "../../icons/Icons";
 
 interface EditorTabBarMenuProps {
@@ -21,19 +22,18 @@ export function EditorTabBarMenu({
   onToggleGroupLock,
 }: EditorTabBarMenuProps) {
   const [open, setOpen] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number; from: { x: number; y: number } } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const pop = useMenuPop(open);
 
+  // Closing keeps the last spot so the menu zooms back into the button.
   useLayoutEffect(() => {
-    if (!open || !buttonRef.current) {
-      setMenuPos(null);
-      return;
-    }
+    if (!open || !buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
     const panelW = 220;
     let left = rect.right - panelW;
     if (left < 8) left = 8;
-    setMenuPos({ x: left, y: rect.bottom + 4 });
+    setMenuPos({ x: left, y: rect.bottom + 4, from: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } });
   }, [open]);
 
   const items: ContextMenuItem[] = [
@@ -82,8 +82,8 @@ export function EditorTabBarMenu({
       >
         {groupLocked ? <Icons.Lock /> : <Icons.MoreHorizontal />}
       </button>
-      {open && menuPos ? (
-        <ContextMenu x={menuPos.x} y={menuPos.y} items={items} onClose={() => setOpen(false)} />
+      {pop.mounted && menuPos ? (
+        <ContextMenu x={menuPos.x} y={menuPos.y} from={menuPos.from} items={items} onClose={() => setOpen(false)} closing={pop.closing} />
       ) : null}
     </>
   );
