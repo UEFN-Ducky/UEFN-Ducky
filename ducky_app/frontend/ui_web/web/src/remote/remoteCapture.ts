@@ -74,6 +74,40 @@ function screenTrack(): Promise<MediaStreamTrack> {
       return screenTrack();
     });
   }
+  screenPromise = fullDesktopStream().catch(pickedScreenStream).then((stream) => {
+    const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error("no screen track");
+    try {
+      track.contentHint = "motion";
+    } catch {
+      /* ignore */
+    }
+    track.addEventListener("ended", () => {
+      screenPromise = null;
+      for (const fn of endedListeners) fn();
+    });
+    return track;
+  });
+  screenPromise.catch(() => {
+    screenPromise = null;
+  });
+  return screenPromise;
+}
+
+/**
+ * Every monitor in one frame, through Chromium's legacy screen source (webview_app turns on
+ * --enable-usermedia-screen-capturing). getDisplayMedia gives one monitor only, so a phone
+ * watching Display 2 got a 2 px sliver of Display 1. No picker list, so no title shield either.
+ */
+function fullDesktopStream(): Promise<MediaStream> {
+  const video = { mandatory: { chromeMediaSource: "screen", maxFrameRate: MAX_FPS } };
+  return Promise.resolve().then(() =>
+    navigator.mediaDevices.getUserMedia({ audio: false, video } as unknown as MediaStreamConstraints),
+  );
+}
+
+/** One screen, auto-picked by --auto-select-desktop-capture-source: the fallback. */
+function pickedScreenStream(): Promise<MediaStream> {
   const opts = {
     video: { frameRate: { ideal: MAX_FPS, max: MAX_FPS }, displaySurface: "monitor", cursor: "never" },
     audio: false,
@@ -90,26 +124,10 @@ function screenTrack(): Promise<MediaStreamTrack> {
     shieldCaptureList(true),
     new Promise((resolve) => window.setTimeout(resolve, SHIELD_WAIT_MS)),
   ]);
-  screenPromise = shielded.then(() => navigator.mediaDevices.getDisplayMedia(opts)).then((stream) => {
-    const track = stream.getVideoTracks()[0];
-    if (!track) throw new Error("no screen track");
-    try {
-      track.contentHint = "motion";
-    } catch {
-      /* ignore */
-    }
-    track.addEventListener("ended", () => {
-      screenPromise = null;
-      for (const fn of endedListeners) fn();
-    });
-    return track;
-  });
+  const picked = shielded.then(() => navigator.mediaDevices.getDisplayMedia(opts));
   const unshield = () => window.setTimeout(() => void shieldCaptureList(false), SHIELD_HOLD_MS);
-  screenPromise.then(unshield, unshield);
-  screenPromise.catch(() => {
-    screenPromise = null;
-  });
-  return screenPromise;
+  picked.then(unshield, unshield);
+  return picked;
 }
 
 /**

@@ -8,6 +8,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { useRunningAgents } from "../hooks/useRunningAgents";
 import { useWaitingChatIds } from "../hooks/waitingChats";
 import { WaitingMarker } from "./WaitingMarker";
+import { fitMenuToScreen } from "./DropdownPanel";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import type {
   AgentProfileDto,
@@ -1111,7 +1112,7 @@ export function GroupMemberStrip({
             <Icons.Plus /> Add
           </button>
           {pickerOpen ? (
-            <div className="group-member-picker" role="listbox">
+            <div className="group-member-picker" role="listbox" ref={(el) => { if (el) fitMenuToScreen(el); }}>
               <button type="button" className="group-member-picker-item group-member-picker-create" disabled={busy} onClick={() => void createNestedGroup()}>
                 <span className="group-member-picker-create-icon" aria-hidden><Icons.Users /></span>
                 <span className="group-member-picker-meta">

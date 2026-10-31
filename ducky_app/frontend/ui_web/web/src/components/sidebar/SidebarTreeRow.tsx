@@ -8,6 +8,8 @@ interface SidebarTreeRowProps {
   labelClassName?: string;
   /** Optional second line under the label (chat meta, etc.). */
   meta?: ReactNode;
+  /** Short text right after the label that never truncates ("- 5m"). */
+  suffix?: ReactNode;
   isEditing?: boolean;
   renameInput?: ReactNode;
   actions?: ReactNode;
@@ -36,6 +38,7 @@ export function SidebarTreeRow({
   title,
   labelClassName,
   meta,
+  suffix,
   isEditing = false,
   renameInput,
   actions,
@@ -54,6 +57,14 @@ export function SidebarTreeRow({
   onContextMenu,
   rowProps,
 }: SidebarTreeRowProps) {
+  const labelEl = (
+    <TruncatedText
+      className={["sidebar-tree-row-label", labelClassName].filter(Boolean).join(" ")}
+      title={title ?? label}
+    >
+      {label}
+    </TruncatedText>
+  );
   return (
     <div
       {...rowProps}
@@ -84,12 +95,14 @@ export function SidebarTreeRow({
         renameInput
       ) : (
         <div className="sidebar-tree-row-text">
-          <TruncatedText
-            className={["sidebar-tree-row-label", labelClassName].filter(Boolean).join(" ")}
-            title={title ?? label}
-          >
-            {label}
-          </TruncatedText>
+          {suffix ? (
+            <div className="sidebar-tree-row-label-line">
+              {labelEl}
+              <span className="sidebar-tree-row-suffix">{suffix}</span>
+            </div>
+          ) : (
+            labelEl
+          )}
           {meta ? <div className="sidebar-tree-row-meta">{meta}</div> : null}
         </div>
       )}

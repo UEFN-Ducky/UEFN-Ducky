@@ -421,6 +421,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     os.environ.setdefault(
         "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
         "--auto-select-desktop-capture-source=creen "
+        # Whole virtual desktop (all monitors) for remoteCapture's chromeMediaSource "screen".
+        "--enable-usermedia-screen-capturing "
         "--disable-features=WebRtcHideLocalIpsWithMdns",
     )
     _allow_screencast_without_gesture()

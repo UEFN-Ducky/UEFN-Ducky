@@ -3072,6 +3072,10 @@ body.layout-sidebar-only .project-selector-title--sidebar-only {
 }
 .sidebar-tree-row-label { flex: 1; min-width: 0; display: block; font-size: 14px; line-height: 1.35; }
 .sidebar-tree-row-text .sidebar-tree-row-label { flex: 0 0 auto; }
+/* "Name - 5m": the name truncates, the time never does. */
+.sidebar-tree-row-label-line { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.sidebar-tree-row-label-line .sidebar-tree-row-label { flex: 0 1 auto; }
+.sidebar-tree-row-suffix { flex: none; font-size: 12px; color: var(--muted); white-space: nowrap; }
 .sidebar-tree-row-meta {
   min-width: 0;
   overflow: hidden;

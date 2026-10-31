@@ -12,3 +12,15 @@ export function formatRelativeTime(ts?: number): string {
   if (day < 7) return `${day}d ago`;
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+/** Shortest "now" / "1m" / "20m" / "1h" / "3d" label, for a sidebar row's name. */
+export function formatAgoShort(ts?: number, now = Date.now()): string {
+  if (!ts) return "";
+  const ms = ts < 1e12 ? ts * 1000 : ts;
+  const min = Math.floor((now - ms) / 60_000);
+  if (min < 1) return "now";
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  return `${Math.floor(hr / 24)}d`;
+}

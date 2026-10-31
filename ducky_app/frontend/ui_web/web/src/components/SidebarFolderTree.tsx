@@ -63,7 +63,7 @@ import { openWaitingChat, useChatWaiting, useNeedsYou, useWaitingChatIds } from 
 import { WaitingMarker } from "./WaitingMarker";
 import { useRunningChatWorkflow, useRunningWorkflowChatIds } from "../hooks/workflowRunsByChat";
 import type { EditorDropZone } from "../types/panel";
-import { formatRelativeTime } from "../utils/formatRelativeTime";
+import { formatAgoShort, formatRelativeTime } from "../utils/formatRelativeTime";
 import {
   chatNestDefaultExpanded,
   loadChatNestExpanded,
@@ -322,6 +322,13 @@ const ChatRow = memo(function ChatRow({
     muted ? { id: chat.id, name: chat.name, isGroup: false, parentHubId: chat.parentConvId } : null,
   );
   const mutedMeta = progress ? `${progress.done}/${progress.total} · ${progress.current || "Done"}` : "Muted";
+  // "- 5m" after the name: how long since this agent last did anything; ticks each minute.
+  const [, setMinuteTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => setMinuteTick((n) => n + 1), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const ago = formatAgoShort(chat.updated);
 
   return (
     <ChatTabHoverCard
@@ -373,6 +380,7 @@ const ChatRow = memo(function ChatRow({
           </span>
         }
         label={chat.name}
+        suffix={ago ? `- ${ago}` : undefined}
         meta={
           muted
             ? mutedMeta

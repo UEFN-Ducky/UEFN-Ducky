@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { getApi } from "../hooks/usePanelApi";
-import { useMenuPop, usePopOrigin } from "./DropdownPanel";
+import { fitMenuToScreen, useMenuPop, usePopOrigin } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import type { VideoSettingsDto } from "../types/panel";
@@ -89,6 +89,11 @@ export function AttachMenuButton({ disabled, onAddFiles }: AttachMenuButtonProps
     route: "chat",
   });
   const pop = useMenuPop(open);
+  // The menu opens leftwards from the paperclip and ran off a phone's left edge: center it there.
+  // Before usePopOrigin, so the zoom's origin is measured where the menu ends up.
+  useLayoutEffect(() => {
+    if (open && flyoutRef.current) fitMenuToScreen(flyoutRef.current);
+  }, [open, stream, cameraError]);
   usePopOrigin(flyoutRef, () => wrapRef.current?.querySelector(".attach-menu-trigger"), pop.mounted);
 
   const close = useCallback(() => {
@@ -123,19 +128,6 @@ export function AttachMenuButton({ disabled, onAddFiles }: AttachMenuButtonProps
       document.removeEventListener("keydown", onKey);
     };
   }, [open, close]);
-
-  // The menu opens leftwards from the paperclip; on a phone that ran off the left edge.
-  // Slide it sideways until it sits 8 px inside the screen.
-  useLayoutEffect(() => {
-    const el = flyoutRef.current;
-    if (!open || !el) return;
-    el.style.transform = "";
-    const box = el.getBoundingClientRect();
-    const pad = 8;
-    const right = window.innerWidth - pad;
-    const shift = box.left < pad ? pad - box.left : box.right > right ? right - box.right : 0;
-    if (shift) el.style.transform = `translateX(${Math.round(shift)}px)`;
-  }, [open, stream, cameraError]);
 
   // The limits under each row come from Settings → Videos; read them each time the menu opens.
   useEffect(() => {
