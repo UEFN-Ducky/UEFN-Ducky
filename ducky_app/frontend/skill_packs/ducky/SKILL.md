@@ -215,6 +215,11 @@ rules and a complete plugin, and says which of these to load next:
 | `plugin_examples_uefn` | Verse templates, UEFN listener tools, Blender and Meshy pipelines |
 | `plugin_examples_app` | Image generators, AI providers, sounds and hooks, walkthroughs |
 
+**General storage** (Ducky Account → Storage, under Workflows) holds anything the person
+wants kept: files, notes, JSON, by name and folder, synced with Your team. "Save it to General
+storage" → `ducky_storage_put`; read with `ducky_storage_list` / `ducky_storage_get`. Plugins
+use `api.storage` (`plugin_data` § General storage).
+
 **HARD:** before any plugin file, load every plugin reference above that applies (at
 least `plugin_data`, `plugin_look`, `plugin_testing`, `plugin_known_problems`) and
 **always ask the person Team or Local only** (`ducky_ask_user`, never your own guess).

@@ -1108,12 +1108,14 @@ class PanelApiStoreMixin:
             return {"ok": False, "current": "personal", "label": "Local", "plugins": [], "error": str(exc)}
 
     def plugin_scope_set_all(self, scope_id: str) -> dict[str, Any]:
-        """The Team modal's picker: every enabled plugin that can share (and Workflows) shows
+        """The Team modal's picker: every enabled plugin that can share (and Workflows and General
+        storage) shows
         Local or one team. Each goes through :meth:`plugin_scope_set`, so it leaves its old
         team's live group at once. A team copy that needs a first share is left as it was
         and named in ``pending``; ``errors`` says what didn't switch."""
         from backend.store.repos import plugin_data as repo
         from backend.uefn_plugins import scopes
+        from backend.uefn_plugins.general_storage import GENERAL
         from backend.uefn_plugins.spaces import WORKFLOW_DOCS
         from backend.uefn_plugins.store import get_enabled_plugin_ids
 
@@ -1122,7 +1124,7 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": "Pick Local or a team."}
         account = scopes.account_id()
         linked = repo.links(account) if account != scopes.LOCAL else {}
-        candidates = sorted(set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS} | set(linked))
+        candidates = sorted(set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS, GENERAL} | set(linked))
         switched: list[str] = []
         pending: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []

@@ -31,6 +31,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 function sourceText(row: TeamPluginRow): string {
   if (row.source === "workflows") return plural(row.items, "workflow");
   if (row.source === "tab") return "On this tab · not on this team";
+  if (row.source === "storage") return `Anything you keep · ${plural(row.items, "item")}`;
   const kind = row.source === "store" ? "Store plugin" : row.source === "ai" ? "AI plugin" : "Private plugin";
   return `${kind} · ${plural(row.items, "item")}`;
 }
@@ -40,7 +41,7 @@ export function TeamPluginIcon({ row, size = 28 }: { row: TeamPluginRow; size?: 
   return (
     <span className="team-plugin-icon" style={{ width: size, height: size }} aria-hidden>
       {row.icon ? <img src={row.icon} alt="" draggable={false} />
-        : row.source === "workflows" ? <Icons.Workflow /> : <span>{row.label.slice(0, 1).toUpperCase()}</span>}
+        : row.source === "workflows" ? <Icons.Workflow /> : row.source === "storage" ? <Icons.Archive /> : <span>{row.label.slice(0, 1).toUpperCase()}</span>}
     </span>
   );
 }

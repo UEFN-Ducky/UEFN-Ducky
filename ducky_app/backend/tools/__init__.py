@@ -18,6 +18,7 @@ from backend.tools.panel import ducky_panel  # noqa: F401
 from backend.tools.panel import ducky_swarm  # noqa: F401
 from backend.tools.panel import panel_ai_plugins  # noqa: F401
 from backend.tools.panel import panel_automations  # noqa: F401
+from backend.tools.panel import panel_general_storage  # noqa: F401
 from backend.tools.panel import panel_i18n  # noqa: F401
 from backend.tools.panel import panel_mcp  # noqa: F401
 from backend.tools.panel import panel_plugin_check  # noqa: F401

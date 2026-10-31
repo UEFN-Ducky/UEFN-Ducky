@@ -210,6 +210,23 @@ the team like `api.data`, with no plugin code:
   last change with no `*.tmp` left.
 - The bar says why a folder can't be shared: a network or non-NTFS drive, or OneDrive.
 
+## General storage
+
+The account also has **General storage** (core id `ducky.storage`): one place for anything
+that isn't one plugin's records, listed in Ducky Account → Storage right under Workflows.
+Files, notes and JSON go in by name and folder (`Promo/2026`); saving a name again replaces it
+and its history keeps the old one. It follows Your team like any plugin's data (Local or the
+team, synced with history, undo, locks and conflicts).
+
+- Plugins: `api.storage.put_file(name, bytes, folder="")`, `.put(name, value, folder="")`,
+  `.items(folder, query)`, `.get(id, with_data=True)`, `.find(name, folder)`, `.delete(id)`.
+  Each item says which plugin kept it, and it stays when the plugin is removed.
+- Agents: `ducky_storage_list`, `ducky_storage_get` (`save_to` writes a file out),
+  `ducky_storage_put` (`text`, `json_value`, `source_path` or `b64`), `ducky_storage_delete`.
+- People: Storage → General storage → Add files.
+- When the person says "save it to General storage" (or "keep it in my storage"), use these,
+  never a folder of your own.
+
 ## Sensitive data
 
 `api.data.put(key, value, sensitive=True)` keeps a doc on this PC in the account's

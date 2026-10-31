@@ -4254,6 +4254,17 @@ class _PluginApi:
         return PluginData(self.plugin_id)
 
     @property
+    def storage(self) -> Any:
+        """The account's General storage, shared by the person and every plugin: ``put_file(name,
+        bytes, folder="")``, ``put(name, value, folder="")`` (a note or any JSON), ``items(folder,
+        query)``, ``get(id, with_data=False)``, ``find(name, folder)``, ``delete(id)``, ``where()``.
+        Synced with Your team like plugin data; what a plugin keeps here stays when it goes. See
+        ``backend.uefn_plugins.general_storage``."""
+        from backend.uefn_plugins.general_storage import StorageApi
+
+        return StorageApi(self.plugin_id)
+
+    @property
     def search(self) -> Any:
         """Make this plugin's own records findable by meaning and keywords: ``upsert(id, title,
         text, meta)``, ``delete(id)``, ``clear()``, ``query(text, limit)``. Only this plugin's

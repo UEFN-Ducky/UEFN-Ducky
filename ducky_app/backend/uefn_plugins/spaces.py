@@ -252,6 +252,10 @@ def install_for_tests(impl: Provider, plugin_id: str = "test-spaces") -> None:
 
 def plugin_label(plugin_id: str) -> str:
     """The plugin's display name, from its manifest. Empty when it has none."""
+    from backend.uefn_plugins.general_storage import GENERAL, LABEL
+
+    if plugin_id == GENERAL:
+        return LABEL
     try:
         from backend.uefn_plugins.store import load_plugin_manifest
 
@@ -547,10 +551,11 @@ def team_overview(space: str = "") -> dict[str, Any]:
 
     from backend.store.repos import plugin_data as repo
     from backend.uefn_plugins import scopes
+    from backend.uefn_plugins.general_storage import GENERAL, LABEL
     from backend.uefn_plugins.store import get_enabled_plugin_ids, load_plugin_manifest, plugin_icon_data_url
 
     account = scopes.account_id()
-    enabled = set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS}
+    enabled = set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS, GENERAL}
     links = {p: s for p, s in repo.links(account).items() if p in enabled and s != scopes.PERSONAL} \
         if account != scopes.LOCAL else {}
     space = str(space or "") or (Counter(links.values()).most_common(1)[0][0] if links else "")
@@ -564,15 +569,15 @@ def team_overview(space: str = "") -> dict[str, Any]:
             _log.debug("team overview of %s failed", pid, exc_info=True)
             continue
         ch = st.get("changes") or {}
-        workflows = pid == WORKFLOW_DOCS
+        core = {WORKFLOW_DOCS: ("Workflows", "workflows"), GENERAL: (LABEL, "storage")}.get(pid)
         try:
-            manifest = {} if workflows else (load_plugin_manifest(pid) or {})
+            manifest = {} if core else (load_plugin_manifest(pid) or {})
         except ValueError:
             manifest = {}
         rows.append({
-            "pluginId": pid, "label": "Workflows" if workflows else str(st.get("pluginLabel") or pid),
-            "icon": "" if workflows else plugin_icon_data_url(pid) or "",
-            "source": "workflows" if workflows else str(manifest.get("source") or "local"),
+            "pluginId": pid, "label": core[0] if core else str(st.get("pluginLabel") or pid),
+            "icon": "" if core else plugin_icon_data_url(pid) or "",
+            "source": core[1] if core else str(manifest.get("source") or "local"),
             "incoming": int(ch.get("incoming") or 0), "incomingBy": list(ch.get("incomingBy") or []),
             "held": bool(ch.get("held")), "outgoing": list(ch.get("outgoing") or []),
             "pending": int(st.get("pending") or 0), "conflicts": len(st.get("conflicts") or []),
@@ -592,7 +597,8 @@ def team_overview(space: str = "") -> dict[str, Any]:
             "head": int(st["head"]) if isinstance(st.get("head"), int) else None,
             "mode": str(st.get("mode") or ""),
         })
-    rows.sort(key=lambda r: (r["pluginId"] == WORKFLOW_DOCS, r["label"].casefold()))
+    # Workflows and General storage first, as the account's Storage lists them, then the plugins.
+    rows.sort(key=lambda r: ({WORKFLOW_DOCS: 0, GENERAL: 1}.get(r["pluginId"], 2), r["label"].casefold()))
     label = str(repo.sync_get(account, space).get("label") or "") or "Team"
     return {"ok": True, "current": space, "label": label, "plugins": rows}
 
