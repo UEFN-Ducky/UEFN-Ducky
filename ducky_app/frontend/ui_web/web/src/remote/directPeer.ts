@@ -29,7 +29,9 @@ import {
   PartAssembler,
   STREAM_PREFIX,
   blobPathAllowed,
+  drained,
   sdpFingerprint,
+  sendPaced,
   splitText,
   waitIceGathering,
   type BlobRequest,
@@ -219,10 +221,10 @@ function wireChannel(s: Session, ch: RTCDataChannel) {
       s.unsubEvents = subscribeAgentEventsImmediate((event) => {
         if (event.type === "direct_rtc" || ch.readyState !== "open") return;
         s.eventSeq += 1;
-        const text = JSON.stringify({ seq: s.eventSeq, event });
+        const seq = s.eventSeq;
+        const text = JSON.stringify({ seq, event });
         const pieces = splitText(text);
-        if (pieces.length === 1) ch.send(text);
-        else pieces.forEach((data, part) => ch.send(JSON.stringify({ seq: s.eventSeq, part, of: pieces.length, data })));
+        void sendPaced(ch, pieces.length === 1 ? [text] : pieces.map((data, part) => JSON.stringify({ seq, part, of: pieces.length, data })));
       });
       break;
     case CHANNEL_BLOB:
@@ -259,8 +261,7 @@ async function onRpc(s: Session, ch: RTCDataChannel, raw: string) {
     if (ch.readyState !== "open") return;
     const text = JSON.stringify(payload);
     const pieces = splitText(text);
-    if (pieces.length === 1) ch.send(text);
-    else pieces.forEach((data, part) => ch.send(JSON.stringify({ id: req.id, ok: true, part, of: pieces.length, data })));
+    void sendPaced(ch, pieces.length === 1 ? [text] : pieces.map((data, part) => JSON.stringify({ id: req.id, ok: true, part, of: pieces.length, data })));
   };
   const method = String(req.method || "");
   const args = Array.isArray(req.args) ? req.args : [];
@@ -378,15 +379,7 @@ async function onBlob(_s: Session, ch: RTCDataChannel, raw: string) {
     const payload = MAX_CHUNK_BYTES - 4;
     for (let off = 0; off < buf.byteLength; off += payload) {
       if (ch.readyState !== "open") return;
-      if (ch.bufferedAmount > BLOB_LOW_WATER_BYTES) {
-        await new Promise<void>((resolve) => {
-          const onLow = () => {
-            ch.removeEventListener("bufferedamountlow", onLow);
-            resolve();
-          };
-          ch.addEventListener("bufferedamountlow", onLow);
-        });
-      }
+      if (ch.bufferedAmount > BLOB_LOW_WATER_BYTES) await drained(ch);
       const slice = buf.subarray(off, Math.min(buf.byteLength, off + payload));
       const frame = new Uint8Array(4 + slice.byteLength);
       new DataView(frame.buffer).setUint32(0, req.id);

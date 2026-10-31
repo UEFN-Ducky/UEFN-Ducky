@@ -26,6 +26,7 @@ import {
   compareVersions,
   newSessionId,
   rewriteLoopbackUrls,
+  sendPaced,
   splitText,
   waitIceGathering,
   type BlobDone,
@@ -549,8 +550,7 @@ export class DirectTransport {
         });
         const text = JSON.stringify({ id, method, args });
         const pieces = splitText(text);
-        if (pieces.length === 1) ch.send(text);
-        else pieces.forEach((data, part) => ch.send(JSON.stringify({ id, part, of: pieces.length, data })));
+        void sendPaced(ch, pieces.length === 1 ? [text] : pieces.map((data, part) => JSON.stringify({ id, part, of: pieces.length, data })));
       };
       if (this.status.state === "live" && this.rpc?.readyState === "open") send();
       // A redial in progress (or waiting on a wake): the call goes once the link is back.

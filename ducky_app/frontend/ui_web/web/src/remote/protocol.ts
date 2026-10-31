@@ -75,6 +75,66 @@ export function splitText(text: string, max = MAX_CHUNK_BYTES): string[] {
   return out;
 }
 
+/** The part of an RTCDataChannel the paced sender uses. */
+export interface PacedChannel {
+  readonly readyState: string;
+  readonly bufferedAmount: number;
+  bufferedAmountLowThreshold: number;
+  send(data: string): void;
+  addEventListener(type: "bufferedamountlow" | "close", fn: () => void): void;
+  removeEventListener(type: "bufferedamountlow" | "close", fn: () => void): void;
+}
+
+/** Resolves once the channel's queue is below its low-water mark (or the channel closed). */
+export function drained(ch: PacedChannel): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      ch.removeEventListener("bufferedamountlow", done);
+      ch.removeEventListener("close", done);
+      resolve();
+    };
+    ch.addEventListener("bufferedamountlow", done);
+    ch.addEventListener("close", done);
+  });
+}
+
+const sendChains = new WeakMap<PacedChannel, Promise<void>>();
+const waiting = new WeakMap<PacedChannel, number>();
+
+/**
+ * Sends `pieces` in order, waiting while the channel holds more than BLOB_LOW_WATER_BYTES.
+ * Chromium throws "send queue is full" once a channel holds 16 MB: a long chat's reply sent
+ * in one go did (Oct 30 2026, chat_failed). Calls on one channel go out one after another;
+ * with nothing waiting and room in the queue they go out at once.
+ */
+export function sendPaced(ch: PacedChannel, pieces: string[]): Promise<void> {
+  let i = 0;
+  if (!waiting.get(ch)) {
+    for (; i < pieces.length && ch.readyState === "open" && !(ch.bufferedAmount > BLOB_LOW_WATER_BYTES); i++) {
+      ch.send(pieces[i]);
+    }
+    if (i === pieces.length || ch.readyState !== "open") return Promise.resolve();
+  }
+  const rest = pieces.slice(i);
+  waiting.set(ch, (waiting.get(ch) ?? 0) + 1);
+  const run = async () => {
+    try {
+      ch.bufferedAmountLowThreshold = BLOB_LOW_WATER_BYTES;
+      for (const piece of rest) {
+        if (ch.readyState !== "open") return;
+        if (ch.bufferedAmount > BLOB_LOW_WATER_BYTES) await drained(ch);
+        if (ch.readyState !== "open") return;
+        ch.send(piece);
+      }
+    } finally {
+      waiting.set(ch, Math.max(0, (waiting.get(ch) ?? 1) - 1));
+    }
+  };
+  const next = (sendChains.get(ch) ?? Promise.resolve()).then(run, run);
+  sendChains.set(ch, next.catch(() => undefined));
+  return next;
+}
+
 /** Reassemble `part` replies; returns the full text once all parts arrived. */
 export class PartAssembler {
   private parts = new Map<number, { of: number; got: Map<number, string> }>();

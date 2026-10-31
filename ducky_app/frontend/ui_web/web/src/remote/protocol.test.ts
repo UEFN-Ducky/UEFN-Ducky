@@ -6,6 +6,7 @@ import {
   compareVersions,
   rewriteLoopbackUrls,
   sdpFingerprint,
+  sendPaced,
   splitText,
 } from "./protocol";
 
@@ -86,5 +87,58 @@ describe("sdpFingerprint / compareVersions", () => {
     expect(compareVersions("1.2.10", "1.2.9")).toBe(1);
     expect(compareVersions("1.2.9", "1.2.10")).toBe(-1);
     expect(compareVersions("1.2.42", "1.2.42")).toBe(0);
+  });
+});
+
+describe("sendPaced", () => {
+  // Oct 30 2026: a long chat's reply sent in one go hit Chromium's 16 MB "send queue is full".
+  class FakeChannel {
+    readyState = "open";
+    bufferedAmount = 0;
+    bufferedAmountLowThreshold = 0;
+    sent: string[] = [];
+    private listeners = new Map<string, Set<() => void>>();
+    send(data: string) {
+      if (this.bufferedAmount > 1024 * 1024) throw new Error("send queue is full");
+      this.sent.push(data);
+      this.bufferedAmount += data.length;
+    }
+    addEventListener(type: string, fn: () => void) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type)!.add(fn);
+    }
+    removeEventListener(type: string, fn: () => void) {
+      this.listeners.get(type)?.delete(fn);
+    }
+    drain() {
+      this.bufferedAmount = 0;
+      for (const fn of [...(this.listeners.get("bufferedamountlow") ?? [])]) fn();
+    }
+  }
+
+  it("waits for the queue to drain instead of overfilling it, and keeps order", async () => {
+    const ch = new FakeChannel();
+    const big = Array.from({ length: 40 }, (_, i) => `${i}:`.padEnd(100 * 1024, "x"));
+    const first = sendPaced(ch, big);
+    const second = sendPaced(ch, ["after"]);
+    await Promise.resolve();
+    expect(ch.sent.length).toBeLessThan(big.length);
+    for (let i = 0; i < 40 && ch.sent.length < 41; i++) {
+      ch.drain();
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    await first;
+    await second;
+    expect(ch.sent.map((s) => s.split(":")[0])).toEqual([...big.map((_, i) => String(i)), "after"]);
+  });
+
+  it("stops when the channel closes while it waits", async () => {
+    const ch = new FakeChannel();
+    ch.bufferedAmount = 10 * 1024 * 1024;
+    const done = sendPaced(ch, ["a", "b"]);
+    ch.readyState = "closed";
+    for (const fn of [...((ch as unknown as { listeners: Map<string, Set<() => void>> }).listeners.get("close") ?? [])]) fn();
+    await done;
+    expect(ch.sent).toEqual([]);
   });
 });
