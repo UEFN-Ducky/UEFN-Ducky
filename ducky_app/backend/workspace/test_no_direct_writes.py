@@ -64,6 +64,7 @@ ALLOWLIST: dict[str, str] = {
     "frontend/ui_web/project_files.py::delete_project_entry._do_trash": "path_op perform",
     "frontend/ui_web/project_files.py::_move_entry": "the move step of the rename/move/delete/restore path_op performs",
     "backend/tools/verse/template_verify.py::_cleanup._unlink": "path_op perform",
+    "backend/tools/panel/panel_general_storage.py::ducky_storage_get._save": "path_op perform",
     "backend/workspace/journal.py::_unlink_through_pipeline._unlink": "path_op perform",
     "backend/workspace/journal.py::_move_back_through_pipeline._move": "path_op perform",
     # The journal writes its own ledger under AppData and restores through the

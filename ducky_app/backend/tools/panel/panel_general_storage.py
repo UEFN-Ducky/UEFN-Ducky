@@ -37,7 +37,7 @@ def ducky_storage_list(folder: str = "", query: str = "", pretty: bool = False) 
 def ducky_storage_get(id: str = "", name: str = "", folder: str = "", save_to: str = "", pretty: bool = False) -> str:
     """Read one item of General storage by ``id`` (or by ``name`` + ``folder``). A note comes back
     as ``text``, JSON as ``value``. A file comes back as metadata; pass ``save_to`` (a folder or a
-    file path) to write its bytes there."""
+    file path in one of your projects) to write its bytes there."""
     from backend.uefn_plugins import general_storage as gs
 
     try:
@@ -51,12 +51,18 @@ def ducky_storage_get(id: str = "", name: str = "", folder: str = "", save_to: s
             if data is None:
                 return tool_json({"ok": False, "error": "That file hasn't reached this PC yet. Try again after a sync."},
                                  pretty=pretty)
+            from backend.workspace.runtime import get_writer
+
             dest = Path(save_to).expanduser()
             if dest.is_dir() or str(save_to).endswith(("/", "\\")):
-                dest.mkdir(parents=True, exist_ok=True)
                 dest = dest / item["name"]
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(data)
+
+            def _save() -> None:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+
+            # A project file: the pipeline checks policy, locks and journals it.
+            get_writer().path_op("import", str(dest), tool="ducky_storage_get", perform=_save)
             item["saved"] = str(dest)
         item.pop("data", None)
         return tool_json({"ok": True, "item": item, "scope": gs.where()}, pretty=pretty)

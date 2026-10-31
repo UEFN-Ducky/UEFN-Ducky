@@ -67,3 +67,21 @@ def test_plugins_and_agents_use_the_same_storage(who) -> None:
     b64 = base64.b64encode(b"\x00\x01").decode()
     assert json.loads(tools.ducky_storage_put("bin.dat", b64=b64))["item"]["size"] == 2
     assert json.loads(tools.ducky_storage_put("bad", json_value="{nope"))["ok"] is False
+
+
+def test_save_to_writes_project_files_through_the_pipeline(who, tmp_path, monkeypatch) -> None:
+    from backend.tools.panel import panel_general_storage as tools
+    from backend.workspace import runtime
+    from backend.workspace.writer import ProjectWriter
+
+    who.be("ana@x.org")
+    project = tmp_path / "Island"
+    (project / "Content").mkdir(parents=True)
+    writer = ProjectWriter.for_root(str(project))
+    monkeypatch.setattr(runtime, "get_writer", lambda: writer)
+    item = gs.put_file("cover.png", b"PNG1", folder="Promo")["item"]
+    out = json.loads(tools.ducky_storage_get(id=item["id"], save_to=str(project / "Content") + "/"))
+    assert out["ok"] and (project / "Content" / "cover.png").read_bytes() == b"PNG1"
+    outside = tmp_path / "Elsewhere" / "cover.png"
+    assert json.loads(tools.ducky_storage_get(id=item["id"], save_to=str(outside)))["ok"] is False
+    assert not outside.exists()
