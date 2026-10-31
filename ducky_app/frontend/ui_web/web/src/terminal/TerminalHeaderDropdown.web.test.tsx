@@ -46,6 +46,22 @@ it("names the ducky that opened each terminal, and none on the person's own", ()
   expect(screen.getAllByTitle(/^Opened by/)).toHaveLength(1);
 });
 
+it("deleting a terminal keeps the menu open, so the next one can be deleted too", () => {
+  const base = { shell: "bash", active: false, running: false, runner: null };
+  const terms = [{ ...base, id: "terminal:a", sessionId: "a", name: "one" }, { ...base, id: "terminal:b", sessionId: "b", name: "two" }];
+  function Host() {
+    const [list, setList] = useState(terms);
+    return <TerminalHeaderDropdown defaultShell="bash" onShellChange={vi.fn()} onGotoTerminal={vi.fn()} onNewTerminal={vi.fn()}
+      onCloseTerminal={(id) => setList((l) => l.filter((t) => t.id !== id))} terminals={list} />;
+  }
+  render(<Host />);
+  press(screen.getByRole("button", { name: "2 terminals" }));
+  press(screen.getByRole("button", { name: "Delete one" }));
+  expect(screen.queryByRole("button", { name: "Delete one" })).toBeNull();
+  press(screen.getByRole("button", { name: "Delete two" }));
+  expect(screen.getByRole("button", { name: "New terminal" })).toBeTruthy();
+});
+
 it.each(["radio", "checkbox"] as const)("keeps a portaled %s choice inside a DropdownPanel usable", (mode) => {
   const changed = vi.fn();
   function Nested() {

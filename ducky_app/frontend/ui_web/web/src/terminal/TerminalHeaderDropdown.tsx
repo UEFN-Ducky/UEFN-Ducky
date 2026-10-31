@@ -142,9 +142,9 @@ export function TerminalHeaderDropdown({
                     title="Delete terminal (kills process)"
                     aria-label={`Delete ${term.name}`}
                     onClick={(e) => {
+                      // The menu stays open: its row goes, and the next one can be deleted too.
                       e.stopPropagation();
                       onCloseTerminal(term.id);
-                      setOpen(false);
                     }}
                   >
                     <Icons.Trash />
