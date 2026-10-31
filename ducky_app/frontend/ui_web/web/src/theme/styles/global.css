@@ -733,6 +733,7 @@ body.native-caption-input-ready .app-header .drag-region {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 .window-control-btn {
   background: transparent;
@@ -4729,8 +4730,10 @@ body.focus-window:has(.focus-top-edge-grip:hover) .focus-header-chrome,
   height: calc(var(--focus-header-toolbar) - 1px);
   min-height: calc(var(--focus-header-toolbar) - 1px);
 }
+/* Gives way in a narrow focus window (the project name shortens): it could not shrink, and
+   at 360-450 px it pushed the window buttons past the right edge (feedback, Oct 30 2026). */
 .focus-header-chrome .app-header--focus .app-header-left {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
 }
 .focus-header-chrome .app-header--focus .app-header-trailing {
@@ -4739,6 +4742,7 @@ body.focus-window:has(.focus-top-edge-grip:hover) .focus-header-chrome,
 }
 .focus-header-chrome .app-header--focus .app-header-status-row {
   gap: 6px;
+  min-width: 0;
 }
 .focus-header-chrome .app-header--focus .app-header-project-label {
   font-size: 12px;
