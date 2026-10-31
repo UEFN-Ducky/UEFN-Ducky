@@ -27,6 +27,7 @@ import { usePluginPage } from "./usePluginPage";
 import { WINDOW_ID } from "../tabs/tabRegistryClient";
 import { PluginChatDock, useDock } from "./PluginChatDock";
 import { dockSnapshot, dropDock, registerChatLookup } from "./pluginChatDockStore";
+import { panelItemKey, subscribePanelItems, takePanelItem } from "./panelOpenItem";
 
 export type PluginChatOverlayProps = {
   allChats: ChatTab[];
@@ -72,6 +73,12 @@ type Follow = { device: string; leading: boolean; older: string[] };
  * older app, whose clicks the leader does for everyone. */
 function postFollow(iframe: HTMLIFrameElement | null, follow: Follow): void {
   iframe?.contentWindow?.postMessage({ channel: BRIDGE_CHANNEL, event: { type: "live.follow", ...follow } }, "*");
+}
+
+/** Bridge event `panel.open_item`: a chat or search reference picked this item of the panel. */
+function postOpenItem(iframe: HTMLIFrameElement | null, item: string | null): void {
+  if (!item) return;
+  iframe?.contentWindow?.postMessage({ channel: BRIDGE_CHANNEL, event: { type: "panel.open_item", item } }, "*");
 }
 
 function findPanel(
@@ -142,18 +149,27 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
   const liveRef = useRef(false);
   const syncRef = useRef<SyncState>({ shared: false, incoming: 0 });
   const followRef = useRef<Follow>({ device: "", leading: false, older: [] });
+  const itemKey = parsed ? panelItemKey(parsed.pluginId, parsed.panelId) : "";
+  const loadedRef = useRef(false);
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe || !src) return;
+    loadedRef.current = false;
     const post = () => {
+      loadedRef.current = true;
       postVisibility(iframe, visibleRef.current);
       postLive(iframe, liveRef.current);
       postSync(iframe, syncRef.current);
       postFollow(iframe, followRef.current);
+      postOpenItem(iframe, takePanelItem(itemKey));
     };
     iframe.addEventListener("load", post);
     return () => iframe.removeEventListener("load", post);
-  }, [src]);
+  }, [src, itemKey]);
+  // A reference to an item (a Kanban board) while this panel is already open.
+  useEffect(() => subscribePanelItems((key) => {
+    if (key === itemKey && loadedRef.current) postOpenItem(iframeRef.current, takePanelItem(itemKey));
+  }), [itemKey]);
   useEffect(() => {
     postVisibility(iframeRef.current, visible);
   }, [visible]);

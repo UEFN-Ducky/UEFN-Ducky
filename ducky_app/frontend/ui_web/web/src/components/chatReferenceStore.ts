@@ -5,7 +5,8 @@ import { subscribePanelPush } from "../hooks/usePanelPushBus";
 /**
  * The @ / slash catalog's raw lists, shared by every composer. Nothing loads on mount or
  * chat switch: the composer calls `ensureLoaded()` on the first '@' or '/'. After that,
- * pushes refresh only the list that changed (debounced 1 s).
+ * pushes refresh only the list that changed (debounced 1 s), and a menu opened more than
+ * 15 s after the last load reloads every list behind the rows it already shows.
  */
 
 type Api = NonNullable<ReturnType<typeof getApi>>;
@@ -18,6 +19,8 @@ const LOADERS = {
   recents: (api: Api) => api.list_recent_projects().catch(() => []),
   paths: (api: Api) => api.list_project_file_paths().catch(() => null) as Promise<unknown>,
   workflows: (api: Api) => api.list_workflows?.().catch(() => null) ?? Promise.resolve(null),
+  // Live rows plugins list (Kanban boards…); asked again on every reload.
+  pluginRefs: (api: Api) => api.list_plugin_references?.().catch(() => null) ?? Promise.resolve(null),
 };
 
 export type ChatReferenceList = keyof typeof LOADERS;
@@ -31,16 +34,21 @@ export interface ChatReferenceSnapshot {
 /** Push type → the lists it changes. Plugin panels/contributions refresh in usePluginContributions. */
 const EVENT_LISTS: Record<string, ChatReferenceList[]> = {
   chats_changed: ["convs"],
-  uefn_plugins_changed: ["mcp", "skills"],
+  uefn_plugins_changed: ["mcp", "skills", "pluginRefs"],
   profiles_changed: ["profiles"],
+  duckies_changed: ["profiles"],
   skills_changed: ["skills"],
   graphs_changed: ["workflows"],
   project_changed: ["recents", "paths"],
 };
 
 const REFRESH_DELAY_MS = 1000;
+// ponytail: catches every change no push announces; per-list pushes stay the fast path.
+const STALE_MS = 15_000;
 
 let snapshot: ChatReferenceSnapshot = { status: "idle", data: {} };
+let loadedAt = 0;
+let reloading = false;
 const listeners = new Set<() => void>();
 let pending = new Set<ChatReferenceList>();
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,12 +89,24 @@ function onPush(event: { type?: unknown }) {
   if (!refreshTimer) refreshTimer = setTimeout(flushRefresh, REFRESH_DELAY_MS);
 }
 
-/** Load every list once; later calls do nothing. */
+/** Load every list once; a later call reloads them when the last load is over 15 s old. */
 export function ensureLoaded(): void {
-  if (snapshot.status !== "idle" || !getApi()) return;
+  if (!getApi() || snapshot.status === "loading") return;
+  const all = Object.keys(LOADERS) as ChatReferenceList[];
+  if (snapshot.status === "ready") {
+    if (reloading || Date.now() - loadedAt < STALE_MS) return;
+    reloading = true;
+    void loadLists(all).then((fresh) => {
+      reloading = false;
+      loadedAt = Date.now();
+      if (snapshot.status === "ready") publish({ status: "ready", data: { ...snapshot.data, ...fresh } });
+    });
+    return;
+  }
   unsubscribePush ??= subscribePanelPush(onPush);
   publish({ status: "loading", data: snapshot.data });
-  void loadLists(Object.keys(LOADERS) as ChatReferenceList[]).then((data) => {
+  void loadLists(all).then((data) => {
+    loadedAt = Date.now();
     publish({ status: "ready", data });
   });
 }
@@ -111,5 +131,7 @@ export function _resetChatReferenceStoreForTests(): void {
   unsubscribePush?.();
   unsubscribePush = null;
   snapshot = { status: "idle", data: {} };
+  loadedAt = 0;
+  reloading = false;
   listeners.clear();
 }

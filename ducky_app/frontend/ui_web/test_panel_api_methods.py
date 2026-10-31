@@ -359,6 +359,7 @@ _PUBLIC_METHODS = frozenset({
     'list_plan_templates',
     'list_plans',
     'list_known_projects',
+    'list_plugin_references',
     'list_project_file_paths',
     'list_project_files',
     'list_recent_projects',

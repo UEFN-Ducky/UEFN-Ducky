@@ -223,11 +223,14 @@ export function useChatReferenceCatalog(
         description: row.description,
       });
     }
+    for (const row of data.pluginRefs?.refs ?? []) {
+      extra.push(chatRef(row.trigger, row.id, row.label, row.group || "Plugins", row.href, row.description, { iconUrl: row.icon_url }));
+    }
     return {
       mentions: dedupeChatRefs([...builtinMentions, ...extra.filter((row) => row.trigger === "@")]),
       slashRefs: dedupeChatRefs([...builtinSlash, ...extra.filter((row) => row.trigger === "/")]),
     };
-  }, [builtinMentions, builtinSlash, contrib.chat_references]);
+  }, [builtinMentions, builtinSlash, contrib.chat_references, data.pluginRefs]);
 
   useEffect(() => {
     noteChatRefFaces([...mentions, ...slashRefs]);

@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   list_recent_projects: vi.fn(),
   list_project_file_paths: vi.fn(),
   list_workflows: vi.fn(),
+  list_plugin_references: vi.fn(),
 }));
 const push = vi.hoisted(() => ({ listener: null as ((event: PanelPushEvent) => void) | null }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api }));
@@ -40,6 +41,7 @@ beforeEach(() => {
   api.list_recent_projects.mockReset().mockResolvedValue([]);
   api.list_project_file_paths.mockReset().mockResolvedValue({ paths: ["Content/a.md"], total: 1, truncated: false });
   api.list_workflows.mockReset().mockResolvedValue({ workflows: [] });
+  api.list_plugin_references.mockReset().mockResolvedValue({ refs: [] });
 });
 afterEach(() => {
   cleanup();
@@ -58,9 +60,42 @@ it("the first @ loads every list once; a second @ makes no calls", async () => {
   expect(result.current.loading).toBe(true);
   await waitFor(() => expect(result.current.mentions.map((row) => row.label)).toEqual(["Builder"]));
   expect(result.current.files.map((row) => row.label)).toEqual(["a.md"]);
-  expect(catalogCalls()).toBe(7);
+  expect(catalogCalls()).toBe(8);
   act(() => ensureLoaded());
-  expect(catalogCalls()).toBe(7);
+  expect(catalogCalls()).toBe(8);
+});
+
+it("a plugin's live items (Kanban boards) show with its icon", async () => {
+  api.list_plugin_references.mockResolvedValue({ refs: [
+    { trigger: "/", id: "plugin:kanban/board:b1", label: "Limo backlog", group: "Kanban", href: "plugin:kanban/board:b1", icon_url: "data:image/svg+xml;base64,AA", plugin_id: "kanban" },
+  ] });
+  const { result } = renderHook(() => useChatReferenceCatalog(true, "c1"));
+  await waitFor(() => expect(result.current.slashRefs.map((row) => row.label)).toContain("Limo backlog"));
+  const board = result.current.slashRefs.find((row) => row.label === "Limo backlog");
+  expect(board).toMatchObject({ group: "Kanban", href: "plugin:kanban/board:b1", iconUrl: "data:image/svg+xml;base64,AA" });
+});
+
+it("an @ opened 15 s after the last load reloads every list", async () => {
+  ensureLoaded();
+  await waitFor(() => expect(getChatReferenceSnapshot().status).toBe("ready"));
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
+  api.list_agent_profiles.mockResolvedValue({ profiles: [{ id: "p1", name: "New Ducky" }] });
+  act(() => ensureLoaded());
+  expect(getChatReferenceSnapshot().status).toBe("ready"); // the old rows stay up meanwhile
+  await waitFor(() => expect(getChatReferenceSnapshot().data.profiles?.profiles?.[0]?.name).toBe("New Ducky"));
+  clock.mockRestore();
+});
+
+it("duckies_changed refreshes the library duckies", async () => {
+  ensureLoaded();
+  await waitFor(() => expect(getChatReferenceSnapshot().status).toBe("ready"));
+  vi.useFakeTimers();
+  push.listener?.({ type: "duckies_changed" as PanelPushEvent["type"] });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(api.list_agent_profiles).toHaveBeenCalledTimes(2);
 });
 
 it("a push before the first load refreshes nothing", () => {

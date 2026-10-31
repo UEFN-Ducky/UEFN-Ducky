@@ -1,5 +1,6 @@
 import { rememberSettingsSections, requestOpenSettings } from "./openSettingsTab";
 import { requestOpenPluginUiTab } from "../plugin-ui/openPluginUiTab";
+import { requestPanelItem } from "../plugin-ui/panelOpenItem";
 import { parseChatRefHref } from "../components/chatReferences";
 import { chatRefFace } from "../components/chatRefFaces";
 import { getApi } from "../hooks/usePanelApi";
@@ -117,7 +118,12 @@ export function requestOpenChatReference(href: string, label = ""): void {
   if (parsed.kind === "plugin") {
     const slash = parsed.id.indexOf("/");
     if (slash <= 0) return;
-    requestOpenPluginUiTab(parsed.id.slice(0, slash), parsed.id.slice(slash + 1), name);
+    // plugin:<plugin>/<panel> opens the panel; plugin:<plugin>/<panel>:<item> opens it on that item.
+    const pluginId = parsed.id.slice(0, slash);
+    const [panelId, ...rest] = parsed.id.slice(slash + 1).split(":");
+    const item = rest.join(":");
+    if (item) requestPanelItem(pluginId, panelId, item);
+    requestOpenPluginUiTab(pluginId, panelId, item ? undefined : name);
     return;
   }
   if (parsed.kind === "mcp") {

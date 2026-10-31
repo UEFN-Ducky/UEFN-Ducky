@@ -4012,6 +4012,10 @@ export interface PanelApi {
   ): Promise<{ ok: boolean; error?: string; asset_path?: string; opened?: boolean | null }>;
   list_recent_projects(): Promise<RecentProject[]>;
   list_known_projects(rescan?: boolean): Promise<KnownProjectsListing>;
+  /** Live @ / / and search rows plugins list (`contributes.chat.reference_sources`). */
+  list_plugin_references?(): Promise<{
+    refs?: Array<{ trigger: "@" | "/"; id: string; label: string; group: string; href: string; description?: string; icon_url?: string; plugin_id: string }>;
+  }>;
   inspect_project_folder(path: string): Promise<ProjectFolderInspection>;
   set_project_root(path: string): Promise<ProjectInfo>;
   delete_recent_project(path: string): Promise<ProjectInfo>;

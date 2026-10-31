@@ -30,6 +30,12 @@ class PanelApiProjectMixin:
             deploy_new_islands([r["path"] for r in listing["projects"] if r.get("kind") == UEFN])
         return listing
 
+    def list_plugin_references(self) -> dict[str, Any]:
+        """Live @ / / and search rows plugins list (Kanban boards…): ``{refs: [...]}``."""
+        from backend.uefn_plugins.reference_sources import list_plugin_references
+
+        return {"refs": list_plugin_references()}
+
     def inspect_project_folder(self, path: str) -> dict[str, Any]:
         """What Add project would open: root, kind, and any islands one level down."""
         from frontend.project_kind import FOLDER, islands_inside, resolve_project_root

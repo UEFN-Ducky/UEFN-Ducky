@@ -82,8 +82,10 @@ function basename(path: string): string {
   return path.split("/").pop() || path;
 }
 
-// Composer catalog groups the search lists, in this order. Subskills stay in the composer.
+// Composer catalog groups listed first, in this order; plugin groups (Kanban…) follow.
+// Subskills stay in the composer.
 const REF_GROUPS = ["Plugins", "Workflows", "Skills", "MCP"];
+const isDuckyHref = (href: string) => href.startsWith("ducky:") || href.startsWith("profile:");
 
 function serviceIcon(service: IdleService, duckyStyle?: string): ReactNode {
   if (service.kind === "chat") return duckyStyle ? <DuckyAvatar styleId={duckyStyle} size={16} /> : <Icons.Duck />;
@@ -335,12 +337,17 @@ export function QuickOpenPalette() {
     });
     const chatIds = new Set(allChats.map((c) => c.id));
     // Library duckies and chats from other projects; this project's chats are chatRows.
-    const otherDuckies = rankByLabel(q, mentions.filter((m) => !chatIds.has(m.id.replace(/^chat:/, "")))).map(refRow);
+    const otherDuckies = rankByLabel(
+      q,
+      mentions.filter((m) => isDuckyHref(m.href) && !chatIds.has(m.id.replace(/^chat:/, ""))),
+    ).map(refRow);
+    const others = [...slashRefs, ...mentions.filter((m) => !isDuckyHref(m.href))];
+    const groups = [...REF_GROUPS, ...new Set(others.map((r) => r.group).filter((g) => g !== "Subskills" && !REF_GROUPS.includes(g)))];
     const out: PaletteRow[] = [];
     if (fileRows.length) out.push({ kind: "section", label: "Files" }, ...fileRows.slice(0, 12));
     if (chatRows.length || otherDuckies.length) out.push({ kind: "section", label: "Duckies" }, ...chatRows, ...otherDuckies);
-    for (const group of REF_GROUPS) {
-      const hits = rankByLabel(q, slashRefs.filter((r) => r.group === group)).map(refRow);
+    for (const group of groups) {
+      const hits = rankByLabel(q, others.filter((r) => r.group === group)).map(refRow);
       if (hits.length) out.push({ kind: "section", label: group }, ...hits);
     }
     const dests = rankByLabel(q, DEFAULT_DESTINATIONS).map((service) => ({ kind: "dest" as const, service, label: service.label }));
