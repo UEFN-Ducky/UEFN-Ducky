@@ -137,3 +137,12 @@ def test_an_agent_reaching_outside_the_projects_asks_the_person_for_that_folder(
             client.resolve_workspace_path(str(other / "a.txt"))
     finally:
         identity.reset(token)
+
+
+def test_a_verse_digest_points_the_agent_to_the_digest_tools() -> None:
+    # Oct 30 2026: an agent retried workspace_read_file on UEFN's Fortnite.digest.verse four times.
+    saved = os.path.join(os.environ["LOCALAPPDATA"], "UnrealEditorFortnite", "Saved", "VerseProject", "FortniteGame")
+    for path in (os.path.join(saved, "Digests", "BuiltIn", "Fortnite", "Fortnite.digest.verse"),
+                 os.path.join(saved, "Digests", "BuiltIn", "Fortnite")):
+        why = run_folders.ask_to_lend(path)
+        assert "search_verse_digest" in why and "get_verse_api" in why, why

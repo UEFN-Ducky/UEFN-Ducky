@@ -162,9 +162,19 @@ def _nearest_folder(path: str) -> str:
     return str(p)
 
 
+def _is_verse_digest(path: str) -> bool:
+    parts = [p.lower() for p in Path(path).parts]
+    return "digests" in parts or bool(parts) and parts[-1].endswith(".digest.verse")
+
+
 def ask_to_lend(path: str) -> str:
     """An agent's file tool reached ``path``, outside the person's Ducky projects: ask the
     person whether its chat may use that folder. "" when it may now, else why not."""
+    if _is_verse_digest(path):
+        # Oct 30 2026: an agent retried workspace_read_file on Fortnite.digest.verse in UEFN's
+        # AppData four times; the digest tools read exactly those files.
+        return ("That is a UEFN Verse digest (Epic's API listing). Read it with search_verse_digest(query) "
+                "or get_verse_api(name); list_verse_digests lists every digest. File tools never open AppData.")
     conv_id = _calling_conv()
     if not conv_id:
         return "Tell the person their folder is outside their Ducky projects."

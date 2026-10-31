@@ -41,22 +41,42 @@ def create_prefab_from_entities(entity_names: list[str], prefab_name: str, folde
     )
 
 
+def spatial_translation(value: list[float] | dict[str, float]) -> list[float]:
+    """SpatialMath [forward, left, up] from that list, {forward, left, up}, or Unreal {x, y, z}
+    (Y is right in Unreal, so left = -y). Oct 30 2026: an agent passed {x, y, z} and the call
+    failed on validation before it ever reached UEFN."""
+    if isinstance(value, dict):
+        given = {str(k).lower(): v for k, v in value.items()}
+        if {"forward", "left", "up"} <= given.keys():
+            return [float(given["forward"]), float(given["left"]), float(given["up"])]
+        if {"x", "y", "z"} <= given.keys():
+            return [float(given["x"]), -float(given["y"]), float(given["z"])]
+        raise ValueError("translation takes [forward, left, up], {forward, left, up} or Unreal {x, y, z}.")
+    if len(value) != 3:
+        raise ValueError("translation takes three numbers: [forward, left, up].")
+    return [float(v) for v in value]
+
+
 @plugin_mcp_tool("uefn")
 def instantiate_prefab(
     prefab_path: str,
     name: str = "",
     parent_entity: str = "",
-    translation: list[float] | None = None,
+    translation: list[float] | dict[str, float] | None = None,
     pretty: bool = False,
 ) -> str:
     """Place an EntityPrefab into the level (same as Content Browser drag → EntityProxyActor).
 
     prefab_path: project asset path (e.g. /MyProject/SolarSystem/EP_SolarSystem).
-    translation: optional SpatialMath [forward, left, up]. name renames the entity after place.
+    translation: optional SpatialMath [forward, left, up] (or {forward, left, up}, or Unreal
+    {x, y, z} in cm). name renames the entity after place.
     """
     params: dict = {"prefab_path": prefab_path, "name": name, "parent_entity": parent_entity}
     if translation is not None:
-        params["translation"] = translation
+        try:
+            params["translation"] = spatial_translation(translation)
+        except (TypeError, ValueError) as exc:
+            return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
     return tool_json(send_command("instantiate_prefab", params), pretty=pretty)
 
 
