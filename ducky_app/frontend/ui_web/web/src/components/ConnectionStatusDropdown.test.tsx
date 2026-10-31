@@ -93,6 +93,23 @@ describe("ConnectionStatusDropdown", () => {
     expect(screen.queryByRole("dialog", { name: "Connection status" })).toBeNull();
   });
 
+  it("while watching a PC window, a pick ends the stream but switching tabs does not", () => {
+    const onMenuAction = vi.fn();
+    render(
+      <ConnectionStatusDropdown
+        status={status}
+        onOpenSettings={() => {}}
+        tabsTab
+        onMenuAction={onMenuAction}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /offline/i }));
+    fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
+    expect(onMenuAction).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Settings"));
+    expect(onMenuAction).toHaveBeenCalledTimes(1);
+  });
+
   it("shows UEFN MCP and Unreal MCP by the editor holding Epic's port", () => {
     const url = "http://127.0.0.1:8000/mcp";
     const rows = (extra: Partial<ListenerStatus>) =>

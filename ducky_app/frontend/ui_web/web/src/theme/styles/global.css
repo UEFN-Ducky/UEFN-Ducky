@@ -1394,6 +1394,10 @@ body.native-caption-input-ready .app-header .drag-region {
   height: 100%;
   object-fit: contain;
 }
+/* A window a bit wider than the phone: top to bottom, a sliver off each side (fillsHeight). */
+.remote-window-overlay video[data-fill="1"] {
+  object-fit: cover;
+}
 .remote-window-canvas {
   cursor: none;
   outline: none;

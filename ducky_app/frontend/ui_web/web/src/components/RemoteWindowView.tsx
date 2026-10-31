@@ -11,6 +11,7 @@ import {
   chordTap,
   clampView,
   contentRect,
+  fillsHeight,
   ignoreMouseAfterTouch,
   isDoubleTap,
   keyDiff,
@@ -839,6 +840,7 @@ function videoRect(video: HTMLVideoElement, viewport: HTMLElement): Rect {
     { left: r.left, top: r.top, width: r.width, height: r.height },
     video.videoWidth,
     video.videoHeight,
+    video.dataset.fill === "1",
   );
 }
 
@@ -1735,6 +1737,29 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       setRemotePicture(null);
     };
   }, []);
+
+  // A window its app won't make as narrow as the phone fills the height, trimming its sides
+  // (data-fill: React owns the video's className). A whole screen always shows whole.
+  useEffect(() => {
+    const video = videoRef.current;
+    const view = viewRef.current;
+    if (!video || !view) return;
+    const isWindow = /^\d+$/.test(hwnd);
+    const fit = () => {
+      const r = view.getBoundingClientRect();
+      const box = { left: 0, top: 0, width: r.width, height: r.height };
+      if (isWindow && fillsHeight(box, video.videoWidth, video.videoHeight)) video.dataset.fill = "1";
+      else delete video.dataset.fill;
+    };
+    fit();
+    video.addEventListener("resize", fit);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    ro?.observe(view);
+    return () => {
+      video.removeEventListener("resize", fit);
+      ro?.disconnect();
+    };
+  }, [hwnd]);
 
   // Back on a network (Wi-Fi to mobile data, out of a tunnel): dial straight away.
   useEffect(() => {

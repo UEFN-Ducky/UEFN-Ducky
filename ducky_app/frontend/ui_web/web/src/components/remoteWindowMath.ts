@@ -19,14 +19,30 @@ export function rankVideoCodec(codec: { mimeType: string; sdpFmtpLine?: string }
   return 8;
 }
 
-/** Where the video pixels actually sit inside an object-fit: contain element. */
+/** Most of a window's width that may be trimmed (both sides together) so it fills the height. */
+export const MAX_SIDE_TRIM = 0.25;
+
+/**
+ * A window a bit wider than the phone's view fills the height and loses a sliver of each side,
+ * instead of sitting between bars. Apps with a minimum width (Claude stops at 616 px) can't be
+ * made as narrow as a phone. ponytail: past MAX_SIDE_TRIM it letterboxes again; pan would cover more.
+ */
+export function fillsHeight(box: ContentBox, videoWidth: number, videoHeight: number): boolean {
+  if (!videoWidth || !videoHeight || !box.width || !box.height) return false;
+  const shownWidth = videoWidth * (box.height / videoHeight);
+  return shownWidth > box.width + 1 && 1 - box.width / shownWidth <= MAX_SIDE_TRIM;
+}
+
+/** Where the video pixels actually sit inside an object-fit: contain (or, with fill, cover) element. */
 export function contentRect(
   box: ContentBox,
   videoWidth: number,
   videoHeight: number,
+  fill = false,
 ): ContentBox {
   if (!videoWidth || !videoHeight || !box.width || !box.height) return box;
-  const s = Math.min(box.width / videoWidth, box.height / videoHeight);
+  const fit = fill ? Math.max : Math.min;
+  const s = fit(box.width / videoWidth, box.height / videoHeight);
   const w = videoWidth * s;
   const h = videoHeight * s;
   return {

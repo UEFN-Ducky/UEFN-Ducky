@@ -121,6 +121,8 @@ export interface ConnectionStatusDropdownProps {
   tabsTab?: boolean;
   /** Phones: the header's tool buttons as one icon row above Settings; `close` shuts the menu. */
   tools?: (close: () => void) => ReactNode;
+  /** Any pick in the menu (not a tab switch): watching a PC window, this goes back to Ducky. */
+  onMenuAction?: () => void;
 }
 
 /**
@@ -138,7 +140,10 @@ export function ConnectionStatusDropdown({
   extra,
   tabsTab = false,
   tools,
+  onMenuAction,
 }: ConnectionStatusDropdownProps) {
+  const onMenuActionRef = useRef(onMenuAction);
+  onMenuActionRef.current = onMenuAction;
   const [open, setOpen] = useState(false);
   // A phone puts its open tabs here as the first tab; a remote view its project list next.
   const [tab, setTab] = useState<"tabs" | "projects" | "connections" | "online">(
@@ -170,7 +175,15 @@ export function ConnectionStatusDropdown({
 
   const pop = useMenuPop(open);
   const close = useCallback(() => setOpen(false), []);
-  const openTabsRef = useCallback((el: HTMLDivElement | null) => setHeaderTabsSlot(el, close), [close]);
+  // The tab list is portaled in from the editor, so its picks never reach the menu's click handler.
+  const openTabsRef = useCallback(
+    (el: HTMLDivElement | null) =>
+      setHeaderTabsSlot(el, () => {
+        onMenuActionRef.current?.();
+        close();
+      }),
+    [close],
+  );
   useDropdownDismiss(open, close, menuRef, triggerRef);
 
   // Closing keeps the last spot so the menu zooms back into the icon.
@@ -221,6 +234,11 @@ export function ConnectionStatusDropdown({
         style={{ top: menuPos.top, left: menuPos.left, transformOrigin: popOrigin(triggerRef.current, menuPos) }}
         role="dialog"
         aria-label="Connection status"
+        onClickCapture={(e) => {
+          const btn = (e.target as Element).closest("button");
+          if (!btn || btn.closest('[role="tablist"]') || btn.classList.contains("connection-status-menu-action")) return;
+          onMenuActionRef.current?.();
+        }}
       >
         {tools ? <div className="connection-status-tools">{tools(close)}</div> : null}
         <button

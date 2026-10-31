@@ -5,6 +5,7 @@ import {
   chordTap,
   clampView,
   contentRect,
+  fillsHeight,
   ignoreMouseAfterTouch,
   isDoubleTap,
   isUeFnHubTitle,
@@ -58,6 +59,19 @@ describe("contentRect", () => {
   it("returns the box itself before the video has dimensions", () => {
     const box = { left: 1, top: 2, width: 300, height: 200 };
     expect(contentRect(box, 0, 0)).toBe(box);
+  });
+
+  it("fills the height of a window a bit wider than the phone, trimming its sides", () => {
+    // Oct 31 2026: Claude stops at 616 px wide; the phone's view wanted ~540, so bars above and below.
+    const box = { left: 0, top: 0, width: 412, height: 788 };
+    expect(fillsHeight(box, 616, 1032)).toBe(true);
+    const r = contentRect(box, 616, 1032, true);
+    expect(r.height).toBe(788);
+    expect(r.width).toBeCloseTo(470.4, 1);
+    expect(r.left).toBeCloseTo(-29.2, 1);
+    // Already the phone's shape, or far too wide (a whole monitor): no trim.
+    expect(fillsHeight(box, 412, 788)).toBe(false);
+    expect(fillsHeight(box, 3840, 1080)).toBe(false);
   });
 });
 

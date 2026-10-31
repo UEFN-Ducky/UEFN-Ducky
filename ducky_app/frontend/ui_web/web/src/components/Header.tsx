@@ -527,7 +527,8 @@ export function Header({
           />
         )
       : undefined;
-  // Watching a PC window from the phone: only Ducky and the View menu stay up top.
+  // Watching a PC window from the phone: only the Ducky menu and the View menu stay up top;
+  // a pick in the Ducky menu ends the stream and shows Ducky.
   const streaming = isRemote() && !!watchWindowId;
   const headerTargetRef = useUiTarget("shell.header", { kind: "button", label: "Top bar", route: "chat" });
   const settingsTargetRef = useUiTarget("header.settings", {
@@ -566,6 +567,7 @@ export function Header({
                 }}
                 tabsTab={compactHeader && !isFocus}
                 tools={phoneTools}
+                onMenuAction={streaming ? () => onWatchWindowId?.("") : undefined}
                 extra={
                   !isFocus && isRemote() ? (
                     <ProjectSelector
@@ -643,7 +645,8 @@ export function Header({
       ) : null}
 
       <div className="app-header-trailing">
-        {streaming ? <TeamLiveDropdown /> : (
+        {/* Watching a PC window: team and notifications are Ducky's, so they wait until you're back. */}
+        {streaming ? null : (
         <>
         <span className="app-header-editor-actions">
           {showWorkflow && workflowAction ? (
