@@ -1,4 +1,5 @@
 import type { EditorTab } from "../types/panel";
+import { lowerDragShield, raiseDragShield } from "./dragShield";
 
 /** Custom MIME so tab drags never paste tab ids into editors as plain text. */
 export const EDITOR_TAB_DRAG_MIME = "application/x-ducky-editor-tab";
@@ -32,6 +33,7 @@ let workflowListDrag = false;
 
 function clearWorkflowListDrag(): void {
   workflowListDrag = false;
+  lowerDragShield("tree");
   if (typeof window === "undefined") return;
   window.removeEventListener("dragend", clearWorkflowListDrag, true);
   window.removeEventListener("drop", clearWorkflowListDrag, true);
@@ -39,6 +41,7 @@ function clearWorkflowListDrag(): void {
 
 export function beginWorkflowListDrag(): void {
   workflowListDrag = true;
+  raiseDragShield("tree");
   if (typeof window === "undefined") return;
   window.addEventListener("dragend", clearWorkflowListDrag, true);
   window.addEventListener("drop", clearWorkflowListDrag, true);
@@ -63,10 +66,12 @@ export function beginEditorTabDrag(tabId: string, groupId: string): void {
     lastClientX: 0,
     lastClientY: 0,
   };
+  raiseDragShield("tab");
 }
 
 export function endEditorTabDrag(): void {
   dragSession = null;
+  lowerDragShield("tab");
 }
 
 export function markEditorTabDropped(): void {

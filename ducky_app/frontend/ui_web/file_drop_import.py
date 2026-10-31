@@ -24,6 +24,38 @@ OPEN_EXTERNAL_TARGET = ":open-external:"
 # Chat pane reports this while attaching via FileList — native handler must not open/import.
 CHAT_ATTACH_TARGET = ":chat-attach:"
 
+# pywebview sends a DOM event to Python as JSON, and its serializer copies every node it
+# meets with all its children and properties. currentTarget is the document, so each drop
+# serialized the whole page: Oct 31 2026, 0.35 s and 8 MB with an empty composer, then
+# 7 s and 258 MB with one dropped picture's data URL on the page, the app frozen meanwhile.
+# Python reads only the event's type and the dropped files' names (pywebview matches the
+# names to the real paths), so an event goes as just that. pywebview still sees the real
+# Event first, which is what makes WebView2 hand over the paths.
+_COMPACT_EVENTS_JS = r"""
+(function () {
+  var pw = window.pywebview;
+  if (!pw || typeof pw.stringify !== 'function' || pw.__duckyCompactEvents) return;
+  var full = pw.stringify;
+  function compact(ev) {
+    var dt = ev.dataTransfer, files = [];
+    for (var i = 0; dt && dt.files && i < dt.files.length; i++) {
+      var f = dt.files[i];
+      files.push({ name: f.name, size: f.size, type: f.type, lastModified: f.lastModified });
+    }
+    return { type: ev.type, dataTransfer: dt ? { files: files, types: Array.prototype.slice.call(dt.types || []) } : null };
+  }
+  pw.stringify = function (obj, timing) {
+    if (obj && typeof Event !== 'undefined' && obj.event instanceof Event) {
+      var copy = {};
+      for (var key in obj) copy[key] = key === 'event' ? compact(obj.event) : obj[key];
+      return full.call(this, copy, timing);
+    }
+    return full.apply(this, arguments);
+  };
+  pw.__duckyCompactEvents = true;
+})();
+"""
+
 
 def install_file_drop_import(window: Any, api: Any) -> None:
     """Register the OS-file drop handler; re-arms on every page load/reload."""
@@ -37,6 +69,10 @@ def install_file_drop_import(window: Any, api: Any) -> None:
     def _register() -> None:
         if state["installed"]:
             return
+        try:
+            window.evaluate_js(_COMPACT_EVENTS_JS)
+        except Exception:
+            pass
         try:
             window.dom.document.on("drop", DOMEventHandler(lambda e: _on_drop(window, api, e)))
             state["installed"] = True

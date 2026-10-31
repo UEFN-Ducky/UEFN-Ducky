@@ -1812,6 +1812,12 @@ html.window-maximized .window-resize-grip {
   min-height: 0;
 }
 
+/* A tab or sidebar row is being dragged: plugin panels (iframes) let it through to the
+   pane under them, so every plugin tab shows the split squares (utils/dragShield.ts). */
+.ducky-drag-shield iframe {
+  pointer-events: none !important;
+}
+
 .editor-drop-overlay {
   position: absolute;
   background-color: color-mix(in srgb, var(--accent) 15%, transparent);
