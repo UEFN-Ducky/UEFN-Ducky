@@ -76,6 +76,42 @@ it("filters by running state and searches names and chats", async () => {
   expect(screen.getByText("No apps match.")).toBeTruthy();
 });
 
+it("ticks several apps (Shift for a range) and stops or deletes them together", async () => {
+  api.sandbox_apps.mockResolvedValue({ ok: true, apps: [
+    app({ conv_id: "c1", name: "web", running: true, pid: 7, ports: [5173] }),
+    app({ conv_id: "c2", name: "game" }),
+    app({ conv_id: "c3", name: "site" }),
+    app({ conv_id: "c3", name: "site-2" }),
+  ] });
+  render(<SandboxAppsDropdown />);
+  fireEvent.click(await screen.findByRole("button", { name: /Apps/ }));
+  fireEvent.click(screen.getByLabelText("Select web"));
+  fireEvent.click(screen.getByLabelText("Select site"), { shiftKey: true });
+  expect(screen.getByText("3 selected")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /Stop$/ }));
+  await waitFor(() => expect(api.sandbox_stop_program).toHaveBeenCalledWith("c1", 7));
+  expect(api.sandbox_stop_program).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete 3" }));
+  await waitFor(() => expect(api.sandbox_delete).toHaveBeenCalledTimes(3));
+  expect(api.sandbox_delete.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["c1", "c2", "c3"]);
+  // The confirm names the sandbox-mate that goes too.
+  expect((confirm.mock.calls[0] as unknown[])[0]).toMatchObject({ message: expect.stringContaining("site-2") });
+  await waitFor(() => expect(screen.queryByText(/selected$/)).toBeNull());
+});
+
+it("Select all ticks every shown app and the X clears it", async () => {
+  api.sandbox_apps.mockResolvedValue({ ok: true, apps: [app({ name: "a" }), app({ conv_id: "c2", name: "b" })] });
+  render(<SandboxAppsDropdown />);
+  fireEvent.click(await screen.findByRole("button", { name: /Apps/ }));
+  fireEvent.click(screen.getByLabelText("Select a"));
+  fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+  expect(screen.getByText("2 selected")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+  expect(screen.queryByText(/selected$/)).toBeNull();
+});
+
 it("shows the app's favicon, then its screenshot when there is none", async () => {
   api.sandbox_apps.mockResolvedValue({ ok: true, apps: [app({ running: true, pid: 1, ports: [8000], picture: "http://x/shot.png" })] });
   render(<SandboxAppsDropdown />);

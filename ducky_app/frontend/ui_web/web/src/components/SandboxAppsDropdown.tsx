@@ -40,6 +40,9 @@ export function SandboxAppsDropdown() {
   const [busy, setBusy] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  /** Ticked apps (`conv:name`) for Stop / Delete on several at once. */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [anchor, setAnchor] = useState("");
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -87,6 +90,29 @@ export function SandboxAppsDropdown() {
     if (ok) await act(`del-${app.conv_id}`, () => getApi()?.sandbox_delete?.(app.conv_id));
   };
 
+  const removeMany = async (picked: SandboxApp[]) => {
+    const convs = [...new Set(picked.map((a) => a.conv_id))];
+    const names = new Set(picked.map((a) => a.name));
+    // A sandbox goes as a whole, so its other apps go with the ticked one.
+    const others = apps.filter((a) => convs.includes(a.conv_id) && !names.has(a.name)).map((a) => a.name);
+    const ok = await confirmFromHost({
+      title: `Delete ${picked.length} app${picked.length === 1 ? "" : "s"}?`,
+      message: `Stops ${picked.length === 1 ? "it" : "them"} and deletes the sandbox${convs.length === 1 ? "" : "es"} they were built in${others.length ? ` (with ${others.join(", ")})` : ""}. Your projects don't change.`,
+      confirmLabel: "Delete",
+      danger: true,
+    }).catch(() => false);
+    if (!ok) return;
+    await act("bulk", async () => {
+      for (const conv of convs) await getApi()?.sandbox_delete?.(conv);
+    });
+    setSelected(new Set());
+  };
+
+  const stopMany = (picked: SandboxApp[]) =>
+    void act("bulk", async () => {
+      for (const a of picked) if (a.running) await getApi()?.sandbox_stop_program?.(a.conv_id, a.pid);
+    });
+
   const running = apps.filter((a) => a.running).length;
   const title = running ? `Apps · ${running} running` : "Apps";
   const q = query.trim().toLowerCase();
@@ -94,6 +120,23 @@ export function SandboxAppsDropdown() {
     (filter === "all" || a.running === (filter === "running")) &&
     (!q || a.name.toLowerCase().includes(q) || (a.chat ?? "").toLowerCase().includes(q)));
   const counts: Record<Filter, number> = { all: apps.length, running, stopped: apps.length - running };
+  const appId = (a: SandboxApp) => `${a.conv_id}:${a.name}`;
+  // Only what is on screen: a filter never hides an app that a bulk delete would take.
+  const picked = shown.filter((a) => selected.has(appId(a)));
+  const toggle = (id: string, range: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const ids = shown.map(appId);
+      const from = ids.indexOf(anchor);
+      const to = ids.indexOf(id);
+      if (range && from >= 0 && to >= 0) {
+        for (const x of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) next.add(x);
+      } else if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setAnchor(id);
+  };
   const menu = pop.mounted && menuPos ? (
     <div ref={menuRef}
       className={`terminal-header-menu terminal-header-menu--portaled sandbox-apps-menu no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
@@ -114,6 +157,29 @@ export function SandboxAppsDropdown() {
             </button>
           ))}
         </div>
+        {picked.length ? (
+          <div className="sandbox-apps-selection" role="toolbar" aria-label="Selected apps">
+            <span className="sandbox-apps-selection-count">{picked.length} selected</span>
+            {picked.length < shown.length ? (
+              <button type="button" className="sandbox-apps-selection-btn"
+                onClick={() => setSelected(new Set(shown.map(appId)))}>Select all</button>
+            ) : null}
+            {picked.some((a) => a.running) ? (
+              <button type="button" className="sandbox-apps-selection-btn" disabled={busy === "bulk"}
+                onClick={() => stopMany(picked)}>
+                <Icons.Stop /> Stop
+              </button>
+            ) : null}
+            <button type="button" className="sandbox-apps-selection-btn is-danger" disabled={busy === "bulk"}
+              onClick={() => void removeMany(picked)}>
+              <Icons.Trash /> Delete {picked.length}
+            </button>
+            <button type="button" className="terminal-header-item-close icon-btn no-drag" title="Clear selection"
+              aria-label="Clear selection" onClick={() => setSelected(new Set())}>
+              <Icons.Close />
+            </button>
+          </div>
+        ) : null}
         </>) : null}
       </div>
       <div className="terminal-header-list sandbox-apps-list">
@@ -128,7 +194,11 @@ export function SandboxAppsDropdown() {
           const id = `${app.conv_id}:${app.name}`;
           const port = app.ports[0];
           return (
-            <div key={id} className={`terminal-header-item sandbox-app-row${app.running ? " is-running" : ""}`}>
+            <div key={id}
+              className={`terminal-header-item sandbox-app-row${app.running ? " is-running" : ""}${selected.has(id) ? " is-selected" : ""}${picked.length ? " is-selecting" : ""}`}>
+              <input type="checkbox" className="sandbox-app-check" checked={selected.has(id)}
+                aria-label={`Select ${app.name}`}
+                onChange={(e) => toggle(id, (e.nativeEvent as MouseEvent).shiftKey)} />
               <button type="button" className="terminal-header-item-main" disabled={!port}
                 title={port ? `Open localhost:${port} in the Browser tab` : "Run it to open it"}
                 onClick={() => { if (port) { openHere(port); setOpen(false); } }}>

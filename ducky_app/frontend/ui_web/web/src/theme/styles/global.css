@@ -4422,25 +4422,26 @@ body.tree-dragging .editor-tab-hover-card { display: none !important; }
 .file-tree-pane--core {
   border-top: 1px solid var(--border);
   flex: 0 0 var(--file-tree-core-height, 38%);
+  transition: flex-basis 180ms ease;
+}
+/* No slide while the split handle is dragged. */
+.file-tree-split:has(.is-dragging) > .file-tree-pane--core {
+  transition: none;
 }
 .file-tree-pane--core .file-tree-pane-scroll {
   flex: 1 1 0%;
 }
 .file-tree-pane--core-collapsed {
   border-top: 1px solid var(--border);
-  /* Header only — hidden file rows must not contribute height. */
-  flex: 0 0 auto;
-  height: 23px;
-  max-height: 23px;
+  /* Header only; a fixed px basis (not auto) so it can slide from the % height. */
+  flex: 0 0 23px;
   min-height: 23px;
   overflow: hidden;
 }
 .file-tree-pane--core-collapsed .file-tree-pane-scroll {
   visibility: hidden;
-  height: 0;
-  flex: 0 0 0;
-  padding: 0;
   overflow: hidden;
+  transition: visibility 0s linear 180ms;
 }
 .file-tree-shell {
   display: flex;

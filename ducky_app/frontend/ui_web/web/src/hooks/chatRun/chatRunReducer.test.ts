@@ -552,6 +552,23 @@ describe("chatRunReducer — loaded merge vs replace", () => {
     expect(s.messages.some((m) => m.text === "hey")).toBe(true);
   });
 
+  it("does not show the message twice when the saved copy's text or attachments differ", () => {
+    // Tab closed and reopened mid-run: the backend saved the message with extra lines and
+    // its own attachment list, plus the turn's checkpoint rows.
+    const inflight = run(initialRunState, {
+      type: "send",
+      text: "fix the  tree\n",
+      attachments: [{ name: "a.png" }, { name: "b.png" }] as never,
+    });
+    const canonical: ChatMessage[] = [
+      { id: 1, role: "user", text: "hi" },
+      { id: 2, role: "user", text: "Capture file: C:/x.png\nfix the tree" },
+      { id: 3, role: "tool", text: "read", tool: { name: "read", arguments: {} } },
+    ];
+    const s = chatRunReducer(inflight, { type: "loaded", rows: canonical });
+    expect(s.messages.filter((m) => m.role === "user" && (m.text ?? "").includes("fix the")).length).toBe(1);
+  });
+
   it("still folds in a genuinely new user turn that differs in text", () => {
     const inflight = run(initialRunState, { type: "send", text: "question B" });
     const canonical: ChatMessage[] = [{ id: 9, role: "user", text: "question A" }];

@@ -318,12 +318,11 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     });
   }, [openTab, openTabsRef]);
 
+  // Settings opens as a tab where the person is (their chat's group), not in the side column.
   const openSettingsTab = useCallback(() => {
     const id = settingsTabId();
-    void openOrFocusTab(id, () =>
-      openBesideChat({ id, kind: "settings", name: "Settings" }),
-    );
-  }, [openBesideChat]);
+    void openOrFocusTab(id, () => openTab({ id, kind: "settings", name: "Settings" }, { activate: true }));
+  }, [openTab]);
 
   useEffect(() => {
     return registerOpenSettingsEditorTab(openSettingsTab);

@@ -1,6 +1,19 @@
 /* Ledger tab: the project-wide record of everything the AI changed. */
 
+/* Ctrl+wheel zoom host around the whole view (same zoom as the sidebar and chat). */
+.changes-zoom {
+  flex: 1 1 0%;
+  height: 100%;
+  min-height: 0;
+}
+
+.changes-zoom > .ctrl-wheel-zoom-content {
+  flex: 1 1 0%;
+  min-height: 0;
+}
+
 .changes-view {
+  flex: 1 1 0%;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -20,7 +33,7 @@
   padding: 4px 8px;
   min-height: 36px;
   border-bottom: 1px solid var(--border);
-  background: var(--panel-header);
+  background: transparent;
 }
 
 .changes-toolbar-title {
@@ -189,12 +202,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 46px;
+  /* RUN_HEADER_HEIGHT in ChangesView.tsx */
+  height: 38px;
   box-sizing: border-box;
-  padding: 0 14px;
-  border-top: 1px solid var(--border);
-  background: var(--panel-header);
-  font-size: 12px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 13px;
+  transition: background-color 0.15s ease, color 0.15s ease;
   /* Fixed height: nothing in here may wrap onto a second line. */
   overflow: hidden;
   white-space: nowrap;
@@ -202,8 +217,28 @@
   user-select: none;
 }
 
+/* Same hover as the sidebar tree: the fill and a faint line above and below. */
 .changes-run-head:hover {
-  background: var(--hover-bg, var(--panel-header));
+  background: var(--tab-hover);
+  color: var(--fg);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+}
+
+.changes-run-head--open {
+  color: var(--fg);
+}
+
+/* Row actions show on hover, like the sidebar's; a live run keeps Stop in view. */
+.changes-run-head .changes-run-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.changes-run-head:hover .changes-run-actions,
+.changes-run-head:focus-within .changes-run-actions,
+.changes-run-head--selected .changes-run-actions,
+.changes-run-head--live .changes-run-actions {
+  opacity: 1;
 }
 
 .changes-run-head:focus-visible {
@@ -217,6 +252,43 @@
   height: 14px;
   flex: 0 0 auto;
   color: var(--muted);
+  transition: transform 180ms ease;
+}
+
+.changes-run-chevron.is-open,
+.changes-group-chevron.is-open {
+  transform: rotate(90deg);
+}
+
+/* A run's rows slide open/shut; heights are the fixed virtual row heights. */
+.changes-item.is-entering,
+.changes-item.is-leaving {
+  overflow: hidden;
+  animation: changes-item-in 180ms ease both;
+}
+
+.changes-item.is-leaving {
+  animation-name: changes-item-out;
+}
+
+@keyframes changes-item-in {
+  from { height: 0; opacity: 0; }
+  to { height: var(--changes-item-h); opacity: 1; }
+}
+
+@keyframes changes-item-out {
+  from { height: var(--changes-item-h); opacity: 1; }
+  to { height: 0; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .changes-item.is-entering,
+  .changes-item.is-leaving,
+  .changes-run-chevron,
+  .changes-group-chevron {
+    animation-duration: 1ms;
+    transition: none;
+  }
 }
 
 .changes-run-chevron svg {
@@ -232,7 +304,7 @@
 }
 
 .changes-run-name {
-  font-weight: 600;
+  font-weight: 500;
   flex: 0 0 auto;
 }
 
@@ -272,11 +344,12 @@
 }
 
 .changes-run-head--selected {
-  background: color-mix(in srgb, var(--accent, #3b82f6) 16%, var(--panel-header));
+  background: var(--tab-active);
+  color: var(--fg);
 }
 
 .changes-run-head--selected:hover {
-  background: color-mix(in srgb, var(--accent, #3b82f6) 22%, var(--panel-header));
+  background: var(--tab-active);
 }
 
 .changes-run-head--busy,
@@ -313,6 +386,28 @@
   border-radius: 8px;
 }
 
+/* Ledger buttons: borderless like the sidebar's action buttons. */
+.changes-view .changeset-btn--icon {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.changes-view .changeset-btn--icon:hover:not(:disabled),
+.changes-view .changeset-btn--icon[aria-pressed="true"] {
+  background: var(--tab-hover);
+  color: var(--fg);
+}
+
+.changes-scroll .changeset-btn:not(.changeset-btn--icon) {
+  border-color: transparent;
+  background: var(--btn-bg);
+}
+
 .changeset-btn--icon svg {
   width: 14px;
   height: 14px;
@@ -347,8 +442,8 @@
   gap: 8px;
   height: 26px;
   padding: 0 14px 0 26px;
-  background: var(--card);
-  border-bottom: 1px solid var(--border-light);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   font-size: 11px;
   color: var(--muted);
 }
@@ -502,6 +597,7 @@
   height: 12px;
   flex: 0 0 auto;
   color: var(--muted);
+  transition: transform 180ms ease;
 }
 
 .changes-group-chevron svg {

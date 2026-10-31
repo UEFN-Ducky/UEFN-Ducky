@@ -432,6 +432,72 @@
   cursor: default;
 }
 
+/* Tick box: shows on hover, and on every row once something is ticked. */
+.sandbox-app-check {
+  flex-shrink: 0;
+  align-self: center;
+  width: 14px;
+  height: 14px;
+  margin: 0 0 0 10px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sandbox-app-row:hover .sandbox-app-check,
+.sandbox-app-row.is-selecting .sandbox-app-check,
+.sandbox-app-check:focus-visible {
+  opacity: 1;
+}
+
+.sandbox-app-row.is-selected {
+  background: var(--tab-active);
+}
+
+.sandbox-apps-selection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sandbox-apps-selection-count {
+  margin-right: auto;
+}
+
+.sandbox-apps-selection-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--btn-bg);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sandbox-apps-selection-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sandbox-apps-selection-btn:hover:not(:disabled) {
+  background: var(--tab-hover);
+}
+
+.sandbox-apps-selection-btn.is-danger {
+  color: var(--red);
+}
+
+.sandbox-apps-selection-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .language-header-add-row {
   display: flex;
   align-items: center;

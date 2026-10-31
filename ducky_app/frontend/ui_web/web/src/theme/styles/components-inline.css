@@ -5975,6 +5975,29 @@ html.window-fullscreen:has(.remote-ducky-reveal:hover, .remote-ducky-bar:hover, 
   overflow-y: auto;
 }
 
+/* Same slide as .sidebar-tree-children-clip: rows stay mounted so open/close can animate. */
+.other-duckies__clip {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 180ms ease;
+}
+
+.other-duckies__clip.is-open {
+  grid-template-rows: 1fr;
+}
+
+.other-duckies__clip-inner {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 0s linear 180ms;
+}
+
+.other-duckies__clip.is-open > .other-duckies__clip-inner {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
 .other-duckies__sync {
   display: flex;
   padding: 2px;

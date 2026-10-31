@@ -70,6 +70,30 @@ it("opens an agent's plugin pages in a column right of the chat, stacked, withou
   expect(result.current.layout.focusedGroupId).toBe(chatGroup);
 });
 
+it("opens the next page RIGHT of a chat that was opened in the side column, not under it", () => {
+  // Oct 31 2026: Ledger opened beside, a chat clicked into that group, then Workflows went below the chat.
+  const page = (id: string, kind: EditorTab["kind"]): EditorTab => ({ id, kind, name: id });
+  const { result } = renderHook(() => useEditorLayout([tab("a")]));
+  act(() => result.current.openTabInSideColumn(page("changes", "changes"), { focus: true }));
+  act(() => result.current.openTab(tab("b"), { activate: true }));
+  const chatGroup = result.current.layout.focusedGroupId;
+  expect(result.current.layout.groups[chatGroup].activeTabId).toBe("chat:b");
+  act(() => result.current.openTabInSideColumn(page("workflows", "workflows"), { focus: true }));
+  const findParent = (node: typeof result.current.layout.root, id: string): typeof node | null => {
+    if (node.type !== "split") return null;
+    if (node.children.some((c) => c.type === "group" && c.groupId === id)) return node;
+    for (const c of node.children) {
+      const hit = findParent(c, id);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const flowGroup = Object.values(result.current.layout.groups).find((g) => g.tabIds.includes("workflows"))!.id;
+  expect(flowGroup).not.toBe(chatGroup);
+  const parent = findParent(result.current.layout.root, flowGroup);
+  expect(parent?.type === "split" && parent.axis).toBe("row");
+});
+
 it("puts a page the person opens beside the chat and focuses it there", () => {
   // Oct 31 2026: Ledger, Workflows… opened from the header covered the chat.
   const page = (id: string, kind: EditorTab["kind"]): EditorTab => ({ id, kind, name: id });

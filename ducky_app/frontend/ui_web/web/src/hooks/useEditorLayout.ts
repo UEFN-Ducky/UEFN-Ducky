@@ -278,7 +278,11 @@ export function useEditorLayout(initialOpenTabs: EditorTab[] = []) {
     setState(({ openTabs: prev, layout: prevLayout }) => {
       const keepFocus = prevLayout.focusedGroupId;
       const nextTabs = addOpenTab(prev, tab);
-      const column = sideColumnRef.current.filter((id) => prevLayout.groups[id]);
+      // The person's own group is never the side column, nor is one they opened a chat in
+      // (Ledger opened there, then a chat clicked): stacking there put pages UNDER the chat.
+      const holdsChat = (id: string) =>
+        prevLayout.groups[id].tabIds.some((tid) => prev.find((t) => t.id === tid)?.kind === "chat");
+      const column = sideColumnRef.current.filter((id) => prevLayout.groups[id] && id !== keepFocus && !holdsChat(id));
       const current = findGroupForTab(prevLayout, tab.id);
       let next: EditorLayoutState;
       if (current && (current !== keepFocus || prevLayout.groups[current]?.activeTabId === tab.id)) {

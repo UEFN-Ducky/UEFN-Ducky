@@ -106,6 +106,23 @@ function contentSig(m: ChatMessage): string {
   return `${m.role}\u0000${m.text ?? ""}\u0000${m.tool?.name ?? ""}\u0000${attach}`;
 }
 
+function squash(text: string | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** The backend's saved copy of the user bubble this pane sent. Its text can differ from
+ *  the typed one (whitespace, hints or capture paths added on save) and its attachment
+ *  list can differ too, so an exact fingerprint missed it and a tab reopened mid-run
+ *  showed the message twice. */
+export function isUserTwin(saved: ChatMessage, sent: ChatMessage): boolean {
+  if (contentSig(saved) === contentSig(sent)) return true;
+  if (saved.role !== "user" || sent.role !== "user") return false;
+  const a = squash(saved.text);
+  const b = squash(sent.text);
+  if (!a || !b) return a === b;
+  return a === b || a.includes(b) || b.includes(a);
+}
+
 function isOptimistic(m: ChatMessage): boolean {
   return String(m.id).startsWith("opt-");
 }
@@ -140,7 +157,7 @@ export function mergeCommitted(existing: ChatMessage[], incoming: ChatMessage[])
     // This pane sent the turn. Once the backend has saved that message, use its
     // copy and the live rows after it; until then the backend only has history.
     // (A matching fingerprint stops a second copy of the same user bubble.)
-    if (lastUser >= 0 && contentSig(incoming[lastUser]) === contentSig(tail[0])) {
+    if (lastUser >= 0 && isUserTwin(incoming[lastUser], tail[0])) {
       return [...incoming.slice(0, lastUser + 1), ...tail.slice(1)];
     }
     return [...incoming, ...tail];

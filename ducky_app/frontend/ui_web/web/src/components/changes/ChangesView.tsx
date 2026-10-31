@@ -1,5 +1,6 @@
 import { failedActionCopyText, readableLabel } from './ledgerPresentation';
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { CtrlWheelZoomRoot } from "../CtrlWheelZoomRoot";
 
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { subscribeLiveRefresh } from "../../hooks/liveRefresh";
@@ -66,7 +67,9 @@ const LIVE_EVENT_TYPES = new Set([
   "changeset_row",
 ]);
 
-const RUN_HEADER_HEIGHT = 46;
+const RUN_HEADER_HEIGHT = 38;
+/** Matches the changes-item-in/out keyframes in changes.css. */
+const RUN_SLIDE_MS = 180;
 const CHANGE_ROW_HEIGHT = 30;
 const STEP_ROW_HEIGHT = 22;
 const PROGRAM_HEADER_HEIGHT = 28;
@@ -485,6 +488,40 @@ export function ChangesView({
     return { items: out, openRuns: open };
   }, [allChats, collapsedGroups, runs, duckyFilter, kindFilter, programFilter, profileId, profileName, query, sortKey, sortDir, expanded, toggledRuns, forcedOpen]);
 
+  /** The run whose rows are sliding open or shut. A closing run stays open until its
+   *  rows have slid away, so the list (virtualized, fixed row heights) can animate. */
+  const [runAnim, setRunAnim] = useState<{ runId: string; dir: "in" | "out" } | null>(null);
+  const runAnimRef = useRef(runAnim);
+  const runAnimTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(runAnimTimer.current), []);
+  const slideRun = useCallback(
+    (runId: string) => {
+      const set = (next: { runId: string; dir: "in" | "out" } | null) => {
+        runAnimRef.current = next;
+        setRunAnim(next);
+      };
+      window.clearTimeout(runAnimTimer.current);
+      const prev = runAnimRef.current;
+      if (prev?.dir === "out") {
+        // Pressed again mid-close: it stays open. Another run: finish closing that one.
+        if (prev.runId === runId) return set(null);
+        toggleRun(prev.runId);
+      }
+      if (openRuns.has(runId) && !(prev?.dir === "out" && prev.runId === runId)) {
+        set({ runId, dir: "out" });
+        runAnimTimer.current = window.setTimeout(() => {
+          toggleRun(runId);
+          set(null);
+        }, RUN_SLIDE_MS);
+        return;
+      }
+      toggleRun(runId);
+      set({ runId, dir: "in" });
+      runAnimTimer.current = window.setTimeout(() => set(null), RUN_SLIDE_MS);
+    },
+    [openRuns, toggleRun],
+  );
+
   const programs = useMemo(() => {
     const seen = new Set<string>();
     for (const run of runs) {
@@ -536,14 +573,14 @@ export function ChangesView({
         return;
       }
       if (selected.size > 1) {
-        toggleRun(runId);
+        slideRun(runId);
         return;
       }
       setSelected(new Set());
       setSelectAnchor(runId);
-      toggleRun(runId);
+      slideRun(runId);
     },
-    [applyRunSelect, selected.size, toggleRun],
+    [applyRunSelect, selected.size, slideRun],
   );
 
   useEffect(() => {
@@ -1112,6 +1149,21 @@ export function ChangesView({
   }, [detail]);
 
   const visible = items.slice(view.start, view.end);
+
+  /** A run's rows sit in a box that slides while that run opens or closes. */
+  const wrapItem = (item: TimelineItem, node: ReactNode) => {
+    if (!item.row && !item.program && !item.kindHead) return node;
+    const anim = runAnim?.runId === item.run.run_id ? runAnim.dir : "";
+    return (
+      <div
+        key={item.key}
+        className={`changes-item${anim === "in" ? " is-entering" : anim === "out" ? " is-leaving" : ""}`}
+        style={anim ? ({ "--changes-item-h": `${item.height}px` } as CSSProperties) : undefined}
+      >
+        {node}
+      </div>
+    );
+  };
   const pair = diff ? diffPair(diff) : null;
 
   const menuItems = (target: MenuTarget): ContextMenuItem[] => {
@@ -1128,7 +1180,7 @@ export function ChangesView({
         {
           id: "toggle",
           label: isOpen ? "Collapse" : "Expand",
-          onClick: () => toggleRun(run.run_id),
+          onClick: () => slideRun(run.run_id),
         },
         contextMenuSeparator("run-sep"),
       ];
@@ -1277,6 +1329,7 @@ export function ChangesView({
   };
 
   return (
+    <CtrlWheelZoomRoot className="changes-zoom" storageKey="uefn-panel-ledger-zoom">
     <div className={`changes-view${selecting ? " changes-view--selecting" : ""}`}>
       <ScopedCss
         selector={`.${virtualClass}`}
@@ -1511,7 +1564,7 @@ export function ChangesView({
           </p>
         ) : (
           <div className={`changes-virtual ${virtualClass}`}>
-            {visible.map((item) => {
+            {visible.map((item) => wrapItem(item, (() => {
               if (item.program) {
                 const run = item.run;
                 const live = isLive(run);
@@ -1535,8 +1588,8 @@ export function ChangesView({
                       aria-label={`${label}, ${open ? "collapse" : "expand"}`}
                       onClick={() => toggleGroup(item.key)}
                     >
-                      <span className="changes-group-chevron" aria-hidden="true">
-                        {open ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                      <span className={`changes-group-chevron${open ? " is-open" : ""}`} aria-hidden="true">
+                        <Icons.ChevronRight />
                       </span>
                       <span className="changes-group-label">{label}</span>
                       <span className="changes-group-count">{item.count ?? 0}</span>
@@ -1574,8 +1627,8 @@ export function ChangesView({
                       aria-label={`${item.kindHead}, ${open ? "collapse" : "expand"}`}
                       onClick={() => toggleGroup(item.key)}
                     >
-                      <span className="changes-group-chevron" aria-hidden="true">
-                        {open ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                      <span className={`changes-group-chevron${open ? " is-open" : ""}`} aria-hidden="true">
+                        <Icons.ChevronRight />
                       </span>
                       <span className="changes-group-label">{item.kindHead}</span>
                       <span className="changes-group-count">{item.count ?? 0}</span>
@@ -1604,7 +1657,7 @@ export function ChangesView({
                 return (
                   <div
                     key={item.key}
-                    className={`changes-run-head ${isOpen ? "changes-run-head--open" : "changes-run-head--folded"}${selected.has(run.run_id) ? " changes-run-head--selected" : ""}${thisReverting ? " changes-run-head--busy" : ""}`}
+                    className={`changes-run-head ${isOpen ? "changes-run-head--open" : "changes-run-head--folded"}${selected.has(run.run_id) ? " changes-run-head--selected" : ""}${thisReverting ? " changes-run-head--busy" : ""}${live ? " changes-run-head--live" : ""}`}
                     role="button"
                     tabIndex={thisReverting ? -1 : 0}
                     aria-expanded={isOpen}
@@ -1623,7 +1676,7 @@ export function ChangesView({
                       if (thisReverting) return;
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        toggleRun(run.run_id);
+                        slideRun(run.run_id);
                       }
                     }}
                   >
@@ -1640,8 +1693,11 @@ export function ChangesView({
                         }}
                       />
                     ) : null}
-                    <span className="changes-run-chevron" aria-hidden="true">
-                      {isOpen ? <Icons.ChevronDown /> : <Icons.ChevronRight />}
+                    <span
+                      className={`changes-run-chevron${isOpen && !(runAnim?.runId === run.run_id && runAnim.dir === "out") ? " is-open" : ""}`}
+                      aria-hidden="true"
+                    >
+                      <Icons.ChevronRight />
                     </span>
                     {canOpenChat ? (
                       <button
@@ -1759,7 +1815,7 @@ export function ChangesView({
                   onContextMenu={(e) => openMenu(e, { kind: "row", run: item.run, row: item.row! })}
                 />
               );
-            })}
+            })()))}
           </div>
         )}
       </div>
@@ -1962,5 +2018,6 @@ export function ChangesView({
         </Modal>
       ) : null}
     </div>
+    </CtrlWheelZoomRoot>
   );
 }

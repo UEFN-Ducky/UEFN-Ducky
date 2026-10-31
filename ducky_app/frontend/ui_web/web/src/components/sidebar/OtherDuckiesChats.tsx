@@ -206,7 +206,8 @@ export function OtherDuckiesChats() {
           <Icons.Refresh />
         </button>
       </div>
-      {!collapsed ? (
+      <div className={`other-duckies__clip${collapsed ? "" : " is-open"}`} aria-hidden={collapsed || undefined}>
+      <div className="other-duckies__clip-inner">
       <div className="other-duckies__body" style={{ height }}>
       {shown.map((peer) => {
         const expanded = !!open[peer.ducky];
@@ -227,8 +228,9 @@ export function OtherDuckiesChats() {
               <span className="other-duckies__name">{peer.name}</span>
               <span className="other-duckies__meta">{peer.live ? "online" : `synced ${agoText(peer.synced)}`}</span>
             </button>
-            {expanded
-              ? peer.chats.map((chat) => (
+            <div className={`other-duckies__clip${expanded ? " is-open" : ""}`} aria-hidden={!expanded || undefined}>
+              <div className="other-duckies__clip-inner">
+                {peer.chats.map((chat) => (
                   <button
                     key={chat.conv_id}
                     type="button"
@@ -239,13 +241,15 @@ export function OtherDuckiesChats() {
                     <Icons.Chat />
                     <span className="other-duckies__chat-title">{chat.title || "Untitled chat"}</span>
                   </button>
-                ))
-              : null}
+                ))}
+              </div>
+            </div>
           </div>
         );
       })}
       </div>
-      ) : null}
+      </div>
+      </div>
       {menu ? (
         <ContextMenu
           x={menu.x}

@@ -133,7 +133,9 @@ describe("ChangesView", () => {
     fireEvent.click(heads[1]);
     expect(screen.getAllByText("shop.verse").length).toBe(2);
     fireEvent.click(heads[0]);
-    expect(screen.getAllByText("shop.verse").length).toBe(1);
+    // Closing slides the rows away first, then folds the run.
+    expect(container.querySelectorAll(".changes-item.is-leaving").length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getAllByText("shop.verse").length).toBe(1));
   });
 
   it("says so plainly when the project has no history yet", async () => {
@@ -347,7 +349,7 @@ describe("ChangesView", () => {
     await waitFor(() => expect(runHeading(container)).toBe("Hacker"));
     expect(container.querySelectorAll(".changes-program-head").length).toBeGreaterThan(0);
     fireEvent.click(container.querySelector(".changes-run-head")!);
-    expect(container.querySelectorAll(".changes-program-head").length).toBe(0);
+    await waitFor(() => expect(container.querySelectorAll(".changes-program-head").length).toBe(0));
   });
 
   it("does not spam program headers when a run is only UEFN", async () => {
