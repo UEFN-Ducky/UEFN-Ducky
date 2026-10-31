@@ -185,6 +185,9 @@ def test_reopening_in_a_chat_reuses_its_idle_terminal(monkeypatch, tmp_path):
         def has_running_command(self):
             return self.running
 
+        def left_running(self):
+            return ""
+
         def to_dict(self):
             return {"session_id": self.id, "shell": self.shell, "cwd": self.cwd, "alive": self.alive}
 
