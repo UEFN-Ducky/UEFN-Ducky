@@ -90,14 +90,26 @@ namespace DuckySetup
             catch { /* best effort */ }
         }
 
+        public static string HostLogPath => Path.Combine(WorkRoot, "setup-host.log");
+
         public static void LogHostError(Exception ex)
         {
             try
             {
                 Directory.CreateDirectory(WorkRoot);
-                File.WriteAllText(Path.Combine(WorkRoot, "setup-host.log"), ex.ToString());
+                File.WriteAllText(HostLogPath, ex.ToString());
             }
             catch { /* ignore */ }
+        }
+
+        // The error a Setup run wrote since `sinceUtc` (the downloaded Setup shares this folder), or "".
+        public static string ReadHostLog(DateTime sinceUtc)
+        {
+            try
+            {
+                return File.GetLastWriteTimeUtc(HostLogPath) >= sinceUtc ? File.ReadAllText(HostLogPath) : "";
+            }
+            catch { return ""; }
         }
 
         public static void ExtractUi()

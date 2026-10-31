@@ -307,7 +307,10 @@ namespace DuckySetup
             _poll?.Stop();
             PostProgress();
             _running = null;
-            var reason = code == 0 || _cancelled ? "" : Stats.FailReason(Engine.ReadLogTail());
+            var engineLog = code == 0 || _cancelled ? "" : Engine.ReadLogTail();
+            var reason = Stats.FailReason(engineLog);
+            if (code == 1 && !_cancelled && reason.Length == 0)
+                reason = Stats.ExitOneReason(engineLog, Engine.ReadHostLog(_installStarted));
             // A running UEFN Ducky the engine could not close kept a file locked: close it, try once more.
             if (reason == "file_in_use" && !_retried && _lastArgs != null)
             {

@@ -260,6 +260,14 @@ namespace DuckySetup.Tests
             Check(Stats.FailReason("CopyFile failed; code 5.\nAccess is denied.") == "access_denied", "no permission");
             Check(Stats.FailReason("There is not enough space on the disk.") == "disk_full" && Stats.FailReason("") == "" && Stats.FailReason(null) == "", "full disk and nothing said");
             Check(Stats.FailCode(4, "file_in_use") == "exit_4.file_in_use" && Stats.FailCode(4, "") == "exit_4" && Stats.FailCode(0, "file_in_use") == "ok", "fail codes");
+            Check(Stats.HostFailReason("System.ComponentModel.Win32Exception (225): Operation did not complete successfully because the file contains a virus or potentially unwanted software.") == "antivirus", "exit_1: antivirus");
+            Check(Stats.HostFailReason("System.InvalidOperationException: The Store's download is a web installer, not the full Setup: stopping here.") == "web_child", "exit_1: web child");
+            Check(Stats.HostFailReason("System.UnauthorizedAccessException: Access to the path 'C:\\x\\Setup-engine.exe' is denied.") == "access_denied", "exit_1: no permission");
+            Check(Stats.HostFailReason("System.IO.IOException: There is not enough space on the disk.") == "disk_full", "exit_1: full disk");
+            Check(Stats.HostFailReason("System.InvalidOperationException: Could not start Setup-engine.exe") == "engine_start", "exit_1: engine start");
+            Check(Stats.HostFailReason("System.NullReferenceException: boom") == "host_error" && Stats.HostFailReason("") == "", "exit_1: other host error");
+            Check(Stats.ExitOneReason("", "") == "no_log" && Stats.ExitOneReason("Log opened.", "") == "" && Stats.ExitOneReason("", "Could not start x") == "engine_start", "exit_1: logs");
+            Check(Stats.FailCode(1, Stats.ExitOneReason("", "")) == "exit_1.no_log", "exit_1 code");
             Check(Stats.Reason("bugs") == "bugs" && Stats.Reason("  slow ") == "slow" && Stats.Reason("hacked") == "none" && Stats.Reason(null) == "none", "reasons");
             Check(Stats.Screen("done") == "done" && Stats.Screen("<b>") == "welcome", "screens");
             Check(Stats.IsRetry("error") && !Stats.IsRetry("welcome") && !Stats.IsRetry("options") && !Stats.IsRetry(null), "install from the error screen counts as a retry");

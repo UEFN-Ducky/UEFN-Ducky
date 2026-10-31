@@ -80,6 +80,37 @@ namespace DuckySetup
             return "";
         }
 
+        // Why the downloaded Setup itself gave up before or around its engine, from its setup-host.log.
+        // exit_1 alone (2 of 10 new web installs on Oct 29 2026) could be any of these.
+        public static string HostFailReason(string? hostLog)
+        {
+            var t = (hostLog ?? "").ToLowerInvariant();
+            if (t.Length == 0)
+                return "";
+            if (t.Contains("virus") || t.Contains("potentially unwanted"))
+                return "antivirus";
+            if (t.Contains("web installer, not the full setup"))
+                return "web_child";
+            var engine = FailReason(t);
+            if (engine.Length > 0)
+                return engine;
+            if (t.Contains("unauthorizedaccessexception"))
+                return "access_denied";
+            if (t.Contains("could not start"))
+                return "engine_start";
+            return "host_error";
+        }
+
+        // exit_1 with neither log saying why: the engine never wrote its log (no_log) or it did
+        // and named nothing; otherwise whatever the downloaded Setup's own log says.
+        public static string ExitOneReason(string engineLog, string hostLog)
+        {
+            var host = HostFailReason(hostLog);
+            if (host.Length > 0)
+                return host;
+            return engineLog.Trim().Length == 0 ? "no_log" : "";
+        }
+
         // exit_4 plus its reason when the log names one: exit_4.file_in_use.
         public static string FailCode(int code, string reason) => ExitCode(code) + (code != 0 && reason.Length > 0 ? "." + reason : "");
 
