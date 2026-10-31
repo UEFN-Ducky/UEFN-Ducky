@@ -129,7 +129,8 @@ def ducky_terminal_run(
     card in this chat (no card when this chat said "Allow everything" or "Always allow" for
     this command, or when the command is typed into the Local workflow running it).
 
-    expect_minutes: how long this run should take; shows the person a progress bar."""
+    expect_minutes: how long this run should take; shows the person a progress bar, and a run
+    three times slower (at least 2 min) comes back still running."""
     hidden = hides_output(command)
     if hidden:
         return tool_json({"ok": False, "error": hidden, "session_id": session_id.strip()}, pretty=pretty)

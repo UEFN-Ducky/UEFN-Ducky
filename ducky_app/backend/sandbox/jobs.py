@@ -25,12 +25,17 @@ _CREATE_NO_WINDOW = 0x08000000
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _KILL_ON_JOB_CLOSE = 0x2000
 _LIMIT_JOB_MEMORY = 0x0200
+_PROCESS_SET_QUOTA_AND_TERMINATE = 0x0100 | 0x0001
 
 
 class _Job:
-    """One Windows Job Object (or a no-op off Windows)."""
+    """One Windows Job Object (or a no-op off Windows).
 
-    def __init__(self, memory_mb: int) -> None:
+    track_only: a job that only lists its processes and kills nothing when it closes. It does
+    not let programs leave: Git Bash (Cygwin) moves every program it starts out of any job
+    that allows that, which hid exactly the programs it is there to find."""
+
+    def __init__(self, memory_mb: int, *, track_only: bool = False) -> None:
         self.handle: int = 0
         if not _WIN:
             return
@@ -67,7 +72,7 @@ class _Job:
         if not job:
             raise OSError(ctypes.get_last_error(), "CreateJobObject failed")
         info = _Extended()
-        flags = _KILL_ON_JOB_CLOSE
+        flags = 0 if track_only else _KILL_ON_JOB_CLOSE
         if memory_mb > 0:
             flags |= _LIMIT_JOB_MEMORY
             info.JobMemoryLimit = int(memory_mb) * 1024 * 1024
@@ -80,6 +85,19 @@ class _Job:
     def assign(self, proc: subprocess.Popen) -> None:
         if self.handle and not _kernel32().AssignProcessToJobObject(self.handle, int(proc._handle)):  # type: ignore[attr-defined]
             raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
+
+    def assign_pid(self, pid: int) -> bool:
+        """Put a running process in the job; what it starts from now on joins too."""
+        if not self.handle:
+            return False
+        k32 = _kernel32()
+        proc = k32.OpenProcess(_PROCESS_SET_QUOTA_AND_TERMINATE, False, int(pid))
+        if not proc:
+            return False
+        try:
+            return bool(k32.AssignProcessToJobObject(self.handle, proc))
+        finally:
+            k32.CloseHandle(proc)
 
     def pids(self) -> list[int]:
         """Every process in the job right now (the program and what it started)."""
@@ -122,6 +140,8 @@ def _kernel32() -> Any:
         k32.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
                                                   ctypes.c_void_p)
         k32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         k32.CloseHandle.argtypes = (wintypes.HANDLE,)
         _k32 = k32
     return _k32

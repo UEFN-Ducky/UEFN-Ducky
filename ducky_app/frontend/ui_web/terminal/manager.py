@@ -52,6 +52,13 @@ _STEER_NOTE = ("The person sent a message. Read it in this result, then check th
                "with ducky_terminal_read_output.")
 _STEER_NOTE_APPROVAL = ("The person sent a message. Read it in this result. The command runs once its "
                         "Allow/Deny card is answered; check it later with ducky_terminal_read_output.")
+# A run the agent said takes expect_minutes comes back still running once it has taken three
+# times that (never before this): Oct 31 2026 a test expected to take a minute held its agent
+# for its whole ten-minute timeout.
+_OVERDUE_MIN_S = 120.0
+_OVERDUE_NOTE = ("It is taking much longer than the {minutes:g} min you expected, so it came back while it "
+                 "still runs. Read its output with ducky_terminal_read_output; if it is stuck, close the "
+                 "terminal with ducky_terminal_close.")
 _manager: "TerminalManager | None" = None
 _manager_lock = threading.Lock()
 
@@ -695,8 +702,13 @@ class TerminalManager:
                 done.set()
 
         threading.Thread(target=work, daemon=True, name=f"terminal-run-{request_id}").start()
-        if _wait_or_steer(done, None, steer) == "steer":
-            so_far = agent_command_output(session.read_output_tail(max_chars=_OUTPUT_RING_CHARS))
+        overdue = max(_OVERDUE_MIN_S, expect_minutes * 180.0) if expect_minutes > 0 else None
+        if overdue is not None and overdue >= command_timeout_s:
+            overdue = None
+        why = _wait_or_steer(done, overdue, steer)
+        if why != "done":
+            so_far = agent_command_output(session.read_output_tail(max_chars=_OUTPUT_RING_CHARS),
+                                          getattr(session, "run_tag", ""))
             return {
                 "ok": True,
                 "still_running": True,
@@ -704,11 +716,12 @@ class TerminalManager:
                 "session_id": session_id,
                 "command_id": request_id,
                 "output_so_far": so_far[-_SO_FAR_CHARS:],
-                "note": _STEER_NOTE,
+                "note": _STEER_NOTE if why == "steer" else _OVERDUE_NOTE.format(minutes=expect_minutes),
             }
         # A command that printed nothing reports nothing. Falling back to the raw screen gave
         # the agent escape codes and its own echoed command instead (a silent failed push).
-        tail = ran["output_tail"] if "output_tail" in ran else agent_command_output(session.read_output_tail(max_chars=_OUTPUT_RING_CHARS))
+        tail = ran["output_tail"] if "output_tail" in ran else agent_command_output(
+            session.read_output_tail(max_chars=_OUTPUT_RING_CHARS), getattr(session, "run_tag", ""))
         out: dict[str, Any] = {
             "ok": bool(ran.get("ok")),
             "request_id": request_id,

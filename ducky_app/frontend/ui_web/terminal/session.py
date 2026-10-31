@@ -30,11 +30,14 @@ _OUTPUT_RING_CHARS = 512 * 1024
 _OUTPUT_CHUNK_CHARS = 8 * 1024
 # Taskbar progress codes (OSC 9;4) never show anything; they stay out of the kept history.
 _PROGRESS_SEQ_RE = re.compile(r"\x1b\]9;4;[0-9;]*(?:\x07|\x1b\\)")
-_DONE_RE = re.compile(r"__DUCKY_DONE__(-?\d+)__")  # Windows exit codes can be negative
+# Both markers carry the run's own tag. Oct 31 2026: a timed-out command's late done marker
+# finished the next command, with the old command's output and exit code. Windows exit codes
+# can be negative.
+_DONE_RE = re.compile(r"__DUCKY_DONE_([0-9a-f]+)__(-?\d+)__")
 # Printed just before an agent command runs. The typed line only spells it as a format
 # string, so the shell's echo of the command (PSReadLine redraws it several times) never
 # matches; what lies between this and the done marker is the command's own output.
-_BEGIN_MARK = "__DUCKY_BEGIN__"
+_BEGIN_RE = re.compile(r"__DUCKY_BEGIN_([0-9a-f]+)__")
 _ESCAPE_SEQ_RE = re.compile(
     r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI: colors, cursor moves, mode switches
     r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: titles, hyperlinks, progress
@@ -59,6 +62,14 @@ _PS_RESTORE_ENV = (
     "$__duckyWas = $null; "
 )
 _BASH_AGENT_ENV = " ".join(f"{k}={v}" for k, v in _AGENT_ENV)
+# Git for Windows runs node, python2.7 and a few others through winpty in any terminal named
+# xterm (its profile.d/aliases.sh, written for mintty). This terminal is a real console
+# (ConPTY), and there winpty outlives its program, waiting on input: Oct 31 2026 every
+# `node ...` an agent ran waited out its whole timeout. Only aliases to winpty go.
+_BASH_DROP_WINPTY = (
+    "for __d in node ipython php php5 psql python2.7 winget; do "
+    '[[ ${BASH_ALIASES[$__d]} == winpty\\ * ]] && unalias "$__d"; done; unset __d'
+)
 # PowerShell reads the curly single quotes as quotes too, so they are doubled like ' is.
 _PS_QUOTE_RE = re.compile("(['‘’‚‛])")
 
@@ -90,14 +101,17 @@ def plain_terminal_text(raw: str) -> str:
     return "\n".join(lines)
 
 
-def agent_command_output(raw: str) -> str:
-    """The command's own output between the begin and done markers, else the plain tail."""
+def agent_command_output(raw: str, tag: str = "") -> str:
+    """The command's own output between its begin and done markers (the run ``tag``'s, else
+    the latest run's), else the plain tail."""
     text = plain_terminal_text(raw)
-    begin = text.rfind(_BEGIN_MARK)
-    if begin >= 0:
-        # The latest command: a timed-out one has no done marker yet.
-        text = text[begin + len(_BEGIN_MARK):]
-        done = _DONE_RE.search(text)
+    begin = None
+    for begin in (m for m in _BEGIN_RE.finditer(text) if not tag or m.group(1) == tag):
+        pass
+    if begin:
+        # A timed-out command has no done marker yet; another run's never ends this one.
+        text = text[begin.end():]
+        done = next((m for m in _DONE_RE.finditer(text) if m.group(1) == begin.group(1)), None)
     else:
         done = None
         for done in _DONE_RE.finditer(text):
@@ -170,6 +184,32 @@ def shell_has_foreground_child(shell_pid: int, snapshot: ProcessSnapshot | None 
             continue
         return True
     return True
+
+
+def _tracking_job(shell_pid: int) -> Any:
+    """A job holding the shell and what it already started, so every later process joins it;
+    None off Windows or when Windows refuses."""
+    if os.name != "nt" or not shell_pid:
+        return None
+    try:
+        from backend.sandbox.jobs import _Job
+
+        job = _Job(0, track_only=True)
+        if not job.assign_pid(shell_pid):
+            job.close()
+            return None
+        # Git's bash.exe shim may have started the real bash before it joined.
+        children, _names = _process_snapshot()
+        seen, todo = {shell_pid}, [shell_pid]
+        while todo:
+            for kid in children.get(todo.pop(), []):
+                if kid not in seen:
+                    seen.add(kid)
+                    job.assign_pid(kid)
+                    todo.append(kid)
+        return job
+    except Exception:
+        return None
 
 
 def kill_process_tree(pid: int) -> None:
@@ -340,6 +380,13 @@ class TerminalSession:
         self._timed_out: dict[int, str] = {}
         # The person pressed Ctrl+C and the agent's command never reported done.
         self._stopped = False
+        # The tag in the current agent command's markers.
+        self.run_tag = ""
+        # Git's winpty aliases were removed for agent commands (the shell's first prompt
+        # removes them too, unless the person's own profile replaced PROMPT_COMMAND).
+        self._winpty_dropped = False
+        # Every process the shell starts, found even when Git Bash leaves it no living parent.
+        self._job: Any = None
 
     def spawn(self) -> None:
         from winpty import PtyProcess
@@ -359,6 +406,9 @@ class TerminalSession:
         env = env_with_fresh_path()
         if self.env_extra:
             env.update(self.env_extra)
+        if self.shell == "bash" and not self.spawn_argv:
+            # Runs once, before the first prompt, after the profile scripts made the aliases.
+            env.setdefault("PROMPT_COMMAND", f"{_BASH_DROP_WINPTY}; unset PROMPT_COMMAND")
         with ctrl_c_on_for_children():
             self._pty = PtyProcess.spawn(
                 argv,
@@ -366,6 +416,7 @@ class TerminalSession:
                 env=env,
                 dimensions=(self._rows, self._cols),
             )
+        self._job = _tracking_job(int(getattr(self._pty, "pid", 0) or 0))
         self._stop.clear()
         self._read_thread = threading.Thread(target=self._read_loop, daemon=True, name=f"pty-{self.id}")
         self._read_thread.start()
@@ -400,13 +451,10 @@ class TerminalSession:
                 except Exception:
                     pass
             scan = self._done_scan + text
-            match = _DONE_RE.search(scan)
-            self._done_scan = "" if match else scan[-32:]
+            match = next((m for m in _DONE_RE.finditer(scan) if m.group(1) == self.run_tag), None)
+            self._done_scan = "" if match else scan[-64:]
             if match and self._pending_done is not None:
-                try:
-                    self._pending_exit_code = int(match.group(1))
-                except ValueError:
-                    self._pending_exit_code = 0
+                self._pending_exit_code = int(match.group(2))
                 self._pending_done.set()
         try:
             code = int(getattr(pty, "exitstatus", 1) or 1) if pty is not None else 1
@@ -441,9 +489,13 @@ class TerminalSession:
         if not pid or not self.is_alive():
             return False
         try:
-            return shell_has_foreground_child(int(pid), snapshot)
+            if shell_has_foreground_child(int(pid), snapshot):
+                return True
         except Exception:
-            return False
+            pass
+        # A program Git Bash started (sleep, curl, winpty) has a dead parent, so only the job
+        # shows it running.
+        return bool(self._job_only(snapshot))
 
     def write(self, data: str) -> None:
         pty = self._pty
@@ -498,6 +550,9 @@ class TerminalSession:
                     pty.close(force=True)
             except Exception:
                 pass
+        job, self._job = self._job, None
+        if job is not None:
+            job.close()
         if self._pending_done is not None and not self._pending_done.is_set():
             self._pending_exit_code = -1
             self._pending_done.set()
@@ -554,6 +609,9 @@ class TerminalSession:
 
     def _wrap_agent_command(self, command: str, background: bool) -> str:
         cmd = command.rstrip("\r\n")
+        if not background:
+            self.run_tag = uuid.uuid4().hex[:8]
+        tag = self.run_tag
         if self.shell == "powershell":
             # As one quoted string, a trailing "# comment" can't eat the done marker; it runs
             # in this scope, so a `cd` or a variable it sets stays.
@@ -571,17 +629,20 @@ class TerminalSession:
             # Enter in a PowerShell console is a bare carriage return; "\r\n" left a
             # ">>" continuation prompt behind.
             return (
-                'Write-Output ("__DUCKY_{0}__" -f "BEGIN"); '
+                f'Write-Output ("__DUCKY_{{0}}__" -f "BEGIN_{tag}"); '
                 f"{_PS_SET_AGENT_ENV}$global:LASTEXITCODE = 0; {run}; {_PS_RESTORE_ENV}"
-                'Write-Output ("__DUCKY_DONE__{0}__" -f $(if ($LASTEXITCODE) { $LASTEXITCODE } '
+                f'Write-Output ("__DUCKY_DONE_{tag}__{{0}}__" -f $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} '
                 "elseif ($__duckyOk) { 0 } else { 1 }))\r"
             )
         # Variables in front of eval last for that command only, while a `cd` or an assignment
         # in it stays. Quoted, a trailing "# comment" or a "!" can't eat the done marker.
         run = f"{_BASH_AGENT_ENV} eval {shlex.quote(cmd)}"
+        # eval reads the command after this, so the aliases are gone for it already.
+        first = "" if self._winpty_dropped else f"{_BASH_DROP_WINPTY}; "
+        self._winpty_dropped = True
         if background:
-            return f"({run}) &\r\n"
-        return f"printf '__DUCKY_%s__\\n' BEGIN; {run}; echo __DUCKY_DONE__$?__\r\n"
+            return f"{first}({run}) &\r\n"
+        return f"{first}printf '__DUCKY_%s__\\n' BEGIN_{tag}; {run}; echo __DUCKY_DONE_{tag}__$?__\r\n"
 
     def background_alive(self, snapshot: ProcessSnapshot | None = None) -> bool:
         """Whether a background command started here still runs; once none does, the terminal
@@ -610,7 +671,31 @@ class TerminalSession:
                 if kid not in found:
                     found[kid] = names.get(kid, "")
                     todo.append(kid)
+        job = self._job
+        for kid in job.pids() if job is not None else ():
+            if kid != int(pid) and kid not in found:
+                found[kid] = names.get(kid, "")
         return found
+
+    def _job_only(self, snapshot: ProcessSnapshot | None = None) -> dict[int, str]:
+        """Processes under this shell that only its job shows (their parent is gone)."""
+        job, pty = self._job, self._pty
+        pid = int(getattr(pty, "pid", 0) or 0) if pty is not None else 0
+        in_job = set(job.pids()) - {pid} if job is not None else set()
+        if not in_job:
+            return {}
+        try:
+            children, names = (snapshot or _process_snapshot)()
+        except Exception:
+            return {}
+        seen, todo = {pid}, [pid]
+        while todo:
+            for kid in children.get(todo.pop(), []):
+                if kid not in seen:
+                    seen.add(kid)
+                    in_job.discard(kid)
+                    todo.append(kid)
+        return {kid: names.get(kid, "") for kid in in_job}
 
     def left_running(self) -> str:
         """What a timed-out agent command left running here ('' when it has ended)."""
@@ -678,19 +763,19 @@ class TerminalSession:
             return {
                 "ok": False,
                 "error": "command timed out",
-                "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS)),
+                "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS), self.run_tag),
             }
         self.set_busy(False)
         if self._stopped:
             return {
                 "ok": False,
                 "error": "The person stopped this command (Ctrl+C in Ducky's Terminal tab) before it finished.",
-                "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS)),
+                "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS), self.run_tag),
             }
         return {
             "ok": True,
             "exit_code": self._pending_exit_code,
-            "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS)),
+            "output_tail": agent_command_output(self.read_output_tail(_OUTPUT_RING_CHARS), self.run_tag),
         }
 
     def to_dict(self) -> dict[str, Any]:

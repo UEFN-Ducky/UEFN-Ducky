@@ -37,7 +37,7 @@ def _reported_code(script: str) -> int:
     out = _run(script)
     match = _DONE_RE.search(out)
     assert match, out
-    return int(match.group(1))
+    return int(match.group(2))
 
 
 def test_the_command_is_submitted_with_a_bare_carriage_return():
@@ -52,7 +52,7 @@ def test_a_trailing_comment_or_quotes_never_eat_the_done_marker():
     assert _reported_code(_wrapped("echo hi  # a note").rstrip("\r")) == 0
     # A failed statement doesn't skip the next one, as when the command is typed.
     out = _run(_wrapped("no_such_command_ducky; Write-Output after-it").rstrip("\r"))
-    assert "after-it" in out and _DONE_RE.search(out).group(1) == "0", out
+    assert "after-it" in out and _DONE_RE.search(out).group(2) == "0", out
     out = _run(_wrapped("Write-Output \"it's, it’s\"").rstrip("\r"))
     assert "it's, it’s" in out and _DONE_RE.search(out), out
 
@@ -88,23 +88,47 @@ def test_an_earlier_native_failure_is_not_reported_for_a_later_success():
 
 
 def test_a_negative_windows_exit_code_still_counts_as_done():
-    match = _DONE_RE.search("__DUCKY_DONE__-1073741819__")
-    assert match and int(match.group(1)) == -1073741819
+    match = _DONE_RE.search("__DUCKY_DONE_ab12cd34__-1073741819__")
+    assert match and match.group(1) == "ab12cd34" and int(match.group(2)) == -1073741819
 
 
 def test_bash_commands_print_a_begin_mark_the_echo_cannot_spell():
-    wrapped = TerminalSession(shell="bash", cwd=".")._wrap_agent_command("ls", background=False)
+    session = TerminalSession(shell="bash", cwd=".")
+    session._wrap_agent_command("pwd", background=False)
+    wrapped = session._wrap_agent_command("ls", background=False)
+    tag = session.run_tag
     assert wrapped == (
-        "printf '__DUCKY_%s__\\n' BEGIN; GIT_PAGER=cat GH_PAGER=cat GIT_EDITOR=true GH_PROMPT_DISABLED=1 eval ls; "
-        "echo __DUCKY_DONE__$?__\r\n"
+        f"printf '__DUCKY_%s__\\n' BEGIN_{tag}; GIT_PAGER=cat GH_PAGER=cat GIT_EDITOR=true GH_PROMPT_DISABLED=1 eval ls; "
+        f"echo __DUCKY_DONE_{tag}__$?__\r\n"
     )
-    assert "__DUCKY_BEGIN__" not in wrapped and "__DUCKY_BEGIN__" not in _wrapped("ls")
+    assert "__DUCKY_BEGIN_" not in wrapped and "__DUCKY_BEGIN_" not in _wrapped("ls")
+
+
+def test_every_run_gets_its_own_tag():
+    session = TerminalSession(shell="powershell", cwd=".")
+    first = session._wrap_agent_command("echo a", background=False)
+    tag = session.run_tag
+    second = session._wrap_agent_command("echo b", background=False)
+    assert len(tag) == 8 and session.run_tag != tag
+    assert f'"BEGIN_{tag}"' in first and f"__DUCKY_DONE_{tag}__" in first and tag not in second
+
+
+def test_the_first_bash_command_drops_gits_winpty_aliases_once():
+    # Oct 31 2026: Git's aliases.sh ran node through winpty, which never exits in a ConPTY
+    # terminal, and every agent `node ...` waited out its whole timeout.
+    session = TerminalSession(shell="bash", cwd=".")
+    first = session._wrap_agent_command("node -v", background=False)
+    assert first.startswith("for __d in node ") and 'unalias "$__d"' in first
+    assert first.index("unalias") < first.index("eval")
+    assert not session._wrap_agent_command("node -v", background=False).startswith("for __d")
+    assert not _wrapped("node -v").startswith("for __d")
 
 
 def test_a_bash_comment_or_bang_stays_inside_the_command():
-    wrapped = TerminalSession(shell="bash", cwd=".")._wrap_agent_command('git commit -m "fix!"  # done', background=False)
-    assert "eval 'git commit -m \"fix!\"  # done'; echo __DUCKY_DONE__$?__" in wrapped
-    background = TerminalSession(shell="bash", cwd=".")._wrap_agent_command("npm run dev", background=True)
+    session = TerminalSession(shell="bash", cwd=".")
+    wrapped = session._wrap_agent_command('git commit -m "fix!"  # done', background=False)
+    assert f"eval 'git commit -m \"fix!\"  # done'; echo __DUCKY_DONE_{session.run_tag}__$?__" in wrapped
+    background = session._wrap_agent_command("npm run dev", background=True)
     assert background == "(GIT_PAGER=cat GH_PAGER=cat GIT_EDITOR=true GH_PROMPT_DISABLED=1 eval 'npm run dev') &\r\n"
 
 
@@ -123,27 +147,40 @@ def test_an_agent_command_gets_no_pager_or_editor_and_the_shell_keeps_its_own():
 def test_the_agent_reads_only_the_command_output_without_escape_codes():
     # Shaped like a real PowerShell console: PSReadLine colors and redraws the typed
     # line (cursor moves, then the line again), then the output, then the next prompt.
-    typed = _wrapped("echo hello").rstrip("\r")
+    session = TerminalSession(shell="powershell", cwd=".")
+    typed = session._wrap_agent_command("echo hello", background=False).rstrip("\r")
+    tag = session.run_tag
     raw = (
         "\x1b[1t\x1b[?1004hPS C:\\p> \x1b[?25l\x1b[1;64H\x1b[93mecho\x1b[39;49m"
         + typed.replace("echo", "\x1b[93mecho\x1b[0m") + "\x1b[2;107H\x1b[?25h"
-        + "\r\n__DUCKY_BEGIN__\r\nhello\r\n\x1b[32mworld\x1b[0m\r\n"
-        + "__DUCKY_DONE__0__\r\n\x1b]0;PowerShell\x07PS C:\\p> "
+        + f"\r\n__DUCKY_BEGIN_{tag}__\r\nhello\r\n\x1b[32mworld\x1b[0m\r\n"
+        + f"__DUCKY_DONE_{tag}__0__\r\n\x1b]0;PowerShell\x07PS C:\\p> "
     )
-    assert agent_command_output(raw) == "hello\nworld"
+    assert agent_command_output(raw, tag) == "hello\nworld"
 
 
 def test_a_redrawn_progress_line_shows_what_was_written_last():
-    raw = "__DUCKY_BEGIN__\r\n 10%\r 55%\r100% done\r\n__DUCKY_DONE__0__\r\n"
+    raw = "__DUCKY_BEGIN_aa11__\r\n 10%\r 55%\r100% done\r\n__DUCKY_DONE_aa11__0__\r\n"
     assert agent_command_output(raw) == "100% done"
 
 
 def test_an_earlier_command_never_answers_for_a_command_still_running():
     raw = (
-        "__DUCKY_BEGIN__\r\nold output\r\n__DUCKY_DONE__0__\r\nPS> "
-        "__DUCKY_BEGIN__\r\nstill building...\r\n"
+        "__DUCKY_BEGIN_aa11__\r\nold output\r\n__DUCKY_DONE_aa11__0__\r\nPS> "
+        "__DUCKY_BEGIN_bb22__\r\nstill building...\r\n"
     )
     assert agent_command_output(raw) == "still building..."
+    assert agent_command_output(raw, "bb22") == "still building..."
+
+
+def test_a_timed_out_commands_late_done_marker_never_ends_the_next_one():
+    # Oct 31 2026: a timed-out command's late done marker finished the next command, which
+    # then reported the old command's output and exit code.
+    raw = (
+        "__DUCKY_BEGIN_aa11__\r\nslow output\r\n"
+        "__DUCKY_BEGIN_bb22__\r\n__DUCKY_DONE_aa11__0__\r\nnext output\r\n__DUCKY_DONE_bb22__3__\r\n"
+    )
+    assert agent_command_output(raw, "bb22") == "__DUCKY_DONE_aa11__0__\nnext output"
 
 
 @needs_powershell
@@ -265,5 +302,57 @@ def test_a_timed_out_command_still_running_gets_no_typed_commands(tmp_path):
         assert slow["error"] == "command timed out", slow
         refused = session.run_command("echo next", timeout_s=10)
         assert not refused["ok"] and "ping.exe" in refused["error"] and "ducky_terminal_close" in refused["hint"], refused
+    finally:
+        session.kill()
+
+
+def _bash_session(tmp_path) -> TerminalSession:
+    session = TerminalSession(shell="bash", cwd=str(tmp_path))
+    try:
+        session.spawn()
+    except Exception as exc:  # noqa: BLE001 - no Git Bash here
+        pytest.skip(f"cannot start a bash terminal here: {exc}")
+    return session
+
+
+@pytest.mark.skipif(sys.platform != "win32" or not shutil.which("node"), reason="needs Windows, Git Bash and node")
+def test_node_in_a_bash_terminal_finishes_for_the_agent_and_the_person(tmp_path):
+    # Oct 31 2026: Git's alias ran node through winpty, which outlives node in this terminal;
+    # a two-second test waited ten minutes, twice in one harness race.
+    import time
+
+    session = _bash_session(tmp_path)
+    try:
+        time.sleep(3)  # the first prompt has run PROMPT_COMMAND
+        session.write("type node\r")
+        time.sleep(2)
+        typed = [line for line in plain_terminal_text(session.read_output_tail(4000)).splitlines() if line.startswith("node is")]
+        assert typed and "winpty" not in typed[-1], typed
+        started = time.time()
+        result = session.run_command('node -e "console.log(6*7)"', timeout_s=60)
+        assert result["ok"] and result["exit_code"] == 0 and result["output_tail"] == "42", result
+        assert time.time() - started < 20
+    finally:
+        session.kill()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="needs Windows terminals")
+def test_a_program_git_bash_started_is_seen_after_a_timeout_and_its_late_marker_is_ignored(tmp_path):
+    # Git Bash leaves `sleep` (any program it runs from usr/bin, winpty too) no living parent,
+    # so the process tree never showed it: a timed-out one counted as gone, and the next
+    # command got its late done marker.
+    import time
+
+    session = _bash_session(tmp_path)
+    try:
+        assert session.run_command("echo ready", timeout_s=60)["ok"]
+        slow = session.run_command("sleep 4; echo slow-done", timeout_s=1)
+        assert slow["error"] == "command timed out", slow
+        assert "sleep.exe" in session.left_running()
+        refused = session.run_command("echo next", timeout_s=10)
+        assert not refused["ok"] and "sleep.exe" in refused["error"], refused
+        time.sleep(5)  # the slow command ends now and prints its done marker
+        after = session.run_command("echo next", timeout_s=30)
+        assert after["ok"] and after["output_tail"] == "next", after
     finally:
         session.kill()

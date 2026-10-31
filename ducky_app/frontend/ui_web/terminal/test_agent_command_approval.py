@@ -135,7 +135,8 @@ def test_the_done_marker_is_found_when_split_across_two_reads() -> None:
     from frontend.ui_web.terminal.session import TerminalSession
 
     session = TerminalSession(shell="bash", cwd="C:/repo")
-    chunks = [b"Uploaded.\r\n__DUCKY_DO", b"NE__0__\r\n$ "]
+    session.run_tag = "c0ffee12"
+    chunks = [b"Uploaded.\r\n__DUCKY_DO", b"NE_c0ffee12__0__\r\n$ "]
 
     class _Pty:
         exitstatus = 0
