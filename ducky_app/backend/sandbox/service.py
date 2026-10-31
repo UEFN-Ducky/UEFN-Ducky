@@ -261,6 +261,15 @@ def _release_when_done(mgr: Any, session: str, repo: str, result: Any) -> None:
     threading.Thread(target=watch, daemon=True, name=f"sandbox-lock-{session}").start()
 
 
+def _fill(arg: str, values: dict[str, str]) -> str:
+    """``%NAME%`` in an argument becomes that variable's value (a port the sandbox picked, or
+    one of ``env``). No shell starts the program, so nothing else would fill it in: Oct 31
+    2026 ``http.server %PORT%`` got the text "%PORT%" and quit."""
+    for key, value in values.items():
+        arg = arg.replace(f"%{key}%", str(value))
+    return arg
+
+
 def launch(conv_id: str, program: str, args: list[str] | None = None, cwd: str = "", name: str = "",
            ports: list[str] | None = None, env: dict[str, str] | None = None,
            files: dict[str, str] | None = None, memory_mb: int = 4096) -> dict[str, Any]:
@@ -298,7 +307,9 @@ def launch(conv_id: str, program: str, args: list[str] | None = None, cwd: str =
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(content), encoding="utf-8")
     port_map = {str(var): free_port() for var in (ports or []) if str(var).strip()}
-    run_env = sandbox_env(box, {**(env or {}), **{k: str(v) for k, v in port_map.items()}})
+    given = {**(env or {}), **{k: str(v) for k, v in port_map.items()}}
+    run_env = sandbox_env(box, given)
+    argv[1:] = [_fill(a, given) for a in argv[1:]]
     if not Path(argv[0]).is_absolute():
         # Windows looks a bare name up on Ducky's own PATH, not the sandbox's runtimes.
         found = shutil.which(argv[0], path=run_env.get("PATH"))

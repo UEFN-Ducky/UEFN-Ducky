@@ -274,6 +274,22 @@ def test_a_sandbox_reuses_its_own_shell_and_never_a_plain_one(mgr, tmp_path):
     assert mgr.spawn(shell="powershell", cwd=str(tmp_path), conv_id="chat-a", reuse_idle=True)["session_id"] == plain["session_id"]
 
 
+def test_a_terminal_whose_timed_out_command_still_runs_is_not_handed_out_again(mgr, tmp_path):
+    # Oct 31 2026: a timed-out sandbox_run left only a bash subshell, which the busy check
+    # reads as Git's shim; the next sandbox_run got that terminal and failed at once.
+    env = {"PATH": "a"}
+    first = mgr.spawn(shell="powershell", cwd=str(tmp_path), conv_id="chat-a", env_extra=env, reuse_idle=True)
+    shell = mgr.get_session(first["session_id"])
+    left = {4242: "bash.exe"}
+    shell._timed_out = dict(left)
+    shell._descendants = lambda snapshot=None: dict(left)
+    again = mgr.spawn(shell="powershell", cwd=str(tmp_path), conv_id="chat-a", env_extra=env, reuse_idle=True)
+    assert again["session_id"] != first["session_id"]
+    left.clear()  # it ended: that terminal is free again
+    assert mgr.spawn(shell="powershell", cwd=str(tmp_path), conv_id="chat-a", env_extra=env,
+                     reuse_idle=True)["session_id"] == first["session_id"]
+
+
 def test_a_shell_handed_out_again_is_not_closed_as_idle(mgr, tmp_path):
     # Oct 23 2026: a sandbox_run picked the chat's quiet shell just as the idle cleanup
     # closed it ("session not found").

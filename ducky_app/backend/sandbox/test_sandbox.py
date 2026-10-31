@@ -302,6 +302,22 @@ def test_clear_deletes_the_sandbox_and_stale_ones_are_pruned():
 
 
 @needs_windows
+def test_a_port_named_in_args_is_filled_in():
+    # Oct 31 2026: "python -m http.server %PORT%" got the text "%PORT%" and quit at once.
+    code = "import sys, time; print('args', sys.argv[1:], flush=True); time.sleep(30)"
+    out = service.launch(CONV, sys.executable, ["-c", code, "%PORT%", "--who=%WHO%"], ports=["PORT"],
+                         env={"WHO": "duck"}, name="args")
+    assert out["ok"], out
+    want = f"args ['{out['ports']['PORT']}', '--who=duck']"
+    deadline = time.time() + 10
+    while time.time() < deadline and want not in service.look(CONV, out["pid"])["output"]:
+        time.sleep(0.2)
+    assert want in service.look(CONV, out["pid"])["output"]
+    launched = [e for e in manifest.read(paths.sandbox_dir(CONV))["events"] if e.get("kind") == "launch"]
+    assert launched[-1]["args"][2] == "%PORT%"  # a relaunch picks a new port
+
+
+@needs_windows
 def test_an_app_is_listed_after_it_stops_and_runs_again():
     box = paths.sandbox_dir(CONV, create=True)
     server = _script(box, "serve.py", """

@@ -31,8 +31,8 @@ Use it for ALL scratch work: never the project, never the OS temp folder.
   the person's projects at a commit (no other chat's uncommitted files), plus listed ignored files.
 - `sandbox_run(command)`: a command that finishes (install, build, test) in the sandbox terminal.
 - `sandbox_launch(program, args, ports=[...], env={...}, files={...})`: something that keeps
-  running (a server, an app, a test Ducky). `ports` names env vars that each get a free port.
-  `files` writes settings files first. Stopped with its whole tree by `sandbox_stop` or when Ducky closes.
+  running (a server, an app, a test Ducky). `ports` names env vars that each get a free port;
+  `%PORT%` in args becomes that port. `files` writes settings files first. Stopped with its whole tree by `sandbox_stop` or when Ducky closes.
 - `sandbox_look(pid, capture=true)`: alive, memory, CPU, listening ports, output, windows, a picture of its window.
 - `sandbox_http(port, method, path, body)`: its own local web API. `sandbox_mcp(command|url, calls=[...])`: its MCP tools.
 - `browser_open("localhost:<port>")` shows a sandbox web app in Ducky's Browser tab;

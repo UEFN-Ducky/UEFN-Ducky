@@ -311,7 +311,10 @@ class TerminalManager:
         with self._lock:
             candidates = [e.session for e in self._sessions.values() if e.reuse_key == reuse_key]
         for session in candidates:
-            if session.is_alive() and not session.has_running_command():
+            # A timed-out command can leave only a bash subshell running, which the busy check
+            # takes for Git's shim and the shell: Oct 31 2026 the next sandbox_run got that
+            # terminal and failed at once ("timed out and is still running").
+            if session.is_alive() and not session.has_running_command() and not session.left_running():
                 # Handed out again: in use, so the idle-terminal reaper must not close it now.
                 session.last_activity = time.time()
                 return session

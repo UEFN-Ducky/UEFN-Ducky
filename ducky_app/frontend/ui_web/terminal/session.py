@@ -612,7 +612,7 @@ class TerminalSession:
                     todo.append(kid)
         return found
 
-    def _left_running(self) -> str:
+    def left_running(self) -> str:
         """What a timed-out agent command left running here ('' when it has ended)."""
         if not self._timed_out:
             return ""
@@ -631,7 +631,7 @@ class TerminalSession:
     ) -> dict[str, Any]:
         if self.is_busy() and not background:
             return {"ok": False, "error": "session busy", "hint": "Wait for the current command or open another terminal."}
-        left = self._left_running()
+        left = self.left_running()
         if left:
             # Typing on would answer whatever it waits on (a prompt, an editor), not run a command.
             return {

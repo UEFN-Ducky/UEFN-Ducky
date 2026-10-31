@@ -159,7 +159,7 @@ def sandbox_launch(program: str, args: list[str] | None = None, cwd: str = "", n
     program: a path inside the sandbox, or a runtime on its PATH (node, python, npm.cmd, uv).
     ports: environment variable names that each get a free port (e.g. ["PORT"]; a test Ducky:
     ["UEFN_DUCKY_PANEL_PORT", "UEFN_DUCKY_PORT"]); the ports come back and count as this
-    sandbox's. files: {path inside the sandbox: text} written first (e.g. a program's settings
+    sandbox's. "%PORT%" (any ports or env name) in args becomes its value. files: {path inside the sandbox: text} written first (e.g. a program's settings
     file under appdata/Local). Then sandbox_look, browser_open('localhost:<port>'), sandbox_http
     or sandbox_mcp. Asks first unless the chat allows sandbox commands."""
     command = " ".join([program, *[str(a) for a in (args or [])]])
