@@ -26,11 +26,15 @@ const app = (over: Partial<SandboxApp>): SandboxApp => ({
   conv_id: "c1", name: "web", chat: "Build a todo app", running: false, pid: 0, ports: [], launched: 1, picture: "", ...over,
 });
 
-it("stays hidden until a sandbox has built an app", async () => {
+it("always shows its button; with no apps the menu says so, and a press outside closes it", async () => {
   api.sandbox_apps.mockResolvedValue({ ok: true, apps: [] });
   render(<SandboxAppsDropdown />);
   await waitFor(() => expect(api.sandbox_apps).toHaveBeenCalled());
-  expect(screen.queryByRole("button", { name: /Apps/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Apps" }));
+  expect(screen.getByText("No apps yet")).toBeTruthy();
+  expect(screen.queryByLabelText("Search apps")).toBeNull();
+  fireEvent.pointerDown(document.body);
+  expect(screen.queryByText("No apps yet")).toBeNull();
 });
 
 it("runs a stopped app, stops, opens and deletes a running one", async () => {

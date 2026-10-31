@@ -355,6 +355,28 @@
   padding: 6px 0;
 }
 
+.sandbox-apps-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 24px 20px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.sandbox-apps-empty strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sandbox-apps-empty .sandbox-app-icon {
+  margin-bottom: 4px;
+}
+
 .sandbox-app-row {
   padding: 2px 4px 2px 0;
   font-size: 13px;

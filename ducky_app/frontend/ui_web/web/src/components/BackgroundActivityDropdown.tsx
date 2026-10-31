@@ -165,7 +165,6 @@ export function BackgroundActivityDropdown() {
         {waiting ? (
           <span className="bg-activity-waiting-count">
             <span className="chat-waiting-marker chat-waiting-marker--chip" aria-hidden="true">?</span>
-            {waiting} waiting
           </span>
         ) : null}
         {nowCount ? <span className="terminal-header-badge" aria-hidden>{nowCount > 9 ? "9+" : nowCount}</span> : null}

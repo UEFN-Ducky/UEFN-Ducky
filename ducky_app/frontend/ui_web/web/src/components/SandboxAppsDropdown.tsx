@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { confirmFromHost } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
+import { popOrigin, useDropdownDismiss, useMenuPop } from "./DropdownPanel";
 import { Icons } from "../icons/Icons";
 import type { SandboxApp } from "../types/panel";
 
@@ -14,7 +15,7 @@ const FILTERS = [
 type Filter = (typeof FILTERS)[number]["id"];
 const MENU_GAP = 6;
 const POLL_OPEN_MS = 5000;
-// Closed, the list only needs to notice a new app for the button to appear.
+// Closed, the list only needs to keep the running badge roughly current.
 const POLL_CLOSED_MS = 30000;
 
 /** The app's own favicon while it runs, else the last screenshot of it, else a box. */
@@ -32,7 +33,7 @@ function AppIcon({ app }: { app: SandboxApp }) {
   );
 }
 
-/** Header menu of every app a sandbox built, in any chat: open, run, stop, delete. Hidden until one exists. */
+/** Header menu of every app a sandbox built, in any chat: open, run, stop, delete. Always shown. */
 export function SandboxAppsDropdown() {
   const [apps, setApps] = useState<SandboxApp[]>([]);
   const [open, setOpen] = useState(false);
@@ -42,6 +43,9 @@ export function SandboxAppsDropdown() {
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const pop = useMenuPop(open);
+  const close = useCallback(() => setOpen(false), []);
+  useDropdownDismiss(open, close, menuRef, triggerRef);
 
   const refresh = useCallback(async () => {
     const got = await getApi()?.sandbox_apps?.().catch(() => null);
@@ -59,27 +63,6 @@ export function SandboxAppsDropdown() {
     const rect = triggerRef.current.getBoundingClientRect();
     setMenuPos({ top: rect.bottom + MENU_GAP, left: Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8)) });
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-dropdown-keep]")) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  if (!apps.length) return null;
 
   const act = async (key: string, work: () => Promise<unknown> | undefined) => {
     setBusy(key);
@@ -111,14 +94,16 @@ export function SandboxAppsDropdown() {
     (filter === "all" || a.running === (filter === "running")) &&
     (!q || a.name.toLowerCase().includes(q) || (a.chat ?? "").toLowerCase().includes(q)));
   const counts: Record<Filter, number> = { all: apps.length, running, stopped: apps.length - running };
-  const menu = open && menuPos ? (
-    <div ref={menuRef} className="terminal-header-menu terminal-header-menu--portaled sandbox-apps-menu no-drag"
-      style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}>
+  const menu = pop.mounted && menuPos ? (
+    <div ref={menuRef}
+      className={`terminal-header-menu terminal-header-menu--portaled sandbox-apps-menu no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
+      style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH, transformOrigin: popOrigin(triggerRef.current, menuPos) }}>
       <div className="sandbox-apps-head">
         <div className="sandbox-apps-title">
           <Icons.Grid />
           <span>Apps you built</span>
         </div>
+        {apps.length ? (<>
         <input className="sandbox-apps-search" type="search" placeholder="Search apps or chats…" value={query}
           aria-label="Search apps" autoFocus onChange={(e) => setQuery(e.target.value)} />
         <div className="sandbox-apps-filters" role="group" aria-label="Filter apps">
@@ -129,9 +114,16 @@ export function SandboxAppsDropdown() {
             </button>
           ))}
         </div>
+        </>) : null}
       </div>
       <div className="terminal-header-list sandbox-apps-list">
-        {!shown.length ? <p className="terminal-header-empty">No apps match.</p> : null}
+        {!apps.length ? (
+          <div className="sandbox-apps-empty">
+            <span className="sandbox-app-icon"><Icons.Grid /></span>
+            <strong>No apps yet</strong>
+            <span>When a chat builds and runs an app in its sandbox, it shows up here to open, run, stop or delete.</span>
+          </div>
+        ) : !shown.length ? <p className="terminal-header-empty">No apps match.</p> : null}
         {shown.map((app) => {
           const id = `${app.conv_id}:${app.name}`;
           const port = app.ports[0];

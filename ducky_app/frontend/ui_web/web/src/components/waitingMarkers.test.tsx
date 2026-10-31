@@ -202,7 +202,9 @@ describe("waiting for your answer markers", () => {
     });
     await flush();
     const trigger = screen.getByLabelText("Background activity");
-    expect(trigger.textContent).toContain("3 waiting");
+    // The icon carries only the "?" marker; the count is in its tooltip, never as words in the bar.
+    expect(trigger.textContent).not.toContain("waiting");
+    expect(trigger.getAttribute("title")).toContain("3 waiting for your answer");
     fireEvent.click(trigger);
 
     const section = screen.getByLabelText("Waiting for you");
@@ -231,6 +233,6 @@ describe("waiting for your answer markers", () => {
     // Answered in another window: the row and the count go.
     act(() => pushLocalAgentEvent({ type: "terminal_command_decided", request_id: "r2", conv_id: "c2" }));
     await flush();
-    expect(trigger.textContent).toContain("1 waiting");
+    expect(trigger.getAttribute("title")).toContain("1 waiting for your answer");
   });
 });

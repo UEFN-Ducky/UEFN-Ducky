@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
+import { popOrigin, useDropdownDismiss, useMenuPop } from "./DropdownPanel";
 import { usePluginUiPrefs } from "../hooks/usePluginUiPrefs";
 import { checkLanguageName } from "../views/settings/languageNames";
 import {
@@ -111,11 +112,17 @@ export function LanguageHeaderDropdown({
     commitLanguage(check.name);
   }, [alert, commitLanguage, confirm, draft]);
 
+  const pop = useMenuPop(open);
+  const close = useCallback(() => {
+    setOpen(false);
+    setAdding(false);
+    setDraft("");
+  }, []);
+  useDropdownDismiss(open, close, menuRef, triggerRef);
+
+  // Closing keeps the last spot so the menu zooms back into the icon.
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setMenuPos((pos) => (pos === null ? pos : null));
-      return;
-    }
+    if (!open || !triggerRef.current) return;
     const update = () => {
       const trigger = triggerRef.current;
       if (!trigger) return;
@@ -130,32 +137,17 @@ export function LanguageHeaderDropdown({
     };
   }, [open, adding]);
 
+  // Escape while adding only cancels the add; capture runs before the dismiss hook, which then skips it.
   useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setOpen(false);
+    if (!open || !adding) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
       setAdding(false);
       setDraft("");
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (adding) {
-          setAdding(false);
-          setDraft("");
-          return;
-        }
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
   }, [adding, open]);
 
   useEffect(() => {
@@ -164,11 +156,11 @@ export function LanguageHeaderDropdown({
   }, [adding, open]);
 
   const menu =
-    open && menuPos ? (
+    pop.mounted && menuPos ? (
       <div
         ref={menuRef}
-        className="terminal-header-menu terminal-header-menu--portaled no-drag"
-        style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH }}
+        className={`terminal-header-menu terminal-header-menu--portaled no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
+        style={{ top: menuPos.top, left: menuPos.left, width: MENU_WIDTH, transformOrigin: popOrigin(triggerRef.current, menuPos) }}
         data-no-translate
         data-dropdown-keep
       >

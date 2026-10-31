@@ -5,6 +5,7 @@ import { useProblemsMenuOpen } from "../contexts/AppHeaderActionsContext";
 import type { ScanFileStatus } from "../verse-editor/lsp/fileDiagnosticRegistry";
 import { Icons } from "../icons/Icons";
 import { TruncatedText } from "./TruncatedText";
+import { popOrigin, useDropdownDismiss, useMenuPop } from "./DropdownPanel";
 import { VerseProblemsDuckyMenu } from "./VerseProblemsDuckyMenu";
 
 type VerseProblemsDropdownProps = HeaderProblemsAction & {
@@ -103,11 +104,12 @@ export function VerseProblemsDropdown({
 
   const problemsByPath = new Map(files.map((f) => [f.path.toLowerCase(), f]));
 
+  const pop = useMenuPop(open);
+  useDropdownDismiss(open, () => setOpenState(false), menuRef, triggerRef);
+
+  // Closing keeps the last spot so the menu zooms back into the icon.
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setMenuPos(null);
-      return;
-    }
+    if (!open || !triggerRef.current) return;
     const update = () => {
       const trigger = triggerRef.current;
       if (!trigger) return;
@@ -128,26 +130,6 @@ export function VerseProblemsDropdown({
     active?.scrollIntoView({ block: "nearest" });
   }, [open, scanInProgress, scanProgress?.currentPath, scanProgress?.done]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      if ((target as Element).closest?.(".verse-problems-ducky-dropdown--portaled")) return;
-      setOpenState(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpenState(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const triggerClass = activityBusy
     ? fileCheckInProgress && !scanInProgress
       ? "verse-problems-trigger--checking"
@@ -159,11 +141,11 @@ export function VerseProblemsDropdown({
         : "verse-problems-trigger--ok";
 
   const menu =
-    open && menuPos ? (
+    pop.mounted && menuPos ? (
       <div
         ref={menuRef}
-        className="verse-problems-menu verse-problems-menu--portaled no-drag"
-        style={{ top: menuPos.top, left: menuPos.left }}
+        className={`verse-problems-menu verse-problems-menu--portaled no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
+        style={{ top: menuPos.top, left: menuPos.left, transformOrigin: popOrigin(triggerRef.current, menuPos) }}
       >
         <div className="verse-problems-header">
           <div className="verse-problems-header-row">

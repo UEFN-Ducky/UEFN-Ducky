@@ -87,7 +87,7 @@
   max-height: var(--dropdown-max-height, min(360px, 50vh));
   /* Set per panel (DropdownPanel zIndex): a plain z-index rule there loses to this one. */
   z-index: var(--dropdown-z, 100010);
-  animation: scaleIn 0.15s ease-out forwards;
+  /* .menu-pop zooms it out of (and back into) its anchor, from this origin. */
   transform-origin: var(--dropdown-transform-origin);
 }
 

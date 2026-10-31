@@ -2601,6 +2601,25 @@ body.layout-sidebar-only .project-selector-title--sidebar-only {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+/* Dropdowns and header menus zoom out of the icon that opened them and back into it on close
+   (transform-origin is the icon's center; useMenuPop keeps the menu mounted for the close). */
+@keyframes menu-pop-in {
+  from { opacity: 0; transform: scale(0.35); }
+  60% { opacity: 1; }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes menu-pop-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.35); }
+}
+.menu-pop { animation: menu-pop-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.12) both; }
+.menu-pop.is-closing {
+  animation: menu-pop-out 0.15s cubic-bezier(0.5, 0, 0.9, 0.5) both;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu-pop, .menu-pop.is-closing { animation-duration: 1ms; }
+}
 .modal-backdrop {
   position: fixed; inset: 0;
   background: var(--overlay);

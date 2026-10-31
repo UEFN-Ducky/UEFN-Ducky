@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChoiceDropdown } from "../components/ChoiceDropdown";
+import { popOrigin, useDropdownDismiss, useMenuPop } from "../components/DropdownPanel";
 import type { HeaderTerminalAction } from "../contexts/AppHeaderActionsContext";
 import { Icons } from "../icons/Icons";
 import type { TerminalShell } from "./types";
@@ -47,11 +48,13 @@ export function TerminalHeaderDropdown({
   const count = terminals.length;
   const title = count > 0 ? `${count} terminal${count === 1 ? "" : "s"}` : "Terminals";
 
+  const pop = useMenuPop(open);
+  const close = useCallback(() => setOpen(false), []);
+  useDropdownDismiss(open, close, menuRef, triggerRef);
+
+  // Closing keeps the last spot so the menu zooms back into the icon.
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setMenuPos(null);
-      return;
-    }
+    if (!open || !triggerRef.current) return;
     const update = () => {
       const trigger = triggerRef.current;
       if (!trigger) return;
@@ -66,37 +69,17 @@ export function TerminalHeaderDropdown({
     };
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest("[data-dropdown-keep]")) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const handleNew = () => {
     onNewTerminal();
     setOpen(false);
   };
 
   const menu =
-    open && menuPos ? (
+    pop.mounted && menuPos ? (
       <div
         ref={menuRef}
-        className="terminal-header-menu terminal-header-menu--portaled no-drag"
-        style={{ top: menuPos.top, left: menuPos.left }}
+        className={`terminal-header-menu terminal-header-menu--portaled no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
+        style={{ top: menuPos.top, left: menuPos.left, transformOrigin: popOrigin(triggerRef.current, menuPos) }}
       >
         <div className="terminal-header-shell-row">
           <Icons.Terminal />

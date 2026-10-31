@@ -95,6 +95,7 @@ export function VerseProblemsDuckyMenu({ payload, disabled, onSent }: VerseProbl
         ref={panelRef}
         className="verse-problems-ducky-dropdown verse-problems-ducky-dropdown--portaled no-drag"
         style={{ top: menuPos.top, left: menuPos.left }}
+        data-dropdown-keep
       >
         <div className="verse-problems-ducky-dropdown-header">
           <span className="verse-problems-ducky-dropdown-title">Send to ducky</span>

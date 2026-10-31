@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ConnectionStatusIcon } from "./ConnectionStatusIcon";
+import { popOrigin, useDropdownDismiss, useMenuPop } from "./DropdownPanel";
 import { DuckiesRows, badgeText, onlineCount, useAccountDuckies } from "./DuckiesDropdown";
 import { Icons } from "../icons/Icons";
 import type { ListenerStatus } from "../types/panel";
@@ -157,11 +158,13 @@ export function ConnectionStatusDropdown({
   const race = Boolean(status.listener_init_race) && !isOnline;
   const uptimeSec = useListenerUptimeSec(open) ?? status.uptime_sec;
 
+  const pop = useMenuPop(open);
+  const close = useCallback(() => setOpen(false), []);
+  useDropdownDismiss(open, close, menuRef, triggerRef);
+
+  // Closing keeps the last spot so the menu zooms back into the icon.
   useLayoutEffect(() => {
-    if (!open || !triggerRef.current) {
-      setMenuPos(null);
-      return;
-    }
+    if (!open || !triggerRef.current) return;
     const update = () => {
       const trigger = triggerRef.current;
       if (!trigger) return;
@@ -184,25 +187,6 @@ export function ConnectionStatusDropdown({
     if (isOnline) setRestartNote("");
   }, [isOnline]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (triggerRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   const duckyDetail = isWedged
     ? "Wedged — reload_listener once, then stay on workspace_*"
     : isOnline
@@ -219,11 +203,11 @@ export function ConnectionStatusDropdown({
   const title = status.status_text?.trim() || (isOnline ? "Online" : "Offline");
 
   const menu =
-    open && menuPos && !readonly ? (
+    pop.mounted && menuPos && !readonly ? (
       <div
         ref={menuRef}
-        className="connection-status-menu connection-status-menu--portaled no-drag"
-        style={{ top: menuPos.top, left: menuPos.left }}
+        className={`connection-status-menu connection-status-menu--portaled no-drag menu-pop${pop.closing ? " is-closing" : ""}`}
+        style={{ top: menuPos.top, left: menuPos.left, transformOrigin: popOrigin(triggerRef.current, menuPos) }}
         role="dialog"
         aria-label="Connection status"
       >

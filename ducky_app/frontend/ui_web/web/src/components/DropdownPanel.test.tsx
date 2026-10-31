@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DropdownPanel } from "./DropdownPanel";
+import { DropdownPanel, MENU_POP_MS, popOrigin } from "./DropdownPanel";
 
 function Menu({ zIndex, onClose = () => {} }: { zIndex?: number; onClose?: () => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
@@ -77,5 +77,42 @@ describe("DropdownPanel closes on any outside interaction", () => {
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.pointerDown(document.body);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DropdownPanel zooms out of its anchor and back into it", () => {
+  function Toggle({ open }: { open: boolean }) {
+    const anchor = useRef<HTMLButtonElement>(null);
+    return (
+      <>
+        <button ref={anchor}>open</button>
+        <DropdownPanel anchorRef={anchor} open={open} onClose={() => {}}>
+          <button>item</button>
+        </DropdownPanel>
+      </>
+    );
+  }
+
+  it("stays mounted as is-closing for the zoom back, then unmounts", () => {
+    vi.useFakeTimers();
+    // jsdom has no animations; give it the API so the close animation runs like in the app.
+    (Element.prototype as unknown as { getAnimations: () => [] }).getAnimations = () => [];
+    try {
+      const view = render(<Toggle open />);
+      expect(document.querySelector(".dropdown-panel.menu-pop")).toBeTruthy();
+      view.rerender(<Toggle open={false} />);
+      expect(document.querySelector(".dropdown-panel.menu-pop.is-closing")).toBeTruthy();
+      act(() => vi.advanceTimersByTime(MENU_POP_MS));
+      expect(document.querySelector(".dropdown-panel")).toBeNull();
+    } finally {
+      delete (Element.prototype as unknown as { getAnimations?: unknown }).getAnimations;
+      vi.useRealTimers();
+    }
+  });
+
+  it("puts the zoom's origin on the trigger's center", () => {
+    const trigger = { getBoundingClientRect: () => ({ left: 100, top: 10, width: 20, height: 20 }) } as unknown as Element;
+    expect(popOrigin(trigger, { left: 40, top: 36 })).toBe("70px -16px");
+    expect(popOrigin(null, { left: 0, top: 0 })).toBeUndefined();
   });
 });
