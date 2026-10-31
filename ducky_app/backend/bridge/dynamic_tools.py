@@ -89,6 +89,7 @@ _NEVER_EXPOSE = frozenset(
         "create_niagara_system",
         "create_prefab_from_entities",
         "create_empty_prefab",
+        "duplicate_prefab",
         "create_retarget_pose",
         "create_widget_blueprint",
         "data_table_capabilities",

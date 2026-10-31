@@ -761,6 +761,43 @@ def create_empty_prefab(prefab_name: str, folder: str = "") -> dict:
     }
 
 
+def duplicate_prefab(source_prefab: str, prefab_name: str, folder: str = "") -> dict:
+    """Copy an EntityPrefab asset with every entity and component it holds, under a new name.
+
+    A prefab made from a template (Content Drawer -> Entity Prefab -> Held Item) keeps all of
+    its components this way; create_empty_prefab / create_prefab_from_entities cannot build one.
+    folder is a content path in the PROJECT mount (omit to auto-pin under Prefabs).
+    """
+    source = (source_prefab or "").strip()
+    name = (prefab_name or "").strip()
+    if not source or not name:
+        raise ValueError("source_prefab and prefab_name must not be empty")
+    asset = unreal.EditorAssetLibrary.load_asset(source)
+    if asset is None:
+        raise ValueError(f"No asset at {source}. Find the prefab with search_assets first.")
+    if asset.get_class().get_name() != "EntityPrefab":
+        raise ValueError(f"{source} is a {asset.get_class().get_name()}, not EntityPrefab.")
+    folder = pin_project_folder(folder, default_leaf="Prefabs")
+    package_path = f"{folder.rstrip('/')}/{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(f"{package_path}.{name}"):
+        raise ValueError(f"Asset already exists: {package_path}. Use a new prefab_name.")
+    unreal.EditorAssetLibrary.make_directory(folder)
+    copy = unreal.EditorAssetLibrary.duplicate_asset(asset.get_path_name(), package_path)
+    if copy is None:
+        raise RuntimeError(f"duplicate_asset failed: {source} -> {package_path}")
+    unreal.EditorAssetLibrary.save_loaded_asset(copy, only_if_is_dirty=False)
+    invalidate()
+    return {
+        "prefab_path": copy.get_path_name(),
+        "source": asset.get_path_name(),
+        "note": (
+            "Same entities and components as the source. Open it with open_asset_in_uefn to swap "
+            "its mesh or icon in the prefab editor; place it with instantiate_prefab. Its Verse "
+            "class appears in Assets.digest after the next Verse build."
+        ),
+    }
+
+
 def create_prefab_from_entities(entity_names: List[str], prefab_name: str, folder: str = "") -> dict:
     """Package existing level entities into a new Prefab asset (they become an instance of it).
 
@@ -923,5 +960,6 @@ register("duplicate_entity")(duplicate_entity)
 register("destroy_entity")(destroy_entity)
 register("create_prefab_from_entities")(create_prefab_from_entities)
 register("create_empty_prefab")(create_empty_prefab)
+register("duplicate_prefab")(duplicate_prefab)
 register("instantiate_prefab")(instantiate_prefab)
 register("convert_actors_to_entities")(convert_actors_to_entities)

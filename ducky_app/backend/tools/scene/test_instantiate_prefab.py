@@ -30,3 +30,12 @@ def test_a_translation_it_cannot_read_says_what_it_takes(monkeypatch) -> None:
     monkeypatch.setattr(scene_graph, "send_command", lambda *a: pytest.fail("never sent"))
     out = json.loads(scene_graph.instantiate_prefab("/P/EP_Thing", translation={"a": 1}))
     assert out["ok"] is False and "{x, y, z}" in out["error"]
+
+
+def test_duplicate_prefab_sends_the_source_and_new_name(monkeypatch) -> None:
+    # Oct 30 2026 feedback: a Held Item prefab (10 template components) could not be made from
+    # MCP; copying one made in the Content Drawer keeps them all.
+    calls = []
+    monkeypatch.setattr(scene_graph, "send_command", lambda cmd, params: calls.append((cmd, params)) or {"ok": True})
+    scene_graph.duplicate_prefab("/P/Prefabs/Lantern.Lantern", "Flashlight")
+    assert calls == [("duplicate_prefab", {"source_prefab": "/P/Prefabs/Lantern.Lantern", "prefab_name": "Flashlight", "folder": ""})]

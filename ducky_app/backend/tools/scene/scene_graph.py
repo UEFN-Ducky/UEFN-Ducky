@@ -27,6 +27,20 @@ def create_empty_prefab(prefab_name: str, folder: str = "", pretty: bool = False
 
 
 @plugin_mcp_tool("uefn")
+def duplicate_prefab(source_prefab: str, prefab_name: str, folder: str = "", pretty: bool = False) -> str:
+    """Copy an EntityPrefab with all its entities and components under a new name (PROJECT mount).
+
+    The way to make more Held Item / weapon-template prefabs: a prefab made from a template in
+    the Content Drawer keeps every template component in the copy. source_prefab is its asset
+    path (search_assets finds it).
+    """
+    return tool_json(
+        send_command("duplicate_prefab", {"source_prefab": source_prefab, "prefab_name": prefab_name, "folder": folder}),
+        pretty=pretty,
+    )
+
+
+@plugin_mcp_tool("uefn")
 def create_prefab_from_entities(entity_names: list[str], prefab_name: str, folder: str = "", pretty: bool = False) -> str:
     """Package existing level entities into a new Prefab asset (they become an instance of it).
 

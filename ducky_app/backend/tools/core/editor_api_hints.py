@@ -153,7 +153,8 @@ Scene Graph entities/components/prefabs (registry tools; capability-guarded)
   check with ``get_verse_api(<component class>)``. Mangled ``__verse_0x...`` names are handled internally.
 - Prefabs: ``create_empty_prefab`` makes a blank EntityPrefab under the project mount;
   ``create_prefab_from_entities`` packages level entities into a new prefab (sources become
-  an instance). ``instantiate_prefab`` places via ``spawn_actor_from_object`` (same as
+  an instance). ``duplicate_prefab`` copies a prefab with every component (more Held Item /
+  weapon-template prefabs from one made in the Content Drawer). ``instantiate_prefab`` places via ``spawn_actor_from_object`` (same as
   Content Browser drag → EntityProxyActor); pass SpatialMath ``translation`` to place.
   Verse class lands in Assets.digest after the next Verse build. Use Verse ``P_*`` spawn
   only for runtime dynamic spawn/despawn — static always-on instances stay in the level.

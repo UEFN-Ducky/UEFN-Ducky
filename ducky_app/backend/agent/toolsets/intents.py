@@ -159,6 +159,7 @@ _SCENE_GRAPH_TOOLS = frozenset(
         "scene_graph_capabilities",
         "create_prefab_from_entities",
         "create_empty_prefab",
+        "duplicate_prefab",
         "instantiate_prefab",
         "convert_actors_to_entities",
         "get_verse_api",
