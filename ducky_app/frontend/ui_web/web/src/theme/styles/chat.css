@@ -1144,6 +1144,10 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-y: auto;
+  /* The scrollbar's room is kept even while it is hidden: when it appeared as the text first
+     reached the bottom, the narrower box re-wrapped the text onto a line the box hadn't grown
+     for yet (Oct 31 2026). */
+  scrollbar-gutter: stable;
   transition: height 0.2s ease;
   user-select: text;
   -webkit-user-select: text;

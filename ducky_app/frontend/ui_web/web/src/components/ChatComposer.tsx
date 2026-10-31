@@ -604,12 +604,27 @@ export function ChatComposer({
       if (before != null) applyTextareaHeight(before, true);
       return;
     }
-    const overflow = el.scrollHeight - el.clientHeight;
-    if (overflow <= 1) return;
-    refreshMaxTextareaHeight();
-    const current = liveTextareaHeightRef.current ?? el.offsetHeight;
-    if (heightBeforeGrowRef.current == null) heightBeforeGrowRef.current = current;
-    applyTextareaHeight(current + overflow, true);
+    const grow = () => {
+      if (inputResizingRef.current) return;
+      const overflow = el.scrollHeight - el.clientHeight;
+      if (overflow <= 1) return;
+      refreshMaxTextareaHeight();
+      const current = liveTextareaHeightRef.current ?? el.offsetHeight;
+      if (heightBeforeGrowRef.current == null) heightBeforeGrowRef.current = current;
+      // At once, never eased: during the 0.2 s height ease the browser scrolled the new line
+      // into view, then the scroll ran back as the box caught up, so the text jumped a line
+      // up and down on every wrap (Oct 31 2026). The ease stays for the handle tap and the
+      // shrink after a send.
+      el.style.transition = "none";
+      applyTextareaHeight(current + overflow, true);
+      void el.offsetHeight;
+      el.style.transition = "";
+    };
+    grow();
+    // A word typed at the very end of a full line can still wrap a moment after its key, with
+    // nothing else changing; look once more after a short pause (the next key looks anyway).
+    const later = window.setTimeout(grow, 150);
+    return () => window.clearTimeout(later);
   }, [inputText, isPopup, applyTextareaHeight, refreshMaxTextareaHeight, textareaRef]);
 
   const onInputResizeTap = useCallback(() => {

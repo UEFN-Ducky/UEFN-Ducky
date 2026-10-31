@@ -20,6 +20,8 @@ import type { EditorDropZone } from "../types/panel";
 
 import { MIN_SPLIT_PANE_SIZE, resizeSplitPair } from "../utils/editorLayoutOps";
 
+import { liveSplitFlex, splitNodeById } from "../utils/liveSplitResize";
+
 interface SplitEditorLayoutProps {
 
   layout: EditorLayoutState;
@@ -212,25 +214,83 @@ export function SplitEditorLayout({
 
 
 
-  const resizePair = useCallback(
+  // A divider drag moves its two panes straight on the page each frame and hands the layout
 
-    (splitId: string, childIndex: number, deltaPx: number, axis: "row" | "column") => {
+  // over once, on release: a layout change per frame re-rendered every pane (~27 ms a move),
 
-      const container = containerRef.current;
+  // so the divider fell behind the pointer, most of all side by side where text re-wraps. It
 
-      if (!container) return;
+  // also measures the two panes themselves: the whole editor's width made a divider between
 
-      const total = axis === "row" ? container.clientWidth : container.clientHeight;
+  // two of three columns move slower than the pointer (Oct 31 2026).
 
-      if (total <= 0) return;
+  const liveResizeRef = useRef<{ start: EditorLayoutState; next: EditorLayoutState; delta: number; pairPx: number;
 
-      onLayoutChange(resizeSplitPair(layout, splitId, childIndex, deltaPx / total, minPaneSize / total));
+    panes: HTMLElement[] } | null>(null);
 
-    },
 
-    [layout, onLayoutChange],
 
-  );
+  const startResize = useCallback((splitId: string, childIndex: number, axis: "row" | "column") => {
+
+    const handle = containerRef.current?.querySelector<HTMLElement>(
+
+      `.split-resize-handle[data-split-id="${CSS.escape(splitId)}"][data-child-index="${childIndex}"]`);
+
+    const panes = [handle?.previousElementSibling, handle?.nextElementSibling]
+
+      .filter((el): el is HTMLElement => el instanceof HTMLElement);
+
+    const pairPx = panes.reduce((sum, el) => sum + (axis === "row" ? el.offsetWidth : el.offsetHeight), 0);
+
+    liveResizeRef.current = { start: layout, next: layout, delta: 0, pairPx, panes };
+
+  }, [layout]);
+
+
+
+  const moveResize = useCallback((splitId: string, childIndex: number, deltaPx: number) => {
+
+    const live = liveResizeRef.current;
+
+    if (!live || live.pairPx <= 0 || live.panes.length !== 2) return;
+
+    live.delta += deltaPx;
+
+    const node = splitNodeById(live.start.root, splitId);
+
+    const pairWeight = node ? (node.sizes[childIndex] ?? 1) + (node.sizes[childIndex + 1] ?? 1) : 1;
+
+    live.next = resizeSplitPair(live.start, splitId, childIndex, live.delta / live.pairPx,
+
+      (minPaneSize / live.pairPx) * pairWeight);
+
+    const flex = liveSplitFlex(live.next.root, splitId, childIndex);
+
+    if (!flex) return;
+
+    live.panes[0].style.setProperty("--split-pane-flex", flex[0]);
+
+    live.panes[1].style.setProperty("--split-pane-flex", flex[1]);
+
+  }, [minPaneSize]);
+
+
+
+  const endResize = useCallback(() => {
+
+    const live = liveResizeRef.current;
+
+    liveResizeRef.current = null;
+
+    if (!live) return;
+
+    if (live.next !== live.start) onLayoutChange(live.next);
+
+    // The layout's own sizes take over once React has drawn them.
+
+    requestAnimationFrame(() => live.panes.forEach((el) => el.style.removeProperty("--split-pane-flex")));
+
+  }, [onLayoutChange]);
 
 
 
@@ -384,7 +444,11 @@ export function SplitEditorLayout({
 
                 splitAxis={node.axis}
 
-                onDrag={(delta) => resizePair(node.id, idx, delta, node.axis)}
+                onDragStart={() => startResize(node.id, idx, node.axis)}
+
+                onDrag={(delta) => moveResize(node.id, idx, delta)}
+
+                onDragEnd={endResize}
 
               />,
 

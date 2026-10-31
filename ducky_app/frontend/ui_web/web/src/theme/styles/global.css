@@ -3981,6 +3981,13 @@ body.tree-dragging .editor-tab-hover-card { display: none !important; }
   flex-direction: column;
   min-height: 28px;
   overflow: hidden;
+  /* Opening or closing a panel (Content, Duckies…) slides it instead of snapping; the others
+     give or take the room as it goes. */
+  transition: flex-grow 180ms ease;
+}
+/* Dragging a divider between panels follows the pointer exactly. */
+.sidebar-stacked-panels:has(> .split-resize-handle.is-dragging) > .sidebar-stacked-panel {
+  transition: none;
 }
 .sidebar-stacked-panel.is-collapsed {
   /* Match the stacked header's border-box height so the hidden body gets no space. */
@@ -3988,6 +3995,13 @@ body.tree-dragging .editor-tab-hover-card { display: none !important; }
 }
 .sidebar-stacked-panel.is-collapsed .sidebar-stacked-panel-body {
   visibility: hidden;
+  /* Stays visible while it slides shut. */
+  transition: visibility 0s linear 180ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-stacked-panel {
+    transition: none;
+  }
 }
 .sidebar-stacked-panel.is-dragging {
   opacity: 0.35;
