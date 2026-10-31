@@ -43,9 +43,10 @@ encrypted on disk, and syncs shared copies.
   Data. A plugin never mixes the two and needs no code for either.
   With no shared spaces on offer, Local is the only choice and the Data page says so.
 - Every plugin says whether teammates may share its data: `"data_sharing"` at the top
-  of `plugin.json`. Ask the user once before you scaffold ("Should your team share this
-  plugin's data? A team copy gives everyone the same records with changes, locks,
-  history and live editing, like source control.") and pass the answer to
+  of `plugin.json`. **Always** ask the user before you scaffold, even when it looks
+  obvious: **For my teams** or **Only on this PC** ("A team copy gives everyone the same
+  records with changes, locks, history and live editing, like source control."). Never
+  pick it yourself. Pass the answer to
   `ducky_plugin_scaffold(…, data_sharing=…)`. `ducky_plugin_validate` warns while it's
   missing, and a Store build (public or a team's private one) refuses the plugin.
   - `true`: the scope bar and Data picker offer shared spaces from the start.

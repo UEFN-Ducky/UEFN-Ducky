@@ -2959,6 +2959,14 @@ export interface TeamPluginRow {
   error: string;
   /** Docs and files in the team copy. */
   items: number;
+  conflictList?: { kind: string; key: string; name: string; by: string; reason: string; at?: number }[];
+  locks?: { unit: string; name: string; holder: string; elsewhere: string; mine: boolean; since?: number }[];
+  /** Who is in the team copy and what they do in this plugin. */
+  people?: { name: string; device: string; me: boolean; viewing: boolean; editing: string[]; live: boolean }[];
+  /** The last change applied here (the new sync only). */
+  head?: number | null;
+  /** "auto" | "manual" ("" on the older sync). */
+  mode?: string;
 }
 
 /** The Team modal's team copy: `current` is a space id, or "personal" when no plugin shows a team. */

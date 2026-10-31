@@ -33,6 +33,12 @@ free ones too. See `plugin_publishing`.
 
 ### HARD rules (do all of them or the plugin is not done)
 
+0. **Read every reference before the first file.** A new plugin, or a change that adds a
+   panel, data, a tool or a node: load `plugin_data`, `plugin_look`, `plugin_testing` and
+   `plugin_known_problems` (plus the `plugin_examples_*` that matches) in the same turn,
+   before `ducky_plugin_scaffold` or any write. Then `ducky_plugin_reference` for the live
+   `api.*` list. Never build from memory: every rule below points at one of them, and a
+   plugin that misses one is not done.
 1. **Census first.** `ducky_plugin_list` lists `drafts` and `installed`. Reuse a
    matching id; empty → `ducky_plugin_scaffold`. Never glob, shell, PowerShell,
    IDE-Read or `workspace_write_file` into AppData `ai_plugins` / `uefn_plugins`.
@@ -74,12 +80,15 @@ free ones too. See `plugin_publishing`.
    tool and when to use it, so later chats know them. Not a `ducky_skills_*` pack.
 7. **Mutators record a changeset** (`api.changeset.record(…)` with an `inverse`, slot
    `{plugin_id}://{kind}/{id}/{facet}`) so Revert can undo them.
-8. **Ready for teams.** Before you scaffold, ask once (in the same `ducky_ask_user` as
-   your other questions): "Should your team share <plugin>'s data? A team copy gives
-   everyone the same records with changes, locks, history and live editing, like source
-   control." Pass the answer as `ducky_plugin_scaffold(…, data_sharing=true|false)`
-   (it becomes `"data_sharing"` in `plugin.json`). `false` only for nothing worth sharing:
-   personal tools, browsing, AI providers, per-PC state. Then:
+8. **Ready for teams: always ask Team or Local only.** Before you scaffold, **always**
+   ask, even when the answer looks obvious and even for a small tool (in the same
+   `ducky_ask_user` as your other questions), with two options: **For my teams** ("Your
+   team shares <plugin>'s data: everyone gets the same records with changes, locks,
+   history and live editing, like source control.") and **Only on this PC** ("Its data
+   stays Local and never syncs."). Never decide it yourself, never skip the question, and
+   never start writing before the answer. Pass it as `ducky_plugin_scaffold(…,
+   data_sharing=true|false)` (it becomes `"data_sharing"` in `plugin.json`). A change to an
+   existing plugin keeps its `data_sharing`; ask again only if they want it changed. Then:
    - **Data only through `api.data`** (panels: `data.*` / `files.*`). One doc per
      record, named (`name`/`title`), so locks and conflicts are per record. Never a
      folder or file you pick, never inside the island folder.
@@ -121,9 +130,38 @@ free ones too. See `plugin_publishing`.
     node with their own image model works too). A simple bold symbol on a plain
     background reads best small. Then `ducky_plugin_set_icon(id, image_path)` with the
     path it returned or they gave: it fits the picture into a 512 px PNG.
+15. **Team-ready the moment it's finished** (`data_sharing: true`). A plugin is multiplayer
+    and source-control ready when the AI says it's done, with no second pass. Check every
+    line, the way Kanban and Island Media Kit do it (`plugin_data` has each in full):
+    - **Data:** every record through `api.data`, one doc per record with a `name`, written
+      in one call per user action (one call = one change in History). Related docs in the
+      same call. Big blobs in `put_file`, never in a doc.
+    - **Locks and conflicts:** fields people edit apart live in separate keys or `id`'d
+      objects; `data_locks` set for append-only prefixes (`"none"`) and for records that
+      must never be edited by two at once (`"required"`). Every tool catches
+      `PermissionError` (locked or read-only) and returns `{"ok": False, "error": …}`;
+      panels show that message.
+    - **Per-PC state** (last opened, window layout, diagnostics) under `data_local`.
+    - **Teammates' changes:** panels handle `plugin_scope_changed` — `synced`: merge the
+      `keys` that changed and keep the open item, selection and scroll (Kanban re-reads
+      quietly, never while a drag runs); `switched`: start over. A backend cache registers
+      `api.data.on_change`.
+    - **Live:** `data-live-id` on everything people point at (Kanban: each card, column
+      and modal); `data-live-view` on `<body>` as `<record>:<tab>` and a
+      `ducky-live-goto` handler that opens that record and tab (Island Media Kit); a
+      component the group watches together (a player, a selection, an open panel) through
+      `live.share` / `live.shared`; each person's own view (a camera, a tool) through
+      `live.setMyState` / `live.memberStates`.
+    - **Findable and undoable:** `api.search.upsert` for every record a person would search
+      by meaning; `api.changeset.record` with an `inverse` for every mutator (rule 7).
+    - **Tested:** `ducky_plugin_test` runs on a throwaway copy; add one test that writes a
+      record, simulates a `synced` push and checks the panel kept what was open.
+    With `data_sharing: false`, skip only the Live and lock lines; the rest still apply.
 
 ### Path (no forks)
 
+0. Load the references (rule 0) and ask, in one `ducky_ask_user`: Team or Local only
+   (rule 8), the icon (rule 14), and anything else only the person can decide.
 1. `ducky_plugin_list`: reuse an existing draft or id, or
 2. `ducky_plugin_scaffold(id, label, description, data_sharing)`: writes `plugin.json`
    (tools, one node, a template graph, the team answer from rule 8),
@@ -141,6 +179,8 @@ free ones too. See `plugin_publishing`.
 7. `ducky_plugin_errors(id)`: load errors, panel errors, tool and node exceptions.
 8. Iterate on the **draft** → validate → test again. Reinstall reloads it; never send
    the user to the Store for updates.
+9. Go through rule 15 line by line and `plugin_known_problems` before you say it's done;
+   your reply says whether it is for the team or Local only, and what teammates get.
 
 Uninstall: `ducky_store_remove(id, confirm=true)`. Delete the draft only:
 `ducky_plugin_delete_draft(id, confirm=true)`. Id: `^[a-z][a-z0-9_-]{0,63}$`; it

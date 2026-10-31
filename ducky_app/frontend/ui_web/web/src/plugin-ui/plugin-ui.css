@@ -687,9 +687,73 @@
   flex-direction: column;
   gap: 4px;
 }
+/* A plugin's own view in the Team modal: every section (Changes, Incoming, Conflicts, Locks,
+   History, People, Settings) as one Ledger card, its intro as the card's header row. */
 .team-detail .plugin-scope-panel {
   max-height: none;
-  border-top: 0;
+  overflow: hidden;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 10px;
+}
+.team-detail .plugin-scope-panel__body {
+  padding: 0;
+}
+.team-detail .plugin-scope-intro {
+  min-height: 46px;
+  padding: 0 14px;
+  background: var(--panel-header);
+  color: var(--muted);
+  font-size: 12px;
+}
+.team-detail .plugin-scope-row {
+  min-height: 36px;
+  padding: 4px 14px 4px 26px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border, #3a3a3a) 60%, transparent);
+  border-left: 2px solid transparent;
+  font-size: 12px;
+}
+.team-detail .plugin-scope-row:last-child {
+  border-bottom: 0;
+}
+.team-detail .plugin-scope-row:hover {
+  background: var(--tab-hover);
+}
+.team-detail .plugin-scope-row--warn,
+.team-detail .plugin-scope-row--error {
+  padding-left: 26px;
+  box-shadow: none;
+  background: var(--red-dim);
+}
+.team-detail .plugin-scope-row--warn {
+  border-left-color: var(--amber);
+}
+.team-detail .plugin-scope-row--error {
+  border-left-color: var(--red);
+}
+.team-detail .plugin-scope-row__name {
+  font-weight: 600;
+}
+.team-detail .plugin-scope-row__sub,
+.team-detail .plugin-scope-seq {
+  color: var(--muted);
+}
+.team-detail .plugin-scope-subhead {
+  padding: 10px 14px 4px;
+}
+.team-detail .plugin-scope-empty {
+  padding: 10px 14px;
+}
+.team-ledger__face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent, #6ee7b7) 30%, transparent);
+  color: var(--fg);
+  font-size: 9px;
+  font-weight: 700;
 }
 
 /* Every scope button, its menus and its tabs: one height, one look. */

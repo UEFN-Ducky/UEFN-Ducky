@@ -215,6 +215,12 @@ rules and a complete plugin, and says which of these to load next:
 | `plugin_examples_uefn` | Verse templates, UEFN listener tools, Blender and Meshy pipelines |
 | `plugin_examples_app` | Image generators, AI providers, sounds and hooks, walkthroughs |
 
+**HARD:** before any plugin file, load every plugin reference above that applies (at
+least `plugin_data`, `plugin_look`, `plugin_testing`, `plugin_known_problems`) and
+**always ask the person Team or Local only** (`ducky_ask_user`, never your own guess).
+A team plugin is multiplayer and source-control ready the moment you finish it:
+`ai_plugins` rule 15 is the checklist.
+
 The rules every plugin follows: `ducky_plugin_list` first and never glob or shell
 AppData; search `ducky_find_tools` and reuse tools with `api.call_tool`; an
 `@api.tool()` and a workflow node for every user action; the UI kit and Appearance

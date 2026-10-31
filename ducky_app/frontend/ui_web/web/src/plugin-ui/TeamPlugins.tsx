@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./plugin-ui.css";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
-import type { PluginScopeStatus, TeamPluginRow } from "../types/panel";
+import type { PluginScopeHistoryEntry, PluginScopeStatus, TeamPluginRow } from "../types/panel";
 import { FileTypeIcon } from "../verse-editor/components/FileTypeIcon";
 import { readActiveTeam, type ActiveTeam } from "./activeTeamStore";
 import { PaneCard } from "./PaneCard";
 import { PluginScopeDrawer } from "./PluginScopeDrawer";
-import { formatBytes, listText, outgoingStateText, type ScopeTab } from "./scopeBarText";
+import { conflictText, formatBytes, historyWho, listText, outgoingStateText, type ScopeTab } from "./scopeBarText";
 import { useTeamScope, type TeamScope } from "./teamScopeStore";
 
 export type TeamPluginsSection = "overview" | ScopeTab;
@@ -45,11 +45,29 @@ export function TeamPluginIcon({ row, size = 28 }: { row: TeamPluginRow; size?: 
   );
 }
 
+/** Teammates on the copy (not this PC), and the ones doing something in this plugin. */
+function others(row: TeamPluginRow) {
+  const all = (row.people ?? []).filter((p) => !p.me);
+  return { all, here: all.filter((p) => p.viewing || p.editing.length) };
+}
+
 /** What a plugin's header says on the right in this section, and whether it needs looking at. */
 function badge(row: TeamPluginRow, section: TeamPluginsSection): { text: string; tone?: "warn" | "error" } {
   if (section === "conflicts" || (section === "overview" && row.conflicts)) {
     return row.conflicts ? { text: plural(row.conflicts, "conflict"), tone: "error" } : { text: "None" };
   }
+  if (section === "locks") {
+    const locks = row.locks ?? [];
+    const theirs = locks.filter((l) => !l.mine).length;
+    return locks.length ? { text: theirs ? `${theirs} held by others` : plural(locks.length, "lock"), tone: theirs ? "warn" : undefined }
+      : { text: "None" };
+  }
+  if (section === "people") {
+    const { all, here } = others(row);
+    return { text: here.length ? `${here.length} here now` : all.length ? plural(all.length, "teammate") : "Just you" };
+  }
+  if (section === "history") return { text: typeof row.head === "number" ? `#${row.head}` : "" };
+  if (section === "settings") return { text: row.mode === "manual" ? "Manual" : row.mode ? "Auto" : "" };
   if (row.state === "offline" || row.state === "error") return { text: "Couldn't sync", tone: "error" };
   if (section === "incoming" || section === "overview") {
     if (row.blocked.length) return { text: `${row.blocked.length} failed`, tone: "warn" };
@@ -59,7 +77,7 @@ function badge(row: TeamPluginRow, section: TeamPluginsSection): { text: string;
     const out = row.pending || row.outgoing.length;
     if (out) return { text: `${out} to send` };
   }
-  return { text: section === "incoming" || section === "changes" || section === "overview" ? "Up to date" : "" };
+  return { text: "Up to date" };
 }
 
 function meta(row: TeamPluginRow, section: TeamPluginsSection): string {
@@ -67,20 +85,65 @@ function meta(row: TeamPluginRow, section: TeamPluginsSection): string {
   if ((section === "incoming" || section === "overview") && row.incoming && row.incomingBy.length) {
     parts.push(`from ${listText(row.incomingBy)}`);
   }
+  if (section === "people") {
+    const names = others(row).here.map((p) => p.name);
+    if (names.length) parts.push(listText(names));
+  }
   return parts.join(" · ");
 }
 
-/** One ledger line in a plugin's folded-open body. */
-function LedgerLine({ verb, name, detail, tone }: { verb: string; name: string; detail?: string; tone?: "blocked" }) {
+/** "3:02 PM" / "Oct 17, 3:02 PM", like the Ledger's time column. */
+function when(at?: number | null): string {
+  if (!at) return "";
+  const d = new Date(at * 1000);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** One ledger line in a plugin's folded-open body: time, verb, icon, name, detail. */
+function LedgerLine({ verb, name, detail, tone, at, icon = "file" }: {
+  verb: string; name: string; detail?: string; tone?: "blocked"; at?: number | null; icon?: "file" | "person" | "none";
+}) {
   return (
     <div className={`changes-row changes-row--file${tone ? ` changes-row--${tone}` : ""}`}>
       <div className="changes-row-line">
+        <span className="changes-row-time">{when(at)}</span>
         <span className={`changes-row-verb${tone ? " changes-row-verb--blocked" : ""}`}>{verb}</span>
-        <span className="changes-row-icon"><FileTypeIcon path={name} size={13} /></span>
+        {icon === "file" ? <span className="changes-row-icon"><FileTypeIcon path={name} size={13} /></span>
+          : icon === "person" ? <span className="changes-row-icon team-ledger__face" aria-hidden>{name.slice(0, 1).toUpperCase()}</span> : null}
         <span className="changes-row-name" title={name}>{name}</span>
         {detail ? <span className="changes-row-detail">{detail}</span> : null}
       </div>
     </div>
+  );
+}
+
+/** A plugin's last few changes, read when its group folds open (History). */
+function HistoryLines({ row }: { row: TeamPluginRow }) {
+  const [entries, setEntries] = useState<PluginScopeHistoryEntry[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    void Promise.resolve(getApi()?.plugin_scope_history?.(row.pluginId, { limit: PREVIEW }))
+      .then((res) => { if (live) setEntries(res && res.ok !== false ? res.entries ?? [] : []); })
+      .catch(() => { if (live) setEntries([]); });
+    return () => {
+      live = false;
+    };
+  }, [row.pluginId, row.head]);
+  if (entries === null) return <p className="team-ledger__empty">Loading…</p>;
+  if (!entries.length) return <p className="team-ledger__empty">No history yet.</p>;
+  return (
+    <>
+      {entries.map((e) => {
+        const n = e.count ?? e.items?.length ?? 0;
+        return (
+          <LedgerLine key={e.seq} at={e.at} verb={`#${e.seq}`} icon="none"
+            name={e.message || `${plural(n, "item")} changed`}
+            detail={[historyWho(e), e.via ? `via ${e.via}'s group` : ""].filter(Boolean).join(" · ")} />
+        );
+      })}
+    </>
   );
 }
 
@@ -115,17 +178,45 @@ function Preview({ row, section, onOpen }: { row: TeamPluginRow; section: TeamPl
         detail={[o.size ? formatBytes(o.size) : "", outgoingStateText(o.state, o.reason, o.attempts)].filter(Boolean).join(" · ")} />);
     }
   }
+  if (section === "conflicts" || section === "overview") {
+    for (const c of (row.conflictList ?? []).slice(0, PREVIEW)) {
+      lines.push(<LedgerLine key={`c:${c.kind}:${c.key}`} at={c.at} verb="conflict" tone="blocked" name={c.name}
+        detail={conflictText(c.reason, c.by)} />);
+    }
+  }
+  if (section === "locks") {
+    for (const l of (row.locks ?? []).slice(0, PREVIEW)) {
+      lines.push(<LedgerLine key={`l:${l.unit}`} at={l.since} verb="locked" name={l.name}
+        detail={l.mine ? "by you" : l.elsewhere ? `by you on ${l.elsewhere}` : `by ${l.holder || "someone"}`} />);
+    }
+  }
+  if (section === "people") {
+    for (const p of others(row).all.slice(0, PREVIEW)) {
+      const doing = p.editing.length ? `editing ${listText(p.editing.slice(0, 2))}` : p.viewing ? `in ${row.label}` : "on the team";
+      lines.push(<LedgerLine key={`p:${p.name}:${p.device}`} verb={p.live ? "live" : p.viewing || p.editing.length ? "here" : "online"}
+        icon="person" name={p.name} detail={[p.device, doing].filter(Boolean).join(" · ")} />);
+    }
+  }
+  if (section === "settings") {
+    lines.push(<LedgerLine key="mode" verb="sending" icon="none" name={row.mode === "manual" ? "Manual" : "Auto"}
+      detail={row.mode === "manual" ? "Changes go out and come in when you send or get them" : "Changes go out and come in by themselves"} />);
+    lines.push(<LedgerLine key="copy" verb="copy" icon="none" name={row.source === "tab" ? "Not on this team" : "Team copy"}
+      detail={plural(row.items, "item")} />);
+  }
   const canGet = (section === "incoming" || section === "overview") && Boolean(getApi()?.plugin_scope_pull);
   return (
     <div className="team-ledger__body">
-      {lines.length ? lines : <p className="team-ledger__empty">Nothing here for {row.label}. Open it for the rest.</p>}
+      {section === "history" ? <HistoryLines row={row} />
+        : lines.length ? lines : <p className="team-ledger__empty">Nothing here for {row.label}.</p>}
       <div className="team-ledger__actions">
         {canGet ? (
           <button type="button" className="plugin-scope-btn plugin-scope-btn--row" disabled={busy} onClick={() => void get()}>
             {row.held && row.incoming ? "Update now" : "Get now"}
           </button>
         ) : null}
-        <button type="button" className="plugin-scope-btn plugin-scope-btn--row" onClick={onOpen}>Details</button>
+        <button type="button" className="plugin-scope-btn plugin-scope-btn--row" onClick={onOpen}>
+          {section === "conflicts" && row.conflicts ? "Resolve" : "Details"}
+        </button>
       </div>
     </div>
   );
@@ -210,7 +301,10 @@ export function TeamPlugins({ team, section, onSection, openId, onOpened }: {
   const [detail, setDetail] = useState<string | null>(null);
   const heads = useRef<Record<string, HTMLDivElement | null>>({});
   const rows = pane && !team.plugins.some((p) => p.pluginId === pane.pluginId) ? [...team.plugins, paneRow(pane)] : team.plugins;
-  useEffect(() => setDetail(null), [section, team.current]);
+  useEffect(() => {
+    setDetail(null);
+    setOpen(new Set());
+  }, [section, team.current]);
   useEffect(() => {
     if (!openId || !rows.some((p) => p.pluginId === openId)) return;
     setDetail(openId);

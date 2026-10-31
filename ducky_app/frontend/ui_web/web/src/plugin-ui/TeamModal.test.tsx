@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   plugin_scope_set_all: vi.fn(),
   plugin_scope_status: vi.fn(),
   plugin_scope_pull: vi.fn(),
+  plugin_scope_history: vi.fn(),
   plugin_scope_resolve: vi.fn(),
   get_settings: vi.fn(async () => ({ team_send_delay_s: 10, team_poll_s: 60 })),
   save_agent_settings: vi.fn(async () => "Saved"),
@@ -137,6 +138,38 @@ describe("TeamModal", () => {
     fireEvent.click(within(card).getByRole("button", { name: /2 updates from Ana/ }));
     expect(screen.getByRole("button", { name: /^Incoming/ }).getAttribute("aria-current")).toBe("page");
     await waitFor(() => expect(document.querySelector(".team-slide")?.classList.contains("is-detail")).toBe(true));
+  });
+
+  it("every section is a Ledger: Conflicts, Locks, People and History fold open their own lines", async () => {
+    api.plugin_scope_history.mockResolvedValue({ ok: true, entries: [{ seq: 44, by: "iliya", at: 1, count: 1, message: "Moved Pip" }] });
+    await modal({ ...ALPHA, plugins: [row({
+      conflicts: 1, head: 44,
+      conflictList: [{ kind: "doc", key: "deck", name: "deck", by: "Ana", reason: "changed" }],
+      locks: [{ unit: "doc:pip", name: "Pip", holder: "Ana", elsewhere: "", mine: false }],
+      people: [{ name: "Ana", device: "Laptop", me: false, viewing: true, editing: ["Pip"], live: true },
+        { name: "You", device: "MainPC", me: true, viewing: true, editing: [], live: false }],
+    })] });
+    const fold = (section: RegExp) => {
+      fireEvent.click(screen.getByRole("button", { name: section }));
+      const list = screen.getByRole("list", { name: "Plugins on Alpha Studio" });
+      fireEvent.click(within(list).getByRole("button", { name: "Kanban" }));
+      return list;
+    };
+    let list = fold(/^Conflicts/);
+    expect(within(list).getByText("1 conflict")).toBeTruthy();
+    expect(within(list).getByText("deck")).toBeTruthy();
+    expect(within(list).getByRole("button", { name: "Resolve" })).toBeTruthy();
+    list = fold(/^Locks/);
+    expect(within(list).getByText("1 held by others")).toBeTruthy();
+    expect(within(list).getByText("by Ana")).toBeTruthy();
+    list = fold(/^People/);
+    expect(within(list).getByText("1 here now")).toBeTruthy();
+    expect(within(list).getByText("Laptop · editing Pip")).toBeTruthy();
+    expect(within(list).queryByText(/MainPC/)).toBeNull();
+    list = fold(/^History/);
+    expect(within(list).getByText("#44")).toBeTruthy();
+    expect(await within(list).findByText("Moved Pip")).toBeTruthy();
+    expect(api.plugin_scope_history).toHaveBeenCalledWith("kanban", { limit: 5 });
   });
 
   it("Settings has the timing sliders: their values, and a move saves the new value once it settles", async () => {

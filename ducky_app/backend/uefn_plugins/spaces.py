@@ -578,6 +578,19 @@ def team_overview(space: str = "") -> dict[str, Any]:
             "pending": int(st.get("pending") or 0), "conflicts": len(st.get("conflicts") or []),
             "blocked": list(ch.get("blocked") or []), "state": str(st.get("state") or ""),
             "error": str(st.get("error") or ""), "items": sum(int((st.get("current") or {}).get(k) or 0) for k in ("docs", "files")),
+            "conflictList": [{"kind": c.get("kind", ""), "key": c.get("key", ""), "name": c.get("name") or c.get("key", ""),
+                              "by": c.get("by", ""), "reason": c.get("reason", ""), "at": c.get("at")}
+                             for c in st.get("conflicts") or []],
+            "locks": [{"unit": lk.get("unit", ""), "name": lk.get("name") or lk.get("unit", ""),
+                       "holder": lk.get("holder") or "", "elsewhere": lk.get("elsewhere") or "",
+                       "mine": bool(lk.get("mine")), "since": lk.get("since")} for lk in st.get("locks") or []],
+            "people": [{"name": p["name"], "device": p.get("device", ""), "me": bool(p.get("me")),
+                        "viewing": bool(((p.get("plugins") or {}).get(pid) or {}).get("viewing")),
+                        "editing": [e.get("unitName", "") for e in ((p.get("plugins") or {}).get(pid) or {}).get("editing") or []],
+                        "live": bool(((p.get("plugins") or {}).get(pid) or {}).get("live"))}
+                       for p in st.get("people") or [] if isinstance(p, dict) and p.get("name")],
+            "head": int(st["head"]) if isinstance(st.get("head"), int) else None,
+            "mode": str(st.get("mode") or ""),
         })
     rows.sort(key=lambda r: (r["pluginId"] == WORKFLOW_DOCS, r["label"].casefold()))
     label = str(repo.sync_get(account, space).get("label") or "") or "Team"
