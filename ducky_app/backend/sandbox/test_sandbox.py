@@ -542,3 +542,24 @@ def test_workflow_template_verifies_in_a_sandbox():
     agent = next(n for n in tpl["graph"]["nodes"] if n["type"] == "pipeline.agent")
     assert "sandbox" in agent["config"]["prompt"] and "deploy nothing" in agent["config"]["prompt"]
     assert BUILTIN_CATEGORIES["builtin:sandbox-verify"] == "Development"
+
+
+def test_a_timed_out_run_has_what_it_left_running_stopped(monkeypatch):
+    # Oct 31 2026: a headless Edge screenshot never returned; the terminal stayed busy and the
+    # next sandbox_run failed until the agent found and closed it.
+    import types
+
+    from frontend.ui_web.terminal import session as session_module
+    from frontend.ui_web.terminal.session import TerminalSession
+
+    killed: list[int] = []
+    monkeypatch.setattr(session_module, "kill_process_tree", lambda pid: killed.append(pid))
+    shell = TerminalSession(shell="bash", cwd=".")
+    shell._timed_out = {4242: "bash.exe", 4343: "msedge.exe"}
+    shell._descendants = lambda snapshot=None: {4242: "bash.exe", 5555: "node.exe"}  # msedge already gone
+    mgr = types.SimpleNamespace(get_session=lambda sid: shell if sid == "s1" else None)
+    out = service._stop_leftovers(mgr, "s1", {"ok": False, "error": "command timed out", "output_tail": "FORM OK"})
+    assert killed == [4242]
+    assert out["stopped"] == "bash.exe" and out["output_tail"] == "FORM OK" and "timeout 60" in out["hint"]
+    assert shell.left_running() == ""
+    assert "stopped" not in service._stop_leftovers(mgr, "s1", {"ok": False, "error": "command timed out"})

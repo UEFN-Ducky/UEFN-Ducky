@@ -9,7 +9,7 @@ import {
 } from "../utils/chatScrollPeek";
 
 const MIN_TURNS = 3;
-const TICK_GAP = 7;
+const TICK_GAP = 9;
 
 interface ConversationScrollPeekProps {
   turns: ChatTurn[];
@@ -129,6 +129,29 @@ export function ConversationScrollPeek({
       ro?.disconnect();
     };
   }, [scroller]);
+
+  // A press anywhere else, or Escape, closes the card (a click on a tick opened it and the
+  // pointer leaving the strip was the only way out).
+  useEffect(() => {
+    if (!open) return;
+    const close = () => {
+      lastIndex.current = -1;
+      setOpen(false);
+    };
+    const onPress = (e: PointerEvent) => {
+      const track = rootRef.current?.querySelector("[data-chat-scroll-peek-track]");
+      if (!track?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", onPress, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPress, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
 
   const jumpTo = useCallback(
     (i: number) => {

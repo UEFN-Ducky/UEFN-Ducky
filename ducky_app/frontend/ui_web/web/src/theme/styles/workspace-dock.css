@@ -352,13 +352,14 @@ body.appearance-skin-active .workspace-dock-layout--default:not(.is-narrow) .doc
   padding-right: 6px;
 }
 
-/* The turn ticks fit in that edge (they still grow while you use them). */
+/* The turn ticks sit a little in from the pane's edge, never touching it (they still grow
+   while you use them). */
 .workspace-dock-layout--default .workspace-dock-center .chat-scroll-peek-track {
-  left: 0;
+  left: 6px;
 }
 
 .workspace-dock-layout--default .workspace-dock-center .chat-scroll-peek-tick {
-  width: calc(var(--chat-edge-inset) - 1px);
+  width: 8px;
 }
 
 .chat-view-layout .workspace-dock-layout {

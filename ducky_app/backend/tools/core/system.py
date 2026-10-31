@@ -371,9 +371,9 @@ def workspace_write_file(relative_path: str = "", *, content: str, pretty: bool 
     Goes through the shared write pipeline: atomic replace, history snapshot with
     your identity, change journal, and write-lane policy when you are a laned
     group member (an out-of-lane path is refused — do not retry it).
-    Only Content/** and .ducky/**. Never writes UEFN digests (*.digest.verse),
-    .py/.pyc (Epic ContainsPythonData), or anything outside those two roots
-    (Saved/, Intermediate/, project root). Python scratch → %LOCALAPPDATA%/UEFN-Ducky/.
+    Only Content/** and .ducky/**, or this chat's sandbox by its absolute path (sandbox_open's
+    work folder). Never writes UEFN digests (*.digest.verse), .py/.pyc (Epic
+    ContainsPythonData), or anything outside those roots (Saved/, Intermediate/, project root).
     """
     from backend.tools.core.workspace_code import path_arg
     from backend.workspace.runtime import get_writer

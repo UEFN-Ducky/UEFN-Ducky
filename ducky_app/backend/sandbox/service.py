@@ -187,6 +187,8 @@ def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: floa
     session, result = "", None
     try:
         session, result = _run_in_terminal(mgr, box, conv_id, command, shell, timeout_s, changed, expect_minutes)
+        if isinstance(result, dict) and result.get("error") == "command timed out":
+            result = _stop_leftovers(mgr, session, result)
     finally:
         if lock:
             _release_when_done(mgr, session, lock, result)
@@ -213,6 +215,20 @@ def _run_in_terminal(mgr: Any, box: Path, conv_id: str, command: str, shell: str
         if not (isinstance(result, dict) and result.get("error") == "session not found"):
             break
     return session, result
+
+
+def _stop_leftovers(mgr: Any, session_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """A sandbox_run is for commands that finish: on a timeout, end what it left running so the
+    sandbox terminal is free again. Oct 31 2026 a headless Edge screenshot never returned; its
+    work was done, but the terminal stayed busy and the next run failed until it was closed."""
+    session = mgr.get_session(session_id) if session_id else None
+    stopped = session.stop_left_running() if session is not None else ""
+    if not stopped:
+        return result
+    return {**result, "stopped": stopped,
+            "hint": f"It timed out, so what it left running ({stopped}) was stopped. Its output is above. "
+                    "For a program that may not exit by itself (a headless browser), run it as "
+                    "`timeout 60 <command>`; for one that keeps running (a server), use sandbox_launch."}
 
 
 def _source_repo(box: Path, command: str) -> str:
@@ -338,7 +354,9 @@ def launch(conv_id: str, program: str, args: list[str] | None = None, cwd: str =
         out["error"] = "It exited right away. Its output is above."
     else:
         out["next"] = ("sandbox_look(pid) shows its windows, output and listening ports (capture=true for a picture); "
-                       "browser_open('localhost:<port>') shows a web app; sandbox_http / sandbox_mcp talk to it.")
+                       "a web app: ducky_call_tool('browser_open', {'url': 'localhost:<port>'}), then browser_look / "
+                       "browser_type / browser_click / browser_capture (width=375 for a phone) the same way; "
+                       "sandbox_http / sandbox_mcp talk to it.")
     return out
 
 

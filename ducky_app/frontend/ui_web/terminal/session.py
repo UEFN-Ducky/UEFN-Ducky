@@ -622,6 +622,17 @@ class TerminalSession:
             self._timed_out = {}
         return ", ".join(left)
 
+    def stop_left_running(self) -> str:
+        """End what a timed-out agent command left running here (only processes still under
+        this shell with the same name); returns what that was, '' when nothing was left."""
+        alive = self._descendants()
+        left = sorted({name for pid, name in self._timed_out.items() if alive.get(pid) == name})
+        for pid, name in self._timed_out.items():
+            if alive.get(pid) == name:
+                kill_process_tree(int(pid))
+        self._timed_out = {}
+        return ", ".join(left)
+
     def run_command(
         self,
         command: str,

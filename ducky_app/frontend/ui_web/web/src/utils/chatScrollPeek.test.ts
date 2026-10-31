@@ -27,6 +27,12 @@ describe("chatScrollPeek", () => {
     expect(flattenPeekText("a".repeat(80), 10)).toBe(`${"a".repeat(9)}…`);
   });
 
+  it("keeps a link's or colored word's words, never its target", () => {
+    expect(flattenPeekText("Higgsfield 1.0.2 is [**published**](ducky:green) on the Store", 80))
+      .toBe("Higgsfield 1.0.2 is published on the Store");
+    expect(flattenPeekText("see ![shot](a.png) and [docs](https://x.y/z)", 80)).toBe("see shot and docs");
+  });
+
   it("pulls query + first two reply lines off a turn", () => {
     expect(peekLinesForTurn(turn("why css", "it leaked", "I traced paint"))).toEqual({
       query: "why css",

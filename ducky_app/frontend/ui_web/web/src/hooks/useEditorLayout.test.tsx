@@ -39,3 +39,33 @@ it("does not reopen tabs when closing several tabs in one update", () => {
   expect(result.current.openTabs.map((t) => t.id)).toEqual(["chat:c"]);
   expect(collectTabIds(result.current.layout)).toEqual(["chat:c"]);
 });
+
+it("opens an agent's plugin pages in a column right of the chat, stacked, without taking focus", () => {
+  // Oct 31 2026: the person wants the agent's Browser beside the chat, a second one under it.
+  const page = (id: string): EditorTab => ({ id: `plugin:${id}`, kind: "plugin", name: id });
+  const { result } = renderHook(() => useEditorLayout([tab("a")]));
+  const chatGroup = result.current.layout.focusedGroupId;
+  const groupOf = (id: string) =>
+    Object.values(result.current.layout.groups).find((g) => g.tabIds.includes(id))?.id;
+  act(() => result.current.openTabInSideColumn(page("browser")));
+  const root = result.current.layout.root;
+  expect(root.type === "split" && root.axis).toBe("row");
+  expect(result.current.layout.focusedGroupId).toBe(chatGroup);
+  expect(groupOf("plugin:browser")).not.toBe(chatGroup);
+
+  act(() => result.current.openTabInSideColumn(page("second")));
+  const right = result.current.layout.root.type === "split" ? result.current.layout.root.children[1] : null;
+  expect(right?.type === "split" && right.axis).toBe("column");
+  expect(groupOf("plugin:second")).not.toBe(groupOf("plugin:browser"));
+
+  act(() => result.current.openTabInSideColumn(page("third")));
+  act(() => result.current.openTabInSideColumn(page("fourth")));
+  expect(Object.keys(result.current.layout.groups)).toHaveLength(4);
+  expect(groupOf("plugin:fourth")).toBe(groupOf("plugin:third"));
+
+  const before = result.current.layout.groups[groupOf("plugin:browser")!];
+  act(() => result.current.openTabInSideColumn(page("browser")));
+  expect(Object.keys(result.current.layout.groups)).toHaveLength(4);
+  expect(result.current.layout.groups[before.id].activeTabId).toBe("plugin:browser");
+  expect(result.current.layout.focusedGroupId).toBe(chatGroup);
+});

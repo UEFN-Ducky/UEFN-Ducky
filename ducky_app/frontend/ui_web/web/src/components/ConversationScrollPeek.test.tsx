@@ -117,6 +117,31 @@ describe("ConversationScrollPeek", () => {
     expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeNull();
   });
 
+  it("closes the card on a press anywhere outside the ticks, or Escape", () => {
+    // Oct 31 2026: a card opened by clicking a tick stayed up until the pointer crossed the strip.
+    const scroller = document.createElement("div");
+    Object.defineProperties(scroller, {
+      scrollHeight: { value: 4000, configurable: true },
+      clientHeight: { value: 800, configurable: true },
+      scrollTop: { value: 0, writable: true, configurable: true },
+    });
+    stubScrollTo(scroller);
+    stubPeekRects();
+    mountPeek(scroller);
+    const track = document.querySelector("[data-chat-scroll-peek-track]")!;
+
+    fireEvent.click(track, { clientY: 200 });
+    expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeTruthy();
+    fireEvent.pointerDown(track, { clientY: 220 });
+    expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeNull();
+
+    fireEvent.click(track, { clientY: 200 });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(document.querySelector("[data-chat-scroll-peek-card]")).toBeNull();
+  });
+
   it("jumps the scroller when the timeline is clicked", () => {
     const scroller = document.createElement("div");
     Object.defineProperties(scroller, {

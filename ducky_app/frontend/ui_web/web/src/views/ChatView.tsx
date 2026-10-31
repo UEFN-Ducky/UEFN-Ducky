@@ -126,6 +126,9 @@ export function shouldOpenRemoteConversation(
   return !shouldSuppressRemoteChatOpen(conv);
 }
 
+/** Narrower than this, an agent's plugin page opens behind the person's tab, not beside it. */
+const SIDE_COLUMN_MIN_WIDTH = 900;
+
 function flattenChats(folders: FolderItem[], rootChats: FolderItem["chats"] = []): ChatTab[] {
   const out: ChatTab[] = [...rootChats];
   const walk = (items: FolderItem[]) => {
@@ -170,6 +173,7 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     remapTabId,
     initLayoutState,
     openTabBeside,
+    openTabInSideColumn,
     openTabInZone,
     openTabsRef,
     toggleGroupLockInLayout,
@@ -430,16 +434,24 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
       );
       const name = title || panel?.title || panelId;
       if (options?.background) {
-        // An agent's open: loaded hidden behind the person's tab (or already open somewhere).
         markBackgroundMount(id);
-        void openInBackground(id, () => openTab({ id, kind: "plugin", name }, { activate: false }));
+        const tab = { id, kind: "plugin" as const, name };
+        // An agent's open (the Browser while it works): beside the person's chat, in a column
+        // on the right that it never takes focus from; a second one stacks under the first.
+        // A narrow window keeps it hidden behind the person's tab.
+        if (window.innerWidth >= SIDE_COLUMN_MIN_WIDTH) {
+          if (openTabsRef.current.some((t) => t.id === id)) openTabInSideColumn(tab);
+          else void openInBackground(id, () => openTabInSideColumn(tab));
+          return;
+        }
+        void openInBackground(id, () => openTab(tab, { activate: false }));
         return;
       }
       void openOrFocusTab(id, () =>
         openTab({ id, kind: "plugin", name }, { activate: true }),
       );
     },
-    [openTab, openChatTab, pluginContrib.ui_panels, allChats],
+    [openTab, openTabInSideColumn, openTabsRef, openChatTab, pluginContrib.ui_panels, allChats],
   );
   useEffect(() => registerOpenPluginUiTab(openPluginUiTab), [openPluginUiTab]);
 

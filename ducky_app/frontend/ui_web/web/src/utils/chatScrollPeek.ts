@@ -4,7 +4,12 @@ const PEEK_CHARS = 72;
 
 /** Collapse markdown/whitespace so the peek card stays one line per field. */
 export function flattenPeekText(text: string, max = PEEK_CHARS): string {
-  const flat = (text || "").replace(/[`*_#>\[\]()]/g, " ").replace(/\s+/g, " ").trim();
+  // A link or a colored word ("[published](ducky:green)") keeps only its words.
+  const flat = (text || "")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_#>\[\]()]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (flat.length <= max) return flat;
   return `${flat.slice(0, Math.max(1, max - 1))}…`;
 }

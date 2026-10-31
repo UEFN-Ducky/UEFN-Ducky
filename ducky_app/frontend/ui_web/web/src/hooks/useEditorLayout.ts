@@ -33,6 +33,9 @@ interface EditorState {
   layout: EditorLayoutState;
 }
 
+/** How many agent pages stack in the right-hand column before more join the bottom one. */
+const SIDE_STACK_MAX = 3;
+
 function addOpenTab(prev: EditorTab[], tab: EditorTab): EditorTab[] {
   return prev.some((t) => t.id === tab.id) ? prev : [...prev, tab];
 }
@@ -264,6 +267,36 @@ export function useEditorLayout(initialOpenTabs: EditorTab[] = []) {
     });
   }, []);
 
+  /** Groups agents' plugin pages were opened in: one column right of the person's group. */
+  const sideColumnRef = useRef<string[]>([]);
+
+  /** An agent opened a plugin page (the Browser): show it in a column right of the person's
+   * group, never taking their focus. The next one stacks under it, up to SIDE_STACK_MAX;
+   * past that it joins the bottom one as a tab. Already on screen: it is shown in place. */
+  const openTabInSideColumn = useCallback((tab: EditorTab) => {
+    setState(({ openTabs: prev, layout: prevLayout }) => {
+      const keepFocus = prevLayout.focusedGroupId;
+      const nextTabs = addOpenTab(prev, tab);
+      const column = sideColumnRef.current.filter((id) => prevLayout.groups[id]);
+      const current = findGroupForTab(prevLayout, tab.id);
+      let next: EditorLayoutState;
+      if (current && (current !== keepFocus || prevLayout.groups[current]?.activeTabId === tab.id)) {
+        next = activateTab(prevLayout, current, tab.id);
+      } else {
+        const last = column[column.length - 1];
+        const source = current ?? keepFocus;
+        if (!last) next = splitGroupWithTab(prevLayout, keepFocus, tab.id, source, "right");
+        else if (column.length < SIDE_STACK_MAX) next = splitGroupWithTab(prevLayout, last, tab.id, source, "bottom");
+        else next = current ? moveTabToGroup(prevLayout, tab.id, current, last) : insertTabIntoGroup(prevLayout, last, tab.id, { activate: true });
+        const placed = findGroupForTab(next, tab.id);
+        if (placed && placed !== keepFocus && !column.includes(placed)) column.push(placed);
+      }
+      sideColumnRef.current = column;
+      const focusedGroupId = next.groups[keepFocus] ? keepFocus : next.focusedGroupId;
+      return { openTabs: nextTabs, layout: syncLayoutWithTabs({ ...next, focusedGroupId }, nextTabs) };
+    });
+  }, []);
+
   /** Open (or move) a tab into a group at a VS Code-style drop zone — used when
    * dragging a ducky/file from a dock rail onto the editor. */
   const openTabInZone = useCallback(
@@ -314,6 +347,7 @@ export function useEditorLayout(initialOpenTabs: EditorTab[] = []) {
     initLayoutState,
     splitFocusedGroupWithTab,
     openTabBeside,
+    openTabInSideColumn,
     openTabInZone,
     toggleGroupLockInLayout,
     collectLayoutTabIds: useCallback(() => collectTabIds(layout), [layout]),

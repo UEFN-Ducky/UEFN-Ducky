@@ -35,11 +35,32 @@ Use it for ALL scratch work: never the project, never the OS temp folder.
   `%PORT%` in args becomes that port. `files` writes settings files first. Stopped with its whole tree by `sandbox_stop` or when Ducky closes.
 - `sandbox_look(pid, capture=true)`: alive, memory, CPU, listening ports, output, windows, a picture of its window.
 - `sandbox_http(port, method, path, body)`: its own local web API. `sandbox_mcp(command|url, calls=[...])`: its MCP tools.
-- `browser_open("localhost:<port>")` shows a sandbox web app in Ducky's Browser tab;
-  `browser_capture()` saves a picture of it, `browser_read()` its text (sandbox pages only).
+- `browser_open("localhost:<port>")` shows a sandbox web app in Ducky's Browser tab, beside the chat;
+  `browser_capture()` saves a picture of it (`width=375` for a phone), `browser_read()` its text,
+  `browser_look` / `browser_type` / `browser_click` use it (sandbox pages only). They are Browser
+  plugin tools: call them as `ducky_call_tool("browser_open", {"url": "localhost:<port>"})`.
+- Files: `workspace_write_file` / `workspace_edit_file` with the sandbox's absolute path (the
+  `work` folder from `sandbox_open`). No approval card, nothing in the Changes tab.
+- A program that may not exit by itself (a headless browser, a watcher) runs as
+  `sandbox_run("timeout 60 <command>")`. On a timeout the sandbox stops what it left running.
 - `sandbox_stop(pid)`, `sandbox_clear()`: stop, or delete everything (worktrees removed too).
 
 Open every picture with `view_image(path)` and describe what you see.
+
+## Build a web page or app
+
+Hold it to the bar a good designer would, then use it like a person before you call it done:
+
+- Light and dark: colors as CSS variables, switched by `prefers-color-scheme`.
+- Real content for its subject (names, prices, hours, one small true detail), drawn SVG icons,
+  never emoji as icons. Links and buttons do what they say.
+- Forms: a message under each field it rejects, a visible result on success, nothing really sent
+  without a backend.
+- Phone: one column at 375 px, no sideways scroll. Check with `browser_capture(width=375)`.
+- Test: `browser_look` → `browser_type` each field → `browser_click` the button → `browser_look`,
+  and once with the form empty. `browser_type` says when the text didn't arrive: then ask the
+  person to bring the Browser tab forward and try once more.
+- Report what you checked with the pictures, and anything you could not check.
 
 ## Verify a change before you push
 
