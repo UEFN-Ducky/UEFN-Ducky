@@ -98,6 +98,21 @@ it("duckies_changed refreshes the library duckies", async () => {
   expect(api.list_agent_profiles).toHaveBeenCalledTimes(2);
 });
 
+it("a plugin's own change event refreshes its live rows only", async () => {
+  api.list_plugin_references.mockResolvedValue({ refs: [], events: ["kanban_changed"] });
+  ensureLoaded();
+  await waitFor(() => expect(getChatReferenceSnapshot().status).toBe("ready"));
+  vi.useFakeTimers();
+  const before = catalogCalls();
+  push.listener?.({ type: "kanban_changed" as PanelPushEvent["type"] });
+  push.listener?.({ type: "someone_elses_event" as PanelPushEvent["type"] });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1000);
+  });
+  expect(api.list_plugin_references).toHaveBeenCalledTimes(2);
+  expect(catalogCalls() - before).toBe(1);
+});
+
 it("a push before the first load refreshes nothing", () => {
   vi.useFakeTimers();
   push.listener?.({ type: "uefn_plugins_changed" });

@@ -4015,6 +4015,8 @@ export interface PanelApi {
   /** Live @ / / and search rows plugins list (`contributes.chat.reference_sources`). */
   list_plugin_references?(): Promise<{
     refs?: Array<{ trigger: "@" | "/"; id: string; label: string; group: string; href: string; description?: string; icon_url?: string; plugin_id: string }>;
+    /** Push types after which the menu asks the plugins again (`refresh_on`). */
+    events?: string[];
   }>;
   inspect_project_folder(path: string): Promise<ProjectFolderInspection>;
   set_project_root(path: string): Promise<ProjectInfo>;

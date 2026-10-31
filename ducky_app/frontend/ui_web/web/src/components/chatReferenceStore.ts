@@ -81,7 +81,9 @@ function flushRefresh() {
 }
 
 function onPush(event: { type?: unknown }) {
-  const keys = EVENT_LISTS[String(event?.type || "")];
+  const type = String(event?.type || "");
+  // A plugin's own change event (kanban_changed) refreshes its live rows.
+  const keys = EVENT_LISTS[type] ?? (snapshot.data.pluginRefs?.events?.includes(type) ? ["pluginRefs" as const] : undefined);
   if (!keys || snapshot.status !== "ready") return; // never loaded = nothing to refresh
   for (const key of keys) pending.add(key);
   // ponytail: the first push starts the 1 s timer and later ones ride along, so a steady

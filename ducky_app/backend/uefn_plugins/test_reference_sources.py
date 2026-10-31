@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from backend.uefn_plugins import host
-from backend.uefn_plugins.reference_sources import list_plugin_references
+from backend.uefn_plugins.reference_sources import list_plugin_references, refresh_events
+
+
+def test_refresh_events_come_from_the_sources(monkeypatch):
+    monkeypatch.setattr(host, "get_reference_sources", lambda: [
+        {"refresh_on": ["kanban_changed", "bad event!"], "plugin_id": "kanban"},
+        {"refresh_on": "notes_changed", "plugin_id": "notes"},
+        {"plugin_id": "quiet"},
+    ])
+    assert refresh_events() == ["kanban_changed", "notes_changed"]
 
 
 def test_plugin_items_become_references(monkeypatch):

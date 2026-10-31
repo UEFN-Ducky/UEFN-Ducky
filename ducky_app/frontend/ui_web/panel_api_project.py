@@ -31,10 +31,11 @@ class PanelApiProjectMixin:
         return listing
 
     def list_plugin_references(self) -> dict[str, Any]:
-        """Live @ / / and search rows plugins list (Kanban boards…): ``{refs: [...]}``."""
-        from backend.uefn_plugins.reference_sources import list_plugin_references
+        """Live @ / / and search rows plugins list (Kanban boards…): ``{refs, events}``;
+        ``events`` are the push types after which the menu asks again."""
+        from backend.uefn_plugins.reference_sources import list_plugin_references, refresh_events
 
-        return {"refs": list_plugin_references()}
+        return {"refs": list_plugin_references(), "events": refresh_events()}
 
     def inspect_project_folder(self, path: str) -> dict[str, Any]:
         """What Add project would open: root, kind, and any islands one level down."""

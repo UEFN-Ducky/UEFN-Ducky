@@ -1,7 +1,8 @@
 """Live @ / / rows plugins add (a Kanban plugin lists its boards).
 
 A plugin declares ``contributes.chat.reference_sources = [{id, rpc, panel, label?, group?,
-trigger?, icon?}]`` and registers that panel RPC; it returns ``[{id, label, description?,
+trigger?, icon?, refresh_on?}]`` and registers that panel RPC; ``refresh_on`` names the
+plugin's own push events (``kanban_changed``) that make Ducky ask again at once; it returns ``[{id, label, description?,
 icon?}]``. Each item becomes a reference ``plugin:<plugin>/<panel>:<item>`` that opens the
 plugin's panel on that item. Ducky asks again every time the catalog reloads.
 """
@@ -48,6 +49,19 @@ def _row(item: Any, source: dict[str, Any]) -> dict[str, Any] | None:
     if icon:
         out["icon_url"] = icon
     return out
+
+
+def refresh_events() -> list[str]:
+    """Push event types after which the menu asks the plugins again."""
+    from backend.uefn_plugins.host import get_reference_sources
+
+    out: set[str] = set()
+    for source in get_reference_sources():
+        raw = source.get("refresh_on")
+        for name in raw if isinstance(raw, list) else [raw]:
+            if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9_.:-]+", name):
+                out.add(name)
+    return sorted(out)
 
 
 def list_plugin_references() -> list[dict[str, Any]]:
