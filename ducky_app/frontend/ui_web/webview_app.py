@@ -620,6 +620,9 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         from frontend import boot_report
 
         boot_report.on_heartbeat(lambda beat: trim_if_bloated(window, beat))
+        from frontend.low_memory import on_heartbeat as warn_if_pc_full
+
+        boot_report.on_heartbeat(warn_if_pc_full)
     except Exception:
         pass
     window_holder["window"] = window

@@ -456,6 +456,16 @@ def main() -> None:
             pass
         _wait_for_previous_version()
         _hand_off_to_newest(bridge=False)
+        # Before the crash recorder starts, so a Cancel here never reads as a crash next time.
+        try:
+            from frontend.low_memory import check_at_launch
+
+            if not check_at_launch():
+                raise SystemExit(0)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
         # Before anything that could crash: send the last launch's crash report, if any,
         # and start recording this one.
         try:
