@@ -122,6 +122,17 @@ export function rankChats(query: string, chats: ChatTab[], limit = 20): QuickOpe
     .slice(0, limit);
 }
 
+/** Best label matches first; rows that don't match are dropped. */
+export function rankByLabel<T extends { label: string }>(query: string, rows: T[], limit = 6): T[] {
+  if (!query.trim()) return [];
+  return rows
+    .map((row) => ({ row, score: fuzzyScore(query, row.label) }))
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((r) => r.row);
+}
+
 export function recentTabs(openTabs: EditorTab[], limit = 12): EditorTab[] {
   return [...openTabs].reverse().slice(0, limit);
 }

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore, rankChats, rankFiles } from "./quickOpenUtils";
+import { fuzzyScore, rankByLabel, rankChats, rankFiles } from "./quickOpenUtils";
 
 describe("quick-open ranking", () => {
+  it("ranks plugins, workflows and the rest by label", () => {
+    const rows = [{ label: "Art Studio" }, { label: "Island Media Kit" }, { label: "Studio Lights" }];
+    expect(rankByLabel("studio", rows).map((r) => r.label)).toEqual(["Studio Lights", "Art Studio"]);
+    expect(rankByLabel("", rows)).toEqual([]);
+    expect(rankByLabel("s", rows, 1)).toHaveLength(1);
+  });
+
   it("finds virtual_pointer_device when typing virtual pointer", () => {
     const files = [
       { path: "Content/Verse/VirtualPointer/virtual_pointer_device.verse", name: "virtual_pointer_device.verse" },

@@ -13,6 +13,10 @@ import type { WorkspaceSearchResult } from "../../types/panel";
 import { isVerseFile } from "../../verse-editor/utils/isVerseFile";
 import { requestOpenSettings } from "../../navigation/openSettingsTab";
 import { requestOpenSidebarPanel } from "../../navigation/openSidebarPanel";
+import { requestOpenChatReference } from "../../navigation/openChatReference";
+import { DuckyAvatar } from "../ducky/DuckyAvatars";
+import { ChatRefIcon } from "../ChatRefChip";
+import { useChatReferenceCatalog } from "../useChatReferenceCatalog";
 import {
   fetchQuickOpenSymbols,
   getQuickOpenEditor,
@@ -22,6 +26,7 @@ import {
 } from "./quickOpenEditorBridge";
 import {
   flattenChats,
+  rankByLabel,
   rankChats,
   rankCommands,
   rankFiles,
@@ -31,6 +36,7 @@ import {
 } from "./quickOpenUtils";
 import {
   clearQueries,
+  DEFAULT_DESTINATIONS,
   destinationTone,
   mergeIdleResources,
   mergeIdleServices,
@@ -48,7 +54,9 @@ import {
 type PaletteRow =
   | { kind: "action"; id: string; label: string; hint?: string; mode: QuickOpenMode }
   | { kind: "file"; path: string; label: string; sub: string }
-  | { kind: "chat"; id: string; label: string; sub?: string }
+  | { kind: "chat"; id: string; label: string; sub?: string; duckyStyle?: string }
+  | { kind: "ref"; href: string; label: string; sub?: string; duckyStyle?: string; iconUrl?: string }
+  | { kind: "dest"; service: IdleService; label: string }
   | { kind: "command"; id: string; label: string }
   | { kind: "symbol"; name: string; line: number; kindNum: number; sub?: string }
   | { kind: "search-file"; path: string; label: string; sub: string; line: number; column: number }
@@ -74,8 +82,11 @@ function basename(path: string): string {
   return path.split("/").pop() || path;
 }
 
-function serviceIcon(service: IdleService): ReactNode {
-  if (service.kind === "chat") return <Icons.Duck />;
+// Composer catalog groups the search lists, in this order. Subskills stay in the composer.
+const REF_GROUPS = ["Plugins", "Workflows", "Skills", "MCP"];
+
+function serviceIcon(service: IdleService, duckyStyle?: string): ReactNode {
+  if (service.kind === "chat") return duckyStyle ? <DuckyAvatar styleId={duckyStyle} size={16} /> : <Icons.Duck />;
   if (service.id === "settings:Store") return <Icons.Puzzle />;
   if (service.id === "settings:Duckies") return <Icons.Duck />;
   if (service.id === "settings:Plans") return <Icons.Plan />;
@@ -86,11 +97,11 @@ function serviceIcon(service: IdleService): ReactNode {
   return <Icons.Gear />;
 }
 
-function resourceIcon(resource: QuickOpenResource): ReactNode {
+function resourceIcon(resource: QuickOpenResource, duckyStyle?: string): ReactNode {
   if (resource.kind === "file" && resource.path) {
-    return <FileTypeIcon path={resource.path} size={16} />;
+    return <FileTypeIcon path={resource.path} size={14} />;
   }
-  if (resource.kind === "chat") return <Icons.Duck />;
+  if (resource.kind === "chat") return duckyStyle ? <DuckyAvatar styleId={duckyStyle} size={16} /> : <Icons.Duck />;
   if (resource.kind === "project") return <Icons.Folder />;
   return <Icons.Settings />;
 }
@@ -112,6 +123,12 @@ export function QuickOpenPalette() {
   const [resources, setResources] = useState<QuickOpenResource[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const { mentions, slashRefs } = useChatReferenceCatalog(paletteOpen, "");
+  const chatStyles = useMemo(() => {
+    const out = new Map<string, string>();
+    if (handlers) for (const c of flattenChats(handlers.folders, handlers.rootChats)) if (c.duckyStyle) out.set(c.id, c.duckyStyle);
+    return out;
+  }, [handlers]);
 
   const refreshRecents = useCallback(() => {
     const chats = handlers ? flattenChats(handlers.folders, handlers.rootChats) : [];
@@ -258,12 +275,12 @@ export function QuickOpenPalette() {
 
     if (!q && effectiveMode === "ducky") {
       return [
-        { kind: "section" as const, label: "duckies" },
+        { kind: "section" as const, label: "Duckies" },
         ...allChats.slice(0, 40).map((c) => ({
           kind: "chat" as const,
           id: c.id,
           label: c.name,
-          sub: c.duckyStyle || "Ducky",
+          duckyStyle: c.duckyStyle,
         })),
       ];
     }
@@ -273,10 +290,10 @@ export function QuickOpenPalette() {
         kind: "chat" as const,
         id: c.id,
         label: c.name,
-        sub: c.duckyStyle || "Ducky",
+        duckyStyle: c.duckyStyle,
       }));
       const seen = new Set(named.map((c) => c.id));
-      const out: PaletteRow[] = named.length ? [{ kind: "section", label: "duckies" }, ...named] : [];
+      const out: PaletteRow[] = named.length ? [{ kind: "section", label: "Duckies" }, ...named] : [];
       if (searchResults) {
         const extra: PaletteRow[] = [];
         for (const cr of searchResults.chat_results) {
@@ -291,7 +308,7 @@ export function QuickOpenPalette() {
         for (const mem of searchResults.memory_results || []) {
           extra.push({ kind: "memory", name: mem.name, label: mem.name, sub: mem.preview });
         }
-        if (extra.length) out.push({ kind: "section", label: "in history & memory" }, ...extra);
+        if (extra.length) out.push({ kind: "section", label: "In history & memory" }, ...extra);
       }
       return out.slice(0, 50);
     }
@@ -302,15 +319,32 @@ export function QuickOpenPalette() {
       label: f.name,
       sub: f.path,
     }));
-    const chatRows = rankChats(q, allChats, 12).map((c) => ({
+    const chatRows = rankChats(q, allChats, 8).map((c) => ({
       kind: "chat" as const,
       id: c.id,
       label: c.name,
-      sub: c.duckyStyle || "Ducky",
+      duckyStyle: c.duckyStyle,
     }));
+    const refRow = (r: (typeof slashRefs)[number]): PaletteRow => ({
+      kind: "ref",
+      href: r.href,
+      label: r.label,
+      sub: r.description,
+      duckyStyle: r.duckyStyle,
+      iconUrl: r.iconUrl,
+    });
+    const chatIds = new Set(allChats.map((c) => c.id));
+    // Library duckies and chats from other projects; this project's chats are chatRows.
+    const otherDuckies = rankByLabel(q, mentions.filter((m) => !chatIds.has(m.id.replace(/^chat:/, "")))).map(refRow);
     const out: PaletteRow[] = [];
-    if (fileRows.length) out.push({ kind: "section", label: "files" }, ...fileRows);
-    if (chatRows.length) out.push({ kind: "section", label: "duckies" }, ...chatRows);
+    if (fileRows.length) out.push({ kind: "section", label: "Files" }, ...fileRows.slice(0, 12));
+    if (chatRows.length || otherDuckies.length) out.push({ kind: "section", label: "Duckies" }, ...chatRows, ...otherDuckies);
+    for (const group of REF_GROUPS) {
+      const hits = rankByLabel(q, slashRefs.filter((r) => r.group === group)).map(refRow);
+      if (hits.length) out.push({ kind: "section", label: group }, ...hits);
+    }
+    const dests = rankByLabel(q, DEFAULT_DESTINATIONS).map((service) => ({ kind: "dest" as const, service, label: service.label }));
+    if (dests.length) out.push({ kind: "section", label: "Settings" }, ...dests);
     if (searchResults) {
       const seenFiles = new Set(fileRows.map((f) => f.path));
       const seenChats = new Set(chatRows.map((c) => c.id));
@@ -352,9 +386,9 @@ export function QuickOpenPalette() {
       for (const mem of searchResults.memory_results || []) {
         extras.push({ kind: "memory", name: mem.name, label: mem.name, sub: mem.preview });
       }
-      if (extras.length) out.push({ kind: "section", label: "in content & ledger" }, ...extras.slice(0, 24));
+      if (extras.length) out.push({ kind: "section", label: "In content & ledger" }, ...extras.slice(0, 24));
     }
-    return out.slice(0, 60);
+    return out.slice(0, 80);
   }, [
     handlers,
     showIdleHome,
@@ -366,6 +400,8 @@ export function QuickOpenPalette() {
     symbols,
     symbolsLoading,
     editorCommands,
+    mentions,
+    slashRefs,
   ]);
 
   useEffect(() => {
@@ -481,6 +517,15 @@ export function QuickOpenPalette() {
         openChat(row.id, row.label);
         return;
       }
+      if (row.kind === "ref") {
+        requestOpenChatReference(row.href, row.label);
+        closePalette();
+        return;
+      }
+      if (row.kind === "dest") {
+        activateService(row.service);
+        return;
+      }
       if (row.kind === "command") {
         runEditorCommand(row.id);
         closePalette();
@@ -510,7 +555,7 @@ export function QuickOpenPalette() {
         openChat(row.id, row.label);
       }
     },
-    [handlers, closePalette, setMode, verseEditor, rememberQuery, query, openFile, openChat],
+    [handlers, closePalette, setMode, verseEditor, rememberQuery, query, openFile, openChat, activateService],
   );
 
   const moveIdle = (delta: number, from = selectedIndex) => {
@@ -694,7 +739,9 @@ export function QuickOpenPalette() {
                       onMouseEnter={() => setSelectedIndex(index)}
                       onClick={() => activateService(service)}
                     >
-                      <span className="quick-open-service-tile-icon">{serviceIcon(service)}</span>
+                      <span className="quick-open-service-tile-icon">
+                        {serviceIcon(service, service.chatId ? chatStyles.get(service.chatId) : undefined)}
+                      </span>
                       <span className="quick-open-service-tile-label">{service.label}</span>
                     </button>
                   );
@@ -717,7 +764,9 @@ export function QuickOpenPalette() {
                       onMouseEnter={() => setSelectedIndex(index)}
                       onClick={() => activateResource(resource)}
                     >
-                      <span className="quick-open-palette-row-icon">{resourceIcon(resource)}</span>
+                      <span className="quick-open-palette-row-icon">
+                        {resourceIcon(resource, resource.chatId ? chatStyles.get(resource.chatId) : undefined)}
+                      </span>
                       <span className="quick-open-palette-row-label">{resource.label}</span>
                       <span className="quick-open-palette-row-type">{resourceTypeLabel(resource.kind)}</span>
                     </button>
@@ -779,17 +828,34 @@ export function QuickOpenPalette() {
                     </>
                   ) : row.kind === "symbol" ? (
                     <>
-                      <span className={`quick-open-palette-row-icon codicon ${lspKindToCodicon(row.kindNum)}`} />
+                      <span className="quick-open-palette-row-icon">
+                        <span className={`codicon ${lspKindToCodicon(row.kindNum)}`} />
+                      </span>
                       <span className="quick-open-palette-row-body">
                         <span className="quick-open-palette-row-label">{row.name}</span>
                         {row.sub ? <span className="quick-open-palette-row-sub">{row.sub}</span> : null}
                       </span>
                     </>
                   ) : (
-                    <span className="quick-open-palette-row-body">
-                      <span className="quick-open-palette-row-label">{row.label}</span>
-                      {"sub" in row && row.sub ? <span className="quick-open-palette-row-sub">{row.sub}</span> : null}
-                    </span>
+                    <>
+                      <span className="quick-open-palette-row-icon">
+                        {row.kind === "ref" ? (
+                          <ChatRefIcon href={row.href} duckyStyle={row.duckyStyle} iconUrl={row.iconUrl} />
+                        ) : row.kind === "dest" ? (
+                          serviceIcon(row.service)
+                        ) : row.kind === "memory" ? (
+                          <Icons.Brain />
+                        ) : (row.kind === "chat" && row.duckyStyle) || chatStyles.get(row.id) ? (
+                          <DuckyAvatar styleId={(row.kind === "chat" && row.duckyStyle) || chatStyles.get(row.id)} size={16} />
+                        ) : (
+                          <Icons.Duck />
+                        )}
+                      </span>
+                      <span className="quick-open-palette-row-body">
+                        <span className="quick-open-palette-row-label">{row.label}</span>
+                        {"sub" in row && row.sub ? <span className="quick-open-palette-row-sub">{row.sub}</span> : null}
+                      </span>
+                    </>
                   )}
                 </button>
               );
