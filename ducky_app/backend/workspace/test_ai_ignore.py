@@ -68,6 +68,28 @@ def test_roots_are_resolved_once_per_policy(tmp_path, monkeypatch):
     assert len(resolved) < 10 * len(roots)  # each root once, plus each checked path
 
 
+def test_a_bare_attachment_name_gets_the_same_answer_without_resolving_each_project(tmp_path, monkeypatch):
+    """Oct 31 2026: 30 ms per attachment name with 54 known projects (a full resolve each)."""
+    roots = [tmp_path / f"p{i}" for i in range(30)]
+    for root in roots:
+        root.mkdir()
+    (roots[3] / "plain.txt").write_text("x")
+    os.link(roots[3] / "plain.txt", roots[4] / "linked.txt")  # two links: refused as before
+    rules = (".env", "*.key", str(roots[9] / "named.png").replace("\\", "/"))
+    policy = guard.IgnorePolicy(rules, tuple(map(str, roots)))
+
+    def full_check(name: str) -> bool:
+        return policy.denied(name) or any(policy.denied(os.path.join(r, name)) for r in policy.roots)
+
+    for name in (".env", "a.key", "named.png", "ok.png", "plain.txt", "linked.txt", "x.txt:secret", "sub/.env"):
+        assert policy.denied_hint(name) == full_check(name), name
+    resolved = []
+    real = os.path.realpath
+    monkeypatch.setattr(guard.os.path, "realpath", lambda p, *a, **k: resolved.append(p) or real(p, *a, **k))
+    assert not policy.denied_hint("shot.png")
+    assert len(resolved) <= 2  # the name itself, not once per project
+
+
 def test_symlink_and_hardlink_aliases(protected):
     alias = protected / "alias.txt"
     try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import threading
@@ -857,13 +858,20 @@ def _recent_project_roots() -> list[str]:
         from frontend.ui_web.known_projects import known_project_roots
     except Exception:
         return []
+    return list(_resolved_roots(tuple(known_project_roots()), int(time.monotonic() // 60)))
+
+
+@functools.lru_cache(maxsize=4)
+def _resolved_roots(roots: tuple[str, ...], _minute: int) -> tuple[str, ...]:
+    """Real paths of ``roots``, worked out once a minute: every AI-ignore check asked for
+    them, and each island folder costs several file-system calls to resolve."""
     out: list[str] = []
-    for item in known_project_roots():
+    for item in roots:
         try:
             out.append(os.path.realpath(os.path.abspath(item)))
         except OSError:
             continue
-    return out
+    return tuple(out)
 
 
 def _is_under_root(candidate: str, root: str) -> bool:

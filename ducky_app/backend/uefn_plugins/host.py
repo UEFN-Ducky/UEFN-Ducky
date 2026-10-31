@@ -1470,6 +1470,7 @@ def filter_uefn_plugin_tools(tools: list[Any]) -> list[Any]:
             owner.setdefault(name, pid)
     if not owner:
         return list(tools)
+    enabled: dict[str, bool] = {}  # once per plugin, not once per tool (a settings read each)
     out: list[Any] = []
     for t in tools:
         name = getattr(t, "name", None)
@@ -1480,7 +1481,9 @@ def filter_uefn_plugin_tools(tools: list[Any]) -> list[Any]:
         if name in _host_disk:
             out.append(t)
             continue
-        if not is_plugin_enabled(pid):
+        if pid not in enabled:
+            enabled[pid] = is_plugin_enabled(pid)
+        if not enabled[pid]:
             try:
                 from backend.tools.support.plugin_gate import heal_enable_store_plugin
 

@@ -864,9 +864,10 @@ def effective_allow_agent_clicks(local: bool) -> bool:
     return bool(local)
 
 
-def tool_blocked_by_caps(name: str) -> str | None:
-    """Why this tool is hidden, or None if allowed."""
-    settings = _panel_cap_settings()
+def tool_blocked_by_caps(name: str, settings: dict[str, bool] | None = None) -> str | None:
+    """Why this tool is hidden, or None if allowed. ``settings``: one _panel_cap_settings()
+    read for a whole tool list (it was read again for every tool)."""
+    settings = _panel_cap_settings() if settings is None else settings
     if not settings.get("allow_see_uefn", True) and name in _UEFN_SEE_TOOLS:
         return "See UEFN is off — re-enable in Settings → Account"
     if not settings.get("allow_see_other_programs", True) and (

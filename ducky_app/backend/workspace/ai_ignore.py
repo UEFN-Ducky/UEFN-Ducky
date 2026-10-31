@@ -108,9 +108,12 @@ class IgnorePolicy:
         # (two file-system calls each), so opening a chat with 3 pictures took 3 s.
         return tuple(dict.fromkeys(os.path.realpath(root) for root in self.roots if root))
 
-    def denied(self, path: str) -> bool:
-        lexical = os.path.abspath(os.fspath(path))
-        canonical = os.path.realpath(lexical)
+    @functools.cached_property
+    def _real_root_of(self) -> dict[str, str]:
+        return {root: os.path.realpath(os.path.abspath(root)) for root in self.roots if root}
+
+    def _named(self, lexical: str, canonical: str) -> bool:
+        """A rule names the path, by itself or relative to a project."""
         candidates = {lexical, canonical}
         for root in self._real_roots:
             for candidate in (lexical, canonical):
@@ -122,7 +125,12 @@ class IgnorePolicy:
             _drive, tail = ntpath.splitdrive(candidate)
             if ":" in tail:
                 return True
-        if any(_matches(candidate, rule) for candidate in candidates for rule in self.rules):
+        return any(_matches(candidate, rule) for candidate in candidates for rule in self.rules)
+
+    def denied(self, path: str) -> bool:
+        lexical = os.path.abspath(os.fspath(path))
+        canonical = os.path.realpath(lexical)
+        if self._named(lexical, canonical):
             return True
         # A hard link can hide the protected name. Refuse multi-linked files
         # instead of scanning and reading every filename on a volume.
@@ -135,9 +143,22 @@ class IgnorePolicy:
 
     def denied_hint(self, path: str) -> bool:
         """Attachment paths may be project-relative rather than process-relative."""
-        return self.denied(path) or (not os.path.isabs(path) and any(
-            self.denied(os.path.join(root, path)) for root in self.roots
-        ))
+        if self.denied(path):
+            return True
+        if os.path.isabs(path):
+            return False
+        bare = "/" not in path and "\\" not in path
+        for root in self.roots:
+            joined = os.path.join(root, path)
+            if bare and root in self._real_root_of and not os.path.lexists(joined):
+                # Nothing there: no link to follow and none to count, and it resolves to the
+                # project's real folder plus the name (resolving it again for each of 50+
+                # known projects took 30 ms per attachment name).
+                if self._named(os.path.abspath(joined), os.path.join(self._real_root_of[root], path)):
+                    return True
+            elif self.denied(joined):
+                return True
+        return False
 
     def require(self, path: str) -> None:
         if self.denied(path):
@@ -160,9 +181,17 @@ def current_policy() -> IgnorePolicy:
             str(default_app_data_dir() / "panel_settings.json").replace("\\", "/"),
             str(default_app_data_dir() / "ducky.db").replace("\\", "/") + "*",
         ])
-        return IgnorePolicy((*BUILTIN_RULES, *rules), tuple(roots), bool(s.ai_ignore_strict))
+        return _policy((*BUILTIN_RULES, *rules), tuple(roots), bool(s.ai_ignore_strict))
     except Exception as exc:
         raise ValueError(POLICY_UNAVAILABLE) from exc
+
+
+@functools.lru_cache(maxsize=8)
+def _policy(rules: tuple[str, ...], roots: tuple[str, ...], strict: bool) -> IgnorePolicy:
+    """One policy per set of rules and roots, so its resolved roots are worked out once.
+    A chat with pictures built a new one per attachment: every known project resolved again
+    on each load (Oct 31 2026: the top idle-CPU stack)."""
+    return IgnorePolicy(rules, roots, strict)
 
 
 # Exact audited tools only. Unknown/plugin tools, wrappers, code execution,

@@ -132,9 +132,10 @@ def _hint_for_error(tool: str, text: str) -> str:
 def apply_cloud_tool_deny(tools: list[Tool]) -> list[Tool]:
     """Drop tools the signed-in site user denied. Missing blob = no deny."""
     try:
-        from frontend.duckyos_account import cloud_denied_names, tool_blocked_by_caps
+        from frontend.duckyos_account import _panel_cap_settings, cloud_denied_names, tool_blocked_by_caps
 
         denied = cloud_denied_names()
+        caps = _panel_cap_settings()
     except Exception:
         return list(tools)
     out = []
@@ -143,7 +144,7 @@ def apply_cloud_tool_deny(tools: list[Tool]) -> list[Tool]:
         if name in denied:
             continue
         try:
-            if tool_blocked_by_caps(name):
+            if tool_blocked_by_caps(name, caps):
                 continue
         except Exception:
             pass

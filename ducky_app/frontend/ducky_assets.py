@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import json
 import re
 from dataclasses import dataclass
@@ -125,6 +126,16 @@ def default_bundled_style() -> str:
 
 
 def _bundled_ids() -> frozenset[str]:
+    try:
+        stamp = _BUNDLED_JSON.stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    return _bundled_ids_at(str(_BUNDLED_JSON), stamp)
+
+
+@functools.lru_cache(maxsize=2)
+def _bundled_ids_at(_path: str, _stamp: int) -> frozenset[str]:
+    # Every chat loaded asked for these (the team keeper reads all chats each minute).
     return frozenset(d.id for d in list_bundled_duckies())
 
 
