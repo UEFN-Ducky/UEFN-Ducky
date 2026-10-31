@@ -3,8 +3,9 @@ import { getApi } from "../hooks/usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 
-/** One row of WebView2's own menu over typed text (a spelling suggestion, Paste...). */
-export type NativeMenuRow = { id?: number; label?: string; enabled?: boolean; separator?: boolean };
+/** One row of WebView2's own menu over typed text (Paste...), or a spelling fix: `replace`
+ * is typed over the selected misspelled word. */
+export type NativeMenuRow = { id?: number; label?: string; enabled?: boolean; separator?: boolean; replace?: string };
 
 type OpenMenu = { token: string; x: number; y: number; rows: NativeMenuRow[] };
 
@@ -17,7 +18,11 @@ export function nativeMenuItems(rows: NativeMenuRow[], onPick: (commandId: numbe
           id: `cmd-${row.id}`,
           label: row.label || "",
           disabled: row.enabled === false,
-          onClick: () => onPick(Number(row.id)),
+          onClick: () => {
+            // insertText keeps undo and fires the box's input event, like typing the fix.
+            if (row.replace) document.execCommand("insertText", false, row.replace);
+            onPick(Number(row.id));
+          },
         },
   );
 }

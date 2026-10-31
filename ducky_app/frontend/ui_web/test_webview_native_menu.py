@@ -63,11 +63,11 @@ class _Core:
         pass
 
 
-def _args(editable: bool):
+def _args(editable: bool, items=SPELLING_MENU, selection: str = ""):
     deferral = SimpleNamespace(done=False)
     deferral.Complete = lambda: setattr(deferral, "done", True)
-    args = SimpleNamespace(ContextMenuTarget=SimpleNamespace(IsEditable=editable), MenuItems=SPELLING_MENU,
-                           Handled=False, SelectedCommandId=-1)
+    args = SimpleNamespace(ContextMenuTarget=SimpleNamespace(IsEditable=editable, SelectionText=selection),
+                           MenuItems=list(items), Handled=False, SelectedCommandId=-1)
     args.GetDeferral = lambda: deferral
     return args, deferral
 
@@ -79,13 +79,17 @@ def pushed(monkeypatch):
     return sent
 
 
+def _payload(pushed: list[str]) -> dict:
+    return json.loads(pushed[0].split("__uefnPanelPush(", 1)[1].rstrip(")"))
+
+
 def test_typed_text_gets_ducky_menu_and_the_pick_runs_in_webview2(pushed) -> None:
     core = _Core()
     nm.attach(core, window=None, form=None, hide_others=True)
     args, deferral = _args(editable=True)
     core.handlers[0](None, args)
     assert args.Handled is True and not deferral.done
-    payload = json.loads(pushed[0].split("__uefnPanelPush(", 1)[1].rstrip(")"))
+    payload = _payload(pushed)
     assert payload["type"] == "native_menu" and payload["items"][0]["label"] == "villager"
 
     assert nm.pick(payload["token"], 12) is True
@@ -98,9 +102,46 @@ def test_closing_the_menu_runs_nothing(pushed) -> None:
     nm.attach(core, window=None, form=None, hide_others=True)
     args, deferral = _args(editable=True)
     core.handlers[0](None, args)
-    token = json.loads(pushed[0].split("__uefnPanelPush(", 1)[1].rstrip(")"))["token"]
-    nm.pick(token, -1)
+    nm.pick(_payload(pushed)["token"], -1)
     assert args.SelectedCommandId == -1 and deferral.done
+
+
+EDIT_ONLY_MENU = [_item("Command", "Cu&t", name="cut", cid=20), _item("Command", "&Paste", name="paste", cid=21)]
+
+
+def test_windows_fixes_top_the_menu_when_webview2_sent_none(pushed, monkeypatch) -> None:
+    """Oct 31 2026: WebView2 hands over its menu before Windows' spell checker fills in the fixes,
+    so the menu showed only Cut / Copy / Paste. Ducky asks the same checker itself."""
+    added: list[str] = []
+    monkeypatch.setattr("frontend.ui_web.win_spellcheck.suggest", lambda w: ["food"] if w == "foood" else None)
+    monkeypatch.setattr("frontend.ui_web.win_spellcheck.add_word", added.append)
+    core = _Core()
+    nm.attach(core, window=None, form=None, hide_others=True)
+    args, deferral = _args(editable=True, items=EDIT_ONLY_MENU, selection=" foood ")
+    core.handlers[0](None, args)
+    payload = _payload(pushed)
+    assert [i.get("label") for i in payload["items"]] == ["food", None, "Add to dictionary", None, "Cut", "Paste"]
+    assert payload["items"][0]["replace"] == "food"
+
+    nm.pick(payload["token"], nm.ADD_WORD)
+    assert added == ["foood"] and args.SelectedCommandId == -1 and deferral.done
+
+
+def test_spelled_right_or_a_phrase_adds_no_spelling_rows(monkeypatch) -> None:
+    monkeypatch.setattr("frontend.ui_web.win_spellcheck.suggest", lambda w: None)
+    assert nm.spelling_rows("hello") == []
+    args, _ = _args(editable=True, items=EDIT_ONLY_MENU, selection="two words")
+    assert nm._misspelled_word(args) == ""
+    args, _ = _args(editable=True, selection="foood")  # WebView2 already sent its own fixes
+    assert nm._misspelled_word(args) == ""
+
+
+@pytest.mark.skipif(__import__("sys").platform != "win32", reason="Windows' spell checker")
+def test_windows_spell_checker_answers() -> None:
+    from frontend.ui_web.win_spellcheck import suggest
+
+    assert "food" in (suggest("foood") or [])
+    assert suggest("hello") is None
 
 
 def test_keep_menu_events_turns_default_menus_back_on() -> None:

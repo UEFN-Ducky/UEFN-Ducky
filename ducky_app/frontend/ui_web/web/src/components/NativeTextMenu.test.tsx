@@ -30,3 +30,19 @@ it("shows WebView2's spelling suggestions as Ducky's menu and answers with the p
   expect(pick).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("menu")).toBeNull();
 });
+
+it("types a Windows spelling fix over the selected word and runs no WebView2 command", () => {
+  const insert = vi.fn(() => true);
+  document.execCommand = insert as never;
+  render(<NativeTextMenu />);
+  act(() => {
+    window.__uefnPanelPush?.({
+      type: "native_menu",
+      token: "t2",
+      items: [{ id: -1, label: "food", replace: "food" }, { id: -2, label: "Add to dictionary" }],
+    } as never);
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "food" }));
+  expect(insert).toHaveBeenCalledWith("insertText", false, "food");
+  expect(pick).toHaveBeenCalledWith("t2", -1);
+});
