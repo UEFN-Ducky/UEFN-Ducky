@@ -7,6 +7,7 @@
 import { getApi } from "../hooks/usePanelApi";
 import type { WindowBox } from "../types/panel";
 import { rankVideoCodec } from "../components/remoteWindowMath";
+import { nativeCaptureAvailable, nativeTrack } from "./nativeCapture";
 
 export const MAX_BITRATE = 20_000_000;
 export const MAX_FPS = 60;
@@ -124,6 +125,36 @@ function pickedScreenStream(): Promise<MediaStream> {
 }
 
 /**
+ * The stream track for `hwnd`: the native capture (no prompt, any monitor) first, else the
+ * shared one-screen getDisplayMedia track cropped to it. Everything stops on abort.
+ */
+export async function watchTrack(hwnd: string, abort: AbortSignal): Promise<MediaStreamTrack> {
+  if (nativeCaptureAvailable()) {
+    const own = new AbortController();
+    abort.addEventListener("abort", () => own.abort());
+    try {
+      return await nativeTrack(hwnd, own.signal);
+    } catch (err) {
+      console.warn("[remote-view] native capture unavailable, using the screen pick", err);
+    }
+  }
+  const screen = await acquireScreenTrack();
+  let held = true;
+  const release = () => {
+    if (!held) return;
+    held = false;
+    releaseScreenTrack();
+  };
+  abort.addEventListener("abort", release);
+  try {
+    return await croppedTrack(screen, hwnd, abort);
+  } catch (err) {
+    release();
+    throw err;
+  }
+}
+
+/**
  * Crop pump. Self-contained on purpose: it is stringified into a Worker (no
  * closure access) and also runs on the main thread as a fallback. Frames are
  * re-wrapped with a visibleRect (metadata only) and dropped instead of queued
@@ -135,7 +166,8 @@ function cropPump(ctx: CropCtx) {
     const fw = frame.displayWidth;
     const fh = frame.displayHeight;
     const b = box;
-    if (!b || !(b.right && b.bottom)) return { x: 0, y: 0, width: fw, height: fh };
+    // typeof, not truthiness: a display left of the primary ends at right == 0.
+    if (!b || typeof b.right !== "number" || typeof b.bottom !== "number") return { x: 0, y: 0, width: fw, height: fh };
     const virtual = Math.abs(fw - (b.screen_w || 0)) <= 4;
     const ox = virtual ? b.screen_left || 0 : 0;
     const oy = virtual ? b.screen_top || 0 : 0;
@@ -237,7 +269,7 @@ export async function croppedTrack(screen: MediaStreamTrack, hwnd: string, abort
     if (!api?.window_box) return;
     void api.window_box(hwnd).then(
       (next) => {
-        if (next?.right) worker.post({ type: "box", box: next });
+        if (typeof next?.right === "number") worker.post({ type: "box", box: next });
       },
       () => {},
     );

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { installAgentEventBus, subscribeAgentEvents } from "../hooks/useAgentEventBus";
 import type { AgentEvent } from "../types/panel";
-import { acquireScreenTrack, croppedTrack, onScreenEnded, preferVideoCodecs, releaseScreenTrack, tuneSender } from "../remote/remoteCapture";
+import { onScreenEnded, preferVideoCodecs, tuneSender, watchTrack } from "../remote/remoteCapture";
 
 export { rankVideoCodec } from "./remoteWindowMath";
 
@@ -78,9 +78,7 @@ async function openSession(sessionId: string, hwnd: string): Promise<Session | n
   const abort = new AbortController();
   let track: MediaStreamTrack;
   try {
-    const screen = await acquireScreenTrack();
-    abort.signal.addEventListener("abort", () => releaseScreenTrack());
-    track = await croppedTrack(screen, hwnd, abort.signal);
+    track = await watchTrack(hwnd, abort.signal);
   } catch (err) {
     abort.abort();
     console.error("[remote-view] capture failed", err);

@@ -38,7 +38,7 @@ import {
   type RpcRequest,
   type StreamOpen,
 } from "./protocol";
-import { acquireScreenTrack, croppedTrack, onScreenEnded, preferVideoCodecs, releaseScreenTrack, tuneSender } from "./remoteCapture";
+import { onScreenEnded, preferVideoCodecs, tuneSender, watchTrack } from "./remoteCapture";
 
 const ICE_GATHER_MS = 2500;
 const LOCAL_WS = /^ws:\/\/(127\.0\.0\.1|localhost):\d+(\/.*)?$/;
@@ -309,20 +309,13 @@ async function startWatch(s: Session, hwnd: string): Promise<{ ok: boolean; erro
   if (!hwnd) return { ok: true, result: { watching: "" } };
   if (!s.videoSender) return { ok: false, error: "no video transceiver in offer" };
   const abort = new AbortController();
-  let held = false;
   try {
-    const screen = await acquireScreenTrack();
-    held = true;
-    const track = await croppedTrack(screen, hwnd, abort.signal);
+    const track = await watchTrack(hwnd, abort.signal);
     abort.signal.addEventListener("abort", () => {
       try {
         track.stop();
       } catch {
         /* ignore */
-      }
-      if (held) {
-        held = false;
-        releaseScreenTrack();
       }
     });
     await s.videoSender.replaceTrack(track);
@@ -332,10 +325,6 @@ async function startWatch(s: Session, hwnd: string): Promise<{ ok: boolean; erro
     return { ok: true, result: { watching: hwnd } };
   } catch (err) {
     abort.abort();
-    if (held) {
-      held = false;
-      releaseScreenTrack();
-    }
     return { ok: false, error: `capture failed: ${String((err as Error)?.message || err)}` };
   }
 }

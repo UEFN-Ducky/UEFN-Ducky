@@ -345,6 +345,20 @@ class PanelApiWindowMixin:
 
         return shield_capture_list(bool(on))
 
+    def native_capture_start(self, view: object, fps: int = 30) -> dict[str, Any]:
+        """Prompt-free capture of a window or display, any monitor (frames arrive as native-frame)."""
+        from frontend.ui_web import native_capture_bridge
+
+        try:
+            return native_capture_bridge.start(str(view or ""), int(fps or 30))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def native_capture_stop(self, view: object) -> bool:
+        from frontend.ui_web import native_capture_bridge
+
+        return native_capture_bridge.stop(str(view or ""))
+
     # ── Browser panes (native WebView2 pinned inside a window; plugin web panes) ──
 
     def browser_pane_open(self, pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:

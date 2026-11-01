@@ -34,6 +34,7 @@ class _Grabber:
         self._g.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
         self._g.SelectObject.restype = wintypes.HGDIOBJ
         self._g.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+        self._g.DeleteDC.argtypes = [wintypes.HDC]
         self._g.CreateCompatibleDC.argtypes = [wintypes.HDC]
         self._g.CreateCompatibleDC.restype = wintypes.HDC
         self._g.BitBlt.argtypes = [wintypes.HDC] + [ctypes.c_int] * 4 + [wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]

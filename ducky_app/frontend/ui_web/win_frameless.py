@@ -1288,6 +1288,10 @@ def install_pywebview_chrome_patches() -> None:
                         label=label,
                         on_browser_exit=lambda _reason: request_browser_rebuild(form),
                     )
+                    if label == "main":
+                        from frontend.ui_web import native_capture_bridge
+
+                        native_capture_bridge.register(sender.CoreWebView2, form)
                 except Exception:
                     _log.exception("WebView2 ProcessFailed hook failed")
                 # Auto-allow mic and the panel's screen capture. App UI owns Allow/Block;
