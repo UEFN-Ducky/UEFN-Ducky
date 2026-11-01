@@ -32,7 +32,7 @@ describe("classifyRichRef", () => {
     expect(classifyRichRef("workspace_write_file").kind).toBe("file");
     expect(classifyRichRef("workspace_list_verse_errors").kind).toBe("verse");
     expect(classifyRichRef("workspace_compile_verse").kind).toBe("verse");
-    expect(classifyRichRef("unreal__call_tool(ValkyrieToolset.VerseToolset, BuildAll)").kind).toBe("device");
+    expect(classifyRichRef("unreal__call_tool(VerseToolset.VerseToolset, BuildAll)").kind).toBe("device");
     expect(classifyRichRef("search_assets(search=\"<class_name>\", directory=\"/<ProjectName>\")").kind).toBe("asset");
     expect(classifyRichRef("/Game").kind).toBe("folder");
     expect(classifyRichRef("spawn_actor(asset_path=..., label=...)").kind).toBe("actor");

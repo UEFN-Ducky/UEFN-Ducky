@@ -149,7 +149,7 @@ def _execute_python_blocked(code: str) -> str | None:
         return (
             "STOP: execute_python blocked — never spawn actors from Python. "
             "FIRST ducky_get_status; when epic_mcp_online use nested Epic unreal__* "
-            "(ActorTools / DeviceToolset / ProgrammaticToolset execute_tool_script for 5+). "
+            "(EditorToolset.LevelToolset / ValkyrieFortniteToolset.DeviceToolset / ProgrammaticToolset execute_tool_script for 5+). "
             "Listener fallback: foliage_scatter, spawn_actor(..., label=..., folder=...). "
             "skill_read_subskill(\"uefn\", \"epic_mcp\")."
         )

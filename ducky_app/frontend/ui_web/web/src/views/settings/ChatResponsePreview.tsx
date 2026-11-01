@@ -23,7 +23,7 @@ Leaving \`Props\` unwired for now per the lock — **3 of 4 fields** are wired, 
 > **Loose end:** The \`Props\` array field on \`FullTest_Manager\` needs another pass once the listener settles. [/UEFN Niagara](mcp:vfx) can place the rest.
 
 ## Place and wire
-1. \`workspace_write_file\` → \`workspace_list_verse_errors\` → \`workspace_compile_verse\` → \`unreal__call_tool(ValkyrieToolset.VerseToolset, BuildAll)\` with [/Verse](skill:verse).
+1. \`workspace_write_file\` → \`workspace_list_verse_errors\` → \`workspace_compile_verse\` → \`unreal__call_tool(VerseToolset.VerseToolset, BuildAll)\` with [/Verse](skill:verse).
 2. Find it with \`search_assets(search="<class_name>", directory="/ExampleProject1")\` — project mount, not \`/Game\`.
 3. \`spawn_actor(asset_path=..., label=..., folder="Test/Ledger")\` then \`set_actor_label\` + \`set_actor_folder\`.
 4. Wire \`EntryTrigger\` with \`wire_verse_device_ref(actor_path, field, target_path)\`.

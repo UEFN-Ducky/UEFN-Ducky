@@ -175,6 +175,8 @@ def _record_epic(args: dict[str, Any], text: str, *, ok: bool) -> None:
 
     if tool == "execute_tool_script":
         script = inner.get("script") if isinstance(inner, dict) else ""
+        if isinstance(script, dict):  # 43.00: {content, language}
+            script = script.get("content")
         sidecar = {
             "program": "uefn",
             "kind": "world",

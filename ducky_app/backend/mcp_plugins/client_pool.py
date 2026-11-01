@@ -6,6 +6,7 @@ import asyncio
 import functools
 import json
 import logging
+import re
 import sys
 import threading
 import time
@@ -39,6 +40,14 @@ _POOL_RUN_TIMEOUT_SEC = 180.0
 _TOGGLE_HINT = (
     "toggle this MCP (Settings → MCPs, or ducky_mcp_set_plugin) when the task is done."
 )
+# Epic answers an unknown toolset/tool name with plain text, not an error
+# ("Toolset 'ValkyrieToolset.SessionToolset' not found" after the 43.00 renames).
+_EPIC_NOT_FOUND = re.compile(r"\b(?:Toolset|Tool) '[^']+' not found")
+
+
+def epic_not_found(text: str) -> bool:
+    """True when Epic's reply says the toolset or tool name does not exist."""
+    return bool(_EPIC_NOT_FOUND.search(str(text or "")[:500]))
 
 
 def _http_transport_kwargs(block: dict[str, Any]) -> dict[str, Any]:
@@ -629,6 +638,9 @@ class PluginClientPool:
             ) from None
         conn.last_used = time.time()
         text = _content_to_text(raw.content if hasattr(raw, "content") else raw)
+        if epic_call and epic_not_found(text):
+            # Fail loudly so callers fall back instead of treating "not found" as success.
+            raise RuntimeError(f"Epic MCP: {text.strip()[:500]}")
         note = _pressed_note(pressed)
         return f"{text}\n\n[Ducky:{note}]" if note else text
 

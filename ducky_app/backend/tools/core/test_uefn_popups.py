@@ -348,7 +348,7 @@ def _epic_pool(monkeypatch, popup_state, *, timeout: float = 180.0, ducky_left_i
 
 
 _GET_SESSION_STATUS = {
-    "toolset_name": "ValkyrieToolset.SessionToolset",
+    "toolset_name": "ValkyrieFortniteToolset.SessionToolset",
     "tool_name": "GetSessionStatus",
     "arguments": {},
 }

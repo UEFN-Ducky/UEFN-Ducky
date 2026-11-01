@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-VERSE_TOOLSET = "ValkyrieToolset.VerseToolset"
+VERSE_TOOLSET = "VerseToolset.VerseToolset"  # 43.00 name; ValkyrieToolset.VerseToolset answers "not found"
 _LIST_TIMEOUT_SEC = 10.0
 _CHANGE_TIMEOUT_SEC = 60.0
 

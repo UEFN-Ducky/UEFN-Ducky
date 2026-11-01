@@ -121,3 +121,14 @@ def test_coerce_snapshot_unwraps_return_value():
     assert out["source"] == "epic"
     assert out["count"] == 1
     assert out["nodes"][0]["label"] == "A"
+
+
+def test_coerce_snapshot_reads_printed_json():
+    printed = '{"returnValue": "{\\"nodes\\": [{\\"id\\": \\"b\\"}], \\"edges\\": []}\\n"}'
+    out = lg._coerce_snapshot(printed, source="epic")
+    assert out is not None and out["count"] == 1 and out["nodes"][0]["id"] == "b"
+
+
+def test_census_script_is_top_level_python():
+    compile(lg._EPIC_CENSUS_SCRIPT, "census", "exec")
+    assert "def run" not in lg._EPIC_CENSUS_SCRIPT

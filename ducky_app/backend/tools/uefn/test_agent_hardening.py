@@ -108,8 +108,9 @@ def test_hard_rules_place_like_content_drawer():
     assert "Place like Content Drawer" in AGENT_HARD_RULES
     assert "FortStaticMeshActor" in AGENT_HARD_RULES
     assert "BakeData" in AGENT_HARD_RULES
-    assert "add_to_scene_from_class" in AGENT_HARD_RULES
-    assert "add_to_scene_from_asset" in AGENT_HARD_RULES
+    assert "EditorToolset.LevelToolset.AddToSceneFromClass" in AGENT_HARD_RULES
+    assert "AddToSceneFromAsset" in AGENT_HARD_RULES
+    assert "SceneTools" not in AGENT_HARD_RULES  # renamed in 43.00
     # Fortnite catalog is allowed; the cook bug is placement method, not the folder.
     assert "never spawn or scatter" not in AGENT_HARD_RULES
 

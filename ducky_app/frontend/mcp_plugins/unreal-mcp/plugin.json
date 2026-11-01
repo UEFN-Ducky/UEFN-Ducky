@@ -1,7 +1,7 @@
 {
   "id": "unreal-mcp",
   "label": "UEFN MCP (Epic)",
-  "description": "Official Epic in-editor MCP nested under Ducky, in UEFN and in Unreal Editor 5.8+ (Unreal MCP). UI shows three tools: unreal__list_toolsets, unreal__describe_toolset, unreal__call_tool — then call that editor's toolsets (UEFN: Valkyrie Device/Entity/Verse/Session and editor_toolset.*). Ducky checks which editor holds the port and never sends island work to Unreal Editor, or Unreal project work to UEFN. Do not add a second IDE mcp.json entry.",
+  "description": "Official Epic in-editor MCP nested under Ducky, in UEFN and in Unreal Editor 5.8+ (Unreal MCP). UI shows three tools: unreal__list_toolsets, unreal__describe_toolset, unreal__call_tool — then call that editor's toolsets (UEFN 43.00: ValkyrieFortniteToolset Device/Session, ValkyrieToolset.EntityToolset, VerseToolset.VerseToolset and EditorToolset.*). Ducky checks which editor holds the port and never sends island work to Unreal Editor, or Unreal project work to UEFN. Do not add a second IDE mcp.json entry.",
   "kind": "catalog",
   "version": 2,
   "default_enabled": true,

@@ -12,40 +12,32 @@ from typing import Any
 
 _LISTENER_SNAPSHOT_TIMEOUT_SEC = 12.0
 _EPIC_CALL_TIMEOUT_SEC = 8.0
-_PROGRAMMATIC = "editor_toolset.toolsets.programmatic.ProgrammaticToolset"
-
-# One ProgrammaticToolset call — DeviceToolset has no list-placed, ActorTools
-# has no census. Sandbox may refuse `import unreal`; then we degrade to listener.
+# 43.00: the ProgrammaticToolset sandbox refuses `import unreal` (only copy/datetime/time/
+# math/json/re), so the census is one Epic PythonScriptingTools call printing JSON.
+_PYTHON_SCRIPTING = "editor_toolset.toolsets.python_scripting.PythonScriptingTools"
 _EPIC_CENSUS_SCRIPT = """
-def run():
-    import unreal
-    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    nodes = []
-    for actor in list(actor_sub.get_all_level_actors() or []):
-        try:
-            cls = actor.get_class().get_name() if actor.get_class() else ""
-        except Exception:
-            continue
-        cl = (cls or "").lower()
-        if "device" not in cl and "versedevice" not in cl:
-            continue
-        path = str(actor.get_path_name())
-        try:
-            label = str(actor.get_actor_label())
-        except Exception:
-            label = path.rsplit(".", 1)[-1]
-        kind = "verse_script" if "versedevice" in cl else "creative_device"
-        nodes.append({
-            "id": path,
-            "label": label,
-            "class": cls,
-            "kind": kind,
-            "path": path,
-            "placed": True,
-        })
-        if len(nodes) >= 100:
-            break
-    return {"nodes": nodes, "edges": [], "count": len(nodes), "source": "epic"}
+import json
+import unreal
+actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+nodes = []
+for actor in list(actor_sub.get_all_level_actors() or []):
+    try:
+        cls = actor.get_class().get_name() if actor.get_class() else ""
+    except Exception:
+        continue
+    cl = (cls or "").lower()
+    if "device" not in cl and "versedevice" not in cl:
+        continue
+    path = str(actor.get_path_name())
+    try:
+        label = str(actor.get_actor_label())
+    except Exception:
+        label = path.rsplit(".", 1)[-1]
+    kind = "verse_script" if "versedevice" in cl else "creative_device"
+    nodes.append({"id": path, "label": label, "class": cls, "kind": kind, "path": path, "placed": True})
+    if len(nodes) >= 100:
+        break
+print(json.dumps({"nodes": nodes, "edges": [], "count": len(nodes), "source": "epic"}))
 """
 
 
@@ -97,6 +89,8 @@ def _coerce_snapshot(raw: Any, *, source: str) -> dict[str, Any] | None:
                 return None
     if not isinstance(raw, dict):
         return None
+    if isinstance(raw.get("returnValue"), str):  # execute_python: printed JSON
+        return _coerce_snapshot(raw["returnValue"], source=source)
     if isinstance(raw.get("returnValue"), dict):
         raw = raw["returnValue"]
     nested = raw.get("result")
@@ -113,11 +107,11 @@ def _coerce_snapshot(raw: Any, *, source: str) -> dict[str, Any] | None:
 
 
 def try_epic_snapshot() -> dict[str, Any] | None:
-    """UEFN MCP census. One ProgrammaticToolset script — never execute_python."""
+    """UEFN MCP census: one Epic PythonScriptingTools call (never the listener's execute_python)."""
     text = _call_epic_tool(
-        _PROGRAMMATIC,
-        "execute_tool_script",
-        {"script": _EPIC_CENSUS_SCRIPT},
+        _PYTHON_SCRIPTING,
+        "execute_python",
+        {"script": {"content": _EPIC_CENSUS_SCRIPT, "language": "Python"}},
     )
     return _coerce_snapshot(text, source="epic")
 

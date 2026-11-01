@@ -46,7 +46,7 @@ def test_place_device_from_bridge_is_journaled(env) -> None:
     plugin_gate._record_bridge_tool(
         "unreal__call_tool",
         _req("unreal__call_tool", {
-            "toolset_name": "ValkyrieToolset.DeviceToolset",
+            "toolset_name": "ValkyrieFortniteToolset.DeviceToolset",
             "tool_name": "PlaceDevice",
             "arguments": {"label": "Trigger_V2"},
         }),

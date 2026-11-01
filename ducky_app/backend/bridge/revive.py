@@ -14,7 +14,9 @@ import time
 from typing import Any
 
 _PYTHON_TOOLSET = "ValkyrieToolset.ValkyriePythonToolset"
-_PROGRAMMATIC_TOOLSET = "editor_toolset.toolsets.programmatic.ProgrammaticToolset"
+# 43.00: ProgrammaticToolset scripts may only import copy/datetime/time/math/json/re, so the
+# boot runs through Epic's unsandboxed Python tool (script is a {content, language} block).
+_PYTHON_SCRIPTING_TOOLSET = "editor_toolset.toolsets.python_scripting.PythonScriptingTools"
 _EPIC_CALL_TIMEOUT_SEC = 20.0
 # A cold or Verse-building editor can take well past 20 s to answer health after the
 # bootstrap (no_health); polled each second, so a quick start still returns at once.
@@ -53,7 +55,7 @@ def _call_epic_tool(tool_name: str, toolset: str = _PYTHON_TOOLSET, arguments: d
 
 def _python_enabled_in_uefn() -> bool | None:
     """True / False from Epic MCP, None when it could not say."""
-    text = _call_epic_tool("IsPythonEnabledInUEFN")
+    text = _call_epic_tool("IsPythonReadyForMainProject")  # 43.00 name (was IsPythonEnabledInUEFN)
     m = re.search(r'returnValue\\?"\s*:\s*(true|false)', text)
     return None if m is None else m.group(1) == "true"
 
@@ -67,16 +69,15 @@ def _port_held_by_uefn(port: int) -> bool:
 
 
 def _boot_script(listener_dir: str) -> str:
-    """What launch_listener.py does, as a ProgrammaticToolset script."""
+    """What launch_listener.py does, as top-level code for PythonScriptingTools.execute_python."""
     return (
-        "def run():\n"
-        "    import sys\n"
-        f"    d = {listener_dir!r}\n"
-        "    if d not in sys.path:\n"
-        "        sys.path.insert(0, d)\n"
-        "    from listener.bootstrap import run as boot\n"
-        "    boot()\n"
-        "    return 'started'\n"
+        "import sys\n"
+        f"d = {listener_dir!r}\n"
+        "if d not in sys.path:\n"
+        "    sys.path.insert(0, d)\n"
+        "from listener.bootstrap import run as boot\n"
+        "boot()\n"
+        "print('started')\n"
     )
 
 
@@ -90,7 +91,8 @@ def _start_listener_in_editor(port: int) -> str:
     from frontend.deploy import appdata_listener_dir
 
     try:
-        _call_epic_tool("execute_tool_script", _PROGRAMMATIC_TOOLSET, {"script": _boot_script(str(appdata_listener_dir()))})
+        script = {"content": _boot_script(str(appdata_listener_dir())), "language": "Python"}
+        _call_epic_tool("execute_python", _PYTHON_SCRIPTING_TOOLSET, {"script": script})
     except Exception as exc:
         return f"refused: {type(exc).__name__}"
     deadline = time.monotonic() + _BOOT_WAIT_SEC
@@ -163,7 +165,7 @@ def revive_listener(port: int) -> dict[str, Any]:
                 "step": why.split(":")[0],
                 "message": f"Python is on in UEFN but the listener did not start ({why}). " + _LAUNCH_HINT,
             }
-        _call_epic_tool("EnablePythonInUEFN")
+        _call_epic_tool("EnablePythonForMainProject")  # 43.00 name (was EnablePythonInUEFN)
     except Exception as exc:
         return {"ok": False, "action": "failed", "message": f"Could not enable Python in UEFN: {exc}. " + _LAUNCH_HINT}
     return {

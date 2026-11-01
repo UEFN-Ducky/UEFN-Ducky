@@ -1,4 +1,4 @@
-"""Split Epic set_properties writes that Unreal's array differ refuses.
+"""Split Epic SetProperties (42.x: set_properties) writes that Unreal's array differ refuses.
 
 SetObjectProperties raises
 ``ArrayAdd: elements changed alongside the size change; insertion points are ambiguous``
@@ -18,16 +18,17 @@ from typing import Any
 _MARKER = "# ducky:instance-array-clear\n"
 _INSTANCE_ARRAYS = frozenset({"perinstancesmdata", "perinstancesmcustomdata"})
 
+# 43.00 sandbox: imports only at top level, execute_tool is async.
 _PREAMBLE = (
     _MARKER
-    + """
+    + """import json as _json
+
 _ducky_orig_execute_tool = execute_tool
 
 def _ducky_instance_array(key):
     return str(key).replace("_", "").lower() in ("perinstancesmdata", "perinstancesmcustomdata")
 
-def execute_tool(name, args=None, *a, **k):
-    import json as _json
+async def execute_tool(name, args=None, *a, **k):
     def _loads(v):
         if not isinstance(v, str):
             return v, False
@@ -36,23 +37,23 @@ def execute_tool(name, args=None, *a, **k):
         except Exception:
             return None, True
     parsed, encoded = _loads(args)
-    if not isinstance(parsed, dict) or "set_properties" not in str(name):
-        return _ducky_orig_execute_tool(name, args, *a, **k)
+    if not isinstance(parsed, dict) or "setproperties" not in str(name).replace("_", "").lower():
+        return await _ducky_orig_execute_tool(name, args, *a, **k)
     values, values_encoded = _loads(parsed.get("values"))
     if not isinstance(values, dict):
-        return _ducky_orig_execute_tool(name, args, *a, **k)
+        return await _ducky_orig_execute_tool(name, args, *a, **k)
     keys = [key for key, val in values.items() if _ducky_instance_array(key) and isinstance(val, list) and val]
     if not keys:
-        return _ducky_orig_execute_tool(name, args, *a, **k)
+        return await _ducky_orig_execute_tool(name, args, *a, **k)
     clear = dict(parsed)
     empty = {key: [] for key in keys}
     clear["values"] = _json.dumps(empty) if values_encoded else empty
     payload = _json.dumps(clear) if encoded else clear
-    cleared = _ducky_orig_execute_tool(name, payload, *a, **k)
+    cleared = await _ducky_orig_execute_tool(name, payload, *a, **k)
     text = cleared if isinstance(cleared, str) else str(cleared)
     if "could not be set" in text or "ArrayAdd" in text:
         return cleared
-    return _ducky_orig_execute_tool(name, args, *a, **k)
+    return await _ducky_orig_execute_tool(name, args, *a, **k)
 """
 )
 
@@ -71,7 +72,8 @@ def _loads_maybe(value: Any) -> tuple[Any, bool]:
 
 
 def _leaf(tool_name: str) -> str:
-    return tool_name.rsplit(".", 1)[-1]
+    """Last name part, case and underscores folded (43.00 SetProperties == 42.x set_properties)."""
+    return tool_name.rsplit(".", 1)[-1].replace("_", "").lower()
 
 
 def guard_instance_array_script(script: str) -> str:
@@ -79,7 +81,7 @@ def guard_instance_array_script(script: str) -> str:
     if _MARKER in script:
         return script
     flat = script.replace("_", "").lower()
-    if "set_properties" not in script or "perinstancesmdata" not in flat:
+    if "setproperties" not in flat or "perinstancesmdata" not in flat:
         return script
     return _PREAMBLE + script
 
@@ -122,19 +124,21 @@ def expand_epic_call(mcp_tool: str, args: dict[str, Any]) -> list[dict[str, Any]
     inner, inner_encoded = _loads_maybe(args.get("arguments"))
     if not isinstance(inner, dict):
         return [args]
-    if leaf == "execute_tool_script":
+    if leaf == "executetoolscript":
         script = inner.get("script")
-        if not isinstance(script, str):
+        block = script if isinstance(script, dict) else None  # 43.00: {content, language}
+        source = block.get("content") if block else script
+        if not isinstance(source, str):
             return [args]
-        guarded = guard_instance_array_script(script)
-        if guarded == script:
+        guarded = guard_instance_array_script(source)
+        if guarded == source:
             return [args]
         copied_inner = dict(inner)
-        copied_inner["script"] = guarded
+        copied_inner["script"] = {**block, "content": guarded} if block else guarded
         copied = dict(args)
         copied["arguments"] = json.dumps(copied_inner) if inner_encoded else copied_inner
         return [copied]
-    if leaf != "set_properties":
+    if leaf != "setproperties":
         return [args]
     cleared = _clear_set_properties_arguments(inner)
     if cleared is None:

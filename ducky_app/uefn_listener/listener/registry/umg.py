@@ -54,9 +54,9 @@ _HARD_LIST_CAP = 200
 # ToolsetRegistry names are "<Class>.<Class>" (verified live). Short "UMGToolSet"
 # alone returns "Toolset not found". NEVER dump get_*_json_schema — crashes UEFN.
 _UMG_TOOLSET = "UMGToolSet.UMGToolSet"
-# Epic's Python toolsets register under their module path (UEFN 42.30, Oct 16 2026);
-# "ObjectTools.ObjectTools" is not a toolset. Arguments: instance + values (a JSON string).
-_OBJECT_TOOLSET = "editor_toolset.toolsets.object.ObjectTools"
+# Renamed in 43.00 from editor_toolset.toolsets.object.ObjectTools (snake_case tools).
+# Arguments: instance + values (a JSON string).
+_OBJECT_TOOLSET = "EditorToolset.ObjectToolset"
 _KNOWN_UMG_TOOLS = (
     "GetWidgets",
     "GetWidgetDescription",
@@ -72,9 +72,9 @@ _KNOWN_UMG_TOOLS = (
 )
 
 _KNOWN_OBJECT_TOOLS = (
-    "list_properties",
-    "get_properties",
-    "set_properties",
+    "ListProperties",
+    "GetProperties",
+    "SetProperties",
 )
 
 # The palette "Text Block" (ListWidgetClasses). AddWidget whitelists it but cannot
@@ -567,16 +567,25 @@ def _json_value(raw: Any) -> Any:
 
 
 def list_object_properties(ref_path: str) -> dict:
-    """{name: value format} for any object (ObjectTools.list_properties, cut down)."""
-    listed = _execute_tool(_OBJECT_TOOLSET, "list_properties", {"instance": {"refPath": ref_path}})
-    return property_shapes(_json_value(listed.get("result")))
+    """{name: value format} for any object (ObjectToolset.ListProperties, cut down)."""
+    # 43.00 lists bare names by default; bGenerateSchema gives the old {name: schema} map
+    # as a JSON string under returnValue (verified live on UEFN 43.00, Nov 1 2026).
+    listed = _execute_tool(
+        _OBJECT_TOOLSET,
+        "ListProperties",
+        {"instance": {"refPath": ref_path}, "bGenerateSchema": True, "maxDepth": 1},
+    )
+    result = _json_value(listed.get("result"))
+    if isinstance(result, dict) and "returnValue" in result:
+        result = _json_value(result["returnValue"])
+    return property_shapes(result)
 
 
 def set_object_properties(ref_path: str, values: dict) -> dict:
-    """ObjectTools.set_properties: import-text values, so FText takes NSLOCTEXT(…) strings."""
+    """ObjectToolset.SetProperties: import-text values, so FText takes NSLOCTEXT(…) strings."""
     return _execute_tool(
         _OBJECT_TOOLSET,
-        "set_properties",
+        "SetProperties",
         {"instance": {"refPath": ref_path}, "values": json.dumps(values)},
     )
 

@@ -14,10 +14,12 @@ def epic(monkeypatch):
 
     def call(tool_name: str, toolset: str = "", arguments=None) -> str:
         calls.append(tool_name)
-        if tool_name == "execute_tool_script":
+        if tool_name == "execute_python":
             if state.get("script_refused"):
                 raise RuntimeError("import refused")
-            state["script"] = (arguments or {}).get("script", "")
+            block = (arguments or {}).get("script") or {}
+            assert block.get("language") == "Python"
+            state["script"] = block.get("content", "")
             state["started"] = state.get("boots", False)
             return "started"
         return '{"result":"{\\"returnValue\\":%s}"}' % state["python"]
@@ -46,7 +48,7 @@ def test_python_off_gets_enabled(epic) -> None:
     calls, _ = epic
     out = revive.revive_listener(4200)
     assert out["action"] == "python_enabled" and out["ok"]
-    assert calls == ["IsPythonEnabledInUEFN", "EnablePythonInUEFN"]
+    assert calls == ["IsPythonReadyForMainProject", "EnablePythonForMainProject"]
 
 
 def test_python_on_does_not_enable_again(epic) -> None:
@@ -54,7 +56,7 @@ def test_python_on_does_not_enable_again(epic) -> None:
     state["python"] = "true"
     out = revive.revive_listener(4200)
     assert out["action"] == "python_already_on" and not out["ok"]
-    assert calls == ["IsPythonEnabledInUEFN", "execute_tool_script"]
+    assert calls == ["IsPythonReadyForMainProject", "execute_python"]
 
 
 def test_python_on_starts_the_listener_in_the_open_editor(epic) -> None:
@@ -63,8 +65,9 @@ def test_python_on_starts_the_listener_in_the_open_editor(epic) -> None:
     state["boots"] = True
     out = revive.revive_listener(4200)
     assert out["action"] == "listener_started" and out["ok"]
-    assert calls == ["IsPythonEnabledInUEFN", "execute_tool_script"]
+    assert calls == ["IsPythonReadyForMainProject", "execute_python"]
     assert "from listener.bootstrap import run as boot" in state["script"] and "UEFN-Ducky" in state["script"]
+    compile(state["script"], "boot", "exec")  # top-level code, no def run()
 
 
 def test_python_on_script_refused_names_it(epic) -> None:
@@ -107,7 +110,7 @@ def test_python_on_with_dead_socket_says_restart(epic) -> None:
     state["held"] = True
     out = revive.revive_listener(4200)
     assert out["action"] == "stale_socket" and not out["ok"]
-    assert calls == ["IsPythonEnabledInUEFN"]
+    assert calls == ["IsPythonReadyForMainProject"]
 
 
 def test_uefn_closed(epic) -> None:
@@ -164,8 +167,8 @@ def test_dead_epic_session_is_dropped_and_tried_once_more(monkeypatch) -> None:
 
     monkeypatch.setattr(client_pool, "get_plugin_pool", lambda: _Pool())
     monkeypatch.setattr(revive, "_SESSION_RETRY_SEC", 0)
-    assert revive._call_epic_tool("EnablePythonInUEFN") == "ok"
-    assert tries == ["EnablePythonInUEFN", "EnablePythonInUEFN"] and len(forgot) == 1
+    assert revive._call_epic_tool("EnablePythonForMainProject") == "ok"
+    assert tries == ["EnablePythonForMainProject", "EnablePythonForMainProject"] and len(forgot) == 1
 
 
 def test_auto_revive_error_code_names_the_step(monkeypatch) -> None:

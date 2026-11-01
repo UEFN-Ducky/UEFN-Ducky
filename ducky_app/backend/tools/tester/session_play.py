@@ -6,8 +6,9 @@ import json
 import time
 from typing import Any
 
-_SESSION = "ValkyrieToolset.SessionToolset"
-_DEVICE = "ValkyrieToolset.DeviceToolset"
+# 43.00 moved these from ValkyrieToolset.* (the old names answer "not found").
+_SESSION = "ValkyrieFortniteToolset.SessionToolset"
+_DEVICE = "ValkyrieFortniteToolset.DeviceToolset"
 _WAIT_CAP_S = 120.0
 
 

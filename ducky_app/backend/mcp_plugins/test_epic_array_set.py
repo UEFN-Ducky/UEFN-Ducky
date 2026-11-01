@@ -1,14 +1,15 @@
-"""PerInstanceSMData must be cleared before a size-changing set_properties."""
+"""PerInstanceSMData must be cleared before a size-changing SetProperties."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 from backend.mcp_plugins.epic_array_set import expand_epic_call, guard_instance_array_script
 
 _SEAT = {
-    "toolset_name": "editor_toolset.toolsets.object.ObjectTools",
-    "tool_name": "set_properties",
+    "toolset_name": "EditorToolset.ObjectToolset",
+    "tool_name": "SetProperties",
     "arguments": {
         "instance": {"refPath": "/ExampleProject1/PersistentLevel.Stadium_Seat_Instances"},
         "values": json.dumps(
@@ -23,17 +24,17 @@ _SEAT = {
 
 _SCRIPT = """
 import json, math
-def apply(data):
-    return execute_tool(
-        "editor_toolset.toolsets.object.ObjectTools.set_properties",
+async def apply(data):
+    return (await execute_tool(
+        "EditorToolset.ObjectToolset.SetProperties",
         json.dumps({
             "instance": {"refPath": "/ExampleProject1/PersistentLevel.Stadium_Seat_Instances"},
             "values": json.dumps({"perInstanceSMData": data}),
         }),
-    )["returnValue"]
-def run():
+    ))["returnValue"]
+async def run():
     data = [{"transform": {"wPlane": {"x": 4933.5, "y": 3354, "z": 7050, "w": 1}}}]
-    return {"ok": apply(data), "instances": len(data)}
+    return {"ok": await apply(data), "instances": len(data)}
 """
 
 
@@ -48,7 +49,7 @@ def test_set_properties_clears_instance_array_then_writes():
 
 def test_empty_instance_array_is_one_call():
     args = {
-        "tool_name": "set_properties",
+        "tool_name": "SetProperties",
         "arguments": {"values": {"perInstanceSMData": []}},
     }
     assert expand_epic_call("call_tool", args) == [args]
@@ -65,14 +66,15 @@ def test_unrelated_array_is_not_cleared():
 def test_script_wrapper_clears_then_sets_the_original_payload():
     calls: list[tuple[str, str]] = []
 
-    def execute_tool(name, args):
+    async def execute_tool(name, args):
         calls.append((name, args))
         return {"returnValue": True}
 
     guarded = guard_instance_array_script(_SCRIPT)
+    assert guarded.splitlines()[1] == "import json as _json"  # 43.00: imports at top level
     ns: dict = {"execute_tool": execute_tool}
     exec(guarded, ns)
-    out = ns["run"]()
+    out = asyncio.run(ns["run"]())
     assert out["instances"] == 1
     assert len(calls) == 2
     first = json.loads(json.loads(calls[0][1])["values"])
@@ -84,7 +86,7 @@ def test_script_wrapper_clears_then_sets_the_original_payload():
 def test_script_wrapper_is_idempotent_and_skips_unrelated_scripts():
     guarded = guard_instance_array_script(_SCRIPT)
     assert guard_instance_array_script(guarded) == guarded
-    plain = "def run():\n    return execute_tool('SceneTools.set_actor_folder', '{}')\n"
+    plain = "def run():\n    return execute_tool('EditorToolset.ActorToolset.SetLabel', '{}')\n"
     assert guard_instance_array_script(plain) == plain
 
 
@@ -100,3 +102,18 @@ def test_execute_tool_script_call_is_wrapped_once():
     assert script.startswith("# ducky:instance-array-clear\n")
     assert "Stadium_Seat_Instances" in script
     assert args["arguments"]["script"] == _SCRIPT
+
+
+def test_code_block_script_is_wrapped_in_place():
+    args = {
+        "tool_name": "execute_tool_script",
+        "arguments": {"script": {"content": _SCRIPT, "language": "Python"}},
+    }
+    [call] = expand_epic_call("call_tool", args)
+    block = call["arguments"]["script"]
+    assert block["language"] == "Python" and block["content"].startswith("# ducky:instance-array-clear\n")
+
+
+def test_legacy_snake_case_name_still_splits():
+    legacy = {**_SEAT, "tool_name": "set_properties"}
+    assert len(expand_epic_call("call_tool", legacy)) == 2
