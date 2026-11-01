@@ -608,8 +608,10 @@ export function ChatComposer({
       if (inputResizingRef.current) return;
       const overflow = el.scrollHeight - el.clientHeight;
       if (overflow <= 1) return;
-      refreshMaxTextareaHeight();
+      const max = refreshMaxTextareaHeight();
       const current = liveTextareaHeightRef.current ?? el.offsetHeight;
+      // Already at the cap and scrolling: leave the box alone, never resize on every key.
+      if (current >= max - 1) return;
       if (heightBeforeGrowRef.current == null) heightBeforeGrowRef.current = current;
       // At once, never eased: during the 0.2 s height ease the browser scrolled the new line
       // into view, then the scroll ran back as the box caught up, so the text jumped a line

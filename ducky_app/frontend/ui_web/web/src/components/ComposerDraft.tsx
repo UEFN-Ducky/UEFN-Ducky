@@ -299,7 +299,11 @@ export function ComposerDraft({
     if (painted.current === value && root.childNodes.length > 0) return;
     if (painted.current === value && !value) return;
     const focused = document.activeElement === root;
+    // paint() empties the box first, which snaps a scrolled box to the top; put the scroll
+    // back so typing in a long draft never bounces (only a caret off screen moves it).
+    const scrollTop = root.scrollTop;
     paint(root, value);
+    root.scrollTop = scrollTop;
     painted.current = value;
     if (focused) {
       composerSetCaret(root, caret);
