@@ -158,6 +158,10 @@ def test_a_waiting_writer_wakes_the_moment_the_holder_commits() -> None:
                 with db.write_txn(conn):
                     got = time.perf_counter()
                     conn.execute("INSERT INTO settings(key, value, updated) VALUES (?, '1', 0)", (f"w{i}",))
+                # The holder stamps `released` after its lock is free, so the woken waiter can get here first.
+                deadline = time.perf_counter() + 5
+                while len(released) <= i and time.perf_counter() < deadline:
+                    time.sleep(0.0005)
                 waits.append(got - released[i])
                 done.set()
         finally:
