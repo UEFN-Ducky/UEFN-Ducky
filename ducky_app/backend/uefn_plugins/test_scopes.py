@@ -199,7 +199,56 @@ def test_two_spaces_of_one_account_never_share_a_plugins_data(who: _Who, fake_sp
     assert [r["key"] for r in repo.rows(ana, "spaceU", "brainrot-tcg", "doc")] == ["card.mo"]
     scopes.link_plugin("brainrot-tcg", "spaceT")
     assert cards.items() == {"card.pip": {"space": "T"}}
-    assert repo.links(ana) == {"brainrot-tcg": "spaceT", "forge": "spaceU"}
+    assert {p: s for p, s in repo.links(ana).items() if p not in scopes.CORE_DATA} == {
+        "brainrot-tcg": "spaceT", "forge": "spaceU"}
+
+
+def test_workflows_and_general_storage_follow_the_team_and_never_leave_it_silently(
+        who: _Who, fake_spaces: FakeSpaces) -> None:
+    from backend.uefn_plugins.general_storage import GENERAL
+
+    wf = spaces.WORKFLOW_DOCS
+    assert scopes.CORE_DATA == (wf, GENERAL)
+    # Nothing ever linked core data (0013 skipped ``ducky.*``; General storage starts Local), so
+    # the Team modal hid it although the team copy held the workflows. The first plugin on a
+    # team now takes them along.
+    ana = open_space(fake_spaces, who, "ana@x.org", "spaceT", "Alpha Studio")
+    assert repo.links(ana) == {"brainrot-tcg": "spaceT", wf: "spaceT", GENERAL: "spaceT"}
+    # Core data on a team stays there when plugins move: never off a team silently.
+    open_space(fake_spaces, who, "ana@x.org", "spaceU", "Beta Crew", plugin="forge")
+    scopes.link_plugin("brainrot-tcg", "spaceU")
+    assert (repo.link_get(ana, wf), repo.link_get(ana, GENERAL)) == ("spaceT", "spaceT")
+    assert scopes.ensure_core_links() == []
+    # No link (an older version's PC): they follow the team most plugins use.
+    repo.link_set(ana, wf, scopes.PERSONAL)
+    repo.link_set(ana, GENERAL, scopes.PERSONAL)
+    assert scopes.ensure_core_links() == [wf, GENERAL]
+    assert (repo.link_get(ana, wf), repo.link_get(ana, GENERAL)) == ("spaceU", "spaceU")
+    # Every plugin Local, or signed out: nothing to follow.
+    for pid in ("brainrot-tcg", "forge", wf, GENERAL):
+        scopes.link_plugin(pid, scopes.PERSONAL)
+    assert scopes.ensure_core_links() == [] and repo.links(ana) == {}
+    who.be("")
+    assert scopes.ensure_core_links() == []
+
+
+def test_team_overview_always_lists_workflows_and_general_storage(who: _Who, fake_spaces: FakeSpaces) -> None:
+    from backend.uefn_plugins.general_storage import GENERAL
+
+    wf = spaces.WORKFLOW_DOCS
+    ana = open_space(fake_spaces, who, "ana@x.org", "spaceT", "Alpha Studio")
+    scopes.link_plugin(GENERAL, scopes.PERSONAL)
+    PluginData(GENERAL).put("note.a", {"text": "kept Local"})
+    over = spaces.team_overview()
+    rows = {r["pluginId"]: r for r in over["plugins"]}
+    assert over["current"] == "spaceT" and list(rows)[:2] == [wf, GENERAL]
+    assert rows[wf]["linked"] is True
+    assert (rows[GENERAL]["linked"], rows[GENERAL]["linkedTo"], rows[GENERAL]["localItems"]) == (False, "Local", 1)
+    assert rows[GENERAL]["label"] == "General storage" and rows[GENERAL]["source"] == "storage"
+    # "Use with team" is the plain link: then it is the team's row like any other.
+    spaces.link_scope(GENERAL, "spaceT")
+    assert {r["pluginId"]: r["linked"] for r in spaces.team_overview()["plugins"]}[GENERAL] is True
+    assert repo.link_get(ana, GENERAL) == "spaceT"
 
 
 def test_copy_local_into_a_space_is_one_way_and_keeps_the_spaces_items(who: _Who, fake_spaces: FakeSpaces) -> None:
@@ -447,7 +496,8 @@ def test_signing_in_or_out_restarts_and_reloads_plugins_that_show_a_space(who: _
     spaces.on_account_change(ana, scopes.LOCAL)
     assert done.wait(5)
     assert restarted == ["brainrot-tcg"]
-    assert pushed == [{"type": "plugin_scope_changed", "plugins": ["brainrot-tcg", "forge"], "switched": True}]
+    assert pushed == [{"type": "plugin_scope_changed", "plugins": ["brainrot-tcg", *scopes.CORE_DATA, "forge"],
+                       "switched": True}]
 
     # An account with every plugin on Local has nothing to restart.
     done.clear()
@@ -931,7 +981,7 @@ def test_erase_drops_the_link_and_a_relink_pulls_the_whole_copy_again(who: _Who,
     repo.sync_put(ana, "spaceT", cursor_rev=42)
     scopes.erase_plugin("brainrot-tcg")
     assert scopes.active_scope("brainrot-tcg")["kind"] == "personal"  # reinstalled: Local
-    assert repo.links(ana) == {"forge": "spaceT"}
+    assert repo.links(ana) == {"forge": "spaceT", **dict.fromkeys(scopes.CORE_DATA, "spaceT")}
     # The space's cursor stays: forge's next round must not bring the erased copy back
     # (a pull stores every plugin's items).
     assert repo.rows(ana, "spaceT", "brainrot-tcg", "doc") == [] and repo.sync_get(ana, "spaceT")["cursor_rev"] == 42

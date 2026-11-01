@@ -2973,6 +2973,11 @@ export interface TeamPluginRow {
   head?: number | null;
   /** "auto" | "manual" ("" on the older sync). */
   mode?: string;
+  /** False: Workflows or General storage shows Local or another team (`linkedTo`), not this one. */
+  linked?: boolean;
+  linkedTo?: string;
+  /** Its Local docs and files, which "Use with team" can copy in. */
+  localItems?: number;
 }
 
 /** The Team modal's team copy: `current` is a space id, or "personal" when no plugin shows a team. */

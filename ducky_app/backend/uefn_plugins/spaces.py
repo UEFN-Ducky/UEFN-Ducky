@@ -545,10 +545,11 @@ def team_overview(space: str = "") -> dict[str, Any]:
     """The Team modal, whatever tab is on screen: one team copy (``space``; '' picks the one
     most plugins show) with each plugin on it (Workflows too): ``pluginId``, ``label``,
     ``icon``, ``source``, ``incoming`` / ``incomingBy`` / ``held``, ``outgoing`` (rows),
-    ``pending``, ``conflicts``, ``blocked`` (downloads that failed), ``state``, ``error``.
-    No plugin on a team: ``current`` is ``personal`` and ``plugins`` is empty."""
-    from collections import Counter
-
+    ``pending``, ``conflicts``, ``blocked`` (downloads that failed), ``state``, ``error``,
+    ``linked``. Workflows and General storage are always listed: when they show Local or
+    another team, ``linked`` is false with ``linkedTo`` (where they are) and ``localItems``
+    (what "Use with team" can copy in). No plugin on a team: ``current`` is ``personal``
+    and ``plugins`` is empty."""
     from backend.store.repos import plugin_data as repo
     from backend.uefn_plugins import scopes
     from backend.uefn_plugins.general_storage import GENERAL, LABEL
@@ -558,10 +559,22 @@ def team_overview(space: str = "") -> dict[str, Any]:
     enabled = set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS, GENERAL}
     links = {p: s for p, s in repo.links(account).items() if p in enabled and s != scopes.PERSONAL} \
         if account != scopes.LOCAL else {}
-    space = str(space or "") or (Counter(links.values()).most_common(1)[0][0] if links else "")
+    space = str(space or "") or scopes.main_team(links)
     if not space:
         return {"ok": True, "current": scopes.PERSONAL, "label": "Local", "plugins": []}
     rows: list[dict[str, Any]] = []
+    for pid in scopes.CORE_DATA:
+        if links.get(pid) == space:
+            continue
+        elsewhere = links.get(pid, "")
+        local = repo.totals(account, scopes.PERSONAL, pid)
+        rows.append({
+            "pluginId": pid, "label": "Workflows" if pid == WORKFLOW_DOCS else LABEL, "icon": "",
+            "source": "workflows" if pid == WORKFLOW_DOCS else "storage", "linked": False,
+            "linkedTo": str(repo.sync_get(account, elsewhere)["label"] or "another team") if elsewhere else "Local",
+            "localItems": local["docs"] + local["files"], "incoming": 0, "incomingBy": [], "held": False,
+            "outgoing": [], "pending": 0, "conflicts": 0, "blocked": [], "state": "", "error": "", "items": 0,
+        })
     for pid in sorted(p for p, s in links.items() if s == space):
         try:
             st = scope_status(pid)
@@ -575,7 +588,7 @@ def team_overview(space: str = "") -> dict[str, Any]:
         except ValueError:
             manifest = {}
         rows.append({
-            "pluginId": pid, "label": core[0] if core else str(st.get("pluginLabel") or pid),
+            "pluginId": pid, "linked": True, "label": core[0] if core else str(st.get("pluginLabel") or pid),
             "icon": "" if core else plugin_icon_data_url(pid) or "",
             "source": core[1] if core else str(manifest.get("source") or "local"),
             "incoming": int(ch.get("incoming") or 0), "incomingBy": list(ch.get("incomingBy") or []),

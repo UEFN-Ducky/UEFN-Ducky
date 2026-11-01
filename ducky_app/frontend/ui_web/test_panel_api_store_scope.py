@@ -110,10 +110,10 @@ def test_one_pick_switches_every_plugin_and_the_overview_lists_them(who, fake: S
     PluginData("forge").put("scene.one", {"name": "One"})
     over = Api().plugin_team_overview()
     assert (over["current"], over["label"]) == ("spaceT", "Alpha")
-    assert [r["pluginId"] for r in over["plugins"]] == [PLUGIN, "forge"]
-    assert {"conflictList", "locks", "people", "head", "mode"} <= set(over["plugins"][0])
+    assert [r["pluginId"] for r in over["plugins"]] == [*scopes.CORE_DATA, PLUGIN, "forge"]  # core data came along
+    assert {"conflictList", "locks", "people", "head", "mode"} <= set(over["plugins"][2])
     out = Api().plugin_scope_set_all("personal")
-    assert out["ok"] and sorted(out["switched"]) == [PLUGIN, "forge"]
+    assert out["ok"] and sorted(out["switched"]) == sorted([*scopes.CORE_DATA, PLUGIN, "forge"])
     assert repo.link_get(aid, PLUGIN) == "personal" and repo.link_get(aid, "forge") == "personal"
     assert Api().plugin_team_overview() == {"ok": True, "current": "personal", "label": "Local", "plugins": []}
     assert Api().plugin_scope_set_all("")["ok"] is False
@@ -269,11 +269,12 @@ def test_clear_my_copy_clears_the_whole_spaces_copy_and_sends_nothing(who, fake:
     assert repo.count_dirty(aid, "spaceT") == 0 and not folder.exists()
     st = repo.sync_get(aid, "spaceT")
     assert (st["state"], st["cursor_rev"], st["label"]) == ("ok", 0, "Alpha")
-    assert repo.links(aid) == {PLUGIN: "spaceT", "forge": "spaceT"}  # still linked: the team's data comes down
+    assert repo.links(aid) == {PLUGIN: "spaceT", "forge": "spaceT", **dict.fromkeys(scopes.CORE_DATA, "spaceT")}  # still linked: the team's data comes down
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline and not any(e.get("switched") for e in api.pushed):
         time.sleep(0.02)
-    assert {"type": "plugin_scope_changed", "plugins": [PLUGIN, "forge"], "switched": True} in api.pushed
+    assert {"type": "plugin_scope_changed", "plugins": sorted([PLUGIN, "forge", *scopes.CORE_DATA]),
+            "switched": True} in api.pushed
     assert api.space_reset_settle("spaceT", "throw away")["ok"] is False
 
 

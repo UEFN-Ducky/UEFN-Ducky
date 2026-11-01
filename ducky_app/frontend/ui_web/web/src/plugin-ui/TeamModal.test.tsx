@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
   plugin_team_overview: vi.fn(),
   plugin_scope_choices: vi.fn(),
   plugin_scope_set_all: vi.fn(),
+  plugin_scope_set: vi.fn(),
+  plugin_data_copy_to_space: vi.fn(),
   plugin_scope_status: vi.fn(),
   plugin_scope_pull: vi.fn(),
   plugin_scope_history: vi.fn(),
@@ -183,6 +185,25 @@ describe("TeamModal", () => {
     fireEvent.change(screen.getByRole("slider", { name: /^Check for teammates' changes every/ }), { target: { value: "90" } });
     await waitFor(() => expect(api.save_agent_settings).toHaveBeenCalledWith({ team_send_delay_s: 30, team_poll_s: 90 }));
     expect(api.save_agent_settings).toHaveBeenCalledTimes(1);
+  });
+
+  it("General storage on Local still shows on the team, and Use with team links it and copies Local in", async () => {
+    api.plugin_scope_set.mockResolvedValue({ ok: true });
+    api.plugin_data_copy_to_space.mockResolvedValue({ ok: true, copied: 2, kept: 0 });
+    await modal({ ...ALPHA, plugins: [...ALPHA.plugins, row({
+      pluginId: "ducky.storage", label: "General storage", source: "storage", items: 0, state: "",
+      linked: false, linkedTo: "Local", localItems: 2,
+    })] });
+    fireEvent.click(screen.getByRole("button", { name: /^Incoming/ }));
+    const list = screen.getByRole("list", { name: "Plugins on Alpha Studio" });
+    expect(within(list).getByText("On Local · not on this team")).toBeTruthy();
+    expect(within(list).getByText("Not on this team")).toBeTruthy();
+    fireEvent.click(within(list).getByRole("button", { name: "Use with team" }));
+    expect(await screen.findByText(/Copy your 2 Local items into Alpha Studio too\?/)).toBeTruthy();
+    expect(api.plugin_scope_set).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^Use and copy/ }));
+    await waitFor(() => expect(api.plugin_data_copy_to_space).toHaveBeenCalledWith("ducky.storage", "s1"));
+    expect(api.plugin_scope_set).toHaveBeenCalledWith("ducky.storage", "s1");
   });
 
   it("on Local only Overview and Settings are offered", async () => {

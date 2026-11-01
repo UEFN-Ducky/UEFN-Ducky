@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import "./plugin-ui.css";
+import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
 import type { PluginScopeHistoryEntry, PluginScopeStatus, TeamPluginRow } from "../types/panel";
@@ -29,6 +30,7 @@ const INTRO: Record<TeamPluginsSection, string> = {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function sourceText(row: TeamPluginRow): string {
+  if (row.linked === false) return `On ${row.linkedTo || "Local"} · not on this team`;
   if (row.source === "workflows") return plural(row.items, "workflow");
   if (row.source === "tab") return "On this tab · not on this team";
   if (row.source === "storage") return `Anything you keep · ${plural(row.items, "item")}`;
@@ -54,6 +56,7 @@ function others(row: TeamPluginRow) {
 
 /** What a plugin's header says on the right in this section, and whether it needs looking at. */
 function badge(row: TeamPluginRow, section: TeamPluginsSection): { text: string; tone?: "warn" | "error" } {
+  if (row.linked === false) return { text: "Not on this team", tone: "warn" };
   if (section === "conflicts" || (section === "overview" && row.conflicts)) {
     return row.conflicts ? { text: plural(row.conflicts, "conflict"), tone: "error" } : { text: "None" };
   }
@@ -223,6 +226,52 @@ function Preview({ row, section, onOpen }: { row: TeamPluginRow; section: TeamPl
   );
 }
 
+/** Workflows or General storage on Local or another team: link it to this team, and offer to copy
+ * its Local items in (one way; the team's items are kept). */
+function UseWithTeam({ row, team, tabIndex }: { row: TeamPluginRow; team: ActiveTeam; tabIndex: number }) {
+  const { confirm } = useConfirmModal();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const use = async () => {
+    const n = row.linkedTo === "Local" ? row.localItems ?? 0 : 0;
+    let copy = false;
+    if (n) {
+      const answer = await confirm({
+        title: `Use ${row.label} with ${team.label}`,
+        message: `Copy your ${plural(n, "Local item")} into ${team.label} too? Items the team already has stay as they are.`,
+        confirmLabel: "Use and copy", extraLabel: "Use without copying",
+      });
+      if (answer === false) return;
+      copy = answer === true;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const api = getApi();
+      const set = await api?.plugin_scope_set?.(row.pluginId, team.current);
+      if (!set || set.ok === false) throw new Error(set?.error || `Couldn't put ${row.label} on ${team.label}.`);
+      if (copy) {
+        const got = await api?.plugin_data_copy_to_space?.(row.pluginId, team.current);
+        if (got?.ok === false) throw new Error(got.error || "Copying the Local items failed.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      void readActiveTeam();
+    }
+  };
+  return (
+    <>
+      {error ? <span className="plugin-scope-msg plugin-scope-msg--error" role="alert">{error}</span> : null}
+      <button type="button" className="plugin-scope-btn plugin-scope-btn--row" disabled={busy} tabIndex={tabIndex}
+        onClick={() => void use()}>
+        Use with team
+      </button>
+    </>
+  );
+}
+
 /** The plugin on screen as a row, while it isn't on the team (it shows Local or another team). */
 function paneRow(pane: TeamScope): TeamPluginRow {
   return {
@@ -357,6 +406,7 @@ export function TeamPlugins({ team, section, onSection, openId, onOpened }: {
                       </span>
                       {b.text ? <span className={`changeset-badge${b.tone ? ` team-ledger__badge--${b.tone}` : ""}`}>{b.text}</span> : null}
                       <span className="changes-run-actions" onClick={(e) => e.stopPropagation()}>
+                        {p.linked === false ? <UseWithTeam row={p} team={team} tabIndex={row ? -1 : 0} /> : null}
                         <button type="button" className="changeset-btn changeset-btn--icon" tabIndex={row ? -1 : 0}
                           aria-label={`Open ${p.label}`} title={`Open ${p.label}`} onClick={() => setDetail(p.pluginId)}>
                           <Icons.ChevronRight />

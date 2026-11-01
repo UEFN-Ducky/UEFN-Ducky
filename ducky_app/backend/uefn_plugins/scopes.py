@@ -587,7 +587,42 @@ def link_plugin(plugin: str, scope_id: str) -> dict[str, Any]:
     repo.link_set(account, plugin, scope_id)
     if scope_id != PERSONAL:
         provider().linked(account, plugin, scope_id)
+        if plugin not in CORE_DATA:
+            ensure_core_links()  # joining or creating a team: core data comes along
     return active_scope(plugin)
+
+
+# Workflows (owned.DOC_PLUGIN) and General storage (general_storage.GENERAL): the account's
+# own data, always on the team its plugins use.
+CORE_DATA = ("ducky.automations", "ducky.storage")
+
+
+def main_team(links: dict[str, str]) -> str:
+    """The space most of these ``{plugin: scope}`` links point at ('' when none is shared).
+    The Team modal shows it by default, and core data follows it."""
+    from collections import Counter
+
+    shared = [s for s in links.values() if s != PERSONAL and valid_space_id(s)]
+    return Counter(shared).most_common(1)[0][0] if shared else ""
+
+
+def ensure_core_links() -> list[str]:
+    """Workflows and General storage with no link follow the team the account's plugins
+    use (:func:`main_team`). A link they have is never changed: core data on a team stays
+    there. Returns the ids linked now."""
+    from backend.store.repos import plugin_data as repo
+
+    account = account_id()
+    if account == LOCAL:
+        return []
+    links = repo.links(account)
+    team = main_team({p: s for p, s in links.items() if p not in CORE_DATA})
+    if not team:
+        return []
+    added = [pid for pid in CORE_DATA if pid not in links]
+    for pid in added:
+        link_plugin(pid, team)
+    return added
 
 
 def copy_local_into(plugin: str, space: str) -> dict[str, Any]:
