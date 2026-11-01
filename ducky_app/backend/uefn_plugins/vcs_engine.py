@@ -2979,7 +2979,9 @@ def _locks_from(account: str, space: str, live: Iterable[LockInfo], *, now: floa
         # else either: the edit and the new lock are both this PC's.
         if lk.get("now_holder") and _this_pc(lk.get("now_user"), lk.get("now_device")):
             continue
-        kept = bool(r and int(r["dirty"])) and bool(lk.get("now_holder"))
+        if not lk.get("now_holder"):
+            continue  # a lease that ran out loses nothing: no alert (the bar already re-read)
+        kept = bool(r and int(r["dirty"]))
         _tell_lock_lost(lk, kept=kept)
         if not kept:
             continue
