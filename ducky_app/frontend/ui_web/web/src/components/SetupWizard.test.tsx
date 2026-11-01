@@ -157,6 +157,16 @@ describe("SetupWizard", () => {
     }
   });
 
+  it("every step after Welcome has its own ducky that says something when clicked", () => {
+    wizard({ step: "plugins" });
+    fireEvent.click(screen.getByRole("button", { name: "Cowboy ducky" }));
+    expect(screen.getByRole("status").textContent).toBe("Yeehaw, rounding up your plugins.");
+    cleanup();
+    wizard({ step: "defaults" });
+    expect(screen.getByRole("button", { name: "Wizard ducky" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Pictures and 3D models" })).toBeNull();
+  });
+
   it("a ducky says what it does when clicked", () => {
     wizard();
     expect(screen.getByText("Click a ducky to meet it")).toBeTruthy();
@@ -366,8 +376,7 @@ describe("SetupWizard", () => {
     expect(fake.saveVoice).toHaveBeenCalledWith({ summaryModel: "anthropic:claude-sonnet" });
     fireEvent.click(screen.getByRole("button", { name: "Spoken summaries model" }));
     expect(fake.api.set_memory_settings).toHaveBeenCalledWith({ memory_summary_model: "anthropic:claude-sonnet" });
-    expect(screen.getByRole("listitem", { name: "Pictures" })).toBeTruthy();
-    expect(screen.getByRole("listitem", { name: "3D models" })).toBeTruthy();
+    expect(screen.queryByRole("listitem", { name: "Pictures" })).toBeNull(); // no picture / 3D maker pickers in setup
     expect(screen.getByText("Default AI: claude-sonnet")).toBeTruthy();
     expect(screen.getByText("AI: OpenAI")).toBeTruthy();
     expect(screen.getByText("Plugins: 2 of 2")).toBeTruthy();

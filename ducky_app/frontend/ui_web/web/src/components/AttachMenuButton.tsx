@@ -90,9 +90,11 @@ export function AttachMenuButton({ disabled, onAddFiles }: AttachMenuButtonProps
   });
   const pop = useMenuPop(open);
   // The menu opens leftwards from the paperclip and ran off a phone's left edge: center it there.
+  // Elsewhere it stays inside the chat pane, so it never slides under the left sidebar.
   // Before usePopOrigin, so the zoom's origin is measured where the menu ends up.
   useLayoutEffect(() => {
-    if (open && flyoutRef.current) fitMenuToScreen(flyoutRef.current);
+    const el = flyoutRef.current;
+    if (open && el) fitMenuToScreen(el, el.closest(".chat-pane-root") || el.closest(".chat-pane-input-box"));
   }, [open, stream, cameraError]);
   usePopOrigin(flyoutRef, () => wrapRef.current?.querySelector(".attach-menu-trigger"), pop.mounted);
 

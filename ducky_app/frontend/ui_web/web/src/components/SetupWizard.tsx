@@ -15,7 +15,7 @@ import { Icons } from "../icons/Icons";
 import type { CodingAgentDto, DuckyOSAccountStatus, DuckyOSStoreItemDto, StarterPluginDto } from "../types/panel";
 import { CodingAgentLoginModal } from "../views/settings/CodingAgentsSection";
 import { DuckyModelPicker } from "./ducky/DuckyModelPicker";
-import { MediaMakerPicker, type MediaKind } from "./MediaMakerPicker";
+import { SetupStepDuck } from "./SetupStepDuck";
 import { SetupWelcomeScene } from "./SetupWelcomeScene";
 import { loadVoiceSettings, saveVoiceSettings } from "../voice/voiceSettings";
 
@@ -1019,11 +1019,6 @@ export const MODEL_JOBS: ModelJob[] = [
   },
 ];
 
-export const MAKER_JOBS: { kind: MediaKind; title: string; suggest: string }[] = [
-  { kind: "image", title: "Pictures", suggest: "Makes the pictures duckies and workflows ask for: Ducky AI, or your own OpenAI or Google key." },
-  { kind: "mesh", title: "3D models", suggest: "Makes 3D models from text or a picture: Meshy, Tripo or 3D AI Studio." },
-];
-
 function saveJobModel(id: ModelJob["id"], next: string) {
   const api = getApi();
   if (id === "chat") void api?.save_agent_settings({ default_model: next });
@@ -1134,27 +1129,6 @@ function DefaultsStep({
         )}
       </section>
 
-      <section className="setup-wizard-card" aria-label="Pictures and 3D models">
-        <h3>
-          Pictures and 3D models{" "}
-          <HelpTip
-            label="About pictures and 3D models"
-            text="Each costs credits or your own API key a run, and a ducky asks you before it spends. Change these any time in Settings → LLMs."
-          />
-        </h3>
-        <ul className="setup-wizard-jobs">
-          {MAKER_JOBS.map((job) => (
-            <li key={job.kind} className="setup-wizard-job" aria-label={job.title}>
-              <span className="setup-wizard-job-text">
-                <strong>{job.title}</strong>
-                <span className="setup-wizard-muted">{job.suggest}</span>
-              </span>
-              <MediaMakerPicker kind={job.kind} label={job.title} />
-            </li>
-          ))}
-        </ul>
-      </section>
-
       <SourcePicker picked={sources} onPick={onSources} />
 
       <section className="setup-wizard-card" aria-label="Overview">
@@ -1195,6 +1169,27 @@ export function SetupWizard(props: SetupWizardProps) {
   const { step, onStep, plugins, rows, installing, onInstall, onFinish } = props;
   const aiAtFinish = useRef<AiResult[]>([]);
   const [sources, setSources] = useState<string[]>([]);
+
+  // Between steps the old step's pieces slide out one after another, then the new step's slide in
+  // (from the right going on, from the left going back). No motion: the step just changes.
+  const [onScreen, setOnScreen] = useState<SetupStep>(step);
+  const [leaving, setLeaving] = useState(false);
+  const goingBack = useRef(false);
+  useEffect(() => {
+    if (step === onScreen) return;
+    goingBack.current = STEPS.findIndex((s) => s.id === step) < STEPS.findIndex((s) => s.id === onScreen);
+    const moves = typeof window.matchMedia === "function" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!moves) {
+      setOnScreen(step);
+      return;
+    }
+    setLeaving(true);
+    const t = window.setTimeout(() => {
+      setLeaving(false);
+      setOnScreen(step);
+    }, 220);
+    return () => window.clearTimeout(t);
+  }, [step, onScreen]);
   // Loaded from Welcome on: a fresh catalog (with its icons) can take a while to arrive.
   const items = useStoreItems();
   const missing = plugins.filter((p) => rows[p.slug]?.phase !== "installed");
@@ -1218,7 +1213,7 @@ export function SetupWizard(props: SetupWizardProps) {
     if (Date.now() >= armedAt.current) fn();
   };
 
-  const back = (to: SetupStep, disabled = false) => (
+  const backBtn = (to: SetupStep, disabled = false) => (
     <button type="button" className="setup-wizard-btn is-ghost" disabled={disabled} onClick={() => onStep(to)}>
       <Icons.ChevronLeft /> Back
     </button>
@@ -1257,7 +1252,7 @@ export function SetupWizard(props: SetupWizardProps) {
     }
     footer = (
       <>
-        {back("welcome", installing)}
+        {backBtn("welcome", installing)}
         <span className="setup-wizard-foot-right">
           {installing && aiReady ? (
             <span className="setup-wizard-muted">
@@ -1276,7 +1271,7 @@ export function SetupWizard(props: SetupWizardProps) {
   } else if (step === "ai") {
     footer = (
       <>
-        {back("plugins")}
+        {backBtn("plugins")}
         <button type="button" className="setup-wizard-btn is-primary" onClick={settled(() => onStep("defaults"))}>
           Next <Icons.ChevronRight />
         </button>
@@ -1285,7 +1280,7 @@ export function SetupWizard(props: SetupWizardProps) {
   } else {
     footer = (
       <>
-        {back("ai")}
+        {backBtn("ai")}
         <button
           type="button"
           className="setup-wizard-btn is-primary"
@@ -1309,9 +1304,13 @@ export function SetupWizard(props: SetupWizardProps) {
         <header className="setup-wizard-top">
           <StepDots step={step} />
         </header>
-        <div className={`setup-wizard-body is-${step}`}>
-          {step === "welcome" ? <WelcomeStep /> : null}
-          {step === "plugins" ? (
+        {onScreen !== "welcome" ? <SetupStepDuck key={onScreen} step={onScreen} /> : null}
+        <div
+          key={onScreen}
+          className={`setup-wizard-body is-${onScreen}${leaving ? " is-leaving" : " is-entering"}${goingBack.current ? " is-back" : ""}`}
+        >
+          {onScreen === "welcome" ? <WelcomeStep /> : null}
+          {onScreen === "plugins" ? (
             <PluginsStep
               plugins={plugins}
               rows={rows}
@@ -1320,8 +1319,8 @@ export function SetupWizard(props: SetupWizardProps) {
               items={items}
             />
           ) : null}
-          {step === "ai" ? <AiStep onInstallStep={() => onStep("plugins")} /> : null}
-          {step === "defaults" ? (
+          {onScreen === "ai" ? <AiStep onInstallStep={() => onStep("plugins")} /> : null}
+          {onScreen === "defaults" ? (
             <DefaultsStep
               plugins={plugins}
               rows={rows}

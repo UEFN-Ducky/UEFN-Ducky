@@ -164,6 +164,7 @@
 }
 
 .setup-wizard {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: min(720px, 100%);
@@ -1312,4 +1313,156 @@
   color: var(--fg-dim);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+/* Between steps: pieces slide out one after another, then the next step's slide in. */
+.setup-wizard-body.is-entering > *,
+.setup-wizard-body.is-entering .setup-wizard-hero > * {
+  animation: setup-piece-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.setup-wizard-body.is-leaving > *,
+.setup-wizard-body.is-leaving .setup-wizard-hero > * {
+  animation: setup-piece-out 180ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.setup-wizard-body > :nth-child(2), .setup-wizard-hero > :nth-child(2) { animation-delay: 50ms; }
+.setup-wizard-body > :nth-child(3), .setup-wizard-hero > :nth-child(3) { animation-delay: 100ms; }
+.setup-wizard-body > :nth-child(4), .setup-wizard-hero > :nth-child(4) { animation-delay: 150ms; }
+.setup-wizard-body > :nth-child(5), .setup-wizard-hero > :nth-child(5) { animation-delay: 200ms; }
+.setup-wizard-body > :nth-child(n + 6), .setup-wizard-hero > :nth-child(n + 6) { animation-delay: 250ms; }
+
+.setup-wizard-body.is-leaving > :nth-child(n),
+.setup-wizard-body.is-leaving .setup-wizard-hero > :nth-child(n) {
+  animation-delay: 0ms;
+}
+
+.setup-wizard-body.is-leaving > :nth-child(2), .setup-wizard-body.is-leaving .setup-wizard-hero > :nth-child(2) { animation-delay: 20ms; }
+.setup-wizard-body.is-leaving > :nth-child(n + 3), .setup-wizard-body.is-leaving .setup-wizard-hero > :nth-child(n + 3) { animation-delay: 40ms; }
+
+@keyframes setup-piece-in {
+  from { opacity: 0; transform: translateX(var(--setup-from, 28px)); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes setup-piece-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateX(var(--setup-to, -24px)); }
+}
+
+.setup-wizard-body.is-back {
+  --setup-from: -28px;
+  --setup-to: 24px;
+}
+
+/* A ducky on a string at the top right of each step: drops in, sways, does a trick when clicked. */
+.setup-step-duck {
+  position: absolute;
+  top: 49px;
+  right: 28px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  transform-origin: 50% 0;
+  animation:
+    setup-duck-drop 700ms cubic-bezier(0.34, 1.4, 0.64, 1) 160ms both,
+    setup-duck-sway 3.2s ease-in-out 900ms infinite;
+}
+
+.setup-step-duck-string {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+}
+
+.setup-step-duck-btn {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.setup-step-duck-btn img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.setup-step-duck-btn:hover img {
+  transform: scale(1.08) rotate(-6deg);
+}
+
+.setup-step-duck-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* The tricks: the cowboy spins his lasso, the hacker shakes, the wizard flips. */
+.setup-step-duck.is-plugins .setup-step-duck-btn.is-trick img { animation: setup-duck-spin 600ms cubic-bezier(0.22, 1, 0.36, 1); }
+.setup-step-duck.is-ai .setup-step-duck-btn.is-trick img { animation: setup-duck-shake 500ms ease-in-out; }
+.setup-step-duck.is-defaults .setup-step-duck-btn.is-trick img { animation: setup-duck-flip 700ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+.setup-step-duck-says {
+  position: absolute;
+  top: 70px;
+  right: 0;
+  width: max-content;
+  max-width: 220px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  pointer-events: none;
+  animation: setup-piece-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --setup-from: 0;
+}
+
+@keyframes setup-duck-drop {
+  from { transform: translateY(-120px) rotate(-10deg); opacity: 0; }
+  60% { opacity: 1; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes setup-duck-sway {
+  0%, 100% { rotate: -4deg; }
+  50% { rotate: 4deg; }
+}
+
+@keyframes setup-duck-spin {
+  from { transform: rotate(0); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes setup-duck-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translateX(-4px) rotate(-6deg); }
+  40% { transform: translateX(4px) rotate(6deg); }
+  60% { transform: translateX(-3px) rotate(-4deg); }
+  80% { transform: translateX(3px) rotate(4deg); }
+}
+
+@keyframes setup-duck-flip {
+  0% { transform: none; }
+  50% { transform: translateY(-18px) rotateY(180deg); }
+  100% { transform: rotateY(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-wizard-body > *,
+  .setup-wizard-hero > *,
+  .setup-step-duck,
+  .setup-step-duck-btn img,
+  .setup-step-duck-says {
+    animation: none !important;
+  }
 }

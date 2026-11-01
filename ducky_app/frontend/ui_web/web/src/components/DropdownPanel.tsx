@@ -83,14 +83,18 @@ export const PHONE_MAX_W = 640;
  * A menu its own CSS places beside its trigger: on a phone it moves to the middle of the screen,
  * elsewhere only back inside it. Uses `translate`, not `transform`, because `.menu-pop` holds
  * `transform` for its zoom, and measures from offsetLeft so the zoom's scale can't skew it.
+ * `within`: keep it inside that element too (a menu in the chat pane must not slide under a sidebar).
  */
-export function fitMenuToScreen(el: HTMLElement): void {
+export function fitMenuToScreen(el: HTMLElement, within?: Element | null): void {
   el.style.translate = "";
   const parent = el.offsetParent as HTMLElement | null;
   const left = (parent ? parent.getBoundingClientRect().left + parent.clientLeft : 0) + el.offsetLeft;
   const width = el.offsetWidth;
   const vw = window.innerWidth;
-  const target = vw <= PHONE_MAX_W ? (vw - width) / 2 : Math.min(Math.max(left, EDGE), vw - EDGE - width);
+  const box = within?.getBoundingClientRect();
+  const lo = Math.max(EDGE, box ? box.left + EDGE : EDGE);
+  const hi = Math.min(vw - EDGE, box ? box.right - EDGE : vw - EDGE);
+  const target = vw <= PHONE_MAX_W ? (vw - width) / 2 : Math.min(Math.max(left, lo), Math.max(lo, hi - width));
   const shift = Math.round(target - left);
   if (shift) el.style.translate = `${shift}px 0`;
 }
