@@ -485,7 +485,11 @@ export function ChatComposer({
     const textarea = textareaRef.current;
     if (!inputBox || !textarea) return Infinity;
 
-    const inputArea = inputBox.parentElement;
+    // The box sits in chat-pane-composer-host inside the input area: its parent is no column
+    // child, so the loop below never stopped, counted the input area itself as "above", and
+    // the cap fell to the floor once the box grew: after a long paste every key collapsed the
+    // box and grew it back (Nov 1 2026).
+    const inputArea = inputBox.closest<HTMLElement>(".chat-pane-input-area") ?? inputBox.parentElement;
     if (!inputArea) return Infinity;
 
     const column = inputArea.closest(".chat-column");
@@ -498,7 +502,7 @@ export function ChatComposer({
 
     let reservedAboveInput = 0;
     for (const child of Array.from(column.children)) {
-      if (child === inputArea) break;
+      if (child.contains(inputBox)) break;
       const el = child as HTMLElement;
       if (el.classList.contains("chat-pane-content")) {
         reservedAboveInput += MIN_MESSAGE_AREA_HEIGHT;

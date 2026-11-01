@@ -81,6 +81,41 @@ it("renders the draft and sends from the Send button", () => {
   expect(onSend).toHaveBeenCalledTimes(1);
 });
 
+it("a grown box keeps its cap: the input area is never counted as room above it", () => {
+  // Nov 1 2026: after a long paste every key collapsed the box to its floor and grew it back.
+  const heights: Record<string, number> = {
+    // A 60 px floor box in a 700 px input area: the old loop counted those 700 px as above it.
+    "chat-pane-input-area": 700, "chat-pane-input-box": 106, "chat-pane-textarea": 60,
+  };
+  const offset = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  const client = Object.getOwnPropertyDescriptor(Element.prototype, "clientHeight");
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      const hit = Object.keys(heights).find((name) => this.classList.contains(name));
+      return hit ? heights[hit] : 0;
+    },
+  });
+  Object.defineProperty(Element.prototype, "clientHeight", {
+    configurable: true,
+    get(this: Element) { return this.classList.contains("chat-column") ? 848 : 0; },
+  });
+  try {
+    render(
+      <ConfirmModalProvider>
+        <div className="chat-column">
+          <div className="chat-pane-content" />
+          <div className="chat-pane-input-area"><Composer onSend={vi.fn()} /></div>
+        </div>
+      </ConfirmModalProvider>,
+    );
+    expect(parseFloat(screen.getByRole("textbox").style.maxHeight)).toBeGreaterThan(600);
+  } finally {
+    if (offset) Object.defineProperty(HTMLElement.prototype, "offsetHeight", offset);
+    if (client) Object.defineProperty(Element.prototype, "clientHeight", client);
+  }
+});
+
 it("mounting the composer (a chat switch) fetches no @ / slash catalog", () => {
   render(<ConfirmModalProvider><Composer onSend={vi.fn()} /></ConfirmModalProvider>);
   expect(calls.filter((call) => CATALOG.includes(call.method))).toEqual([]);
