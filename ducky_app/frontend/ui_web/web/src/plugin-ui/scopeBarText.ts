@@ -126,9 +126,10 @@ export function kindTitle(kindLabel?: string): string {
   return k.charAt(0).toUpperCase() + k.slice(1);
 }
 
-/** The question before a plugin's data switches: nothing is copied, and the plugin
- * restarts on the other copy. Leaving a shared copy (`from`), its changes still to send go
- * first, and the ones that aren't going out (`held`) stay in that copy on this PC. */
+/** The question before the app switches copy from a plugin's bar: the whole app moves (every
+ * plugin, Workflows and General storage), nothing is copied. Leaving a shared copy (`from`), its
+ * changes still to send go first, and the ones that aren't going out (`held`) stay in that copy
+ * on this PC. */
 export function switchConfirm(
   plugin: string,
   to: { kind: string; label: string },
@@ -142,8 +143,9 @@ export function switchConfirm(
     held ? `${plural(held, "change")} not shared stay${held === 1 ? "s" : ""} in ${from?.label}'s copy on this PC.` : "",
   ];
   return {
-    title: `Switch ${plugin} to ${shared ? to.label : "Local"} data?`,
-    message: [...before, `Nothing is copied. ${plugin} restarts with ${shared ? `${to.label}'s` : "its Local"} data.`]
+    title: `Switch everything to ${shared ? to.label : "Local"}?`,
+    message: [...before, `Nothing is copied. ${plugin}, every other plugin, Workflows and General storage switch to ${
+      shared ? `${to.label}'s` : "their Local"} data together.`]
       .filter(Boolean)
       .join(" "),
   };

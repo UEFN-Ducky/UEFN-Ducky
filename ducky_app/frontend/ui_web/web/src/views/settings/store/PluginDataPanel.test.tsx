@@ -57,7 +57,7 @@ describe("Plugins page → Data", () => {
     expect(screen.queryByRole("button", { name: /Copy Local data/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Keep data in…" }));
     fireEvent.click(await screen.findByRole("radio", { name: /Space · Alpha Studio/ }));
-    expect(screen.getByText(/Your Local copy stays on this PC, separate. Nothing is copied./)).toBeTruthy();
+    expect(screen.getByText(/^Switch everything to .*Your Local copies stay on this PC, separate. Nothing is copied./)).toBeTruthy();
     expect(api.plugin_scope_set).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Switch" }));
     await waitFor(() => expect(api.plugin_scope_set).toHaveBeenCalledWith("brainrot-tcg", "spaceT"));

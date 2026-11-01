@@ -119,6 +119,37 @@ def test_one_pick_switches_every_plugin_and_the_overview_lists_them(who, fake: S
     assert Api().plugin_scope_set_all("")["ok"] is False
 
 
+def test_one_switch_moves_everything_and_round_trips_with_no_mixed_state(who, fake: Sending, monkeypatch) -> None:
+    from backend.uefn_plugins import store
+
+    enabled = [PLUGIN, "forge", "fresh-plugin"]  # fresh-plugin has no data yet: it still moves
+    monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: list(enabled))
+    aid = who.be("ana@x.org")
+    fake.spaces.update({"spaceT": "Alpha", "spaceU": "Beta"})
+    PluginData(PLUGIN).put("card.pip", {"name": "Pip"})
+    everything = sorted([*enabled, *scopes.CORE_DATA])
+
+    def where() -> set[str]:
+        return {repo.link_get(aid, pid) for pid in everything}
+
+    assert Api().plugin_scope_set_all("spaceT")["ok"]
+    assert where() == {"spaceT"} and scopes.app_copy() == "spaceT"
+    assert Api().plugin_team_overview()["current"] == "spaceT"
+    assert Api().plugin_scope_set_all("personal")["ok"]
+    assert where() == {"personal"} and scopes.app_copy() == "personal"
+    assert Api().plugin_team_overview()["current"] == "personal"
+    assert Api().plugin_scope_set_all("spaceT")["ok"]
+    assert where() == {"spaceT"}
+    # One plugin's own picker can't split them: a pick of another copy is the app-wide switch.
+    out = Api().plugin_scope_set(PLUGIN, "spaceU")
+    assert out["scope"]["spaceId"] == "spaceU" and where() == {"spaceU"} and scopes.app_copy() == "spaceU"
+    # A plugin installed or enabled later joins the copy the app is on.
+    enabled.append("new-plugin")
+    assert scopes.active_scope("new-plugin")["spaceId"] == "spaceU" and repo.link_get(aid, "new-plugin") == "spaceU"
+    assert Api().plugin_scope_set_all("personal")["ok"]
+    assert scopes.active_scope("later-plugin")["kind"] == "personal" and repo.links(aid) == {}
+
+
 def test_drop_clears_a_blocked_change_and_the_team_copy_comes_back(who, fake: Sending) -> None:
     aid = open_space(fake, who, "ana@x.org", "spaceT", "Alpha")
     data = PluginData(PLUGIN)

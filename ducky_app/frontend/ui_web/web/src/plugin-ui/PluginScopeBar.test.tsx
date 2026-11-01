@@ -160,7 +160,7 @@ describe("plugin scope bar", () => {
     expect(
       await screen.findByText(
         "3 changes not sent to Alpha Studio will be sent first. 1 change not shared stays in Alpha Studio's copy on this PC. " +
-          "Nothing is copied. BrainRot TCG restarts with its Local data.",
+          "Nothing is copied. BrainRot TCG, every other plugin, Workflows and General storage switch to their Local data together.",
       ),
     ).toBeTruthy();
     expect(api.plugin_scope_set).not.toHaveBeenCalled();

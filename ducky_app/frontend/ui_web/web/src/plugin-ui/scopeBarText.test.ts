@@ -69,12 +69,12 @@ describe("scope bar text", () => {
     expect(syncText({ syncedAt: 100, pending: 0, state: "ok" }, 105_000)).toBe("Synced 5 s ago");
     expect(syncText({ syncedAt: 100, pending: 3, state: "offline" }, 105_000)).toBe("Offline · 3 changes waiting");
     expect(switchConfirm("BrainRot TCG", { kind: "shared", label: "Alpha Studio" })).toEqual({
-      title: "Switch BrainRot TCG to Alpha Studio data?",
-      message: "Nothing is copied. BrainRot TCG restarts with Alpha Studio's data.",
+      title: "Switch everything to Alpha Studio?",
+      message: "Nothing is copied. BrainRot TCG, every other plugin, Workflows and General storage switch to Alpha Studio's data together.",
     });
     expect(switchConfirm("BrainRot TCG", { kind: "personal", label: "Local" })).toEqual({
-      title: "Switch BrainRot TCG to Local data?",
-      message: "Nothing is copied. BrainRot TCG restarts with its Local data.",
+      title: "Switch everything to Local?",
+      message: "Nothing is copied. BrainRot TCG, every other plugin, Workflows and General storage switch to their Local data together.",
     });
   });
 
@@ -131,16 +131,16 @@ describe("scope bar text", () => {
 
   it("the switch says what is sent first and what stays; drop and reset ask first", () => {
     expect(switchConfirm("BrainRot TCG", { kind: "personal", label: "Local" }, { label: "Alpha", pending: 3, held: 1 })).toEqual({
-      title: "Switch BrainRot TCG to Local data?",
+      title: "Switch everything to Local?",
       message:
         "3 changes not sent to Alpha will be sent first. 1 change not shared stays in Alpha's copy on this PC. " +
-        "Nothing is copied. BrainRot TCG restarts with its Local data.",
+        "Nothing is copied. BrainRot TCG, every other plugin, Workflows and General storage switch to their Local data together.",
     });
     expect(switchConfirm("BrainRot TCG", { kind: "shared", label: "Beta" }, { label: "Alpha", pending: 1 }).message).toBe(
-      "1 change not sent to Alpha will be sent first. Nothing is copied. BrainRot TCG restarts with Beta's data.",
+      "1 change not sent to Alpha will be sent first. Nothing is copied. BrainRot TCG, every other plugin, Workflows and General storage switch to Beta's data together.",
     );
     expect(switchConfirm("BrainRot TCG", { kind: "shared", label: "Beta" }, { label: "Alpha", pending: 0, held: 0 }).message).toBe(
-      "Nothing is copied. BrainRot TCG restarts with Beta's data.",
+      "Nothing is copied. BrainRot TCG, every other plugin, Workflows and General storage switch to Beta's data together.",
     );
     expect(dropConfirm("Alpha", "scene_1")).toEqual({
       title: "Drop your change to scene_1?",

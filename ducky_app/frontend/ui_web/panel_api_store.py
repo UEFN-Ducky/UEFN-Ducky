@@ -544,6 +544,13 @@ class PanelApiStoreMixin:
             )
             if result.get("ok"):
                 _pa._prune_model_caches_to_enabled_providers()
+                if enabled:
+                    try:  # it joins the copy the app is on (scopes.active_scope)
+                        from backend.uefn_plugins.scopes import active_scope
+
+                        active_scope(str(plugin_id or ""))
+                    except Exception:  # noqa: BLE001 — its first data call does it too
+                        pass
             self._push_panel({"type": "uefn_plugins_changed"})
             return result
         except Exception as exc:
@@ -1108,42 +1115,52 @@ class PanelApiStoreMixin:
             return {"ok": False, "current": "personal", "label": "Local", "plugins": [], "error": str(exc)}
 
     def plugin_scope_set_all(self, scope_id: str) -> dict[str, Any]:
-        """The Team modal's picker: every enabled plugin that can share (and Workflows and General
-        storage) shows
-        Local or one team. Each goes through :meth:`plugin_scope_set`, so it leaves its old
-        team's live group at once. A team copy that needs a first share is left as it was
-        and named in ``pending``; ``errors`` says what didn't switch."""
+        """The one switch of the whole app: every plugin that can share (enabled, linked, with
+        or without data yet), Workflows and General storage show Local or one team, and the
+        app copy (:func:`scopes.app_copy`) says which, so a plugin enabled later joins it.
+        Each goes through :meth:`_scope_set_one`, so it leaves its old team's live group at
+        once. A plugin whose folders need a first share stays where it was, named in
+        ``pending``, and its bar offers the copy; ``errors`` says what didn't switch."""
+        out, _each = self._switch_everything(str(scope_id or ""))
+        return out
+
+    def _switch_everything(self, target: str) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+        from backend.store.repos import folder_files
         from backend.store.repos import plugin_data as repo
         from backend.uefn_plugins import scopes
-        from backend.uefn_plugins.general_storage import GENERAL
-        from backend.uefn_plugins.spaces import WORKFLOW_DOCS
         from backend.uefn_plugins.store import get_enabled_plugin_ids
+        from backend.uefn_plugins.team_folders import plugin_folders
 
-        target = str(scope_id or "")
         if not target:
-            return {"ok": False, "error": "Pick Local or a team."}
+            return {"ok": False, "error": "Pick Local or a team."}, {}
         account = scopes.account_id()
+        if account == scopes.LOCAL and target != scopes.PERSONAL:
+            return {"ok": False, "error": "Sign in to share a plugin's data"}, {}
+        scopes.set_app_copy(target)  # first: what the plugins read meanwhile follows it
         linked = repo.links(account) if account != scopes.LOCAL else {}
-        candidates = sorted(set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS, GENERAL} | set(linked))
+        candidates = sorted(set(get_enabled_plugin_ids()) | set(scopes.CORE_DATA) | set(linked))
         switched: list[str] = []
         pending: list[dict[str, Any]] = []
         errors: list[dict[str, str]] = []
+        each: dict[str, dict[str, Any]] = {}
         for pid in candidates:
             try:
-                if scopes.active_scope(pid)["id"] == target:
+                if repo.link_get(account, pid) == target:
                     continue
-                if target != scopes.PERSONAL and not scopes.shareable(pid):
+                if target != scopes.PERSONAL and not scopes.sharing_allowed(pid):
                     continue
             except Exception:  # noqa: BLE001 — a plugin that can't say is left alone
                 continue
-            out = self.plugin_scope_set(pid, target)
+            out = each[pid] = self._scope_set_one(pid, target, None)
             if out.get("needs") == "first_share":
                 pending.append({"plugin": pid, **{k: out[k] for k in ("units", "note", "team") if k in out}})
+                for folder in plugin_folders(pid):  # its bar offers "Copy Local into <team>"
+                    folder_files.copy_put(account, target, pid, folder.id, "", offer=1)
             elif out.get("ok") is False:
                 errors.append({"plugin": pid, "error": str(out.get("error") or "")})
             else:
                 switched.append(pid)
-        return {"ok": not errors, "switched": switched, "pending": pending, "errors": errors}
+        return {"ok": not errors, "switched": switched, "pending": pending, "errors": errors}, each
 
     def plugin_scope_set(self, plugin_id: str, scope_id: str, options: dict | None = None) -> dict[str, Any]:
         """Keep a plugin's data in Local or one shared space. Nothing moves: the plugin
@@ -1160,14 +1177,31 @@ class PanelApiStoreMixin:
         Local into <team>" sends ``{pick: true}``: the answer asks which Local units to copy
         even when the team already has files, and the same call with the units copies them.
         A team that has no copy yet of a project opened since (its offer) goes through the
-        switch too, even when the plugin is on that team already."""
+        switch too, even when the plugin is on that team already.
+
+        The app is on one copy: a pick of another copy than the app's is the app-wide switch
+        (:meth:`plugin_scope_set_all`), and this answers with this plugin's part of it."""
+        from backend.uefn_plugins import scopes
+        from backend.uefn_plugins.spaces import scope_status
+
+        pid = str(plugin_id or "")
+        target = str(scope_id or "")
+        if target and target != scopes.app_copy() and scopes.account_id() != scopes.LOCAL:
+            summary, each = self._switch_everything(target)
+            if summary.get("error"):
+                return summary
+            # Already there, or a plugin that can't share: its status as it is now.
+            own = each.get(pid) or {**scope_status(pid), "ok": True}
+            return {**own, "switchedAll": summary.get("switched", []), "pendingAll": summary.get("pending", [])}
+        return self._scope_set_one(pid, target, options)
+
+    def _scope_set_one(self, pid: str, target: str, options: dict | None) -> dict[str, Any]:
+        """One plugin onto ``target`` (:meth:`plugin_scope_set`'s steps), the app copy aside."""
         import threading
 
         from backend.uefn_plugins.scopes import active_scope
         from backend.uefn_plugins.spaces import link_scope, switch_folders, sync_active
 
-        pid = str(plugin_id or "")
-        target = str(scope_id or "")
         opts = dict(options or {}) if isinstance(options, dict) else {}
         first_share = opts.get("firstShare") if isinstance(opts.get("firstShare"), dict) else None
         if first_share is None and any(k in opts for k in ("units", "start_empty", "startEmpty", "pick")):

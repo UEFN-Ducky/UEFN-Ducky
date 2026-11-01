@@ -714,17 +714,18 @@ def _reload_moved() -> None:
 def _migrate_folder_links() -> None:
     """Once per account: plugins linked to a team before their folders could be shared go
     back on Local, with the bar's offer to copy Local into the team; they restart on it.
-    Workflows and General storage with no link follow the account's team."""
+    Every other plugin, Workflows and General storage go on the app's copy
+    (:func:`scopes.settle_app_copy`)."""
     from backend.uefn_plugins import scopes, vcs_engine
 
     try:
-        core = scopes.ensure_core_links()
-        if core:
+        settled = scopes.settle_app_copy()
+        if settled:
             from frontend.ui_web.agent_modes import push_ui_event
 
-            push_ui_event({"type": "plugin_scope_changed", "plugins": core, "switched": True})
-    except Exception:  # noqa: BLE001 — the next link to a team does it too
-        _log.warning("putting Workflows and General storage on the team failed", exc_info=True)
+            push_ui_event({"type": "plugin_scope_changed", "plugins": settled, "switched": True})
+    except Exception:  # noqa: BLE001 — the next app-wide switch does it too
+        _log.warning("putting every plugin on the app's copy failed", exc_info=True)
     try:
         moved = vcs_engine.migrate_folder_links()
         if not moved:

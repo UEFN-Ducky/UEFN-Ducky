@@ -101,8 +101,8 @@ def ducky_plugin_data_scope(id: str, scope: str = "", pretty: bool = False) -> s
     ``scope`` empty → report the current scope, its state (ok, offline, error, paused,
     waiting, locked, lost, unavailable, reset, no_provider) and, for a shared copy, who is
     in it, locks, what waits to go out or come in, and conflicts (as ``ducky_team_status``).
-    ``scope`` of 'local' or a space id → move the plugin's data copy there (nothing is
-    copied) and restart it on the new copy.
+    ``scope`` of 'local' or a space id → the whole app switches there: every plugin,
+    Workflows and General storage show that copy (nothing is copied) and restart on it.
     """
     from backend.uefn_plugins import scopes
     from backend.uefn_plugins.spaces import provider
@@ -121,51 +121,28 @@ def ducky_plugin_data_scope(id: str, scope: str = "", pretty: bool = False) -> s
     if scope_id != scopes.PERSONAL and not scopes.sharing_allowed(pid):
         return tool_json({"ok": False, "error": f"'{pid}' keeps its data on this PC only. It can't be shared."},
                          pretty=pretty)
-    label ="Local" if scope_id == scopes.PERSONAL else f"{provider().kind_label} {want}"
-    if not _confirm(f"Switch '{pid}' data to {label}? Nothing is copied.", title="Switch data"):
+    label = "Local" if scope_id == scopes.PERSONAL else f"{provider().kind_label} {want}"
+    if not _confirm(f"Switch the whole app (every plugin, Workflows and General storage) to {label}? "
+                    "Nothing is copied.", title="Switch data"):
         return tool_json({"ok": False, "error": "Cancelled — data scope unchanged."}, pretty=pretty)
-    # Same steps as the scope bar's switch (PanelApi.plugin_scope_set): relink, tell the
-    # panels, sync, then restart the plugin on the new copy and reload its open panels.
-    import threading
-
-    from backend.uefn_plugins.spaces import link_scope, switch_folders, sync_active
+    # The app is on one copy: the same switch as the scope bar and the Team picker.
+    import frontend.ui_web.panel_api  # noqa: F401 — panel_api_store is imported through it
     from frontend.ui_web.agent_modes import push_ui_event
+    from frontend.ui_web.panel_api_store import PanelApiStoreMixin
 
-    try:
-        before = scopes.active_scope(pid)["id"]
-        # A plugin that keeps its own folders: the copy it leaves sends its changes, the
-        # team's files come down, then its folders point at them (as the bar's switch).
-        folders = switch_folders(pid, scope_id) if before != scope_id else None
-        if folders is not None and not folders.get("ok"):
-            if folders.get("needs") == "first_share":
-                return tool_json({"ok": False, "needs": "first_share", "units": folders.get("units") or [],
-                                  "error": f"{folders.get('team') or 'The team'} has none of this plugin's files "
-                                           "yet. Choose which to copy in the plugin's bar (Change)."}, pretty=pretty)
-            return tool_json({"ok": False, "error": folders.get("error") or "The plugin's folders couldn't move."},
-                             pretty=pretty)
-        result = link_scope(pid, scope_id)
-    except (ValueError, PermissionError, OSError) as exc:
-        return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
-    push_ui_event({"type": "plugin_scope_changed", "plugins": [pid]})
-    try:
-        from backend.uefn_plugins.sync_scheduler import synced_event
+    class _Switch(PanelApiStoreMixin):
+        def _push_panel(self, event: dict) -> None:
+            push_ui_event(event)
 
-        sync_active(pid, force=True, on_done=lambda r: push_ui_event(synced_event(r)))
-    except Exception:
-        pass
-    if before != scope_id:
-
-        def _restart() -> None:
-            try:
-                from backend.uefn_plugins.host import reload_single_plugin
-
-                reload_single_plugin(pid)
-            except Exception:
-                pass
-            push_ui_event({"type": "plugin_scope_changed", "plugins": [pid], "switched": True})
-
-        threading.Thread(target=_restart, name="plugin-scope-restart", daemon=True).start()
-    return tool_json({"ok": True, "scope": result}, pretty=pretty)
+    out = _Switch().plugin_scope_set(pid, scope_id)
+    if out.get("needs") == "first_share":
+        return tool_json({"ok": False, "needs": "first_share", "units": out.get("units") or [],
+                          "error": f"{out.get('team') or 'The team'} has none of this plugin's files yet. Choose "
+                                   "which to copy in the plugin's bar (Copy Local into the team)."}, pretty=pretty)
+    if out.get("ok") is False:
+        return tool_json({"ok": False, "error": out.get("error") or "The switch didn't go through."}, pretty=pretty)
+    return tool_json({"ok": True, "scope": out.get("scope"), "switchedAll": out.get("switchedAll", []),
+                      "pendingAll": out.get("pendingAll", [])}, pretty=pretty)
 
 
 @mcp.tool()

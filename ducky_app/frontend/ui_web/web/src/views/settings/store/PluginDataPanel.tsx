@@ -225,8 +225,8 @@ export function PluginDataPanel({ pluginId, name }: { pluginId: string; name: st
             {confirm.kind === "copy"
               ? `Copy your Local ${name} data into ${scope.label}? Items ${scope.label} already has are kept. Nothing goes to any other ${kind}.`
               : confirm.choice.kind === "shared"
-                ? `Show ${confirm.choice.label}'s copy of ${name}? Your Local copy stays on this PC, separate. Nothing is copied.`
-                : `Show your Local copy of ${name}? ${scope.label}'s copy stays with the ${kind}.`}
+                ? `Switch everything to ${confirm.choice.label}? ${name}, every other plugin, Workflows and General storage show ${confirm.choice.label}'s copy. Your Local copies stay on this PC, separate. Nothing is copied.`
+                : `Switch everything to Local? ${name}, every other plugin, Workflows and General storage show their Local copy. ${scope.label}'s copy stays with the ${kind}.`}
           </p>
           <button type="button" className="ds-btn ds-data-btn ds-data-btn--primary" disabled={busy}
             onClick={() => void (confirm.kind === "copy" ? copyIn() : switchTo(confirm.choice))}>

@@ -401,6 +401,12 @@ def active_scope(plugin: str) -> dict[str, Any]:
     if account == LOCAL or not sharing_allowed(plugin):
         return personal_scope(account)
     space = repo.link_get(account, plugin)
+    if space == PERSONAL:
+        # A plugin new here (installed or enabled since the switch) joins the app's team.
+        joined = _stored_app_copy(account)
+        if joined and joined != PERSONAL and _joins_app_copy(plugin):
+            link_plugin(plugin, joined)
+            space = joined
     if space == PERSONAL or not valid_space_id(space):
         return personal_scope(account)
     scope = shared_scope(account, space)
@@ -623,6 +629,70 @@ def ensure_core_links() -> list[str]:
     for pid in added:
         link_plugin(pid, team)
     return added
+
+
+# The copy the whole app is on (Local or one team), per account: switching is app-wide
+# (PanelApi.plugin_scope_set_all), so every plugin, Workflows and General storage follow it.
+_APP_COPY_KEY = "app_copy.{}"
+
+
+def _stored_app_copy(account: str) -> str:
+    from backend.store.repos import kv
+
+    got = str(kv.meta_get(_APP_COPY_KEY.format(account)) or "")
+    return got if got == PERSONAL or valid_space_id(got) else ""
+
+
+def app_copy() -> str:
+    """Which copy this PC is on for the signed-in account: ``personal`` or a space id. Before
+    the first app-wide switch or start-up (:func:`settle_app_copy`), the team most plugins use."""
+    from backend.store.repos import plugin_data as repo
+
+    account = account_id()
+    if account == LOCAL:
+        return PERSONAL
+    return _stored_app_copy(account) or main_team(repo.links(account)) or PERSONAL
+
+
+def set_app_copy(scope_id: str) -> None:
+    from backend.store.repos import kv
+
+    account = account_id()
+    if account != LOCAL and (scope_id == PERSONAL or valid_space_id(scope_id)):
+        kv.meta_set(_APP_COPY_KEY.format(account), scope_id)
+
+
+def _joins_app_copy(plugin: str) -> bool:
+    """A plugin that follows the app copy by a plain link. One that keeps its own folders
+    needs its first share (its bar offers it), and ``data_sharing: false`` stays Local."""
+    from backend.uefn_plugins.team_folders import plugin_folders
+
+    return valid_plugin_id(plugin) and sharing_allowed(plugin) and not plugin_folders(plugin)
+
+
+def settle_app_copy() -> list[str]:
+    """At start-up: the app copy is decided once (the team most plugins use, else Local), then
+    every plugin that isn't on it (enabled ones, Workflows, General storage, any linked) is
+    put there. It never undoes a switch: the last app-wide switch set the app copy. Returns
+    the plugins moved."""
+    from backend.store.repos import plugin_data as repo
+    from backend.uefn_plugins.store import get_enabled_plugin_ids
+
+    account = account_id()
+    if account == LOCAL:
+        return []
+    links = repo.links(account)
+    target = _stored_app_copy(account)
+    if not target:
+        target = main_team(links) or PERSONAL
+        set_app_copy(target)
+    before = dict(links)
+    for pid in sorted(set(get_enabled_plugin_ids()) | set(CORE_DATA) | set(links)):
+        # Read again each time: a team link brings core data along (ensure_core_links).
+        if repo.link_get(account, pid) != target and _joins_app_copy(pid):
+            link_plugin(pid, target)
+    after = repo.links(account)
+    return sorted(p for p in set(before) | set(after) if before.get(p, PERSONAL) != after.get(p, PERSONAL))
 
 
 def copy_local_into(plugin: str, space: str) -> dict[str, Any]:

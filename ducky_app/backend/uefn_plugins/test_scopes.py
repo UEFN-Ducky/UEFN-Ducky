@@ -232,6 +232,30 @@ def test_workflows_and_general_storage_follow_the_team_and_never_leave_it_silent
     assert scopes.ensure_core_links() == []
 
 
+def test_startup_puts_a_mixed_pc_on_one_copy_and_never_undoes_a_switch(who: _Who, fake_spaces: FakeSpaces,
+                                                                      monkeypatch) -> None:
+    from backend.uefn_plugins import store
+    from backend.uefn_plugins.general_storage import GENERAL
+
+    wf = spaces.WORKFLOW_DOCS
+    monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: ["brainrot-tcg", "forge", "kanban", "idle"])
+    ana = open_space(fake_spaces, who, "ana@x.org", "spaceT", "Alpha Studio")
+    scopes.link_plugin("forge", "spaceT")
+    fake_spaces.spaces["spaceU"] = "Beta Crew"
+    repo.link_set(ana, "kanban", "spaceU")  # an older version's per-plugin pick
+    repo.link_set(ana, GENERAL, scopes.PERSONAL)
+    # No app-wide copy yet: the team most plugins use wins, and everything goes there once.
+    assert sorted(scopes.settle_app_copy()) == sorted(["kanban", "idle", GENERAL])
+    assert scopes.app_copy() == "spaceT"
+    assert {repo.link_get(ana, p) for p in ("brainrot-tcg", "forge", "kanban", "idle", wf, GENERAL)} == {"spaceT"}
+    assert scopes.settle_app_copy() == []
+    # After an app-wide switch to Local nothing goes back on the team at the next start.
+    scopes.set_app_copy(scopes.PERSONAL)
+    for pid in list(repo.links(ana)):
+        scopes.link_plugin(pid, scopes.PERSONAL)
+    assert scopes.settle_app_copy() == [] and repo.links(ana) == {}
+
+
 def test_team_overview_always_lists_workflows_and_general_storage(who: _Who, fake_spaces: FakeSpaces) -> None:
     from backend.uefn_plugins.general_storage import GENERAL
 
