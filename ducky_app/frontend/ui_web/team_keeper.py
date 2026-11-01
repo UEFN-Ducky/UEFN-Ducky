@@ -755,7 +755,19 @@ def _dispatch_members(plans: list[dict[str, Any]], busy: set[str], now: float,
                 # change; that counted as nothing, and the team sat idle with nobody told.
                 st.update(moves=moves, tries=0, next=0.0, cleared=st["blocked"] or st["cleared"], blocked="",
                           cleared_mark=_reply_mark(member))
+            nudged = max(float(n.get("nudged_at") or 0.0) for n in [work.get("section") or {}, *work["points"]])
+            if nudged > st.get("nudged", 0.0):
+                # The lead or the person re-assigned, rewrote or added this member's open work:
+                # it starts now, even after a Stop, a block or two turns that moved nothing.
+                st.update(nudged=nudged, tries=0, next=0.0, idle_since=now - _MEMBER_IDLE_S, blocked="",
+                          cleared=st["blocked"] or st["cleared"], cleared_mark=_reply_mark(member))
+                _resume(member)
             if member in busy or _waiting(member):
+                if st["idle_since"] is not None and now - st.get("woke_at", float("-inf")) > _MEMBER_IDLE_S:
+                    # A turn Ducky didn't start (a recycle, the person typing): it starts over.
+                    # ponytail: "ours" = began within _MEMBER_IDLE_S of a keeper wake; tag turns with
+                    # their starter if a slow start ever reads as foreign.
+                    st.update(tries=0, next=0.0)
                 st["idle_since"] = None  # idle time counts from the first quiet look
                 movable.add(lead)
                 continue
@@ -778,7 +790,7 @@ def _dispatch_members(plans: list[dict[str, Any]], busy: set[str], now: float,
                         continue
                 except Exception:
                     continue
-                st.update(task=task, tries=0, idle_since=now, next=now + _MEMBER_IDLE_S, blocked="",
+                st.update(task=task, tries=0, idle_since=now, next=now + _MEMBER_IDLE_S, blocked="", woke_at=now,
                           cleared=st["cleared"] if same else "", told_done=st["told_done"] if same else None,
                           done_at_wake=_done_points(work.get("section")))
                 woke.append(member)
@@ -823,6 +835,7 @@ def _dispatch_members(plans: list[dict[str, Any]], busy: set[str], now: float,
             except Exception:
                 continue
             st["done_at_wake"] = done
+            st["woke_at"] = now
             st["tries"] += 1
             st["idle_since"] = now
             st["next"] = now + _MEMBER_IDLE_S * 2
@@ -830,6 +843,16 @@ def _dispatch_members(plans: list[dict[str, Any]], busy: set[str], now: float,
     _had_work.clear()
     _had_work.update(with_work)
     return woke, movable
+
+
+def _resume(member: str) -> None:
+    """Clear a Stop: the lead or the person asked for this member's work again."""
+    try:
+        from backend.agent.a2a_broker import resume_by_user
+
+        resume_by_user(member)
+    except Exception:
+        pass
 
 
 def stop_team(group_id: str, cancel: Callable[[str], Any]) -> dict[str, Any]:

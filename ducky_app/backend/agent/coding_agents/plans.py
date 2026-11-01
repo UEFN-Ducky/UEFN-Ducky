@@ -251,7 +251,29 @@ def _normalize_node(raw: Any, *, fallback_id: str | None = None) -> dict[str, An
     after = _normalize_after(raw.get("after"), own_id=nid)
     if after:
         node["after"] = after  # steps that must finish before this one starts
+    nudged = raw.get("nudged_at")
+    if isinstance(nudged, (int, float)) and nudged > 0:
+        node["nudged_at"] = float(nudged)  # the lead or the person last touched this open step
     return node
+
+
+def _nudge(doc: dict[str, Any], node: dict[str, Any], *, by_user: bool = False) -> None:
+    """The lead or the person re-assigned, rewrote or added this open step: stamp it, so the team
+    keeper starts its member again, even after a Stop or turns that moved nothing. A member's own
+    edits (its notes, its splits) are not a nudge. Oct 2026: a lead re-set a stopped member's
+    assignee and rewrote its in_progress point, and the member never woke."""
+    if doc.get("kind") == "template" or _is_done_node(node):
+        return
+    if not by_user:
+        try:
+            from backend.workspace.identity import resolve_context
+
+            actor = str(getattr(resolve_context(), "conv_id", "") or "")
+        except Exception:
+            actor = ""
+        if actor and actor != str(doc.get("chat_id") or ""):
+            return
+    node["nudged_at"] = time.time()
 
 
 _NOTES_MAX = 2048  # bytes of notes kept on a step; the whole text goes to a linked note file
@@ -927,6 +949,7 @@ def add_node(
         raise ValueError("content required")
     doc, save = _load_editable(chat_id, project_root=project_root, template_id=template_id)
     node["body_markdown"] = _cap_notes(doc, node, node.get("body_markdown"), project_root)
+    _nudge(doc, node)
     playing = doc.get("kind") != "template" and plan_structure_locked(doc)
     if playing and str(doc.get("status") or "").strip().lower() == "finished":
         _refuse_if_structure_locked(doc)
@@ -1048,6 +1071,8 @@ def update_node(
             plan_hooks.before_complete(doc, node, chat_id)
         node["status"] = _apply_status_gate(node, status, chat_id, by_user=by_user,
                                             owners=_owners_of(roots, node_id), project_root=project_root)
+    if any(v is not None for v in (assignee, body_markdown, content, after)):
+        _nudge(doc, node, by_user=by_user)  # a same-value re-assign counts too
     doc["nodes"] = roots
     return save(doc)
 

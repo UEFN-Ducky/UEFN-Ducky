@@ -793,3 +793,62 @@ def test_member_wakes_wait_for_a_seat_and_the_top_leads_never_do(monkeypatch) ->
     admission._running.discard("other")
     sq.on_turn_end("other")  # a turn ends: the waiting member starts with its whole task
     assert [c for c, _ in woke] == ["lead2", "builder"] and "Your task" in woke[1][1]
+
+
+def _nudged(plan: dict, node_id: str, at: float) -> dict:
+    """``plan`` with ``nudged_at`` on one node: what plans.update_node stamps for a lead's touch."""
+    def walk(nodes):
+        return [{**n, **({"nudged_at": at} if n["id"] == node_id else {}), "children": walk(n.get("children") or [])}
+                for n in nodes]
+    return {**plan, "nodes": walk(plan["nodes"])}
+
+
+@pytest.fixture()
+def _stopped(monkeypatch):
+    """The broker's Stop set: automatic work is held until resume_by_user."""
+    stopped: set[str] = set()
+    monkeypatch.setattr(keeper, "_team_context", lambda plan, **_: ({"builder", "builder2"}, ""))
+    monkeypatch.setattr("backend.agent.a2a_broker.automatic_work_blocked", lambda cid, **kw: cid in stopped)
+    monkeypatch.setattr("backend.agent.a2a_broker.resume_by_user", stopped.discard)
+    return stopped
+
+
+def test_a_stopped_member_with_an_in_progress_point_starts_when_its_lead_reassigns_it(_stopped) -> None:
+    # Plan 14283125831b: the lead stopped the team; the member's point stayed in_progress, the
+    # keeper only woke the lead, and re-setting the same assignee changed nothing.
+    woke: list[tuple[str, str]] = []
+    member = lambda: [cid for cid, _ in woke if cid == "builder"]  # noqa: E731
+    _run(0, [], woke, plans=[SUB])
+    _run(60, ["builder"], woke, plans=[SUB])
+    _stopped.add("builder")  # ducky_group_stop / ducky_agent_stop while it ran
+    for minute in range(2, 10):
+        _run(minute * MIN, [], woke, plans=[SUB])
+    assert member() == ["builder"] and "coord" in [cid for cid, _ in woke]
+    _run(10 * MIN, [], woke, plans=[_nudged(SUB, "sec", 500.0)])  # same assignee, re-set by the lead
+    assert member() == ["builder", "builder"] and "builder" not in _stopped
+    _run(11 * MIN, [], woke, plans=[_nudged(SUB, "sec", 500.0)])
+    assert len(member()) == 2  # one nudge, one start
+
+
+def test_a_leads_notes_on_an_open_point_wake_a_member_out_of_tries(_stopped) -> None:
+    woke: list[tuple[str, str]] = []
+    member = lambda: [cid for cid, _ in woke if cid == "builder"]  # noqa: E731
+    for minute in range(0, 30):
+        _run(minute * MIN, [], woke, plans=[SUB])
+    assert len(member()) == 3  # its task, then two "continue": out of tries
+    _run(30 * MIN, [], woke, plans=[_nudged(SUB, "fx", 1800.0)])  # the lead rewrote the in_progress point
+    assert len(member()) == 4 and "Points left" in woke[-1][1]
+
+
+def test_a_turn_ducky_did_not_start_gives_the_member_fresh_tries(_stopped) -> None:
+    # After ducky_recycle_member the member ran its handoff turn, then sat idle for good: the
+    # keeper had spent its two "continue" tries before the recycle.
+    woke: list[tuple[str, str]] = []
+    member = lambda: [cid for cid, _ in woke if cid == "builder"]  # noqa: E731
+    for minute in range(0, 30):
+        _run(minute * MIN, [], woke, plans=[SUB])
+    assert len(member()) == 3
+    _run(30 * MIN, ["builder"], woke, plans=[SUB])  # the recycle's turn
+    for minute in range(31, 36):
+        _run(minute * MIN, [], woke, plans=[SUB])
+    assert len(member()) == 4
