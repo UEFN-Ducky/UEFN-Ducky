@@ -654,7 +654,7 @@ def _in_own_thread(fn: Any, thread: dict[str, Any], name: str) -> asyncio.Future
 
 
 async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any], ident: Any,
-                   waits: dict[str, Any] | None = None) -> Any:
+                   waits: dict[str, Any] | None = None, arguments: dict[str, Any] | None = None) -> Any:
     """Await one tool call. A quick tool past :data:`QUICK_TOOL_LIMIT_S` is stopped and
     raises :class:`_CallTimedOut`; any call past the first check is recorded where it waits."""
     limit = QUICK_TOOL_LIMIT_S if name in QUICK_TOOLS else None
@@ -662,7 +662,7 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
         if not done:
-            _report_stuck(name, first, work, thread, ident, waits)
+            _report_stuck(name, first, work, thread, ident, waits, arguments)
             if limit is not None:
                 work.cancel()
                 raise _CallTimedOut(
@@ -726,18 +726,27 @@ def _call_stack(work: Any, thread: dict[str, Any]) -> list[str]:
 
 
 def _report_stuck(name: str, seconds: float, work: Any, thread: dict[str, Any], ident: Any,
-                  waits: dict[str, Any] | None = None) -> None:
-    """One events row (kind ``tool_stuck``) with where the call waits. Never raises."""
+                  waits: dict[str, Any] | None = None, arguments: dict[str, Any] | None = None) -> None:
+    """One events row (kind ``tool_stuck``) with where the call waits. Never raises.
+    ducky_call_tool reports as the tool it ran, as _usage_tool_done counts it: 9 of 15
+    stuck calls on Oct 31 2026 said ducky_call_tool and hid the plugin."""
     try:
         import sys
         import traceback
 
+        from backend.agent.toolsets import effective_tool_name
+
+        name = effective_tool_name(name, arguments if isinstance(arguments, dict) else {})
+
         frames = sys._current_frames()
         lines = _call_stack(work, thread)
         # A wait on another loop (nested MCP servers) continues on that loop's thread.
+        # An idle pool loop (sitting in _poll) says nothing about this call: skip it.
         for t in threading.enumerate():
             if t.name == "mcp-plugin-pool" and t.ident in frames:
-                lines += ["mcp-plugin-pool:\n", *traceback.format_stack(frames[t.ident])[-12:]]
+                pool = traceback.format_stack(frames[t.ident])
+                if not _idle_in_loop(pool):
+                    lines += ["mcp-plugin-pool:\n", *pool[-12:]]
         from backend.store.repos import events
         from backend.util.privacy import scrub
 
@@ -855,7 +864,7 @@ async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any)
         rpc.untrack_waits(waits_token)
         t0 = time.monotonic()
         try:
-            raw = await _watched(work, name, thread, ident, waits)
+            raw = await _watched(work, name, thread, ident, waits, arguments)
         except _CallTimedOut as exc:
             _usage_tool_done(name, False, t0, ident, arguments, fail="timeout")
             return {"content": [{"type": "text", "text": str(exc)}], "isError": True}

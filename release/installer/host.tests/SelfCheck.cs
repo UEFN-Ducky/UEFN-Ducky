@@ -217,8 +217,50 @@ namespace DuckySetup.Tests
 
             Check(WebRelease.SameSha(Sha, Sha.ToUpperInvariant()) && !WebRelease.SameSha("", "") && !WebRelease.SameSha(Sha, Sha.Substring(1) + "0"), "sha compare");
 
+            DownloadRetries();
+
             var files = new[] { @"C:\d\UEFN-Ducky-Setup-1.2.416.exe", @"C:\d\UEFN-Ducky-Setup-1.2.417.exe", @"C:\d\UEFN-Ducky-Setup-1.2.417.exe.part", @"C:\d\UEFN-Ducky-Setup-1.2.415.exe.part" };
             Check(WebRelease.Stale(files, "UEFN-Ducky-Setup-1.2.417.exe").SequenceEqual(new[] { files[0], files[3] }), "other versions' downloads swept, ours kept");
+        }
+
+        static void DownloadRetries()
+        {
+            Check(WebRelease.DownloadRetryWaits.SequenceEqual(new[] { 2, 5, 10, 20, 30 }), "download retried after 2, 5, 10, 20, 30 s");
+
+            // Fails twice (each try adds bytes), then finishes: no error, waits start over each time.
+            long have = 0;
+            var tries = 0;
+            var waits = new List<int>();
+            var last = WebRelease.FetchWithRetries(() =>
+            {
+                tries++;
+                have += 40;
+                if (tries <= 2) throw new WebException("drop", WebExceptionStatus.ReceiveFailure);
+            }, () => have, waits.Add);
+            Check(last == null && tries == 3 && waits.SequenceEqual(new[] { 2, 2 }), "fails twice then finishes still installs");
+
+            // No progress at all: 6 tries, every wait used, last error returned.
+            tries = 0;
+            waits.Clear();
+            var dead = new WebException("dns", WebExceptionStatus.NameResolutionFailure);
+            last = WebRelease.FetchWithRetries(() => { tries++; throw dead; }, () => 0, waits.Add);
+            Check(last == dead && tries == 6 && waits.SequenceEqual(WebRelease.DownloadRetryWaits), "dead network gives up after 6 tries");
+
+            // A 25 s drop (no bytes on tries 1-3) resumes on try 4.
+            tries = 0;
+            waits.Clear();
+            last = WebRelease.FetchWithRetries(() => { if (++tries < 4) throw new System.IO.IOException("reset"); }, () => 0, waits.Add);
+            Check(last == null && tries == 4 && waits.Sum() == 17, "a 25 s drop resumes on try 4");
+
+            Check(WebRelease.DownloadErrorCode(new WebException("t", WebExceptionStatus.Timeout)) == "download_failed.timeout", "download timeout");
+            Check(WebRelease.DownloadErrorCode(dead) == "download_failed.dns", "download dns");
+            Check(new[] { WebExceptionStatus.ConnectFailure, WebExceptionStatus.ConnectionClosed, WebExceptionStatus.ReceiveFailure }
+                .All(s => WebRelease.DownloadErrorCode(new WebException("c", s)) == "download_failed.conn"), "download conn");
+            Check(WebRelease.DownloadErrorCode(new WebException("h", WebExceptionStatus.ProtocolError), 503) == "download_failed.http_503", "download http status");
+            Check(WebRelease.DownloadErrorCode(new System.IO.IOException("disk")) == "download_failed.io", "download io");
+            Check(WebRelease.DownloadErrorCode(null) == "download_failed.short", "download short");
+            Check(WebRelease.DownloadErrorCode(new WebException("u", WebExceptionStatus.UnknownError)) == "download_failed.other", "download other");
+            Check(WebRelease.DownloadErrorCode(new WebException("h", WebExceptionStatus.ProtocolError), 503).Length <= 48, "code fits usage_events");
         }
 
         static void StoreErrors()

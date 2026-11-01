@@ -67,12 +67,38 @@ def test_python_on_starts_the_listener_in_the_open_editor(epic) -> None:
     assert "from listener.bootstrap import run as boot" in state["script"] and "UEFN-Ducky" in state["script"]
 
 
-def test_a_refused_boot_script_still_says_python_is_on(epic) -> None:
+def test_python_on_script_refused_names_it(epic) -> None:
     _calls, state = epic
     state["python"] = "true"
     state["script_refused"] = True
     out = revive.revive_listener(4200)
     assert out["action"] == "python_already_on" and not out["ok"]
+    assert out["step"] == "refused" and "RuntimeError" in out["message"]
+    assert revive.error_source("listener_revive", out) == "listener_revive.python_already_on.refused"
+
+
+def test_python_on_no_health_names_it(epic) -> None:
+    _calls, state = epic
+    state["python"] = "true"
+    out = revive.revive_listener(4200)
+    assert out["step"] == "no_health" and "no_health" in out["message"]
+    code = revive.error_source("listener_restart", out)
+    assert code == "listener_restart.python_already_on.no_health" and len(code) <= 48
+
+
+def test_slow_listener_within_60s_counts_as_started(monkeypatch, epic) -> None:
+    _calls, state = epic
+    state["python"] = "true"
+    monkeypatch.setattr(revive, "_BOOT_WAIT_SEC", 60.0)
+    clock = {"t": 0.0}
+    logged: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
+    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port: {"status": "ok"} if clock["t"] >= 35 else None)
+    monkeypatch.setattr(revive.time, "monotonic", lambda: clock["t"])
+    monkeypatch.setattr(revive.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
+    revive.AutoRevive._run(4200)  # the auto path: records an error only when the revive fails
+    assert clock["t"] == 35  # returned on the first healthy poll, not at the 60 s deadline
+    assert logged == [] and state["script"]
 
 
 def test_python_on_with_dead_socket_says_restart(epic) -> None:
@@ -148,12 +174,12 @@ def test_auto_revive_error_code_names_the_step(monkeypatch) -> None:
     logged: list[str] = []
     monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
     for action in ("uefn_offline", "stale_socket", "python_already_on"):
-        monkeypatch.setattr(revive, "revive_listener", lambda port, a=action: {"ok": False, "action": a, "message": "x"})
+        monkeypatch.setattr(revive, "revive_listener", lambda port, a=action: {"ok": False, "action": a, "step": "no_health" if a == "python_already_on" else "", "message": "x"})
         revive.AutoRevive._run(4200)
     monkeypatch.setattr(revive, "revive_listener", lambda port: 1 / 0)
     revive.AutoRevive._run(4200)
     # UEFN closing mid-try is status, not an error.
-    assert logged == ["listener_revive.stale_socket", "listener_revive.python_already_on", "listener_revive.failed"]
+    assert logged == ["listener_revive.stale_socket", "listener_revive.python_already_on.no_health", "listener_revive.failed"]
     assert where_of(logged[0]) == "bridge"
 
 

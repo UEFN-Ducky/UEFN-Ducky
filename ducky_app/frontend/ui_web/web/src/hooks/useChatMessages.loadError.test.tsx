@@ -37,7 +37,7 @@ describe("a chat that never loads", () => {
 
     expect(result.current.hydrated).toBe(true);
     expect(result.current.loadError).toBe("This chat is taking too long to load.");
-    expect(api.report_ui_error).toHaveBeenCalledWith("chat_timeout", expect.stringContaining("Chat abcdef12 didn't load"));
+    expect(api.report_ui_error).toHaveBeenCalledWith("chat_timeout.unknown", expect.stringContaining("Chat abcdef12 didn't load"));
 
     // Retry loads it once the backend answers.
     api.load_messages.mockResolvedValue([{ id: 1, role: "user", text: "hi" }]);
@@ -46,5 +46,17 @@ describe("a chat that never loads", () => {
     });
     expect(result.current.loadError).toBe("");
     expect(result.current.messages).toHaveLength(1);
+  });
+});
+
+describe("a slow chat load", () => {
+  it("tags chat_slow with the chat's size", async () => {
+    const rows: ChatMessage[] = Array.from({ length: 600 }, (_, i) => ({ id: i * 1000, role: "user", text: `m${i}` }));
+    api.load_messages.mockResolvedValue(rows);
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (now += 7_000));
+    const { result } = renderHook(() => useChatMessages("5100aaaa-0000-0000-0000-000000000000", true, false));
+    await vi.waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(api.report_ui_error).toHaveBeenCalledWith("chat_slow.long", expect.stringContaining("(600 messages)"));
   });
 });

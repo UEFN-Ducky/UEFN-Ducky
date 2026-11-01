@@ -16,8 +16,9 @@ from typing import Any
 _PYTHON_TOOLSET = "ValkyrieToolset.ValkyriePythonToolset"
 _PROGRAMMATIC_TOOLSET = "editor_toolset.toolsets.programmatic.ProgrammaticToolset"
 _EPIC_CALL_TIMEOUT_SEC = 20.0
-# The listener answers health within a few ticks of its bootstrap; past this it did not start.
-_BOOT_WAIT_SEC = 20.0
+# A cold or Verse-building editor can take well past 20 s to answer health after the
+# bootstrap (no_health); polled each second, so a quick start still returns at once.
+_BOOT_WAIT_SEC = 60.0
 # UEFN MCP answers ~30 s before UEFN turns Python on itself, and the boot file then
 # waits ~45 slow loading ticks; give a normal start this long before stepping in.
 AUTO_REVIVE_GRACE_SEC = 60.0
@@ -79,25 +80,26 @@ def _boot_script(listener_dir: str) -> str:
     )
 
 
-def _start_listener_in_editor(port: int) -> bool:
+def _start_listener_in_editor(port: int) -> str:
     """Python is on but the listener never started: the init scripts only run when Python
     starts, so a hook a Fortnite update wiped stays unrun (python_already_on, 5 on 3 PCs on
-    Oct 28 2026). Run the bootstrap in the open editor and wait for health. False when the
-    script is refused or the listener still does not answer."""
+    Oct 28 2026). Run the bootstrap in the open editor and wait for health. ``""`` when it
+    started, ``"refused: <ExcType>"`` when Epic refused the script, ``"no_health"`` when the
+    listener still does not answer (both were one code, 10 on 8 PCs on Oct 31 2026)."""
     from backend.bridge import listener_get_health
     from frontend.deploy import appdata_listener_dir
 
     try:
         _call_epic_tool("execute_tool_script", _PROGRAMMATIC_TOOLSET, {"script": _boot_script(str(appdata_listener_dir()))})
-    except Exception:
-        return False
+    except Exception as exc:
+        return f"refused: {type(exc).__name__}"
     deadline = time.monotonic() + _BOOT_WAIT_SEC
     while True:
         health = listener_get_health(port)
         if health is not None and health.get("status") == "ok":
-            return True
+            return ""
         if time.monotonic() >= deadline:
-            return False
+            return "no_health"
         time.sleep(1.0)
 
 
@@ -151,13 +153,15 @@ def revive_listener(port: int) -> dict[str, Any]:
                     "version on, Ducky closes it on every island switch."
                 ),
             }
-        if enabled and _start_listener_in_editor(port):
-            return {"ok": True, "action": "listener_started", "message": "Listener started in the open UEFN."}
         if enabled:
+            why = _start_listener_in_editor(port)
+            if not why:
+                return {"ok": True, "action": "listener_started", "message": "Listener started in the open UEFN."}
             return {
                 "ok": False,
                 "action": "python_already_on",
-                "message": "Python is on in UEFN but the listener did not start. " + _LAUNCH_HINT,
+                "step": why.split(":")[0],
+                "message": f"Python is on in UEFN but the listener did not start ({why}). " + _LAUNCH_HINT,
             }
         _call_epic_tool("EnablePythonInUEFN")
     except Exception as exc:
@@ -219,4 +223,5 @@ class AutoRevive:
 def error_source(prefix: str, result: dict[str, Any]) -> str:
     """Error code naming how a revive ended (``listener_revive.stale_socket``): plain
     "listener" (8 on 4 PCs, Oct 26-27 2026) could not say which step failed."""
-    return f"{prefix}.{result.get('action') or 'failed'}"
+    step = f".{result['step']}" if result.get("step") else ""
+    return f"{prefix}.{result.get('action') or 'failed'}{step}"

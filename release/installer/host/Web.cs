@@ -139,26 +139,18 @@ namespace DuckySetup
                     TryDelete(final);
                 }
             }
-            Exception? last = null;
-            for (var attempt = 0; attempt < 4; attempt++)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (attempt > 0)
-                    ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(2 * attempt));
-                ct.ThrowIfCancellationRequested();
-                try
+            ct.ThrowIfCancellationRequested();
+            var last = WebRelease.FetchWithRetries(
+                () => Fetch(release, part, progress, ct),
+                () => File.Exists(part) ? new FileInfo(part).Length : 0,
+                seconds =>
                 {
-                    Fetch(release, part, progress, ct);
-                    break;
-                }
-                catch (Exception ex) when (ex is WebException || ex is IOException)
-                {
-                    last = ex;
-                }
-            }
+                    ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds));
+                    ct.ThrowIfCancellationRequested();
+                });
             if (!File.Exists(part) || new FileInfo(part).Length != release.Size)
                 throw new SetupFailure(
-                    "download_failed",
+                    WebRelease.DownloadErrorCode(last),
                     "The download didn't finish. Check your internet connection and try again."
                     + (last != null ? " (" + last.Message + ")" : ""), last);
             TryDelete(final);

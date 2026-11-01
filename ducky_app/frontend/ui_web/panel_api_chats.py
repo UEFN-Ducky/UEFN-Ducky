@@ -95,6 +95,45 @@ def _cap_tool_results(rows: list[dict[str, Any]]) -> None:
                            "resultBytes": len(result.encode("utf-8"))}
 
 
+# The stand-in for a message a page doesn't show: _messages_to_ui walks from the end and
+# stops once it has enough rows, so it is never converted (a page that reaches it widens).
+_NOT_LOADED: dict[str, Any] = {"role": "user", "text": ""}
+
+
+def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dict[str, Any]] | None:
+    """The ``limit`` rows before ``before_id`` (the newest without it), opening only the
+    messages they come from. ``load_conversation`` opened every message of the chat, one
+    DPAPI call each: a 735-message chat out of the opened-row cache took 0.45 s for its
+    first page on an idle PC (Nov 1 2026), and the cache keeps 8 chats. None: use the
+    whole load (file store, or a save of this chat still queued for the writer)."""
+    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chat_rows import ROW_ID_STEP
+
+    writer = pc._WRITER
+    if not pc._use_db() or pc._queued(conv_id) is not None or (writer is not None and writer.checkpoint_waits(conv_id)):
+        return None
+    conv = pc.load_conversation_meta(conv_id)
+    if conv is None:
+        return []
+    repo = pc._repo()
+    stop = None if before_id is None else int(before_id) // ROW_ID_STEP + 1
+    want = max(16, limit // 4)  # assistant turns give many rows each
+    while True:
+        _, count = repo.messages_range(conv_id, 0, 0)
+        end = count if stop is None else min(stop, count)
+        start = max(0, end - want)
+        got, count = repo.messages_range(conv_id, start, end)
+        messages: list[Any] = [_NOT_LOADED] * count
+        for seq, message in got:
+            if seq < count:
+                messages[seq] = message
+        conv.messages = messages
+        rows = _pa._messages_to_ui(conv, live=live, before_id=None if before_id is None else int(before_id), limit=limit)
+        if start == 0 or (rows and rows[0]["id"] >= start * ROW_ID_STEP):
+            return rows
+        want *= 4
+
+
 class PanelApiChatsMixin:
     @staticmethod
     def _folder_sidebar_row(
@@ -1740,15 +1779,18 @@ class PanelApiChatsMixin:
         """
         started = _pa.time.monotonic()
         try:
-            conv = _pa.load_conversation(conv_id)
-            if not conv:
-                return []
-            rows = _pa._messages_to_ui(
-                conv,
-                live=conv_id in self.list_running_agents(),
-                before_id=None if before_id is None else int(before_id),
-                limit=None if limit is None else int(limit),
-            )
+            live = conv_id in self.list_running_agents()
+            rows = None if limit is None else _page_rows(conv_id, before_id, int(limit), live)
+            if rows is None:
+                conv = _pa.load_conversation(conv_id)
+                if not conv:
+                    return []
+                rows = _pa._messages_to_ui(
+                    conv,
+                    live=live,
+                    before_id=None if before_id is None else int(before_id),
+                    limit=None if limit is None else int(limit),
+                )
         except Exception as exc:
             # A chat that can't be read must leave a trace, not just a spinner.
             _pa.record_error("chat", f"Chat {str(conv_id)[:8]} couldn't be loaded: {type(exc).__name__}: {exc}")

@@ -988,11 +988,16 @@ def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
             if orig:
                 return _user32_sc.CallWindowProcW(orig, hwnd, msg, wparam, -1)
         elif msg == _WM_ENDSESSION and wparam:
-            # Logoff/shutdown kills the process after this returns: only clear the running
-            # flag (one meta write) so the next start doesn't count an app_unclean_exit.
-            from frontend import usage_stats
+            # Logoff/shutdown kills the process after this returns: clear the running flag
+            # (one meta write) and mark the launch closed, so the next start neither counts an
+            # app_unclean_exit nor asks to send 'closed by itself' (a sign-out isn't a reboot,
+            # so _pc_restarted_since didn't catch it).
+            from frontend import boot_report, usage_stats
 
-            usage_stats.app_closing()
+            try:
+                usage_stats.app_closing()
+            finally:
+                boot_report.mark("closed")
     except Exception:
         pass
     if orig:

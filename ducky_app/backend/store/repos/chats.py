@@ -1126,15 +1126,24 @@ def upsert_run_message(
 
 
 def _messages(
-    conn, conv_id: str, account: str, start: int = 0, hashes: list[str] | None = None
+    conn,
+    conv_id: str,
+    account: str,
+    start: int = 0,
+    hashes: list[str] | None = None,
+    stop: int | None = None,
+    seqs: list[int] | None = None,
 ) -> list[dict[str, Any]]:
-    """The transcript from seq *start*; *hashes* gets each message's row hash (a copy's
-    base for ``conv_save(base_hashes=...)``). A row whose hash matches an opened copy is
-    read from it."""
+    """The transcript from seq *start* (to *stop*, exclusive); *hashes* gets each message's
+    row hash (a copy's base for ``conv_save(base_hashes=...)``), *seqs* its seq. A row whose
+    hash matches an opened copy is read from it."""
     if hashes is None:
         hashes = []
+    if seqs is None:
+        seqs = []
     rows = conn.execute(
-        "SELECT seq, hash, body, fmt FROM messages WHERE conv_id=? AND seq>=? ORDER BY seq", (conv_id, start)
+        "SELECT seq, hash, body, fmt FROM messages WHERE conv_id=? AND seq>=? AND seq<? ORDER BY seq",
+        (conv_id, start, 1 << 62 if stop is None else stop),
     ).fetchall()
     _opened_touch(conv_id)
     reader: list[Callable[[str], str | None]] = []
@@ -1150,6 +1159,7 @@ def _messages(
         if shell is not None:
             out.append(_copy_containers(shell))
             hashes.append(str(h))
+            seqs.append(int(seq))
             continue
         try:
             message = _message(str(body), int(fmt), account, parts)
@@ -1157,6 +1167,7 @@ def _messages(
             continue
         out.append(message)
         hashes.append(str(h))
+        seqs.append(int(seq))
         _opened_put(conv_id, int(seq), str(h), message)
     return out
 
@@ -1190,6 +1201,26 @@ def messages_get_rev(conv_id: str, *, with_hashes: bool = False) -> tuple:
         hashes: list[str] = []
         msgs = [] if rev is None else _messages(conn, conv_id, account, 0, hashes)
         return (msgs, rev, hashes) if with_hashes else (msgs, rev)
+    finally:
+        if own:
+            conn.execute("COMMIT")
+
+
+def messages_range(conv_id: str, start: int, stop: int | None = None) -> tuple[list[tuple[int, Any]], int]:
+    """``([(seq, message), ...], row count)`` for seqs *start* to *stop* from one snapshot,
+    decoding only those rows: a page of a long chat must not open (one DPAPI call each)
+    every message before it. ``([], 0)`` when the chat isn't this account's."""
+    account = account_rows.current()
+    conn = db.connect()
+    own = not conn.in_transaction
+    if own:
+        conn.execute("BEGIN")
+    try:
+        if conv_msg_rev(conv_id) is None:
+            return [], 0
+        seqs: list[int] = []
+        msgs = _messages(conn, conv_id, account, max(0, int(start)), stop=stop, seqs=seqs)
+        return list(zip(seqs, msgs)), _row_count(conn, conv_id)
     finally:
         if own:
             conn.execute("COMMIT")

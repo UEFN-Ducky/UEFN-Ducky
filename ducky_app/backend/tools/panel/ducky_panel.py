@@ -126,7 +126,6 @@ def _serialize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 _DESC_TRUNC = 200
-_DISPATCHER_BLOCKLIST = frozenset({"ducky_call_tool", "ducky_get_tools"})
 # Old names kept callable through ducky_call_tool only; they are not registered, so
 # tools/list stays one name per job. Value = the tool that serves the call.
 HIDDEN_ALIAS_TOOLS: dict[str, str] = {
@@ -322,8 +321,11 @@ async def ducky_get_tools(
         if canonical:
             return tool_json({**describe(tool_catalog_row(by_name[canonical])), "revision": revision}, pretty=pretty)
         close = await asyncio.to_thread(_ranked_tool_names, tools, by_name, n, 10)
+        # A miss is an answer, not a failure: "ok": false counted every lookup of an invented
+        # name as a failed call (34 ducky_get_tools failures on Oct 31 2026).
         return tool_json({
-            "ok": False, "error": f"tool not found in current catalog: {n}",
+            "found": False, "name": n, "note": f"tool not found in current catalog: {n}",
+            "hint": "Pick one of close_matches, or search with pattern= instead.",
             "close_matches": close[:10],
             "revision": revision, **_discovery_miss_context(),
         }, pretty=pretty)
@@ -400,10 +402,17 @@ async def ducky_call_tool(
             limit=int(a.get("limit") or 20), offset=int(a.get("offset") or 0), pretty=pretty,
         )
     tool_name = HIDDEN_ALIAS_TOOLS.get(tool_name, tool_name)
+    if tool_name == "ducky_get_tools":
+        # Agents reach for ducky_call_tool out of habit; refusing counted as a failed
+        # ducky_get_tools call. Answer it instead.
+        a = arguments if isinstance(arguments, dict) else {}
+        return await ducky_get_tools(
+            name=str(a.get("name") or ""), pattern=str(a.get("pattern") or a.get("query") or ""),
+            limit=int(a.get("limit") or 10), offset=int(a.get("offset") or 0),
+            diagnostics=bool(a.get("diagnostics")), server_id=str(a.get("server_id") or ""), pretty=pretty,
+        )
     if tool_name == "ducky_call_tool":
         raise ValueError('ducky_call_tool takes the tool itself: ducky_call_tool(name="set_workflow_folder", arguments={"workflow_id": "…", "folder": "…"})')
-    if tool_name in _DISPATCHER_BLOCKLIST:
-        raise ValueError(f"{tool_name} is a direct tool: call {tool_name}(...) itself, not through ducky_call_tool")
     if tool_name in EXCLUDED_TOOLS:
         raise ValueError(f"tool excluded: {tool_name}")
     args = arguments if isinstance(arguments, dict) else {}

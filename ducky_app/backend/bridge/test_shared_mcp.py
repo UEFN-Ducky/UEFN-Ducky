@@ -756,7 +756,7 @@ class _StuckMcp:
     SYNC = {"sync_sleeper", "forwarded", "ducky_terminal_run"}
 
     def __init__(self) -> None:
-        names = self.SYNC | {"async_sleeper"}
+        names = self.SYNC | {"async_sleeper", "ducky_call_tool"}
         self._tool_manager = SimpleNamespace(_tools={
             n: SimpleNamespace(name=n, is_async=n not in self.SYNC, inputSchema={}) for n in names
         })
@@ -772,7 +772,7 @@ class _StuckMcp:
         if name == "sync_sleeper":
             # Like ProtectedFastMCP.call_tool: the sync tool's coroutine awaits a worker thread.
             await asyncio.to_thread(_sync_sleeps_in_a_worker)
-        elif name == "async_sleeper":
+        elif name in ("async_sleeper", "ducky_call_tool"):
             await _async_sleeps()
         else:
             rpc.panel_rpc("ask_user", {"questions": []}, timeout=10)
@@ -795,14 +795,14 @@ def stuck_events(monkeypatch):
 
     monkeypatch.setattr(rpc, "_http", fake_http)
 
-    def run(name: str) -> dict:
+    def run(name: str, arguments: dict | None = None) -> dict:
         import asyncio
 
         ident = shared_mcp.identity_from_payload({"run_id": "r", "conv_id": "450a3ccd-chat", "coding_agent": "claude_code"})
-        result = asyncio.run(shared_mcp._call_tool(_StuckMcp(), name, {}, ident))
+        result = asyncio.run(shared_mcp._call_tool(_StuckMcp(), name, arguments or {}, ident))
         assert result["content"][0]["text"] == f"{name} done"
         row = events.newest("tool_stuck", limit=1)[0]
-        assert row["source"] == name
+        assert row["source"] == (arguments or {}).get("name", name)
         payload = row["payload"]
         assert payload["conv_id"] == "450a3ccd-chat" and payload["coding_agent"] == "claude_code"
         assert payload["seconds"] == pytest.approx(0.2)
@@ -828,6 +828,43 @@ def test_stuck_forwarded_tool_names_the_panel_rpc(stuck_events) -> None:
     payload = stuck_events("forwarded")
     assert payload["waiting_on"] == {"panel_rpc": "ask_user", "request_id": "req-7"}
     assert "panel_rpc ask_user" in payload["message"]
+
+
+@pytest.fixture
+def stuck_tracked(monkeypatch):
+    from frontend import usage_stats
+
+    seen: list[str] = []
+    monkeypatch.setattr(usage_stats, "stuck", lambda agent, seconds, tool="": seen.append(tool))
+    return seen
+
+
+def test_stuck_call_tool_names_the_inner_tool(stuck_events, stuck_tracked) -> None:
+    payload = stuck_events("ducky_call_tool", {"name": "roblox_call", "arguments": {}})
+    assert payload["tool"] == "roblox_call" and payload["message"].startswith("roblox_call ")
+    assert stuck_tracked == ["roblox_call"]
+
+
+def test_stuck_call_tool_running_a_question_waits_by_design(stuck_events, stuck_tracked) -> None:
+    payload = stuck_events("ducky_call_tool", {"name": "ducky_ask_user", "arguments": {}})
+    assert payload["tool"] == "ducky_ask_user"
+    assert stuck_tracked == []
+
+
+def test_stuck_report_skips_an_idle_plugin_pool_loop(stuck_events) -> None:
+    import asyncio
+
+    loop = asyncio.new_event_loop()
+    pool = threading.Thread(target=loop.run_forever, name="mcp-plugin-pool", daemon=True)
+    pool.start()
+    try:
+        payload = stuck_events("async_sleeper")
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        pool.join(5)
+        loop.close()
+    assert "mcp-plugin-pool" not in payload["stack"]
+    assert "_async_sleeps" in payload["stack"]
 
 
 def test_stuck_terminal_run_says_it_waits_for_the_approval_card(stuck_events) -> None:

@@ -65,6 +65,42 @@ def test_chats_with_different_tool_filters_do_not_look_like_a_catalog_change(mon
     assert calls == ["tools"]
 
 
+def _get_tools_catalog(monkeypatch, *names: str) -> None:
+    from backend.agent import tools as agent_tools
+    from backend.search import query
+
+    async def catalog():
+        return _tools(*names)
+
+    monkeypatch.setattr(agent_tools, "list_mcp_tools", catalog)
+    monkeypatch.setattr(query, "search_tools", lambda *a, **k: [])
+    monkeypatch.setattr(ducky_panel, "_discovery_miss_context", lambda: {})
+
+
+def test_a_name_miss_answers_ok_with_close_matches(monkeypatch) -> None:
+    # Oct 31 2026: 34 ducky_get_tools "failures" were lookups that answered {"ok": false}.
+    import asyncio
+    import json
+
+    from backend.bridge.shared_mcp import _refused
+
+    _get_tools_catalog(monkeypatch, "save_current_level", "spawn_actor")
+    text = asyncio.run(ducky_panel.ducky_get_tools(name="save_levle_now"))
+    data = json.loads(text)
+    assert data["found"] is False and "ok" not in data
+    assert "close_matches" in data and data["hint"]
+    assert not _refused({"content": [{"type": "text", "text": text}]})
+
+
+def test_call_tool_forwards_ducky_get_tools_instead_of_refusing(monkeypatch) -> None:
+    import asyncio
+    import json
+
+    _get_tools_catalog(monkeypatch, "save_current_level")
+    text = asyncio.run(ducky_panel.ducky_call_tool(name="ducky_get_tools", arguments={"name": "nope_tool"}))
+    assert json.loads(text)["found"] is False
+
+
 def test_pattern_paging_reaches_every_word_match(monkeypatch) -> None:
     from backend.search import query
 

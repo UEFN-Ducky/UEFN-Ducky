@@ -161,6 +161,60 @@ namespace DuckySetup
             }
         }
 
+        // Seconds between download tries: 6 tries, ~67 s of waiting. A try that added
+        // bytes starts the waits over, so a slow but moving download keeps going.
+        public static readonly int[] DownloadRetryWaits = { 2, 5, 10, 20, 30 };
+
+        // Runs fetch until it returns; on a network / disk error waits and resumes.
+        // have() is the bytes on disk. Returns null when a fetch returned, else the last error.
+        public static Exception? FetchWithRetries(Action fetch, Func<long> have, Action<int> wait)
+        {
+            var fails = 0;
+            while (true)
+            {
+                var before = have();
+                try
+                {
+                    fetch();
+                    return null;
+                }
+                catch (Exception ex) when (ex is WebException || ex is IOException)
+                {
+                    if (have() > before)
+                        fails = 0;
+                    if (fails >= DownloadRetryWaits.Length)
+                        return ex;
+                    wait(DownloadRetryWaits[fails++]);
+                }
+            }
+        }
+
+        // setup.result code when the download didn't finish, named after the last error.
+        public static string DownloadErrorCode(Exception? last) =>
+            DownloadErrorCode(last, (last as WebException)?.Response is HttpWebResponse r ? (int)r.StatusCode : 0);
+
+        public static string DownloadErrorCode(Exception? last, int httpStatus)
+        {
+            switch (last)
+            {
+                case null: return "download_failed.short";
+                case WebException w:
+                    switch (w.Status)
+                    {
+                        case WebExceptionStatus.Timeout: return "download_failed.timeout";
+                        case WebExceptionStatus.NameResolutionFailure: return "download_failed.dns";
+                        case WebExceptionStatus.ConnectFailure:
+                        case WebExceptionStatus.ConnectionClosed:
+                        case WebExceptionStatus.ReceiveFailure: return "download_failed.conn";
+                        case WebExceptionStatus.ProtocolError when httpStatus > 0:
+                            return "download_failed.http_" + httpStatus.ToString(CultureInfo.InvariantCulture);
+                        default: return "download_failed.other";
+                    }
+                case IOException _: return "download_failed.io";
+                default: return "download_failed.other";
+            }
+        }
+
         // Try again after a failed Store request asks the Store again; a good answer is reused.
         public static bool NeedsFetch(Task? release) => release == null || release.IsFaulted || release.IsCanceled;
 

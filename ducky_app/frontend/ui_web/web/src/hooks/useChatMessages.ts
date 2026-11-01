@@ -41,6 +41,11 @@ const RECONCILE_GRACE_MS = 15000;
 /** A chat load slower than this is written to Settings → Errors. */
 const SLOW_CHAT_LOAD_MS = 10_000;
 
+/** The chat's size on a slow/timed-out code, so a long chat can be told from a queued panel API. */
+function sizeTag(rows: number): string {
+  return rows < 100 ? "short" : rows <= 500 ? "mid" : "long";
+}
+
 /** A reload of a chat already on screen (every finished turn) fetches only this many
  *  newest rows: a team lead's 2,000-row chat took 12-27 s to re-send in full (Oct 24 2026). */
 const RELOAD_TAIL_ROWS = 300;
@@ -102,9 +107,12 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     // Loading always leaves a trace (the chat's short id and timing, never its text).
     // The source says which (slow, timed out, failed): it is also the anonymous error code,
     // and "chat" alone (102 in a week on 7 PCs) could not tell a slow load from a broken one.
-    const report = (source: "chat_slow" | "chat_timeout" | "chat_failed", text: string) => {
+    // Slow and timed-out codes carry the chat's size (`chat_slow.long`); the once-per-chat
+    // gate stays on the base kind.
+    const report = (source: "chat_slow" | "chat_timeout" | "chat_failed", text: string, size = "") => {
       if (!firstLoadReport(source, chatId)) return;
-      void Promise.resolve(api.report_ui_error?.(source, text)).catch(() => undefined);
+      const code = size ? `${source}.${size}` : source;
+      void Promise.resolve(api.report_ui_error?.(code, text)).catch(() => undefined);
     };
     try {
       const shown = stateRef.current.messages.some((m) => typeof m.id === "number");
@@ -115,7 +123,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       const rows = shown ? spliceTail(stateRef.current.messages, page, RELOAD_TAIL_ROWS) ?? page : page;
       const tookMs = performance.now() - startedAt;
       if (tookMs > SLOW_CHAT_LOAD_MS) {
-        report("chat_slow", `Chat ${chatId.slice(0, 8)} took ${(tookMs / 1000).toFixed(1)}s to load (${rows.length} messages).`);
+        report("chat_slow", `Chat ${chatId.slice(0, 8)} took ${(tookMs / 1000).toFixed(1)}s to load (${rows.length} messages).`, sizeTag(rows.length));
       }
       if (seq !== loadSeqRef.current) return; // a newer load superseded this one
       lastLoadedAtRef.current = Date.now();
@@ -123,11 +131,13 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       dispatch({ type: "loaded", rows });
     } catch (err) {
       const timedOut = err instanceof ChatLoadTimeout;
+      const shownCount = stateRef.current.messages.length;
       report(
         timedOut ? "chat_timeout" : "chat_failed",
         `Chat ${chatId.slice(0, 8)} didn't load: ${
           timedOut ? `no reply after ${Math.round(CHAT_LOAD_TIMEOUT_MS / 1000)}s` : err instanceof Error ? err.message : String(err)
         }.`,
+        timedOut ? (shownCount ? sizeTag(shownCount) : "unknown") : "",
       );
       // Keep the cached conversation on transient failures; a later reload retries.
       if (seq === loadSeqRef.current) {

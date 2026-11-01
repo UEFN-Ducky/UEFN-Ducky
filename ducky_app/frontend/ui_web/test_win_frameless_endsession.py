@@ -10,11 +10,14 @@ import pytest
 @pytest.mark.skipif(sys.platform != "win32", reason="window proc is Windows-only")
 def test_end_session_true_calls_app_closing_and_false_does_not(monkeypatch) -> None:
     # Oct 29 2026: a logoff with Ducky open was counted as app_unclean_exit.
-    from frontend import usage_stats
+    from frontend import boot_report, usage_stats
     from frontend.ui_web import win_frameless as wf
 
     closed: list[int] = []
+    marks: list[str] = []
     monkeypatch.setattr(usage_stats, "app_closing", lambda: closed.append(1))
+    # Nov 1 2026: a sign-out (no reboot) still asked 'closed by itself' at the next start.
+    monkeypatch.setattr(boot_report, "mark", lambda state, **_: marks.append(state))
 
     class _User32:
         @staticmethod
@@ -26,6 +29,6 @@ def test_end_session_true_calls_app_closing_and_false_does_not(monkeypatch) -> N
     monkeypatch.setattr(wf, "_user32_sc", _User32)
     monkeypatch.setattr(wf, "_native_subclass_orig", {})
     wf._chrome_subclass_proc(1, wf._WM_ENDSESSION, 0, 0)
-    assert closed == []
+    assert closed == [] and marks == []
     wf._chrome_subclass_proc(1, wf._WM_ENDSESSION, 1, 0)
-    assert closed == [1]
+    assert closed == [1] and marks == ["closed"]
