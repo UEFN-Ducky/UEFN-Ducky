@@ -16,6 +16,22 @@ from listener.state import accept_lock, command_queue, response_events, response
 
 _CONN_ERRORS = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
 
+# POST must carry this header. A web page cannot add it without a CORS preflight,
+# which this server never answers, so a browser can never run a command here.
+LISTENER_HEADER = "X-Ducky-Listener"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
+
+
+def request_trusted(headers: Any, *, post: bool) -> bool:
+    """Loopback Host (blocks DNS rebinding), no browser Origin, and the header on POST."""
+    if headers.get("Origin") is not None:
+        return False
+    host = (headers.get("Host") or "").strip().lower()
+    name = host.split("]")[0] + "]" if host.startswith("[") else host.rsplit(":", 1)[0]
+    if name not in _LOOPBACK_HOSTS:
+        return False
+    return not post or (headers.get(LISTENER_HEADER) or "").strip() == "1"
+
 
 def _is_client_disconnect(exc: BaseException) -> bool:
     if isinstance(exc, _CONN_ERRORS):
@@ -64,9 +80,16 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             if not _is_client_disconnect(e):
                 raise
 
+    def _refuse(self) -> None:
+        self._send_json(403, json.dumps({"success": False, "error": "forbidden"}).encode())
+        self.close_connection = True
+
     def do_GET(self) -> None:
         from listener.state import metrics
 
+        if not request_trusted(self.headers, post=False):
+            self._refuse()
+            return
         now = time.time()
         metrics["last_client_ping"] = now
         with accept_lock:
@@ -107,6 +130,9 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         from listener.state import metrics
 
+        if not request_trusted(self.headers, post=True):
+            self._refuse()
+            return
         metrics["last_client_ping"] = time.time()
         try:
             content_length = int(self.headers.get("Content-Length", 0))

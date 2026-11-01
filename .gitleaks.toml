@@ -7,11 +7,19 @@ useDefault = true
 # LLM plugins pass a model id as test_key_model= — not a credential.
 # The release-signing tests pin a made-up Ed25519 PUBLIC key (bytes 0..31) as _STORE_KEY.
 # build/fetch_search_model.py pins each model file's SHA-256 ("tokenizer.json": "<64 hex>").
+# uefn-plugin-account tests pin GOLDEN_KEYS, a SHA-256 of keys derived from a test secret.
+# uefn-plugin-anthropic's _CLAUDE_OAUTH_CLIENT is Claude's public OAuth client id, not a secret.
+# uefn-plugin-browser vendors Google's prebuilt chrome-devtools-mcp, which embeds Google's public API keys.
 [allowlist]
-description = "LLM test_key_model is a model id; _STORE_KEY is a fake public key in tests; file SHA-256 pins"
+description = "Model ids, fake/test keys, SHA-256 pins, a public OAuth client id, Google's vendored bundle"
 regexTarget = "line"
 regexes = [
   '''test_key_model\s*=''',
   '''^_STORE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="''',
   '''^\s*"[\w.-]+\.(json|safetensors|md)": "[0-9a-f]{64}",$''',
+  '''^\s*GOLDEN_KEYS = "[0-9a-f]{64}"\s*$''',
+  '''^\s*_CLAUDE_OAUTH_CLIENT = "[0-9a-f-]{36}"\s*$''',
+]
+paths = [
+  '''vendor/chrome-devtools-mcp/build/''',
 ]
