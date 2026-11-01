@@ -479,7 +479,6 @@
 .changes-colhead-kind {
   flex: 0 0 auto;
   min-width: 48px;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 10px;
 }
@@ -554,7 +553,6 @@
   padding: 0 8px 0 22px;
   font-size: 11px;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -665,7 +663,6 @@
 .changes-row-kind {
   flex: 0 0 auto;
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
 }
@@ -807,7 +804,6 @@
 .json-diff-table th {
   text-align: left;
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
   padding: 0 8px 4px 0;
@@ -844,7 +840,6 @@
 .json-diff-raw h4 {
   margin: 0 0 4px;
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
 }
@@ -891,7 +886,6 @@
   margin: 0 0 4px;
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
 }
@@ -922,7 +916,6 @@
 .json-diff h4 {
   margin: 0 0 4px;
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
 }
@@ -946,7 +939,6 @@
 .json-diff-change {
   flex: 0 0 62px;
   font-size: 10px;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
 }

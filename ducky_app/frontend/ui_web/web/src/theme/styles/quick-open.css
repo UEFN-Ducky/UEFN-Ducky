@@ -111,7 +111,6 @@
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 .quick-open-palette-clear {
@@ -131,7 +130,6 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--muted);
-  text-transform: uppercase;
 }
 .quick-open-palette-row {
   display: flex;

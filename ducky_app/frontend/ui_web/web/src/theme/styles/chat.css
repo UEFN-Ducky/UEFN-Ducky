@@ -1203,18 +1203,18 @@
   flex-shrink: 0;
 }
 
-/* Phone-width composer: every button on one evenly spaced row (the left and right groups
-   melt into the toolbar), Stop the same size as the rest. */
+/* Phone-width composer: the left group stays on the left and the right group on the right,
+   with tighter gaps; the icons never spread evenly across the bar. */
 @container chat-composer (max-width: 520px) {
   .chat-pane-input-toolbar-left,
   .chat-pane-input-toolbar-right,
   .chat-pane-input-toolbar .voice-controls {
-    display: contents;
+    gap: 4px;
   }
 
   .chat-pane-input-toolbar {
     justify-content: space-between;
-    gap: 2px;
+    gap: 4px;
   }
 
   /* An empty send slot (a run going, nothing typed) must not take a share of the spacing. */

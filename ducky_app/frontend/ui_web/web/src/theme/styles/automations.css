@@ -1077,7 +1077,7 @@
 .aw-node-live.is-running { border-color: color-mix(in srgb, var(--wf-run) 60%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--wf-run) 22%, transparent); }
 .aw-node-live.is-error { border-color: var(--danger); }
 .aw-node-live.is-stopped { border-color: var(--amber); }
-.aw-node-live > strong { font-size: 0.78em; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wf-node-muted); }
+.aw-node-live > strong { font-size: 0.78em; color: var(--wf-node-muted); }
 .aw-node-live-state { display: flex; align-items: center; gap: 6px; margin: 0; font-variant-numeric: tabular-nums; }
 .aw-node-live.is-running .aw-node-live-state { color: var(--wf-run); }
 .aw-node-live.is-ok .aw-node-live-state { color: var(--wf-run-path); }
@@ -1131,7 +1131,7 @@
 .aw-toolbar > .aw-toolbar-actions { flex-shrink: 0; margin-left: auto; padding: 0 5px; }
 
 /* Zoom popup: a small heading over the grid choices. */
-.aw-canvas-menu-heading { padding: 6px 10px 2px; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.aw-canvas-menu-heading { padding: 6px 10px 2px; color: var(--text-muted); font-size: 11px; font-weight: 500; }
 
 /* Hover card for a workflow in the list (the Duckies list's card, with the graph in miniature). */
 .aw-hover-card { display: flex; flex-direction: column; gap: 10px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -1186,7 +1186,7 @@
 .aw-edge--data .aw-wire--draft { stroke: var(--aw-pin); }
 
 /* Details: input pins (wired, or an editor), the last run, the new settings. */
-.aw-pins-section > legend, .aw-pins-title { padding: 0; margin: 0 0 2px; color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.aw-pins-section > legend, .aw-pins-title { padding: 0; margin: 0 0 2px; color: var(--text-muted); font-size: 11px; font-weight: 500; }
 .aw-pins-section { padding-top: 12px; border-top: 1px solid var(--border); }
 .aw-pin-field-head { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 12px; font-weight: 600; }
 .aw-pin-field-head small { margin-left: auto; color: var(--text-muted); font-size: 11px; font-weight: 400; }
@@ -1572,7 +1572,7 @@ button.aw-code-chip { cursor: pointer; }
 .aw-code-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .aw-code-review { border-color: color-mix(in srgb, var(--amber) 55%, var(--border)); }
 .aw-code-review button { align-self: flex-start; }
-.aw-code-pins > strong { color: var(--text-muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.aw-code-pins > strong { color: var(--text-muted); font-size: 11px; }
 .aw-code-pins ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; font-family: var(--font-mono); font-size: 11px; }
 .aw-code-pins .is-added { color: var(--wf-run-path); }
 .aw-code-pins .is-removed { color: var(--amber); }
@@ -1586,7 +1586,7 @@ button.aw-code-chip { cursor: pointer; }
 .aw-code-test-inputs { gap: 10px; }
 .aw-code-result { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wf-run-path) 40%, var(--border)); border-radius: 10px; font-size: 12px; }
 .aw-code-result.is-error { border-color: color-mix(in srgb, var(--danger) 50%, var(--border)); }
-.aw-code-result > strong { color: var(--text-muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+.aw-code-result > strong { color: var(--text-muted); font-size: 11px; }
 .aw-code-result-head { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .aw-code-result-head svg { width: 13px; height: 13px; }
 .aw-code-result.is-ok .aw-code-result-head svg { color: var(--wf-run-path); }

@@ -279,7 +279,6 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.14em;
-  text-transform: uppercase;
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid transparent;
@@ -873,7 +872,6 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--ds-amber);
   background: color-mix(in srgb, var(--ds-card) 88%, rgba(245, 158, 11, 0.35));
   border: 1px solid rgba(245, 158, 11, 0.45);
@@ -1765,7 +1763,6 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--ds-text-mute);
 }
 
@@ -1798,7 +1795,6 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
   color: var(--ds-text-dim);
 }
 
@@ -1901,7 +1897,6 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .ds-pill--accent {

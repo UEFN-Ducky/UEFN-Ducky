@@ -199,8 +199,6 @@
 .rich-ref-tip-kind {
   font-size: 0.7em;
   font-weight: 400;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 0.2em;
 }
@@ -285,7 +283,7 @@
 .rich-chart-node-rim { fill: none; stroke: var(--rich-c); stroke-width: 1.5; }
 .rich-chart-node-label { fill: var(--fg); font-size: 12.5px; font-weight: 600; }
 .rich-chart-group { fill: color-mix(in srgb, var(--rich-c) 6%, transparent); stroke: var(--rich-c); stroke-width: 1.2; stroke-dasharray: 6 4; }
-.rich-chart-group-label { fill: var(--rich-c); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.rich-chart-group-label { fill: var(--rich-c); font-size: 11px; font-weight: 600; }
 .rich-chart-edge { fill: none; stroke: var(--muted); stroke-width: 1.6; }
 .rich-chart-edge-head { fill: var(--muted); }
 .rich-chart-edge-bg { fill: var(--chat-code-background, var(--card)); }
@@ -654,8 +652,6 @@
     margin-bottom: 2px;
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
     color: var(--chat-table-heading-color, var(--blue));
   }
 }
@@ -681,8 +677,6 @@
   color: var(--chat-muted-color, var(--muted));
   font-weight: 600;
   font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .rich-key-value-val {
@@ -750,8 +744,6 @@
   margin: 0 0 0.4em;
   font-size: 0.78em;
   font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
 }
 
 .rich-callout-body {
@@ -1004,8 +996,6 @@
   margin: 0 0 0.3em;
   font-size: 0.72em;
   font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   color: var(--chat-muted-color, var(--muted));
 }
 
@@ -1226,8 +1216,6 @@
   font-size: 0.72em;
   font-weight: 600;
   color: var(--rich-item-accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .rich-inventory-slash {

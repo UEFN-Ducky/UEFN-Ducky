@@ -326,7 +326,6 @@
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--muted);
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   flex-shrink: 0;
 }
@@ -444,7 +443,6 @@
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--muted);
-  text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
@@ -479,7 +477,6 @@
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--muted);
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   flex-shrink: 0;
   font-weight: 700;
@@ -657,7 +654,6 @@
   margin: 18px 0 6px;
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
 }
@@ -675,7 +671,6 @@
   display: block;
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
   margin-bottom: 4px;
@@ -990,7 +985,6 @@
 .sps-search-hits-title {
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
   margin: 0 0 6px 2px;

@@ -221,7 +221,6 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 .choice-dropdown-empty {
@@ -407,7 +406,6 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 .choice-speed-slider-value {
@@ -1673,7 +1671,6 @@ html.window-maximized .window-resize-grip {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--red);
   line-height: 1;
 }
@@ -2300,7 +2297,6 @@ html.window-maximized .window-resize-grip {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .pl-card-name {
@@ -2434,7 +2430,6 @@ html.window-maximized .window-resize-grip {
   color: var(--fg-dim);
   font-size: 11px;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .pl-facts dd {
@@ -3135,7 +3130,6 @@ html.window-maximized .window-resize-grip {
   background: transparent;
   border: none;
   cursor: pointer;
-  text-transform: uppercase;
 }
 
 .model-selector-provider-label:hover {
@@ -3208,7 +3202,6 @@ html.window-maximized .window-resize-grip {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--muted);
-  text-transform: uppercase;
 }
 
 .model-selector-option-name {
@@ -3322,7 +3315,6 @@ html.window-maximized .window-resize-grip {
   padding: 4px 8px;
   font-size: 10px;
   letter-spacing: 0.5px;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -3448,7 +3440,6 @@ html.window-maximized .window-resize-grip {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.5px;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -3479,7 +3470,6 @@ html.window-maximized .window-resize-grip {
   background-color: transparent;
   font-weight: 400;
   font-size: 11px;
-  text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
@@ -3542,7 +3532,6 @@ html.window-maximized .window-resize-grip {
   font-size: 10px;
   font-weight: 400;
   color: var(--muted);
-  text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 4px 10px 8px;
 }
@@ -3643,7 +3632,6 @@ html.window-maximized .window-resize-grip {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .attach-menu-item {
   display: flex;
@@ -3771,7 +3759,6 @@ html.window-maximized .window-resize-grip {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .chat-perm-note { padding: 0 10px 6px; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
 .chat-perm-item {
@@ -4009,7 +3996,6 @@ html.window-maximized .window-resize-grip {
   font-size: 10px;
   font-weight: 400;
   color: var(--muted);
-  text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
@@ -4450,7 +4436,6 @@ html.window-maximized .window-resize-grip {
   font-size: 10px;
   font-weight: 400;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -4600,7 +4585,6 @@ html.window-maximized .window-resize-grip {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -5947,7 +5931,6 @@ html.window-fullscreen:has(.remote-ducky-reveal:hover, .remote-ducky-bar:hover, 
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   cursor: pointer;
   user-select: none;
 }
