@@ -2485,6 +2485,11 @@ def _terminal_output_stream(session_id: str, node_id: str) -> tuple[threading.Ev
     return stopped, thread
 
 
+def in_workflow() -> bool:
+    """A tool call made by a running workflow (a step, a nested workflow or one Run this node)."""
+    return _CANCEL.get() is not None or bool(_CALL_STACK.get())
+
+
 def typed_command_approved(command: str) -> bool:
     """ducky_terminal_run: this exact command is typed into the Local workflow running it."""
     typed = _TYPED_COMMAND.get()

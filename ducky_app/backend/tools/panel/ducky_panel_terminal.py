@@ -141,7 +141,7 @@ def ducky_terminal_run(
             if _RELEASE_SCRIPT.search(command or "") else "")
     if busy:
         return tool_json({"ok": False, "error": busy, "session_id": session_id.strip()}, pretty=pretty)
-    from backend.automations.runner import typed_command_approved
+    from backend.automations.runner import in_workflow, typed_command_approved
     from backend.tools.panel.permission_prompt import allows_everything
 
     auto = bool(chat and allows_everything(chat)) or typed_command_approved(command)
@@ -158,6 +158,8 @@ def ducky_terminal_run(
         command_timeout_s=max(5.0, min(float(command_timeout_s), 3600.0)),
         auto_approve=auto,
         expect_minutes=max(0.0, float(expect_minutes or 0)),
+        # A workflow step waits for its command whatever the chat does; its next step needs the terminal.
+        early_return=not in_workflow(),
     )
     if not auto and "not approved" in str(result.get("error") or ""):
         # Say whose card it was: a team whose chats allowed everything waited on cards

@@ -1109,6 +1109,7 @@ class PanelApiWindowMixin:
         command_timeout_s: float = 300.0,
         auto_approve: bool = False,
         expect_minutes: float = 0.0,
+        early_return: bool = True,
     ) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager
 
@@ -1118,7 +1119,7 @@ class PanelApiWindowMixin:
                 session_id.strip(), command, source=source, conv_id=conv_id,
                 wait=wait, background=background, auto_approve=auto_approve,
                 approval_timeout_s=approval_timeout_s, command_timeout_s=command_timeout_s,
-                expect_minutes=expect_minutes,
+                expect_minutes=expect_minutes, early_return=early_return,
             )
         return mgr.request_command(
             session_id.strip(), command, source=source, conv_id=conv_id,

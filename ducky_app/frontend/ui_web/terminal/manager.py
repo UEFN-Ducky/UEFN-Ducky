@@ -625,6 +625,7 @@ class TerminalManager:
         auto_approve: bool = False,
         steer_pending: Callable[[], bool] | None = None,
         expect_minutes: float = 0.0,
+        early_return: bool = True,
     ) -> dict[str, Any]:
         """auto_approve: the chat said "Allow everything", so no Allow/Deny card. A command
         the chat said "Always allow" for runs without one too.
@@ -635,9 +636,14 @@ class TerminalManager:
         wait (not background): the result is the command's exit code; a command that fails
         is ok=False. When the person writes first (steer_pending, default: the chat's steer
         inbox) it comes back early with still_running (or waiting_for_approval) and the
-        command goes on as a background one would."""
+        command goes on as a background one would.
+
+        early_return=False (a workflow step): waits for the end, never steered or overdue. A
+        step that came back early let the next step hit "session busy" (Oct 31 2026 release)."""
         runs_here = wait and not background
         steer = steer_pending if steer_pending is not None else _steer_check(conv_id)
+        if not early_return:
+            steer = None
         if not auto_approve and conv_id:
             known = self.get_session(session_id)
             auto_approve = _chat_always_allows(conv_id, command, str(getattr(known, "cwd", "") or ""))
@@ -702,7 +708,7 @@ class TerminalManager:
                 done.set()
 
         threading.Thread(target=work, daemon=True, name=f"terminal-run-{request_id}").start()
-        overdue = max(_OVERDUE_MIN_S, expect_minutes * 180.0) if expect_minutes > 0 else None
+        overdue = max(_OVERDUE_MIN_S, expect_minutes * 180.0) if expect_minutes > 0 and early_return else None
         if overdue is not None and overdue >= command_timeout_s:
             overdue = None
         why = _wait_or_steer(done, overdue, steer)

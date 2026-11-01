@@ -1207,16 +1207,15 @@ def _sync_window_chrome_state(window: object) -> None:
 
 
 def _auto_allow_permission(kind_i: int, kind_s: str, uri: str) -> bool:
-    """Mic anywhere (as before); the local panel's own screen capture without WebView2's prompt.
+    """Mic anywhere (as before); everything the local panel itself asks for, without WebView2's prompt.
 
-    The phone stream's whole-desktop capture (getUserMedia chromeMediaSource "screen") reaches
-    PermissionRequested as Unknown (0), unlike getDisplayMedia, which the
-    --auto-select-desktop-capture-source flag answers by itself (Oct 31 2026).
+    The phone stream's whole-desktop capture (getUserMedia chromeMediaSource "screen") raised
+    WebView2's Screen Sharing prompt (Oct 31 2026); its kind isn't a documented one, so the
+    panel's own origin gets every kind rather than a guessed one. Other origins: mic only.
     """
     if kind_i == 1 or "Microphone" in kind_s:
         return True
-    local = uri.startswith(("http://127.0.0.1:", "http://localhost:"))
-    return local and (kind_i == 0 or "Screen" in kind_s)
+    return uri.startswith(("http://127.0.0.1:", "http://localhost:"))
 
 
 def install_pywebview_chrome_patches() -> None:

@@ -79,6 +79,18 @@ def test_no_message_waits_for_the_end(monkeypatch) -> None:
     assert "900 passed" in out["output_tail"]
 
 
+def test_a_workflow_step_waits_for_the_end_though_the_person_wrote(monkeypatch) -> None:
+    # Oct 31 2026: a release step came back early on a chat message; the next hit "session busy".
+    _fast(monkeypatch)
+    session = _Long()
+    mgr, _ = _mgr(monkeypatch, session)
+    threading.Timer(0.5, session.finish.set).start()
+    out = mgr.run_agent_command("s1", "pytest", auto_approve=True, command_timeout_s=180,
+                                expect_minutes=0.001, early_return=False,
+                                steer_pending=lambda: True)
+    assert out["ok"] is True and "still_running" not in out and out["exit_code"] == 0
+
+
 def test_nothing_is_asked_before_the_first_ten_seconds(monkeypatch) -> None:
     _fast(monkeypatch)
     monkeypatch.setattr(manager_mod, "_STEER_FIRST_S", 5.0)
