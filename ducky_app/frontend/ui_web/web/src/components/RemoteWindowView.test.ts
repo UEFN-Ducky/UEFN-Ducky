@@ -5,7 +5,6 @@ import {
   chordTap,
   clampView,
   contentRect,
-  fillsHeight,
   ignoreMouseAfterTouch,
   isDoubleTap,
   isUeFnHubTitle,
@@ -61,17 +60,11 @@ describe("contentRect", () => {
     expect(contentRect(box, 0, 0)).toBe(box);
   });
 
-  it("fills the height of a window a bit wider than the phone, trimming its sides", () => {
-    // Oct 31 2026: Claude stops at 616 px wide; the phone's view wanted ~540, so bars above and below.
-    const box = { left: 0, top: 0, width: 412, height: 788 };
-    expect(fillsHeight(box, 616, 1032)).toBe(true);
-    const r = contentRect(box, 616, 1032, true);
-    expect(r.height).toBe(788);
-    expect(r.width).toBeCloseTo(470.4, 1);
-    expect(r.left).toBeCloseTo(-29.2, 1);
-    // Already the phone's shape, or far too wide (a whole monitor): no trim.
-    expect(fillsHeight(box, 412, 788)).toBe(false);
-    expect(fillsHeight(box, 3840, 1080)).toBe(false);
+  it("shows a window wider than the phone whole, never trimming its sides", () => {
+    // Nov 1 2026: cover-cropping Claude's 616 px window cut off its menu and close buttons.
+    const r = contentRect({ left: 0, top: 0, width: 412, height: 788 }, 616, 1032);
+    expect(r.left).toBeCloseTo(0, 5);
+    expect(r.width).toBeCloseTo(412, 5);
   });
 });
 
@@ -162,9 +155,10 @@ describe("view pan/zoom", () => {
     expect(clampView(view, 999, 0, 2).panX).toBe(100);
   });
 
-  it("pinchScale multiplies and clamps to 1..4", () => {
+  it("pinchScale multiplies and clamps to 1..10", () => {
     expect(pinchScale(100, 200, 1)).toBe(2);
-    expect(pinchScale(100, 800, 1)).toBe(4);
+    expect(pinchScale(100, 800, 1)).toBe(8);
+    expect(pinchScale(100, 2000, 1)).toBe(10);
     expect(pinchScale(100, 10, 1)).toBe(1);
   });
 
