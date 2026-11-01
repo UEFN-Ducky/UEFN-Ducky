@@ -2943,6 +2943,9 @@ export interface PluginScopeChoice {
   label: string;
   members?: number;
   slug?: string;
+  /** A team: this PC's copy of it ("ok", "offline", "paused", …) and changes still to send. */
+  state?: string;
+  pending?: number;
 }
 
 /** One plugin (or Workflows) on a team copy, as the Team modal lists it. */

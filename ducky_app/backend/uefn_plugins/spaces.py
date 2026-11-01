@@ -559,8 +559,8 @@ def team_overview(space: str = "") -> dict[str, Any]:
     enabled = set(get_enabled_plugin_ids()) | {WORKFLOW_DOCS, GENERAL}
     links = {p: s for p, s in repo.links(account).items() if p in enabled and s != scopes.PERSONAL} \
         if account != scopes.LOCAL else {}
-    space = str(space or "") or scopes.main_team(links)
-    if not space:
+    space = str(space or "") or scopes.app_copy()
+    if not space or space == scopes.PERSONAL:
         return {"ok": True, "current": scopes.PERSONAL, "label": "Local", "plugins": []}
     rows: list[dict[str, Any]] = []
     for pid in scopes.CORE_DATA:
@@ -801,15 +801,20 @@ def _team_folder_fields(out: dict[str, Any], account: str, space: str, plugin: s
 
 
 def scope_choices(purpose: str = "data") -> dict[str, Any]:
-    """Local, plus the spaces the provider offers for ``purpose``. Pickers only."""
+    """Local, plus the spaces the provider offers for ``purpose``. Pickers only. Each space
+    has this PC's ``state`` of its copy and ``pending`` (changes still to send), for its dot."""
+    from backend.store.repos import plugin_data as repo
     from backend.uefn_plugins import scopes
 
     choices: list[dict[str, Any]] = [{"id": scopes.PERSONAL, "kind": "personal", "label": "Local"}]
-    if scopes.account_id() != scopes.LOCAL:
+    account = scopes.account_id()
+    if account != scopes.LOCAL:
         for row in provider().choices(purpose) or []:
             sid = str((row or {}).get("id") or "")
             if scopes.valid_space_id(sid):
-                choices.append({**row, "id": sid, "kind": "shared", "label": str(row.get("label") or sid)})
+                choices.append({**row, "id": sid, "kind": "shared", "label": str(row.get("label") or sid),
+                                "state": str(repo.sync_get(account, sid)["state"] or "ok"),
+                                "pending": repo.count_dirty(account, sid)})
     return {"ok": True, "choices": choices, "kindLabel": provider().kind_label,
             "emptyNote": provider().choices_note(purpose)}
 

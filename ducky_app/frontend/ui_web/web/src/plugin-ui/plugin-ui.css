@@ -1099,6 +1099,127 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+.plugin-scope-dot--ok {
+  background: var(--green, #3ddc84);
+}
+.plugin-scope-dot--local {
+  background: var(--muted, #888);
+}
+
+/* The header menu's copy picker: the copy the whole app is on, and Local or a team to switch to. */
+.team-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 4px 8px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border, #3a3a3a);
+}
+.team-copy__current,
+.team-copy__option,
+.team-live-menu__settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 6px);
+  background: none;
+  color: var(--fg, #e6e6e6);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.team-copy__current {
+  border-color: var(--border, #3a3a3a);
+  background: color-mix(in srgb, var(--fg, #e6e6e6) 4%, transparent);
+}
+.team-copy__current:hover:not(:disabled),
+.team-copy__option:hover:not(:disabled),
+.team-live-menu__settings:hover {
+  background: color-mix(in srgb, var(--fg, #e6e6e6) 7%, transparent);
+}
+.team-copy__current:disabled,
+.team-copy__option:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.team-copy__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elevated, var(--bg));
+}
+.team-copy__option.is-current {
+  background: color-mix(in srgb, var(--accent, #d4a017) 12%, transparent);
+}
+.team-copy__icon,
+.team-copy__check,
+.team-copy__chevron {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--fg-dim, #a0a0a0);
+}
+.team-copy__icon svg,
+.team-copy__check svg,
+.team-copy__chevron svg,
+.live-menu__head svg,
+.live-menu__start svg,
+.team-live-menu__alert svg {
+  width: 14px;
+  height: 14px;
+}
+.team-copy__check {
+  color: var(--accent, #d4a017);
+}
+.team-copy__chevron {
+  transition: transform 0.12s ease;
+}
+.team-copy__chevron.is-open {
+  transform: rotate(180deg);
+}
+.team-copy__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+.team-copy__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-copy__sub {
+  overflow: hidden;
+  color: var(--fg-dim, #a0a0a0);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-menu__head,
+.live-menu__start,
+.team-live-menu__alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.live-menu__start {
+  justify-content: center;
+}
+.team-live-menu__alert {
+  margin-left: auto;
+  color: var(--danger, #e55);
+  font-size: 11px;
+}
 .plugin-scope-faces {
   display: inline-flex;
   flex: none;

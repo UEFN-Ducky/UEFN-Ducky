@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Icons } from "../icons/Icons";
 import type { LiveTeam, LiveTeamGroup, LiveTeamMember, LiveTeamOnline } from "../types/panel";
 import { groupName, initials, listText, personTone } from "./scopeBarText";
 import "./plugin-ui.css";
@@ -25,10 +26,9 @@ type Props = {
   /** Each plugin's page goes to the leader's screen in a group this PC joined. */
   follow: boolean;
   onFollow: (on: boolean) => void;
-  /** The team this PC works in (a space id, or "personal"), the same on every tab. */
+  /** The copy the app is on (a space id, or "personal"), the same on every tab. Switching it is
+   * the copy picker's, above this menu. */
   current?: string;
-  /** Work in this team: every plugin moves to it. */
-  onUse?: (team: LiveTeam) => void;
 };
 
 const size = (g: LiveTeamGroup) => `${g.members.length} ${g.members.length === 1 ? "person" : "people"}`;
@@ -38,7 +38,7 @@ function whereText(members: LiveTeamMember[]): string {
   return members.filter((m) => !m.me && m.pluginLabel).map((m) => `${m.name} in ${m.pluginLabel}`).join(", ");
 }
 
-function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, onFollow, current, onUse }: Omit<Props, "teams"> & {
+function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, onFollow }: Omit<Props, "teams"> & {
   team: LiveTeam;
   heading: boolean;
 }) {
@@ -52,14 +52,6 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, o
 
   return (
     <>
-      {onUse && current !== undefined && current !== team.space ? (
-        <div className="plugin-scope-menu__foot">
-          <button type="button" role="menuitem" className="plugin-scope-btn plugin-scope-btn--block" disabled={busy}
-            onClick={() => onUse(team)}>
-            Work in this team
-          </button>
-        </div>
-      ) : null}
       {!team.supported ? (
         <div className="plugin-scope-menu__note">{team.reason || "Live isn't available here."}</div>
       ) : (
@@ -123,7 +115,7 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, o
           ) : null}
           {(team.online ?? []).length ? (
             <>
-              <div className="plugin-scope-menu__head">Online</div>
+              <div className="plugin-scope-menu__head live-menu__head"><Icons.Globe /> Online</div>
               {(team.online ?? []).map((p) => (
                 <div key={p.device} className="plugin-scope-menu__row">
                   <span className="plugin-scope-faces"><Face name={p.name} id={p.device || p.user || p.name} /></span>
@@ -144,9 +136,9 @@ function TeamSection({ team, heading, busy, onJoin, onLeave, onInvite, follow, o
               this PC's own: two people who both press it end up together. */}
           {!team.on ? (
             <div className="plugin-scope-menu__foot">
-              <button type="button" role="menuitem" className="plugin-scope-btn plugin-scope-btn--block" disabled={busy}
+              <button type="button" role="menuitem" className="plugin-scope-btn plugin-scope-btn--block live-menu__start" disabled={busy}
                 aria-label={heading ? `Start live in ${team.label}` : "Start live"} onClick={() => onJoin(team)}>
-                Start live
+                <Icons.Zap /> Start live
               </button>
             </div>
           ) : null}
@@ -168,7 +160,7 @@ function headCount(team: LiveTeam): number {
  * The title bar's Team and Live menu. Tabs: Live (team copies where someone is live) and All.
  * Each team copy is an accordion (your team, or the one this PC is live in, starts open): its
  * live groups (named by host, who is in which plugin) with Join / Leave, Same screen as the
- * group, who else is online with Invite, Start live, and Work in this team. Being live
+ * group, who else is online with Invite, and Start live. Being live
  * covers every plugin on that team copy: people live together see each other's pointers, and
  * what one presses is greyed out for the others.
  */
@@ -204,6 +196,7 @@ export function LiveMenu({ teams, ...rest }: Props) {
             <button type="button" role="menuitem" className="plugin-scope-menu__row live-menu__team-head" aria-expanded={isOpen}
               onClick={() => toggle(team.space)}>
               <span className={`live-menu__caret${isOpen ? " is-open" : ""}`} aria-hidden>▸</span>
+              <span className="team-copy__icon" aria-hidden><Icons.Users /></span>
               <span className="plugin-scope-menu__text">
                 <span className="plugin-scope-menu__name">{team.label}</span>
                 <span className="plugin-scope-menu__sub">

@@ -292,8 +292,13 @@ describe("Team and Live in the title bar", () => {
     expect(within(menu).getByRole("menuitem", { name: "Invite Bo" })).toBeTruthy();
   });
 
-  it("your team starts open; Work in this team moves every plugin to another team", async () => {
+  it("your team starts open; the copy picker lists Local and every team, and a pick switches everything", async () => {
     api.live_overview.mockResolvedValue(overview(team(), team({ space: "s2", label: "Beta" })));
+    api.plugin_scope_choices.mockResolvedValue({ ok: true, choices: [
+      { id: "personal", kind: "personal", label: "Local" },
+      { id: "s1", kind: "shared", label: "Mindful Path", members: 3 },
+      { id: "s2", kind: "shared", label: "Beta", members: 2, state: "ok", pending: 0 },
+    ] });
     api.plugin_scope_set_all.mockResolvedValue({ ok: true, switched: ["kanban"], pending: [] });
     mindful();
     render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
@@ -305,9 +310,55 @@ describe("Team and Live in the title bar", () => {
     expect(alpha.getAttribute("aria-expanded")).toBe("true");
     expect(alpha.textContent).toContain("your team");
     expect(within(menu).queryByRole("menuitem", { name: "Work in this team" })).toBeNull();
-    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Beta/ }));
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "Work in this team" }));
+    // Not a native select: a button that opens a list, the current copy checked.
+    expect(document.querySelector("select")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Your copy: Mindful Path" }));
+    const list = await screen.findByRole("listbox", { name: "Switch the whole app to" });
+    await waitFor(() => expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "LocalThis PC only", "Mindful Path3 members", "Beta2 members"]));
+    expect(within(list).getByRole("option", { name: /Mindful Path/ }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(within(list).getByRole("option", { name: /Beta/ }));
+    expect(await screen.findByText("Switch everything to Beta?")).toBeTruthy();
+    expect(api.plugin_scope_set_all).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^Switch \(/ }));
     await waitFor(() => expect(api.plugin_scope_set_all).toHaveBeenCalledWith("s2"));
+  });
+
+  it("a status dot per copy: red with conflicts, yellow while something waits, green in sync, grey for Local", async () => {
+    api.live_overview.mockResolvedValue(overview(team()));
+    api.plugin_scope_choices.mockResolvedValue({ ok: true, choices: [
+      { id: "personal", kind: "personal", label: "Local" },
+      { id: "s1", kind: "shared", label: "Mindful Path" },
+      { id: "s2", kind: "shared", label: "Beta", state: "paused", pending: 0 },
+      { id: "s3", kind: "shared", label: "Gamma", state: "ok", pending: 0 },
+      { id: "s4", kind: "shared", label: "Delta", state: "ok", pending: 2 },
+    ] });
+    const dotOf = (el: Element | null | undefined) => el?.querySelector("[data-dot]")?.getAttribute("data-dot");
+    const open = async () => {
+      fireEvent.click(trigger());
+      fireEvent.click(await screen.findByRole("button", { name: "Your copy: Mindful Path" }));
+      return screen.findByRole("listbox", { name: "Switch the whole app to" });
+    };
+    mindful({ conflicts: 1 });
+    const view = render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    await waitFor(() => expect(dotOf(trigger())).toBe("error"));
+    let list = await open();
+    await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(5));
+    const dots = () => within(list).getAllByRole("option").map((o) => dotOf(o));
+    expect(dots()).toEqual(["local", "error", "warn", "ok", "warn"]);
+    expect(dotOf(screen.getByRole("button", { name: "Your copy: Mindful Path" }))).toBe("error");
+    view.unmount();
+    _resetActiveTeamForTests();
+    mindful({ pending: 2 });
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    await waitFor(() => expect(dotOf(trigger())).toBe("warn"));
+    list = await open();
+    await waitFor(() => expect(dots()[1]).toBe("warn"));
+    cleanup();
+    _resetActiveTeamForTests();
+    mindful();
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    await waitFor(() => expect(dotOf(trigger())).toBe("ok"));
   });
 
   it("an error joining shows in the menu", async () => {

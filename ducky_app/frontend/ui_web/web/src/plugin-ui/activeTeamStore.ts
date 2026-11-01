@@ -23,7 +23,21 @@ export type ActiveTeam = TeamOverview & {
   badge: number;
   phrase: string;
   tone: "" | "warn" | "error";
+  /** The status dot: red with a conflict or an error, yellow while something waits (to send, coming
+   * in, held, blocked, offline, paused), green in sync; "local" when everything is Local. */
+  dot: CopyDot;
 };
+
+export type CopyDot = "error" | "warn" | "ok" | "local";
+
+/** Sync states of a team copy that mean it waits (yellow); "error" is red. */
+const WAITING_STATES = new Set(["offline", "paused", "waiting", "locked", "lost", "unavailable", "reset", "binding"]);
+
+/** The dot of a team copy this PC isn't on now, from its sync state and changes still to send. */
+export function copyDot(state?: string, pending = 0): CopyDot {
+  if (state === "error") return "error";
+  return pending || WAITING_STATES.has(state || "") ? "warn" : "ok";
+}
 
 /** Pushes that land together (a switch moves every plugin) make one read. */
 const SETTLE_MS = 300;
@@ -45,7 +59,15 @@ export function summarizeTeam(o: TeamOverview): ActiveTeam {
   const conflicts = sum((p) => p.conflicts);
   const blocked = sum((p) => p.blocked.length);
   const failing = plugins.some((p) => p.state === "offline" || p.state === "error");
+  const held = plugins.some((p) => p.held);
   const shared = o.current !== "personal";
+  const worst = plugins.reduce<CopyDot>((d, p) => {
+    const one = copyDot(p.state);
+    return d === "error" || one === "error" ? "error" : d === "warn" || one === "warn" ? "warn" : "ok";
+  }, "ok");
+  const dot: CopyDot = !shared ? "local"
+    : conflicts || worst === "error" ? "error"
+      : incoming || pending || blocked || held || worst === "warn" ? "warn" : "ok";
   const phrase = !shared ? "Not on a team"
     : conflicts ? plural(conflicts, "conflict")
       : failing ? "Couldn't sync"
@@ -55,6 +77,7 @@ export function summarizeTeam(o: TeamOverview): ActiveTeam {
     badge: shared ? incoming + pending + conflicts + blocked : 0,
     phrase,
     tone: conflicts || failing ? "error" : blocked ? "warn" : "",
+    dot,
   };
 }
 
