@@ -1206,6 +1206,19 @@ def _sync_window_chrome_state(window: object) -> None:
     )
 
 
+def _auto_allow_permission(kind_i: int, kind_s: str, uri: str) -> bool:
+    """Mic anywhere (as before); the local panel's own screen capture without WebView2's prompt.
+
+    The phone stream's whole-desktop capture (getUserMedia chromeMediaSource "screen") reaches
+    PermissionRequested as Unknown (0), unlike getDisplayMedia, which the
+    --auto-select-desktop-capture-source flag answers by itself (Oct 31 2026).
+    """
+    if kind_i == 1 or "Microphone" in kind_s:
+        return True
+    local = uri.startswith(("http://127.0.0.1:", "http://localhost:"))
+    return local and (kind_i == 0 or "Screen" in kind_s)
+
+
 def install_pywebview_chrome_patches() -> None:
     """Patch pywebview BrowserForm + WebView2 for edge-to-edge frameless chrome."""
     if sys.platform != "win32":
@@ -1273,7 +1286,7 @@ def install_pywebview_chrome_patches() -> None:
                     )
                 except Exception:
                     _log.exception("WebView2 ProcessFailed hook failed")
-                # Auto-allow mic for the local panel origin. App UI owns Allow/Block;
+                # Auto-allow mic and the panel's screen capture. App UI owns Allow/Block;
                 # this only silences WebView2's chrome prompt and persists the grant.
                 try:
                     core = sender.CoreWebView2
@@ -1286,7 +1299,7 @@ def install_pywebview_chrome_patches() -> None:
                                 kind_i = int(kind)
                             except Exception:
                                 kind_i = int(getattr(kind, "value", -1))
-                            if kind_i != 1 and "Microphone" not in str(kind):
+                            if not _auto_allow_permission(kind_i, str(kind), str(getattr(e, "Uri", "") or "")):
                                 return
                             # Prefer typed enum when pythonnet exposes it.
                             try:
