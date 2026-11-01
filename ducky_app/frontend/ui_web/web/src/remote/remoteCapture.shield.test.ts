@@ -37,16 +37,17 @@ it("blanks our window titles before getDisplayMedia and gives them back after th
   expect(calls).toEqual(["shield:true", "getDisplayMedia", "shield:false"]);
 });
 
-it("captures the whole desktop first, with no picker and no title shield", async () => {
-  // Oct 31 2026: getDisplayMedia gave one monitor, so a phone watching Display 2 saw a 2 px line.
+it("never asks getUserMedia for the screen (it raised WebView2's Screen Sharing prompt)", async () => {
+  // Nov 1 2026: chromeMediaSource "screen" popped "Screen Sharing Request" on stream.
+  vi.useFakeTimers();
   vi.resetModules();
   calls.length = 0;
   const track = { readyState: "live", addEventListener: () => {}, stop: () => {} };
   Object.defineProperty(navigator, "mediaDevices", {
     configurable: true,
     value: {
-      getUserMedia: async (c: { video: { mandatory: { chromeMediaSource: string } } }) => {
-        calls.push(`getUserMedia:${c.video.mandatory.chromeMediaSource}`);
+      getUserMedia: async () => {
+        calls.push("getUserMedia");
         return { getVideoTracks: () => [track] };
       },
       getDisplayMedia: async () => {
@@ -57,5 +58,6 @@ it("captures the whole desktop first, with no picker and no title shield", async
   });
   const { acquireScreenTrack } = await import("./remoteCapture");
   await expect(acquireScreenTrack()).resolves.toBe(track);
-  expect(calls).toEqual(["getUserMedia:screen"]);
+  expect(calls).not.toContain("getUserMedia");
+  expect(calls).toContain("getDisplayMedia");
 });

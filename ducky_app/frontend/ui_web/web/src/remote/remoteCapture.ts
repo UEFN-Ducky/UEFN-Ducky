@@ -74,7 +74,7 @@ function screenTrack(): Promise<MediaStreamTrack> {
       return screenTrack();
     });
   }
-  screenPromise = fullDesktopStream().catch(pickedScreenStream).then((stream) => {
+  screenPromise = pickedScreenStream().then((stream) => {
     const track = stream.getVideoTracks()[0];
     if (!track) throw new Error("no screen track");
     try {
@@ -95,18 +95,11 @@ function screenTrack(): Promise<MediaStreamTrack> {
 }
 
 /**
- * Every monitor in one frame, through Chromium's legacy screen source (webview_app turns on
- * --enable-usermedia-screen-capturing). getDisplayMedia gives one monitor only, so a phone
- * watching Display 2 got a 2 px sliver of Display 1. No picker list, so no title shield either.
+ * One screen, auto-picked by --auto-select-desktop-capture-source: no prompt.
+ * ponytail: never getUserMedia chromeMediaSource "screen" (whole desktop) — it raised WebView2's
+ * "Screen Sharing Request" prompt on stream (Nov 1 2026) even with PermissionRequested auto-allow.
+ * Ceiling: one monitor only; a phone watching Display 2 needs a prompt-free all-monitor source.
  */
-function fullDesktopStream(): Promise<MediaStream> {
-  const video = { mandatory: { chromeMediaSource: "screen", maxFrameRate: MAX_FPS } };
-  return Promise.resolve().then(() =>
-    navigator.mediaDevices.getUserMedia({ audio: false, video } as unknown as MediaStreamConstraints),
-  );
-}
-
-/** One screen, auto-picked by --auto-select-desktop-capture-source: the fallback. */
 function pickedScreenStream(): Promise<MediaStream> {
   const opts = {
     video: { frameRate: { ideal: MAX_FPS, max: MAX_FPS }, displaySurface: "monitor", cursor: "never" },
