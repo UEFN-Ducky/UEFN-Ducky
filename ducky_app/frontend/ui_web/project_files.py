@@ -286,6 +286,11 @@ def _is_workspace_locked_path(relative_path: str) -> bool:
     In a folder project every project-relative path (``.`` is the root) is writable.
     """
     rel = (relative_path or "").strip().replace("\\", "/")
+    # Agents pass full paths (C:/.../Content/x, or abs:C:/...): one inside the open
+    # project's Content is as writable as its Content-relative form.
+    in_content = _abs_to_content_rel(rel)
+    if in_content is not None:
+        rel = in_content
     if rel.lower().startswith(ABS_PATH_PREFIX.lower()):
         return True
     if rel.lower().startswith(WS_PATH_PREFIX.lower()):
@@ -295,6 +300,21 @@ def _is_workspace_locked_path(relative_path: str) -> bool:
     if _active_is_folder():
         return False
     return not rel.lower().startswith(f"{CONTENT_DIR.lower()}/") and rel.lower() != CONTENT_DIR.lower()
+
+
+def _abs_to_content_rel(rel: str) -> str | None:
+    """``Content/...`` for a raw or abs:-encoded absolute path inside the open Content, else None."""
+    raw = rel[len(ABS_PATH_PREFIX) :] if rel.lower().startswith(ABS_PATH_PREFIX.lower()) else rel
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        return None
+    try:
+        target = candidate.resolve()
+        if not _is_under_content(target):
+            return None
+        return str(target.relative_to(_project_root().resolve())).replace("\\", "/")
+    except (OSError, ValueError):
+        return None
 
 
 def _encode_abs_path(path: Path) -> str:
