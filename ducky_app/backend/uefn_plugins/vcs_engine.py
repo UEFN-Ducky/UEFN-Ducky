@@ -2971,7 +2971,11 @@ def _locks_from(account: str, space: str, live: Iterable[LockInfo], *, now: floa
     for lk in change["lost"]:
         row = _row_of_unit(lk["unit"])
         r = space_vcs.row(None, account, space, lk["plugin_id"], *row) if row else None
-        kept = bool(r and int(r["dirty"]))
+        # No new holder: the lease ran out (a long call kept this PC from renewing it) or a
+        # break left the unit free. Nobody else is editing it, so the unsent edit stays an
+        # ordinary pending change; its push still checks the base rev, so a real edit by
+        # someone in between becomes a normal "changed" conflict that names them.
+        kept = bool(r and int(r["dirty"])) and bool(lk.get("now_holder"))
         _tell_lock_lost(lk, kept=kept)
         if not kept:
             continue

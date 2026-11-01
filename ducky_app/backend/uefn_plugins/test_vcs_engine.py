@@ -655,6 +655,22 @@ def test_a_broken_lock_turns_unsent_edits_into_a_conflict(pc: PC, ben: Ben, worl
     assert pc.data.get("card.pip") == {"hp": 1} and pc.row("card.pip")["dirty"] == 0
 
 
+def test_a_lock_that_just_ends_keeps_unsent_edits_pending_not_a_conflict(pc: PC, world: conf.FakeWorld) -> None:
+    # A long call kept this PC from renewing its lock, or a break left the unit free: nobody
+    # else holds it, so this is no conflict and never "a teammate"; the edit just goes out.
+    pc.data.put("card.pip", {"hp": 1})
+    pc.run()
+    vcs_engine.acquire(pc.account, SPACE, PLUGIN, pc.backend, [("doc:card.pip", "card.pip")])
+    pc.data.put("card.pip", {"hp": 9})
+    boss = world.client("u_olga", "d_olga", name="Olga", admin=True)
+    assert type(boss.break_lock(SPACE, PLUGIN, "doc:card.pip")).__name__ == "Done"
+    vcs_engine.refresh(pc.account, SPACE, [PLUGIN], pc.backend)
+    r = pc.row("card.pip")
+    assert r["sync_state"] != "conflict" and r["dirty"] == 1
+    assert space_vcs.conflict_get(pc.account, SPACE, PLUGIN, "doc", "card.pip") is None
+    assert pc.run()["pushed"] == 1 and pc.row("card.pip")["dirty"] == 0
+
+
 # --------------------------------------------------------------------------- answers and modes
 
 
