@@ -757,7 +757,12 @@ class TerminalSession:
             return {"ok": True, "status": "running"}
         # timeout_s <= 0: wait until the shell reports done (no wall-clock kill).
         wait_timeout = None if float(timeout_s) <= 0 else max(1.0, float(timeout_s))
-        if not done.wait(timeout=wait_timeout):
+        from frontend.ui_web.terminal.focus_guard import no_focus_steal
+
+        # A window the command opens (a test app, a probe) must not take the person's typing.
+        with no_focus_steal():
+            finished = done.wait(timeout=wait_timeout)
+        if not finished:
             self.set_busy(False)
             self._timed_out = {pid: name for pid, name in self._descendants().items() if pid not in before}
             return {

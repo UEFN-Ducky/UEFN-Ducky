@@ -56,6 +56,9 @@ CORE_RULES = (
     "pipe one through `Select-Object -Last/-First`, `tail`, `head`, `Out-Null`, `Out-String` or "
     "`more` (they hold every line back until the end); long runs use `background=true` and "
     "`ducky_terminal_read_output`.\n"
+    "- **No windows on the person's screen (HARD):** never open a window to test (a webview "
+    "probe, a GUI app, a browser) on the person's desktop: each one takes their typing. Prove it "
+    "with tests, or `sandbox_launch` / a hidden window; ask first when only a real window will do.\n"
     "- **AI-made plugins (HARD):** `ducky_plugin_*` only; `ducky_plugin_list` is the "
     'census. Load `skill_read_subskill("ducky", "ai_plugins")` first.\n'
     "- **Clean your own scratch (HARD):** probe `.verse` files, test assets and temp folders you "
