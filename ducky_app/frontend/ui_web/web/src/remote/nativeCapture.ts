@@ -17,7 +17,8 @@ type Generator = MediaStreamTrack & { writable: WritableStream<VideoFrame> };
 
 /** No first frame this long after start: the native path isn't working here, fall back. */
 export const FIRST_FRAME_MS = 3_000;
-const FRAME_US = 1_000_000 / 30;
+/** Python grabs this often (DXGI hands frames up to the refresh rate; a still screen sends none). */
+export const NATIVE_FPS = 60;
 
 const slots = new Map<string, Slots>();
 const sinks = new Map<string, (m: FrameMsg) => void>();
@@ -71,7 +72,8 @@ export async function nativeTrack(view: string, abort: AbortSignal, firstFrameMs
         format: "BGRX",
         codedWidth: m.w,
         codedHeight: m.h,
-        timestamp: Math.round(m.seq * FRAME_US),
+        // Real arrival time: a still screen sends no frames, so seq * period would drift.
+        timestamp: Math.round(performance.now() * 1000),
       });
     } catch {
       return; // a buffer replaced mid-frame
@@ -97,7 +99,7 @@ export async function nativeTrack(view: string, abort: AbortSignal, firstFrameMs
   };
   abort.addEventListener("abort", stop);
   try {
-    const out = await api.native_capture_start(view, 30);
+    const out = await api.native_capture_start(view, NATIVE_FPS);
     if (!out?.ok) throw new Error(out?.error || "native capture refused");
     let timer = 0;
     await Promise.race([

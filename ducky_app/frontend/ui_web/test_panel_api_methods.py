@@ -474,6 +474,8 @@ _PUBLIC_METHODS = frozenset({
     'reload_uefn_plugin',
     'report_plugin_panel',
     'get_restore_tabs',
+    'native_capture_start',
+    'native_capture_stop',
     'set_visible_chats',
     'plan_progress',
     'swarm_preview',

@@ -2,8 +2,9 @@
 
 WebView2's whole-desktop getUserMedia always raises Chromium's "Screen Sharing Request" box
 and getDisplayMedia gives one monitor, so this process grabs pixels itself, the way Chrome
-Remote Desktop's native host does. ponytail: GDI BitBlt (ctypes, no dependency); DXGI Desktop
-Duplication if a 4K/60 grab ever costs too much.
+Remote Desktop's native host does: DXGI Desktop Duplication first (native_capture_dxgi, ~3 ms
+for 1080p, up to the refresh rate), GDI BitBlt when that can't start or a rect spans two
+monitors (BitBlt waits on the compositor: ~20 ms for 1080p, under 50 fps).
 """
 
 from __future__ import annotations
@@ -98,6 +99,32 @@ def grab(left: int, top: int, w: int, h: int) -> bytes:
         g.close()
 
 
+class _BestGrabber:
+    """DXGI when it works, BitBlt for what it can't do (start, rect across monitors, lost access)."""
+
+    def __init__(self) -> None:
+        self._gdi = _Grabber()
+        try:
+            from frontend.native_capture_dxgi import DxgiGrabber
+
+            self._dxgi = DxgiGrabber()
+        except Exception:
+            self._dxgi = None
+
+    def grab(self, left: int, top: int, w: int, h: int) -> bytes | None:
+        if self._dxgi is not None:
+            try:
+                return self._dxgi.grab(left, top, w, h)
+            except OSError:
+                pass
+        return self._gdi.grab(left, top, w, h)
+
+    def close(self) -> None:
+        if self._dxgi is not None:
+            self._dxgi.close()
+        self._gdi.close()
+
+
 RectFn = Callable[[], "tuple[int, int, int, int] | None"]
 FrameFn = Callable[[bytes, int, int], None]
 
@@ -112,7 +139,7 @@ class Capturer:
         self._rect_fn = rect_fn
         self._period = 1.0 / max(1, min(60, int(fps)))
         self._on_frame = on_frame
-        self._factory = grabber_factory or _Grabber
+        self._factory = grabber_factory or _BestGrabber
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="native-capture", daemon=True)
 
@@ -138,7 +165,9 @@ class Capturer:
                 if rect:
                     left, top, w, h = even_rect(*rect)
                     try:
-                        self._on_frame(g.grab(left, top, w, h), w, h)
+                        buf = g.grab(left, top, w, h)
+                        if buf is not None:  # None: nothing changed on screen, nothing to send
+                            self._on_frame(buf, w, h)
                     except Exception:
                         pass  # ponytail: a failed grab (secure desktop, mid-resize) skips one frame
                 due += self._period

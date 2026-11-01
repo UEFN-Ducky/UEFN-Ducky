@@ -1366,6 +1366,9 @@ REMOTE_DENY = frozenset(
         # Only this PC's own window says whether Ducky is in use, and only it updates Ducky.
         "report_update_ui",
         "apply_auto_update_now",
+        # The PC's own page starts the stream's native capture; a viewer only asks to watch.
+        "native_capture_start",
+        "native_capture_stop",
         "set_window_bounds",
         "get_window_bounds",
         "minimize_window",

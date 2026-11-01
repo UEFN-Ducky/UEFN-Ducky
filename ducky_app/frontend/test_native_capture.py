@@ -55,6 +55,43 @@ def test_capturer_drops_frames_while_the_consumer_is_slow():
     assert len(frames) <= 6  # 60 fps asked, ~10/s possible: the rest were dropped, not queued
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="DXGI")
+def test_dxgi_grabs_every_monitor_fast_enough_for_60fps_and_always_gives_a_first_frame():
+    from frontend.native_capture_dxgi import DxgiGrabber
+
+    try:
+        g = DxgiGrabber()
+    except OSError:
+        pytest.skip("no DXGI duplication here (remote session / no GPU)")
+    try:
+        for o in g._outputs:
+            left, top, right, bottom = o.rect
+            w, h = min(1920, right - left) & ~1, min(1080, bottom - top) & ~1
+            # A new rect on a still screen still gets its first picture.
+            first = g.grab(left, top, w, h)
+            assert first is not None and len(first) == w * h * 4
+            t0 = time.perf_counter()
+            for _ in range(20):
+                g.grab(left, top, w, h)
+            per = (time.perf_counter() - t0) / 20
+            print(f"DXGI {o.rect} {w}x{h}: {per * 1000:.2f} ms")
+            assert per < 1 / 60
+    finally:
+        g.close()
+
+
+def test_capturer_sends_nothing_while_the_screen_is_still():
+    class _Still(_FakeGrabber):
+        def grab(self, left, top, w, h):
+            return None
+
+    frames = []
+    cap = native_capture.Capturer(lambda: (0, 0, 2, 2), 60, lambda *a: frames.append(a), _Still).start()
+    time.sleep(0.2)
+    cap.stop()
+    assert frames == []
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="GDI")
 def test_real_grab_of_a_1080p_rect_is_fast_enough_for_30fps():
     g = native_capture._Grabber()

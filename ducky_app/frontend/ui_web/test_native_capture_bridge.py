@@ -55,7 +55,7 @@ def test_start_streams_frames_into_slots_and_stop_closes(monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr("frontend.native_capture._Grabber", _G)
+    monkeypatch.setattr("frontend.native_capture._BestGrabber", _G)
     out = bridge.start("monitor:1", 30, rect_fn=lambda: (-1920, 0, -1916, 2))
     assert out == {"ok": True, "view": "monitor:1"}
     time.sleep(0.2)
