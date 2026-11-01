@@ -4,6 +4,7 @@ HTTP, MCP sessions, worktrees, the file-tool and writer rules, and no leaks over
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -563,3 +564,25 @@ def test_a_timed_out_run_has_what_it_left_running_stopped(monkeypatch):
     assert out["stopped"] == "bash.exe" and out["output_tail"] == "FORM OK" and "timeout 60" in out["hint"]
     assert shell.left_running() == ""
     assert "stopped" not in service._stop_leftovers(mgr, "s1", {"ok": False, "error": "command timed out"})
+
+
+def test_a_reused_sandbox_shell_runs_from_work_again(tmp_path):
+    # Oct 31 2026: `cd check && npm install` left the reused shell in check/, and the next
+    # `cd check && node check.mjs` failed with "No such file or directory".
+    import types
+
+    work = tmp_path / "it's a box" / "work"
+    (work / "check").mkdir(parents=True)
+    ran: list[str] = []
+    for reused in (True, False):
+        mgr = types.SimpleNamespace(
+            spawn=lambda **k: {"session_id": "s1", "reused": reused},
+            run_agent_command=lambda sid, command, **k: ran.append(command) or {"ok": True})
+        service._run_in_terminal(mgr, work.parent, "c1", "cd check && pwd", "bash", 60, {})
+    assert ran[1] == "cd check && pwd" and ran[0].endswith(" && cd check && pwd")
+    bash = shutil.which("bash")
+    if bash:
+        out = subprocess.run([bash, "-c", "cd / && " + ran[0]], capture_output=True, text=True, timeout=30)
+        assert out.returncode == 0 and out.stdout.strip().endswith("it's a box/work/check")
+    assert service._from_work("powershell", Path("C:/a'b/work"), "dir").startswith("Set-Location -LiteralPath 'C:")
+    assert "a''b" in service._from_work("powershell", Path("C:/a'b/work"), "dir")

@@ -208,13 +208,25 @@ def _run_in_terminal(mgr: Any, box: Path, conv_id: str, command: str, shell: str
         session = str(opened.get("session_id") or "")
         if not session:
             return "", {"ok": False, "error": str(opened.get("error") or "The sandbox terminal did not open.")}
-        result = mgr.run_agent_command(session, command, source="sandbox_run", conv_id=conv_id, wait=True,
+        run = _from_work(shell, box / "work", command) if opened.get("reused") else command
+        result = mgr.run_agent_command(session, run, source="sandbox_run", conv_id=conv_id, wait=True,
                                        command_timeout_s=max(5.0, min(float(timeout_s), 3600.0)), auto_approve=True,
                                        expect_minutes=expect_minutes)
         # The idle-terminal cleanup can close a reused shell just as it is handed out: once more in a new one.
         if not (isinstance(result, dict) and result.get("error") == "session not found"):
             break
     return session, result
+
+
+def _from_work(shell: str, work: Path, command: str) -> str:
+    """Every sandbox_run starts in work/. A reused shell is still wherever the last command
+    cd'd: Oct 31 2026 `cd check && npm install` left it in check/, and the next
+    `cd check && node check.mjs` failed with "No such file or directory"."""
+    from frontend.ui_web.terminal.shells import shell_label
+
+    if shell_label(shell) == "powershell":
+        return "Set-Location -LiteralPath '" + str(work).replace("'", "''") + "'; " + command
+    return "cd -- " + shlex.quote(str(work).replace("\\", "/")) + " && " + command
 
 
 def _stop_leftovers(mgr: Any, session_id: str, result: dict[str, Any]) -> dict[str, Any]:
