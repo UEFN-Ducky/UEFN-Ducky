@@ -157,9 +157,9 @@
   align-items: center;
   justify-content: center;
   padding: 24px 16px;
-  background: var(--overlay);
-  backdrop-filter: var(--blur-md);
-  -webkit-backdrop-filter: var(--blur-md);
+  /* Solid: nothing of the app (Settings, the sidebars) shows behind the setup or its rating;
+     the app appears once setup is finished. */
+  background: var(--bg);
   animation: setup-wizard-fade 160ms ease-out;
 }
 
