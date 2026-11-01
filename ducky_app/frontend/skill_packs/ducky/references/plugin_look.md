@@ -245,3 +245,28 @@ Settings → Appearance (that also turns on the plugin's skin and effect, if it 
 them). It can't pick another plugin's theme or the user's own. It still ships an
 `@api.tool()` that lists and applies its themes, a workflow node and a bundled skill.
 See `plugin_examples_ui` § Theme.
+
+## 7. Make it look designed (unslop pass)
+
+The kit makes a panel look like Ducky; it doesn't make it look designed. Before
+calling a panel done, run the unslop pass: `skill_read_subskill("agent-skills",
+"unslop")` (direction, nine passes, checklist; `unslop_signs` is the audit list).
+Adapted from unslop by Damir Sokolovsky (@heydamir), CC BY 4.0.
+
+In a Ducky panel its tokens map onto the kit, so you never type its hex values:
+
+| unslop says | In a plugin panel |
+|---|---|
+| One neutral ramp, three text roles | surfaces `--bg`, `--card`, `--bg-elevated`, `--panel-header`; text `--fg`, `--fg-dim`, `--muted` |
+| One accent, used rarely | `--accent` on the primary `dk-btn--primary`, the selection and one key figure only |
+| Hairline borders | `1px var(--border)` |
+| Semantic colors only for meaning | `--green` / `--red` / `--warn` (+ `-dim`) for success, error, warning, never decoration |
+| No glows, quiet depth | no `--shadow-glow` on chrome; `--shadow-sm` at most on floating things |
+| 4px spacing scale, one row height | gaps and paddings of 4 / 8 / 12 / 16 / 24; every row in a list one height |
+| One icon set, one size | one inline SVG set at 16 px, stroke 1.5, `currentColor` |
+| Copy rules | sentence case labels, no `!`, no trailing periods, no greetings, no hype words |
+| Motion | color/opacity/transform transitions of 120–220 ms, no `transition: all`, no looping pulse on things that aren't live |
+
+Where the two disagree, this page's house style wins (for example the small
+uppercase section titles in §3). Fix every remaining sign before reporting the
+panel finished.
