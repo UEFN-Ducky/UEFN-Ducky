@@ -48,7 +48,8 @@ def test_visible_schema_and_search_permission(monkeypatch, mode):
         if mode == "ask":
             assert "allowed" in search["matches"][0]
         missing = json.loads(asyncio.run(ducky_panel.ducky_get_tools(name="absent")))
-        assert not missing["ok"]
+        assert missing["found"] is False
+        assert "close_matches" in missing["hint"]
         assert "not proof" in missing["hint"]
         assert "inputSchema" not in missing
     finally:

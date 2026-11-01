@@ -323,11 +323,12 @@ async def ducky_get_tools(
         close = await asyncio.to_thread(_ranked_tool_names, tools, by_name, n, 10)
         # A miss is an answer, not a failure: "ok": false counted every lookup of an invented
         # name as a failed call (34 ducky_get_tools failures on Oct 31 2026).
+        miss = _discovery_miss_context()
+        miss["hint"] = "Pick one of close_matches, or search with pattern= instead. " + miss.get("hint", "")
         return tool_json({
             "found": False, "name": n, "note": f"tool not found in current catalog: {n}",
-            "hint": "Pick one of close_matches, or search with pattern= instead.",
             "close_matches": close[:10],
-            "revision": revision, **_discovery_miss_context(),
+            "revision": revision, **miss,
         }, pretty=pretty)
 
     ranked = await asyncio.to_thread(_ranked_tool_names, tools, by_name, p, 50, all_words=True)

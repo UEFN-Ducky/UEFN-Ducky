@@ -65,7 +65,8 @@ def test_ducky_discovery_guidance_no_invented_absence_or_readiness(discovery, mo
 
     monkeypatch.setattr(epic, "_probe_cache", {"at": time.time(), "result": status})
     result = json.loads(asyncio.run(panel.ducky_get_tools(name="unknown__missing")))
-    assert result["error"] == "tool not found in current catalog: unknown__missing"
+    assert result["found"] is False
+    assert result["note"] == "tool not found in current catalog: unknown__missing"
     assert result["connection_status"] == (status or None)
     assert "not MCP session or tool readiness" in result["hint"]
     assert "not proof" in result["hint"]
