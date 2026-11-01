@@ -1451,6 +1451,41 @@ body.native-caption-input-ready .app-header .drag-region {
   background: var(--bg);
   transform: translateY(calc(-1 * var(--remote-kb, 0px)));
 }
+/* Grip on top of the typing box: drag up for a taller box, double-tap for one line again. */
+.remote-type-grip {
+  display: grid;
+  place-items: center;
+  height: 16px;
+  margin-top: -6px;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.remote-type-grip span {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+/* Header chat button while the phone watches the PC: the typing box on / off. */
+.remote-type-toggle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.remote-type-toggle.is-on {
+  background: var(--btn-hover);
+  color: var(--fg);
+}
+.remote-type-toggle svg {
+  width: 20px;
+  height: 20px;
+}
 .remote-type-box {
   display: flex;
   align-items: flex-end;

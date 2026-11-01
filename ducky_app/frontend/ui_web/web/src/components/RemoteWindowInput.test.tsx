@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 // A live link to the other PC that records what the picture sends there.
@@ -30,7 +30,7 @@ vi.mock("../remote/directTransport", async (original) => ({
   getDirectTransport: () => fake,
 }));
 
-import { RemoteWindowOverlay } from "./RemoteWindowView";
+import { draggedTypeHeight, RemoteTypeToggle, RemoteWindowOverlay, setRemoteTypeBarOpen } from "./RemoteWindowView";
 
 const VIDEO = { videoWidth: 1600, videoHeight: 900, readyState: 4 } as const;
 
@@ -111,8 +111,19 @@ it("keys go to the PC, held keys repeat there, and this app's shortcuts never se
   expect(app).not.toHaveBeenCalled();
 });
 
-it("on a phone the typing box stays under the picture", async () => {
+it("on a phone the typing box is off until the chat button turns it on, then grows by its grip", async () => {
   useScreen(false);
+  setRemoteTypeBarOpen(false);
   await showPicture();
-  expect(screen.getByLabelText("Type on the PC")).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Type on the PC" })).toBeNull();
+  render(<RemoteTypeToggle />);
+  fireEvent.click(screen.getByRole("button", { name: "Type on the PC" }));
+  const box = await screen.findByRole("textbox", { name: "Type on the PC" });
+  expect(document.activeElement).toBe(box);
+  expect(screen.getByRole("button", { name: "Hide the typing box" }).getAttribute("aria-pressed")).toBe("true");
+  expect(draggedTypeHeight(40, -200, 500)).toBe(240); // dragged up 200 px
+  expect(draggedTypeHeight(40, -900, 500)).toBe(500); // capped
+  expect(draggedTypeHeight(40, 300, 500)).toBe(22); // never under one line
+  fireEvent.click(screen.getByRole("button", { name: "Hide the typing box" }));
+  await waitFor(() => expect(screen.queryByRole("textbox", { name: "Type on the PC" })).toBeNull());
 });

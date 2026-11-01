@@ -40,7 +40,7 @@ import { ContextMenu, useContextMenuState, type ContextMenuItem } from "./Contex
 import { targetRef, useUiTarget } from "../ui-targets/registry";
 import { ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
-import { RemoteWindowSelect } from "./RemoteWindowView";
+import { RemoteTypeToggle, RemoteWindowSelect } from "./RemoteWindowView";
 import type { PluginHeaderButton } from "../hooks/usePluginContributions";
 
 interface HeaderProps {
@@ -729,6 +729,7 @@ export function Header({
         </>
         )}
 
+        {isRemote() && onWatchWindowId && watchWindowId ? <RemoteTypeToggle /> : null}
         {isRemote() && onWatchWindowId ? (
           <RemoteWindowSelect
             value={watchWindowId}

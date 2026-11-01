@@ -329,6 +329,46 @@ function useViewerActive(): boolean {
 
 const LAUNCH_WAIT_MS = 120_000;
 
+/** The phone's typing box under the stream: off until the header's chat button turns it on. */
+let typeBarOpen = false;
+const typeBarSubs = new Set<() => void>();
+
+export function setRemoteTypeBarOpen(open: boolean) {
+  if (typeBarOpen === open) return;
+  typeBarOpen = open;
+  typeBarSubs.forEach((fn) => fn());
+}
+
+export function useRemoteTypeBarOpen(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      typeBarSubs.add(onChange);
+      return () => typeBarSubs.delete(onChange);
+    },
+    () => typeBarOpen,
+    () => typeBarOpen,
+  );
+}
+
+/** Header button beside the View menu while a phone watches the PC: shows / hides the typing box. */
+export function RemoteTypeToggle() {
+  const open = useRemoteTypeBarOpen();
+  const desktop = useDesktopPointer();
+  if (desktop) return null;
+  return (
+    <button
+      type="button"
+      className={`remote-type-toggle${open ? " is-on" : ""}`}
+      aria-label={open ? "Hide the typing box" : "Type on the PC"}
+      aria-pressed={open}
+      title={open ? "Hide the typing box" : "Type on the PC"}
+      onClick={() => setRemoteTypeBarOpen(!open)}
+    >
+      <Icons.Chat />
+    </button>
+  );
+}
+
 let uefnLaunchLabel = "";
 const launchSubs = new Set<() => void>();
 
@@ -1223,9 +1263,12 @@ async function sampleStats(pc: RTCPeerConnection, cursor: StatsCursor): Promise<
   };
 }
 
+/** The size · codec · fps · bitrate · ping line over the stream. Off for now: it covered the picture. */
+const SHOW_STATS = false;
+
 function statsLabel(s: Stats): string {
   const parts: string[] = [];
-  if (s.w && s.h) parts.push(`${s.w}×${s.h}`);
+  if (s.w && s.h) parts.push(`${s.w}×${s.h}`); // ponytail: hidden for now (SHOW_STATS)
   if (s.codec) parts.push(s.codec);
   parts.push(`${s.fps} fps`);
   parts.push(s.kbps >= 1000 ? `${(s.kbps / 1000).toFixed(1)} Mb/s` : `${s.kbps} kb/s`);
@@ -1519,25 +1562,45 @@ function UefnStickOverlay({
 }
 
 const TYPE_MAX_PX = 112;
+/** The grip can pull the box up to this share of the screen. */
+export const TYPE_DRAG_MAX_SHARE = 0.6;
 
 type TypeBarHandle = { focusFromTap: () => void; blur: () => void };
 
+/** Box height for a grip drag: dragging up (negative dy) makes it taller, within 1 line .. maxPx. */
+export function draggedTypeHeight(startPx: number, dy: number, maxPx: number): number {
+  return Math.round(Math.min(maxPx, Math.max(22, startPx - dy)));
+}
+
 /**
- * Always under the stream, like our chat box: what you type goes to the PC on Send.
+ * Under the stream when the header's chat button is on: what you type goes to the PC on Send.
  * Send with the box empty presses Enter there; Backspace in the empty box deletes there.
+ * The grip on top drags the box taller (or back down) for longer text.
  */
-const RemoteTypeBar = forwardRef<TypeBarHandle, { send: SendFn; disabled: boolean }>(function RemoteTypeBar({ send, disabled }, ref) {
+const RemoteTypeBar = forwardRef<TypeBarHandle, { send: SendFn; disabled: boolean; focusOnMount?: boolean }>(function RemoteTypeBar(
+  { send, disabled, focusOnMount },
+  ref,
+) {
   const barRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const shiftEnter = useRef(false);
   const [text, setText] = useState("");
+  const [dragPx, setDragPx] = useState(0);
+  const drag = useRef<{ y: number; h: number } | null>(null);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TYPE_MAX_PX)}px`;
-  }, [text]);
+    const cap = Math.max(TYPE_MAX_PX, dragPx);
+    el.style.maxHeight = `${cap}px`;
+    el.style.height = `${Math.max(dragPx, Math.min(el.scrollHeight, cap))}px`;
+  }, [text, dragPx]);
+
+  useEffect(() => {
+    if (focusOnMount) inputRef.current?.focus({ preventScroll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = useCallback(() => {
     const value = (inputRef.current?.value ?? "").slice(0, 2000);
@@ -1600,6 +1663,27 @@ const RemoteTypeBar = forwardRef<TypeBarHandle, { send: SendFn; disabled: boolea
       }}
       onPointerDown={(ev) => ev.stopPropagation()}
     >
+      <div
+        className="remote-type-grip"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Drag to resize the typing box"
+        onPointerDown={(ev) => {
+          ev.preventDefault();
+          ev.currentTarget.setPointerCapture?.(ev.pointerId);
+          drag.current = { y: ev.clientY, h: inputRef.current?.getBoundingClientRect().height || 22 };
+        }}
+        onPointerMove={(ev) => {
+          const d = drag.current;
+          if (!d) return;
+          setDragPx(draggedTypeHeight(d.h, ev.clientY - d.y, window.innerHeight * TYPE_DRAG_MAX_SHARE));
+        }}
+        onPointerUp={() => (drag.current = null)}
+        onPointerCancel={() => (drag.current = null)}
+        onDoubleClick={() => setDragPx(0)}
+      >
+        <span aria-hidden />
+      </div>
       <div className="remote-type-box">
         <textarea
           ref={inputRef}
@@ -1659,6 +1743,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
   // Failures in a row; a stream that went live starts counting again.
   const streakRef = useRef(0);
   const typeBarRef = useRef<TypeBarHandle>(null);
+  const typeOpen = useRemoteTypeBarOpen();
   const tapGen = useRef(0);
   const controls = useRemoteViewControls();
   const rows = useWindowViews(!!hwnd);
@@ -1704,6 +1789,8 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       void Promise.resolve(probe(hwnd))
         .then((focused) => {
           if (gen !== tapGen.current || !focused) return;
+          // A text field tapped on the PC opens the typing box (it focuses itself on mount).
+          if (!typeBarOpen) setRemoteTypeBarOpen(true);
           typeBarRef.current?.focusFromTap();
         })
         .catch(() => {});
@@ -2059,7 +2146,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
             </button>
           </div>
         ) : null}
-        {showing && stats ? <span className="remote-window-stats">{statsLabel(stats)}</span> : null}
+        {SHOW_STATS && showing && stats ? <span className="remote-window-stats">{statsLabel(stats)}</span> : null}
         {showing && controls.overlay && watchingUefn ? (
           <UefnStickOverlay
             send={send}
@@ -2071,7 +2158,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
           />
         ) : null}
       </div>
-      {!idle && !desktop ? <RemoteTypeBar ref={typeBarRef} send={send} disabled={phase !== "live"} /> : null}
+      {!idle && !desktop && typeOpen ? <RemoteTypeBar ref={typeBarRef} send={send} disabled={phase !== "live"} focusOnMount /> : null}
     </div>
   );
 }

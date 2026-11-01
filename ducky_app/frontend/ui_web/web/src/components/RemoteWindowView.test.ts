@@ -155,10 +155,10 @@ describe("view pan/zoom", () => {
     expect(clampView(view, 999, 0, 2).panX).toBe(100);
   });
 
-  it("pinchScale multiplies and clamps to 1..10", () => {
+  it("pinchScale multiplies and clamps to 1..40", () => {
     expect(pinchScale(100, 200, 1)).toBe(2);
-    expect(pinchScale(100, 800, 1)).toBe(8);
-    expect(pinchScale(100, 2000, 1)).toBe(10);
+    expect(pinchScale(100, 800, 4)).toBe(32);
+    expect(pinchScale(100, 2000, 4)).toBe(40);
     expect(pinchScale(100, 10, 1)).toBe(1);
   });
 

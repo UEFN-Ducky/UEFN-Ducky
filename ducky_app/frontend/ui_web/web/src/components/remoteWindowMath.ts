@@ -104,7 +104,8 @@ export function pickUeFnFollow(args: {
 
 /** Local Chrome-style pan/zoom of the stream view (not sent to the desktop). */
 export const VIEW_SCALE_MIN = 1;
-export const VIEW_SCALE_MAX = 10;
+/** Deep enough to read one UEFN Details row of a 4K desktop on a phone. */
+export const VIEW_SCALE_MAX = 40;
 
 export type ViewPanZoom = { panX: number; panY: number; scale: number };
 
