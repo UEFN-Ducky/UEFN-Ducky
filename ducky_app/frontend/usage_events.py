@@ -112,6 +112,8 @@ EVENTS: dict[str, dict[str, Any]] = {
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),
         "memory": ("bucket", MEMORY_MB, "memory_mb"),
         "agents": ("bucket", AGENTS_N, "agents_running_n"),
+        # Over 5% idle CPU only: the busiest thread's name as a slug (usage_stats.thread_slug).
+        "hot": ("slug",),
     },
 }
 

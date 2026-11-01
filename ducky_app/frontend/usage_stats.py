@@ -14,6 +14,7 @@ swallows its own errors: stats never break the app.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sys
 import threading
@@ -802,11 +803,46 @@ def _maybe_perf_sample() -> None:
 
         proc = psutil.Process()
         props["memory_mb"] = proc.memory_info().rss / (1024 * 1024)
+        before = _thread_times(proc)
         props["idle_cpu_pct"] = proc.cpu_percent(interval=1.0)
+        # Over 5%: which thread used it (46% of idle samples on Oct 31 2026, and one PC's
+        # profile had no single hot thread, so the busy one has to be named across PCs).
+        if props["idle_cpu_pct"] > 5.0:
+            hot = _hot_thread(before, _thread_times(proc))
+            if hot:
+                props["hot"] = hot
     except Exception:
         pass
     if props:
         track("perf.sample", **props)
+
+
+def _thread_times(proc: Any) -> dict[int, float]:
+    """CPU seconds so far per native thread id; {} when psutil can't say."""
+    try:
+        return {t.id: t.user_time + t.system_time for t in proc.threads()}
+    except Exception:
+        return {}
+
+
+def thread_slug(name: str) -> str:
+    """A Python thread name as a short anonymous slug: what comes after ':' (a tool name in
+    ``shared-mcp-call:<tool>``) and digits never leave. ``search-indexer-2`` -> ``search_indexer``."""
+    s = re.sub(r"[^a-z_]+", "_", re.sub(r"\d+", "", name.split(":", 1)[0].lower()))
+    return re.sub(r"_+", "_", s).strip("_")[:24].strip("_") or "native"
+
+
+def _hot_thread(before: dict[int, float], after: dict[int, float]) -> str:
+    """The thread that used the most CPU between two _thread_times; native when it runs no Python."""
+    if not after:
+        return ""
+    tid = max(after, key=lambda t: after[t] - before.get(t, 0.0))
+    if after[tid] - before.get(tid, 0.0) <= 0:
+        return ""
+    for t in threading.enumerate():
+        if getattr(t, "native_id", None) == tid:
+            return thread_slug(t.name)
+    return "native"
 
 
 def debug_state() -> dict[str, Any]:

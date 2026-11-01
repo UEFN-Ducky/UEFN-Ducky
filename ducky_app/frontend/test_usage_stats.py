@@ -230,6 +230,22 @@ def test_perf_sample_counts_running_turns(monkeypatch) -> None:
     assert ev.validate("perf.sample", {"agents_running_n": 3}) == {"agents": "2-4"}
 
 
+def test_perf_sample_names_the_busiest_thread_without_leaking_tool_names() -> None:
+    import threading
+
+    assert us.thread_slug("search-indexer-2") == "search_indexer"
+    assert us.thread_slug("shared-mcp-call:roblox_call") == "shared_mcp_call"
+    assert us.thread_slug("12345") == "native"
+    me = threading.current_thread().native_id
+    other = me + 1 if me + 1 != me else me + 2
+    # This thread used 0.4 s of the window, another (no Python thread) 0.1 s.
+    assert us._hot_thread({me: 1.0, other: 2.0}, {me: 1.4, other: 2.1}) == us.thread_slug(threading.current_thread().name)
+    assert us._hot_thread({me: 1.0, other: 2.0}, {me: 1.0, other: 2.5}) == "native"
+    assert us._hot_thread({me: 1.0}, {me: 1.0}) == ""
+    assert us._hot_thread({}, {}) == ""
+    assert ev.validate("perf.sample", {"idle_cpu_pct": 9.0, "hot": "search_indexer"})["hot"] == "search_indexer"
+
+
 def test_ui_track_accepts_only_ui_events_and_uefn_transitions_count_once() -> None:
     assert us.ui_track("feature.open", {"tab": "settings"})
     assert us.ui_track("error.code", {"code": "x", "where": "ui"}) is False
