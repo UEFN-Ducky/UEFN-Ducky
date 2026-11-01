@@ -30,5 +30,6 @@ describe("pictures from public/", () => {
         });
     }
     expect(bad).toEqual([]);
-  });
+    // Reads every source file: past 5 s while the release's 421 test files ran at once (Oct 31 2026).
+  }, 60_000);
 });
