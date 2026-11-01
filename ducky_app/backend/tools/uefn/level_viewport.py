@@ -112,41 +112,52 @@ def _conflict_dialog() -> dict | None:
     return find_conflict_dialog()
 
 
+def _counted(op: str, run) -> dict:
+    """Run one push or pull and count it (anonymous usage stats: outcome words only)."""
+    t0 = time.monotonic()
+    out = run()
+    try:
+        from frontend import usage_stats
+
+        usage_stats.revision(op, out, time.monotonic() - t0)
+    except Exception:
+        pass
+    return out
+
+
 @plugin_mcp_tool("uefn")
 def revision_push(description: str, pretty: bool = False) -> str:
     """Save the island and push every change not yet on the remote (Unreal Revision Control). Never without a description."""
     if not (description or "").strip():
         return tool_json({"ok": False, "error": "description is required (the check-in message)"}, pretty=pretty)
+    return tool_json(_counted("push", lambda: _push(description)), pretty=pretty)
+
+
+def _push(description: str) -> dict:
     root = _island_root()
     if not root:
-        return tool_json({"ok": False, "error": "UEFN has no island open"}, pretty=pretty)
+        return {"ok": False, "error": "UEFN has no island open"}
     lore = _lore_cli()
     # Lore refuses a check-in (with no message) while main has revisions this island lacks.
     before = lore.repo_state(root)
     if before.get("ok") and before.get("behind"):
-        return tool_json(
-            {
-                "ok": False,
-                **_remote_state(before),
-                "error": "the remote has changes this island doesn't have: pull them first (revision_pull), then push",
-            },
-            pretty=pretty,
-        )
+        return {
+            "ok": False,
+            **_remote_state(before),
+            "error": "the remote has changes this island doesn't have: pull them first (revision_pull), then push",
+        }
     pending = lore.pending_paths(root)
     if not pending.get("ok"):
-        return tool_json({"ok": False, "error": pending.get("error") or "could not list pending files"}, pretty=pretty)
+        return {"ok": False, "error": pending.get("error") or "could not list pending files"}
     # A text file Lore merged keeps its <<<<<<< / >>>>>>> markers until someone resolves it.
     marked = [_rel(root, p) for p in lore.conflict_marked(pending.get("paths") or [])]
     if marked:
-        return tool_json(
-            {
-                "ok": False,
-                "conflict_markers": marked,
-                "error": f"{marked[0]} still has conflict markers from a merge: resolve it "
-                "(UEFN's Conflict resolution tab or VS Code) before pushing",
-            },
-            pretty=pretty,
-        )
+        return {
+            "ok": False,
+            "conflict_markers": marked,
+            "error": f"{marked[0]} still has conflict markers from a merge: resolve it "
+            "(UEFN's Conflict resolution tab or VS Code) before pushing",
+        }
     # A file changed here while the other PC holds its lock (edited by hand past UEFN's
     # warning, or by a script) can't be checked in: say which, instead of a failed check-in.
     from backend.bridge.island_locks import locked_files
@@ -154,15 +165,12 @@ def revision_push(description: str, pretty: bool = False) -> str:
     locked = locked_files(root, pending.get("paths") or [])
     if locked:
         first = locked[0]
-        return tool_json(
-            {
-                "ok": False,
-                "locked_by_other": locked,
-                "error": f"{first['file'].rsplit('/', 1)[-1]} is being edited on the other PC by "
-                f"{first['owner'] or 'someone else'}: wait until they push it, pull, then push again",
-            },
-            pretty=pretty,
-        )
+        return {
+            "ok": False,
+            "locked_by_other": locked,
+            "error": f"{first['file'].rsplit('/', 1)[-1]} is being edited on the other PC by "
+            f"{first['owner'] or 'someone else'}: wait until they push it, pull, then push again",
+        }
     result = send_command(
         "revision_check_in",
         {"files": list(pending.get("paths") or []), "description": description},
@@ -182,75 +190,64 @@ def revision_push(description: str, pretty: bool = False) -> str:
         )
     state = lore.repo_state(root)
     _wake_island_watch()
-    return tool_json(
-        {
-            "ok": bool(result.get("ok")),
-            "checked_in": len(result.get("checked_in") or []),
-            "saved": len(saved),
-            **_remote_state(state),
-            "error": result.get("error") or state.get("error") or "",
-        },
-        pretty=pretty,
-    )
+    return {
+        "ok": bool(result.get("ok")),
+        "checked_in": len(result.get("checked_in") or []),
+        "saved": len(saved),
+        **_remote_state(state),
+        "error": result.get("error") or state.get("error") or "",
+    }
 
 
 @plugin_mcp_tool("uefn")
 def revision_pull(force: bool = False, allow_both_changed: bool = False, pretty: bool = False) -> str:
     """Pull the remote's changes and reload the map. Never force over unsaved work or files changed on both PCs unasked."""
+    return tool_json(_counted("pull", lambda: _pull(force, allow_both_changed)), pretty=pretty)
+
+
+def _pull(force: bool, allow_both_changed: bool) -> dict:
     root = _island_root()
     if not root:
-        return tool_json({"ok": False, "error": "UEFN has no island open"}, pretty=pretty)
+        return {"ok": False, "error": "UEFN has no island open"}
     lore = _lore_cli()
     before = lore.repo_state(root)
     if not before.get("ok"):
-        return tool_json({"ok": False, "error": before.get("error") or "could not read the repository"}, pretty=pretty)
+        return {"ok": False, "error": before.get("error") or "could not read the repository"}
     if not before.get("behind"):
-        return tool_json({"ok": True, "up_to_date": True, **_remote_state(before)}, pretty=pretty)
+        return {"ok": True, "up_to_date": True, **_remote_state(before)}
     # A file changed both here and on the other PC: never let the pull pick a side unasked.
     # Its own flag: forcing past unsaved work must not also wave this through.
     both = lore.overlap(root, state=before)
     both_changed = [{k: f[k] for k in ("rel", "local", "remote")} for f in both.get("files") or []]
     if not allow_both_changed and not both.get("ok"):
-        return tool_json(
-            {
-                "ok": False,
-                "error": f"could not check which files changed on both PCs ({both.get('error')}): "
-                "tell the person, pull with allow_both_changed=true only if they agree",
-            },
-            pretty=pretty,
-        )
+        return {
+            "ok": False,
+            "error": f"could not check which files changed on both PCs ({both.get('error')}): "
+            "tell the person, pull with allow_both_changed=true only if they agree",
+        }
     if not allow_both_changed and both_changed:
         names = ", ".join(f["rel"] for f in both_changed[:3]) + (" …" if len(both_changed) > 3 else "")
-        return tool_json(
-            {
-                "ok": False,
-                "both_changed": both_changed,
-                "error": f"{len(both_changed)} file{'s' if len(both_changed) != 1 else ''} changed on both PCs "
-                f"({names}): nothing was pulled. Ask the person what to do with each: keep this PC's version, "
-                "take the other PC's, or merge by hand; then pull with allow_both_changed=true",
-            },
-            pretty=pretty,
-        )
+        return {
+            "ok": False,
+            "both_changed": both_changed,
+            "error": f"{len(both_changed)} file{'s' if len(both_changed) != 1 else ''} changed on both PCs "
+            f"({names}): nothing was pulled. Ask the person what to do with each: keep this PC's version, "
+            "take the other PC's, or merge by hand; then pull with allow_both_changed=true",
+        }
     try:
         result = send_command("revision_sync", {"force": bool(force)}, timeout=_REVISION_TIMEOUT)
     except Exception as exc:  # the editor thread is held (a dialog) or the listener is gone
         result = {"ok": False, "error": str(exc)}
     # A merged file makes UEFN ask the person in a modal dialog; the sync waits on it.
     if not result.get("ok") and not result.get("needs_save") and _conflict_dialog():
-        return tool_json(
-            {"ok": False, "conflict_dialog": True, "both_changed": both_changed, "hint": CONFLICT_DIALOG_HINT},
-            pretty=pretty,
-        )
+        return {"ok": False, "conflict_dialog": True, "both_changed": both_changed, "hint": CONFLICT_DIALOG_HINT}
     if result.get("needs_save"):
-        return tool_json(
-            {
-                "ok": False,
-                "needs_save": result["needs_save"],
-                "error": "UEFN has unsaved changes: ask the person to push them first (revision_push) "
-                "or to pull anyway (force=true, the map is then not reloaded)",
-            },
-            pretty=pretty,
-        )
+        return {
+            "ok": False,
+            "needs_save": result["needs_save"],
+            "error": "UEFN has unsaved changes: ask the person to push them first (revision_push) "
+            "or to pull anyway (force=true, the map is then not reloaded)",
+        }
     after = lore.repo_state(root)
     _wake_island_watch()
     out = {
@@ -262,7 +259,7 @@ def revision_pull(force: bool = False, allow_both_changed: bool = False, pretty:
     }
     if both_changed:
         out.update(both_changed=both_changed, **_conflicts(both.get("files") or []))
-    return tool_json(out, pretty=pretty)
+    return out
 
 
 def _conflicts(files: list[dict]) -> dict:

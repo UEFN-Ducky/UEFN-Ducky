@@ -59,6 +59,17 @@ def _clean_ice(ice: Any) -> list[dict[str, Any]]:
 
 
 def rtc_connect(args: dict[str, Any] | None) -> dict[str, Any]:
+    out = _connect(args)
+    try:
+        from frontend import usage_stats
+
+        usage_stats.remote_connect(out)
+    except Exception:
+        pass
+    return out
+
+
+def _connect(args: dict[str, Any] | None) -> dict[str, Any]:
     """Hand a viewer offer to the page and wait for its answer.
 
     Returns ``{"answer": {...}, "version": ..., "protocol": ...}`` or
@@ -137,6 +148,12 @@ def note_report(payload: Any) -> None:
     with _lock:
         _last_report.clear()
         _last_report.update(keep)
+    try:
+        from frontend import usage_stats
+
+        usage_stats.remote_link(keep)
+    except Exception:
+        pass
 
 
 def last_report() -> dict[str, Any]:

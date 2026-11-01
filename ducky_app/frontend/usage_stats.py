@@ -785,6 +785,51 @@ def popup(kind: str) -> None:
     track("uefn.popup_watchdog", kind=kind)
 
 
+# What stopped a push or pull before it tried: the tool answer's own keys, else words in its error.
+_REVISION_KEYS = (("conflict_markers", "conflict_markers"), ("locked_by_other", "locked"),
+                  ("both_changed", "both_changed"), ("conflict_dialog", "conflict_dialog"), ("needs_save", "needs_save"))
+_REVISION_WORDS = (("pull them first", "behind"), ("no island open", "no_island"),
+                   ("could not read the repository", "repo_read"), ("could not list pending", "repo_read"))
+
+
+def revision(op: str, out: dict[str, Any], took_s: float) -> None:
+    """One source-control push or pull, from the tool's answer. The error text never leaves."""
+    try:
+        if out.get("ok"):
+            track("revision.op", op=op, outcome="up_to_date" if out.get("up_to_date") else "ok", took_s=took_s)
+            return
+        error = str(out.get("error") or "")
+        reason = next((r for k, r in _REVISION_KEYS if out.get(k)), "")
+        reason = reason or next((r for w, r in _REVISION_WORDS if w in error.lower()), "")
+        track("revision.op", op=op, outcome="blocked" if reason else "fail",
+              reason=reason or ev.kind_of(error), took_s=took_s)
+    except Exception:
+        pass
+
+
+def remote_connect(out: dict[str, Any]) -> None:
+    """The PC's answer to one Remote View offer (remote_direct.rtc_connect)."""
+    error = str(out.get("error") or "")
+    outcome = ("ok" if out.get("answer") else "timeout" if "in time" in error
+               else "old_protocol" if "protocol" in error else "bad_offer" if error.startswith("invalid") else "error")
+    track("remote.connect", outcome=outcome)
+
+
+def remote_link(report: dict[str, Any]) -> None:
+    """One viewer link report (state, connect time or path); its free-text reason never leaves."""
+    props: dict[str, Any] = {}
+    if report.get("state"):
+        state = str(report["state"])
+        props["link"] = state if state in ("connecting", "live", "reconnecting", "failed") else "other"
+    if report.get("candidate"):
+        cand = str(report["candidate"])
+        props["candidate"] = cand if cand in ("host", "srflx", "prflx", "relay") else "other"
+    if "connect_ms" in report:
+        props["connect_ms"] = report["connect_ms"]
+    if props:
+        track("remote.link", **props)
+
+
 def _maybe_perf_sample() -> None:
     try:
         last = float(_meta_get(META_PERF_AT) or 0.0)
@@ -859,6 +904,7 @@ def debug_state() -> dict[str, Any]:
 __all__ = [
     "track", "ui_track", "flush", "install_id", "enabled", "set_enabled", "app_opened", "app_closing",
     "uefn_mode", "run_begin", "run_end", "tool_done", "stuck", "error", "agent_crash", "ui_crash",
-    "workflow_done", "plugin_installed", "plugin_removed", "login", "popup", "queued", "clear_queue",
+    "workflow_done", "plugin_installed", "plugin_removed", "login", "popup", "revision", "remote_connect",
+    "remote_link", "queued", "clear_queue",
     "debug_state", "reset_install_id", "json",
 ]

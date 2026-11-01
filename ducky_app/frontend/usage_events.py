@@ -32,6 +32,10 @@ IDLE_CPU_PCT: Buckets = ((1, "1pct"), (5, "5pct"), (None, "more"))
 AGENTS_N: Buckets = ((0, "0"), (1, "1"), (4, "2-4"), (None, "more"))
 MEMORY_MB: Buckets = ((500, "500mb"), (1024, "1gb"), (2048, "2gb"), (None, "more"))
 INSTALL_AGE_S: Buckets = ((86400, "day0"), (7 * 86400, "week1"), (30 * 86400, "month1"), (None, "older"))
+# A source-control push or pull (save, check-in, sync and map reload).
+REVISION_S: Buckets = ((10, "10s"), (60, "1m"), (180, "3m"), (None, "more"))
+# Remote View: offer to a live peer link.
+CONNECT_MS: Buckets = ((1000, "1s"), (3000, "3s"), (10000, "10s"), (None, "more"))
 
 PROVIDERS = ("claude", "codex", "cursor", "ollama", "ducky_ai", "other")
 # The first-run setup's Connect AI step: which AI, and how it ended up connected (or not).
@@ -53,6 +57,10 @@ TOOL_FAILS = ("exit_nonzero", "busy", "not_approved", "timeout", "not_found", "r
 CMD_KINDS = ("test", "build", "git", "install", "script", "other")
 # Tools whose tool.call carries cmd.
 COMMAND_TOOLS = frozenset({"ducky_terminal_run", "sandbox_run"})
+# Why a push or pull did not go through: what stopped it before trying, else ERROR_KINDS.
+REVISION_BLOCKS = ("behind", "conflict_markers", "locked", "both_changed", "conflict_dialog", "needs_save",
+                   "no_island", "repo_read")
+REVISION_REASONS = REVISION_BLOCKS + tuple(k for k in ERROR_KINDS if k not in REVISION_BLOCKS)
 TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "plugin",
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 
@@ -107,6 +115,14 @@ EVENTS: dict[str, dict[str, Any]] = {
     # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",)},
     "ui.crash": {"code": ("slug",)},
+    # Source control (Unreal Revision Control): one per push or pull, never a path or a message.
+    "revision.op": {"op": ("push", "pull"), "outcome": ("ok", "up_to_date", "blocked", "fail"),
+                    "reason": REVISION_REASONS, "took": ("bucket", REVISION_S, "took_s")},
+    # Remote View: the PC's answer to a viewer's offer, then the viewer's link reports.
+    "remote.connect": {"outcome": ("ok", "timeout", "error", "bad_offer", "old_protocol")},
+    "remote.link": {"link": ("connecting", "live", "reconnecting", "failed", "other"),
+                    "candidate": ("host", "srflx", "prflx", "relay", "other"),
+                    "connect": ("bucket", CONNECT_MS, "connect_ms")},
     "perf.sample": {
         "startup": ("bucket", STARTUP_S, "startup_s"),
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),

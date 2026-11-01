@@ -55,6 +55,9 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "agent.stuck": {"provider": "codex", "after_s": 90},
     "ui.crash": {"code": "render"},
     "perf.sample": {"startup_s": 3.2, "idle_cpu_pct": 0.4, "memory_mb": 700},
+    "revision.op": {"op": "pull", "outcome": "blocked", "reason": "both_changed", "took_s": 4},
+    "remote.connect": {"outcome": "timeout"},
+    "remote.link": {"link": "live", "candidate": "relay", "connect_ms": 812},
 }
 
 
@@ -178,6 +181,32 @@ def test_chat_turn_counts_its_tools_and_first_message_once() -> None:
     assert turns[0] == {"provider": "codex", "model_family": "gpt", "outcome": "ok", "duration": "10s", "tool_calls": "1-5", "tool_fails": "0"}
     assert turns[1]["provider"] == "claude" and turns[1]["outcome"] == "error" and turns[1]["tool_calls"] == "0"
     assert not any("Cube" in str(r) for r in rows)
+
+
+def test_source_control_and_remote_view_report_words_only() -> None:
+    us.revision("push", {"ok": True, "checked_in": 3}, 42)
+    us.revision("pull", {"ok": True, "up_to_date": True}, 0.5)
+    us.revision("pull", {"ok": False, "both_changed": [{"rel": "Content/Secret.verse"}], "error": "C:/Users/x"}, 2)
+    us.revision("push", {"ok": False, "error": "the remote has changes this island doesn't have: pull them first"}, 1)
+    us.revision("push", {"ok": False, "error": "request timed out after 180 s"}, 200)
+    us.remote_connect({"error": "desktop did not answer in time"})
+    us.remote_connect({"answer": {"type": "answer", "sdp": "v=0"}})
+    us.remote_link({"state": "failed", "reason": "No peer-to-peer path from 10.0.0.4", "at": 1.0})
+    us.remote_link({"candidate": "relay", "connect_ms": 2400})
+    rows, _ = us._take(100)
+    got = [(r["name"], r["props"]) for r in rows]
+    assert got == [
+        ("revision.op", {"op": "push", "outcome": "ok", "took": "1m"}),
+        ("revision.op", {"op": "pull", "outcome": "up_to_date", "took": "10s"}),
+        ("revision.op", {"op": "pull", "outcome": "blocked", "reason": "both_changed", "took": "10s"}),
+        ("revision.op", {"op": "push", "outcome": "blocked", "reason": "behind", "took": "10s"}),
+        ("revision.op", {"op": "push", "outcome": "fail", "reason": "timeout", "took": "more"}),
+        ("remote.connect", {"outcome": "timeout"}),
+        ("remote.connect", {"outcome": "ok"}),
+        ("remote.link", {"link": "failed"}),
+        ("remote.link", {"candidate": "relay", "connect": "3s"}),
+    ]
+    assert "Secret" not in str(rows) and "10.0.0.4" not in str(rows)
 
 
 def test_turn_outcome_tells_limits_logins_and_closed_apps_from_errors() -> None:
