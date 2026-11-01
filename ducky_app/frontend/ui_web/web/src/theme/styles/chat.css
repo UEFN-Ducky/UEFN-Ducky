@@ -328,7 +328,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--card);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .chat-workflow-run-step {
@@ -503,10 +503,8 @@
   gap: 7px;
   padding: 5px 6px 5px 10px;
   border-bottom: 1px solid var(--border);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--fg-muted, var(--fg));
 }
 
@@ -682,7 +680,7 @@
 .prompt-queue-text {
   grid-column: 1;
   grid-row: 1;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.35;
   color: var(--text);
   white-space: nowrap;
@@ -774,8 +772,6 @@
   padding: 8px 12px 4px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -1059,7 +1055,7 @@
   background: #202024;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.2;
 }
 
@@ -1099,17 +1095,16 @@
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--accent, #3b82f6);
-  border: 2px solid #18181b;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.45);
+  background: var(--accent);
+  border: 2px solid var(--bg);
 }
 
 .live-voice-process-talk-input::-moz-range-thumb {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--accent, #3b82f6);
-  border: 2px solid #18181b;
+  background: var(--accent);
+  border: 2px solid var(--bg);
 }
 
 .live-voice-process-talk--settings .live-voice-process-talk-input {
@@ -1148,7 +1143,6 @@
      reached the bottom, the narrower box re-wrapped the text onto a line the box hadn't grown
      for yet (Oct 31 2026). */
   scrollbar-gutter: stable;
-  transition: height 0.2s ease;
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
@@ -1390,15 +1384,7 @@
 .chat-changes-btn.is-open {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent),
-    0 0 12px color-mix(in srgb, var(--accent) 55%, transparent);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .chat-changes-btn.is-open {
-    animation: chat-changes-btn-glow 1.8s ease-in-out infinite;
-  }
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 /* Held on its current frame while the window is in the background (utils/appIdle). */
@@ -1811,7 +1797,7 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: #60a5fa;
+  background: var(--blue);
   opacity: 0.2;
   animation: voice-orb-ping 3s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
@@ -1821,39 +1807,28 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: linear-gradient(to bottom right, #93c5fd, #3b82f6);
-  box-shadow:
-    inset 0 -2px 4px rgba(0, 0, 0, 0.4),
-    0 0 10px 2px rgba(59, 130, 246, 0.4);
-  animation: voice-orb-glow 2s ease-in-out infinite alternate;
+  background: var(--blue);
+  box-shadow: inset 0 -2px 4px color-mix(in srgb, var(--bg) 40%, transparent);
 }
 
 .voice-overlay-orb--thinking {
-  background: linear-gradient(to bottom right, #c084fc, #7c3aed);
-  box-shadow:
-    inset 0 -2px 4px rgba(0, 0, 0, 0.45),
-    0 0 18px 6px rgba(168, 85, 247, 0.28);
+  background: var(--purple);
 }
 
 .voice-overlay-orb-wrap--thinking .voice-overlay-orb-ping {
-  background: #a855f7;
+  background: var(--purple);
 }
 
 .voice-overlay-orb--speaking {
-  background: linear-gradient(to bottom right, #4ade80, #16a34a);
-  box-shadow:
-    inset 0 -2px 4px rgba(0, 0, 0, 0.45),
-    0 0 18px 6px rgba(34, 197, 94, 0.28);
+  background: var(--green);
 }
 
 .voice-overlay-orb-wrap--speaking .voice-overlay-orb-ping {
-  background: #22c55e;
+  background: var(--green);
 }
 
 .voice-overlay-orb--error {
-  background: linear-gradient(to bottom right, #f87171, #dc2626);
-  animation: none;
-  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.45);
+  background: var(--red);
 }
 
 .voice-overlay-orb-wrap--error .voice-overlay-orb-ping {
@@ -1861,9 +1836,7 @@
 }
 
 .voice-overlay-orb--muted {
-  background: linear-gradient(to bottom right, #a1a1aa, #52525b);
-  animation: none;
-  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.45);
+  background: var(--muted);
 }
 
 .voice-overlay-orb-wrap--muted .voice-overlay-orb-ping {
@@ -2236,8 +2209,6 @@
   font-size: 11px;
   font-weight: 400;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   margin-bottom: 8px;
   padding: 0 4px;
 }
@@ -2527,8 +2498,6 @@
 .chat-list-panel-header {
   font-size: 10px;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .chat-list-panel-folder-section {
@@ -2852,7 +2821,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--member-color, var(--accent));
 }
 
@@ -3477,7 +3446,7 @@
   display: flex;
   width: 100%;
   max-width: 100%;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .message-bubble-user-content {
@@ -3489,9 +3458,8 @@
   border-radius: var(--radius);
   padding: 12px 16px;
   color: var(--fg);
-  font-size: 13px;
-  line-height: 1.6;
-  box-shadow: var(--shadow-sm);
+  font-size: var(--chat-text-size, 14px);
+  line-height: 1.55;
 }
 
 .message-bubble-attachments {
@@ -3754,7 +3722,7 @@
   flex: 0 0 auto;
   background: var(--chat-code-background, var(--chat-surface, var(--bg)));
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .chat-ref-chip-icon img,
@@ -3988,8 +3956,6 @@
 
 .message-bubble-automated-heading {
   font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -4122,7 +4088,7 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .message-bubble-automated-more {
@@ -4293,7 +4259,7 @@
   display: flex;
   width: 100%;
   box-sizing: border-box;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
   padding-left: 8px;
 }
 
@@ -4311,7 +4277,7 @@
 
 .message-bubble-author {
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--member-color, var(--accent));
   margin-bottom: 4px;
@@ -4352,8 +4318,6 @@
 .subagent-banner-kicker {
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--muted);
 }
 .subagent-banner-name {
@@ -4407,7 +4371,7 @@
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   cursor: pointer;
 }
 .team-bar-toggle:hover,
@@ -4466,7 +4430,7 @@
 .team-bar-more:hover { color: var(--fg); }
 .team-roster { max-height: min(48vh, 520px); padding: 0 12px 10px; overflow: auto; }
 .team-roster-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 8px; }
-.team-roster-summary { margin-right: auto; color: var(--muted); font-size: 11.5px; }
+.team-roster-summary { margin-right: auto; color: var(--muted); font-size: 12px; }
 .team-roster-filter {
   display: inline-flex;
   align-items: center;
@@ -4485,7 +4449,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--fg);
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 .team-roster-tool:hover { background: var(--bg-hover); }
@@ -4504,7 +4468,7 @@
   min-height: 32px;
   padding: 2px 8px;
   border-top: 1px solid var(--border-subtle, var(--border));
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .team-roster-row:first-child { border-top: 0; }
 .team-roster-row:hover { background: var(--bg-hover); }
@@ -4513,9 +4477,7 @@
   min-height: 26px;
   background: color-mix(in srgb, var(--fg) 3%, transparent);
   color: var(--muted);
-  font-size: 10.5px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 11px;
 }
 .team-roster-row--group { background: color-mix(in srgb, var(--fg) 2.5%, transparent); }
 .team-roster-cell { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -4558,7 +4520,7 @@
 .team-roster-row--group .team-roster-name { font-weight: 600; }
 .team-roster-row--muted .team-roster-name { color: var(--muted); }
 .team-roster-row--muted .team-roster-open { cursor: default; }
-.team-roster-muted-badge { flex: none; color: var(--amber); font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; }
+.team-roster-muted-badge { flex: none; color: var(--amber); font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
 /* Stop on a group row shows on hover (or keyboard focus); disabled when nothing in it runs. */
 .team-roster-icon--stop { visibility: hidden; color: var(--red); }
 .team-roster-row:hover .team-roster-icon--stop,
@@ -4601,7 +4563,7 @@
   font: inherit;
   cursor: pointer;
 }
-.team-roster-status { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.team-roster-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .team-roster-status::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .team-roster-status--idle::before { opacity: 0.5; }
 .team-roster-status--running { color: var(--blue); }
@@ -4636,7 +4598,7 @@
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
 .team-roster-plan-meter > span { display: block; width: var(--pct, 0%); height: 100%; background: var(--green); }
-.team-roster-plan-count { flex: none; color: var(--fg-dim, var(--fg)); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.team-roster-plan-count { flex: none; color: var(--fg-dim, var(--fg)); font-size: 12px; font-variant-numeric: tabular-nums; }
 .team-roster-plan-step { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .team-roster-plan-step--waiting { color: var(--amber); }
 .team-bar-stat--progress { color: var(--green); }
@@ -4687,7 +4649,7 @@
 .team-roster-editor-label { margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .team-roster-details { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
 .team-roster-details-blurb { color: var(--fg-dim, var(--fg)); font-size: 12px; }
-.team-roster-details-ai { color: var(--muted); font-size: 11.5px; }
+.team-roster-details-ai { color: var(--muted); font-size: 12px; }
 .team-roster-details-lines {
   display: flex;
   flex-direction: column;
@@ -4695,7 +4657,7 @@
   margin: 0;
   padding: 0;
   color: var(--fg-dim, var(--fg));
-  font-size: 11.5px;
+  font-size: 12px;
   list-style: none;
   overflow-wrap: anywhere;
 }
@@ -4925,7 +4887,7 @@
 
 .agent-activity-group-body .tool-execution-card-shell--embedded .tool-execution-card-toggle-name {
   color: var(--fg-dim);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 400;
 }
 
@@ -5071,8 +5033,6 @@
   font-size: 10px;
   color: var(--muted);
   margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .tool-execution-card-args-pre {
@@ -5377,7 +5337,7 @@
 .tool-execution-card-body--web .tool-card-web {
   gap: 6px;
   font-family: var(--font-ui);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 .tool-execution-card-body--web .tool-card-web-images {
@@ -5766,8 +5726,6 @@
   color: var(--red);
   font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .tool-card-screenshot-badge--ok {
@@ -6289,8 +6247,6 @@
 .context-usage-panel-agent-badge {
   font-size: 10px;
   font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--muted);
   padding: 2px 6px;
   border: 1px solid var(--border);
@@ -6761,7 +6717,6 @@
   font-size: 10px;
   line-height: 1.5;
   font-weight: 400;
-  text-transform: uppercase;
   letter-spacing: 0.02em;
   vertical-align: middle;
   white-space: nowrap;
@@ -6798,7 +6753,7 @@
   grid-template-columns: 1fr auto;
   align-items: baseline;
   gap: 8px;
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 .context-usage-panel-breakdown-sublabel {
@@ -7118,7 +7073,7 @@
   z-index: 50;
   pointer-events: none;
   opacity: 0.8;
-  transition: all 0.15s ease;
+  transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
 .chat-view-drag-overlay--left {
@@ -7286,7 +7241,7 @@
   width: 100%;
   box-sizing: border-box;
   color: var(--text-secondary, #aaa);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.35;
   text-align: left;
   appearance: none;
@@ -7338,7 +7293,7 @@
 .plan-todo-outline-n {
   flex: 0 0 auto;
   min-width: 1.75rem;
-  font-weight: 700;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
@@ -7512,8 +7467,6 @@
 
 .plan-pane-kicker {
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--amber, #d4a017);
   margin-bottom: 4px;
 }
@@ -7542,8 +7495,6 @@
 
 .plan-pane-nest-crumb-label {
   margin-right: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   font-size: 10px;
 }
 
@@ -7587,8 +7538,6 @@
 .plan-lead-link-kicker {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--muted);
 }
 
@@ -7614,8 +7563,6 @@
 
 .plan-pane-nest-children-label {
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--muted);
 }
 
@@ -7864,15 +7811,13 @@
 .chat-plan-popup-bar-kicker {
   font-size: 10px;
   font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--amber, #d4a017);
 }
 
 .chat-plan-popup-bar-title {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8071,10 +8016,8 @@
   white-space: nowrap;
 }
 .changeset-status {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   padding: 1px 6px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--fg) 10%, transparent);
@@ -8149,8 +8092,6 @@
 .changeset-file-op {
   font-size: 10px;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 .changeset-file-stats {
   font-size: 11px;
@@ -8163,7 +8104,7 @@
   color: var(--red, #e0575b);
 }
 .changeset-badge {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 4px;
@@ -8297,8 +8238,8 @@
   border-radius: 3px;
   background: var(--amber, #e0a43a);
   color: var(--bg, #111);
-  font-size: 8px;
-  font-weight: 800;
+  font-size: 10px;
+  font-weight: 600;
   letter-spacing: 0.03em;
   line-height: 12px;
   vertical-align: middle;
