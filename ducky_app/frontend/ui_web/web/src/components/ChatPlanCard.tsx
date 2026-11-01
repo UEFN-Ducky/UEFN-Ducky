@@ -6,6 +6,7 @@ import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { ChatPlanPopup } from "./ChatPlanPopup";
 import { PlanLeadLinks } from "./PlanOwnerChips";
 import { countProgress } from "./PlanTodoCard";
+import { REMOTE_RESYNC } from "../remote/protocol";
 
 /** Live plan state shared by the chat dock and its finished-plan card. */
 export function useChatPlan(chatId: string) {
@@ -34,6 +35,11 @@ export function useChatPlan(chatId: string) {
   }, [reloadPlan]);
 
   useAgentEventSubscription(chatId, (event) => {
+    // Phone link back after a drop: steps ticked meanwhile never arrived (a stale "6/12").
+    if (event.type === REMOTE_RESYNC) {
+      void reloadPlan();
+      return;
+    }
     if (event.conv_id !== chatId) return;
     if (event.type === "plan_assignment_changed") void reloadPlan();
     if (event.type === "plan_updated") {
