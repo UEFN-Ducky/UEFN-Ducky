@@ -306,6 +306,21 @@ def test_page_tabs_belong_to_their_browser_tab() -> None:
         bo._panes.update(saved)
 
 
+def test_a_hidden_pane_says_why(monkeypatch) -> None:
+    """Nov 1 2026: an agent-opened page stayed blank on screen and nothing said why."""
+    from frontend.ui_web import browser_overlay as bo
+
+    monkeypatch.setattr(bo, "_ui", lambda window, fn: None)
+    pane = bo._Pane(pane_id="why", window=None)
+    monkeypatch.setitem(bo._panes, "why", pane)
+    bo.set_bounds("why", 0, 0, 800, 600, 1000, 800, False, "covered_by div.modal-backdrop")
+    assert bo._state_dict(pane)["hidden_why"] == "covered_by div.modal-backdrop"
+    bo.set_bounds("why", 0, 0, 800, 600, 1000, 800, False)
+    assert bo._state_dict(pane)["hidden_why"] == "hidden"
+    bo.set_bounds("why", 0, 0, 800, 600, 1000, 800, True)
+    assert bo._state_dict(pane)["hidden_why"] == ""
+
+
 def test_devtools_refuses_sites_the_person_uses(monkeypatch) -> None:
     """No script or capture on a signed-in site (Gmail, X) until the person allows it."""
     from frontend.ui_web import browser_overlay as bo

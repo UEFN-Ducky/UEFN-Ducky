@@ -77,6 +77,8 @@ class _Pane:
     # it draws under Ducky's own page (render_behind), at its last on-screen pixel size.
     behind_until: float = 0.0
     last_size: tuple[int, int] = (0, 0)
+    # Why the app last asked to hide it (ui_cover, panel_hidden, covered_by <element>, ...).
+    hidden_why: str = ""
     # Keep delegate refs alive for the lifetime of the control (pythonnet GC).
     _handlers: list[Any] = field(default_factory=list)
 
@@ -329,6 +331,7 @@ def _hide_other_panes(keep_id: str) -> None:
         others = [p for p in _panes.values() if p.pane_id != keep_id and p.visible]
     for other in others:
         other.visible = False
+        other.hidden_why = f"another pane shown ({keep_id})"
         other.css_bounds = (0.0, 0.0, 0.0, 0.0)
         if other.window is not None:
             _ui(other.window, lambda p=other: _apply_bounds(p))
@@ -852,6 +855,7 @@ def _state_dict(pane: _Pane) -> dict[str, Any]:
         "connection": kind,
         "cert_error": pane.cert_error,
         "visible": bool(pane.visible and pane.css_bounds[2] > 0),
+        "hidden_why": "" if pane.visible else pane.hidden_why,
     }
 
 
@@ -1308,6 +1312,7 @@ def set_bounds(
     viewport_w: float = 0.0,
     viewport_h: float = 0.0,
     visible: bool = True,
+    why: str = "",
 ) -> dict[str, Any]:
     pid = (pane_id or "").strip()
     with _lock:
@@ -1316,6 +1321,7 @@ def set_bounds(
         return {"ok": False, "error": "pane not open"}
     show = bool(visible)
     was_visible = bool(pane.visible)
+    pane.hidden_why = "" if show else (why or "hidden")
     pane.css_bounds = (float(x), float(y), float(width), float(height))
     pane.css_viewport = (float(viewport_w or 0.0), float(viewport_h or 0.0))
     pane.visible = show

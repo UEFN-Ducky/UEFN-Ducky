@@ -3386,6 +3386,7 @@ export interface PanelApi {
     viewport_w?: number,
     viewport_h?: number,
     visible?: boolean,
+    why?: string,
   ): Promise<{ ok?: boolean; error?: string }>;
   browser_pane_navigate?(pane_id: string, url: string): Promise<{ ok?: boolean; error?: string }>;
   browser_pane_command?(pane_id: string, command: string): Promise<{ ok?: boolean; error?: string }>;

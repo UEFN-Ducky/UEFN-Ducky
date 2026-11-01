@@ -362,12 +362,13 @@ class PanelApiWindowMixin:
         viewport_w: float = 0.0,
         viewport_h: float = 0.0,
         visible: bool = True,
+        why: str = "",
     ) -> dict[str, Any]:
         from frontend.ui_web import browser_overlay
 
         return browser_overlay.set_bounds(
             str(pane_id or ""), float(x), float(y), float(width), float(height),
-            float(viewport_w or 0.0), float(viewport_h or 0.0), bool(visible),
+            float(viewport_w or 0.0), float(viewport_h or 0.0), bool(visible), str(why or ""),
         )
 
     def browser_pane_navigate(self, pane_id: str, url: str) -> dict[str, Any]:

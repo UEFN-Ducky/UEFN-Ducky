@@ -258,17 +258,31 @@ const COVER_CHECK_MS = 120;
 /** How long the live page may stay up while its snapshot is on the way. */
 const SNAPSHOT_WAIT_MS = 300;
 
-type CoverState = { covered: boolean; checkedAt: number; since: number; shot: "none" | "pending" | "shown" };
+type CoverState = { covered: boolean; checkedAt: number; since: number; shot: "none" | "pending" | "shown"; by: string };
 const coverStates = new Map<string, CoverState>();
 
 export function paneCoveredByHtml(
   iframe: HTMLIFrameElement, x: number, y: number, w: number, h: number,
 ): boolean {
-  if (w < 8 || h < 8) return false;
+  return paneCoverer(iframe, x, y, w, h) !== "";
+}
+
+/** `tag#id.class[role]` of an element, for browser_status's hidden_why. */
+function coverName(el: Element): string {
+  const cls = typeof el.className === "string" ? el.className.trim().split(/\s+/).filter(Boolean).slice(0, 3) : [];
+  const role = el.getAttribute("role");
+  return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${cls.map((c) => `.${c}`).join("")}${role ? `[role=${role}]` : ""}`;
+}
+
+/** The element of Ducky's own page over the pane's rect, named, or "" when nothing covers it. */
+export function paneCoverer(
+  iframe: HTMLIFrameElement, x: number, y: number, w: number, h: number,
+): string {
+  if (w < 8 || h < 8) return "";
   for (const px of [x + 3, x + w * 0.25, x + w / 2, x + w * 0.75, x + w - 3]) {
     for (const py of [y + 3, y + h / 2, y + h - 3]) {
       const hit = document.elementFromPoint(px, py);
-      if (hit && hit !== iframe && !hit.contains(iframe)) return true;
+      if (hit && hit !== iframe && !hit.contains(iframe)) return coverName(hit);
     }
   }
   for (const el of document.querySelectorAll<HTMLElement>(FLOATING_SELECTOR)) {
@@ -277,9 +291,9 @@ export function paneCoveredByHtml(
     if (r.width < 2 || r.height < 2 || r.right <= x || r.left >= x + w || r.bottom <= y || r.top >= y + h) continue;
     const st = getComputedStyle(el);
     if (st.visibility === "hidden" || st.display === "none" || Number(st.opacity) < 0.05) continue;
-    return true;
+    return coverName(el);
   }
-  return false;
+  return "";
 }
 
 /** A box in a panel's own coordinates moved onto the app page (the iframe's offset added). */
@@ -300,12 +314,13 @@ function showPaneUncovered(paneId: string, iframe: HTMLIFrameElement, x: number,
   const now = Date.now();
   let st = coverStates.get(paneId);
   if (!st) {
-    st = { covered: false, checkedAt: 0, since: 0, shot: "none" };
+    st = { covered: false, checkedAt: 0, since: 0, shot: "none", by: "" };
     coverStates.set(paneId, st);
   }
   if (now - st.checkedAt >= COVER_CHECK_MS) {
     st.checkedAt = now;
-    const covered = paneCoveredByHtml(iframe, x, y, w, h);
+    st.by = paneCoverer(iframe, x, y, w, h);
+    const covered = st.by !== "";
     if (covered && !st.covered) {
       st.since = now;
       st.shot = "pending";
@@ -370,17 +385,23 @@ export function pushBrowserPaneBounds(tabId: string, iframe?: HTMLIFrameElement 
   const w = Math.max(iw - left - right, 0);
   const h = Math.max(ih - top - bottom, 0);
   const visible = browserUiCoverDepth > 0 ? false : insetVisible && showPaneUncovered(tabId, el, x, y, w, h);
+  // Why a pane on screen stays hidden, for browser_status (Nov 1 2026: an agent-opened
+  // localhost page stayed blank on screen with nothing saying why).
+  const why = visible ? ""
+    : browserUiCoverDepth > 0 ? `ui_cover ${browserUiCoverDepth}`
+    : !insetVisible ? "panel_hidden"
+    : `covered_by ${coverStates.get(tabId)?.by || "?"}`;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const key = [x, y, w, h, vw, vh, visible ? 1 : 0]
     .map((n) => Math.round(Number(n)))
-    .join(",");
+    .join(",") + why;
   const last = lastSentBounds.get(tabId);
   const now = Date.now();
   if (last && last.key === key && now - last.at < BOUNDS_HEARTBEAT_MS) return;
   lastSentBounds.set(tabId, { key, at: now });
   void api
-    .browser_pane_set_bounds(tabId, x, y, w, h, vw, vh, visible)
+    .browser_pane_set_bounds(tabId, x, y, w, h, vw, vh, visible, why)
     .then((res) => {
       // Remote deny / missing method → undefined. Do not retry every frame.
       if (res === undefined) return;
@@ -439,7 +460,7 @@ export function hideBrowserPaneOnUnmount(tabId: string): void {
   if (isRemote()) return;
   for (const id of [tabId, ...subs]) {
     void getApi()
-      ?.browser_pane_set_bounds?.(id, 0, 0, 0, 0, 0, 0, false)
+      ?.browser_pane_set_bounds?.(id, 0, 0, 0, 0, 0, 0, false, "tab_off_screen")
       ?.finally(() => {
         // Late hide after remount would leave a blank/brown pane — re-pin.
         if ((paneMountGen.get(tabId) ?? 0) !== hideGen) {
