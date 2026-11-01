@@ -40,14 +40,15 @@ _POOL_RUN_TIMEOUT_SEC = 180.0
 _TOGGLE_HINT = (
     "toggle this MCP (Settings → MCPs, or ducky_mcp_set_plugin) when the task is done."
 )
-# Epic answers an unknown toolset/tool name with plain text, not an error
-# ("Toolset 'ValkyrieToolset.SessionToolset' not found" after the 43.00 renames).
-_EPIC_NOT_FOUND = re.compile(r"\b(?:Toolset|Tool) '[^']+' not found")
+# Epic answers an unknown toolset/tool name with plain text, not an error: "Toolset
+# 'ValkyrieToolset.SessionToolset' not found" / "Unknown tool X" (both live, 43.00).
+# Anchored: a log line or file that merely mentions it is a normal reply.
+_EPIC_NOT_FOUND = re.compile(r"\s*(?:Error:\s*)?(?:(?:Toolset|Tool) '[^']+' not found|Unknown tool \S+)")
 
 
 def epic_not_found(text: str) -> bool:
     """True when Epic's reply says the toolset or tool name does not exist."""
-    return bool(_EPIC_NOT_FOUND.search(str(text or "")[:500]))
+    return bool(_EPIC_NOT_FOUND.match(str(text or "")))
 
 
 def _http_transport_kwargs(block: dict[str, Any]) -> dict[str, Any]:
@@ -640,7 +641,8 @@ class PluginClientPool:
         text = _content_to_text(raw.content if hasattr(raw, "content") else raw)
         if epic_call and epic_not_found(text):
             # Fail loudly so callers fall back instead of treating "not found" as success.
-            raise RuntimeError(f"Epic MCP: {text.strip()[:500]}")
+            # Keep the "Available toolsets: ..." list: it is how the agent finds the right name.
+            raise RuntimeError(f"Epic MCP: {text.strip()[:4000]}")
         note = _pressed_note(pressed)
         return f"{text}\n\n[Ducky:{note}]" if note else text
 

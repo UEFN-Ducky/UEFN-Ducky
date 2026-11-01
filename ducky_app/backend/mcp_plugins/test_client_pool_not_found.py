@@ -10,12 +10,16 @@ from backend.tools.tester import session_play
 def test_not_found_replies_are_failures() -> None:
     assert epic_not_found("Toolset 'ValkyrieToolset.SessionToolset' not found")
     assert epic_not_found("Error: Tool 'StartGame' not found in toolset X")
+    assert epic_not_found("Unknown tool NoSuchTool")  # live reply for a bad tool name
 
 
 def test_normal_replies_pass() -> None:
     assert not epic_not_found('{"returnValue": []}')
     assert not epic_not_found("Session started")
     assert not epic_not_found("")
+    # A log or file that mentions the phrase is data, not a failed call.
+    assert not epic_not_found('{"returnValue": ["LogMCP: Toolset \'X\' not found"]}')
+    assert not epic_not_found("line 1\nUnknown tool Foo was logged")
 
 
 def test_callers_use_43_00_toolset_names() -> None:

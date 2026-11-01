@@ -162,6 +162,7 @@ def content_root_rel() -> str:
 
 def _is_content_root_rel(rel: str) -> bool:
     norm = (rel or "").strip().replace("\\", "/").strip("/")
+    norm = _abs_to_content_rel(norm) or norm  # a full path to Content is the root too
     if _active_is_folder():
         return norm in {"", "."}
     return norm.lower() == CONTENT_DIR.lower()
@@ -542,7 +543,9 @@ def _join_content_path(parent_relative: str, name: str) -> str:
 
 
 def _norm_relative_path(relative_path: str) -> str:
-    return (relative_path or "").strip().replace("\\", "/").strip("/").lower()
+    rel = (relative_path or "").strip().replace("\\", "/").strip("/")
+    # A full path inside Content names the same file as its Content/ form (locked files too).
+    return (_abs_to_content_rel(rel) or rel).lower()
 
 
 def _show_hidden_project_files() -> bool:
