@@ -328,6 +328,10 @@ export function activityPanelTitle(
   }
   const pending = lines.find((line) => line.status === "pending");
   if (pending) return pending.text;
+  // statusText is cleared by every content/tool event, so when set it is the newest thing
+  // (e.g. "Writing workspace_write_file · 12.4 KB" while a big tool input streams).
+  const status = (statusText || "").trim();
+  if (status) return status;
   if (lines.some((line) => line.status === "thinking")) return "Thinking";
   if (lines.some((line) => line.status === "streaming")) return "Writing…";
   const last = lines[lines.length - 1];
