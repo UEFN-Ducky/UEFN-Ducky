@@ -97,6 +97,20 @@ describe("which window answers", () => {
     expect(countAskUserSessionsForConv("race")).toBe(0);
   });
 
+  it("phone back after a drop: closes questions answered meanwhile and shows ones asked meanwhile", async () => {
+    // Nov 1 2026: the phone's Waiting for you kept a question answered on the PC while it slept.
+    const { countAskUserSessionsForConv } = await import("../ask-user");
+    request("old", "ask_user", { conv_id: "slept", questions: [{ id: "q", prompt: "Answered on the PC?" }] });
+    await waitFor(() => expect(countAskUserSessionsForConv("slept")).toBe(1));
+    api.ui_rpc_pending_questions.mockResolvedValueOnce([{
+      type: "ui_rpc_request", request_id: "new", method: "ask_user",
+      params: { conv_id: "asked-meanwhile", questions: [{ id: "q", prompt: "New?" }] },
+    } as unknown as AgentEvent]);
+    handler?.({ type: "remote_resync" } as unknown as AgentEvent);
+    await waitFor(() => expect(countAskUserSessionsForConv("slept")).toBe(0));
+    await waitFor(() => expect(countAskUserSessionsForConv("asked-meanwhile")).toBe(1));
+  });
+
   it("claims active when the user clicks or types here", () => {
     api.ui_rpc_active.mockClear();
     fireEvent.pointerDown(document.body);

@@ -24,7 +24,8 @@ import { listUiActions, runUiAction, searchTargets, waitForUiAction } from "./re
 import { installEditorLineTargets } from "./editorLineTarget";
 import { asGuidedUi } from "./guidedBusy";
 import { getCurrentWorkflow, aiTourSteps, buildWorkflowTour, withOpenStep } from "../automations/workflowTour";
-import { dropAnsweredAskUser, markAskUserLate, runAskUser } from "../ask-user";
+import { askUserRequestIds, dropAnsweredAskUser, markAskUserLate, runAskUser } from "../ask-user";
+import { REMOTE_RESYNC } from "../remote/protocol";
 import { runAgentWalkthrough } from "../walkthrough/agentWalkthrough";
 
 type RpcResult = Record<string, unknown>;
@@ -128,7 +129,22 @@ export function UiRpcBridge() {
   useEffect(() => {
     installAgentEventBus();
     const seen = new Set<string>();
+    // The questions still open on the PC: add the ones missed, close the ones answered meanwhile.
+    const syncPending = async (api: { ui_rpc_pending_questions?: () => Promise<AgentEvent[]> } | null | undefined, dropMissing: boolean) => {
+      const events = await api?.ui_rpc_pending_questions?.().catch(() => null);
+      if (!events) return;
+      if (dropMissing) {
+        const open = new Set(events.map((e) => String(e.request_id ?? "")));
+        for (const id of askUserRequestIds()) if (!open.has(id)) dropAnsweredAskUser(id);
+      }
+      for (const event of events) void handler(event);
+    };
     const handler = async (event: AgentEvent) => {
+      // Phone link back after a drop: settles and new questions sent meanwhile never arrived.
+      if (event.type === REMOTE_RESYNC) {
+        void syncPending(getApi(), true);
+        return;
+      }
       // Answered in another window or on the phone: close it here too.
       if (event.type === "agent_stopped" && event.conv_id) {
         markAskUserLate(String(event.conv_id));
@@ -166,11 +182,7 @@ export function UiRpcBridge() {
       });
     };
     const unsubscribe = subscribeAgentEvents((event) => void handler(event));
-    const stopReady = onApiReady((api) => {
-      void api.ui_rpc_pending_questions?.().then((events) => {
-        for (const event of events) void handler(event);
-      }).catch(() => {});
-    });
+    const stopReady = onApiReady((api) => void syncPending(api, false));
     return () => { unsubscribe(); stopReady(); };
   }, []);
 

@@ -210,6 +210,12 @@ function deliverLateAnswer(p: Pending, result: AskUserResult): void {
   void Promise.resolve(getApi()?.answer_late_question?.(p.convId, lateAnswerText(p.title, p.questions, result))).catch(() => {});
 }
 
+/** The PC's request ids of every question open here (to drop the ones answered while away). */
+export function askUserRequestIds(): string[] {
+  const ids = [...sessions.values(), ...orphanQueue].map((p) => p.requestId || "").filter(Boolean);
+  return [...new Set(ids)];
+}
+
 /** Another window (or the phone) answered this request: close it here. */
 export function dropAnsweredAskUser(requestId: string): void {
   if (!requestId) return;

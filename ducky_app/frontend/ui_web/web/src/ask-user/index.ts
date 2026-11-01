@@ -3,6 +3,7 @@ export { getFocusedChatForAsk, setFocusedChatForAsk } from "./focusedChatForAsk"
 export {
   runAskUser,
   dropAnsweredAskUser,
+  askUserRequestIds,
   settleAskUser,
   answerAskUserWithMessage,
   getAskUserSession,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { ChatTab, EditorTab, EditorLayoutState, EditorWorkspaceSnapshot, FocusWindowSnapshot } from "../types/panel";
 import { changesTabId, isLegacyWorkflowsTabId, workflowsTabId } from "../types/panel";
 import { getApi } from "./usePanelApi";
+import { subscribeAgentEvents } from "./useAgentEventBus";
 import { collectTabIds, createDefaultLayout, repairLayout } from "../utils/editorLayoutOps";
 
 const DEBOUNCE_MS = 300;
@@ -9,6 +10,54 @@ const DEBOUNCE_MS = 300;
 /** Survives ChatView remounts — a per-hook ref was resetting and re-running restore
  * (close_all_focus_windows) every time the tree remounted. */
 let _restoredWorkspaceSlug: string | null = null;
+
+/**
+ * This page, in the workspace saves it makes: the PC's window and a phone each save the
+ * same tabs, and Ducky tells every page (`editor_workspace_changed`) so the others reload
+ * them. Before Nov 1 2026 each kept its own tabs until restart: a tab closed on the phone
+ * stayed open on the PC.
+ */
+export const WORKSPACE_ORIGIN = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+/** The tabs this page last saved or took from another page: the same again is no save (no echo). */
+let _lastSyncedJson = "";
+
+/**
+ * What syncs between pages: the open tabs and which group holds each. Terminal tabs (never
+ * shared) and split sizes / the active tab are left out, or two pages with their own
+ * terminals would bounce saves back and forth forever.
+ */
+export function workspaceSyncKey(tabs: EditorTab[], layout: EditorLayoutState): string {
+  const shared = tabs.filter((t) => t.kind !== "terminal");
+  const ids = new Set(shared.map((t) => t.id));
+  const groups = Object.values(layout.groups)
+    .map((g) => g.tabIds.filter((id) => ids.has(id)))
+    .filter((g) => g.length);
+  return JSON.stringify({ tabs: shared.map((t) => [t.id, t.kind, t.path ?? ""]), groups });
+}
+
+export function _resetWorkspaceSyncForTests() {
+  _lastSyncedJson = "";
+}
+
+/** Another page's tabs, keeping this page's own terminals (a terminal tab is never shared). */
+export function withLocalTerminals(
+  synced: { openTabs: EditorTab[]; layout: EditorLayoutState },
+  local: EditorTab[],
+): { openTabs: EditorTab[]; layout: EditorLayoutState } {
+  const terminals = local.filter((t) => t.kind === "terminal");
+  if (!terminals.length) return synced;
+  const { layout } = synced;
+  const gid = layout.groups[layout.focusedGroupId] ? layout.focusedGroupId : Object.keys(layout.groups)[0];
+  if (!gid) {
+    const tabs = [...synced.openTabs, ...terminals];
+    return { openTabs: tabs, layout: createDefaultLayout(tabs.map((t) => t.id)) };
+  }
+  const group = layout.groups[gid]!;
+  return {
+    openTabs: [...synced.openTabs, ...terminals],
+    layout: { ...layout, groups: { ...layout.groups, [gid]: { ...group, tabIds: [...group.tabIds, ...terminals.map((t) => t.id)] } } },
+  };
+}
 
 function buildSnapshot(openTabs: EditorTab[], layout: EditorLayoutState): EditorWorkspaceSnapshot {
   return {
@@ -184,8 +233,12 @@ export function useEditorWorkspace({
     // after a switch — would overwrite the saved workspace.
     if (!api || isRestoringRef.current || _restoredWorkspaceSlug !== projectSlugRef.current) return;
     const { openTabs: tabs, layout: lay } = stateRef.current;
+    const snapshot = buildSnapshot(tabs, lay);
+    const json = workspaceSyncKey(tabs, lay);
+    if (json === _lastSyncedJson) return;
+    _lastSyncedJson = json;
     try {
-      await api.save_editor_workspace(buildSnapshot(tabs, lay));
+      await api.save_editor_workspace({ ...snapshot, origin: WORKSPACE_ORIGIN });
     } catch {
       // Ignore transient AppData write races on Windows.
     }
@@ -206,6 +259,34 @@ export function useEditorWorkspace({
       void saveNow();
     };
   }, [saveNow]);
+
+  // Tabs opened or closed on another page (the phone, or the PC while the phone watches).
+  useEffect(() => {
+    let gen = 0;
+    return subscribeAgentEvents((event) => {
+      const origin = (event as { origin?: string }).origin;
+      if (event.type !== "editor_workspace_changed" || !origin || origin === WORKSPACE_ORIGIN) return;
+      if (isRestoringRef.current || _restoredWorkspaceSlug !== projectSlugRef.current) return;
+      const mine = ++gen;
+      void (async () => {
+        const api = getApi();
+        if (!api) return;
+        try {
+          const raw = (await api.get_editor_workspace(projectSlugRef.current)) as EditorWorkspaceSnapshot;
+          const files = await existingSnapshotFiles({ ...raw, focusWindows: [] }, () => mine !== gen);
+          if (mine !== gen) return;
+          const synced = validateSnapshot(raw, allChatsRef.current, files);
+          const json = workspaceSyncKey(synced.openTabs, synced.layout);
+          _lastSyncedJson = json;
+          if (json === workspaceSyncKey(stateRef.current.openTabs, stateRef.current.layout)) return;
+          const next = withLocalTerminals(synced, stateRef.current.openTabs);
+          initLayoutState(next.openTabs, next.layout);
+        } catch {
+          /* the next change syncs again */
+        }
+      })();
+    });
+  }, [initLayoutState]);
 
   useEffect(() => {
     if (!foldersLoaded) return;

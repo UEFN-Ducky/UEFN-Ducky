@@ -142,3 +142,40 @@ it("restores the old separate graph tabs as one Workflows tab", async () => {
   const layout = initLayoutState.mock.calls[0][1];
   expect(Object.values(layout.groups).flatMap((group: any) => group.tabIds)).toEqual(["workflows:main"]);
 });
+
+it("a tab closed on the phone closes here too, keeps this page's terminals, and saves no echo", async () => {
+  // Nov 1 2026: phone and PC each kept their own tabs; closing one on the phone left it on the PC.
+  const { pushLocalAgentEvent } = await import("./useAgentEventBus");
+  const { WORKSPACE_ORIGIN, _resetWorkspaceSyncForTests } = await import("./useEditorWorkspace");
+  _resetWorkspaceSyncForTests();
+  const slug = `sync-${Math.random()}`;
+  const { rerender, initLayoutState } = render(slug, true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+  const term = { id: "terminal:t1", kind: "terminal", name: "bash" } as EditorTab;
+  rerender({ foldersLoaded: true, openTabs: [...savedTabs, term] });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(api.save_editor_workspace.mock.calls.at(-1)![0]).toMatchObject({ origin: WORKSPACE_ORIGIN });
+  const saves = api.save_editor_workspace.mock.calls.length;
+  initLayoutState.mockClear();
+  api.get_editor_workspace.mockClear();
+
+  // This page's own save comes back: nothing to do.
+  act(() => pushLocalAgentEvent({ type: "editor_workspace_changed", origin: WORKSPACE_ORIGIN } as never));
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(api.get_editor_workspace).not.toHaveBeenCalled();
+
+  // The phone closed a.verse.
+  const phoneTabs = [savedTabs[0]!];
+  api.get_editor_workspace.mockResolvedValue({ version: 1, openTabs: phoneTabs, layout: createDefaultLayout(["chat:c1"]) });
+  act(() => pushLocalAgentEvent({ type: "editor_workspace_changed", origin: "phone" } as never));
+  await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+  expect(initLayoutState).toHaveBeenCalledTimes(1);
+  const [tabs, layout] = initLayoutState.mock.calls[0]!;
+  expect(tabs.map((t: EditorTab) => t.id)).toEqual(["chat:c1", "terminal:t1"]);
+  expect(Object.values(layout.groups).flatMap((g: any) => g.tabIds)).toEqual(["chat:c1", "terminal:t1"]);
+
+  // Taking the phone's tabs is not a change of this page's own: no save bounces back.
+  rerender({ foldersLoaded: true, openTabs: [savedTabs[0]!, term] });
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(api.save_editor_workspace.mock.calls.length).toBe(saves);
+});

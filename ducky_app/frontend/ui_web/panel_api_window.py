@@ -521,9 +521,15 @@ class PanelApiWindowMixin:
         return load_editor_workspace(slug.strip() or None)
 
     def save_editor_workspace(self, payload: dict[str, Any]) -> None:
+        """Save the tabs, then tell every other page (the PC window, a phone) to reload them."""
+        from frontend.ui_web.agent_modes import push_ui_event
         from frontend.ui_web.editor_workspace import save_editor_workspace
 
-        save_editor_workspace(payload)
+        data = dict(payload or {})
+        origin = str(data.pop("origin", "") or "")
+        save_editor_workspace(data)
+        if origin:
+            push_ui_event({"type": "editor_workspace_changed", "origin": origin})
 
     def get_workspace_dock(self, window_id: str = "main") -> dict[str, Any]:
         """Left/right rail layout (sides, widths, splits) — AppData durable store."""

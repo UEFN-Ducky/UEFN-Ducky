@@ -942,6 +942,8 @@ export interface EditorWorkspaceSnapshot {
   openTabs: EditorTab[];
   layout: EditorLayoutState;
   focusWindows?: FocusWindowSnapshot[];
+  /** The page that saved it (never stored): Ducky tells the other pages to reload the tabs. */
+  origin?: string;
 }
 
 export interface FolderItem {
@@ -2138,7 +2140,9 @@ export interface AgentEvent {
     | "user_steered"
     | "run_expect"
     /** Phone panel only (local): the link to the PC is back after a drop; reload what was missed. */
-    | "remote_resync";
+    | "remote_resync"
+    /** A page saved its open tabs (`origin`: that page): every other page reloads them. */
+    | "editor_workspace_changed";
   text?: string;
   /** run_expect: how long the chat's running sandbox/terminal command should take (ms, 0 = ended). */
   expected_ms?: number;

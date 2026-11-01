@@ -5,6 +5,7 @@ import { getApi } from "./usePanelApi";
 import { requestOpenChatTab } from "../navigation/openChatReference";
 import { requestLatestChatActivity } from "../navigation/latestChatActivity";
 import { agentStepText } from "../utils/agentActivity";
+import { REMOTE_RESYNC } from "../remote/protocol";
 import { isArchiveFolderId } from "../utils/archiveFolder";
 
 const TURN_EVENTS = new Set(["agent_started", "text_delta", "thinking", "tool", "tool_done", "status"]);
@@ -71,6 +72,15 @@ export function reconcileAgentJobs(running: string[] | null, existing: Set<strin
       continue;
     }
     if (running && job.phase === "working" && !running.includes(job.convId) && now - job.ts > SETTLE_MS) {
+      endAgentJobs(job.convId, "Finished", now);
+    }
+  }
+}
+
+/** Every working row whose chat the PC no longer runs, closed now (a resync: no settle wait). */
+export function closeNotRunning(running: string[], now = Date.now()): void {
+  for (const job of getBackgroundJobs()) {
+    if (job.source === "agent" && job.phase === "working" && job.convId && !running.includes(job.convId)) {
       endAgentJobs(job.convId, "Finished", now);
     }
   }
@@ -154,6 +164,14 @@ export function subscribeAgentBackgroundActivity(): () => void {
     }
   };
   const stop = subscribeAgentEvents((event) => {
+    // Phone link back after a drop: the stops sent meanwhile never arrived. Close every row
+    // the PC no longer runs now, not after the 10 s settle a live link waits for.
+    if (event.type === REMOTE_RESYNC) {
+      void Promise.resolve(api?.list_running_agents?.())
+        .then((ids) => { if (active && Array.isArray(ids)) closeNotRunning(ids); })
+        .catch(() => {});
+      return;
+    }
     if (event.type === "chats_changed") {
       void refreshTitles().then(() => { if (active && existing) reconcileAgentJobs(null, existing); });
     } else if (event.conv_id && !titles.has(event.conv_id) && !touched.has(event.conv_id)) void refreshTitles();

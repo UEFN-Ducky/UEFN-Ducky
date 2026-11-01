@@ -200,3 +200,19 @@ it("offers Hide only for a row that cannot be stopped", async () => {
   fireEvent.click(screen.getByLabelText("Hide"));
   expect(getBackgroundJobs()).toHaveLength(0);
 });
+
+it("phone back after a drop: a run that finished meanwhile stops saying 'is working' at once", async () => {
+  // Nov 1 2026: the phone's Now row kept "Hide streaming popup is working · Running tests 33s".
+  const stop = subscribeAgentBackgroundActivity();
+  await act(async () => {});
+  act(() => mocks.listener!(start()));
+  expect(countWorkingBackgroundJobs(getBackgroundJobs())).toBe(1);
+  mocks.api.list_running_agents.mockResolvedValue([]);
+  await act(async () => {
+    mocks.listener!({ type: "remote_resync" } as unknown as AgentEvent);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(countWorkingBackgroundJobs(getBackgroundJobs())).toBe(0);
+  expect(getBackgroundJobs().find((j) => j.id === "agent:other")?.detail).toBe("Finished");
+  stop();
+});
