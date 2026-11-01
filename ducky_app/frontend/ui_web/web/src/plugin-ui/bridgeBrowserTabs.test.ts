@@ -57,3 +57,23 @@ it("Ducky's own dialogs, dim layers and tooltips over the page count as covering
   tip.getBoundingClientRect = () => ({ left: 10, top: -60, right: 200, bottom: -5, width: 190, height: 55 }) as DOMRect;
   expect(paneCoveredByHtml(iframe, 0, 0, 400, 300)).toBe(false);
 });
+
+it("a popup faded out through its parent never counts as covering the page", () => {
+  // Nov 1 2026: an agent's localhost page stayed blank in the Browser column beside the chat.
+  const iframe = document.createElement("iframe");
+  document.body.appendChild(iframe);
+  (document as { elementFromPoint?: unknown }).elementFromPoint = () => iframe;
+  const tip = document.createElement("div");
+  tip.setAttribute("role", "tooltip");
+  tip.getBoundingClientRect = () => ({ left: 10, top: 10, right: 200, bottom: 60, width: 190, height: 50 }) as DOMRect;
+  document.body.appendChild(tip);
+  (tip as unknown as { checkVisibility: () => boolean }).checkVisibility = () => false;
+  expect(paneCoveredByHtml(iframe, 0, 0, 400, 300)).toBe(false);
+
+  const dim = document.createElement("div");
+  (dim as unknown as { checkVisibility: () => boolean }).checkVisibility = () => false;
+  (document as { elementFromPoint?: unknown }).elementFromPoint = () => dim;
+  expect(paneCoveredByHtml(iframe, 0, 0, 400, 300)).toBe(false);
+  (dim as unknown as { checkVisibility: () => boolean }).checkVisibility = () => true;
+  expect(paneCoveredByHtml(iframe, 0, 0, 400, 300)).toBe(true);
+});

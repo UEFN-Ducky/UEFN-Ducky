@@ -258,7 +258,7 @@ const COVER_CHECK_MS = 120;
 /** How long the live page may stay up while its snapshot is on the way. */
 const SNAPSHOT_WAIT_MS = 300;
 
-type CoverState = { covered: boolean; checkedAt: number; since: number; shot: "none" | "pending" | "shown"; by: string };
+type CoverState = { covered: boolean; checkedAt: number; since: number; shot: "none" | "pending" | "shown" | "failed"; by: string };
 const coverStates = new Map<string, CoverState>();
 
 export function paneCoveredByHtml(
@@ -274,6 +274,14 @@ function coverName(el: Element): string {
   return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ""}${cls.map((c) => `.${c}`).join("")}${role ? `[role=${role}]` : ""}`;
 }
 
+/** Painted on screen: not faded out or hidden through an ancestor either. A popup kept in the
+ * page at opacity 0 by its parent (a chat hover card beside an agent's Browser column) counted
+ * as covering the pane, which then hid for good (Nov 1 2026). */
+function painted(el: Element): boolean {
+  const check = (el as Element & { checkVisibility?: (o: object) => boolean }).checkVisibility;
+  return typeof check !== "function" || check.call(el, { opacityProperty: true, visibilityProperty: true });
+}
+
 /** The element of Ducky's own page over the pane's rect, named, or "" when nothing covers it. */
 export function paneCoverer(
   iframe: HTMLIFrameElement, x: number, y: number, w: number, h: number,
@@ -282,7 +290,7 @@ export function paneCoverer(
   for (const px of [x + 3, x + w * 0.25, x + w / 2, x + w * 0.75, x + w - 3]) {
     for (const py of [y + 3, y + h / 2, y + h - 3]) {
       const hit = document.elementFromPoint(px, py);
-      if (hit && hit !== iframe && !hit.contains(iframe)) return coverName(hit);
+      if (hit && hit !== iframe && !hit.contains(iframe) && painted(hit)) return coverName(hit);
     }
   }
   for (const el of document.querySelectorAll<HTMLElement>(FLOATING_SELECTOR)) {
@@ -290,7 +298,7 @@ export function paneCoverer(
     const r = el.getBoundingClientRect();
     if (r.width < 2 || r.height < 2 || r.right <= x || r.left >= x + w || r.bottom <= y || r.top >= y + h) continue;
     const st = getComputedStyle(el);
-    if (st.visibility === "hidden" || st.display === "none" || Number(st.opacity) < 0.05) continue;
+    if (st.visibility === "hidden" || st.display === "none" || Number(st.opacity) < 0.05 || !painted(el)) continue;
     return coverName(el);
   }
   return "";
@@ -330,10 +338,15 @@ function showPaneUncovered(paneId: string, iframe: HTMLIFrameElement, x: number,
           if (state.covered && res?.ok && res.data) {
             postPaneSnapshot(iframe, paneId, res.data);
             state.shot = "shown";
-            lastSentBounds.delete(paneId);
+          } else if (state.covered) {
+            state.shot = "failed";
           }
+          lastSentBounds.delete(paneId);
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (state.covered) state.shot = "failed";
+          lastSentBounds.delete(paneId);
+        });
     } else if (!covered && st.covered) {
       if (st.shot === "shown") setTimeout(() => postPaneSnapshot(iframe, paneId, ""), 80);
       st.shot = "none";
@@ -341,6 +354,8 @@ function showPaneUncovered(paneId: string, iframe: HTMLIFrameElement, x: number,
     st.covered = covered;
   }
   if (!st.covered) return true;
+  // No picture to stand in: the live page stays up (over the HTML) rather than a blank pane.
+  if (st.shot === "failed") return true;
   return st.shot === "pending" && now - st.since < SNAPSHOT_WAIT_MS;
 }
 
