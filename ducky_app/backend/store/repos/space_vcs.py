@@ -653,7 +653,8 @@ def locks_replace(account: str, space: str, live: Iterable[dict[str, Any]], *, n
                      reason=str(lk.get("reason") or "") if mine else "", now=now, conn=conn)
             before = old.get(k)
             if before and before["mine"] and not mine:
-                lost.append({**before, "now_holder": str(lk.get("user_name") or lk.get("user") or "")})
+                lost.append({**before, "now_holder": str(lk.get("user_name") or lk.get("user") or ""),
+                             "now_user": str(lk.get("user") or ""), "now_device": str(lk.get("device") or "")})
             elif before and not before["mine"] and mine:
                 freed.append(before)
         for k, before in old.items():

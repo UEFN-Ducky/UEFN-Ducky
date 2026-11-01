@@ -671,6 +671,36 @@ def test_a_lock_that_just_ends_keeps_unsent_edits_pending_not_a_conflict(pc: PC,
     assert pc.run()["pushed"] == 1 and pc.row("card.pip")["dirty"] == 0
 
 
+def test_an_old_lock_conflict_nobody_else_holds_heals_into_a_pending_change(pc: PC) -> None:
+    # Made by an older build when its lease ran out: nobody holds the unit, so it goes out.
+    pc.data.put("card.pip", {"hp": 1})
+    pc.run()
+    pc.data.put("card.pip", {"hp": 9})
+    r = pc.row("card.pip")
+    from backend.store import db
+
+    conn = db.connect()
+    with db.write_txn(conn):
+        space_vcs.conflict_put(conn, pc.account, SPACE, PLUGIN, "doc", "card.pip", unit="doc:card.pip",
+                               reason="lock_broken", mine_value=r["value"], mine_sha=r["sha256"],
+                               mine_size=int(r["size"]), base_seq=int(r["rev"]), theirs_seq=int(r["rev"]),
+                               theirs_by="A teammate", theirs_at=0.0)
+        space_vcs.set_row_state(conn, pc.account, SPACE, PLUGIN, "doc", "card.pip", "conflict", "taken")
+    vcs_engine.refresh(pc.account, SPACE, [PLUGIN], pc.backend)
+    assert space_vcs.conflict_get(pc.account, SPACE, PLUGIN, "doc", "card.pip") is None
+    assert pc.row("card.pip")["sync_state"] != "conflict"
+    assert pc.run()["pushed"] == 1 and pc.data.get("card.pip") == {"hp": 9}
+
+
+def test_this_pc_is_the_signed_in_account_on_this_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(vcs_engine, "my_user_id", lambda: "u_me")
+    here = vcs_engine.device_id()
+    assert vcs_engine._this_pc("u_me", here)
+    assert not vcs_engine._this_pc("u_me", "d_other") and not vcs_engine._this_pc("u_ben", here)
+    monkeypatch.setattr(vcs_engine, "my_user_id", lambda: "")
+    assert not vcs_engine._this_pc("", here)
+
+
 # --------------------------------------------------------------------------- answers and modes
 
 

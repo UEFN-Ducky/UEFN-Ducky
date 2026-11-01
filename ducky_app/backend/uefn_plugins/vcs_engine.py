@@ -2975,6 +2975,10 @@ def _locks_from(account: str, space: str, live: Iterable[LockInfo], *, now: floa
         # break left the unit free. Nobody else is editing it, so the unsent edit stays an
         # ordinary pending change; its push still checks the base rev, so a real edit by
         # someone in between becomes a normal "changed" conflict that names them.
+        # The same account on this PC (another Ducky chat or AI, a restart) is not someone
+        # else either: the edit and the new lock are both this PC's.
+        if lk.get("now_holder") and _this_pc(lk.get("now_user"), lk.get("now_device")):
+            continue
         kept = bool(r and int(r["dirty"])) and bool(lk.get("now_holder"))
         _tell_lock_lost(lk, kept=kept)
         if not kept:
@@ -2988,7 +2992,33 @@ def _locks_from(account: str, space: str, live: Iterable[LockInfo], *, now: floa
                                    base_seq=int(r["rev"]), theirs_seq=int(r["rev"]), theirs_by=holder, theirs_at=now)
             space_vcs.set_row_state(conn, account, space, lk["plugin_id"], r["kind"], r["key"], "conflict",
                                     f"Your lock was taken by {holder}; your unsent change is kept.")
+    _heal_lock_conflicts(account, space, now=now)
     return change
+
+
+def _this_pc(user: Any, device: Any) -> bool:
+    """``user`` on ``device`` is this signed-in account on this PC."""
+    me = my_user_id()
+    return bool(me) and str(user or "") == me and str(device or "") == device_id()
+
+
+def _heal_lock_conflicts(account: str, space: str, *, now: float) -> None:
+    """A ``lock_broken`` conflict whose unit nobody else holds now was never a real one (a
+    lease that ran out, this PC's own AI taking the unit): it goes back to an ordinary
+    pending change. Its push still checks the base rev, so an edit someone really made in
+    between becomes a normal conflict that names them."""
+    held = {(lk["plugin_id"], lk["unit"]) for lk in space_vcs.locks(account, space, now=now)
+            if not lk["mine"] and not _this_pc(lk.get("holder_user"), lk.get("holder_device"))}
+    stale = [c for c in space_vcs.conflicts(account, space)
+             if c.get("reason") == "lock_broken" and (c["plugin_id"], c.get("unit") or "") not in held]
+    if not stale:
+        return
+    conn = db.connect()
+    with db.write_txn(conn):
+        for c in stale:
+            space_vcs.conflict_delete(conn, account, space, c["plugin_id"], c["kind"], c["key"])
+            space_vcs.set_row_state(conn, account, space, c["plugin_id"], c["kind"], c["key"], "", dirty=True)
+    _tell_bars({str(c["plugin_id"]) for c in stale})
 
 
 def _tell_lock_lost(lk: Mapping[str, Any], *, kept: bool) -> None:
