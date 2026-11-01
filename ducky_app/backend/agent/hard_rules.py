@@ -58,6 +58,12 @@ CORE_RULES = (
     "`ducky_terminal_read_output`.\n"
     "- **AI-made plugins (HARD):** `ducky_plugin_*` only; `ducky_plugin_list` is the "
     'census. Load `skill_read_subskill("ducky", "ai_plugins")` first.\n'
+    "- **Clean your own scratch (HARD):** probe `.verse` files, test assets and temp folders you "
+    "made, you delete before you finish (`workspace_delete_file`; `.verse` while UEFN is open: "
+    "Epic `VerseToolset.VerseToolset.Delete`). A refused delete is a Ducky bug to report, never "
+    "a chore for the person.\n"
+    "- **Commit as you go:** commit and push each repo as you finish its work; never leave "
+    "changes for the end.\n"
     "\n"
     "### Plans and evidence\n"
     "- **Check off the plan (HARD):** If this chat has a Plan, tick every step. Before "

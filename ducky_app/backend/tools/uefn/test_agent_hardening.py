@@ -111,6 +111,13 @@ def test_hard_rules_place_like_content_drawer():
     assert "EditorToolset.LevelToolset.AddToSceneFromClass" in AGENT_HARD_RULES
     assert "AddToSceneFromAsset" in AGENT_HARD_RULES
     assert "SceneTools" not in AGENT_HARD_RULES  # renamed in 43.00
+
+
+def test_agents_clean_their_own_scratch_and_commit_as_they_go() -> None:
+    assert "Clean your own scratch (HARD)" in AGENT_HARD_RULES
+    assert "VerseToolset.VerseToolset.Delete" in AGENT_HARD_RULES
+    assert "never a chore for the person" in AGENT_HARD_RULES
+    assert "commit and push each repo as you finish" in AGENT_HARD_RULES
     # Fortnite catalog is allowed; the cook bug is placement method, not the folder.
     assert "never spawn or scatter" not in AGENT_HARD_RULES
 
