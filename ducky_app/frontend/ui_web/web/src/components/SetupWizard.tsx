@@ -16,6 +16,7 @@ import type { CodingAgentDto, DuckyOSAccountStatus, DuckyOSStoreItemDto, Starter
 import { CodingAgentLoginModal } from "../views/settings/CodingAgentsSection";
 import { DuckyModelPicker } from "./ducky/DuckyModelPicker";
 import { MediaMakerPicker, type MediaKind } from "./MediaMakerPicker";
+import { SetupWelcomeScene } from "./SetupWelcomeScene";
 import { loadVoiceSettings, saveVoiceSettings } from "../voice/voiceSettings";
 
 export type SetupStep = "welcome" | "plugins" | "ai" | "defaults";
@@ -38,8 +39,6 @@ export interface SetupWizardProps {
   installError: string;
   onInstall: () => void;
   onFinish: () => void;
-  /** Only when opened again later (Settings, the corner card): the first run can't be closed. */
-  onClose?: () => void;
 }
 
 /** A "?" that shows the long version of a short label on hover, focus or press. */
@@ -172,9 +171,9 @@ function Feature({ icon, tone, title, body, tip }: { icon: ReactNode; tone: stri
 function WelcomeStep() {
   return (
     <div className="setup-wizard-hero">
-      <img className="setup-wizard-logo" src="./OnlineMCPIcon.png" alt="" draggable={false} />
       <h2 id="setup-wizard-title">Welcome to UEFN Ducky</h2>
       <p className="setup-wizard-lead">Your AI crew for Fortnite islands.</p>
+      <SetupWelcomeScene />
       <ul className="setup-wizard-features">
         <Feature
           icon={<Icons.Duck />}
@@ -206,6 +205,49 @@ function WelcomeStep() {
         />
       </p>
     </div>
+  );
+}
+
+/** "Where did you hear about us?": ids match usage_events.SETUP_SOURCES. */
+export const SOURCES: Array<{ id: string; label: string }> = [
+  { id: "youtube", label: "YouTube" },
+  { id: "tiktok", label: "TikTok" },
+  { id: "discord", label: "Discord" },
+  { id: "x", label: "X" },
+  { id: "reddit", label: "Reddit" },
+  { id: "google", label: "Google search" },
+  { id: "epic_forums", label: "Epic forums" },
+  { id: "friend", label: "A friend" },
+  { id: "other", label: "Somewhere else" },
+];
+
+function SourcePicker({ picked, onPick }: { picked: string[]; onPick: (next: string[]) => void }) {
+  return (
+    <section className="setup-wizard-card" aria-label="Where did you hear about us?">
+      <h3>Where did you hear about us?</h3>
+      <p className="setup-wizard-muted">Tick all that apply.</p>
+      <ul className="setup-source-grid">
+        {SOURCES.map((s) => {
+          const on = picked.includes(s.id);
+          return (
+            <li key={s.id}>
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={on}
+                className={`setup-source${on ? " is-on" : ""}`}
+                onClick={() => onPick(on ? picked.filter((p) => p !== s.id) : [...picked, s.id])}
+              >
+                <span className="setup-source-box" aria-hidden>
+                  {on ? <Icons.Check /> : null}
+                </span>
+                {s.label}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
@@ -997,7 +1039,13 @@ function DefaultsStep({
   onInstall,
   onStep,
   onAi,
-}: Pick<SetupWizardProps, "plugins" | "rows" | "installing" | "onInstall" | "onStep"> & { onAi: (results: AiResult[]) => void }) {
+  sources,
+  onSources,
+}: Pick<SetupWizardProps, "plugins" | "rows" | "installing" | "onInstall" | "onStep"> & {
+  onAi: (results: AiResult[]) => void;
+  sources: string[];
+  onSources: (next: string[]) => void;
+}) {
   const { providers, ideFor, ides, connectedNames, ai } = useConnections();
   // Kept current for Finish, which sends how each AI ended up.
   useEffect(() => {
@@ -1107,6 +1155,8 @@ function DefaultsStep({
         </ul>
       </section>
 
+      <SourcePicker picked={sources} onPick={onSources} />
+
       <section className="setup-wizard-card" aria-label="Overview">
         <h3>Overview</h3>
         <ul className="setup-wizard-overview">
@@ -1141,8 +1191,10 @@ function DefaultsStep({
 }
 
 export function SetupWizard(props: SetupWizardProps) {
-  const { step, onStep, plugins, rows, installing, onInstall, onFinish, onClose } = props;
+  // No close and no skip: setup is gone through to the end, first run or opened again later.
+  const { step, onStep, plugins, rows, installing, onInstall, onFinish } = props;
   const aiAtFinish = useRef<AiResult[]>([]);
+  const [sources, setSources] = useState<string[]>([]);
   // Loaded from Welcome on: a fresh catalog (with its icons) can take a while to arrive.
   const items = useStoreItems();
   const missing = plugins.filter((p) => rows[p.slug]?.phase !== "installed");
@@ -1165,15 +1217,6 @@ export function SetupWizard(props: SetupWizardProps) {
   const settled = (fn: () => void) => () => {
     if (Date.now() >= armedAt.current) fn();
   };
-
-  useEffect(() => {
-    if (!onClose) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !installing) onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [installing, onClose]);
 
   const back = (to: SetupStep, disabled = false) => (
     <button type="button" className="setup-wizard-btn is-ghost" disabled={disabled} onClick={() => onStep(to)}>
@@ -1246,8 +1289,11 @@ export function SetupWizard(props: SetupWizardProps) {
         <button
           type="button"
           className="setup-wizard-btn is-primary"
+          disabled={!sources.length}
+          title={sources.length ? undefined : "Tick where you heard about us first"}
           onClick={settled(() => {
             for (const r of aiAtFinish.current) usageTrack("setup.ai", r);
+            for (const source of sources) usageTrack("setup.source", { source });
             onFinish();
           })}
         >
@@ -1262,17 +1308,6 @@ export function SetupWizard(props: SetupWizardProps) {
       <section className="setup-wizard" role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title">
         <header className="setup-wizard-top">
           <StepDots step={step} />
-          {onClose ? (
-            <button
-              type="button"
-              className="setup-wizard-close"
-              aria-label="Close setup"
-              disabled={installing}
-              onClick={onClose}
-            >
-              <Icons.Close />
-            </button>
-          ) : null}
         </header>
         <div className={`setup-wizard-body is-${step}`}>
           {step === "welcome" ? <WelcomeStep /> : null}
@@ -1294,6 +1329,8 @@ export function SetupWizard(props: SetupWizardProps) {
               onInstall={onInstall}
               onStep={onStep}
               onAi={(r) => (aiAtFinish.current = r)}
+              sources={sources}
+              onSources={setSources}
             />
           ) : null}
         </div>

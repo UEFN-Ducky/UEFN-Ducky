@@ -41,6 +41,10 @@ PROVIDERS = ("claude", "codex", "cursor", "ollama", "ducky_ai", "other")
 # The first-run setup's Connect AI step: which AI, and how it ended up connected (or not).
 SETUP_AI_PROVIDERS = ("claude", "codex", "gemini", "cursor", "ollama", "ducky_ai", "other")
 SETUP_AI_STATES = ("plan", "key", "account", "not_logged_in", "not_installed", "none")
+# The first-run setup's "Where did you hear about us?": one event per box ticked.
+SETUP_SOURCES = ("youtube", "tiktok", "discord", "x", "reddit", "google", "epic_forums", "friend", "other")
+# The 0–5 star rating shown once the first-run setup is finished.
+SETUP_STARS = ("0", "1", "2", "3", "4", "5")
 MODEL_FAMILIES = ("claude", "gpt", "gemini", "ollama", "ducky_ai", "other")
 YES_NO = ("yes", "no")
 WHERE = ("agent", "ui", "bridge", "uefn", "store", "sync", "workflow", "other")
@@ -83,6 +87,8 @@ EVENTS: dict[str, dict[str, Any]] = {
     "setup.first_message": {"within": ("first_session", "later")},
     "setup.plugin": {"plugin_id": ("slug",), "ok": YES_NO},
     "setup.ai": {"provider": SETUP_AI_PROVIDERS, "state": SETUP_AI_STATES},
+    "setup.source": {"source": SETUP_SOURCES},
+    "setup.rating": {"stars": SETUP_STARS},
     "tour.end": {"tour": ("slug",), "how": ("done", "skipped"), "at": ("slug",)},
     "uefn.connect": {"ok": YES_NO, "reason": ("lost", "port_busy", "not_running", "listener_missing", "timeout", "other")},
     "uefn.popup_watchdog": {"kind": ("save", "lone_ok", "other")},
@@ -134,7 +140,7 @@ EVENTS: dict[str, dict[str, Any]] = {
 }
 
 # Events the panel UI may report through ``usage_track`` (everything else is backend-only).
-UI_EVENTS = frozenset({"feature.open", "setup.step", "setup.ai", "tour.end"})
+UI_EVENTS = frozenset({"feature.open", "setup.step", "setup.ai", "setup.source", "setup.rating", "tour.end"})
 
 # Setup, the web installer and the uninstaller (release/installer/host) report setup.open,
 # setup.install, setup.result, setup.close and uninstall.done under the same install id

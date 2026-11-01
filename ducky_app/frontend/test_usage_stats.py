@@ -40,6 +40,8 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "setup.first_message": {"within": "later"},
     "setup.plugin": {"plugin_id": "anthropic", "ok": False},
     "setup.ai": {"provider": "gemini", "state": "not_logged_in"},
+    "setup.source": {"source": "youtube"},
+    "setup.rating": {"stars": "4"},
     "tour.end": {"tour": "app.shell", "how": "skipped", "at": "3"},
     "uefn.connect": {"ok": False, "reason": "port_busy"},
     "uefn.popup_watchdog": {"kind": "save"},
@@ -313,6 +315,16 @@ def test_setup_steps_and_connect_ai_values() -> None:
     assert us.ui_track("setup.ai", {"provider": "codex", "state": "key"})
     assert us.ui_track("tour.end", {"tour": "chat.composer", "how": "done", "at": "4"})
     assert us.ui_track("setup.plugin", {"plugin_id": "anthropic", "ok": "yes"}) is False, "backend-only"
+
+
+def test_setup_source_and_rating_come_from_the_ui() -> None:
+    assert ev.validate("setup.source", {"source": "youtube"}) == {"source": "youtube"}
+    assert ev.validate("setup.source", {"source": "my cousin Joe"}) == {}
+    assert ev.validate("setup.rating", {"stars": "0"}) == {"stars": "0"}
+    assert ev.validate("setup.rating", {"stars": "5"}) == {"stars": "5"}
+    assert ev.validate("setup.rating", {"stars": "6"}) == {}
+    assert us.ui_track("setup.source", {"source": "discord"})
+    assert us.ui_track("setup.rating", {"stars": "4"})
 
 
 def test_first_start_takes_over_the_id_setup_made() -> None:

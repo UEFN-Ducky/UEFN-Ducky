@@ -2,13 +2,14 @@ import { getApi } from "./usePanelApi";
 
 /**
  * Anonymous usage stats from the UI, fire-and-forget. Only `feature.open`, `setup.step`,
- * `setup.ai` and `tour.end` are accepted by the panel; values are enum labels, never text a
- * person typed. The switch lives in Settings → Permissions → Anonymous usage stats.
+ * `setup.ai`, `setup.source`, `setup.rating` and `tour.end` are accepted by the panel; values are
+ * enum labels, never text a person typed. The switch lives in Settings → Permissions → Anonymous
+ * usage stats.
  */
 let lastKey = "";
 let lastAt = 0;
 
-export type UiUsageEvent = "feature.open" | "setup.step" | "setup.ai" | "tour.end";
+export type UiUsageEvent = "feature.open" | "setup.step" | "setup.ai" | "setup.source" | "setup.rating" | "tour.end";
 
 export function usageTrack(name: UiUsageEvent, props: Record<string, string>): void {
   try {

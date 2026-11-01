@@ -20,6 +20,7 @@ import { reportFirstRunSetup } from "../walkthrough/firstRunSetup";
 import { ensurePopularPlugins, markStarterPluginToursCompleted } from "../walkthrough/starterLlmGateways";
 import { welcomeAfterSetup } from "../walkthrough/welcomeDucky";
 import { markTourCompleted } from "../walkthrough/WalkthroughService";
+import { SetupRatingModal } from "./SetupRatingModal";
 import { SetupWizard, type InstallRow, type SetupStep } from "./SetupWizard";
 import "./gateway-setup.css";
 
@@ -152,9 +153,9 @@ export function GatewaySetupNotice() {
   const [rows, setRows] = useState<Record<string, InstallRow>>({});
   // The step on screen, or null when the setup is closed.
   const [wizard, setWizard] = useState<SetupStep | null>(null);
-  // The first run's setup: it can't be skipped or closed, only finished.
-  const [firstRun, setFirstRun] = useState(false);
-  // After Finish: the welcome ducky is opening, so the app's own tours keep waiting.
+  // After Finish: the 0–5 star rating of the setup, before the welcome ducky.
+  const [rating, setRating] = useState(false);
+  // After the rating: the welcome ducky is opening, so the app's own tours keep waiting.
   const [welcoming, setWelcoming] = useState(false);
   const [pill, setPill] = useState(false);
   const [pillHidden, setPillHidden] = useState(readPillHidden);
@@ -178,10 +179,7 @@ export function GatewaySetupNotice() {
       decided.current = true;
       // A new install's setup, open until Finish (a restart part way through opens it again).
       const open = !!status?.pending_first_run;
-      if (open) {
-        setFirstRun(true);
-        setWizard("welcome");
-      }
+      if (open) setWizard("welcome");
       reportFirstRunSetup(open);
     }
   }, []);
@@ -243,8 +241,8 @@ export function GatewaySetupNotice() {
 
   // The app's own tours wait while the setup, or the welcome it hands over to, is on screen.
   useEffect(() => {
-    if (decided.current) reportFirstRunSetup(wizard !== null || welcoming);
-  }, [wizard, welcoming]);
+    if (decided.current) reportFirstRunSetup(wizard !== null || rating || welcoming);
+  }, [wizard, rating, welcoming]);
 
   const install = useCallback(() => {
     setBusy(true);
@@ -280,17 +278,19 @@ export function GatewaySetupNotice() {
     markTourCompleted("settings.store");
     markTourCompleted("llms.setup");
     setWizard(null);
-    setFirstRun(false);
+    setRating(true);
+  }, []);
+
+  const rated = useCallback((stars: number) => {
+    usageTrack("setup.rating", { stars: String(stars) });
+    setRating(false);
     setWelcoming(true);
     void welcomeAfterSetup().finally(() => setWelcoming(false));
   }, []);
 
-  const close = useCallback(() => {
-    usageTrack("setup.step", { step: "closed" });
-    setWizard(null);
-  }, []);
-
   if (!ready) return null;
+
+  if (rating) return <SetupRatingModal onSubmit={rated} />;
 
   if (wizard) {
     return (
@@ -303,7 +303,6 @@ export function GatewaySetupNotice() {
         installError={error}
         onInstall={install}
         onFinish={finish}
-        onClose={firstRun ? undefined : close}
       />
     );
   }

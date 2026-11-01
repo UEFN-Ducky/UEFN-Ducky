@@ -106,15 +106,16 @@ describe("GatewaySetupNotice", () => {
     expect(await screen.findByRole("dialog", { name: "Welcome to UEFN Ducky" })).toBeTruthy();
   });
 
-  it("lets an existing install through: corner card, no setup, no hold; reopened, it can close", async () => {
+  it("lets an existing install through: corner card, no setup, no hold; reopened, it still can't close", async () => {
     fake.status.mockResolvedValue({ pending_first_run: false, gateway_ids: [], plugins: BUNDLE });
     render(<GatewaySetupNotice />);
     expect(await screen.findByText("Finish setting up Ducky")).toBeTruthy();
     expect(fake.reportFirstRunSetup).toHaveBeenCalledWith(false);
     fireEvent.click(screen.getByRole("button", { name: "Continue setup" }));
     expect(screen.getByRole("dialog", { name: "Starter plugins" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close setup" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Close setup" })).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Starter plugins" })).toBeTruthy();
   });
 
   it("installs the bundle and shows each plugin's progress", async () => {
@@ -146,7 +147,7 @@ describe("GatewaySetupNotice", () => {
     expect(screen.getByRole("button", { name: /Try again/ })).toBeTruthy();
   });
 
-  it("Finish closes it, skips the chained tours, and hands over to the welcome ducky", async () => {
+  it("Finish asks for a 0–5 star rating, then hands over to the welcome ducky", async () => {
     let welcomed: () => void = () => {};
     fake.welcomeAfterSetup.mockReturnValue(new Promise<void>((r) => (welcomed = r)));
     render(<GatewaySetupNotice />);
@@ -166,12 +167,20 @@ describe("GatewaySetupNotice", () => {
     pause();
     fireEvent.click(screen.getByRole("button", { name: /Next/ }));
     expect(screen.getByRole("dialog", { name: "Your defaults" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Discord" }));
     pause();
     fireEvent.click(screen.getByRole("button", { name: /Finish/ }));
-    expect(screen.queryByRole("dialog")).toBeNull();
     expect(fake.markStarterPluginToursCompleted).toHaveBeenCalled();
     expect(fake.markTourCompleted).toHaveBeenCalledWith("settings.store");
     expect(fake.markTourCompleted).toHaveBeenCalledWith("llms.setup");
+    // The rating comes first: no close, the welcome waits for Submit.
+    expect(screen.getByRole("dialog", { name: "How was getting started?" })).toBeTruthy();
+    expect(fake.welcomeAfterSetup).not.toHaveBeenCalled();
+    expect(fake.reportFirstRunSetup).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("radio", { name: "4 stars" }));
+    expect(screen.getByText("4 of 5 · Great")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(fake.welcomeAfterSetup).toHaveBeenCalledOnce();
     // The app's own tours keep waiting until the welcome has run.
     expect(fake.reportFirstRunSetup).toHaveBeenLastCalledWith(true);

@@ -136,10 +136,11 @@ afterEach(() => {
 });
 
 describe("SetupWizard", () => {
-  it("welcomes with the logo and the four steps, and can't be skipped or closed", () => {
+  it("welcomes with the moving duckies and the four steps, and can't be skipped or closed", () => {
     const props = wizard();
     expect(screen.getByRole("dialog", { name: "Welcome to UEFN Ducky" })).toBeTruthy();
-    expect(document.querySelector("img.setup-wizard-logo")?.getAttribute("src")).toBe("./OnlineMCPIcon.png");
+    expect(document.querySelector(".setup-scene image[href='./OnlineMCPIcon.png']")).toBeTruthy();
+    expect(document.querySelectorAll(".setup-scene-duck")).toHaveLength(4);
     expect(screen.getByRole("list", { name: "Setup steps" }).textContent).toContain("Defaults");
     expect(screen.queryByRole("button", { name: /Skip/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Close setup" })).toBeNull();
@@ -148,10 +149,20 @@ describe("SetupWizard", () => {
     expect(props.onStep).toHaveBeenCalledWith("plugins");
   });
 
-  it("can be closed when it was opened again later", () => {
-    const props = wizard({ step: "plugins", onClose: vi.fn() });
-    fireEvent.click(screen.getByRole("button", { name: "Close setup" }));
-    expect(props.onClose).toHaveBeenCalled();
+  it("has no close button on any step", () => {
+    for (const step of ["plugins", "ai", "defaults"] as const) {
+      wizard({ step });
+      expect(screen.queryByRole("button", { name: "Close setup" })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("a ducky says what it does when clicked", () => {
+    wizard();
+    expect(screen.getByText("Click a ducky to meet it")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Wizard ducky/ }));
+    expect(screen.getByText("I write and fix your Verse.")).toBeTruthy();
+    expect(document.querySelector(".setup-scene-job.is-picked")?.textContent).toContain("Verse");
   });
 
   it("keeps the long text behind a ? that shows on hover", () => {
@@ -363,7 +374,12 @@ describe("SetupWizard", () => {
     expect(await screen.findByText("Ducky's tools in: Codex")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Use Ducky in other apps" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /Finish/ }));
+    const finish = screen.getByRole("button", { name: /Finish/ });
+    expect(finish).toHaveProperty("disabled", true); // where they heard about us comes first
+    fireEvent.click(screen.getByRole("checkbox", { name: "YouTube" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "A friend" }));
+    expect(screen.getByRole("checkbox", { name: "YouTube" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(finish);
     expect(props.onFinish).toHaveBeenCalled();
   });
 

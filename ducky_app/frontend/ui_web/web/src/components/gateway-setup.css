@@ -188,10 +188,6 @@
   background: var(--panel-header);
 }
 
-.setup-wizard-top:has(.setup-wizard-close) {
-  position: relative;
-}
-
 .setup-wizard-steps {
   display: flex;
   align-items: center;
@@ -249,23 +245,6 @@
   border-color: transparent;
   background: var(--green-dim);
   color: var(--green);
-}
-
-.setup-wizard-close {
-  position: absolute;
-  right: 12px;
-  display: inline-flex;
-  padding: 6px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-dim);
-  cursor: pointer;
-}
-
-.setup-wizard-close:hover:not(:disabled) {
-  background: var(--tab-hover);
-  color: var(--fg);
 }
 
 .setup-wizard-body {
@@ -376,7 +355,7 @@
 
 .setup-wizard-hero .setup-wizard-lead {
   justify-content: center;
-  margin-bottom: 28px;
+  margin-bottom: 12px;
   font-size: 14px;
 }
 
@@ -496,9 +475,8 @@
   gap: 6px;
   margin: 0 0 8px;
   color: var(--fg-dim);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .setup-wizard-plugin-list {
@@ -1085,4 +1063,253 @@
   .setup-wizard-step-label {
     display: none;
   }
+}
+
+/* Welcome scene: Ducky sends work out to the duckies' jobs while they waddle along the ground. */
+.setup-scene {
+  width: 100%;
+  margin: 0 0 16px;
+}
+
+.setup-scene-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 260px;
+  overflow: visible;
+}
+
+.setup-scene-routes path {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.setup-scene-flow circle {
+  fill: var(--accent);
+}
+
+.setup-scene-job rect {
+  fill: var(--card);
+  stroke: var(--border);
+}
+
+.setup-scene-job .setup-scene-job-lit,
+.setup-scene-job.is-picked rect:first-child {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.setup-scene-job text {
+  fill: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.setup-scene-hub {
+  fill: var(--card);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.setup-scene-halo {
+  fill: var(--accent);
+}
+
+.setup-scene-spin {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.setup-scene-ground {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
+}
+
+.setup-scene-shadow {
+  fill: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.setup-scene-duck {
+  cursor: pointer;
+  outline: none;
+}
+
+.setup-scene-duck > .setup-scene-waddle {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+/* Hover or keyboard focus: the scene holds still and this ducky hops. */
+.setup-scene-duck image {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.setup-scene-duck:hover image,
+.setup-scene-duck:focus-visible image,
+.setup-scene-duck.is-picked image {
+  transform: translateY(-8px) scale(1.12);
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+.setup-scene-duck:focus-visible .setup-scene-shadow {
+  fill: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.setup-scene-says {
+  min-height: 20px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  transition: color 160ms ease;
+}
+
+.setup-scene-says.is-on {
+  color: var(--fg);
+}
+
+.setup-scene-says strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Where did you hear about us? Checkbox tiles. */
+.setup-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--card) 65%, var(--bg));
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.setup-source:hover {
+  background: var(--tab-hover);
+}
+
+.setup-source:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.setup-source.is-on {
+  border-color: var(--accent);
+}
+
+.setup-source-box {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+  color: var(--fg-inverse);
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.setup-source-box svg {
+  width: 12px;
+  height: 12px;
+}
+
+.setup-source.is-on .setup-source-box {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* The 0–5 star rating after setup. */
+.setup-rating {
+  width: min(440px, calc(100vw - 32px));
+  height: auto;
+}
+
+.setup-rating-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 28px 12px;
+  text-align: center;
+}
+
+.setup-rating-body h2 {
+  margin: 0 0 4px;
+  color: var(--fg);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.setup-rating-duck {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 12px;
+  object-fit: contain;
+}
+
+.setup-rating-stars {
+  display: flex;
+  gap: 4px;
+}
+
+.setup-rating-btn {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.setup-rating-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.setup-rating-btn:active svg {
+  transform: scale(0.94);
+}
+
+.setup-rating-star {
+  fill: transparent;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  transition: fill 120ms ease, stroke 120ms ease;
+}
+
+.setup-rating-star.is-on {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.setup-rating-word {
+  min-height: 20px;
+  margin: 8px 0 0;
+  color: var(--fg-dim);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
