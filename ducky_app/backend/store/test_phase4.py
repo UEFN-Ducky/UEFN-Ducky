@@ -225,3 +225,14 @@ def test_content_dot_ducky_moves_beside_content(tmp_path: Path) -> None:
     assert (island / ".ducky" / "notes.md").read_text(encoding="utf-8") == "keep"
     assert (island / ".ducky" / "from-content" / "notes.md").read_text(encoding="utf-8") == "clash"
     assert lift_content_dot_ducky(str(island)) == 0
+
+
+def test_dot_ducky_kept_out_of_revision_control(tmp_path: Path) -> None:
+    from backend.store.importers.boot import ignore_dot_ducky, lift_content_dot_ducky
+
+    (tmp_path / ".loreignore").write_text("Binaries\nSaved", encoding="utf-8")
+    lift_content_dot_ducky(str(tmp_path))  # every project open runs it
+    assert (tmp_path / ".loreignore").read_text(encoding="utf-8").splitlines()[-1] == ".ducky"
+    assert "Saved\n" in (tmp_path / ".loreignore").read_text(encoding="utf-8")
+    assert ignore_dot_ducky(str(tmp_path)) is False  # once only
+    assert not (tmp_path / ".urcignore").exists()

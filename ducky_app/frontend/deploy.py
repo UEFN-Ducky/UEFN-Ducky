@@ -791,6 +791,10 @@ def ensure_project_init(project_root: Path) -> list[str]:
         dest_init.write_text(text, encoding="utf-8")
         logs.append(f"Installed init_unreal.py -> {dest_init}")
     _clear_python_cache(dest_py)
+    from backend.store.importers.boot import ignore_dot_ducky
+
+    if ignore_dot_ducky(str(root)):
+        logs.append(f"Kept .ducky out of revision control -> {root}")
     return logs
 
 

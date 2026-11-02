@@ -71,6 +71,7 @@ def lift_content_dot_ducky(project: str) -> int:
     from backend.workspace.paths import island_root
 
     island = island_root(project)
+    ignore_dot_ducky(island)
     src = os.path.join(island, "Content", ".ducky")
     if not os.path.isdir(src):
         return 0
@@ -99,6 +100,35 @@ def lift_content_dot_ducky(project: str) -> int:
     if moved:
         _log.info("moved %d files from %s to %s", moved, src, dst)
     return moved
+
+
+_DOT_DUCKY_RULES = {".ducky", ".ducky/", "/.ducky", "/.ducky/", "**/.ducky", "**/.ducky/"}
+
+
+def ignore_dot_ducky(island: str) -> bool:
+    """Keep ``<island>/.ducky`` out of UEFN revision control: it is one person's Ducky notes
+    (plans, swarms, memory), never island content. Adds ``.ducky`` to the island's existing
+    ``.loreignore`` / ``.urcignore``. Returns True when a file changed; never raises."""
+    import os
+
+    changed = False
+    for name in (".loreignore", ".urcignore"):
+        path = os.path.join(island, name)
+        try:
+            with open(path, encoding="utf-8-sig", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            continue  # ponytail: only files UEFN made; a workspace without one isn't created here
+        if any(line.strip() in _DOT_DUCKY_RULES for line in text.splitlines()):
+            continue
+        sep = "" if not text or text.endswith("\n") else "\n"
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(f"{sep}\n# UEFN Ducky: per-person notes, never submitted\n.ducky\n")
+            changed = True
+        except OSError:
+            _log.warning("could not add .ducky to %s", path)
+    return changed
 
 
 def _has_dot_ducky(path: object) -> bool:
