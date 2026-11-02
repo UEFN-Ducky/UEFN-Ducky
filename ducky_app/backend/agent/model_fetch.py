@@ -201,7 +201,11 @@ def _account_switch(provider: str, rows: list[dict[str, Any]]) -> dict[str, Any]
 
 
 def normalize_usage_windows(raw: Any) -> dict[str, Any]:
-    """Clamp plugin `fetch_usage` output. Missing/junk → empty windows."""
+    """Clamp plugin `fetch_usage` output. Missing/junk → empty windows.
+
+    A bare list is the windows themselves (``account_usage`` hooks return just the rows)."""
+    if isinstance(raw, list):
+        raw = {"windows": raw}
     switch = _normalize_usage_switch(raw.get("switch") if isinstance(raw, dict) else None)
     extra = {"switch": switch} if switch else {}
     notice = _normalize_usage_notice(raw.get("notice") if isinstance(raw, dict) else None)
@@ -266,7 +270,12 @@ def fetch_usage(provider: str, api_key: str, *, model: str = "", force: bool = F
     asked = (provider or "").strip().lower()
     acc_provider, rows = _accounts_of(asked, name) if asked != name else _accounts_of(name)
     account = next((r["id"] for r in rows if r.get("active")), "")
-    out = _fetch_usage(name, reg, asked, api_key, model=model, force=force, account=account)
+    from backend.uefn_plugins.host import get_coding_agent_registration
+
+    if account and account != "default" and callable((get_coding_agent_registration(acc_provider) or {}).get("account_usage")):
+        out = fetch_account_usage(acc_provider, account, force=force)  # its own login folder, not the CLI's
+    else:
+        out = _fetch_usage(name, reg, asked, api_key, model=model, force=force, account=account)
     switch = _account_switch(acc_provider, rows)
     if switch and not out.get("switch"):
         out = {**out, "switch": switch}

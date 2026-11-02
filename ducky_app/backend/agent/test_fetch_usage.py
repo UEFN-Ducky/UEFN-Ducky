@@ -26,6 +26,13 @@ def test_normalize_empty_and_three_windows() -> None:
     assert out["windows"][0]["reset"] == "Resets in 2 hr"
 
 
+def test_normalize_bare_list_is_the_windows() -> None:
+    # Claude Code's account_usage hook returns just the rows: a second account must still get its bars.
+    out = normalize_usage_windows([{"id": "weekly", "label": "Weekly", "used": 3, "limit": 100}])
+    assert out == {"windows": [{"id": "weekly", "label": "Weekly", "used": 3.0, "limit": 100.0}]}
+    assert normalize_usage_windows([]) == {"windows": []}
+
+
 def test_fetch_usage_without_key_still_calls_plugin() -> None:
     reset_usage_cache()
     def _fn(api_key: str, *, model: str = "") -> dict:
@@ -214,6 +221,24 @@ def test_fetch_usage_adds_core_account_switch(tmp_path) -> None:
         reg["fetch_usage"] = _own_fn
         reset_usage_cache("openai")
         assert fetch_usage("openai", "sk")["switch"]["rpc"] == "own"  # plugin's switch wins
+
+
+def test_fetch_usage_second_login_uses_its_account_hook(tmp_path) -> None:
+    from backend.agent import accounts
+
+    reset_usage_cache()
+    seen: list = []
+    agent = {"account_usage": lambda d: seen.append(d) or [{"id": "w", "label": "Weekly", "used": 5, "limit": 100}]}
+    with (
+        patch.object(accounts, "_data_root", lambda: tmp_path),
+        patch("backend.uefn_plugins.host.get_llm_provider_registration", return_value={}),
+        patch("backend.uefn_plugins.host.get_coding_agent_registration", return_value=agent),
+    ):
+        two = accounts.add_account("claude_code", "Account 2", "login")
+        accounts.set_active_account("claude_code", two)
+        out = fetch_usage("claude_code", "")
+    assert out["windows"][0]["used"] == 5 and out["switch"]["value"] == two
+    assert [p.name for p in seen] == [two]  # its own login folder
 
 
 def test_fetch_usage_keeps_windows_on_empty_retry() -> None:
