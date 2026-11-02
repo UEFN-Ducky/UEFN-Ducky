@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { editor } from "monaco-editor";
-import "monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css";
+import "monaco-editor/features/codicon/register";
 
 import { FileEditHistoryContent } from "../../components/FileEditHistoryContent";
 import { HistoryDateRangeHeaderButton, useHistoryDateRange } from "../../components/history/HistoryDateRangePicker";

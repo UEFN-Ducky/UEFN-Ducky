@@ -319,7 +319,7 @@ const FileRow = memo(function FileRow({
   isEditing: boolean;
   editing: EditTarget | null;
   setEditing: Dispatch<SetStateAction<EditTarget | null>>;
-  editInputRef: RefObject<HTMLInputElement>;
+  editInputRef: RefObject<HTMLInputElement | null>;
   draggable: boolean;
   onToggle: () => void;
   onOpen: () => void;
@@ -607,7 +607,7 @@ const FileBranch = memo(function FileBranchImpl({
   clipboardHasItems: boolean;
   editing: EditTarget | null;
   setEditing: Dispatch<SetStateAction<EditTarget | null>>;
-  editInputRef: RefObject<HTMLInputElement>;
+  editInputRef: RefObject<HTMLInputElement | null>;
   onToggle: (path: string) => void;
   onOpen: (path: string, name: string) => void;
   onOpenPermanent: (path: string, name: string) => void;

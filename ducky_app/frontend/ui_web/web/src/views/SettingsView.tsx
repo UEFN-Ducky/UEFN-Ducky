@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   readLastSettingsSections,

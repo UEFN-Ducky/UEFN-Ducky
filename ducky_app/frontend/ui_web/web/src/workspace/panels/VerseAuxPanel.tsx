@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
-import "monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css";
+import "monaco-editor/features/codicon/register";
 
 import { FileEditHistoryContent } from "../../components/FileEditHistoryContent";
 import { useFileHistory } from "../../hooks/useFileHistory";

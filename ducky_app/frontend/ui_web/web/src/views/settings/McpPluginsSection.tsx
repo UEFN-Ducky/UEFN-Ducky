@@ -1,3 +1,4 @@
+import { runBridgeJob } from "../../hooks/bridgeJobAsync";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRankedToolNames } from "../../hooks/useToolSearch";
 
@@ -181,8 +182,7 @@ export function McpPluginsSection() {
     if (!serverId) return;
     const ask = ++toolsAsk.current;
     setServerTools({ id: serverId, catalog: null, error: "" });
-    void import("../../hooks/bridgeJobAsync")
-      .then(({ runBridgeJob }) => runBridgeJob<McpCatalogDto & { ok?: boolean; error?: string }>("get_mcp_server_tools", [serverId], 120_000))
+    void runBridgeJob<McpCatalogDto & { ok?: boolean; error?: string }>("get_mcp_server_tools", [serverId], 120_000)
       .then((res) => {
         if (ask !== toolsAsk.current) return;
         if (!res || res.ok === false || !Array.isArray(res.tools)) {
@@ -279,7 +279,6 @@ export function McpPluginsSection() {
     if (!api?.test_mcp_plugin) return;
     setBusyId(server.id);
     try {
-      const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
       const result = await runBridgeJob<McpPluginTestResultDto>("test_mcp_plugin", [server.id], 120_000);
       setTestResults((prev) => ({ ...prev, [server.id]: result }));
       if (result?.ok && server.enabled) loadServerTools(server.id);

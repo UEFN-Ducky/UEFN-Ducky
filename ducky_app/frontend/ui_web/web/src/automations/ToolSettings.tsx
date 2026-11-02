@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { rankToolNames } from "../hooks/useToolSearch";
 import { ChoiceDropdown, type ChoiceOption } from "../components/ChoiceDropdown";
 import { getApi } from "../hooks/usePanelApi";
+import { runBridgeJob } from "../hooks/bridgeJobAsync";
 import type { AutomationGraphNodeDto, McpCatalogDto, McpToolDto, McpToolParameterDto } from "../types/panel";
 
 /** One catalog for every Call tool node: the host tool list only changes when a
@@ -15,7 +16,6 @@ async function fetchWorkflowTools(): Promise<McpToolDto[]> {
   let catalog: McpCatalogDto | null = null;
   if (typeof api.get_workflow_tools_catalog === "function") {
     // Worker thread + poll: the bridge stays free and the list arrives in ms.
-    const { runBridgeJob } = await import("../hooks/bridgeJobAsync");
     catalog = await runBridgeJob<McpCatalogDto>("get_workflow_tools_catalog", [], 30_000);
   } else if (api.get_mcp_tools_catalog) {
     catalog = await api.get_mcp_tools_catalog(); // older app builds

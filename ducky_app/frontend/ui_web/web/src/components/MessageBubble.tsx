@@ -196,7 +196,7 @@ export const MessageBubble = memo(function MessageBubble({
       return;
     }
     markedRef.current = markSpokenWord(richRef.current, readAlong.spokenText, readAlong.charIndex);
-  }, [readAlong?.spokenText, readAlong?.charIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [readAlong?.spokenText, readAlong?.charIndex]);  
   useEffect(() => () => {
     if (markedRef.current) clearSpokenWord();
   }, []);

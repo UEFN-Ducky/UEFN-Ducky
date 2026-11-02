@@ -1,3 +1,4 @@
+import { runBridgeJob } from "../../hooks/bridgeJobAsync";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChoiceDropdown } from "../../components/ChoiceDropdown";
 import { Modal } from "../../components/Modal";
@@ -476,7 +477,6 @@ export function StoreTab() {
           queued: false,
           label: `Downloading ${name}${targetVer ? ` v${targetVer}` : ""}…`,
         });
-        const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
         // isUpdate → Store must not bump install_count for already-installed packs.
         const result = await runBridgeJob<{
           ok?: boolean;

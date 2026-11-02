@@ -1599,7 +1599,7 @@ const RemoteTypeBar = forwardRef<TypeBarHandle, { send: SendFn; disabled: boolea
 
   useEffect(() => {
     if (focusOnMount) inputRef.current?.focus({ preventScroll: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   const submit = useCallback(() => {

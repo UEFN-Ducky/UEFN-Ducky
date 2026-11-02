@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { getApi } from "../hooks/usePanelApi";

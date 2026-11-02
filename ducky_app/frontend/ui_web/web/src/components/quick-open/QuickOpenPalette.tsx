@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import "monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css";
+import "monaco-editor/features/codicon/register";
 import { Icons } from "../../icons/Icons";
 import { FileTypeIcon } from "../../verse-editor/components/FileTypeIcon";
 import { useVerseEditorOptional } from "../../verse-editor/VerseEditorProvider";

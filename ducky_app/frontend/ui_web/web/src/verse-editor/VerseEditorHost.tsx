@@ -320,7 +320,7 @@ export function VerseEditorHost({ relativePath, projectRoot = "", readOnly = fal
 
           contextmenu: true,
 
-          hover: { enabled: true, delay: 350 },
+          hover: { enabled: "on", delay: 350 },
 
           quickSuggestions: { other: true, comments: false, strings: false },
 

@@ -130,7 +130,7 @@ export function LiveVoicePickers({
       setVoiceModelState(saved);
       setVoiceAgent(voiceModelAgent(saved));
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [modelChat]);
 
   const setVoiceModel = useCallback(

@@ -266,7 +266,7 @@ const ChatRow = memo(function ChatRow({
   isEditing: boolean;
   editing: EditTarget | null;
   setEditing: React.Dispatch<React.SetStateAction<EditTarget | null>>;
-  editInputRef: React.RefObject<HTMLInputElement>;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
   onSelect: () => void;
   onSelectPersistent?: () => void;
   onModSelect?: (mods: SelectMods) => void;
@@ -497,7 +497,7 @@ type ChatNodeCtx = {
   newlyCreatedIds: Set<string>;
   editing: EditTarget | null;
   setEditing: React.Dispatch<React.SetStateAction<EditTarget | null>>;
-  editInputRef: React.RefObject<HTMLInputElement>;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
   childrenByParent: Map<string, FolderItem["chats"]>;
   selectedIds: ReadonlySet<string>;
   focusId: string | null;
@@ -632,7 +632,7 @@ function FolderHeader({
   foldedNeedYou?: number;
   editing: EditTarget | null;
   setEditing: React.Dispatch<React.SetStateAction<EditTarget | null>>;
-  editInputRef: React.RefObject<HTMLInputElement>;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
   onToggle: () => void;
   onSelectFolder: () => void;
   onModSelect?: (mods: SelectMods) => void;
@@ -839,7 +839,7 @@ const FolderGroup = memo(function FolderGroupImpl({
   focusId: string | null;
   editing: EditTarget | null;
   setEditing: React.Dispatch<React.SetStateAction<EditTarget | null>>;
-  editInputRef: React.RefObject<HTMLInputElement>;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
   onToggle: (folderId: string) => void;
   onSelectChatFolder: (folderId: string) => void;
   onModSelectFolder: (folderId: string, mods: SelectMods) => void;
@@ -1045,7 +1045,7 @@ interface SidebarFolderTreeProps {
   newlyCreatedIds: Set<string>;
   editing: EditTarget | null;
   setEditing: React.Dispatch<React.SetStateAction<EditTarget | null>>;
-  editInputRef: React.RefObject<HTMLInputElement>;
+  editInputRef: React.RefObject<HTMLInputElement | null>;
   onCommitRename: () => void;
   onCancelRename: () => void;
   onRenameFolder: (id: string, name: string) => void;

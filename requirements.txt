@@ -4,7 +4,7 @@
 # Tested together: AnyIO 4.14.2 fixes cancellation spinning on completed tasks.
 # Pin the shipped MCP runtime so an old satisfying dependency cannot survive a rebuild.
 mcp[cli]==1.30.0
-anyio==4.14.2
+anyio==4.16.0
 httpx==0.28.1
 tzdata>=2024.1
 # Verify HTTPS with the Windows cert store/chain engine (what Edge trusts), not OpenSSL's.
@@ -33,7 +33,7 @@ toon_format @ git+https://github.com/toon-format/toon-python.git
 # Custom code workflow nodes run their JavaScript in V8 (ships mini_racer.dll + icudtl.dat).
 mini-racer==0.14.1
 # Compiled plugins: disassemble a build to prove every PC's CPU runs it (cpu_check.py).
-iced-x86==1.21.0
+iced-x86==1.22.0
 # Skill and tool search (backend/search): the meaning model's matrix math and its tokenizer.
 # The model files come from build/fetch_search_model.py (pinned, SHA-256 checked).
 numpy==2.5.4

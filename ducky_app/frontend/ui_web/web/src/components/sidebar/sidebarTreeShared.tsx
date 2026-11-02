@@ -17,7 +17,7 @@ export function FileRenameInput<T extends { value: string }>({
 }: {
   editing: T | null;
   setEditing: Dispatch<SetStateAction<T | null>>;
-  editInputRef: RefObject<HTMLInputElement>;
+  editInputRef: RefObject<HTMLInputElement | null>;
   onCommitRename: () => void;
   onCancelRename: () => void;
   splitExtension?: boolean;
@@ -80,7 +80,7 @@ export function FileRenameInput<T extends { value: string }>({
 export function renameInputProps<T extends { value: string }>(
   editing: T | null,
   setEditing: Dispatch<SetStateAction<T | null>>,
-  editInputRef: RefObject<HTMLInputElement>,
+  editInputRef: RefObject<HTMLInputElement | null>,
   onCommitRename: () => void,
   onCancelRename: () => void,
 ) {

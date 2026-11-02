@@ -21,7 +21,7 @@ function OutlineHeaderButton({
   active?: boolean;
   disabled?: boolean;
   pressed?: boolean;
-  buttonRef?: RefObject<HTMLButtonElement>;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -57,7 +57,7 @@ function VerseOutlineHeaderActions({
   nodesCount: number;
   kindFilter: ReadonlySet<number> | null;
   filterOpen: boolean;
-  filterBtnRef: RefObject<HTMLButtonElement>;
+  filterBtnRef: RefObject<HTMLButtonElement | null>;
   onFilterOpenChange: (open: boolean) => void;
   onToggleKind: (kind: number) => void;
   onClearKindFilter: () => void;

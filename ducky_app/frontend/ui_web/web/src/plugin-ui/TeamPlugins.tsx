@@ -300,7 +300,7 @@ function PluginDetail({ row, team, section, onBack, onSection }: {
   };
   useEffect(() => {
     if (!own) void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [row.pluginId, own === null]);
   const status = own?.status ?? read;
   const tab: ScopeTab = section === "overview" ? "changes" : section;
@@ -359,7 +359,7 @@ export function TeamPlugins({ team, section, onSection, openId, onOpened }: {
     if (!openId || !rows.some((p) => p.pluginId === openId)) return;
     setDetail(openId);
     onOpened?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [openId, section, rows.length]);
   const row = detail ? rows.find((p) => p.pluginId === detail) : undefined;
   const toggle = (id: string) => setOpen((prev) => {

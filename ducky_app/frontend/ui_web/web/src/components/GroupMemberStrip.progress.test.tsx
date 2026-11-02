@@ -232,9 +232,9 @@ describe("team bar progress", () => {
     api.get_plan.mockResolvedValue({ ok: true, plan: plan(), progress: {} });
     render(<GroupMemberStrip groupId="group" members={rows} onMembersChange={() => {}} onOpenMember={() => {}} />);
     openTeam();
-    await waitFor(() => expect(api.get_plan).toHaveBeenCalled());
+    // Wait on the row itself: an earlier test may have cached this plan, so no get_plan call.
+    await waitFor(() => expect(screen.getByTitle("No assigned sub plan seen")).toBeTruthy());
     expect(screen.queryByText(/steps ·/)).toBeNull();
-    expect(screen.getByTitle("No assigned sub plan seen")).toBeTruthy();
   });
 
 });

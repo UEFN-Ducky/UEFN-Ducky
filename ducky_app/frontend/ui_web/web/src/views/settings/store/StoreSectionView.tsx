@@ -27,7 +27,7 @@ type Props = {
   /** Optional control next to the title (e.g. Update All). */
   headerAction?: ReactNode;
   /** Scroll container of this layer — reset to top on page change. */
-  layerRef: RefObject<HTMLDivElement>;
+  layerRef: RefObject<HTMLDivElement | null>;
 };
 
 /** Full-grid view of one section: page sizes, Show more, or ALL (scroll batches). */

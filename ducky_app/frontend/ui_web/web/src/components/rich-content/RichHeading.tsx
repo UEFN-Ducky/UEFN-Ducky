@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { RichHeadingLevel } from "../../types/richContent";
 import { richNodeText, richTextClass } from "./richTextColors";
 

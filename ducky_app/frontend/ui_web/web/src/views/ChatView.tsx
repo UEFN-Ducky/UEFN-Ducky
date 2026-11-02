@@ -1,3 +1,4 @@
+import { ensureDucktactoeGameChat } from "../plugin-ui/ducktactoeBoardChat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ChatSidebarHandle } from "../components/ChatSidebar";
 import { WorkspaceDockLayout } from "../workspace/WorkspaceDockLayout";
@@ -427,7 +428,6 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
         panelId.trim().toLowerCase() === "board"
       ) {
         void (async () => {
-          const { ensureDucktactoeGameChat } = await import("../plugin-ui/ducktactoeBoardChat");
           const chat = await ensureDucktactoeGameChat(allChats);
           if (chat) openChatTab(chat);
         })();

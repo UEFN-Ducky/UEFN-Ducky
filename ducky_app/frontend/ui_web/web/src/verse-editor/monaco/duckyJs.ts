@@ -41,7 +41,7 @@ export function setDuckyLibs(monaco: Monaco, libs: string[]): void {
   }
   for (const [path, content] of wanted) {
     if (installed.has(path)) continue;
-    const handle = monaco.languages.typescript.javascriptDefaults.addExtraLib(content, path);
+    const handle = monaco.typescript.javascriptDefaults.addExtraLib(content, path);
     installed.set(path, { content, dispose: () => handle.dispose() });
   }
 }
@@ -88,7 +88,7 @@ function flattenMessage(text: TsDiagnostic["messageText"]): string {
 
 /** The TypeScript service's semantic check of one model: what `// @ts-check` reports. */
 export async function checkJsModel(monaco: Monaco, model: MonacoNs.editor.ITextModel): Promise<void> {
-  const getWorker = await monaco.languages.typescript.getJavaScriptWorker();
+  const getWorker = await monaco.typescript.getJavaScriptWorker();
   const worker = await getWorker(model.uri);
   const found = await worker.getSemanticDiagnostics(model.uri.toString()) as TsDiagnostic[];
   if (model.isDisposed()) return;

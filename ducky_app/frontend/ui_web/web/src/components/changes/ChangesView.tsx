@@ -1,5 +1,7 @@
 import { failedActionCopyText, readableLabel } from './ledgerPresentation';
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+// Static: chat tool cards already load it at boot, so a lazy split saved nothing.
+import { ToolFileEditDiff } from "../ToolFileEditDiff";
 import { CtrlWheelZoomRoot } from "../CtrlWheelZoomRoot";
 
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
@@ -53,9 +55,6 @@ import { JsonDiffView } from "./JsonDiffView";
 
 /** Every run in the project, not just this chat's. The server clamps at 500. */
 const RUN_LIMIT = 500;
-const ToolFileEditDiff = lazy(() =>
-  import("../ToolFileEditDiff").then((m) => ({ default: m.ToolFileEditDiff })),
-);
 
 /** Any write, editor change, refusal, stop or revert redraws the ledger. Every journal row
  *  announces itself (`changeset_row`); a plain `tool_done` from any agent only refetched. */
