@@ -61,6 +61,11 @@ QUICK_TOOL_LIMIT_S = 60.0
 # Any other call still running this long: where it waits is recorded (events kind
 # "tool_stuck") and it keeps running, since workflows, renders and questions take minutes.
 STUCK_REPORT_S = 120.0
+# A Store plugin or nested MCP tool run through ducky_call_tool: Codex waits on an MCP call
+# forever, and 9 of 15 stuck calls on Oct 31 2026 were these. Long enough for a render or
+# a 3D generation; a tool that waits by design (WAITS_BY_DESIGN) has no limit.
+# ponytail: one limit for every plugin tool; a per-tool limit if a real tool needs longer.
+PLUGIN_CALL_LIMIT_S = 900.0
 # Calls that wait by design (on the person, or a command / workflow / window with its own
 # timeout): still recorded where they wait, but not counted as an anonymous agent.stuck,
 # which said "stuck" 117 times a day for questions and test suites (Oct 25 2026).
@@ -658,18 +663,30 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
     """Await one tool call. A quick tool past :data:`QUICK_TOOL_LIMIT_S` is stopped and
     raises :class:`_CallTimedOut`; any call past the first check is recorded where it waits."""
     limit = QUICK_TOOL_LIMIT_S if name in QUICK_TOOLS else None
+    inner = name
+    if name == "ducky_call_tool":
+        from backend.agent.toolsets import effective_tool_name
+
+        inner = effective_tool_name(name, arguments if isinstance(arguments, dict) else {})
+        if inner in QUICK_TOOLS:
+            limit = QUICK_TOOL_LIMIT_S
+        elif inner != name and inner not in WAITS_BY_DESIGN:
+            limit = PLUGIN_CALL_LIMIT_S
     first = min(limit, STUCK_REPORT_S) if limit is not None else STUCK_REPORT_S
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
         if not done:
             _report_stuck(name, first, work, thread, ident, waits, arguments)
-            if limit is not None:
+            if limit is not None and limit > first:
+                done, _ = await asyncio.wait({work}, timeout=limit - first)
+            if not done and limit is not None:
                 work.cancel()
                 raise _CallTimedOut(
-                    f"{name} did not answer within {limit:.0f} s and was stopped. Call it once more; "
+                    f"{inner} did not answer within {limit:.0f} s and was stopped. Call it once more; "
                     "if it stops again, carry on without it and tell the person."
                 )
-            await asyncio.wait({work})
+            if not done:
+                await asyncio.wait({work})
     except asyncio.CancelledError:
         work.cancel()  # the agent cancelled the call
         raise

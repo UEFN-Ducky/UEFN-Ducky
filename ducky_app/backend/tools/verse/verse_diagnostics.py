@@ -249,7 +249,14 @@ def workspace_compile_verse(pretty: bool = False) -> str:
             "Verse Workflow Server not connected. Do NOT retry. "
             "Use workspace_list_verse_errors for Problems diagnostics (works offline)."
         )
-    result = client.compile_project()
+    try:
+        result = client.compile_project()
+    except TimeoutError as exc:
+        # The build never answered: UEFN is behind a popup or busy. Say which, don't hang
+        # (workspace_compile_verse past 5 min was agent.stuck 3x on Oct 31 2026).
+        from backend.tools.core.uefn_popups import blocked_call_hint
+
+        raise ValueError(f"{exc}. {blocked_call_hint()}") from exc
     try:
         from frontend.ui_web.verse_editor.api import refresh_editor_lsp_after_build
 
@@ -265,21 +272,15 @@ def workspace_compile_verse(pretty: bool = False) -> str:
             load_for_ui,
             stale_keys,
         )
-        from frontend.ui_web.verse_editor.lsp.diagnostics_scan import (
-            scan_project_verse_diagnostics,
-        )
         from frontend.ui_web.verse_editor.panel_events import push_verse_diagnostics_sync
 
-        # Builds only re-check changed/stale files — never a full-project rescan.
-        if stale_keys(root):
-            scan = scan_project_verse_diagnostics(root, full=False, on_progress=_ui_progress(root))
-        else:
-            scan = {
-                "files": files_for_ui(load(root)),
-                "scanned": 0,
-                "with_errors": 0,
-                "with_warnings": 0,
-            }
+        # Builds only re-check changed/stale files, within the agent's limit: an unbounded
+        # scan here held the build's answer past 5 minutes.
+        complete = _scan_within_limit(root, False) if stale_keys(root) else True
+        scan = {"files": files_for_ui(load(root)), "with_errors": 0, "with_warnings": 0}
+        if not complete:
+            scan["complete"] = False
+            scan["unchecked"] = sorted(stale_keys(root))[:50]
         merged = load_for_ui(root)
         push_verse_diagnostics_sync(list(merged.get("files") or []), root, replace=True)
         scan["with_errors"] = sum(1 for f in merged.get("files") or [] if f.get("errors"))

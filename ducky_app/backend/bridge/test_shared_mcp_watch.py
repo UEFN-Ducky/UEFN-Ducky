@@ -25,7 +25,7 @@ class WatchMcp:
         self.threads: list[str] = []
         self.run_ids: list[str] = []
         self.cancelled = threading.Event()
-        names = {"ducky_find_tools", "slow_render", "blocking_sync", "ask_and_wait"}
+        names = {"ducky_find_tools", "slow_render", "blocking_sync", "ask_and_wait", "ducky_call_tool"}
         self._tool_manager = SimpleNamespace(_tools={
             n: SimpleNamespace(name=n, is_async=n not in sync, inputSchema={}) for n in names
         })
@@ -48,6 +48,8 @@ class WatchMcp:
                 raise
         if name == "slow_render":
             await asyncio.sleep(float((arguments or {}).get("seconds") or 0))
+        if name == "ducky_call_tool":
+            await asyncio.sleep(float(((arguments or {}).get("arguments") or {}).get("seconds") or 0))
         if name in ("blocking_sync", "ask_and_wait"):
             self.release.wait(10)
         return [{"type": "text", "text": f"{name} done"}]
@@ -83,6 +85,21 @@ def test_a_quick_tool_that_never_answers_is_stopped_and_says_where_it_waited(qui
     row = events.newest("tool_stuck", limit=1)[0]
     assert row["source"] == "ducky_find_tools"
     assert "_waits_on_a_catalog_that_never_answers" in row["payload"]["stack"]
+
+
+def test_a_plugin_tool_behind_ducky_call_tool_is_stopped_at_its_limit(quick, monkeypatch) -> None:
+    monkeypatch.setattr(shared_mcp, "PLUGIN_CALL_LIMIT_S", 0.6)
+    mcp = WatchMcp(sync=set())
+    hung = {"name": "roblox_call", "arguments": {"seconds": 30}}
+    started = time.monotonic()
+    result = asyncio.run(shared_mcp._call_tool(mcp, "ducky_call_tool", hung, _ident()))
+    assert time.monotonic() - started < 5
+    assert result["isError"] is True and "roblox_call did not answer within" in _text(result)
+    # Under its limit it finishes; a question waits by design and has none.
+    ok = {"name": "roblox_call", "arguments": {"seconds": 0.4}}
+    assert not asyncio.run(shared_mcp._call_tool(mcp, "ducky_call_tool", ok, _ident())).get("isError")
+    ask = {"name": "ducky_ask_user", "arguments": {"seconds": 0.9}}
+    assert not asyncio.run(shared_mcp._call_tool(mcp, "ducky_call_tool", ask, _ident())).get("isError")
 
 
 def test_a_long_call_is_recorded_once_and_still_finishes(quick) -> None:

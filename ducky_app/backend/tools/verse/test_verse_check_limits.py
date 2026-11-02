@@ -44,6 +44,22 @@ def test_a_stuck_scan_is_stopped_and_reported(monkeypatch, tmp_path: Path) -> No
     assert "never report such a file as clean" in out["note"]
 
 
+def test_a_build_that_never_answers_names_the_popup(monkeypatch) -> None:
+    import pytest
+
+    class Client:
+        connected = True
+
+        def compile_project(self):
+            raise TimeoutError("Verse workflow request timed out: compileProject")
+
+    monkeypatch.setattr("frontend.ui_web.verse_editor.workflow.client.get_workflow_client", lambda: Client())
+    monkeypatch.setattr("backend.tools.core.uefn_popups.list_popups",
+                        lambda: [{"title": "Message", "blocking": True}])
+    with pytest.raises(ValueError, match="'Message'.*uefn_popups"):
+        vd.workspace_compile_verse()
+
+
 def test_scan_checks_the_newest_files_first(monkeypatch, tmp_path: Path) -> None:
     from frontend.ui_web.verse_editor.lsp import diagnostics_cache, diagnostics_scan
 
