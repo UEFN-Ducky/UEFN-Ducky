@@ -688,7 +688,8 @@ export class DirectTransport {
         const headers: Record<string, string> = {};
         if (h?.type) headers["Content-Type"] = h.type;
         if (h?.etag) headers.ETag = h.etag;
-        w.resolve(new Response(body, { status: h?.status ?? 200, headers }));
+        // ponytail: TS 5.9 types Uint8Array<ArrayBufferLike> narrower than BodyInit; the bytes are a plain ArrayBuffer.
+        w.resolve(new Response(body as BodyInit | null, { status: h?.status ?? 200, headers }));
         return;
       }
       w.header = msg;
