@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import {
   useCallback,
   useEffect,
@@ -286,7 +287,7 @@ export interface ChatComposerProps {
   visible: boolean;
   isPopup: boolean;
   paneHost: HTMLDivElement | null;
-  textareaRef: RefObject<HTMLDivElement>;
+  textareaRef: RefObject<HTMLDivElement | null>;
   inputText: string;
   setInputText: Dispatch<SetStateAction<string>>;
   caret: number;

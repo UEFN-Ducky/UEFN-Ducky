@@ -1,4 +1,4 @@
-declare module "monaco-editor/esm/vs/platform/actions/common/actions.js" {
+declare module "monaco-editor/platform/actions/common/actions.js" {
   export class MenuId {
     constructor(id: string);
     static readonly EditorContext: MenuId;
@@ -11,25 +11,25 @@ declare module "monaco-editor/esm/vs/platform/actions/common/actions.js" {
   };
 }
 
-declare module "monaco-editor/esm/vs/platform/commands/common/commands.js" {
+declare module "monaco-editor/platform/commands/common/commands.js" {
   export const CommandsRegistry: {
     registerCommand(id: string, handler: (...args: unknown[]) => unknown): { dispose: () => void };
   };
 }
 
-declare module "monaco-editor/esm/vs/editor/common/editorContextKeys.js" {
+declare module "monaco-editor/editor/common/editorContextKeys.js" {
   export const EditorContextKeys: {
     hasNonEmptySelection: unknown;
   };
 }
 
-declare module "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js" {
+declare module "monaco-editor/platform/contextkey/common/contextkey.js" {
   export const ContextKeyExpr: {
     false(): unknown;
   };
 }
 
-declare module "monaco-editor/esm/vs/base/common/actions.js" {
+declare module "monaco-editor/base/common/actions.js" {
   export interface IAction {
     readonly id: string;
     readonly label: string;
@@ -60,9 +60,9 @@ declare module "monaco-editor/esm/vs/base/common/actions.js" {
   }
 }
 
-declare module "monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js" {
+declare module "monaco-editor/editor/contrib/contextmenu/browser/contextmenu.js" {
   import type { editor } from "monaco-editor";
-  import type { IAction } from "monaco-editor/esm/vs/base/common/actions.js";
+  import type { IAction } from "monaco-editor/base/common/actions.js";
 
   export class ContextMenuController {
   static readonly ID: string;

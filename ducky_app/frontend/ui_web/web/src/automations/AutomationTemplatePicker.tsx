@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 
 import { ChoiceDropdown } from "../components/ChoiceDropdown";

@@ -1,7 +1,7 @@
 import type { editor, Position } from "monaco-editor";
-import { Separator, SubmenuAction } from "monaco-editor/esm/vs/base/common/actions.js";
-import type { IAction } from "monaco-editor/esm/vs/base/common/actions.js";
-import { ContextMenuController } from "monaco-editor/esm/vs/editor/contrib/contextmenu/browser/contextmenu.js";
+import { Separator, SubmenuAction } from "monaco-editor/base/common/actions.js";
+import type { IAction } from "monaco-editor/base/common/actions.js";
+import { ContextMenuController } from "monaco-editor/editor/contrib/contextmenu/browser/contextmenu.js";
 
 import { getVerseLspSession } from "../lsp/verseLspSession";
 import { openQuickOpenFromEditor } from "../../components/quick-open/quickOpenGlobal";

@@ -1,3 +1,4 @@
+import { runBridgeJob } from "../../hooks/bridgeJobAsync";
 import { useCallback, useEffect, useState } from "react";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
@@ -159,7 +160,6 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     setBusy(true);
     setNote("Testing…");
     try {
-      const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
       const test = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>("test_key", [provider, value], 300_000);
       if (!test.ok) throw new Error(test.detail || test.error || "Key test failed");
       let id = keyFor;

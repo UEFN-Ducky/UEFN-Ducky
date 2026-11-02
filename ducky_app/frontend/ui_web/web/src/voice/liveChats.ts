@@ -1,3 +1,4 @@
+import { stopLiveChat } from "./liveSpeakService";
 /**
  * Live-voice presence + per-chat overlay state.
  * Spoken-summary skips chats that are currently live.
@@ -80,7 +81,8 @@ export function setLiveVoiceChat(chatId: string, on: boolean): void {
 // Phone notification's Stop: end every live chat the same way End does.
 onNativeLiveVoiceStop(() => {
   const ids = [...live];
-  void import("./liveSpeakService").then(({ stopLiveChat }) => ids.forEach((id) => stopLiveChat(id)));
+  // After this handler returns: stopping inside it would re-enter the native Stop.
+  void Promise.resolve().then(() => ids.forEach((id) => stopLiveChat(id)));
   return ids.length;
 });
 

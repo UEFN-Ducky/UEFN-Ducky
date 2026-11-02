@@ -46,6 +46,10 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // The panel loads from the PC's own disk / loopback, not a network: the 500 kB web
+    // default doesn't fit. Largest chunks: Monaco 0.57 (~3.4 MB, loaded only when a file
+    // opens) and the boot bundle (~2.5 MB). Over 3.5 MB means something new got big.
+    chunkSizeWarningLimit: 3500,
   },
   optimizeDeps: {
     include: ["monaco-editor", "vscode-oniguruma", "vscode-textmate"],

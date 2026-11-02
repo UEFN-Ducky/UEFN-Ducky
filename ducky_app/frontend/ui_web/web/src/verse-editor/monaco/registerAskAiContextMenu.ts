@@ -1,7 +1,7 @@
-import { MenuId, MenuRegistry } from "monaco-editor/esm/vs/platform/actions/common/actions.js";
-import { CommandsRegistry } from "monaco-editor/esm/vs/platform/commands/common/commands.js";
-import { EditorContextKeys } from "monaco-editor/esm/vs/editor/common/editorContextKeys.js";
-import { ContextKeyExpr } from "monaco-editor/esm/vs/platform/contextkey/common/contextkey.js";
+import { MenuId, MenuRegistry } from "monaco-editor/platform/actions/common/actions.js";
+import { CommandsRegistry } from "monaco-editor/platform/commands/common/commands.js";
+import { EditorContextKeys } from "monaco-editor/editor/common/editorContextKeys.js";
+import { ContextKeyExpr } from "monaco-editor/platform/contextkey/common/contextkey.js";
 
 import { getAskAiHandlers } from "../../contexts/askAiHandlersRef";
 import { readSelectionPayload } from "../askAi/askAiEditorRef";

@@ -1,3 +1,5 @@
+import { runBridgeJob } from "../hooks/bridgeJobAsync";
+import { onApiReady } from "../hooks/onApiReady";
 import { getApi } from "../hooks/usePanelApi";
 import { pluginTourId } from "./pluginWalkthroughs";
 import { markTourCompleted } from "./WalkthroughService";
@@ -48,9 +50,7 @@ export type StarterInstallResult = {
 let popularInflight: Promise<StarterInstallResult> | null = null;
 
 async function whenPanelApiReady(): Promise<void> {
-  const { getApi } = await import("../hooks/usePanelApi");
   if (getApi()) return;
-  const { onApiReady } = await import("../hooks/onApiReady");
   await new Promise<void>((resolve, reject) => {
     let stop = () => {};
     const timer = window.setTimeout(() => {
@@ -69,7 +69,6 @@ export function ensurePopularPlugins(force = false): Promise<StarterInstallResul
   if (popularInflight) return popularInflight;
   popularInflight = (async () => {
     await whenPanelApiReady();
-    const { runBridgeJob } = await import("../hooks/bridgeJobAsync");
     return runBridgeJob<StarterInstallResult>("ensure_starter_llm_gateways", [force], 1_200_000);
   })().finally(() => {
     popularInflight = null;

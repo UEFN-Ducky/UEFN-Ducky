@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import type { ChatTab } from "../../types/panel";
-import { ChangesView } from "../changes/ChangesView";
+
+// Lazy like the other ChangesView hosts, so the ledger stays out of the boot chunk.
+const ChangesView = lazy(() => import("../changes/ChangesView").then((m) => ({ default: m.ChangesView })));
 
 type Props = {
   profileId: string;
@@ -49,12 +51,14 @@ export function DuckyProfileLedger({ profileId, profileName }: Props) {
         File and editor changes from every current {profileName || "ducky"} chat — toggle Archive
         to see locked history.
       </p>
-      <ChangesView
-        profileId={profileId}
-        profileName={profileName}
-        hideDuckyFilter
-        allChats={chats}
-      />
+      <Suspense fallback={null}>
+        <ChangesView
+          profileId={profileId}
+          profileName={profileName}
+          hideDuckyFilter
+          allChats={chats}
+        />
+      </Suspense>
     </div>
   );
 }

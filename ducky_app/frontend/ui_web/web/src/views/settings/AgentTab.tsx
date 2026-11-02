@@ -1,3 +1,4 @@
+import { runBridgeJob } from "../../hooks/bridgeJobAsync";
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import { savePermissionSettings } from "../../hooks/permissionSettings";
@@ -192,7 +193,6 @@ function DefaultModelSection() {
     if (busySlug) return;
     setBusySlug(slug);
     try {
-      const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
       const result = await runBridgeJob<{ ok?: boolean }>(
         "duckyos_store_download",
         [slug, "", false],
@@ -719,7 +719,6 @@ export function AgentTab() {
     setTestingKey(key);
 
     try {
-      const { runBridgeJob } = await import("../../hooks/bridgeJobAsync");
       const res = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
         "test_key",
         [key, (value ?? "").trim()],

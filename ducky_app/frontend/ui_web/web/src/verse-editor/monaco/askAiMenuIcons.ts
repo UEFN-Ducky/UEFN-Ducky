@@ -1,5 +1,5 @@
-import type { IAction } from "monaco-editor/esm/vs/base/common/actions.js";
-import { SubmenuAction } from "monaco-editor/esm/vs/base/common/actions.js";
+import type { IAction } from "monaco-editor/base/common/actions.js";
+import { SubmenuAction } from "monaco-editor/base/common/actions.js";
 
 import { CONNECTION_ICONS } from "../../connectionIcons";
 

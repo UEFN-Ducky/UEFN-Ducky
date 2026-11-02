@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";

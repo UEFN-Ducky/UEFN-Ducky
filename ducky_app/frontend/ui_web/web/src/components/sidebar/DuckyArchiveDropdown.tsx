@@ -93,7 +93,7 @@ interface DuckyArchiveDropdownProps {
   onDeleteArchivedAgent?: (profile: AgentProfileDto) => void;
   /** Delete everything in Archive (asks first). */
   onEmptyArchive?: () => void;
-  buttonRef?: RefObject<HTMLButtonElement>;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 export function DuckyArchiveDropdown({

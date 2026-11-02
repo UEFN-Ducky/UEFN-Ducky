@@ -5719,7 +5719,7 @@ html.window-maximized .window-resize-grip {
 .verse-editor-banner.is-warn {
   padding: 6px 12px;
   font-size: 11px;
-  background-color: var(--warn-dim));
+  background-color: var(--warn-dim);
   border-bottom: 1px solid var(--warn);
   color: var(--fg);
   flex-shrink: 0;

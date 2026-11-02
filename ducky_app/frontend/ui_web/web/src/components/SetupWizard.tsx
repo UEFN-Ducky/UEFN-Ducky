@@ -1,3 +1,4 @@
+import { runBridgeJob } from "../hooks/bridgeJobAsync";
 /**
  * First-run setup: Welcome, the starter plugins (one Install, a tile per plugin with its Store
  * icon and progress), connecting an AI (an API key, or a plan you already pay for), then the
@@ -620,7 +621,6 @@ function ProviderRow({
     if (!value) return;
     setState({ text: "Testing the key…", ok: true, pending: true });
     try {
-      const { runBridgeJob } = await import("../hooks/bridgeJobAsync");
       const res = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
         "test_key",
         [secretKey, value],

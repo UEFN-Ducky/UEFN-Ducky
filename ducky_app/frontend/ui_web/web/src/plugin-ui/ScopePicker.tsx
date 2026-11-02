@@ -39,7 +39,7 @@ export function ChoicePicker({ label, current, choices, shown, disabled, onPick,
   useEffect(() => {
     if (open) setFocus(Math.max(0, list.findIndex((choice) => choice.id === current)));
     // Only when it opens: the list is new on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [open]);
 
   const pick = (choice: PickerChoice) => {

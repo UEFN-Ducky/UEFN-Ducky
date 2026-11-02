@@ -149,7 +149,7 @@ export function TeamModal({ open, onClose, initial = "overview" }: Props) {
     setSection(initial);
     setFocus(initial !== "overview" && pane ? pane.pluginId : null);
     void readActiveTeam();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [open, initial]);
   // The plugin on screen moved to another copy: the team may have moved with it.
   useEffect(() => {

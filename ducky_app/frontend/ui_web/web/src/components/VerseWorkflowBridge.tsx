@@ -1,3 +1,4 @@
+import { runBridgeJob } from "../hooks/bridgeJobAsync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterAppHeaderActions } from "../contexts/AppHeaderActionsContext";
 import { subscribeAgentEvents } from "../hooks/useAgentEventBus";
@@ -137,7 +138,6 @@ export function VerseWorkflowBridge({ enabled }: VerseWorkflowBridgeProps) {
     if (!api || busy || !status.connected) return;
     setBusy(true);
     try {
-      const { runBridgeJob } = await import("../hooks/bridgeJobAsync");
       await runBridgeJob("compile_verse_project", [], 180_000);
       requestVerseLspSessionRebind();
       await refreshStatus();

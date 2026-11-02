@@ -1,3 +1,6 @@
+import { alertFromHost, confirmFromHost } from "../contexts/ConfirmModalContext";
+import { pickModelFromHost } from "./PluginModelPickerHost";
+import { pluginLlmCompleteAsync } from "./pluginLlmAsync";
 /**
  * Host ↔ plugin iframe postMessage bridge.
  *
@@ -733,7 +736,6 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
   },
   "ui.confirm": async (ctx, params) => {
     // A plugin's "are you sure?" is Ducky's own confirm modal, not a bar inside the panel.
-    const { confirmFromHost } = await import("../contexts/ConfirmModalContext");
     const message = typeof params.message === "string" ? params.message.trim() : "";
     if (!message) throw new Error("ui.confirm requires message");
     const result = await confirmFromHost({
@@ -746,7 +748,6 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     return { confirmed: result === true };
   },
   "ui.alert": async (ctx, params) => {
-    const { alertFromHost } = await import("../contexts/ConfirmModalContext");
     const message = typeof params.message === "string" ? params.message.trim() : "";
     if (!message) throw new Error("ui.alert requires message");
     await alertFromHost({
@@ -759,7 +760,6 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
   /** Ducky's own model picker: ``{purpose?: "video"|"chat", current?, title?, extra?: [{id, name, group, note?, vision?}], anchor?: {left, top, width, height}}`` → ``{model, name}`` or ``{model: ""}`` when cancelled. With ``anchor`` (a box in the panel) it drops down from there instead of opening a dialog. */
   "ui.pickModel": async (ctx, params) => {
     if (isRemote()) throw new Error("Pick models on the PC that runs Ducky.");
-    const { pickModelFromHost } = await import("./PluginModelPickerHost");
     const picked = await pickModelFromHost({
       purpose: typeof params.purpose === "string" ? params.purpose : "chat",
       current: typeof params.current === "string" ? params.current : "",
@@ -803,7 +803,6 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     };
   },
   "llm.complete": async (ctx, params) => {
-    const { pluginLlmCompleteAsync } = await import("./pluginLlmAsync");
     const system = typeof params.system === "string" ? params.system : "";
     const user = typeof params.user === "string" ? params.user : "";
     const model = typeof params.model === "string" ? params.model : "";

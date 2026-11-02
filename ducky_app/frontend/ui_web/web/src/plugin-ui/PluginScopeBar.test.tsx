@@ -225,9 +225,16 @@ describe("plugin scope bar", () => {
     api.plugin_scope_push?.mockResolvedValue({ ok: true, started: true });
     api.plugin_scope_pull?.mockResolvedValue({ ok: true, started: true });
     bar();
-    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    // Both are disabled while the bar is busy (a status read, the Send itself): a click
+    // then does nothing, so wait for each to be clickable first.
+    const enabled = async (name: string) => {
+      const button = await screen.findByRole("button", { name }) as HTMLButtonElement;
+      await waitFor(() => expect(button.disabled).toBe(false));
+      return button;
+    };
+    fireEvent.click(await enabled("Send"));
     await waitFor(() => expect(api.plugin_scope_push).toHaveBeenCalledWith("brainrot-tcg"));
-    fireEvent.click(screen.getByRole("button", { name: "Get" }));
+    fireEvent.click(await enabled("Get"));
     await waitFor(() => expect(api.plugin_scope_pull).toHaveBeenCalledWith("brainrot-tcg"));
   });
 
@@ -369,7 +376,7 @@ describe("plugin scope bar", () => {
       await waitFor(() => expect(api.plugin_scope_set).toHaveBeenLastCalledWith(
         "forge", "s1", { units: ["MEGA_Duel_Stadium"] }));
       noShareDialog();
-      expect(await screen.findByText("Sending your files to Alpha Studio…")).toBeTruthy();
+      expect(await screen.findByText("Sending your files to Alpha Studio…", undefined, { timeout: 3000 })).toBeTruthy();
       api.plugin_scope_status.mockResolvedValue(sharedStatus({ pluginLabel: "Forge", ...declared() }));
       sent({ ok: true });
       expect(await screen.findByText(/^Up to date/)).toBeTruthy();

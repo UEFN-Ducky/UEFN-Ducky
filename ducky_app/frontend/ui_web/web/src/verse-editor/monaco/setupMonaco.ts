@@ -1,10 +1,12 @@
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import jsonWorker from "monaco-editor/esm/vs/language/json/json.worker?worker";
-import cssWorker from "monaco-editor/esm/vs/language/css/css.worker?worker";
-import htmlWorker from "monaco-editor/esm/vs/language/html/html.worker?worker";
-import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import editorWorker from "monaco-editor/editor/editor.worker?worker";
+import jsonWorker from "monaco-editor/language/json/json.worker?worker";
+import cssWorker from "monaco-editor/language/css/css.worker?worker";
+import htmlWorker from "monaco-editor/language/html/html.worker?worker";
+import tsWorker from "monaco-editor/language/typescript/ts.worker?worker";
 import type * as MonacoNs from "monaco-editor";
 import { verseEditorLog, verseEditorLogError } from "../verseEditorLog";
+// Static: the editor hosts import it at boot anyway (type-only Monaco, no editor code).
+import { registerVerseMonacoTheme } from "./verseTheme";
 
 /**
  * Monaco is loaded on demand, never at boot.
@@ -55,11 +57,10 @@ async function setupMonacoOnce(): Promise<Monaco> {
   verseEditorLog("setup", "start");
   configureMonacoWorkers();
   // One round trip: the editor and its Verse language setup land together.
-  const [monaco, textMate, snippets, theme, formatter, askAi, contextMenu, configLanguages] = await Promise.all([
+  const [monaco, textMate, snippets, formatter, askAi, contextMenu, configLanguages] = await Promise.all([
     import("monaco-editor"),
     import("./registerVerseTextMate"),
     import("./registerVerseSnippets"),
-    import("./verseTheme"),
     import("../format/registerVerseFormatter"),
     import("./registerAskAiContextMenu"),
     import("./patchEditorContextMenu"),
@@ -68,7 +69,7 @@ async function setupMonacoOnce(): Promise<Monaco> {
   configLanguages.registerConfigLanguages(monaco);
   await textMate.registerVerseTextMate(monaco);
   snippets.registerVerseSnippets(monaco);
-  theme.registerVerseMonacoTheme(monaco);
+  registerVerseMonacoTheme(monaco);
   formatter.registerVerseFormatter(monaco);
   askAi.registerAskAiContextMenu();
   contextMenu.patchEditorContextMenu();
