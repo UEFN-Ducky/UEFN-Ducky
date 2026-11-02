@@ -24,7 +24,8 @@ def test_post_command_fail_fast_when_health_down(monkeypatch: pytest.MonkeyPatch
     t0 = time.perf_counter()
     with pytest.raises(ConnectionError, match="listener offline"):
         bridge.post_command_to_listener(4200, "ping", {})
-    assert time.perf_counter() - t0 < 2.0
+    # ponytail: the regression is waiting out REQUEST_TIMEOUT (30 s); a 2 s wall clock flaked on busy PCs.
+    assert time.perf_counter() - t0 < bridge.REQUEST_TIMEOUT / 3
     assert posted == []
 
 
@@ -43,7 +44,8 @@ def test_send_command_fail_fast_pinned_offline(monkeypatch: pytest.MonkeyPatch) 
     t0 = time.perf_counter()
     with pytest.raises(ConnectionError, match="listener offline"):
         bridge.send_command("ping", {})
-    assert time.perf_counter() - t0 < 2.0
+    # ponytail: the regression is waiting out REQUEST_TIMEOUT (30 s); a 2 s wall clock flaked on busy PCs.
+    assert time.perf_counter() - t0 < bridge.REQUEST_TIMEOUT / 3
     assert posted == []
 
 
