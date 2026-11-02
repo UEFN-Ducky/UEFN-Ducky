@@ -47,7 +47,11 @@ vi.mock("../hooks/storeInstallJobs", () => ({
   patchStoreJob: () => {},
 }));
 vi.mock("../hooks/storeCatalogCache", () => ({ peekStoreCatalogCache: () => null, rememberStoreCatalog: () => {} }));
-vi.mock("../hooks/modelsCatalogCache", () => ({ refreshModelsCatalog: vi.fn() }));
+vi.mock("../hooks/modelsCatalogCache", () => ({
+  refreshModelsCatalog: vi.fn(),
+  getCachedModels: () => [],
+  subscribeModelsCatalog: () => () => {},
+}));
 vi.mock("../hooks/usePluginContributions", () => ({
   usePluginContributions: () => ({ llm_providers: fake.providers, llm_coding_agents: [], ready: true }),
 }));

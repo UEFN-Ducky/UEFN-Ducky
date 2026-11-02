@@ -167,8 +167,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(720px, 100%);
-  height: min(640px, calc(100vh - 48px));
+  width: min(1040px, 100%);
+  height: min(820px, calc(100vh - 48px));
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -917,6 +917,101 @@
   line-height: 1.45;
 }
 
+/* Model tiles: the best few for each job, one click each. */
+.setup-model-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.setup-model-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 10px 32px 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--card) 65%, var(--bg));
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  animation: setup-piece-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: background-color 150ms ease, border-color 150ms ease, transform 120ms ease;
+}
+
+.setup-model-tile:nth-child(2) { animation-delay: 40ms; }
+.setup-model-tile:nth-child(3) { animation-delay: 80ms; }
+.setup-model-tile:nth-child(4) { animation-delay: 120ms; }
+.setup-model-tile:nth-child(n + 5) { animation-delay: 160ms; }
+
+button.setup-model-tile:hover {
+  background: var(--tab-hover);
+}
+
+button.setup-model-tile:active {
+  transform: scale(0.98);
+}
+
+button.setup-model-tile:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.setup-model-tile.is-on {
+  border-color: var(--accent);
+}
+
+.setup-model-tile > svg {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+  animation: setup-tile-pick 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.setup-model-tile-name {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-model-tile-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setup-model-tile.is-other {
+  padding-right: 12px;
+  cursor: default;
+}
+
+.setup-model-tile.is-other > :last-child {
+  width: 100%;
+}
+
+@keyframes setup-tile-pick {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-model-tile,
+  .setup-model-tile > svg {
+    animation: none;
+  }
+}
+
 .setup-wizard-overview {
   display: grid;
   gap: 8px;
@@ -1356,10 +1451,16 @@
 }
 
 /* A ducky on a string at the top right of each step: drops in, sways, does a trick when clicked. */
+/* The body keeps the duck's corner free, so it never sits on a step's own content. */
+.setup-wizard-body:not(.is-welcome) > h2,
+.setup-wizard-body:not(.is-welcome) > .setup-wizard-lead {
+  padding-right: 96px;
+}
+
 .setup-step-duck {
   position: absolute;
   top: 49px;
-  right: 28px;
+  right: 36px;
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -1373,7 +1474,7 @@
 
 .setup-step-duck-string {
   width: 1px;
-  height: 18px;
+  height: 10px;
   background: var(--border);
 }
 
@@ -1388,8 +1489,8 @@
 }
 
 .setup-step-duck-btn img {
-  width: 52px;
-  height: 52px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }

@@ -15,6 +15,7 @@ import { Icons } from "../icons/Icons";
 import type { CodingAgentDto, DuckyOSAccountStatus, DuckyOSStoreItemDto, StarterPluginDto } from "../types/panel";
 import { CodingAgentLoginModal } from "../views/settings/CodingAgentsSection";
 import { DuckyModelPicker } from "./ducky/DuckyModelPicker";
+import { SetupModelTiles } from "./SetupModelTiles";
 import { SetupStepDuck } from "./SetupStepDuck";
 import { SetupWelcomeScene } from "./SetupWelcomeScene";
 import { loadVoiceSettings, saveVoiceSettings } from "../voice/voiceSettings";
@@ -225,7 +226,7 @@ function SourcePicker({ picked, onPick }: { picked: string[]; onPick: (next: str
   return (
     <section className="setup-wizard-card" aria-label="Where did you hear about us?">
       <h3>Where did you hear about us?</h3>
-      <p className="setup-wizard-muted">Tick all that apply.</p>
+      <p className="setup-wizard-muted">Tick all that apply, if you like.</p>
       <ul className="setup-source-grid">
         {SOURCES.map((s) => {
           const on = picked.includes(s.id);
@@ -1099,22 +1100,30 @@ function DefaultsStep({
         {connectedNames.length ? (
           <ul className="setup-wizard-jobs">
             {MODEL_JOBS.map((job) => (
-              <li key={job.id} className="setup-wizard-job" aria-label={job.title}>
+              <li key={job.id} className="setup-wizard-job is-tiles" aria-label={job.title}>
                 <span className="setup-wizard-job-text">
                   <strong>{job.title}</strong>
                   <span className="setup-wizard-muted">{job.suggest}</span>
                 </span>
-                <DuckyModelPicker
-                  model={models[job.id]}
-                  onChange={(next) => save(job.id, next)}
-                  allowClear={job.id !== "chat"}
-                  requireTools={job.id === "chat"}
-                  placeholder={loaded ? job.empty : "Loading…"}
-                  label=""
-                  hint=""
-                  menuPlacement="bottom"
-                  labeled
-                  menuZIndex={2147483300}
+                <SetupModelTiles
+                  job={job.id}
+                  value={models[job.id]}
+                  onPick={(next) => save(job.id, next)}
+                  sameLabel={job.id === "chat" ? undefined : job.empty}
+                  other={
+                    <DuckyModelPicker
+                      model={models[job.id]}
+                      onChange={(next) => save(job.id, next)}
+                      allowClear={job.id !== "chat"}
+                      requireTools={job.id === "chat"}
+                      placeholder={loaded ? job.empty : "Loading…"}
+                      label=""
+                      hint=""
+                      menuPlacement="top"
+                      labeled
+                      menuZIndex={2147483300}
+                    />
+                  }
                 />
               </li>
             ))}
@@ -1284,8 +1293,6 @@ export function SetupWizard(props: SetupWizardProps) {
         <button
           type="button"
           className="setup-wizard-btn is-primary"
-          disabled={!sources.length}
-          title={sources.length ? undefined : "Tick where you heard about us first"}
           onClick={settled(() => {
             for (const r of aiAtFinish.current) usageTrack("setup.ai", r);
             for (const source of sources) usageTrack("setup.source", { source });
@@ -1304,9 +1311,10 @@ export function SetupWizard(props: SetupWizardProps) {
         <header className="setup-wizard-top">
           <StepDots step={step} />
         </header>
-        {onScreen !== "welcome" ? <SetupStepDuck key={onScreen} step={onScreen} /> : null}
+        {/* Its own key: sharing the body's key made React keep old duckies when going Back. */}
+        {onScreen !== "welcome" ? <SetupStepDuck key={`duck-${onScreen}`} step={onScreen} /> : null}
         <div
-          key={onScreen}
+          key={`body-${onScreen}`}
           className={`setup-wizard-body is-${onScreen}${leaving ? " is-leaving" : " is-entering"}${goingBack.current ? " is-back" : ""}`}
         >
           {onScreen === "welcome" ? <WelcomeStep /> : null}

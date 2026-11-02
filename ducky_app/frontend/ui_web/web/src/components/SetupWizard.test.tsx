@@ -34,7 +34,16 @@ vi.mock("../hooks/storeCatalogCache", () => ({ peekStoreCatalogCache: () => null
 vi.mock("../hooks/usePluginContributions", () => ({
   usePluginContributions: () => ({ llm_providers: fake.providers, llm_coding_agents: [], ready: true }),
 }));
-vi.mock("../hooks/modelsCatalogCache", () => ({ refreshModelsCatalog: vi.fn(), rereadModelsCatalog: vi.fn() }));
+const CATALOG = vi.hoisted(() => [
+  { provider: "Anthropic", providerKey: "anthropic", id: "claude-opus", name: "Claude Opus", supportsTools: true, supportsVision: true, supportsWebSearch: false, contextLimit: 0 },
+  { provider: "Anthropic", providerKey: "anthropic", id: "claude-haiku", name: "Claude Haiku", supportsTools: true, supportsVision: true, supportsWebSearch: false, contextLimit: 0 },
+]);
+vi.mock("../hooks/modelsCatalogCache", () => ({
+  refreshModelsCatalog: vi.fn(),
+  rereadModelsCatalog: vi.fn(),
+  getCachedModels: () => CATALOG,
+  subscribeModelsCatalog: () => () => {},
+}));
 vi.mock("../voice/voiceSettings", () => ({
   loadVoiceSettings: () => Promise.resolve({ liveModel: "openai:gpt-mini", summaryModel: "" }),
   saveVoiceSettings: fake.saveVoice,
@@ -155,6 +164,28 @@ describe("SetupWizard", () => {
       expect(screen.queryByRole("button", { name: "Close setup" })).toBeNull();
       cleanup();
     }
+  });
+
+  it("finishes without a model or a where-you-heard pick", () => {
+    const props = wizard({ step: "defaults" });
+    const finish = screen.getByRole("button", { name: /Finish/ });
+    expect(finish).toHaveProperty("disabled", false);
+    fireEvent.click(finish);
+    expect(props.onFinish).toHaveBeenCalled();
+  });
+
+  it("picks a job's model from its tiles in one click", async () => {
+    fake.providers = [OPENAI];
+    fake.api.get_key_status.mockResolvedValue({ openai: true });
+    wizard({ step: "defaults", rows: { openai: { phase: "installed" }, uefn: { phase: "installed" } } });
+    const chats = await screen.findByRole("listitem", { name: "Chats and duckies" });
+    // The strongest model leads for chats, the small fast one for live voice.
+    const first = within(chats).getAllByRole("radio")[0];
+    expect(first.textContent).toContain("Claude Opus");
+    fireEvent.click(first);
+    expect(fake.api.save_agent_settings).toHaveBeenCalledWith({ default_model: "anthropic:claude-opus" });
+    const live = screen.getByRole("listitem", { name: "Live voice" });
+    expect(within(live).getAllByRole("radio")[1].textContent).toContain("Claude Haiku");
   });
 
   it("every step after Welcome has its own ducky that says something when clicked", () => {
@@ -370,7 +401,7 @@ describe("SetupWizard", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Pick a model" }));
     expect(fake.api.save_agent_settings).toHaveBeenCalledWith({ default_model: "anthropic:claude-sonnet" });
     // Every job has its own picker with a suggestion, saved where Settings keeps it.
-    expect(within(screen.getByRole("listitem", { name: "Live voice" })).getByText(/Haiku/)).toBeTruthy();
+    expect(within(screen.getByRole("listitem", { name: "Live voice" })).getByText(/Try Claude Haiku/)).toBeTruthy();
     expect(await screen.findByRole("button", { name: "openai:gpt-mini" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Chats model" }));
     expect(fake.saveVoice).toHaveBeenCalledWith({ summaryModel: "anthropic:claude-sonnet" });
@@ -384,7 +415,6 @@ describe("SetupWizard", () => {
     expect(screen.queryByRole("region", { name: "Use Ducky in other apps" })).toBeNull();
 
     const finish = screen.getByRole("button", { name: /Finish/ });
-    expect(finish).toHaveProperty("disabled", true); // where they heard about us comes first
     fireEvent.click(screen.getByRole("checkbox", { name: "YouTube" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "A friend" }));
     expect(screen.getByRole("checkbox", { name: "YouTube" }).getAttribute("aria-checked")).toBe("true");
