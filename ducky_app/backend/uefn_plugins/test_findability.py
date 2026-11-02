@@ -60,5 +60,29 @@ def test_short_descriptions_and_weak_tool_docstrings_are_warnings(tmp_path: Path
     assert "demo_get" not in text
 
 
+def test_tools_registered_in_a_loop_are_checked_by_their_own_names(tmp_path: Path) -> None:
+    root = _write(tmp_path / "demo", {
+        "skills/demo/SKILL.md": GOOD_SKILL,
+        "backend/__init__.py": (
+            "def demo_list() -> dict:\n"
+            '    """List every demo record, newest first, for picking one to open."""\n'
+            "    return {}\n"
+            "\n"
+            "def demo_bare() -> dict:\n"
+            "    return {}\n"
+            "\n"
+            "TOOLS = (demo_list, demo_bare)\n"
+            "\n"
+            "def register(api):\n"
+            "    for fn in TOOLS:\n"
+            "        api.tool(fn, name=fn.__name__, listener=False)\n"
+        ),
+    })
+    _, warnings = check_findability(root, "demo")
+    text = "\n".join(warnings)
+    assert "tool fn " not in text  # never the loop variable
+    assert "tool demo_bare has no docstring" in text and "demo_list" not in text
+
+
 def test_a_plugin_without_skills_or_tools_is_clean(tmp_path: Path) -> None:
     assert check_findability(tmp_path, "empty") == ([], [])

@@ -416,6 +416,14 @@ class _Backend:
         self.file_writes: list[tuple[str, int]] = []  # (rel, line) of each call that writes a file of its own
 
     def scan(self, rel: str, tree: ast.AST) -> None:
+        # `for fn in TOOLS: api.tool(fn, name=fn.__name__)`: each function of the module's TOOLS tuple is a tool
+        # by its own name (never one tool called "fn").
+        seqs = {t.id: [e.id for e in node.value.elts if isinstance(e, ast.Name)]
+                for node in getattr(tree, "body", []) if isinstance(node, ast.Assign) and isinstance(node.value, (ast.Tuple, ast.List))
+                for t in node.targets if isinstance(t, ast.Name)}
+        looped = {node.target.id: seqs[node.iter.id] for node in ast.walk(tree)
+                  if isinstance(node, ast.For) and isinstance(node.target, ast.Name)
+                  and isinstance(node.iter, ast.Name) and node.iter.id in seqs}
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self.func_docs[node.name] = (ast.get_docstring(node) or "").strip().split("\n", 1)[0].strip()
@@ -436,6 +444,11 @@ class _Backend:
                 self.rpcs.add(_first_str(node))
             elif name in ("register_pipeline_node", "register_automation_node") and _first_str(node):
                 self.nodes.add(_first_str(node))
+            elif name == "tool" and node.args and isinstance(node.args[0], ast.Name) and not _kw_str(node, "name") \
+                    and node.args[0].id in looped:
+                for fn in looped[node.args[0].id]:
+                    self.tools.add(fn)
+                    self.tool_funcs[fn] = fn
             elif name == "tool" and node.args and isinstance(node.args[0], ast.Name):
                 self.tools.add(_kw_str(node, "name") or node.args[0].id)
                 self.tool_funcs[_kw_str(node, "name") or node.args[0].id] = node.args[0].id
