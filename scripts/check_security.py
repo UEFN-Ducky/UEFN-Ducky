@@ -127,6 +127,31 @@ def _pip_audit(root: Path) -> tuple[str, bool]:
     return out or f"exit {code}", False
 
 
+def _venv_audit(root: Path) -> tuple[str, bool]:
+    """Audit what the build venv really holds: ``-r`` resolves ``>=`` to the newest
+    release, so it stays green while an old, vulnerable copy sits in the venv and ships."""
+    site = root / ".venv" / "Lib" / "site-packages"
+    if not site.is_dir():
+        return "skip (no .venv)", True
+    code, out = _run(
+        [sys.executable, "-m", "pip_audit", "--path", str(site), "--skip-editable"], cwd=root
+    )
+    if code == 0:
+        return "ok", True
+    return out or f"exit {code}", False
+
+
+def _npm_targets(root: Path) -> list[Path]:
+    """package.json files to audit. A vendored bundle without a lockfile ships prebuilt
+    with no installed dependencies, so there is nothing for npm audit to read."""
+    return sorted(
+        p
+        for p in root.rglob("package.json")
+        if "node_modules" not in p.parts
+        and not ("vendor" in p.parts and not (p.parent / "package-lock.json").is_file())
+    )
+
+
 def _npm_summary(raw: str) -> str:
     data = json.loads(raw)
     counts = data.get("metadata", {}).get("vulnerabilities") or {}
@@ -143,7 +168,7 @@ def _npm_summary(raw: str) -> str:
 
 
 def _npm_audit(root: Path) -> tuple[str, bool]:
-    pkgs = sorted(p for p in root.rglob("package.json") if "node_modules" not in p.parts)
+    pkgs = _npm_targets(root)
     if not pkgs:
         return "skip (no package.json)", True
     npm = shutil.which("npm")
@@ -189,6 +214,15 @@ def _self_check() -> None:
     )
     assert "brace-expansion (high)" in _npm_summary(sample)
     assert "monaco-languageclient" not in _npm_summary(sample)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for rel in ("package.json", "vendor/bundle/package.json", "vendor/locked/package.json"):
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text("{}", encoding="utf-8")
+        (root / "vendor/locked/package-lock.json").write_text("{}", encoding="utf-8")
+        got = [p.parent.relative_to(root).as_posix() for p in _npm_targets(root)]
+        assert got == [".", "vendor/locked"], got
+        assert _venv_audit(root) == ("skip (no .venv)", True)
     print("self-check: ok")
 
 
@@ -214,6 +248,7 @@ def main() -> int:
         checks = (
             ("gitleaks", lambda: _gitleaks(root, exe)),
             ("pip-audit", lambda: _pip_audit(root)),
+            ("venv-audit", lambda: _venv_audit(root)),
             ("npm-audit", lambda: _npm_audit(root)),
         )
         for label, fn in checks:

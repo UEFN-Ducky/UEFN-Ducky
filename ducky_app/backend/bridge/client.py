@@ -272,7 +272,8 @@ def _post_json_locked(
         req = urllib.request.Request(
             url,
             data=payload,
-            headers={"Content-Type": "application/json"},
+            # The listener refuses a POST without this header (blocks browser drive-bys).
+            headers={"Content-Type": "application/json", "X-Ducky-Listener": "1"},
             method="POST",
         )
         try:

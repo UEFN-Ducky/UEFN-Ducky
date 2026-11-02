@@ -14,9 +14,9 @@ pystray>=0.19.5
 pywebview>=5.0
 # Team plugin data is AES-256-GCM encrypted with each team's key (already shipped via pywebview/PyJWT).
 cryptography==50.0.2
-Pillow>=10.0.0
+Pillow>=13.0.0
 # Workflow document nodes (PDF text and images); pure Python.
-pypdf>=5.0
+pypdf>=6.21.4
 # Workflow runs across processes (backend/automations/live_runs.py): which owners are still alive.
 psutil>=7.0
 # Optional: enables the AI tools (ai_scene_command, ai_generate_python).
@@ -38,3 +38,15 @@ iced-x86==1.21.0
 # The model files come from build/fetch_search_model.py (pinned, SHA-256 checked).
 numpy==2.5.4
 tokenizers==0.23.3
+# Security floors for transitive deps (pip-audit, 2026-11-01). The build installs with
+# --upgrade, so an old copy in the build env cannot ship.
+PyJWT>=2.15.0
+urllib3>=2.8.0
+certifi>=2026.10.18
+pyasn1>=0.6.5
+filelock>=4.2.1
+idna>=3.15
+starlette>=1.3.1
+python-multipart>=0.0.31
+pydantic-settings>=2.14.2
+fsspec>=2026.6.0

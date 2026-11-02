@@ -330,3 +330,27 @@ def test_the_leads_own_change_does_not_wake_the_lead(notices, monkeypatch):
     reports = events.completion_reports(doc("pending"), doc("cancelled"))
     events.deliver_reports(doc("cancelled"), reports)
     assert len(notices) == 1 and "cancelled step Verify" in notices[0]["body"]
+
+
+def test_a_leads_reassign_notes_or_new_step_nudge_the_member_but_its_own_notes_dont(team, notices, monkeypatch):
+    # Plan 14283125831b: re-setting the same assignee and rewriting an in_progress point were no
+    # change at all, so the stopped member never started. The keeper reads ``nudged_at``.
+    from backend.workspace import identity
+
+    def nudged(doc, node_id):
+        return plans._walk_find(doc["nodes"], node_id)[2].get("nudged_at")
+
+    plans.update_node("coord", "a", assignee="builder", project_root=team)  # notices fixture: the member calls
+    plans.update_node("coord", "a1", status="in_progress", body_markdown="my notes", project_root=team)
+    doc = plans.load_plan("coord", project_root=team)
+    assert nudged(doc, "a") is None and nudged(doc, "a1") is None
+    monkeypatch.setattr(identity, "resolve_context", lambda: SimpleNamespace(conv_id="coord", ducky_name="Lead"))
+    doc = plans.update_node("coord", "a", assignee="builder", project_root=team)  # same owner again
+    first = nudged(doc, "a")
+    assert first
+    doc = plans.update_node("coord", "a1", body_markdown="Retry: the API is back.", project_root=team)
+    assert nudged(doc, "a1") and nudged(plans.load_plan("coord", project_root=team), "a") == first  # it persists
+    doc = plans.add_node("coord", content="One more", parent_id="a", project_root=team)
+    assert nudged(doc, doc["nodes"][0]["children"][-1]["id"])
+    monkeypatch.setattr(identity, "resolve_context", lambda: None)  # the person, in the plan view
+    assert nudged(plans.update_node("coord", "a2", body_markdown="Use v2.", project_root=team), "a2")

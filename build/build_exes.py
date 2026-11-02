@@ -332,7 +332,8 @@ def main() -> int:
         app_version = _bump_package_version(init_py)
 
     # Deps first: write_ico below needs Pillow, so this must run before it.
-    pip = [sys.executable, "-m", "pip", "install", "pyinstaller", "-r", str(req)]
+    # --upgrade: a ">=" floor already met by an old, vulnerable copy would otherwise ship.
+    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller", "-r", str(req)]
     print(">", " ".join(pip))
     subprocess.run(pip, check=True, cwd=str(root))
     from runtime_versions import validate as validate_runtime_versions
