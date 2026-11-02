@@ -1,10 +1,7 @@
 # Manual Store app publish (Setup.exe). Never on push / PR / cron.
 # Open-source PRs never get DUCKYOS_API_KEY. Fork workflows cannot publish.
-# Environment store-publish requires UEFN-Ducky/officers approval — Write
-# maintainers can merge PRs but cannot finish a Store publish without an officer.
-# Officers may Run this workflow from main. They cannot merge edits to this file
-# (CODEOWNERS @UEFN-Ducky/admins + required code-owner review). Secrets inject
-# only after officers approval, and only for the main branch.
+# No GitHub environment: runs never create deployment entries. DUCKYOS_API_KEY is
+# a repository secret. Edits to this file need CODEOWNERS @UEFN-Ducky/admins review.
 #
 # Same release as a local one: the three release/publish_app.py steps
 # (RELEASE_STEPS in that file) test, build + sign (app EXEs, Inno engine and its
@@ -40,7 +37,6 @@ jobs:
     name: build, sign and publish Setup
     runs-on: windows-latest
     timeout-minutes: 120
-    environment: store-publish
     env:
       DUCKYOS_API_KEY: ${{ secrets.DUCKYOS_API_KEY }}
       DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
@@ -79,7 +75,7 @@ jobs:
         shell: bash
         run: |
           if [ -z "${DUCKYOS_API_KEY}" ]; then
-            echo "Missing DUCKYOS_API_KEY (environment secret store-publish)."
+            echo "Missing DUCKYOS_API_KEY (repository secret)."
             exit 1
           fi
           if [ -z "${DUCKYOS_BASE_URL}" ]; then
