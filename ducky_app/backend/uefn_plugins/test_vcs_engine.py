@@ -513,8 +513,10 @@ def test_a_lock_on_a_unit_this_pc_is_behind_on_pulls_first(pc: PC, ben: Ben) -> 
     mine = space_vcs.locks(pc.account, SPACE, PLUGIN)
     assert [(lk["unit"], lk["mine"], lk["reason"]) for lk in mine] == [("doc:card.pip", True, "manual")]
     now = time.time()
-    assert vcs_engine.renew_due(pc.account, SPACE, PLUGIN, active=True, now=now + 61) == ["doc:card.pip"]
-    assert vcs_engine.renew_due(pc.account, SPACE, PLUGIN, active=False, now=now + 61) == []
+    # Leases run 300 s: no renew a minute in (the Store's rate limit), one at 180 s.
+    assert vcs_engine.renew_due(pc.account, SPACE, PLUGIN, active=True, now=now + 61) == []
+    assert vcs_engine.renew_due(pc.account, SPACE, PLUGIN, active=True, now=now + 181) == ["doc:card.pip"]
+    assert vcs_engine.renew_due(pc.account, SPACE, PLUGIN, active=False, now=now + 181) == []
     assert vcs_engine.idle_auto_locks(pc.account, SPACE, PLUGIN, now=now + 400) == []  # manual: kept
     theirs = vcs_engine.acquire(pc.account, SPACE, PLUGIN, ben.client, [("doc:card.pip", "card.pip")])
     assert theirs["doc:card.pip"]["state"] == "locked"
@@ -712,6 +714,14 @@ def test_refused_items_wait_with_the_reason_and_the_rest_go_out(pc: PC, ben: Ben
     assert out["pushed"] == 1 and ben.doc("card.pip") == {"hp": 1}
     r = pc.row("big.bin", "asset")
     assert (r["sync_state"], r["sync_error"], r["dirty"]) == ("refused", conf.TOO_BIG, 1)
+
+
+def test_too_many_requests_on_heads_is_a_retry_never_an_error(pc: PC, monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.uefn_plugins.ledger import Retry as BusyRetry
+
+    monkeypatch.setattr(pc.backend, "heads", lambda *a, **k: BusyRetry(40.0))
+    got = vcs_engine.refresh(pc.account, SPACE, [PLUGIN], pc.backend)
+    assert got["state"] == "retry" and got["after"] == 40.0 and "40 s" in got["error"]
 
 
 def test_offline_backs_off_and_a_forced_round_goes_anyway(pc: PC, ben: Ben, world: conf.FakeWorld) -> None:

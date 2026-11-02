@@ -20,6 +20,11 @@ const api = vi.hoisted(() => ({
   plugin_scope_choices: vi.fn(),
 }));
 const remote = vi.hoisted(() => ({ on: false }));
+const tabs = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock("../plugin-ui/openPluginUiTab", async (orig) => ({
+  ...(await orig<typeof import("../plugin-ui/openPluginUiTab")>()),
+  requestOpenPluginUiTab: tabs.open,
+}));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => remote.on }));
 const push = vi.hoisted(() => ({ handlers: new Set<(event: Record<string, unknown>) => void>() }));
 vi.mock("../hooks/usePanelPushBus", () => ({
@@ -368,5 +373,35 @@ describe("Team and Live in the title bar", () => {
     fireEvent.click(await waitFor(trigger));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Start live" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Couldn't go live: no link");
+  });
+
+  it("\"N to send\" is a button into the Team modal's Changes, where each queued item is listed", async () => {
+    api.live_overview.mockResolvedValue(overview(team()));
+    mindful({ pending: 3, outgoing: [
+      { kind: "doc", key: "card.pip", name: "card.pip", size: 12, deleted: false, state: "queued", reason: "", attempts: 0 },
+    ] });
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    fireEvent.click(await waitFor(trigger));
+    fireEvent.click(await screen.findByRole("button", { name: "See what's being sent" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Your changes on this PC, per plugin, before they go to the team.")).toBeTruthy();
+    expect(within(dialog).getByText("3 to send")).toBeTruthy();
+  });
+
+  it("nothing waiting: no queue button", async () => {
+    api.live_overview.mockResolvedValue(overview(team()));
+    mindful();
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    fireEvent.click(await waitFor(trigger));
+    await screen.findByRole("button", { name: "Settings" });
+    expect(screen.queryByRole("button", { name: "See what's being sent" })).toBeNull();
+  });
+
+  it("Storage opens the Ducky Account plugin's Storage tab", async () => {
+    api.live_overview.mockResolvedValue(overview());
+    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
+    fireEvent.click(await waitFor(trigger));
+    fireEvent.click(await screen.findByRole("button", { name: "Storage" }));
+    expect(tabs.open).toHaveBeenCalledWith("account", "account-storage", "Storage");
   });
 });

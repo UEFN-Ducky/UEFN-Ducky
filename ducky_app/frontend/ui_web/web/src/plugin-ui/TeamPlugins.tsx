@@ -15,6 +15,11 @@ export type TeamPluginsSection = "overview" | ScopeTab;
 
 /** Rows a folded-open plugin shows before "Open". */
 const PREVIEW = 5;
+/** Changes lists this many queued items folded open, then "+N more". */
+const CHANGES_SHOWN = 50;
+
+/** The team copy can't sync (or the server asked to wait) and this plugin has something waiting. */
+const stuck = (row: TeamPluginRow) => row.state === "offline" || row.state === "error" || row.state === "retry";
 
 const INTRO: Record<TeamPluginsSection, string> = {
   overview: "Every plugin on this team. Open one for its changes, history and settings.",
@@ -72,6 +77,10 @@ function badge(row: TeamPluginRow, section: TeamPluginsSection): { text: string;
   }
   if (section === "history") return { text: typeof row.head === "number" ? `#${row.head}` : "" };
   if (section === "settings") return { text: row.mode === "manual" ? "Manual" : row.mode ? "Auto" : "" };
+  // Busy (too many requests) only matters to a plugin with something waiting; the rest are up to date.
+  if (row.state === "retry" && (row.pending || row.outgoing.length || row.incoming)) {
+    return { text: "Server busy · retrying", tone: "warn" };
+  }
   if (row.state === "offline" || row.state === "error") return { text: "Couldn't sync", tone: "error" };
   if (section === "incoming" || section === "overview") {
     if (row.blocked.length) return { text: `${row.blocked.length} failed`, tone: "warn" };
@@ -163,7 +172,22 @@ function Preview({ row, section, onOpen }: { row: TeamPluginRow; section: TeamPl
       void readActiveTeam();
     }
   };
+  const retry = async () => {
+    setBusy(true);
+    try {
+      await getApi()?.plugin_scope_sync?.(row.pluginId, true);
+    } finally {
+      setBusy(false);
+      void readActiveTeam();
+    }
+  };
   const lines: ReactNode[] = [];
+  if (stuck(row) && row.error) {
+    lines.push(<LedgerLine key="why" verb={row.state === "retry" ? "busy" : "failed"} icon="none"
+      tone={row.state === "retry" ? undefined : "blocked"}
+      name={row.state === "retry" ? "The server asked to wait" : row.state === "offline" ? "Offline" : "Couldn't sync"}
+      detail={row.error} />);
+  }
   if (section === "incoming" || section === "overview") {
     if (row.incoming) {
       lines.push(<LedgerLine key="in" verb="incoming" name={plural(row.incoming, "change")}
@@ -176,10 +200,15 @@ function Preview({ row, section, onOpen }: { row: TeamPluginRow; section: TeamPl
     }
   }
   if (section === "changes" || section === "overview") {
-    for (const o of row.outgoing.slice(0, PREVIEW)) {
+    const cap = section === "changes" ? CHANGES_SHOWN : PREVIEW;
+    for (const o of row.outgoing.slice(0, cap)) {
       lines.push(<LedgerLine key={`o:${o.kind}:${o.key}`} verb={o.deleted ? "delete" : "send"} name={o.name || o.key}
         tone={o.state === "blocked" || o.state === "refused" ? "blocked" : undefined}
         detail={[o.size ? formatBytes(o.size) : "", outgoingStateText(o.state, o.reason, o.attempts)].filter(Boolean).join(" · ")} />);
+    }
+    if (row.outgoing.length > cap) {
+      lines.push(<LedgerLine key="o:more" verb="" icon="none" name={`+${row.outgoing.length - cap} more`}
+        detail="Details lists every one" />);
     }
   }
   if (section === "conflicts" || section === "overview") {
@@ -213,6 +242,11 @@ function Preview({ row, section, onOpen }: { row: TeamPluginRow; section: TeamPl
       {section === "history" ? <HistoryLines row={row} />
         : lines.length ? lines : <p className="team-ledger__empty">Nothing here for {row.label}.</p>}
       <div className="team-ledger__actions">
+        {stuck(row) && getApi()?.plugin_scope_sync ? (
+          <button type="button" className="plugin-scope-btn plugin-scope-btn--row" disabled={busy} onClick={() => void retry()}>
+            Retry now
+          </button>
+        ) : null}
         {canGet ? (
           <button type="button" className="plugin-scope-btn plugin-scope-btn--row" disabled={busy} onClick={() => void get()}>
             {row.held && row.incoming ? "Update now" : "Get now"}

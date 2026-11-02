@@ -145,7 +145,9 @@ CONFLICT_MOVES = 3
 MOVES_BACKOFF_S = (30.0, 120.0)
 GROUP_WAIT_S = 24 * 3600.0
 FETCH_WORKERS = 4
-LOCK_RENEW_S = 60.0
+# Leases run 300 s on the server: renewing at 180 s keeps 2 minutes in hand and sends a
+# fifth of the lock calls a 60 s renew did (the Store's rate limit is the account's).
+LOCK_RENEW_S = 180.0
 AUTO_RELEASE_S = 30.0  # an auto lock frees this long after its last change went out
 TAB_CLOSED_RELEASE_S = 10.0  # the plugin's tab closed this long ago: its auto locks go
 BEAT_EVERY_S = 60.0
@@ -2823,6 +2825,8 @@ def refresh(account: str, space: str, plugins: list[str], backend: Any, *, now: 
     if not isinstance(got, Heads):
         if isinstance(got, Paused):
             repo.sync_put(account, space, state="paused")
+        if isinstance(got, Retry):  # the server is busy (too many requests): wait, it isn't an error
+            return {"state": "retry", "error": reason_of(got), "after": float(got.after)}
         return {"state": "paused" if isinstance(got, Paused) else "offline" if isinstance(got, Offline) else "error",
                 "error": reason_of(got)}
     if not got.v2:

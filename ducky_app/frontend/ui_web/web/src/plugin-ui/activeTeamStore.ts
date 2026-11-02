@@ -31,7 +31,7 @@ export type ActiveTeam = TeamOverview & {
 export type CopyDot = "error" | "warn" | "ok" | "local";
 
 /** Sync states of a team copy that mean it waits (yellow); "error" is red. */
-const WAITING_STATES = new Set(["offline", "paused", "waiting", "locked", "lost", "unavailable", "reset", "binding"]);
+const WAITING_STATES = new Set(["offline", "paused", "waiting", "locked", "lost", "unavailable", "reset", "binding", "retry"]);
 
 /** The dot of a team copy this PC isn't on now, from its sync state and changes still to send. */
 export function copyDot(state?: string, pending = 0): CopyDot {

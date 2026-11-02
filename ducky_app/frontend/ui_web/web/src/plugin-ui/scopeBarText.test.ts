@@ -180,6 +180,8 @@ describe("the bar's one status phrase", () => {
     // The raw reason stays off the bar: the Changes tab shows it.
     expect(say({ ...busy(), state: "error", error: "HTTP 502", nextTry: NOW / 1000 + 40 })).toBe("Couldn't sync · 3 to send · retry in 40 s");
     expect(say({ ...busy(), state: "offline", error: "Network error: <urlopen error [WinError 10060] ...>" })).toBe("Offline · 3 to send");
+    // Too many requests is a wait, never "Couldn't sync".
+    expect(say({ ...busy(), state: "retry", error: "busy, retry in 40 s", nextTry: NOW / 1000 + 40 })).toBe("Server busy · 3 to send · retry in 40 s");
     expect(say({ ...busy(), state: "no_provider" })).toBe("Not connected: Ducky Account isn't running · 3 to send");
     expect(say({ ...busy(), state: "unavailable", error: "permission denied" })).toBe(
       "Alpha isn't available right now (permission denied). Read-only until it's back.");

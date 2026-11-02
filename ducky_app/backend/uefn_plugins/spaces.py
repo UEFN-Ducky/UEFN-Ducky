@@ -733,7 +733,8 @@ def team_fields(account: str, space: str, plugin: str, *, state: str = "ok") -> 
                       "attempts": int(b["attempts"])} for b in space_vcs.blocked(account, space, plugin)],
         )
         if state == "ok" and head["state"] in ("offline", "error", "retry"):
-            out.update(state="offline" if head["state"] == "offline" else "error", error=str(head["error"] or ""))
+            # retry: the server is busy (too many requests); it waits nextTry, it isn't broken.
+            out.update(state=head["state"], error=str(head["error"] or ""))
         elif state == "ok" and head["state"] == "paused":
             out.update(state="paused", error=str(head["error"] or ""))
     if state == "lost":

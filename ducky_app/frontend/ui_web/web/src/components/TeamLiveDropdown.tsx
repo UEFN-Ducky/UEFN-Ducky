@@ -5,6 +5,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
 import { LiveMenu } from "../plugin-ui/LiveMenu";
 import { useLiveFollow, writeLiveFollow } from "../plugin-ui/liveFollow";
+import { requestOpenPluginUiTab } from "../plugin-ui/openPluginUiTab";
 import { OPEN_TEAM_MODAL_EVENT } from "../plugin-ui/scopeActivity";
 import { groupName } from "../plugin-ui/scopeBarText";
 import { copyDot, readActiveTeam, useActiveTeam, type ActiveTeam, type CopyDot } from "../plugin-ui/activeTeamStore";
@@ -209,6 +210,21 @@ export function TeamLiveDropdown() {
     setOpen(false);
     setModal("overview");
   };
+  // "68 to send": the Team modal's Changes, every plugin's queued items.
+  const changes = () => {
+    setOpen(false);
+    setModal(team?.conflicts ? "conflicts" : team?.pending ? "changes" : "incoming");
+  };
+  // ponytail: the account plugin is default-on and owns teams; no installed check until a team works without it.
+  const storage = () => {
+    setOpen(false);
+    requestOpenPluginUiTab("account", "account-storage", "Storage");
+  };
+  const queued = team?.shared ? [
+    team.pending ? `${team.pending} to send` : "",
+    team.incoming ? `${team.incoming} coming in` : "",
+    team.conflicts ? plural(team.conflicts, "conflict") : "",
+  ].filter(Boolean).join(" · ") : "";
 
   return (
     <div className="connection-status-root no-drag">
@@ -232,12 +248,24 @@ export function TeamLiveDropdown() {
       </button>
       <DropdownPanel anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} width={320} placement="bottom">
         <CopyPicker team={team} onSwitched={() => void readLiveOverview()} />
+        {queued ? (
+          <button type="button" className="team-live-menu__settings team-live-menu__queue" aria-label="See what's being sent"
+            onClick={changes}>
+            <span className="team-copy__icon" aria-hidden><Icons.Upload /></span>
+            <span>{queued}</span>
+            <span className="team-live-menu__go" aria-hidden><Icons.ChevronRight /></span>
+          </button>
+        ) : null}
         {error ? <p className="plugin-scope-menu__note plugin-scope-menu__note--warn live-menu__error" role="alert">{error}</p> : null}
         {teams.length ? (
           <LiveMenu teams={teams} busy={busy} onJoin={join} onLeave={leave} onInvite={invite} follow={follow} onFollow={writeLiveFollow}
             current={team?.current} />
         ) : <div className="plugin-scope-menu__empty">No team yet.</div>}
         <div className="team-live-menu__foot">
+          <button type="button" className="team-live-menu__settings" onClick={storage}>
+            <span className="team-copy__icon" aria-hidden><Icons.Archive /></span>
+            <span>Storage</span>
+          </button>
           <button type="button" className="team-live-menu__settings" onClick={settings}>
             <span className="team-copy__icon" aria-hidden><Icons.Gear /></span>
             <span>Settings</span>

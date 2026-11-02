@@ -224,7 +224,7 @@ def _ledger_round(account: str, space: str, team: dict[str, Any], *, force: bool
         seen = vcs_engine.refresh(account, space, sorted(team), next(iter(team.values())), now=now)
         if seen["state"] != "ok":
             error = str(seen.get("error") or "")
-            if seen["state"] in ("offline", "error"):  # the bar says "Not synced" and why
+            if seen["state"] in ("offline", "error", "retry"):  # the bar says "Not synced" (or busy) and why
                 repo.sync_put(account, space, called_at=now, state=seen["state"], error=error)
             else:
                 repo.sync_put(account, space, called_at=now)
@@ -251,7 +251,7 @@ def _ledger_round(account: str, space: str, team: dict[str, Any], *, force: bool
     fields: dict[str, Any] = {"called_at": now}
     if not failed:
         fields["synced_at"] = now
-        if repo.sync_get(account, space)["state"] in ("offline", "error"):
+        if repo.sync_get(account, space)["state"] in ("offline", "error", "retry"):
             fields.update(state="ok", error="")
     repo.sync_put(account, space, **fields)
     state, error = failed[0] if failed else ("ok", "")

@@ -371,6 +371,12 @@ export function statusPhrase(status: PluginScopeStatus, nowMs: number): StatusPh
     const retry = wait > 0 ? ` · retry in ${durationText(wait)}` : "";
     return { key: "not_synced", text: `${state === "offline" ? "Offline" : "Couldn't sync"}${queued}${retry}`, tone: "error" };
   }
+  if (state === "retry") {
+    // Too many requests: the server asked to wait. Nothing is wrong; the changes go after the wait.
+    const wait = status.nextTry ? status.nextTry - nowMs / 1000 : 0;
+    const retry = wait > 0 ? ` · retry in ${durationText(wait)}` : "";
+    return { key: "not_synced", text: `Server busy${queued}${retry}`, tone: "warn" };
+  }
   if (state === "no_provider") {
     return { key: "no_provider", text: `${status.error || "Not connected: Ducky Account isn't running"}${queued}`, tone: "error" };
   }
