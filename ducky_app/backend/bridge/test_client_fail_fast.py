@@ -102,8 +102,9 @@ def test_a_timeout_names_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
     sources: list[str] = []
     monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: sources.append(src))
     bridge._record_bridge_error("Command 'save_current_level' timed out after 30.0s", "save_current_level")
-    bridge._record_bridge_error("Command 'ping' timed out waiting for listener idle", "ping")
-    assert sources == ["bridge_timeout.save_current_level", "bridge_busy.ping"]
+    bridge._record_bridge_error("Command 'ping' timed out waiting for listener idle", "ping")  # busy = alive
+    bridge._record_bridge_error("Command 'reload_listener' timed out waiting for listener idle", "reload_listener")
+    assert sources == ["bridge_timeout.save_current_level", "bridge_busy.reload_listener"]
     # The anonymous code keeps it, and it still counts as a bridge error.
     assert usage_events.code_of(sources[0]) == "bridge_timeout.save_current_level"
     assert usage_events.where_of(sources[0]) == "bridge"

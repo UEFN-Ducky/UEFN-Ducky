@@ -114,6 +114,11 @@ def _record_bridge_error(message: str, command: str = "") -> None:
     # (bridge_busy/bridge_timeout.describe_commands, 5 on Oct 26-27 2026).
     if command == "describe_commands":
         return
+    # A ping that waited on a busy listener proves the editor is alive (a long command,
+    # PIE, a Verse build holds it): status, not a failure. bridge_busy.ping was 375 of 381
+    # errors on Nov 2 2026, one per status poll while the editor worked.
+    if command == "ping" and "waiting for listener idle" in message:
+        return
     if "waiting for listener idle" not in message and _lone_ping_timeout(command):
         return
     source = "bridge"
