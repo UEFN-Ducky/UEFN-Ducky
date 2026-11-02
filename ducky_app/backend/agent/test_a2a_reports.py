@@ -373,7 +373,7 @@ def test_a_report_from_a_member_waiting_on_others_is_not_repeated(monkeypatch):
     # Oct 12 2026: the lead got a finished report every half minute because the member still
     # owned a step that waited on a teammate.
     from backend.agent import a2a_broker as b
-    from backend.agent.coding_agents import plans, team_plan_events
+    from backend.agent.coding_agents import plans
 
     plan = {"status": "open", "nodes": [
         {"id": "done", "status": "completed", "assignee": "m1"},

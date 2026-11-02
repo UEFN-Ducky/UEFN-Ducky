@@ -841,7 +841,8 @@ def test_actual_done_posts_one_hub_note_without_broadcast_under_concurrency(monk
         barrier.wait(timeout=2)
         am._push_agent_stopped(lambda e: None, "m1", "real", "done")
     workers = [threading.Thread(target=stop) for _ in range(2)]
-    for worker in workers: worker.start()
+    for worker in workers:
+        worker.start()
     barrier.wait(timeout=2)
     for worker in workers:
         worker.join(2)

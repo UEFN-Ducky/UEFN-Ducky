@@ -126,7 +126,6 @@ class PanelApiProjectMixin:
 
     def open_asset_in_uefn(self, relative_path: str) -> dict[str, object]:
         """Reveal a project asset in UEFN (Content Browser). Rich preview UI is the Store plugin."""
-        from frontend.settings import PANEL_LISTENER_PORT
 
         content_rel = _pa.content_package_rel(relative_path)
         asset_path = f"/Game/{content_rel}"
@@ -151,7 +150,6 @@ class PanelApiProjectMixin:
 
     def _uefn_asset_path_for_content(self, relative_path: str) -> str:
         """Map ``Content/...`` to ``/{Project}/...`` package/folder path for EditorAssetLibrary."""
-        from frontend.settings import PANEL_LISTENER_PORT
 
         from backend.bridge import post_command_to_listener
 
@@ -165,7 +163,6 @@ class PanelApiProjectMixin:
 
     def _uefn_delete_content_entry(self, relative_path: str) -> None:
         """Delete uassets/umaps (or a folder of them) through UEFN — disk-only delete leaves ghosts."""
-        from frontend.settings import PANEL_LISTENER_PORT
 
         from backend.bridge import post_command_to_listener
 
@@ -206,7 +203,6 @@ class PanelApiProjectMixin:
             # folder delete the path is usually gone — skip soft-trash then.
             result = _pa.delete_project_entry(rel)
         else:
-            from pathlib import Path
 
             result = {"path": rel.strip("/"), "name": _pa.Path(rel).name}
         # All windows purge diagnostics for the dead path and close the LSP document.
@@ -491,7 +487,6 @@ class PanelApiProjectMixin:
         blocked = self._require_tester_plugin()
         if blocked:
             return {**blocked, "trace": [], "effects": []}
-        import json
 
         from backend.testing.device_sim import simulate_device_event
 
@@ -558,7 +553,6 @@ class PanelApiProjectMixin:
         blocked = self._require_tester_plugin()
         if blocked:
             return blocked
-        import os
 
         from backend.bridge import resolve_workspace_path
         from backend.testing.verse_harness import scaffold_content
@@ -637,7 +631,6 @@ class PanelApiProjectMixin:
         blocked = self._require_tester_plugin()
         if blocked:
             return blocked
-        from frontend.agent_profiles import list_bundled_agent_profile_templates
 
         profile = next(
             (p for p in _pa.list_bundled_agent_profile_templates() if str(p.get("id") or "") == "tester"),

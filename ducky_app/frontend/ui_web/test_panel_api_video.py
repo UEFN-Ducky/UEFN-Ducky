@@ -148,6 +148,8 @@ def test_video_prep_status_and_retry(monkeypatch):
 def test_a_file_attached_to_an_answer_is_saved_in_that_chat(monkeypatch, tmp_path):
     import base64
 
+    from pathlib import Path
+
     import frontend.ui_web.conversation_attachments as ca
 
     att = tmp_path / "c1" / "attachments"
@@ -156,5 +158,5 @@ def test_a_file_attached_to_an_answer_is_saved_in_that_chat(monkeypatch, tmp_pat
     out = PanelApi().save_chat_file("c1", "Island Kit.html", base64.b64encode(page.encode()).decode())
     assert out["ok"] and out["path"].endswith("_Island_Kit.html")
     assert (att / out["path"].split("\\")[-1].split("/")[-1]).read_text(encoding="utf-8") == page
-    assert "A" * 600 not in open(out["readable_path"], encoding="utf-8").read()
+    assert "A" * 600 not in Path(out["readable_path"]).read_text(encoding="utf-8")
     assert PanelApi().save_chat_file("c1", "x.bin", "not base64!!")["ok"] is False

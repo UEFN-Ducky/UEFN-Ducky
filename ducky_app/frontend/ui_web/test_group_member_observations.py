@@ -4,7 +4,6 @@ import pytest
 
 from frontend.settings import PanelSettings
 from frontend.ui_web import project_chats as chats, group_orchestrator as groups
-import frontend.ui_web.panel_api  # Initialize the public API before its mixin.
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 from backend.agent.coding_agents import plans
 

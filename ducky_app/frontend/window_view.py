@@ -1130,7 +1130,7 @@ def _monitors() -> list[tuple[int, int, int, int]]:
 
     user32.EnumDisplayMonitors(0, 0, MONITORENUMPROC(_cb), 0)
     found.sort(key=lambda m: (m[4], m[0], m[1]))
-    return [(l, t, w, h) for l, t, w, h, _p in found] or [(0, 0, 1920, 1080)]
+    return [(left, t, w, h) for left, t, w, h, _p in found] or [(0, 0, 1920, 1080)]
 
 
 def _screen_metrics() -> tuple[int, int, int, int, int, int]:

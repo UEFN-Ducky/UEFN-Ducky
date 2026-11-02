@@ -1,7 +1,7 @@
 """Cancelled work stays visible without inflating progress denominators."""
 import pytest
 from backend.agent.coding_agents import plans
-from backend.agent.coding_agents.test_plan_assignment import team
+from backend.agent.coding_agents.test_plan_assignment import team  # noqa: F401  (fixture)
 
 
 @pytest.mark.parametrize("legacy", [False, True])

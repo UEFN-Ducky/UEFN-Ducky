@@ -408,7 +408,6 @@ if __name__ == "__main__":
     test_hung_register_does_not_wedge_store_toggles()
     test_reload_single_plugin_register_is_async()
     test_rmtree_retry_recovers_from_winerror_32()
-    test_parallel_plugin_replaces_do_not_overlap_rmtree()
     print("store_sync self-check OK")
 
 

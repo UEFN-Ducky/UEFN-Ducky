@@ -2580,7 +2580,9 @@ def _invoke_tool(name: str, arguments: dict[str, Any], node_id: str = "", typed:
     if fn is None:
         return {"ok": False, "error": f"tool has no fn: {name}"}
     stream = _terminal_output_stream(str(arguments.get("session_id") or ""), node_id) if name == "ducky_terminal_run" else None
-    release_cancel = lambda: None
+    def release_cancel() -> None:
+        return None
+
     if name == "ducky_terminal_run" and _CANCEL.get() is not None:
         from backend.tools.panel.ducky_panel_terminal import _terminal_manager
 

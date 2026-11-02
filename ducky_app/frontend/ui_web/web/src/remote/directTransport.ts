@@ -868,7 +868,7 @@ export class DirectStreamSocket {
   }
 }
 
-function concat(chunks: Uint8Array[]): Uint8Array {
+function concat(chunks: Uint8Array[]): Uint8Array<ArrayBuffer> {
   let n = 0;
   for (const c of chunks) n += c.byteLength;
   const out = new Uint8Array(n);

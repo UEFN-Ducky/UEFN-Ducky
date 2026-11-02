@@ -57,7 +57,8 @@ def test_append_and_reservation_share_actual_lock(admissions):
     r.start()
     assert not outcomes
     finish.set()
-    t.join(2); r.join(2)
+    t.join(2)
+    r.join(2)
     assert len(outcomes) == 1 and outcomes[0]
 
 

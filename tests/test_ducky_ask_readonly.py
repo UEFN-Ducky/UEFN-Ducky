@@ -7,7 +7,7 @@ import pytest
 from backend.agent import runner, run_context, tools
 from backend.agent.providers.base import StreamEvent as E, StreamEventKind as K, ToolCallRequest as Call
 from frontend.ui_web import agent_modes as am
-from test_ducky_mode_dispatch import dispatch, QUALIFIED_CALLS, ASK_REFUSAL, qualified_call
+from test_ducky_mode_dispatch import dispatch, QUALIFIED_CALLS, ASK_REFUSAL, qualified_call  # noqa: F401  (dispatch: fixture)
 
 
 def tool(name, annotations=None):
@@ -64,7 +64,9 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
         return tools.ToolCallResult(ok=True, tool=name, data='{"evidence":"read result"}')
     monkeypatch.setattr(runner, "execute_tool", execute)
     def run(name="workspace_read_file", args=None, mode="ask", resume=False, attachments=None, failure="", calls=None):
-        seen.clear(); executed.clear(); events.clear()
+        seen.clear()
+        executed.clear()
+        events.clear()
         if resume and not conv.messages:
             conv.messages = [{"role": "user", "content": "Inspect", "text": "Inspect"}, {"role": "assistant", "content": "Earlier"}]
         class Provider:

@@ -857,7 +857,6 @@ def test_a_connection_the_site_closed_is_replaced_not_an_error() -> None:
 if __name__ == "__main__":
     test_pkce_pair_s256()
     test_device_login_polls_until_token()
-    test_auto_apply_store_updates_skips_local_and_unpaid()
     test_store_item_versions_strips_empty_and_keeps_changelog()
     test_store_item_versions_needs_slug()
     test_set_agent_caps_stays_on_desktop()

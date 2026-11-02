@@ -547,13 +547,6 @@ def folder_project_slug(folder_id: str) -> str:
     return _repo().folder_project_id(folder_id.strip()) or ""
 
 
-def conversation_project_slug(conv_id: str) -> str:
-    """The island a chat is stored under ("" when unknown or not on the database)."""
-    if not _use_db() or not (conv_id or "").strip():
-        return ""
-    return _repo().conv_project_id(conv_id.strip()) or ""
-
-
 def mark_folders_deleted(folder_ids: list[str], project_root: str | None = None) -> None:
     """Of these folders, the ones a delete removed: a stale folder list can't bring them back."""
     if not _use_db() or not folder_ids:

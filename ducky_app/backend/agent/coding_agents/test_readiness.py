@@ -77,9 +77,11 @@ def test_in_an_agent_host_a_missing_server_still_runs_the_turn(monkeypatch, outc
 @pytest.mark.parametrize("outcome", ["disabled", "exception", "cancelled"])
 def test_no_launch_on_start_failure_or_cancellation(monkeypatch, outcome):
     cancel = threading.Event()
-    if outcome == "cancelled": cancel.set()
+    if outcome == "cancelled":
+        cancel.set()
     def start():
-        if outcome == "exception": raise OSError("private details")
+        if outcome == "exception":
+            raise OSError("private details")
         assert outcome != "cancelled"
         return {"ok": False}
     monkeypatch.setattr(shared_mcp, "start_daemon_from_app", start)

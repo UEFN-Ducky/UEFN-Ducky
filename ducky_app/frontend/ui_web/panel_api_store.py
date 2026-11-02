@@ -599,7 +599,6 @@ class PanelApiStoreMixin:
         self.open_path_in_explorer(str(folder))
 
     def get_skill_info(self) -> dict[str, Any]:
-        from frontend.settings import default_app_data_dir
         from backend.skills.store import (
             appdata_skill_packs_dir,
             list_skill_packs,
@@ -1675,7 +1674,6 @@ class PanelApiStoreMixin:
 
     def prompt_save_skill_pack_export(self, filename: str, data_base64: str) -> dict[str, Any]:
         import base64
-        from pathlib import Path
 
         win = self._resolve_window()
         if win is None:
@@ -1709,7 +1707,6 @@ class PanelApiStoreMixin:
 
     def import_skill_pack(self, pack_id: str = "", replace: bool = False) -> dict[str, Any]:
         """Legacy path-based import (file dialog). Prefer import_skill_pack_bytes from the UI."""
-        from pathlib import Path
 
         from backend.skills.store import import_skill_pack_from_zip
 
@@ -2135,7 +2132,6 @@ class PanelApiStoreMixin:
 
     def open_mcp_plugins_folder(self) -> None:
         """Reveal AppData folder that holds mcp.json (legacy name)."""
-        import os
         import subprocess
 
         from backend.mcp_plugins.store import mcp_config_path, seed_mcp_plugins

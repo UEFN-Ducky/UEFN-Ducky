@@ -243,6 +243,8 @@ def test_kick_all_remote_clears_sessions_and_wakes_viewers(remote_auth):
     viewer = _Viewer()
     httpd._window_viewers.clear()
     httpd._window_viewers.append(viewer)
+    # A cursor past 0: polling from 0 is a fresh window, which by design never replays a kick.
+    httpd.publish_panel_events([{"type": "test_marker"}])
     before = httpd._event_seq
     try:
         httpd.kick_all_remote()

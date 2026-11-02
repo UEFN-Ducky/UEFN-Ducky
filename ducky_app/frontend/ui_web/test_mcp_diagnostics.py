@@ -99,7 +99,6 @@ def test_bounded_details_preserve_full_counts(observations):
 def test_agent_and_settings_report_parity_without_discovery_connect(observations, monkeypatch):
     from backend.agent import run_context, tools
     from backend.tools.panel import ducky_panel
-    from frontend.ui_web import panel_api  # Bootstrap the existing mixin import cycle.
     from frontend.ui_web.panel_api_store import PanelApiStoreMixin
     monkeypatch.setattr(tools, "list_mcp_tools", lambda **kw: pytest.fail("diagnostics must not discover/connect"))
     observations["failures"].add("docs")

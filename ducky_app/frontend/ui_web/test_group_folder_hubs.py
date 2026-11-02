@@ -13,7 +13,6 @@ from frontend.ui_web.project_chats import (
     delete_conversation,
     delete_folder,
     ensure_group_folder_hubs,
-    list_conversations,
     load_conversation,
     load_folders,
     move_conversation,

@@ -10,7 +10,7 @@ import zlib
 import pytest
 
 from backend.store import account_rows, db
-from backend.store.repos import chats, duckies, ducky_mirrors
+from backend.store.repos import chats, duckies
 from backend.uefn_plugins import data_crypto, scopes
 from backend.uefn_plugins.scopes import LOCAL, account_id_for
 

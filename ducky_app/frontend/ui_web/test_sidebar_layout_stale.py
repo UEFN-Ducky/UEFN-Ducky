@@ -6,7 +6,6 @@ into or out of Archive, and deletes tell every window which rows to drop.
 
 from __future__ import annotations
 
-import types
 from pathlib import Path
 
 import pytest

@@ -28,7 +28,6 @@ class _FakeCore:
     def __init__(self):
         self.posted = []
         self.messages = []
-        core = self
 
         class _Env:
             def CreateSharedBuffer(self, size):

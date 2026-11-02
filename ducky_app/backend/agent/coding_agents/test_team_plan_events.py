@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 import pytest
 from backend.agent.coding_agents import plans, team_plan_events as events
-from backend.agent.coding_agents.test_plan_assignment import team
+from backend.agent.coding_agents.test_plan_assignment import team  # noqa: F401  (fixture)
 
 @pytest.fixture
 def notices(monkeypatch):

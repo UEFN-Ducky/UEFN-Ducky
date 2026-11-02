@@ -30,8 +30,8 @@ import json
 from types import SimpleNamespace
 import pytest
 from backend.tools.panel import ducky_panel as panel, permission_prompt
-from frontend.ui_web import agent_modes, context_control
-from frontend.ui_web.test_context_session_reset import member
+from frontend.ui_web import agent_modes
+from frontend.ui_web.test_context_session_reset import member  # noqa: F401  (fixture)
 
 @pytest.mark.parametrize("wait", [False, True])
 @pytest.mark.parametrize("alias", [False, True])

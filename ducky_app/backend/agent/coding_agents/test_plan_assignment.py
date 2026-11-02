@@ -270,7 +270,6 @@ print(json.dumps(plans.assigned_plan_view('builder', sys.argv[1])))
 
 def test_open_team_steps_outrank_a_personal_plan(team):
     # Oct 12 2026: a member's private plan hid the step its lead assigned it.
-    from frontend.ui_web import panel_api  # initialize the public API before its mixin
     from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
     plans.update_node('coord', 'a', assignee='group-a', project_root=team)
     personal = plans.create_plan('builder', title='Personal', nodes=[
@@ -390,7 +389,6 @@ def test_deleted_assigned_node_falls_back_without_changing_master(team, monkeypa
 @pytest.mark.parametrize('backend', ['files', 'db'])
 @pytest.mark.parametrize('binding', ['valid', 'missing', 'deleted_owner', 'ambiguous', 'other_project', 'archived_master'])
 def test_archived_personal_reference_never_masks_canonical_assignment(team, monkeypatch, backend, binding, tmp_path):
-    from frontend.ui_web import panel_api
     from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
     monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
     archived = plans.save_plan({

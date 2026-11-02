@@ -686,6 +686,9 @@ def begin(version: str) -> None:
     try:
         import faulthandler
 
+        if _native_file is not None:  # a second begin(): hand the handler over, close the old file
+            faulthandler.disable()
+            _native_file.close()
         _native_file = open(_native_path(), "w", encoding="utf-8")  # noqa: SIM115 — must stay open for the crash handler
         # Only the crashing thread: on Windows faulthandler also fires on first-chance exceptions
         # COM and .NET handle themselves (0x8001010d), and walking the other threads' frames while

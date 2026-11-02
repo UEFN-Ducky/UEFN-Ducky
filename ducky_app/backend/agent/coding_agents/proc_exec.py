@@ -445,6 +445,13 @@ def run_streaming_process(
             result.stdin_writer.close()
         t_out.join(timeout=5)
         t_err.join(timeout=2)
+        # The readers are done (or gave up): close the pipes so no handle outlives the run.
+        for pipe in (proc.stdout, proc.stderr, proc.stdin):
+            try:
+                if pipe is not None:
+                    pipe.close()
+            except (OSError, ValueError):
+                pass
         unregister_process(conv_id, proc)
 
     result.returncode = proc.returncode if proc.returncode is not None else -1

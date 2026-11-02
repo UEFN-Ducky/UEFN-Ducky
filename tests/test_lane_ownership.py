@@ -28,8 +28,12 @@ def roster(tmp_path, monkeypatch):
     conv = Conversation(id=cid, title="Lane fixture", is_group=True, leader_conv_id="lead",
                         group_members=[{"member_conv_id": "a", "write_allowed": []},
                                        {"member_conv_id": "b", "write_allowed": []}])
-    load = lambda key: project_chats.load_conversation(key, str(project))
-    save = lambda row: project_chats.save_conversation(row, str(project))
+    def load(key):
+        return project_chats.load_conversation(key, str(project))
+
+    def save(row):
+        return project_chats.save_conversation(row, str(project))
+
     save(conv)
     monkeypatch.setattr(panel_api, "load_conversation", load)
     monkeypatch.setattr(panel_api, "save_conversation", save)

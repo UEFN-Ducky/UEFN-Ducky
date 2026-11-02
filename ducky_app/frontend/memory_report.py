@@ -152,7 +152,11 @@ def _gc(collect: bool, top: int) -> dict[str, Any]:
     out["garbage"] = len(gc.garbage)
     objects = gc.get_objects()
     out["tracked"] = len(objects)
-    counts = collections.Counter(type(o).__module__ + "." + type(o).__qualname__ for o in objects)
+    # str(): some extension types carry a non-str __module__ (None, a descriptor).
+    counts = collections.Counter(
+        f"{getattr(type(o), '__module__', None)}.{getattr(type(o), '__qualname__', type(o).__name__)}"
+        for o in objects
+    )
     del objects
     out["types"] = [{"type": k, "count": n} for k, n in counts.most_common(top)]
     return out

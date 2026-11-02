@@ -28,7 +28,7 @@ def _matte_for_colorkey(img: Any) -> Any:
     rgba = img.convert("RGBA")
     kr, kg, kb = _KEY_RGB
     out: list[tuple[int, int, int, int]] = []
-    for r, g, b, a in rgba.getdata():
+    for r, g, b, a in rgba.get_flattened_data():  # getdata() goes away in Pillow 14
         if int(a) < _ALPHA_CUTOFF:
             out.append((kr, kg, kb, 255))
             continue

@@ -8,7 +8,7 @@ from backend.agent import run_context
 from backend.agent.toolsets.plan_safe import mode_tool_block_reason
 from backend.server import ProtectedFastMCP
 from mcp.server.fastmcp.exceptions import ToolError
-from test_ducky_mode_dispatch import dispatch, invoke
+from test_ducky_mode_dispatch import dispatch, invoke  # noqa: F401  (dispatch: fixture)
 
 
 def catalog():

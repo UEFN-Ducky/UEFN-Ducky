@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 import urllib.error
-import urllib.request
+import urllib.request  # noqa: F401  (tests patch updater.urllib.request.urlopen)
 from pathlib import Path
 from typing import Any
 

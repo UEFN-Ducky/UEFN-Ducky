@@ -300,7 +300,7 @@ class PanelApiChatsMixin:
         hub_ids = _pa.group_hub_ids_in(scope, root)
         archived: list[str] = []
         if hub_ids:
-            from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
+            from frontend.ui_web.agent_modes import is_agent_running
 
             for hub_id in hub_ids:
                 targets = [hub_id]
@@ -1300,11 +1300,6 @@ class PanelApiChatsMixin:
         if not pid or not name or not old or old == name:
             return
         try:
-            from frontend.ui_web.project_chats import (
-                list_all_conversation_metadata,
-                load_conversation,
-                save_conversation,
-            )
 
             for meta in _pa.list_all_conversation_metadata():
                 if str(getattr(meta, "profile_id", "") or "").strip() != pid:
@@ -1692,7 +1687,7 @@ class PanelApiChatsMixin:
         root = self._chat_root(conv_id)
         leaving: list[str] = []
         if archiving:
-            from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
+            from frontend.ui_web.agent_modes import is_agent_running
 
             leaving = [conv_id, *_pa.conversation_descendant_ids(conv_id, root)]
             conv = _pa.load_conversation(conv_id, root)
@@ -1712,7 +1707,7 @@ class PanelApiChatsMixin:
         _pa.notify_chats_changed(open_tab=False, removed_conv_ids=leaving)
 
     def delete_conversation(self, conv_id: str, keep_inside: bool = False) -> None:
-        from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
+        from frontend.ui_web.agent_modes import is_agent_running
 
         root = self._chat_root(conv_id)
         if keep_inside:
@@ -1987,7 +1982,6 @@ class PanelApiChatsMixin:
                 conv_id, model, mode=mode, draft_text=draft, include_content=include_content
             )
         except Exception as exc:
-            import logging
 
             _pa.logging.getLogger(__name__).exception("get_context_usage failed for %s: %s", conv_id, exc)
             from frontend.ui_web.context_tokens import context_limit_for_model
