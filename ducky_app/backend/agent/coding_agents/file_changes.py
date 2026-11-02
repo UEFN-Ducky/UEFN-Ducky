@@ -348,6 +348,13 @@ class TurnFileChanges:
             return lambda _path: True  # the agent's own edit tool, reported without its paths
         return lambda path: os.path.normcase(str(Path(path).resolve())) in named
 
+    def _theirs(self, root: Path, path: Path, after: Snapshot) -> bool:
+        """Another run's journaled write (a parallel chat's workspace_* edit) left this exact
+        content: a shell call that ran meanwhile must not show or journal it as its own."""
+        stamp = self.journal.index_stamp(path.relative_to(root).as_posix(), project_root=str(root)) or {}
+        return bool(stamp.get("run_id")) and stamp.get("run_id") != self.ctx.run_id \
+            and stamp.get("hash", "") == after.digest
+
     def _record(self, root: Path, path: Path, before: Snapshot, after: Snapshot, tool: str) -> dict[str, Any]:
         relative = path.relative_to(root).as_posix()
         added, removed = line_delta(before.text, after.text)
@@ -387,18 +394,21 @@ class TurnFileChanges:
             # Snapshots always advance; only what this call could have written is its edit.
             # Another agent working in the same folder at the same time was credited to
             # whatever call ended next (a plan tick "created" the other writer's file).
-            owns = self._reach(str(tool.get("name") or ""), tool.get("arguments") or {})
+            # Nov 2 2026: a 9-minute ducky_terminal_run in one chat showed four .verse diffs
+            # that a second chat wrote in the same project meanwhile.
+            reach = self._reach(str(tool.get("name") or ""), tool.get("arguments") or {})
+            owns = lambda path, root, after: reach(path) and not self._theirs(root, path, after)  # noqa: E731
             for root, repo in self.repos.items():
                 for path, before, after in repo.changes():
-                    if owns(path):
+                    if owns(path, root, after):
                         edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
             for root, folder in self.folders.items():
                 for path, before, after in folder.changes():
-                    if owns(path):
+                    if owns(path, root, after):
                         edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
             for path, before in self.files.items():
                 after = _read(path)
-                if before is not None and after is not None and before.digest != after.digest and owns(path):
+                if before is not None and after is not None and before.digest != after.digest and owns(path, path.parent, after):
                     edits.append(self._record(path.parent, path, before, after, str(tool.get("name") or "tool")))
                 self.files[path] = after
             # These snapshots are authoritative, including no-change and skip cases.

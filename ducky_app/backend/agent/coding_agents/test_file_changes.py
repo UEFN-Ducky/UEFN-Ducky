@@ -415,6 +415,22 @@ def test_a_listed_folder_claims_nothing_and_a_shell_command_claims_what_it_wrote
     assert [Path(e["path"][4:]).name for e in build["tool"]["fileEdits"]] == ["game.verse"]
 
 
+def test_a_long_shell_call_does_not_claim_another_chats_journaled_write(env, tmp_path):
+    # Nov 2 2026: chat A's 9-minute terminal run showed chat B's .verse edits as its own.
+    _, ledger, ctx = env
+    root = plain_project(tmp_path)
+    a = TurnFileChanges(str(root), ctx, ledger)
+    b = TurnFileChanges(str(root), RunContext(run_id="turn-b", conv_id="chat-b", coding_agent="codex"), ledger)
+    game = root / "Content" / "Verse" / "game.verse"
+    game.write_text("chat b\n", encoding="utf-8")
+    b_edit = event("tool_done", "Edit", {"file_path": str(game)}, id="b-edit")
+    b.process(b_edit)
+    assert [Path(e["path"][4:]).name for e in b_edit["tool"]["fileEdits"]] == ["game.verse"]
+    run = event("tool_done", "uefn/ducky_terminal_run", {"command": "pytest", "session_id": "s"}, id="a-run")
+    a.process(run)
+    assert run["tool"]["fileEdits"] == []
+
+
 def test_an_edit_tool_tells_team_folders_before_and_after_it_runs(env, monkeypatch):
     """A plugin's shared folder hears which files an outside AI edits, so the team sync
     sends them as that AI's change. A read names files too and tells nothing."""
