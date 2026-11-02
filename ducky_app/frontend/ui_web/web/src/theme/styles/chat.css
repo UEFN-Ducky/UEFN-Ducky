@@ -2876,13 +2876,20 @@
   padding-left: 0;
 }
 
-/* Agent narration between tools reads like the chat itself: same font, size and colour. */
+/* Agent narration between tools: its own dim look, but the chat's font. */
 .agent-activity-group-thought {
   padding: 5px 10px;
-  color: inherit;
-  font: inherit;
+  color: var(--fg-dim);
+  font-family: var(--chat-text-font);
+  font-size: var(--chat-text-size, 14px);
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+  opacity: 0.85;
+}
+
+.agent-activity-group-thought--streaming {
+  opacity: 1;
 }
 
 /* ── Thinking / reasoning panel (Cursor-style) ── */
