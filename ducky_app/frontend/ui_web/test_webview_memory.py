@@ -115,6 +115,20 @@ def test_trim_only_when_hidden_idle_big_and_not_too_soon():
     assert not memory.should_trim({"webview_gb": "?"}, active=False, now=t, last_at=0.0)
 
 
+def test_an_open_window_nobody_uses_trims_past_the_open_cap():
+    """Nov 2 2026: 2.7 GB in an open, idle window on a soft-cap build, then an OOM exit."""
+    t = memory.TRIM_EVERY_S + 1
+    idle = memory.OPEN_IDLE_S + 60
+    assert memory.should_trim({"webview_gb": 2.7, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
+    assert not memory.should_trim({"webview_gb": 2.7, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=30)
+    assert not memory.should_trim({"webview_gb": 2.2, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
+    assert not memory.should_trim({"webview_gb": 2.7, "agents": 1}, active=True, now=t, last_at=0.0, idle_s=idle)
+
+
+def test_input_idle_is_a_number():
+    assert memory.input_idle_s() >= 0.0
+
+
 def test_a_bloated_hidden_window_reloads_once_and_keeps_its_chats(window, monkeypatch):
     from frontend import error_log
     from frontend.ui_web import panel_api
@@ -136,6 +150,7 @@ def test_a_bloated_hidden_window_reloads_once_and_keeps_its_chats(window, monkey
 
 def test_a_window_shown_before_the_queued_trim_is_left_alone(window, monkeypatch):
     queued, reloaded = [], []
+    monkeypatch.setattr(memory, "input_idle_s", lambda: 0.0)  # showing it is input
     monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
     monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
     window.native.BeginInvoke = queued.append
@@ -145,6 +160,24 @@ def test_a_window_shown_before_the_queued_trim_is_left_alone(window, monkeypatch
     window.native.Visible = True
     queued.pop()()
     assert reloaded == []
+
+
+def test_an_open_idle_window_reloads(window, monkeypatch):
+    from frontend import error_log
+    from frontend.ui_web import panel_api
+
+    queued, reloaded, activity = [], [], []
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(memory, "input_idle_s", lambda: memory.OPEN_IDLE_S + 1)
+    monkeypatch.setattr(panel_api, "mark_crash_reload", lambda: None)
+    monkeypatch.setattr(error_log, "record_activity", lambda src, msg: activity.append(msg))
+    window.native.BeginInvoke = queued.append
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    window.native.Visible = True
+    assert memory.trim_if_bloated(window, {"webview_gb": 2.7, "agents": 0})
+    queued.pop()()
+    assert reloaded == [1] and "nobody used the window" in activity[0]
 
 
 def test_closed_window_ignores_queued_attachment(window, monkeypatch):

@@ -830,7 +830,15 @@ def remote_link(report: dict[str, Any]) -> None:
         track("remote.link", **props)
 
 
+PERF_SETTLE_S = 300.0
+
+
 def _maybe_perf_sample() -> None:
+    # The day's one sample came from the first heartbeat, while start-up threads still ran
+    # (panel_startup_bg, ship_newest): 6 of 19 "idle" samples over 5% on Nov 2 2026. Wait for
+    # steady state; a run shorter than this has no idle to measure.
+    if _opened_at and time.monotonic() - _opened_at < PERF_SETTLE_S:
+        return
     try:
         last = float(_meta_get(META_PERF_AT) or 0.0)
     except (TypeError, ValueError):

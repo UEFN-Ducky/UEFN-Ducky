@@ -126,7 +126,22 @@ def try_listener_snapshot(kwargs: dict[str, Any] | None = None) -> dict[str, Any
         **(kwargs or {}),
     }
     # Full wait/retry (503 + idle). snapshot_live() must not call this when health is down.
-    raw = send_command("device_graph_snapshot", params, timeout=_LISTENER_SNAPSHOT_TIMEOUT_SEC)
+    try:
+        raw = send_command("device_graph_snapshot", params, timeout=_LISTENER_SNAPSHOT_TIMEOUT_SEC)
+    except TimeoutError:
+        # One slow deep read (a device's settings or Verse editables) can outlast the
+        # listener's own budget on a big island (timeouts on 3 PCs, Nov 2 2026). Ask once more
+        # for the device list alone: nodes without wiring beat no graph at all.
+        if not (params["include_editables"] or params["include_events"]):
+            raise
+        quick = {**params, "include_editables": False, "include_events": False}
+        raw = send_command("device_graph_snapshot", quick, timeout=_LISTENER_SNAPSHOT_TIMEOUT_SEC)
+        snap = _coerce_snapshot(raw, source="listener") if isinstance(raw, dict) else None
+        if snap is not None:
+            snap["partial"] = True
+            snap["note"] = ("The full read timed out, so this is the device list without wiring. "
+                            "Narrow it with label_filter or class_filter for edges.")
+        return snap
     return _coerce_snapshot(raw, source="listener") if isinstance(raw, dict) else None
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -183,9 +184,19 @@ def _format_fatal_message(exc: BaseException | str) -> str:
     if not msg:
         msg = repr(exc)
     text = str(exc)
-    if "Panel build incomplete" in text or "React build not found" in text or "Panel dist missing" in text:
-        from frontend.bundle_root import is_packaged_runtime
+    from frontend.bundle_root import is_packaged_runtime
 
+    # An installed DLL gone (antivirus, a cut-short update): pywebview raised "Cannot find
+    # Microsoft.Web.WebView2.Core.dll" at ready_for_webview_start on 1.2.462 (Nov 3 2026).
+    missing_dll = re.search(r"[\w.\-]+\.dll", text, re.I) if isinstance(exc, FileNotFoundError) else None
+    if missing_dll and is_packaged_runtime():
+        return (
+            f"An installed UEFN Ducky file is missing: {missing_dll.group(0)}. Antivirus software "
+            "may have removed it.\n\n"
+            "Run the latest UEFN Ducky Setup from https://uefnducky.org again "
+            "to repair the installation. Your chats and settings are kept."
+        )
+    if "Panel build incomplete" in text or "React build not found" in text or "Panel dist missing" in text:
         if is_packaged_runtime():
             return (
                 "Some installed UEFN Ducky files are missing or damaged.\n\n"

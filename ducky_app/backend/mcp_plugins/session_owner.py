@@ -23,6 +23,7 @@ class _Request:
     timeout: float
     result: asyncio.Future[Any]
     scope: anyio.CancelScope | None = None
+    started: float = 0.0  # loop time the owner began running it
 
     def cancel(self, future: asyncio.Future[Any]) -> None:
         if future.cancelled() and self.scope is not None:
@@ -61,6 +62,13 @@ class SessionOwner:
     @property
     def busy(self) -> bool:
         return self._active is not None or not self._queue.empty()
+
+    def active_for(self) -> float:
+        """Seconds the running request has run; 0 when idle."""
+        active = self._active
+        if active is None or not active.started:
+            return 0.0
+        return asyncio.get_running_loop().time() - active.started
 
     async def start(self) -> None:
         await asyncio.shield(self._ready)
@@ -112,6 +120,7 @@ class SessionOwner:
                     if request.result.done():
                         continue
                     self._active = request
+                    request.started = asyncio.get_running_loop().time()
                     try:
                         with anyio.CancelScope() as scope:
                             request.scope = scope

@@ -387,3 +387,64 @@ def test_ensure_editor_auto_start_appends_and_flips(tmp_path: Path) -> None:
     ini.write_text("[/Script/Foo]\nbAutoStartServer=False\n", encoding="utf-8")
     assert epic.ensure_editor_auto_start(ini) is True
     assert "bAutoStartServer=True" in ini.read_text(encoding="utf-8")
+
+
+def _hanging_epic_pool(monkeypatch, reply_after: float) -> tuple[PluginClientPool, list[str]]:
+    """A pool whose Epic session answers after ``reply_after`` seconds; no network."""
+    import backend.mcp_plugins.client_pool as cp
+    from backend.tools.core import uefn_popups
+
+    rebuild_plugin_prefix_cache([{"id": EPIC_MCP_SERVER_ID, "tool_prefix": "unreal"}])
+    monkeypatch.setattr(cp, "ensure_plugin_prefix_cache", lambda: None)
+    monkeypatch.setattr(epic, "probe_epic_mcp", lambda **_k: {"epic_mcp_online": True, "epic_mcp_editor": "unreal"})
+    monkeypatch.setattr(uefn_popups, "blocked_call_hint", lambda: "POPUP HINT")
+    monkeypatch.setattr(cp, "_EPIC_QUICK_TIMEOUT_SEC", 0.05)
+    sent: list[str] = []
+
+    class Session:
+        async def call_tool(self, name, args):
+            sent.append(name)
+            await asyncio.sleep(reply_after)
+            return "ok"
+
+    pool = PluginClientPool()
+    conn = cp.PluginConnection(plugin_id=EPIC_MCP_SERVER_ID, manifest={})
+
+    async def _conn(_pid):
+        return conn
+
+    async def _session(_conn):
+        return Session()
+
+    monkeypatch.setattr(pool, "_get_or_create", _conn)
+    monkeypatch.setattr(pool, "_ensure_session", _session)
+    return pool, sent
+
+
+def test_epic_call_after_a_timeout_fails_at_once(monkeypatch) -> None:
+    """Nov 3 2026: one hung Epic call made every later unreal__* call wait its own 180 s."""
+    pool, sent = _hanging_epic_pool(monkeypatch, reply_after=10)
+
+    async def run() -> None:
+        try:
+            await pool.call_tool("unreal__list_toolsets", {})
+            raise AssertionError("expected a timeout")
+        except RuntimeError as exc:
+            assert "timed out after 0s" in str(exc)
+        started = time.monotonic()
+        try:
+            await pool.call_tool("unreal__describe_toolset", {})
+            raise AssertionError("expected a fail-fast")
+        except RuntimeError as exc:
+            assert "not answering" in str(exc) and "POPUP HINT" in str(exc)
+        assert time.monotonic() - started < 1.0
+
+    asyncio.run(run())
+    assert sent == ["list_toolsets"], "the call behind a timeout is never sent"
+
+
+def test_epic_answer_clears_the_unanswered_mark(monkeypatch) -> None:
+    pool, sent = _hanging_epic_pool(monkeypatch, reply_after=0)
+    pool._epic_unanswered_at = time.time() - 61
+    assert asyncio.run(pool.call_tool("unreal__list_toolsets", {})) == "ok"
+    assert pool._epic_unanswered_at == 0.0 and sent == ["list_toolsets"]

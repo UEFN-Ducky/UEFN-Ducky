@@ -132,3 +132,34 @@ def test_coerce_snapshot_reads_printed_json():
 def test_census_script_is_top_level_python():
     compile(lg._EPIC_CENSUS_SCRIPT, "census", "exec")
     assert "def run" not in lg._EPIC_CENSUS_SCRIPT
+
+
+def test_timed_out_deep_snapshot_comes_back_as_the_device_list(monkeypatch):
+    """bridge_timeout.device_graph_snapshot on 3 PCs (Nov 2 2026): the dock got nothing."""
+    import backend.bridge as bridge
+
+    sent: list[dict] = []
+
+    def send(command, params, timeout):
+        sent.append(dict(params))
+        if params["include_editables"]:
+            raise TimeoutError("Command 'device_graph_snapshot' timed out after 12.0s")
+        return {"nodes": [{"id": "/Game/Btn", "label": "Btn"}], "edges": []}
+
+    monkeypatch.setattr(bridge, "send_command", send)
+    snap = lg.try_listener_snapshot()
+    assert snap and snap["partial"] is True and snap["count"] == 1
+    assert [p["include_editables"] for p in sent] == [True, False]
+
+    calls: list[int] = []
+
+    def always_slow(command, params, timeout):
+        calls.append(1)
+        raise TimeoutError("slow")
+
+    monkeypatch.setattr(bridge, "send_command", always_slow)
+    try:
+        lg.try_listener_snapshot({"include_editables": False, "include_events": False})
+        raise AssertionError("expected TimeoutError")
+    except TimeoutError:
+        assert calls == [1], "a quick read that times out is not retried"

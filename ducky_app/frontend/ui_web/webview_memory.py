@@ -1,5 +1,6 @@
-"""Best-effort WebView2 memory targets; never suspend scripts. The one reload: a hidden,
-idle window whose WebView2 grew past TRIM_GB (``trim_if_bloated``)."""
+"""Best-effort WebView2 memory targets; never suspend scripts. The one reload: an idle window
+whose WebView2 grew too big (``trim_if_bloated``): hidden past TRIM_GB, or open but untouched
+for OPEN_IDLE_S past OPEN_TRIM_GB."""
 
 from __future__ import annotations
 
@@ -37,22 +38,43 @@ def update_control(control: Any, *, active: bool) -> bool:
 # webview_browser_exit_oom hit one PC 4 times (Oct 28 2026). Idle WebView2 sits under 0.5 GB.
 TRIM_GB = 2.0
 TRIM_EVERY_S = 30 * 60
+# An open window nobody touched: 1.2.461 (a soft-cap build) still had 3 browser + 1 renderer
+# OOM exits on Nov 2 2026, and a 'closed by itself' report showed 2.7 GB in an open, idle window.
+OPEN_TRIM_GB = 2.5
+OPEN_IDLE_S = 10 * 60
 _last_trim = {"at": 0.0}
 
 
-def should_trim(beat: dict[str, Any], *, active: bool, now: float, last_at: float) -> bool:
-    """Reload only when nobody is looking and nothing runs: hidden or minimized, no agent turn,
-    WebView2 past TRIM_GB, and not within TRIM_EVERY_S of the last time."""
+def input_idle_s() -> float:
+    """Seconds since the person last used mouse or keyboard on this PC; 0 when unknown."""
+    if sys.platform != "win32":
+        return 0.0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _LastInput(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+        info = _LastInput(ctypes.sizeof(_LastInput), 0)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+            return 0.0
+        # Both are 32-bit millisecond tick counts: the mask keeps a wrap at 49.7 days right.
+        return ((ctypes.windll.kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF) / 1000.0
+    except Exception:
+        return 0.0
+
+
+def should_trim(beat: dict[str, Any], *, active: bool, now: float, last_at: float, idle_s: float = 0.0) -> bool:
+    """Reload only when nobody is using it and nothing runs: no agent turn, not within
+    TRIM_EVERY_S of the last time, and either hidden or minimized past TRIM_GB, or open with
+    no input for OPEN_IDLE_S past OPEN_TRIM_GB."""
     try:
         webview_gb = float(beat.get("webview_gb") or 0.0)
     except (TypeError, ValueError):
         return False
-    return (
-        not active
-        and int(beat.get("agents") or 0) == 0
-        and webview_gb >= TRIM_GB
-        and now - last_at >= TRIM_EVERY_S
-    )
+    big = webview_gb >= OPEN_TRIM_GB and idle_s >= OPEN_IDLE_S if active else webview_gb >= TRIM_GB
+    return big and int(beat.get("agents") or 0) == 0 and now - last_at >= TRIM_EVERY_S
 
 
 def _form_active(native: Any) -> bool:
@@ -69,14 +91,16 @@ def trim_if_bloated(window: Any, beat: dict[str, Any]) -> bool:
         if native is None or native.IsDisposed:
             return False
         now = time.monotonic()
-        if not should_trim(beat, active=_form_active(native), now=now, last_at=_last_trim["at"]):
+        if not should_trim(beat, active=_form_active(native), now=now, last_at=_last_trim["at"],
+                           idle_s=input_idle_s()):
             return False
         _last_trim["at"] = now
         gb = float(beat.get("webview_gb") or 0.0)
 
         def reload() -> None:
-            if native.IsDisposed or _form_active(native):
-                return  # shown again meanwhile: leave the page alone
+            open_now = not native.IsDisposed and _form_active(native)
+            if native.IsDisposed or (open_now and input_idle_s() < OPEN_IDLE_S):
+                return  # shown again or used meanwhile: leave the page alone
             from frontend.error_log import record_activity
             from frontend.ui_web.panel_api import mark_crash_reload
 
@@ -85,7 +109,8 @@ def trim_if_bloated(window: Any, beat: dict[str, Any]) -> bool:
                 if core is not None:
                     mark_crash_reload()
                     core.Reload()
-                    record_activity("webview", f"WebView2 used {gb:.1f} GB while the window was hidden; reloaded it to free memory")
+                    where = "while nobody used the window" if open_now else "while the window was hidden"
+                    record_activity("webview", f"WebView2 used {gb:.1f} GB {where}; reloaded it to free memory")
                     return
 
         from System import Action

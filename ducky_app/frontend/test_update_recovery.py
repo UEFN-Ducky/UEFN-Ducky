@@ -212,3 +212,18 @@ def test_startup_failure_records_original_error_before_generic_popup(monkeypatch
     assert recorded[0][0] == "startup"
     assert "assets/missing.js" in recorded[0][1]
     assert "FileNotFoundError" in recorded[0][1]
+
+
+def test_a_missing_installed_dll_says_how_to_repair(monkeypatch):
+    """1.2.462 (Nov 3 2026): pywebview's 'Cannot find Microsoft.Web.WebView2.Core.dll' was a traceback."""
+    from frontend import bundle_root
+    from frontend.ui_web import shutdown
+
+    error = FileNotFoundError("Cannot find Microsoft.Web.WebView2.Core.dll")
+    monkeypatch.setattr(bundle_root, "is_packaged_runtime", lambda: True)
+    text = shutdown._format_fatal_message(error)
+    assert "Microsoft.Web.WebView2.Core.dll" in text and "uefnducky.org" in text and "Traceback" not in text
+    monkeypatch.setattr(bundle_root, "is_packaged_runtime", lambda: False)
+    assert shutdown._format_fatal_message(error).startswith("FileNotFoundError"), "a source run keeps the raw error"
+    monkeypatch.setattr(bundle_root, "is_packaged_runtime", lambda: True)
+    assert "uefnducky.org" not in shutdown._format_fatal_message(FileNotFoundError("settings.json"))

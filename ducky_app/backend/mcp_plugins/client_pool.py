@@ -33,6 +33,14 @@ _CONNECT_TIMEOUT_SEC = 45.0
 _HTTP_CONNECT_TIMEOUT_SEC = 2.0
 _HTTP_FAIL_CACHE_SEC = 10.0
 _TOOL_TIMEOUT_SEC = 180.0
+# Epic runs every call on UEFN's game thread, one at a time: once a call hangs (a popup, a
+# long build) each later unreal__* call waited its own 180 s behind it (17 of 21 agent.stuck
+# on Nov 3 2026). Calls behind a call running this long, or this soon after one timed out
+# with no answer since, fail at once with the popup hint.
+_EPIC_UNANSWERED_SEC = 60.0
+# Listing Epic's toolsets is a read: it never needs the full tool limit.
+_EPIC_QUICK_TOOLS = frozenset({"list_toolsets", "describe_toolset"})
+_EPIC_QUICK_TIMEOUT_SEC = 45.0
 _IDLE_EVICT_SEC = 15 * 60.0
 # How often a pool with its own loop closes sessions idle longer than _IDLE_EVICT_SEC.
 _EVICT_EVERY_SEC = 60.0
@@ -112,6 +120,8 @@ class PluginClientPool:
         # Lets the change journal tell a nested read from a nested mutation.
         self._tool_annotations: dict[str, Any] = {}
         self._failed_until: dict[str, float] = {}
+        # time.time() of the last Epic call that timed out; 0 once a later call answered.
+        self._epic_unanswered_at = 0.0
         # Servers closed for being idle. Listing serves their saved inventory
         # instead of starting them again; a tool call opens them as usual.
         self._idle_closed: set[str] = set()
@@ -579,6 +589,21 @@ class PluginClientPool:
                 f"dead MCP session — use the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from e
         uefn_call = epic_call and epic_editor != EDITOR_UNREAL
+        call_timeout = _EPIC_QUICK_TIMEOUT_SEC if epic_call and original_name in _EPIC_QUICK_TOOLS else _TOOL_TIMEOUT_SEC
+        if epic_call:
+            active_for = getattr(getattr(conn, "owner", None), "active_for", None)
+            running = active_for() if callable(active_for) else 0.0
+            since = time.time() - self._epic_unanswered_at
+            if running >= _EPIC_UNANSWERED_SEC or since < _EPIC_UNANSWERED_SEC:
+                from backend.tools.core.uefn_popups import blocked_call_hint
+
+                hint = await asyncio.to_thread(blocked_call_hint)
+                what = (f"an earlier call is still running after {running:.0f} s" if running >= _EPIC_UNANSWERED_SEC
+                        else f"its last call timed out {since:.0f} s ago")
+                raise RuntimeError(
+                    f"Epic MCP '{original_name}' not sent: UEFN is not answering ({what}). {hint} "
+                    f"Then try again, or use the Ducky fallback tool for this step."
+                )
 
         def _watchdog():
             # Epic's MCP runs on UEFN's Slate thread: a Save prompt or message box
@@ -598,7 +623,7 @@ class PluginClientPool:
             for index, step in enumerate(sequence):
                 last = await asyncio.wait_for(
                     session_obj.call_tool(original_name, step),
-                    timeout=_TOOL_TIMEOUT_SEC,
+                    timeout=call_timeout,
                 )
                 if index == len(sequence) - 1:
                     break
@@ -616,6 +641,8 @@ class PluginClientPool:
             with _watchdog() as pressed:
                 raw = await _invoke(session)
         except asyncio.TimeoutError:
+            if epic_call:
+                self._epic_unanswered_at = time.time()
             popup = ""
             if uefn_call:
                 from backend.tools.core.uefn_popups import blocked_call_hint
@@ -625,7 +652,7 @@ class PluginClientPool:
                 popup = "Use"
             raise RuntimeError(
                 f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
-                f"{_TOOL_TIMEOUT_SEC:.0f}s — server reachable but unresponsive.{_pressed_note(pressed)} "
+                f"{call_timeout:.0f}s — server reachable but unresponsive.{_pressed_note(pressed)} "
                 f"{popup} the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from None
         except Exception:
@@ -638,6 +665,8 @@ class PluginClientPool:
                 "execution may have occurred. Check the result before retrying."
             ) from None
         conn.last_used = time.time()
+        if epic_call:
+            self._epic_unanswered_at = 0.0
         text = _content_to_text(raw.content if hasattr(raw, "content") else raw)
         if epic_call and epic_not_found(text):
             # Fail loudly so callers fall back instead of treating "not found" as success.

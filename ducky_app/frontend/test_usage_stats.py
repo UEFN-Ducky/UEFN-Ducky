@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import pytest
@@ -259,6 +260,20 @@ def test_perf_sample_counts_running_turns(monkeypatch) -> None:
     assert sample["agents"] == "1"
     assert ev.validate("perf.sample", {"agents_running_n": 0}) == {"agents": "0"}
     assert ev.validate("perf.sample", {"agents_running_n": 3}) == {"agents": "2-4"}
+
+
+def test_perf_sample_waits_for_steady_state(monkeypatch) -> None:
+    """Nov 2 2026: the day's sample ran beside start-up threads and read as idle CPU."""
+    stamped: list[str] = []
+    monkeypatch.setattr(us, "_meta_get", lambda key: "0")
+    monkeypatch.setattr(us, "_meta_set", lambda key, value: stamped.append(key))
+    monkeypatch.setattr(us, "_opened_at", time.monotonic() - 60)
+    us._maybe_perf_sample()
+    assert stamped == [], "a minute after open: no sample, and the day's slot stays free"
+    monkeypatch.setattr(us, "_opened_at", time.monotonic() - us.PERF_SETTLE_S - 1)
+    us._maybe_perf_sample()
+    rows, _ = us._take(100)
+    assert stamped and any(r["name"] == "perf.sample" for r in rows)
 
 
 def test_perf_sample_names_the_busiest_thread_without_leaking_tool_names() -> None:
