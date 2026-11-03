@@ -66,6 +66,29 @@ describe("PluginMenuButton (contributes.header.menus)", () => {
     expect(screen.getByTestId("page").getAttribute("data-visible")).toBe("false");
   });
 
+  it("header_menu_size sizes the dropdown to the page, kept inside the window", async () => {
+    render(<PluginMenuButton menu={MENU} />);
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    const box = () => document.querySelector(".plugin-header-menu") as HTMLElement;
+    expect(box().style.height).toBe("240px");
+    await call("header_menu_size", { height: 300 });
+    expect(box().style.height).toBe("300px");
+    await call("header_menu_size", { height: 5000 });
+    expect(parseInt(box().style.height, 10)).toBe(Math.max(120, Math.min(640, window.innerHeight - 96)));
+    await call("header_menu_size", { height: 40 });
+    expect(box().style.height).toBe("120px");
+    await call("header_menu_size", { height: "x" });
+    expect(box().style.height).toBe("120px");
+  });
+
+  it("headerMenuHeight clamps to 120 px and the window", async () => {
+    const { headerMenuHeight } = await import("./PluginHeaderMenu");
+    expect(headerMenuHeight(300, 900)).toBe(300);
+    expect(headerMenuHeight(900, 900)).toBe(640);
+    expect(headerMenuHeight(500, 500)).toBe(404);
+    expect(headerMenuHeight(10, 900)).toBe(120);
+  });
+
   it("a page outside a header menu can't call them", async () => {
     const res = await call("header_menu_close", {}, undefined);
     expect(res.ok).toBe(false);

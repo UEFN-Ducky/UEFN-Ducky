@@ -96,10 +96,12 @@
   display: none;
 }
 
-/* A header.menus plugin page: an iframe can't size to its content, so it fills the menu's room. */
+/* A header.menus plugin page: an iframe can't size to its content, so the page reports its
+   height (bridge header_menu_size) and PluginMenuButton sets it inline, clamped to the window. */
 .plugin-header-menu {
   display: flex;
-  height: min(480px, var(--dropdown-max-height, 360px));
+  height: 240px;
+  max-height: calc(100vh - 96px);
 }
 .plugin-header-menu > .plugin-ui-pane {
   flex: 1;

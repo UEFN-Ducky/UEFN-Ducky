@@ -7,7 +7,11 @@ import { pluginLlmCompleteAsync } from "./pluginLlmAsync";
  * To add a method: put one entry in BRIDGE_HANDLERS. No other file needs changing.
  */
 
-import { BRIDGE_CHANNEL } from "./constants";
+import { BRIDGE_CHANNEL, PANEL_ACTION_PREFIX } from "./constants";
+import { requestOpenSettings } from "../navigation/openSettingsTab";
+import type { SettingsTab } from "../views/SettingsView";
+import { requestOpenPluginUiTab } from "./openPluginUiTab";
+import { requestPanelItem } from "./panelOpenItem";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import { getDirectTransport } from "../remote/directTransport";
 import { pluginPrefsKey } from "../hooks/pluginPrefsStorage";
@@ -33,7 +37,12 @@ export type BridgeContext = {
 export type HeaderMenuDot = "error" | "warn" | "ok" | "local" | "";
 export type HeaderMenuBadge = { dot: HeaderMenuDot; count: number };
 /** What a header.menus page can do to its title-bar button. */
-export type HeaderMenuHost = { badge: (badge: HeaderMenuBadge) => void; close: () => void };
+export type HeaderMenuHost = {
+  badge: (badge: HeaderMenuBadge) => void;
+  close: () => void;
+  /** The page's content height in CSS px; the dropdown sizes to it (clamped). */
+  size?: (height: number) => void;
+};
 
 function headerMenuHost(ctx: BridgeContext, method: string): HeaderMenuHost {
   if (!ctx.headerMenu) throw new Error(`${method}: only a header.menus page has a title-bar button`);
@@ -631,9 +640,42 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     headerMenuHost(ctx, "header_menu_badge").badge({ dot, count: Number.isFinite(n) && n > 0 ? Math.floor(n) : 0 });
     return { ok: true };
   },
+  /** header.menus page: its content height in CSS px, so the dropdown fits it (no fixed box). */
+  header_menu_size: (ctx, params) => {
+    const n = Number(params.height);
+    if (!Number.isFinite(n) || n <= 0) return { ok: false };
+    headerMenuHost(ctx, "header_menu_size").size?.(Math.ceil(n));
+    return { ok: true };
+  },
   /** header.menus page: close its dropdown (a menu item that opened a tab). */
   header_menu_close: (ctx) => {
     headerMenuHost(ctx, "header_menu_close").close();
+    return { ok: true };
+  },
+  /** Open or focus one of this plugin's own panels (`panel:<panelId>`) or a Settings tab
+   * (`settings:<Tab>`). `item` is a section the panel gets as bridge event `panel.open_item`
+   * (also sent as `panel.item`). From a header menu, the menu closes after. */
+  "panel.open": (ctx, params) => {
+    const action = typeof params.action === "string" ? params.action.trim() : "";
+    const item = params.item == null ? "" : typeof params.item === "string" ? params.item.trim() : null;
+    if (item === null || item.length > 64) throw new Error("panel.open: item must be a short string");
+    if (action.startsWith(PANEL_ACTION_PREFIX)) {
+      const panelId = action.slice(PANEL_ACTION_PREFIX.length).trim().toLowerCase();
+      // A bare id only: `plugin:other/panel` or `other:panel` would name another plugin's panel.
+      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(panelId)) {
+        throw new Error(`panel.open: not one of this plugin's panels: ${panelId}`);
+      }
+      const pid = ctx.pluginId.trim().toLowerCase();
+      if (item) requestPanelItem(pid, panelId, item);
+      requestOpenPluginUiTab(pid, panelId);
+    } else if (action.startsWith("settings:")) {
+      const tab = action.slice("settings:".length).trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9 &._-]{0,39}$/.test(tab)) throw new Error(`panel.open: bad Settings tab: ${tab}`);
+      requestOpenSettings(tab as SettingsTab);
+    } else {
+      throw new Error(`panel.open: unknown action: ${action}`);
+    }
+    ctx.headerMenu?.close();
     return { ok: true };
   },
   "plugin.info": (ctx) => ({
