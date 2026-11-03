@@ -23,6 +23,19 @@ def test_configured_roots_prefer_env_then_panel(monkeypatch, tmp_path: Path) -> 
     assert roots == [str(tmp_path.resolve())]
 
 
+def test_content_prefix_never_doubles_under_a_content_root(monkeypatch, tmp_path: Path) -> None:
+    # Nov 2 2026: a read of a not-yet-existing file came back as ...\Content\Content\Verse\...
+    content = tmp_path / "Island" / "Content"
+    content.mkdir(parents=True)
+    monkeypatch.delenv("UEFN_VSCODE_WORKSPACE_FOLDERS", raising=False)
+    monkeypatch.setenv("UEFN_DUCKY_PROJECT_ROOT", str(content))
+    want = str((content / "Verse" / "Life" / "a.verse").resolve())
+    assert client.resolve_workspace_path("Content/Verse/Life/a.verse") == want
+    assert client.resolve_workspace_path("Verse/Life/a.verse") == want
+    (content / "Content").mkdir()  # a real nested Content folder keeps the literal path
+    assert client.resolve_workspace_path("Content/x.txt") == str((content / "Content" / "x.txt").resolve())
+
+
 def test_absolute_path_under_a_recent_project_is_readable(monkeypatch, tmp_path: Path) -> None:
     active = tmp_path / "Active"
     other = tmp_path / "Roguelike"

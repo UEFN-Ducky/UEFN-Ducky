@@ -945,15 +945,12 @@ def _resolve_workspace_path_unchecked(relative_or_absolute: str) -> str:
     if not _is_under_root(full, primary):
         raise ValueError(f"Path escapes workspace root: {relative_or_absolute!r}")
     # Models often prefix the root folder name ("Content/Verse" when the root IS
-    # ...\Content). If the literal path is missing but the deduped one exists, use it.
-    if not os.path.exists(full):
-        root_name = os.path.basename(primary.rstrip("\\/")).lower()
-        first, _, rest = p.replace("\\", "/").partition("/")
-        if rest and first.lower() == root_name:
-            alt = os.path.realpath(os.path.abspath(os.path.join(primary, rest)))
-            alt_ok = os.path.exists(alt) or (
-                not os.path.isdir(os.path.dirname(full)) and os.path.isdir(os.path.dirname(alt))
-            )
-            if _is_under_root(alt, primary) and alt_ok:
-                return alt
+    # ...\Content). Unless that doubled folder really exists, the prefix is the root itself:
+    # a missing file must not read back as ...\Content\Content\... (Nov 2 2026 log).
+    root_name = os.path.basename(primary.rstrip("\\/")).lower()
+    first, _, rest = p.replace("\\", "/").partition("/")
+    if rest and first.lower() == root_name and not os.path.isdir(os.path.join(primary, first)):
+        alt = os.path.realpath(os.path.abspath(os.path.join(primary, rest)))
+        if _is_under_root(alt, primary):
+            return alt
     return full
