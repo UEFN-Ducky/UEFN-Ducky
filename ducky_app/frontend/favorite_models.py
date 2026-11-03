@@ -201,7 +201,14 @@ def _available_agent_models(settings: Any, backend: str = "") -> dict[str, set[s
         # bridge process) do we probe directly — just ``backend``, bounded, so a
         # hung Gemini CLI cannot block spawning a Claude Code ducky.
         payload = coding_agents.detect_all()
-        if payload.get("checking"):
+        # The refresh publishes each agent as its probe lands, without "checking": until
+        # ``backend``'s own probe lands its row is still the "Checking…" stub (available
+        # False), and a Claude Code lead's seats were refused as "unavailable".
+        pending = backend and any(
+            isinstance(a, dict) and a.get("id") == backend and a.get("status") == "Checking…"
+            for a in payload.get("agents") or []
+        )
+        if payload.get("checking") or pending:
             if backend:
                 info = _probe_agent(settings, backend)
                 payload = {"agents": [info] if info else []}

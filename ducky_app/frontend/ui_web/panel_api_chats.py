@@ -82,6 +82,22 @@ def _copy_name(profile: dict[str, Any], members: list[dict[str, Any]]) -> str:
     return f"{base} {n}"
 
 
+def _leader_agent_ok(err: Any, leader: Any) -> Any:
+    """A seat refused on the coding agent its group's leader is running right now: that agent
+    is available (the leader's turn proves it), whatever this process's detect cache says.
+    Returns a ResolveOk for the seat's own pick, or None to keep the refusal."""
+    from frontend.favorite_models import ResolveOk, parse_selection
+
+    sel = parse_selection(getattr(err, "requested", "") or "")
+    agent = str(getattr(leader, "coding_agent", "") or "").strip().lower().replace("-", "_")
+    if sel is None or not sel.is_coding_agent or sel.backend != agent:
+        return None
+    # The agent's own refusal ("unavailable") or the very model the leader runs.
+    if not str(err.message).startswith("Coding agent") and sel.model_id != str(getattr(leader, "model", "") or "").strip():
+        return None
+    return ResolveOk(coding_agent=sel.coding_agent, model=sel.model_id, provider="", selection=sel)
+
+
 # A tool card's preview; past it the card asks load_tool_result for the rest.
 TOOL_RESULT_CAP = 8_000
 
@@ -747,6 +763,9 @@ class PanelApiChatsMixin:
         result = allow_create_without_model(
             _pa.resolve_model_selection(favorites, settings)
         )
+        leader_id = (getattr(group, "leader_conv_id", None) or "").strip()
+        if isinstance(result, ResolveErr) and leader_id:
+            result = _leader_agent_ok(result, _pa.load_conversation(leader_id)) or result
         if for_agent:
             from frontend.favorite_models import refuse_paid_api_for_agent
 

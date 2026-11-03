@@ -337,6 +337,33 @@ def test_cold_cache_probes_only_the_requested_agent(monkeypatch):
         release.set()
 
 
+def test_a_checking_stub_in_a_partial_cache_is_probed(monkeypatch):
+    """The refresh publishes per agent; an agent still on its "Checking…" stub is probed, not refused."""
+    from backend.agent import coding_agents
+    from frontend import favorite_models
+
+    partial = {"agents": [{"id": "codex", "available": True, "models": [{"id": "gpt-6"}]},
+                          {"id": "claude_code", "available": False, "status": "Checking…", "models": []}]}
+    monkeypatch.setattr(coding_agents, "detect_all", lambda *_a: partial)
+    monkeypatch.setattr(coding_agents, "get_adapter", {"claude_code": _claude_adapter()}.get)
+    out = favorite_models._available_agent_models(SimpleNamespace(), backend="claude_code")
+    assert out == {"claude_code": {"claude-sonnet-5-5"}}
+
+
+def test_a_seat_on_the_leaders_running_agent_is_not_refused():
+    from frontend.ui_web.panel_api_chats import _leader_agent_ok
+
+    leader = SimpleNamespace(coding_agent="claude_code", model="claude-opus-5-5")
+    down = ResolveErr(code="model_unavailable", message="Coding agent 'claude_code' is unavailable. …",
+                      requested="claude_code:claude-opus-5-5")
+    ok = _leader_agent_ok(down, leader)
+    assert isinstance(ok, ResolveOk) and (ok.coding_agent, ok.model) == ("claude_code", "claude-opus-5-5")
+    assert _leader_agent_ok(down, SimpleNamespace(coding_agent="codex", model="gpt-6")) is None
+    unlisted = ResolveErr(code="model_unavailable", message="Model 'x' is not advertised by claude_code.",
+                          requested="claude_code:x")
+    assert _leader_agent_ok(unlisted, leader) is None
+
+
 def test_cold_cache_probe_is_bounded(monkeypatch):
     import threading
     import time

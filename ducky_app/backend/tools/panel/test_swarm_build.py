@@ -150,12 +150,42 @@ def test_a_failure_at_seat_9_leaves_no_groups_and_no_chats(tmp_path):
     assert ("restore_home", "lead", "home") in api.calls
 
 
-def test_a_lane_outside_the_project_fails_before_anything_is_made(tmp_path):
+def test_a_lane_outside_the_project_fails_before_anything_is_made(tmp_path, monkeypatch):
+    from backend.workspace import lanes
+
+    other = "C:/Repos/DuckyOS"
+    monkeypatch.setattr(lanes, "_roots_source", lambda: [str(tmp_path), other])
+    # A lane in another of the person's projects is seated as it is: full path, no project switch.
+    api = Api(tmp_path)
+    sb.build_swarm(api=api, from_plan=_flat_plan(2, lane=lambda i: f"{other}/plugins/plugin-meshy/**"
+                                                 if i == 2 else f"src/s{i}/**"))
+    lanes_by_seat = {c[2]: c[3] for c in api.names("invite")}
+    assert f"{other}/plugins/plugin-meshy/**" in lanes_by_seat["Seat 2"]
+    assert lanes.in_lane(lanes_by_seat["Seat 2"], f"{other}/plugins/plugin-meshy/src/main.ts")
+    assert not lanes.in_lane(lanes_by_seat["Seat 2"], f"{other}/plugins/other/x.ts")
+    # A path in no known project still fails before anything is made.
     api = Api(tmp_path)
     plan = _flat_plan(9, lane=lambda i: "C:/elsewhere/x/**" if i == 9 else f"src/s{i}/**")
     with pytest.raises(sb.SwarmBuildError, match="seat 9: lane outside project"):
         sb.build_swarm(api=api, from_plan=plan)
     assert api.calls == []
+
+
+def test_a_seat_with_no_model_inherits_the_leads(tmp_path):
+    class LeadApi(Api):
+        def seat_model(self, lead, profile):
+            return "claude_code:claude-opus-5-5" if profile == "developer" else ""
+
+        def invite(self, group_id, profile, name, model, write_allowed):
+            self.calls.append(("model", name, model))
+            return super().invite(group_id, profile, name, model, write_allowed)
+
+    plan = _plan(_section("a", "A", "Ducky: developer", [_step(1)]),
+                 _section("b", "B", "Ducky: developer\nModel: codex:gpt-6", [_step(2)]))
+    api = LeadApi(tmp_path)
+    sb.build_swarm(api=api, from_plan=plan)
+    assert dict((c[1], c[2]) for c in api.names("model")) == {"A": "claude_code:claude-opus-5-5",
+                                                               "B": "codex:gpt-6"}
 
 
 def test_a_full_path_lane_inside_the_project_becomes_relative(tmp_path):

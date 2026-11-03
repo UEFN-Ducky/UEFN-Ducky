@@ -143,6 +143,21 @@ class PanelSwarmApi:
                                         name=name, model=model))
         return str((res.get("member") or {}).get("member_conv_id") or "")
 
+    def seat_model(self, lead: str, profile: str) -> str:
+        """The lead's own agent and model (``claude_code:claude-opus-5-5``) for a seat whose
+        profile names no model; '' when the profile has one (it wins) or the lead has none."""
+        from backend.tools.panel.ducky_panel import _resolve_ducky_profile
+        from frontend.favorite_models import first_favorite, qualify
+        from frontend.ui_web.project_chats import load_conversation
+
+        if first_favorite((_resolve_ducky_profile(profile) or {}).get("favorite_models")):
+            return ""
+        conv = load_conversation(lead, self.project_root())
+        model = str(getattr(conv, "model", "") or "").strip()
+        agent = str(getattr(conv, "coding_agent", "") or "").strip()
+        backend = agent if agent and agent != "ducky" else str(getattr(conv, "provider", "") or "").strip()
+        return qualify(backend, model) if model and backend else ""
+
     def set_muted(self, conv_id: str, muted: bool) -> None:
         from backend.tools.panel.ducky_panel import ducky_set_muted
 
@@ -209,6 +224,9 @@ class _Defaults:
 
     def is_chat(self, conv_id: str) -> bool:
         return False
+
+    def seat_model(self, lead: str, profile: str) -> str:
+        return ""
 
     def trust_drafts(self, group_ids: list[str]) -> None:
         pass
@@ -315,15 +333,21 @@ def seats_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
 # ---- validate -----------------------------------------------------------------------------
 
 def _relative_lane(path: str, root: str) -> str:
-    """*path* relative to the project, normalized; raises ValueError outside it."""
-    from backend.workspace.lanes import _is_abs, normalize_glob
+    """*path* normalized: relative to the open project when inside it, kept full when inside
+    another of the person's Ducky projects (lanes enforce full paths there, so seating a team
+    never needs a project switch); raises ValueError in no known project."""
+    from backend.workspace.lanes import LaneGlobError, _is_abs, normalize_glob
 
     p = path.strip().replace("\\", "/")
     if _is_abs(p):
         r = root.replace("\\", "/").rstrip("/")
-        if not r or not (p.lower() == r.lower() or p.lower().startswith(r.lower() + "/")):
-            raise ValueError("lane outside project")
-        p = p[len(r):].lstrip("/") or "**"
+        if r and (p.lower() == r.lower() or p.lower().startswith(r.lower() + "/")):
+            p = p[len(r):].lstrip("/") or "**"
+        else:
+            try:
+                return normalize_glob(p)  # refuses a full path in no Ducky project
+            except LaneGlobError:
+                raise ValueError("lane outside project") from None
     return normalize_glob(p)
 
 
@@ -541,6 +565,12 @@ def _build(goal: str, tree: list[dict[str, Any]], plan_id: str, lead: str, api: 
     errors = validate(tree, api.project_root())
     if errors:
         raise SwarmBuildError("; ".join(errors))
+    for s in walk_seats(tree):
+        if not s.get("model") and not s.get("existing"):
+            try:
+                s["model"] = api.seat_model(lead, s["profile"]) or ""
+            except Exception:  # noqa: BLE001 - no lead model: the profile/default rules apply
+                s["model"] = ""
     sections = {s["name"]: s for s in walk_seats(tree)}
     targets = {s["name"]: s for s in known or sections.values()}
     handovers = []
