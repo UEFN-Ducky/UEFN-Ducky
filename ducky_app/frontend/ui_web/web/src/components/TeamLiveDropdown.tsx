@@ -220,11 +220,6 @@ export function TeamLiveDropdown() {
     setOpen(false);
     requestOpenPluginUiTab("account", "account-storage", "Storage");
   };
-  // The team page alone (members, plugins, storage, settings) as its own tab, no close.
-  const teamTab = () => {
-    setOpen(false);
-    requestOpenPluginUiTab("account", "account-team", "Team");
-  };
   const queued = team?.shared ? [
     team.pending ? `${team.pending} to send` : "",
     team.incoming ? `${team.incoming} coming in` : "",
@@ -267,10 +262,6 @@ export function TeamLiveDropdown() {
             current={team?.current} />
         ) : <div className="plugin-scope-menu__empty">No team yet.</div>}
         <div className="team-live-menu__foot">
-          <button type="button" className="team-live-menu__settings" onClick={teamTab}>
-            <span className="team-copy__icon" aria-hidden><Icons.Users /></span>
-            <span>Team</span>
-          </button>
           <button type="button" className="team-live-menu__settings" onClick={storage}>
             <span className="team-copy__icon" aria-hidden><Icons.Archive /></span>
             <span>Storage</span>

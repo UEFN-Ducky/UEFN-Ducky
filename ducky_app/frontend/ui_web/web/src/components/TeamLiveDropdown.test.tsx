@@ -404,12 +404,4 @@ describe("Team and Live in the title bar", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Storage" }));
     expect(tabs.open).toHaveBeenCalledWith("account", "account-storage", "Storage");
   });
-
-  it("Team opens the Ducky Account plugin's Team tab", async () => {
-    api.live_overview.mockResolvedValue(overview());
-    render(<ConfirmModalProvider><TeamLiveDropdown /></ConfirmModalProvider>);
-    fireEvent.click(await waitFor(trigger));
-    fireEvent.click(await screen.findByRole("button", { name: "Team" }));
-    expect(tabs.open).toHaveBeenCalledWith("account", "account-team", "Team");
-  });
 });
