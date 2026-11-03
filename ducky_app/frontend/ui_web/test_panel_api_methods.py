@@ -721,6 +721,37 @@ def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> Non
     assert rows == []  # small replies trace nothing
 
 
+def test_plugin_call_etag_skips_unchanged_big_reply(monkeypatch) -> None:
+    import json
+
+    from backend.uefn_plugins import host
+
+    seen: list[dict] = []
+    data = {'ok': True, 'models': [{'id': f'm{i}', 'blob': 'x' * 900} for i in range(2000)]}
+
+    def rpc(p, m, a):
+        seen.append(a)
+        return data
+
+    monkeypatch.setattr(host, 'call_panel_rpc', rpc)
+    api = PanelApi.__new__(PanelApi)
+
+    first = api.plugin_call('account', 'list_models', {'_etag': ''})
+    assert len(json.dumps(first)) > 1_000_000 and first['etag']
+    assert seen[-1] == {}  # _etag never reaches the plugin
+
+    again = api.plugin_call('account', 'list_models', {'_etag': first['etag']})
+    assert again == {'ok': True, 'unchanged': True, 'etag': first['etag']}
+    assert len(json.dumps(again)) < 64 * 1024 and len(json.dumps(again)) < 100
+
+    data['models'].append({'id': 'new'})
+    changed = api.plugin_call('account', 'list_models', {'_etag': first['etag']})
+    assert 'unchanged' not in changed and changed['etag'] != first['etag']
+
+    plain = api.plugin_call('account', 'list_models', {})
+    assert 'etag' not in plain  # callers that don't opt in get the reply as before
+
+
 def test_panel_api_public_methods() -> None:
     names = {
         n

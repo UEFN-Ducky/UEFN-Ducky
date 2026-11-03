@@ -14,19 +14,26 @@ def plugin_rpc_source(plugin_id: str, method: str) -> str:
     return f"plugin_call:{plugin_id or '?'}.{method or '?'}"
 
 
-def _reply_bytes(reply: Any) -> int:
+def _encode_reply(reply: Any) -> str:
     import json
 
     try:
-        return len(json.dumps(reply, ensure_ascii=False, default=str, separators=(",", ":")))
+        return json.dumps(reply, ensure_ascii=False, default=str, separators=(",", ":"), sort_keys=True)
     except Exception:  # noqa: BLE001
-        return 0
+        return ""
 
 
-def _trace_big_plugin_reply(plugin_id: str, method: str, reply: Any) -> int:
+def reply_etag(encoded: str) -> str:
+    """A short version token for one encoded reply (equal data, equal token)."""
+    import hashlib
+
+    return hashlib.blake2b(encoded.encode("utf-8", "replace"), digest_size=12).hexdigest()
+
+
+def _trace_big_plugin_reply(plugin_id: str, method: str, encoded: str) -> int:
     """The bridge only sees ``plugin_call``; name the plugin RPC behind a big reply
     as a ``ui_js_big`` row so ``ui_js_big_top`` ranks it per plugin and method."""
-    nbytes = _reply_bytes(reply)
+    nbytes = len(encoded)
     if nbytes > PLUGIN_REPLY_BIG_BYTES:
         try:
             from frontend.perf_trace import trace
@@ -1554,19 +1561,29 @@ class PanelApiStoreMixin:
         method: str,
         params: dict | None = None,
     ) -> dict[str, Any]:
-        """Dispatch a panel RPC registered by ``api.register_panel_rpc`` in a plugin."""
+        """Dispatch a panel RPC registered by ``api.register_panel_rpc`` in a plugin.
+
+        A panel that polls big data opts into version tokens by passing ``_etag`` in
+        ``params`` ("" on its first call): the reply then carries ``etag``, and a repeat
+        call with the same token gets ``{ok, unchanged, etag}`` instead of the data again.
+        ``_etag`` never reaches the plugin."""
         from backend.uefn_plugins.host import call_panel_rpc
 
+        kwargs = dict(params or {}) if isinstance(params, dict) else {}
+        wants_etag = "_etag" in kwargs
+        since = str(kwargs.pop("_etag", "") or "")
         try:
-            result = call_panel_rpc(
-                str(plugin_id or ""),
-                str(method or ""),
-                dict(params or {}) if isinstance(params, dict) else {},
-            )
+            result = call_panel_rpc(str(plugin_id or ""), str(method or ""), kwargs)
             out = result if isinstance(result, dict) else {"ok": True, "result": result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
-        _trace_big_plugin_reply(str(plugin_id or ""), str(method or ""), out)
+        encoded = _encode_reply(out)
+        if wants_etag and encoded and out.get("ok", True) is not False:
+            etag = reply_etag(encoded)
+            if since == etag:
+                return {"ok": True, "unchanged": True, "etag": etag}
+            out = {**out, "etag": etag}
+        _trace_big_plugin_reply(str(plugin_id or ""), str(method or ""), encoded)
         return out
 
     def draft_skill_pack(self, description: str, model: str, provider: str = "") -> dict[str, Any]:
