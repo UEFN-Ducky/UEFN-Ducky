@@ -269,11 +269,34 @@ def _line(body: str, label: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+# A lane is a path or a glob: a slash or a '*', or a file name with an extension. Backticked
+# operation names (`model3d.start`) and prose are not. ponytail: bare names need a 1-4 letter
+# extension (or .verse); widen the list when a real lane file is missed.
+_PATHISH = re.compile(r"[/\\*]|\.(?:[A-Za-z][A-Za-z0-9]{0,3}|verse)$")
+
+
 def _paths(text: str) -> list[str]:
-    """Paths from a Files/Hands over list: the backticked ones when there are any, else split on , ;."""
+    """Paths from a Files/Hands over line: the backticked ones (spaces kept) and the bare words
+    around them, each only when it reads as a path or glob."""
     ticked = re.findall(r"`([^`]+)`", text)
-    raw = ticked or re.split(r"[,;]", text)
-    return [p for p in (x.strip(" .`") for x in raw) if p and " " not in p]
+    rest = re.split(r"[,;\s()]+", re.sub(r"`[^`]*`", " ", text))
+    out: list[str] = []
+    for p in (x.strip(" .`") for x in [*ticked, *rest]):
+        if p and _PATHISH.search(p) and p not in out:
+            out.append(p)
+    return out
+
+
+# The ducky a section's files call for; code and anything mixed goes to Developer.
+_PROFILE_BY_EXT = {".verse": "verse-coder", ".blend": "3d-modeler", ".fbx": "3d-modeler",
+                   ".obj": "3d-modeler", ".glb": "3d-modeler", ".gltf": "3d-modeler"}
+
+
+def _profile_for_files(paths: list[str]) -> str:
+    """A seat's profile from its Files, never from words in its title (Nov 3 2026: code sections
+    titled "... 3D endpoint" and "... tests" were seated as 3d-modeler and tester)."""
+    kinds = {_PROFILE_BY_EXT.get(os.path.splitext(p.rstrip("/*"))[1].lower(), "developer") for p in paths}
+    return kinds.pop() if len(kinds) == 1 else "developer"
 
 
 def _plain(text: str) -> str:
@@ -288,19 +311,16 @@ def seats_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     """The swarm tree of *plan*: a section whose children are steps = a seat (its sub plan), a
     section whose children are sections = a group, at any depth. Top-level steps stay with the
     lead. Seats read ``Files:``, ``Hands over:``, ``Ducky:``, ``Model:`` and ``Start after:``
-    from their body; no Ducky line routes like ducky_swarm_create."""
+    from their body. The profile is the Ducky line, else ``planned_assignee``, else what the
+    Files call for (``_profile_for_files``); no Model line = the lead's model at build."""
 
     def seat(sec: dict[str, Any]) -> dict[str, Any]:
-        from frontend.swarm_routing import route
-
         body = str(sec.get("body_markdown") or "")
         name = str(sec.get("content") or "").strip()
         planned = str(sec.get("planned_assignee") or "").strip()
-        profile, model = _plain(_line(body, "Ducky")) or planned, _plain(_line(body, "Model"))
-        kind = ""
-        if not profile or (not model and not planned):
-            r = route(f"{name}: {body}")
-            profile, model, kind = profile or r["profile_id"], model or r["model"], r["kind"]
+        paths = _paths(_line(body, "Files"))
+        profile = _plain(_line(body, "Ducky")) or planned or _profile_for_files(paths)
+        model, kind = _plain(_line(body, "Model")), ""
         steps = [{"id": str(s.get("id") or ""), "content": str(s.get("content") or ""),
                   "body_markdown": str(s.get("body_markdown") or "")} for s in _kids(sec)]
         hands = _line(body, "Hands over")
@@ -311,7 +331,7 @@ def seats_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
                 handover = {"paths": _paths(parts[0]), "to": _plain(parts[1]).strip(" .")}
         return {"name": name, "job": name, "kind": kind, "profile": profile, "model": model,
                 "planned_assignee": planned, "assignee": str(sec.get("assignee") or "").strip(),
-                "paths": _paths(_line(body, "Files")), "handover": handover,
+                "paths": paths, "handover": handover,
                 "start_after": _plain(_line(body, "Start after")),
                 "sub_plan": {"id": str(sec.get("id") or ""), "title": name, "done": 0,
                              "total": len(steps), "steps": steps}}

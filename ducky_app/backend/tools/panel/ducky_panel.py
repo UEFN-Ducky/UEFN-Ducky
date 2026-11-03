@@ -1047,6 +1047,14 @@ def ducky_group_invite(
             f"No ducky named {ducky!r}. Call ducky_list_duckies to see available duckies."
         )
     pid = str(profile.get("id") or "").strip() or ducky.strip()
+    try:  # a member's chat id or the group's folder id names its group too
+        group_id = _resolve_group_hub_id(group_id=group_id) or group_id.strip()
+    except ValueError:
+        group_id = group_id.strip()  # the panel answers for an id it doesn't know
+    from backend.workspace import identity as run_identity
+
+    ctx = run_identity.resolve_context()
+    _lead_if_leaderless(group_id, str(getattr(ctx, "conv_id", "") or ""), _project_root())
     if write_allowed is not None:
         _require_lane_authority(group_id)
     api = _panel_api()
@@ -1493,19 +1501,21 @@ def _lead_without_plan(me: str, target: str, root: str | None) -> bool:
 
 
 def _spawn_needs_plan(caller: str, hub_id: str, root: str | None) -> bool:
-    """Seating work into a group the caller leads, while its team has members and it has no live plan."""
+    """Seating work into a group the caller leads, while its team has members and it has no plan
+    at all. A finished (or paused) plan is no reason to refuse: a helper spawned after it isn't
+    part of it (Nov 3 2026: a lead whose 17 steps were done was told it had no plan yet)."""
     if not caller:
         return False
     try:
         from backend.agent.a2a_broker import leads_receiver
-        from backend.agent.coding_agents.plans import _live_plan, load_plan
+        from backend.agent.coding_agents.plans import load_plan
         from frontend.ui_web.team_keeper import _staffed_leaders
 
         hub = load_conversation(hub_id, project_root=root)
         lead = str(getattr(hub, "leader_conv_id", "") or "").strip() if hub is not None else ""
         if lead != caller and not leads_receiver(caller, hub_id):
             return False
-        return not _live_plan(load_plan(caller, root)) and caller in _staffed_leaders(root)
+        return load_plan(caller, root) is None and caller in _staffed_leaders(root)
     except Exception:
         return False
 
@@ -1900,6 +1910,16 @@ def _resolve_group_hub_id(group_id: str = "", folder_id: str = "") -> str:
         hub = load_conversation(gid, project_root=root)
         if hub is not None and getattr(hub, "is_group", False):
             return gid
+        # A member's chat id (what a spawn answered with) means the group it sits in.
+        parent_id = str(getattr(hub, "parent_conv_id", "") or "").strip() if hub is not None else ""
+        parent = load_conversation(parent_id, project_root=root) if parent_id else None
+        if parent is not None and getattr(parent, "is_group", False):
+            return parent_id
+        if hub is None and not (folder_id or "").strip():
+            try:
+                return _resolve_group_hub_id(folder_id=gid)  # a group's folder id
+            except ValueError:
+                pass
         raise ValueError(
             f"{gid!r} is not a group hub. Pass the group hub id from ducky_group_create."
         )
@@ -1915,6 +1935,18 @@ def _resolve_group_hub_id(group_id: str = "", folder_id: str = "") -> str:
             f"Folder {fid!r} is not a group folder. Create one with ducky_group_create first."
         )
     return ""
+
+
+def _lead_if_leaderless(hub_id: str, caller: str, root: str | None) -> None:
+    """The chat that seats a member into a group with no leader leads it (a pointer: the chat is
+    not moved). Nov 3 2026: a lead spawned into a group by id, and its later ducky_group_invite
+    there was refused with "This group has no leader yet"."""
+    if not caller or caller == hub_id:
+        return
+    hub = load_conversation(hub_id, project_root=root)
+    if hub is not None and not (getattr(hub, "leader_conv_id", None) or "").strip():
+        hub.leader_conv_id = caller
+        save_conversation(hub, root)
 
 
 @mcp.tool()
@@ -2006,12 +2038,9 @@ def ducky_spawn_chat(
         if not created.get("ok"):
             raise ValueError(str(created.get("error") or "group_create failed"))
         hub_id = str(created.get("id") or "").strip()
-        hub = load_conversation(hub_id, project_root=root)
-        if hub is not None and not (getattr(hub, "leader_conv_id", None) or "").strip():
-            hub.leader_conv_id = caller
-            save_conversation(hub, root)
     if not hub_id:
         raise ValueError("No group to seat this ducky in.")
+    _lead_if_leaderless(hub_id, caller, root)
     if _spawn_needs_plan(caller, hub_id, root):
         return tool_json({"status": "not_sent", "sender": caller, "reason": LEAD_NEEDS_PLAN}, pretty=pretty)
 

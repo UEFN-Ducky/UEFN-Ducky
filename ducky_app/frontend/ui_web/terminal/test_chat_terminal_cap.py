@@ -302,3 +302,18 @@ def test_a_shell_handed_out_again_is_not_closed_as_idle(mgr, tmp_path):
     again = mgr.spawn(shell="powershell", cwd=str(tmp_path), conv_id="chat-a", env_extra=env, reuse_idle=True)
     assert again["session_id"] == first["session_id"]
     assert mgr.close_idle_agent_terminals(now=_time.time() + 1, running=set()) == []
+
+
+def test_a_terminal_whose_background_job_still_runs_is_never_closed(mgr, tmp_path):
+    # Nov 3 2026: `cargo test` run with background=true (a `( … ) &` subshell the busy check
+    # doesn't see) lost its terminal while it built: read_output said "session not found".
+    first = [_open(mgr, tmp_path)["session_id"] for _ in range(manager_module._MAX_CHAT_SHELLS)]
+    cargo = mgr.get_session(first[0])
+    cargo.ran_background = True
+    mgr.running[cargo._pty.pid] = [9998]  # the background job under the shell
+    assert _open(mgr, tmp_path)["closed"] == [first[1]]  # the cap closes the next idle one instead
+    later = cargo.last_activity + manager_module._AGENT_IDLE_CLOSE_S + 1
+    assert first[0] not in mgr.close_chat_terminals(["chat-a"], now=later)
+    assert first[0] in mgr._sessions
+    mgr.running.pop(cargo._pty.pid)  # cargo ends: an ordinary idle terminal again
+    assert mgr.close_chat_terminals(["chat-a"], now=later) == [first[0]]

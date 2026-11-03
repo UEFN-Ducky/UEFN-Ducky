@@ -307,6 +307,18 @@ def test_bold_files_line_gives_clean_paths():
     assert sb.seats_from_plan(_plan(sec))[0]["paths"] == ["a/**", "b.py"]
 
 
+def test_lanes_are_paths_and_globs_never_operation_names():
+    # Nov 3 2026: lanes came out as ["model3d.start", "model3d.status"]; a not-yet-made folder
+    # written bare with a note after it came out empty (no_lane).
+    sec = _section("x", "X", "Files: `C:/r/DuckyOS/plugins/plugin-meshy/**` (new; tools `model3d.start`, "
+                             "`model3d.status`, `model3d-models`)", [_step(1)])
+    assert sb.seats_from_plan(_plan(sec))[0]["paths"] == ["C:/r/DuckyOS/plugins/plugin-meshy/**"]
+    sec["body_markdown"] = "**Files:** C:/r/DuckyOS/plugins/plugin-meshy/** (folder made by this seat)"
+    assert sb.seats_from_plan(_plan(sec))[0]["paths"] == ["C:/r/DuckyOS/plugins/plugin-meshy/**"]
+    sec["body_markdown"] = "Files: `My Projects/a b/x.py`, relay.rs; see model3d.start"
+    assert sb.seats_from_plan(_plan(sec))[0]["paths"] == ["My Projects/a b/x.py", "relay.rs"]
+
+
 def test_build_from_plan_assigns_the_existing_sections_and_adds_no_nodes(tmp_path):
     api = Api(tmp_path)
     sb.build_swarm(api=api, from_plan=_three_level_plan())

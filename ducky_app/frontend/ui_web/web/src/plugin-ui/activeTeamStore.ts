@@ -43,6 +43,11 @@ export function copyDot(state?: string, pending = 0): CopyDot {
 const SETTLE_MS = 300;
 
 let team: ActiveTeam | null = null;
+/** The version of `team` Python sent; a repeat read with it gets `{unchanged:true}` back. */
+let etag = "";
+
+type OverviewReply = TeamOverview & { etag?: string; unchanged?: boolean };
+type OverviewCall = (space?: string, etag?: string) => Promise<OverviewReply>;
 const listeners = new Set<() => void>();
 let started = false;
 let stopPush: (() => void) | null = null;
@@ -96,9 +101,14 @@ export async function readActiveTeam(): Promise<void> {
     return;
   }
   try {
-    const got = await api.plugin_team_overview();
+    const read = api.plugin_team_overview as OverviewCall;
+    const got = await read("", team ? etag : "");
     if (!got || got.ok === false) return;
-    team = summarizeTeam(got);
+    if (got.unchanged) return; // same overview: keep our copy, nothing to redraw
+    const overview: OverviewReply = { ...got };
+    etag = overview.etag || "";
+    delete overview.etag;
+    team = summarizeTeam(overview);
     tell();
   } catch {
     /* keep the last read */
@@ -143,6 +153,7 @@ export function _resetActiveTeamForTests(): void {
   stopReady = null;
   started = false;
   team = null;
+  etag = "";
   listeners.clear();
   window.clearTimeout(settle);
 }

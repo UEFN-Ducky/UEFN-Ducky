@@ -646,7 +646,7 @@ _TEAM_SCREEN_API = {
     'live_team_join': ['account', 'space', 'room'],
     'live_team_invite': ['account', 'space', 'device'],
     'live_team_leave': ['account', 'space'],
-    'plugin_team_overview': ['space'],
+    'plugin_team_overview': ['space', 'etag'],
     'plugin_scope_choices': [],
     'plugin_scope_set_all': ['scope_id'],
     'plugin_scope_set': ['plugin_id', 'scope_id', 'options'],
@@ -750,6 +750,26 @@ def test_plugin_call_etag_skips_unchanged_big_reply(monkeypatch) -> None:
 
     plain = api.plugin_call('account', 'list_models', {})
     assert 'etag' not in plain  # callers that don't opt in get the reply as before
+
+
+def test_team_overview_same_etag_gets_a_tiny_reply(monkeypatch) -> None:
+    import json
+
+    from backend.uefn_plugins import spaces
+
+    overview = {'ok': True, 'current': 's', 'label': 'Team', 'plugins': [{'pluginId': f'p{i}', 'pad': 'x' * 1700} for i in range(100)]}
+    monkeypatch.setattr(spaces, 'team_overview', lambda space='': overview)
+    api = PanelApi.__new__(PanelApi)
+
+    first = api.plugin_team_overview('')
+    assert first['plugins'] == overview['plugins'] and first['etag']
+    again = api.plugin_team_overview('', first['etag'])
+    assert again == {'ok': True, 'unchanged': True, 'etag': first['etag']}
+    assert len(json.dumps(again)) < 100
+
+    overview['plugins'][0]['pad'] = 'changed'
+    changed = api.plugin_team_overview('', first['etag'])
+    assert 'unchanged' not in changed and changed['etag'] != first['etag']
 
 
 def test_panel_api_public_methods() -> None:

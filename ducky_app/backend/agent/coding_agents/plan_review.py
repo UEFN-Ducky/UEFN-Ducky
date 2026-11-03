@@ -65,13 +65,30 @@ def _same(a: str, b: str) -> bool:
     return a == b or a.endswith("/" + b) or b.endswith("/" + a)
 
 
+def _is_abs(path: str) -> bool:
+    return path.startswith("/") or (len(path) > 1 and path[1] == ":")
+
+
+def in_lane_root(path: str, own: str) -> str:
+    """*path* read against the folder of a full-path lane in another repo (a step names
+    ``src/hooks.rs`` under ``C:/repo/plugin-meshy/**``); '' when that doesn't apply. Nov 3 2026:
+    such steps were flagged "Outside its lane". A relative lane shares the step's root already."""
+    if _is_abs(path) or not _is_abs(own):
+        return ""
+    root = re.split(r"[*?\[]", own, maxsplit=1)[0].rstrip("/")
+    if root == own.rstrip("/") and _FILE_EXT_RE.search(root):
+        return ""  # a single-file lane has no folder to read against
+    return f"{root}/{path.removeprefix('./')}"
+
+
 def _inside(path: str, lane: list[str]) -> bool:
     for own in lane:
-        if fnmatch.fnmatch(path, own) or _same(path, own):
-            return True
-        folder = own.rstrip("/") + "/"
-        if (own.endswith("/") or not _FILE_EXT_RE.search(own)) and (path.startswith(folder) or "/" + folder in path):
-            return True
+        for p in filter(None, (path, in_lane_root(path, own))):
+            if fnmatch.fnmatch(p, own) or _same(p, own):
+                return True
+            folder = own.rstrip("/") + "/"
+            if (own.endswith("/") or not _FILE_EXT_RE.search(own)) and (p.startswith(folder) or "/" + folder in p):
+                return True
     return False
 
 

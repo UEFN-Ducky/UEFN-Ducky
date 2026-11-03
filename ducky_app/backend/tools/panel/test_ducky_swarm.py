@@ -557,17 +557,67 @@ def test_from_plan_model_move_drop_and_mute_edits_change_the_plan(tmp_path):
     api, store = _plan_api(tmp_path)
     out = sw.swarm_create("", None, from_plan=True, api=api, store=store, edits=[
         {"seat": "Widget", "model": "codex:gpt-5"}, {"seat": "Widget", "to_group": "Backend"},
-        {"seat": "Widget", "drop_step": "Widget step 2"}, {"mute": "Backend"}, {"wiggle": 1}])
+        {"seat": "Widget", "drop_step": "Widget step 2"}, {"mute": "Backend"}])
     widget = next(s for s in sw.walk_seats(out["preview"]["tree"]) if s["name"] == "Widget")
     assert widget["model"] == "codex:gpt-5" and widget["sub_plan"]["total"] == 2
     assert [s["name"] for s in sw.walk_groups(out["preview"]["tree"]).__next__()["seats"]] == ["API", "Store", "Widget"]
     assert "Muted: yes" in api.plan["nodes"][0]["body_markdown"]
-    assert any("wiggle" in w for w in out["preview"]["warnings"])
     # confirm builds what the plan says and doesn't apply the edits twice
     store.calls.clear()
     done = sw.swarm_create("", None, from_plan=True, api=api, store=store, confirm=True,
                            edits=[{"seat": "Widget", "model": "codex:gpt-5"}])
     assert store.calls == [] and done["status"] == "done"
+
+
+def test_from_plan_seat_edits_set_profile_and_lane_and_unknown_edits_are_refused():
+    # Nov 3 2026: {"seat", "profile", "paths"} came back "Not a plan edit, ignored" for every row.
+    api, store = _plan_api()
+    meshy = "C:/Users/me/GitHub/DuckyOS/plugins/plugin-meshy/**"
+    out = sw.swarm_create("", None, from_plan=True, api=api, store=store, edits=[
+        {"seat": "Widget", "profile": "reviewer", "paths": [meshy.replace("/", "\\")]},
+        {"seat": "api", "profile": "tester"}])  # by section id
+    seats = {s["name"]: s for s in sw.walk_seats(out["preview"]["tree"])}
+    assert out["status"] == "needs_confirm" and "warnings" not in out["preview"]
+    assert seats["Widget"]["profile"] == "reviewer" and seats["Widget"]["paths"] == [meshy]
+    assert seats["API"]["profile"] == "tester"
+    assert f"Files: `{meshy}`" in api.plan["nodes"][1]["body_markdown"]
+    # Sent straight with confirm=true they still land before the build.
+    api2, store2 = _plan_api()
+    sw.swarm_create("", None, from_plan=True, confirm=True, api=api2, store=store2,
+                    edits=[{"seat": "Widget", "profile": "reviewer"}])
+    assert "Ducky: reviewer" in api2.plan["nodes"][1]["body_markdown"]
+    bad = sw.swarm_create("", None, from_plan=True, api=api, store=store,
+                          edits=[{"seat": "Widget", "profile": "developer"}, {"wiggle": 1}])
+    assert bad["status"] == "error" and "{seat, profile?, paths?, model?}" in bad["error"]
+    assert "Ducky: reviewer" in api.plan["nodes"][1]["body_markdown"]  # nothing applied
+
+
+def test_from_plan_routes_by_files_never_title_words_and_shows_the_leads_model():
+    # Nov 3 2026: code sections titled "... 3D endpoint" / "... tests" got 3d-modeler / tester,
+    # and the card showed model "" for seats that would run on the lead's model.
+    from backend.tools.panel.test_swarm_build import Api
+
+    class LeadApi(Api):
+        def seat_model(self, lead, profile):
+            return "claude_code:claude-opus-5-5"
+
+    def sec(sid, title, body):
+        return {"id": sid, "content": title, "body_markdown": body,
+                "children": [{"id": f"{sid}-0", "content": "do it", "body_markdown": ""}]}
+
+    plan = {"id": "p", "title": "Meshy", "nodes": [
+        sec("a", "Ducky AI core: 3D endpoint and tests", "Files: `C:/r/DuckyOS/duckyos-core/src/ducky_ai/**`"),
+        sec("b", "Meshy gateway plugin (3D models)", "Files: C:/r/DuckyOS/plugins/plugin-meshy/** (new folder)"),
+        sec("c", "Verse hooks", "Files: `Content/Verse/Shop/shop.verse`"),
+        {**sec("d", "Site 3D card", "Files: `site/card.tsx`"), "planned_assignee": "ui-engineer"},
+    ]}
+    out = sw.swarm_create("", None, from_plan=True, api=LeadApi("C:/proj", plan=plan))
+    seats = {s["name"]: s for s in out["seats"]}
+    assert {n: s["profile"] for n, s in seats.items()} == {
+        "Ducky AI core: 3D endpoint and tests": "developer", "Meshy gateway plugin (3D models)": "developer",
+        "Verse hooks": "verse-coder", "Site 3D card": "ui-engineer"}
+    assert {s["model"] for s in seats.values()} == {"claude_code:claude-opus-5-5"}
+    assert seats["Meshy gateway plugin (3D models)"]["lane"] == ["C:/r/DuckyOS/plugins/plugin-meshy/**"]
 
 
 def _swap_case(monkeypatch, assignee, new_id):

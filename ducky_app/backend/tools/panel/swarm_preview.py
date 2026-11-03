@@ -853,10 +853,13 @@ def after_cycles(seats: list[dict[str, Any]], deps: dict[str, list[str]]) -> lis
 
 
 def out_of_lane(seats: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """[{seat, step, file}] for a step whose own Files line names a path outside its seat's lane."""
+    """[{seat, step, file}] for a step whose own Files line names a path outside its seat's lane
+    (a relative path is also read against a full-path lane's folder: ``in_lane_root``)."""
+    from backend.agent.coding_agents.plan_review import in_lane_root
+
     return [{"seat": s["name"], "step": st["content"], "file": p}
             for s in seats if s["lane"] for st in s["steps"] for p in files_in(st["body"])
-            if not any(_covers(q, p) for q in s["lane"])]
+            if not any(_covers(q, p) or (in_lane_root(p, q) and _covers(q, in_lane_root(p, q))) for q in s["lane"])]
 
 
 # ---- balance: most seats working, fewest waiting ------------------------------------------

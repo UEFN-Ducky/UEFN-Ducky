@@ -12,7 +12,7 @@ import uuid
 from typing import Any, Callable
 
 from frontend.settings import PanelSettings
-from frontend.ui_web.terminal import repo_lock, run_durations
+from frontend.ui_web.terminal import commit_guard, repo_lock, run_durations
 from frontend.ui_web.terminal.bridge import TerminalBridge
 from frontend.ui_web.terminal.session import (
     _OUTPUT_RING_CHARS,
@@ -292,9 +292,10 @@ class TerminalManager:
 
     def close_chat_terminals(self, chat_ids: list[str] | set[str], *, now: float | None = None) -> list[str]:
         """Close every terminal these chats opened (team stop, archive, plan done), stuck
-        children and all (the shell's tree is killed). Kept: one waiting on an Allow card, and
-        one whose command printed in the last ``_AGENT_IDLE_CLOSE_S`` (the idle reaper closes it
-        once it is quiet). Each close sends terminal_close."""
+        children and all (the shell's tree is killed). Kept: one waiting on an Allow card, one
+        whose background command still runs, and one whose command printed in the last
+        ``_AGENT_IDLE_CLOSE_S`` (the idle reaper closes it once it is quiet). Each close sends
+        terminal_close."""
         ids = {str(c) for c in chat_ids or [] if c}
         if not ids:
             return []
@@ -305,7 +306,7 @@ class TerminalManager:
         snapshot = functools.cache(_process_snapshot)
         closed: list[str] = []
         for session in mine:
-            if session.id in asked:
+            if session.id in asked or session.background_alive(snapshot):
                 continue
             recent = now - float(getattr(session, "last_activity", now)) < _AGENT_IDLE_CLOSE_S
             if recent and session.has_running_command(snapshot):
@@ -332,7 +333,9 @@ class TerminalManager:
 
         A terminal running a command or waiting on an Allow pop-up is never closed, and
         when every one is busy the new terminal opens anyway. A person's own terminals
-        belong to no chat and are never counted."""
+        belong to no chat and are never counted. Nov 3 2026: a `cargo test` started with
+        background=true runs in a `( … ) &` subshell the busy check doesn't see, and its
+        terminal was closed under it ("session not found"): a live background job is busy."""
         with self._lock:
             mine = [e.session for e in self._sessions.values() if e.chat == conv_id]
             asked = {p.session_id for p in self._pending.values()}
@@ -340,7 +343,8 @@ class TerminalManager:
         if excess <= 0:
             return []
         snapshot = functools.cache(_process_snapshot)
-        idle = [s for s in mine if s.id not in asked and not s.has_running_command(snapshot)]
+        idle = [s for s in mine if s.id not in asked and not s.has_running_command(snapshot)
+                and not s.background_alive(snapshot)]
         # Terminals whose shell already ended go first, then the oldest (open order).
         idle.sort(key=lambda s: s.is_alive())
         closed = [s.id for s in idle[:excess]]
@@ -644,9 +648,17 @@ class TerminalManager:
         steer = steer_pending if steer_pending is not None else _steer_check(conv_id)
         if not early_return:
             steer = None
+        known = self.get_session(session_id)
         if not auto_approve and conv_id:
-            known = self.get_session(session_id)
             auto_approve = _chat_always_allows(conv_id, command, str(getattr(known, "cwd", "") or ""))
+        # ponytail: reads the terminal's opening folder; a `cd` typed in an earlier command
+        # isn't followed (one in this command is).
+        try:
+            refused = commit_guard.check(command, str(getattr(known, "cwd", "") or ""), conv_id) if known else ""
+        except Exception:  # noqa: BLE001 - the guard never blocks a command by failing
+            refused = ""
+        if refused:
+            return {"ok": False, "fail": "foreign_files", "error": refused}
         req = self.request_command(
             session_id,
             command,

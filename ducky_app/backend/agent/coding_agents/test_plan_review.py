@@ -102,3 +102,22 @@ def test_a_step_naming_another_lanes_file_is_flagged() -> None:
     assert [i["issue"].split(" is ")[0] for i in issues] == ["Outside its lane: backend/agent/coding_agents/plans.py"]
     step["body_markdown"] = _full("plan_review.py", "web/src/components/Plan.tsx")
     assert plan_review(_plan(sec)) == []
+
+
+def test_relative_step_paths_are_read_against_a_full_path_lane(monkeypatch) -> None:
+    # Nov 3 2026: steps naming src/model3d.rs under `C:/…/plugin-meshy/**` and relay.rs under
+    # `…/src/ducky_ai/**` were flagged "Outside its lane".
+    meshy, core = "C:/r/DuckyOS/plugins/plugin-meshy/**", "C:/r/DuckyOS/duckyos-core/src/ducky_ai/**"
+    a = {"id": "a1", "content": "Start a job", "status": "pending", "body_markdown": _full("src/model3d.rs", "src/hooks.rs")}
+    b = {"id": "b1", "content": "Bill a job", "status": "pending", "body_markdown": _full("relay.rs", "money.rs")}
+    c = {"id": "c1", "content": "Stray", "status": "pending", "body_markdown": _full("C:/r/DuckyOS/other/x.rs")}
+    issues = plan_review(_plan(_section("a", "Meshy", [meshy], [a, c]), _section("b", "Core", [core], [b])))
+    assert [i["issue"].split(" is ")[0] for i in issues] == ["Outside its lane: C:/r/DuckyOS/other/x.rs"]
+    from backend.tools.panel.swarm_preview import out_of_lane
+    from backend.workspace import lanes
+
+    monkeypatch.setattr(lanes, "_roots_source", lambda: ["C:/proj", "C:/r/DuckyOS"])
+    seats = [{"name": "Meshy", "lane": [meshy], "steps": [
+        {"content": "Start", "body": "Files: `src/model3d.rs`"},
+        {"content": "Stray", "body": "Files: `C:/r/DuckyOS/other/x.rs`"}]}]
+    assert [x["file"] for x in out_of_lane(seats)] == ["C:/r/DuckyOS/other/x.rs"]

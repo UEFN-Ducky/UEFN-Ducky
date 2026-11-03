@@ -75,7 +75,7 @@ _PERMISSIONS = ("may_commit", "may_release", "allow_terminal", "trust_drafts")
 _EDIT_KEYS = frozenset({
     "drop", "rename", "to", "seat", "model", "add_step", "drop_step", "rename_step", "mute", "unmute",
     "group", "muted", "interfaces",
-    "paths", *_PERMISSIONS, "run_at_once", "move_step", "to_seat", "start_after",
+    "paths", "profile", *_PERMISSIONS, "run_at_once", "move_step", "to_seat", "start_after",
 })
 
 
@@ -121,6 +121,8 @@ def apply_card_edits(preview: dict[str, Any], edits: list[dict[str, Any]] | None
         elif "seat" in e and "paths" in e:
             seat = seat_of(e["seat"])
             seat["paths"] = [str(p).strip() for p in e["paths"] or [] if str(p).strip()]
+        if "seat" in e and str(e.get("profile") or "").strip():
+            seat_of(e["seat"])["profile"] = str(e["profile"]).strip()
         perms = {k: bool(e[k]) for k in _PERMISSIONS if k in e}
         if perms:
             target = seat_of(e["seat"]) if "seat" in e else groups.get(str(e.get("group") or "").strip())
@@ -204,6 +206,20 @@ def plan_preview(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _show_seat_models(preview: dict[str, Any], api: Any, lead: str) -> None:
+    """Fill each seat with no Model line with the model the build gives it (the lead's, unless
+    its profile names one), so the card never shows ``model: ""``."""
+    from backend.tools.panel.swarm_build import _Api
+
+    wrapped = _Api(api)
+    for seat in walk_seats(preview["tree"]):
+        if not seat.get("model"):
+            try:
+                seat["model"] = wrapped.seat_model(lead, seat["profile"]) or ""
+            except Exception:  # noqa: BLE001 - a preview never fails over a model lookup
+                pass
+
+
 class PlanStore:
     """The plan edits a from-plan Change makes, through the plan tools (events and checks included)."""
 
@@ -247,14 +263,32 @@ def _set_line(body: str, label: str, value: str) -> str:
     """*body* with its ``Label: value`` line replaced (or added at the end)."""
     line = f"{label}: {value}"
     pat = re.compile(rf"^\s*(?:\*\*)?{label}(?:\*\*)?\s*:(?:\*\*)?.*$", re.IGNORECASE | re.MULTILINE)
-    return pat.sub(line, body, count=1) if pat.search(body) else (body.rstrip() + "\n" + line).lstrip()
+    # A function, so a Windows path's backslashes are never read as group references.
+    return pat.sub(lambda _m: line, body, count=1) if pat.search(body) else (body.rstrip() + "\n" + line).lstrip()
+
+
+PLAN_EDIT_SHAPES = (
+    "{seat, profile?, paths?, model?} (seat = section title or id), {seat, rename_step|drop_step, to?}, "
+    "{seat, to_group}, {rename, to}, {mute|unmute: group}"
+)
+
+
+def _is_plan_edit(e: dict[str, Any]) -> bool:
+    if "seat" in e:
+        return any(k in e for k in ("rename_step", "drop_step", "model", "profile", "paths", "to_group"))
+    return "rename" in e or "mute" in e or "unmute" in e
 
 
 def apply_plan_edits(chat_id: str, plan: dict[str, Any], edits: list[dict[str, Any]], store: Any) -> list[str]:
     """Card Change edits on the real plan: ``{seat, rename_step, to}`` / ``{seat, drop_step}`` (a
     step's content or id), ``{seat, model}`` (the section's Model: line), ``{rename, to}`` (a seat
     or group), ``{mute|unmute: group}`` (the group's Muted: line), ``{seat, to_group}`` (move the
-    section; '' = top level). Returns warnings for edits that don't fit a plan."""
+    section; '' = top level), ``{seat, profile}`` (its Ducky: line), ``{seat, paths}`` (its Files:
+    line, the seat's lane). A seat is named by its section title or id. An edit of any other shape
+    is refused (ValueError naming ``PLAN_EDIT_SHAPES``) before anything changes."""
+    bad = [e for e in edits if isinstance(e, dict) and not _is_plan_edit(e)]
+    if bad:
+        raise ValueError(f"Not a plan edit: {bad[0]}. Accepted: {PLAN_EDIT_SHAPES}.")
     preview = plan_preview(plan)
     seats = {s["name"]: s for s in walk_seats(preview["tree"])}
     groups = {g["group"]: g for g in walk_groups(preview["tree"])}
@@ -269,7 +303,8 @@ def apply_plan_edits(chat_id: str, plan: dict[str, Any], edits: list[dict[str, A
     warnings: list[str] = []
 
     def seat_of(name: Any) -> dict[str, Any]:
-        hit = seats.get(str(name or "").strip())
+        key = str(name or "").strip()
+        hit = seats.get(key) or next((s for s in seats.values() if s["sub_plan"]["id"] == key), None)
         if hit is None:
             raise ValueError(f"No seat called {name!r}; seats: {', '.join(seats)}")
         return hit
@@ -277,6 +312,16 @@ def apply_plan_edits(chat_id: str, plan: dict[str, Any], edits: list[dict[str, A
     for e in edits:
         if not isinstance(e, dict):
             continue
+        if "seat" in e and ("profile" in e or "paths" in e):
+            sid = seat_of(e["seat"])["sub_plan"]["id"]
+            if str(e.get("profile") or "").strip():
+                bodies[sid] = _set_line(bodies.get(sid, ""), "Ducky", str(e["profile"]).strip())
+            if "paths" in e:
+                paths = [str(p).strip().replace("\\", "/") for p in e["paths"] or [] if str(p).strip()]
+                bodies[sid] = _set_line(bodies.get(sid, ""), "Files", ", ".join(f"`{p}`" for p in paths))
+            store.update(chat_id, sid, body_markdown=bodies[sid])
+            if not e.get("model"):
+                continue
         if "rename_step" in e or "drop_step" in e:
             seat = seat_of(e.get("seat"))
             key = str(e.get("rename_step") or e.get("drop_step") or "").strip()
@@ -319,8 +364,6 @@ def apply_plan_edits(chat_id: str, plan: dict[str, Any], edits: list[dict[str, A
             gid = groups[name]["id"]
             bodies[gid] = _set_line(bodies.get(gid, ""), "Muted", "yes" if "mute" in e else "no")
             store.update(chat_id, gid, body_markdown=bodies[gid])
-        else:
-            warnings.append(f"Not a plan edit, ignored: {e}")
     return warnings
 
 
@@ -341,15 +384,27 @@ def _swarm_from_plan(confirm: bool, api: Any, edits: list[dict[str, Any]] | None
             return {"status": "error", "error": str(exc)}
         plan = api.load_plan(lead) or plan  # re-preview what the plan now says
     elif edits:
-        # A build sent straight with {seat, model} edits (no preview first) still seats that model;
-        # one the plan already says is skipped, so a resent card never applies it twice.
+        # A build sent straight with seat edits (no preview first) still seats them: profile and
+        # paths rewrite their lines (the same again is harmless); a model the plan already says
+        # is skipped, so a resent card never swaps a live seat twice.
         models = {s["name"]: s.get("model") for s in walk_seats(plan_preview(plan)["tree"])}
-        new = [e for e in edits if isinstance(e, dict) and e.get("seat") and e.get("model")
-               and str(e["seat"]).strip() in models and models[str(e["seat"]).strip()] != str(e["model"]).strip()]
-        if new:
-            apply_plan_edits(lead, plan, new, store or PlanStore())
-            plan = api.load_plan(lead) or plan
+        new = []
+        for e in edits:
+            if not isinstance(e, dict) or not e.get("seat"):
+                continue
+            row = dict(e)
+            if models.get(str(e["seat"]).strip(), object()) == str(e.get("model") or "").strip():
+                row.pop("model", None)
+            if row.get("model") or "profile" in row or "paths" in row:
+                new.append(row)
+        try:
+            if new:
+                apply_plan_edits(lead, plan, new, store or PlanStore())
+                plan = api.load_plan(lead) or plan
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
     preview = plan_preview(plan)
+    _show_seat_models(preview, api, lead)
     if warnings:
         preview["warnings"] = warnings
     if not preview["agents"]:
@@ -426,7 +481,12 @@ def ducky_swarm_create(
     """Make a swarm: write every job from the request ({name, purpose, task, steps[], paths[]}), call
     WITHOUT detail; needs_answers: ask its questions (detail too) in ONE ducky_ask_user, call again;
     needs_confirm: show the preview (tree, steps, detail slider), confirm=true builds exactly it.
-    from_plan=true (no goal/jobs): seat your own plan as it is, one seat per sub plan.
+    from_plan=true (no goal/jobs): seat your own plan as it is, one seat per sub plan; each seat's
+    profile is its section's Ducky: line, else its planned_assignee, else Developer for code Files,
+    and its model the section's Model: line, else yours. from_plan edits change the plan itself:
+    {seat, profile?, paths?, model?} (seat = section title or id; paths = its Files/lane),
+    {seat, rename_step|drop_step, to?}, {seat, to_group}, {rename, to}, {mute|unmute: group}.
+    Any other edit is refused with that list.
     """
     return tool_json(swarm_create(goal, jobs, agents, max_agents, per_group, edits, confirm, detail=detail,
                                   from_plan=from_plan), pretty=pretty)

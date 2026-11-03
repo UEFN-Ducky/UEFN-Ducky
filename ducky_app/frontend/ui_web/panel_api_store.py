@@ -1143,14 +1143,26 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "choices": [], "error": str(exc)}
 
-    def plugin_team_overview(self, space: str = "") -> dict[str, Any]:
-        """The Team modal: one team copy and every plugin on it (:func:`spaces.team_overview`)."""
+    def plugin_team_overview(self, space: str = "", etag: str = "") -> dict[str, Any]:
+        """The Team modal: one team copy and every plugin on it (:func:`spaces.team_overview`).
+
+        The reply carries ``etag``; a caller that passes the one it holds gets
+        ``{ok, unchanged, etag}`` while nothing changed (most reads are repeats)."""
         from backend.uefn_plugins.spaces import team_overview
 
         try:
-            return team_overview(str(space or ""))
+            out = team_overview(str(space or ""))
         except Exception as exc:
             return {"ok": False, "current": "personal", "label": "Local", "plugins": [], "error": str(exc)}
+        if not isinstance(out, dict) or out.get("ok") is False:
+            return out
+        encoded = _encode_reply(out)
+        if not encoded:
+            return out
+        tag = reply_etag(encoded)
+        if etag and str(etag) == tag:
+            return {"ok": True, "unchanged": True, "etag": tag}
+        return {**out, "etag": tag}
 
     def plugin_scope_set_all(self, scope_id: str) -> dict[str, Any]:
         """The one switch of the whole app: every plugin that can share (enabled, linked, with

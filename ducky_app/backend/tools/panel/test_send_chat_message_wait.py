@@ -122,3 +122,45 @@ def test_a_lead_whose_team_has_members_spawns_no_work_before_its_plan(monkeypatc
     assert out["status"] == "not_sent" and "ducky_group_invite" in out["reason"] and seated == ["hub"]
     monkeypatch.setattr(plans, "load_plan", lambda cid, root=None: {"chat_id": cid, "status": "open"})
     assert spawn("Build the CLI.")["status"] == "running" and seated == ["hub", "hub"]
+    # Nov 3 2026: a lead whose plan was finished (all 17 steps done) was told it had none yet.
+    monkeypatch.setattr(plans, "load_plan", lambda cid, root=None: {"chat_id": cid, "status": "finished"})
+    assert spawn("Help with one more thing.")["status"] == "running" and seated == ["hub", "hub", "hub"]
+
+
+def test_the_chat_that_spawns_into_a_leaderless_group_leads_it_and_invite_finds_the_group(monkeypatch) -> None:
+    # Nov 3 2026: after spawning into a group by id, ducky_group_invite answered "Not a group chat"
+    # (given the member's chat id) and "This group has no leader yet".
+    hub = SimpleNamespace(id="hub", is_group=True, title="Meshy", folder_id="f1", leader_conv_id="")
+    lead = SimpleNamespace(id="lead", is_group=False, title="Lead", parent_conv_id="", folder_id="", coding_agent="codex")
+    member = SimpleNamespace(id="m1", is_group=False, title="Dev", parent_conv_id="hub", folder_id="f1",
+                             model="", provider="", coding_agent="claude_code")
+    chats = {"hub": hub, "lead": lead, "m1": member}
+    monkeypatch.setattr(ducky_panel, "_project_root", lambda: "")
+    monkeypatch.setattr(ducky_panel, "load_conversation", lambda cid, project_root=None: chats.get(cid))
+    monkeypatch.setattr(ducky_panel, "save_conversation", lambda conv, root=None: None)
+    monkeypatch.setattr(ducky_panel, "load_folders", lambda root=None: [SimpleNamespace(id="f1", group_hub_id="hub")])
+    monkeypatch.setattr(ducky_panel, "_resolve_ducky_profile", lambda ducky: {"id": "developer", "name": "Developer"})
+    monkeypatch.setattr("backend.agent.a2a_broker.leads_receiver", lambda sender, receiver: False)
+    monkeypatch.setattr("frontend.ui_web.team_keeper._staffed_leaders", lambda root: set())
+    monkeypatch.setattr("backend.workspace.identity.resolve_context", lambda: SimpleNamespace(conv_id="lead"))
+    invited: list[str] = []
+
+    class Api:
+        def group_seat_profile(self, group_id, profile_id, **kw):
+            return {"ok": True, "member": {"member_conv_id": "m1", "name": "Dev"}}
+
+        def group_invite(self, group_id, profile_id, **kw):
+            invited.append(group_id)
+            return {"ok": True, "member": {"member_conv_id": "m2"}}
+
+        def group_lane_authorities(self, group_id):
+            return [chats[group_id].leader_conv_id] if chats[group_id].leader_conv_id else []
+
+    monkeypatch.setattr(ducky_panel, "_panel_api", lambda: Api())
+    monkeypatch.setattr(agent_modes, "run_message", lambda *a, **k: "running")
+    monkeypatch.setattr("backend.agent.a2a_client.open_thread", lambda *a, **k: "rid")
+    ducky_panel.ducky_spawn_chat("Build it.", ducky="Developer", group_id="hub", sender="lead", wait_for_reply=False)
+    assert hub.leader_conv_id == "lead"
+    for target in ("m1", "f1", "hub"):  # the member's chat, the group's folder, the group
+        json.loads(ducky_panel.ducky_group_invite(target, "Developer", write_allowed=["src/**"]))
+    assert invited == ["hub", "hub", "hub"]

@@ -162,15 +162,23 @@ def _work_text(work: dict[str, Any]) -> str:
 
 
 def _team_leaders(project_root: str | None) -> set[str]:
-    from frontend.ui_web.group_orchestrator import is_group_conversation
+    """Leaders of a live team: a group that isn't archived and seats at least one live member
+    (a chat or a nested group, not archived or deleted) besides its leader. Nov 3 2026: a swarm
+    that failed to build archived its group and seats but kept the owner as its leader, and
+    the keeper nagged that owner, working the plan alone, about a team ("Working: none")."""
+    from frontend.archive_folder import is_archive_folder_id
+    from frontend.ui_web.group_orchestrator import group_members, is_group_conversation
     from frontend.ui_web.project_chats import list_all_conversation_metadata
 
+    convs = list(list_all_conversation_metadata(project_root))
+    live = {str(getattr(c, "id", "")) for c in convs if not is_archive_folder_id(str(getattr(c, "folder_id", "") or ""))}
     leaders: set[str] = set()
-    for conv in list_all_conversation_metadata(project_root):
-        if is_group_conversation(conv):
-            lid = (getattr(conv, "leader_conv_id", None) or "").strip()
-            if lid:
-                leaders.add(lid)
+    for conv in convs:
+        if not is_group_conversation(conv) or str(getattr(conv, "id", "")) not in live:
+            continue
+        lid = (getattr(conv, "leader_conv_id", None) or "").strip()
+        if lid and any(m["member_conv_id"] in live and m["member_conv_id"] != lid for m in group_members(conv)):
+            leaders.add(lid)
     return leaders
 
 
@@ -228,37 +236,22 @@ def kept_plans(project_root: str | None = None) -> list[dict[str, Any]]:
         if not live:
             continue  # the team lookup reads every chat of the project: only when needed
         leaders = _team_leaders(root)
-        staffed: set[str] | None = None
         for plan in live:
             cid = str(plan.get("chat_id") or "")
+            # Only a lead with live seated members has a team; a solo owner is its own worker.
+            # A lead that seated members before giving any sub plan an owner is kept too (it
+            # was never woken).
             if cid not in leaders:
                 continue
-            if not (_started(plan) or _has_owner(plan)):
-                # Nothing assigned yet. A lead whose turn ended after writing the plan and
-                # seating members, before giving any sub plan an owner, was never woken.
-                if staffed is None:
-                    staffed = _staffed_leaders(root)
-                if cid not in staffed:
-                    continue
             plan.setdefault("project_root", root)
             out.append(plan)
     return out
 
 
 def _staffed_leaders(project_root: str | None) -> set[str]:
-    """Leaders of groups that hold at least one other member (a chat or a nested group)."""
+    """Leaders of live groups that hold at least one other live member (``_team_leaders``)."""
     try:
-        from frontend.ui_web.group_orchestrator import group_members, is_group_conversation
-        from frontend.ui_web.project_chats import list_all_conversation_metadata
-
-        out: set[str] = set()
-        for conv in list_all_conversation_metadata(project_root):
-            if not is_group_conversation(conv):
-                continue
-            lid = str(getattr(conv, "leader_conv_id", None) or "").strip()
-            if lid and any(str(m.get("member_conv_id") or "") not in ("", lid) for m in group_members(conv)):
-                out.add(lid)
-        return out
+        return _team_leaders(project_root)
     except Exception:
         return set()
 

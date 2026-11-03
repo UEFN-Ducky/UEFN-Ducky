@@ -142,9 +142,8 @@ def test_only_started_open_team_plans_are_kept(monkeypatch) -> None:
 
     monkeypatch.setattr(plans, "list_plans", lambda project_root=None: rows)
     monkeypatch.setattr(keeper, "_project_roots", lambda root: ["C:/island"])
-    monkeypatch.setattr(
-        keeper, "_team_leaders", lambda root: {"coord", "paused", "finished", "unstarted", "done"}
-    )
+    # "unstarted" leads a group with no live member: no team yet.
+    monkeypatch.setattr(keeper, "_team_leaders", lambda root: {"coord", "paused", "finished", "done"})
     assert [p["chat_id"] for p in keeper.kept_plans()] == ["coord"]
 
 
@@ -594,9 +593,40 @@ def test_a_lead_with_members_but_no_assignments_yet_is_kept(monkeypatch) -> None
             {**PLAN, "chat_id": "alone", "progress": {"pending": 5}}]
     monkeypatch.setattr(plans, "list_plans", lambda project_root=None: rows)
     monkeypatch.setattr(keeper, "_project_roots", lambda root: ["C:/island"])
-    monkeypatch.setattr(keeper, "_team_leaders", lambda root: {"staffed", "alone"})
-    monkeypatch.setattr(keeper, "_staffed_leaders", lambda root: {"staffed"})
+    monkeypatch.setattr(keeper, "_team_leaders", lambda root: {"staffed"})
     assert [p["chat_id"] for p in keeper.kept_plans()] == ["staffed"]
+
+
+def test_an_owner_whose_swarm_failed_works_alone_and_is_never_nagged(monkeypatch) -> None:
+    # Nov 3 2026: the swarm build failed and archived its group and seats, the owner stayed
+    # its leader and worked the plan alone; the keeper sent "Nothing in your plan can move"
+    # and "Your team has been working for 47 minutes" with "Working: none · Idle: none".
+    from types import SimpleNamespace
+
+    from frontend.ui_web import project_chats
+
+    def group(gid, leader, members, folder=""):
+        return SimpleNamespace(id=gid, is_group=True, leader_conv_id=leader, folder_id=folder,
+                               group_members=[{"member_conv_id": m} for m in members])
+
+    convs = [
+        group("g-failed", "solo", ["seat-1"], folder="archive"),  # the rolled-back swarm
+        SimpleNamespace(id="seat-1", is_group=False, folder_id="archive"),
+        group("g-gone", "solo2", ["deleted-seat"]),  # its only member was deleted
+        group("g-live", "lead", ["member", "lead"]),
+        SimpleNamespace(id="member", is_group=False, folder_id="f"),
+        SimpleNamespace(id="solo", is_group=False, folder_id=""),
+        SimpleNamespace(id="solo2", is_group=False, folder_id=""),
+        SimpleNamespace(id="lead", is_group=False, folder_id=""),
+    ]
+    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda root=None: convs)
+    assert keeper._team_leaders("C:/island") == {"lead"}
+    import backend.agent.coding_agents.plans as plans
+
+    rows = [{**PLAN, "chat_id": cid, "progress": {"pending": 10, "completed": 7}} for cid in ("solo", "solo2", "lead")]
+    monkeypatch.setattr(plans, "list_plans", lambda project_root=None: rows)
+    monkeypatch.setattr(keeper, "_project_roots", lambda root: ["C:/island"])
+    assert [p["chat_id"] for p in keeper.kept_plans()] == ["lead"]
 
 
 def test_a_stopped_builder_is_not_woken(monkeypatch) -> None:
