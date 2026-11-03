@@ -62,8 +62,8 @@ _opened_at = 0.0
 _boot_total_ms: float | None = None
 _install_fresh = False
 _last_uefn_mode: str | None = None
-# Test seam: the sender; returns True when the batch landed.
-send_override: Callable[[dict[str, Any]], bool] | None = None
+# Test seam: the sender; True/"ok" landed, "refused" the Store said no, False/"failed" no answer.
+send_override: Callable[[dict[str, Any]], bool | str] | None = None
 
 # Setup, the web installer and the uninstaller (release/installer/host/Usage.cs) read this
 # PC's id and the switch here, so one PC counts once from download to uninstall. Setup
@@ -364,16 +364,27 @@ def ui_track(name: str, props: dict[str, Any] | None) -> bool:
 
 # ----------------------------------------------------------------------------- sending
 
-def _send(body: dict[str, Any]) -> bool:
+# A batch the Store refuses this many times in a row is dropped: one row it can never take
+# (a key past its limit) once held a PC's whole queue for a day, signed-in status and all.
+REFUSED_DROP_AFTER = 3
+_refused_in_a_row = 0
+
+
+def _send(body: dict[str, Any]) -> str:
+    """ok | refused (the Store answered no to this batch) | failed (no answer: try again)."""
     if send_override is not None:
-        return bool(send_override(body))
+        got = send_override(body)
+        return got if isinstance(got, str) else "ok" if got else "failed"
     try:
         from frontend.duckyos_account import _store_collect
 
-        # The Store answers a refused batch with 200 and {"error": ...}: keep it queued.
-        return not _store_collect("usage", body, allow_anonymous=True, timeout=20.0).get("error")
+        # The Store answers a refused batch with 200 and {"error": ...}.
+        error = str(_store_collect("usage", body, allow_anonymous=True, timeout=20.0).get("error") or "")
     except Exception:
-        return False
+        return "failed"
+    if not error:
+        return "ok"
+    return "failed" if "too soon" in error else "refused"
 
 
 def flush() -> bool:
@@ -391,9 +402,20 @@ def flush() -> bool:
     groups = _coalesce(rows, ids)
     batch = groups[:BATCH_MAX]
     body = {"installId": install_id(), "appVersion": __version__, "events": [g[0] for g in batch]}
-    if not _send(body):
+    global _refused_in_a_row
+    sent = _send(body)
+    if sent == "refused":
+        _refused_in_a_row += 1
+        if _refused_in_a_row < REFUSED_DROP_AFTER:
+            return False
+    elif sent != "ok":
         return False
     _drop([i for g in batch for i in g[1]])
+    if sent == "refused":
+        _refused_in_a_row = 0
+        track("error.code", code="usage_batch_refused", where="store", kind="bad_request", version=__version__)
+        return False  # the report itself goes in the next batch
+    _refused_in_a_row = 0
     return len(groups) <= BATCH_MAX
 
 

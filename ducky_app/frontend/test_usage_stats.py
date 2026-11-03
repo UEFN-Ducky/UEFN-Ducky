@@ -18,6 +18,7 @@ def _fresh_module():
     us._conv_run.clear()
     us._last_failed.clear()
     us._mem_queue.clear()
+    us._refused_in_a_row = 0
     us.send_override = None
     us.registry_override = None
     us._last_uefn_mode = None
@@ -186,6 +187,21 @@ def test_failed_send_keeps_the_rows() -> None:
     us.send_override = lambda body: True
     assert us.flush() is True
     assert us.queued() == 0
+
+
+def test_a_batch_the_store_keeps_refusing_is_dropped_not_resent_forever() -> None:
+    # A row the Store can never take once held a PC's whole queue (and its signed-in status) for a day.
+    answers = iter(["refused", "failed", "refused", "refused", "ok"])
+    sent: list[dict[str, Any]] = []
+    us.send_override = lambda body: sent.append(body) or next(answers)
+    us.track("feature.open", tab="chat")
+    assert us.flush() is False and us.queued() == 1   # refused once: kept
+    assert us.flush() is False and us.queued() == 1   # offline: not a refusal
+    assert us.flush() is False and us.queued() == 1   # refused twice
+    assert us.flush() is False                         # third refusal: dropped, reported
+    rows, _ = us._take(10)
+    assert [r["name"] for r in rows] == ["error.code"] and rows[0]["props"]["code"] == "usage_batch_refused"
+    assert us.flush() is True and us.queued() == 0
 
 
 def test_switch_off_means_no_queue_and_no_network() -> None:
