@@ -189,6 +189,40 @@ def _schedule_auto_resume(conv_id: str, error: str, mode: str) -> bool:
     return True
 
 
+QUOTA_FALLBACK_AGENT = "claude_code"
+QUOTA_FALLBACK_MODEL = "claude-opus-5-5"
+
+
+def _continue_on_claude_code(conv_id: str, mode: str, push: PushFn) -> bool:
+    """Ducky AI plan limit hit: carry on with this chat on Claude Code, Opus 5.5 only
+    (the person's choice, Nov 2026). Claude Code missing or signed out: say so and stop."""
+    from backend.agent.coding_agents.base import get_adapter
+
+    try:
+        adapter = get_adapter(QUOTA_FALLBACK_AGENT)
+        info = adapter.detect(PanelSettings.load()) if adapter is not None else None
+        ready = bool(info and info.enabled and info.available)
+    except Exception:
+        ready = False
+    if not ready:
+        push({"type": "error", "conv_id": conv_id,
+              "text": "Ducky AI limit reached, and Claude Code is not installed or signed in, "
+                      "so this turn stops here. Sign in to Claude Code to keep working."})
+        return False
+    conv = load_conversation(conv_id)
+    if conv is None:
+        return False
+    conv.coding_agent = QUOTA_FALLBACK_AGENT
+    conv.model = QUOTA_FALLBACK_MODEL
+    conv.provider = ""
+    save_conversation(conv)
+    push({"type": "status", "conv_id": conv_id,
+          "text": "Ducky AI limit reached, continuing on Claude Code Opus 5.5"})
+    # queue_if_busy: this crashed turn may still be closing its session.
+    run_message(conv_id, "", mode, QUOTA_FALLBACK_MODEL, resume=True, queue_if_busy=True)
+    return True
+
+
 # --- Cross-process push forwarding (bridge process → panel process) ---------
 # ducky_spawn_chat / ducky_send_chat_message run inside the stdio MCP bridge,
 # a DIFFERENT process from the panel UI, where _panel_push is never set. Without
@@ -1241,6 +1275,15 @@ async def _run_agent_loop(
                             "kept_partial": bool(partial),
                         }
                     )
+                    from backend.agent.providers import is_plan_limit
+
+                    if is_plan_limit(err_text):
+                        # Off this thread: detect can probe the CLI for seconds.
+                        threading.Thread(
+                            target=_continue_on_claude_code,
+                            args=(conv.id, "plan" if plan_filter else "agent", push),
+                            daemon=True,
+                        ).start()
                 return stop_reason
             elif event.kind == "usage_step":
                 u = event.usage or {}
