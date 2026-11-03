@@ -581,7 +581,8 @@ def test_a_reused_sandbox_shell_runs_from_work_again(tmp_path):
         service._run_in_terminal(mgr, work.parent, "c1", "cd check && pwd", "bash", 60, {})
     assert ran[1] == "cd check && pwd" and ran[0].endswith(" && cd check && pwd")
     bash = shutil.which("bash")
-    if bash:
+    # WSL's launcher (system32\bash.exe) sees C:/ paths only under /mnt/c; Git Bash is the shell Ducky runs.
+    if bash and "system32" not in bash.lower():
         out = subprocess.run([bash, "-c", "cd / && " + ran[0]], capture_output=True, text=True, timeout=30)
         assert out.returncode == 0 and out.stdout.strip().endswith("it's a box/work/check")
     assert service._from_work("powershell", Path("C:/a'b/work"), "dir").startswith("Set-Location -LiteralPath 'C:")

@@ -170,7 +170,7 @@ def test_reopening_in_a_chat_reuses_its_idle_terminal(monkeypatch, tmp_path):
     spawned = []
 
     class FakeSession:
-        def __init__(self, *, shell, cwd, title="", hidden=False, spawn_argv=None, env_extra=None):
+        def __init__(self, *, shell, cwd, title="", hidden=False, spawn_argv=None, env_extra=None, agent=False):
             self.id = f"t{len(spawned) + 1}"
             self.shell, self.cwd, self.title, self.hidden = shell, cwd, title or shell, hidden
             self.port, self.ws_url, self._exit_code = 0, "", None
