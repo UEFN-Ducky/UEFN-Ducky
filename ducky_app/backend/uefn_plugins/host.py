@@ -78,6 +78,7 @@ _CONTRIBUTIONS: dict[str, Any] = {
     "dock_panels": [],
     "editor_kinds": [],
     "header_buttons": [],
+    "header_menus": [],  # {id, title?, icon?, ui: "panel:<id>", width?, order?, plugin_id}
     "ui_panels": [],
     "chat_references": [],  # {trigger, id, label, group, href, plugin_id}
     "shell_boots": [],  # {plugin_id, entry}
@@ -359,6 +360,7 @@ def get_ui_contributions() -> dict[str, Any]:
                 _CONTRIBUTIONS["editor_kinds"], key_fields=("kind",)
             ),
             "header_buttons": _dedupe_contrib_rows(_CONTRIBUTIONS["header_buttons"]),
+            "header_menus": _dedupe_contrib_rows(_CONTRIBUTIONS["header_menus"]),
             "ui_panels": _dedupe_contrib_rows(_CONTRIBUTIONS["ui_panels"]),
             "chat_references": _dedupe_contrib_rows(
                 _CONTRIBUTIONS["chat_references"], key_fields=("trigger", "id")
@@ -2032,6 +2034,7 @@ def reload_plugins() -> None:
             _CONTRIBUTIONS["dock_panels"] = []
             _CONTRIBUTIONS["editor_kinds"] = []
             _CONTRIBUTIONS["header_buttons"] = []
+            _CONTRIBUTIONS["header_menus"] = []
             _CONTRIBUTIONS["ui_panels"] = []
             _CONTRIBUTIONS["shell_boots"] = []
             _CONTRIBUTIONS["appearance_profiles"] = []
@@ -2929,6 +2932,18 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             elif "icon" in entry and str(entry.get("icon") or "").startswith("assets/"):
                 entry.pop("icon", None)
             _CONTRIBUTIONS["header_buttons"].append(entry)
+
+    # A title-bar button whose dropdown is one of the plugin's own ui.panels pages.
+    for menu in contributes.get("header.menus") or contributes.get("header_menus") or []:
+        if isinstance(menu, dict) and menu.get("id") and str(menu.get("ui") or "").startswith("panel:"):
+            entry = dict(menu)
+            entry["plugin_id"] = pid
+            resolved = _resolve_contrib_icon(entry.get("icon"), root)
+            if resolved:
+                entry["icon"] = resolved
+            elif str(entry.get("icon") or "").startswith("assets/"):
+                entry.pop("icon", None)
+            _CONTRIBUTIONS["header_menus"].append(entry)
 
     chat = contributes.get("chat") if isinstance(contributes.get("chat"), dict) else {}
     ref_rows = chat.get("references") if isinstance(chat.get("references"), list) else None

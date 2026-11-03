@@ -21,6 +21,8 @@ interface DropdownPanelProps {
   idealHeight?: number;
   /** Pin footers and let the list scroll when content hits the cap. */
   fill?: boolean;
+  /** Keep the children mounted (hidden) while closed: a plugin page that sets its button's badge. */
+  keepMounted?: boolean;
 }
 
 type DropdownCoords = {
@@ -189,6 +191,7 @@ export function DropdownPanel({
   clip = false,
   idealHeight = IDEAL_H,
   fill = false,
+  keepMounted = false,
 }: DropdownPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const scopeClass = useScopedClass("dropdown-panel");
@@ -235,7 +238,7 @@ export function DropdownPanel({
 
   useDropdownDismiss(open, onClose, panelRef, anchorRef);
 
-  if (!pop.mounted) return null;
+  if (!pop.mounted && !keepMounted) return null;
 
   return createPortal(
     <>
@@ -257,7 +260,7 @@ export function DropdownPanel({
       ) : null}
       <div
         ref={panelRef}
-        className={`dropdown-panel no-drag is-positioned menu-pop${pop.closing ? " is-closing" : ""} ${scopeClass}${clip ? " dropdown-panel--clip" : ""}${fill ? " dropdown-panel--fill" : ""}`}
+        className={`dropdown-panel no-drag is-positioned menu-pop${pop.closing ? " is-closing" : ""} ${scopeClass}${clip ? " dropdown-panel--clip" : ""}${fill ? " dropdown-panel--fill" : ""}${pop.mounted ? "" : " dropdown-panel--parked"}`}
       >
         {children}
       </div>

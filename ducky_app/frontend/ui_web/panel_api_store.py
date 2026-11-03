@@ -495,6 +495,7 @@ class PanelApiStoreMixin:
             "dock_panels": [],
             "editor_kinds": [],
             "header_buttons": [],
+            "header_menus": [],
             "ui_panels": [],
             "chat_references": [],
             "sounds": [],

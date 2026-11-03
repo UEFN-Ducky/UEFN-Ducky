@@ -26,7 +26,19 @@ export type BridgeContext = {
   filePath?: string;
   /** The hosting iframe — used to translate in-iframe rects to app-page coords. */
   iframe?: HTMLIFrameElement | null;
+  /** Set when the page is a title-bar `header.menus` dropdown (PluginHeaderMenu). */
+  headerMenu?: HeaderMenuHost;
 };
+
+export type HeaderMenuDot = "error" | "warn" | "ok" | "local" | "";
+export type HeaderMenuBadge = { dot: HeaderMenuDot; count: number };
+/** What a header.menus page can do to its title-bar button. */
+export type HeaderMenuHost = { badge: (badge: HeaderMenuBadge) => void; close: () => void };
+
+function headerMenuHost(ctx: BridgeContext, method: string): HeaderMenuHost {
+  if (!ctx.headerMenu) throw new Error(`${method}: only a header.menus page has a title-bar button`);
+  return ctx.headerMenu;
+}
 
 type BridgeHandler = (
   ctx: BridgeContext,
@@ -593,11 +605,34 @@ function hostDataHandler(op: string): BridgeHandler {
   };
 }
 
+/** The only plugin whose pages may call the team API, and the methods (panel_api_store.py). */
+const TEAM_PLUGIN_ID = "account";
+export const TEAM_API_METHODS = new Set([
+  "live_overview", "live_team_join", "live_team_invite", "live_team_leave", "plugin_team_overview",
+  "plugin_scope_status", "plugin_scope_choices", "plugin_scope_set_all", "plugin_scope_set",
+  "plugin_scope_sync", "plugin_scope_retry", "plugin_scope_drop", "plugin_scope_activity",
+  "plugin_scope_lock", "plugin_scope_unlock", "plugin_scope_break", "plugin_scope_ask",
+  "plugin_scope_resolve", "plugin_scope_restore", "plugin_scope_history", "plugin_scope_mode",
+  "plugin_scope_push", "plugin_scope_pull", "plugin_scope_save_unsent",
+]);
+
 /**
  * Allowlisted bridge methods. Add new capabilities here only.
  * Keys are what the plugin calls via `postMessage({ method: "…" })`.
  */
 export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
+  /** header.menus page: the dot (`error`/`warn`/`ok`/`local`, "" = none) and count on its button. */
+  header_menu_badge: (ctx, params) => {
+    const dot = ["error", "warn", "ok", "local"].includes(String(params.dot)) ? (params.dot as HeaderMenuDot) : "";
+    const n = Number(params.count);
+    headerMenuHost(ctx, "header_menu_badge").badge({ dot, count: Number.isFinite(n) && n > 0 ? Math.floor(n) : 0 });
+    return { ok: true };
+  },
+  /** header.menus page: close its dropdown (a menu item that opened a tab). */
+  header_menu_close: (ctx) => {
+    headerMenuHost(ctx, "header_menu_close").close();
+    return { ok: true };
+  },
   "plugin.info": (ctx) => ({
     pluginId: ctx.pluginId,
     panelId: ctx.panelId,
@@ -883,6 +918,17 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
         ? (params.params as Record<string, unknown>)
         : {};
     return await api.plugin_call(ctx.pluginId, method, callParams);
+  },
+  /** Team screens in the `account` plugin: the host's team API, same arguments, result unchanged.
+   * Any other plugin is refused, as it has no way to these methods today. */
+  "team.call": async (ctx, params) => {
+    const method = typeof params.method === "string" ? params.method : "";
+    if (ctx.pluginId !== TEAM_PLUGIN_ID || !TEAM_API_METHODS.has(method)) {
+      throw new Error(`team.call: ${method || "(none)"} not allowed`);
+    }
+    const fn = (getApi() as unknown as Record<string, ((...a: unknown[]) => unknown) | undefined>)?.[method];
+    if (typeof fn !== "function") throw new Error(`${method} unavailable`);
+    return await fn(...(Array.isArray(params.args) ? params.args : []));
   },
   /** Live editing on a team copy (backend/uefn_plugins/live.py): go live in a room (no room:
    * host this PC's own group), leave, and short messages to the teammates live there. */

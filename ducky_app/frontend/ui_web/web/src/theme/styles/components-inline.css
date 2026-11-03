@@ -91,6 +91,21 @@
   transform-origin: var(--dropdown-transform-origin);
 }
 
+/* Closed DropdownPanel with keepMounted: its plugin page keeps running, off screen. */
+.dropdown-panel.dropdown-panel--parked {
+  display: none;
+}
+
+/* A header.menus plugin page: an iframe can't size to its content, so it fills the menu's room. */
+.plugin-header-menu {
+  display: flex;
+  height: min(480px, var(--dropdown-max-height, 360px));
+}
+.plugin-header-menu > .plugin-ui-pane {
+  flex: 1;
+  min-height: 0;
+}
+
 /* ── ChoiceDropdown (button + radio/checkbox menu; replaces native <select>) ── */
 /* Wrapper is layout-only (position/width). Put borders/padding on .choice-dropdown-trigger. */
 .choice-dropdown {

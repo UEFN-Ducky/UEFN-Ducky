@@ -11,6 +11,7 @@ import {
   ownsBrowserPane,
   pushOwnBrowserPanes,
   shouldForwardPluginPush,
+  type HeaderMenuHost,
 } from "./bridge";
 import { usePluginThemePush } from "./pluginTheme";
 import { reloadIframe, useReloadOnPluginUpdate } from "./pluginReload";
@@ -45,6 +46,8 @@ type Props = {
   chatOverlay?: PluginChatOverlayProps;
   /** False while the tab is kept mounted but hidden (another tab of its group is active). */
   visible?: boolean;
+  /** A title-bar header.menus dropdown: no scope bar, and the page may set its button's badge or close it. */
+  headerMenu?: HeaderMenuHost;
 };
 
 /** Bridge event `panel.visibility`: the panel's tab was shown or hidden. */
@@ -90,8 +93,10 @@ function findPanel(
 }
 
 /** Sandboxed iframe hosting a plugin's contributes.ui.panels entry. */
-export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props) {
+export function PluginWebviewPane({ tabId, chatOverlay, visible = true, headerMenu }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const headerMenuRef = useRef(headerMenu);
+  headerMenuRef.current = headerMenu;
   const contrib = usePluginContributions();
   const parsed = useMemo(() => parsePluginUiTabId(tabId), [tabId]);
 
@@ -193,6 +198,7 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
           tabId,
           version: panel?.version,
           iframe,
+          headerMenu: headerMenuRef.current,
         },
         event.data,
       ).then((response) => {
@@ -311,7 +317,7 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
   return (
     <PluginSurfaceBoundary pluginId={parsed.pluginId} surface={`ui.panel:${parsed.panelId}`}>
       <div className="plugin-ui-pane">
-        <PluginScopeBar
+        {headerMenu ? null : <PluginScopeBar
           pluginId={parsed.pluginId}
           active={visible}
           onLiveState={(on) => {
@@ -333,7 +339,7 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true }: Props)
               "*",
             )
           }
-        />
+        />}
         <div className={`plugin-ui-body${dockShown && dock ? ` plugin-ui-body--dock-${dock.place}` : ""}`}>
           <iframe
             ref={iframeRef}

@@ -5,6 +5,7 @@ import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
 import { TeamLiveDropdown } from "./TeamLiveDropdown";
+import { PluginMenuButton } from "./PluginHeaderMenu";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
 import { SandboxAppsDropdown } from "./SandboxAppsDropdown";
@@ -36,6 +37,7 @@ import {
   listedPluginHeaderButtons,
   resolvePluginHeaderAction,
   resolvePluginHeaderIcon,
+  sortPluginHeaderButtons,
 } from "../hooks/pluginHeaderActions";
 import { ContextMenu, useContextMenuState, type ContextMenuItem } from "./ContextMenu";
 import { targetRef, useUiTarget } from "../ui-targets/registry";
@@ -379,6 +381,10 @@ export function Header({
         headerBtnVisible(pluginHeaderButtonId(btn.plugin_id || btn.id, btn.id)),
       ),
     [headerBtnVisible, listedHeaderButtons],
+  );
+  const pluginHeaderMenus = useMemo(
+    () => sortPluginHeaderButtons(pluginContrib.header_menus ?? []),
+    [pluginContrib.header_menus],
   );
   const headerMenu = useContextMenuState<null>();
   const compactHeader = narrowHeader;
@@ -755,7 +761,13 @@ export function Header({
           </button>
         ) : null}
 
-        <TeamLiveDropdown />
+        {pluginHeaderMenus.map((menu) => (
+          <PluginSurfaceBoundary key={`${menu.plugin_id}:${menu.id}`} pluginId={menu.plugin_id || ""} surface="header-menu" compact>
+            <PluginMenuButton menu={menu} />
+          </PluginSurfaceBoundary>
+        ))}
+        {/* ponytail: built-in team menu until the plugin's `team` header.menus entry replaces it (older account plugins). */}
+        {pluginHeaderMenus.some((m) => m.id === "team") ? null : <TeamLiveDropdown />}
         <BackgroundActivityDropdown />
 
         <div className="app-header-divider" />

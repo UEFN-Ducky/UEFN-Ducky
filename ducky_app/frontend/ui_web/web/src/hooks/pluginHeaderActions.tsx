@@ -78,7 +78,8 @@ export function listedPluginHeaderButtons(buttons: PluginHeaderButton[]): Plugin
   });
 }
 
-export function sortPluginHeaderButtons(buttons: PluginHeaderButton[]): PluginHeaderButton[] {
+/** By `order` (default 100), then id: header.buttons and header.menus alike. */
+export function sortPluginHeaderButtons<T extends { id: string; order?: number }>(buttons: T[]): T[] {
   return [...buttons].sort((a, b) => {
     const ao = typeof a.order === "number" ? a.order : 100;
     const bo = typeof b.order === "number" ? b.order : 100;

@@ -43,6 +43,18 @@ export type PluginHeaderButton = {
   plugin_id?: string;
 };
 
+/** `contributes.header.menus[]`: a title-bar button whose dropdown is the plugin's own page. */
+export type PluginHeaderMenu = {
+  id: string;
+  title?: string;
+  icon?: string;
+  /** `panel:<ui.panels id>` of the same plugin. */
+  ui: string;
+  width?: number;
+  order?: number;
+  plugin_id?: string;
+};
+
 export type PluginUiPanel = {
   id: string;
   title?: string;
@@ -178,6 +190,7 @@ export type PluginContributions = {
   dock_panels: PluginDockPanel[];
   editor_kinds: PluginEditorKind[];
   header_buttons: PluginHeaderButton[];
+  header_menus: PluginHeaderMenu[];
   ui_panels: PluginUiPanel[];
   /** Rows from contributes.chat.references and api.chat_reference(). */
   chat_references: Array<{
@@ -239,6 +252,7 @@ const EMPTY: PluginContributions = {
   dock_panels: [],
   editor_kinds: [],
   header_buttons: [],
+  header_menus: [],
   ui_panels: [],
   chat_references: [],
   shell_boots: [],
@@ -340,6 +354,16 @@ async function refresh() {
         ? next.header_buttons.filter(
             (b): b is PluginHeaderButton =>
               !!b && typeof b.id === "string" && typeof b.action === "string",
+          )
+        : [],
+      header_menus: Array.isArray((next as { header_menus?: unknown }).header_menus)
+        ? ((next as { header_menus: PluginHeaderMenu[] }).header_menus || []).filter(
+            (m): m is PluginHeaderMenu =>
+              !!m &&
+              typeof m.id === "string" &&
+              typeof m.plugin_id === "string" &&
+              typeof m.ui === "string" &&
+              m.ui.startsWith("panel:"),
           )
         : [],
       ui_panels: Array.isArray(next.ui_panels)

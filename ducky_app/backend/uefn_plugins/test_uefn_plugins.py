@@ -38,6 +38,10 @@ def _zip_plugin(plugin_id: str = "demo", version: int = 1) -> bytes:
                 {"id": "demo", "title": "Demo", "icon": "chat", "action": "builtin:open-discord", "order": 50},
                 {"id": "game", "title": "Game", "icon": "duck", "action": "panel:game", "order": 51},
             ],
+            "header.menus": [
+                {"id": "team", "title": "Team", "icon": "👥", "ui": "panel:game", "width": 320},
+                {"id": "no-page", "title": "Bad", "ui": "settings:Demo"},
+            ],
             "ui.panels": [
                 {"id": "game", "title": "Demo Game", "icon": "duck", "entry": "ui/index.html"},
                 {"id": "bad", "title": "Hostile", "entry": "../escape.html"},
@@ -327,6 +331,8 @@ def main() -> None:
             s.get("id") == "placement" and s.get("tab") == "Demo" for s in contrib["settings_sections"]
         ), contrib
         assert any(b.get("id") == "demo" and b.get("action") == "builtin:open-discord" for b in contrib["header_buttons"]), contrib
+        menus = contrib.get("header_menus") or []
+        assert [(m.get("id"), m.get("ui"), m.get("plugin_id")) for m in menus] == [("team", "panel:game", "demo")], menus
         ui_panels = contrib.get("ui_panels") or []
         assert any(p.get("id") == "game" and p.get("entry") == "ui/index.html" for p in ui_panels), ui_panels
         assert not any(p.get("id") == "bad" for p in ui_panels), ui_panels
