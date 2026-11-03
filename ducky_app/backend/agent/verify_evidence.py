@@ -325,12 +325,34 @@ def fake_verify_warning(assistant_message: dict[str, Any] | None) -> str | None:
     )
 
 
-def handoff_warning(assistant_message: dict[str, Any] | None) -> str | None:
-    """Banner when the reply asks the user to finish / playtest / Build Verse."""
-    if not assistant_message:
+_DESTRUCTIVE_RE = re.compile(
+    r"(?i)\b(?:restart|close|delete|remove|overwrite|reset|wipe|discard|revert|kill)\b"
+)
+
+
+def _is_destructive_question(text: str, start: int, end: int) -> bool:
+    """Match sits in a question about a destructive step (asking first is correct)."""
+    s = max(text.rfind(c, 0, start) for c in ".!?\n") + 1
+    stops = [i for i in (text.find(c, end) for c in ".!?\n") if i >= 0]
+    e = min(stops) if stops else len(text)
+    return e < len(text) and text[e] == "?" and bool(_DESTRUCTIVE_RE.search(text[s:e]))
+
+
+def handoff_warning(
+    assistant_message: dict[str, Any] | None, *, asked_user: bool = False
+) -> str | None:
+    """Banner when the reply asks the user to finish / playtest / Build Verse.
+
+    Silent when the turn asked through ducky_ask_user, or every match is a
+    question about a destructive step.
+    """
+    if not assistant_message or asked_user:
         return None
     text = _message_text(assistant_message)
-    if not _HANDOFF_RE.search(text):
+    if not any(
+        not _is_destructive_question(text, m.start(), m.end())
+        for m in _HANDOFF_RE.finditer(text)
+    ):
         return None
     return (
         "This reply hands work back to the user (check / compile / continue / "

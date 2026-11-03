@@ -34,6 +34,42 @@ _PATH_RE = re.compile(
 )
 
 
+# A path is only claimed when its clause says it was written (or it sits in an Inventory).
+_WRITE_VERB_RE = re.compile(
+    r"(?i)\b(?:fix(?:ed)?|chang(?:ed|e)|edit(?:ed)?|wr(?:ote|itten)|creat(?:ed|e)|add(?:ed)?"
+    r"|sav(?:ed|e)|updat(?:ed|e)|rewr(?:ote|itten)|patch(?:ed)?|modif(?:ied|y))\b"
+)
+_NEG_RE = re.compile(
+    r"(?i)\b(?:left|leave|untouched|unchanged|alone|not|never|didn't|did not|no changes?)\b"
+)
+_CLAUSE_BREAKS = (". ", "; ", "! ", "? ", ", ", " and ", " but ", " — ", " - ")
+
+
+def _clause_around(text: str, start: int, end: int) -> str:
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    before = text[line_start:start]
+    after = text[end:len(text) if line_end < 0 else line_end]
+    cut = max(before.rfind(b) + len(b) if b in before else 0 for b in _CLAUSE_BREAKS)
+    stops = [after.find(b) for b in _CLAUSE_BREAKS if b in after]
+    return before[cut:] + " " + (after[: min(stops)] if stops else after)
+
+
+def _in_inventory(text: str, pos: int) -> bool:
+    heading = ""
+    for line in text[:pos].splitlines():
+        if line.lstrip().startswith("#"):
+            heading = line
+    return bool(re.match(r"\s*#+\s*Inventory", heading, re.I))
+
+
+def _is_write_claim(text: str, start: int, end: int) -> bool:
+    if _in_inventory(text, start):
+        return True
+    clause = _clause_around(text, start, end)
+    return bool(_WRITE_VERB_RE.search(clause)) and not _NEG_RE.search(clause)
+
+
 def normalize_rel(path: str) -> str:
     p = (path or "").strip().replace("\\", "/").lstrip("/")
     if p.lower().startswith("content/"):
@@ -76,7 +112,10 @@ def record_write_from_tool(
 def claimed_paths(text: str) -> list[str]:
     found: list[str] = []
     seen: set[str] = set()
-    for m in _PATH_RE.finditer(text or ""):
+    text = text or ""
+    for m in _PATH_RE.finditer(text):
+        if not _is_write_claim(text, m.start(), m.end()):
+            continue
         raw = (m.group(1) or m.group(2) or m.group(0) or "").strip()
         key = normalize_rel(raw)
         if not key or key in seen:

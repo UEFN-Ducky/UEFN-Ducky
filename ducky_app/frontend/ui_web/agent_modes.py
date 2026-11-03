@@ -1073,8 +1073,10 @@ async def _run_agent_loop(
     delegation_tools_called: set[str] = set()
     written_relpaths: set[str] = set()
     write_failures: list[str] = []
+    asked_user = False
     turn_started = time.time()  # pictures made for this chat from now on show in the reply
     from backend.agent.coding_agents.runner import _TurnCheckpoint
+    from backend.agent.toolsets import effective_tool_name
     from frontend.ui_web.project_chats import upsert_in_flight_assistant
 
     ckpt = _TurnCheckpoint(conv, "ducky", run_id)
@@ -1101,6 +1103,8 @@ async def _run_agent_loop(
                 rec = event.tool
                 if rec.name in ("ducky_spawn_chat", "ducky_send_chat_message"):
                     delegation_tools_called.add(rec.name)
+                if effective_tool_name(rec.name, rec.arguments) == "ducky_ask_user":
+                    asked_user = True
                 if plan_filter and not is_plan_safe_tool(rec.name):
                     continue
                 push(
@@ -1221,7 +1225,7 @@ async def _run_agent_loop(
                 if verify_warning:
                     assistant_msg = append_verify_warning(assistant_msg, verify_warning)
                     push({"type": "delegation_warning", "text": verify_warning, "conv_id": conv.id})
-                handoff = handoff_warning(assistant_msg)
+                handoff = handoff_warning(assistant_msg, asked_user=asked_user)
                 if handoff:
                     assistant_msg = append_verify_warning(
                         assistant_msg, handoff, title="Hand-off"

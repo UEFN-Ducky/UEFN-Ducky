@@ -53,3 +53,10 @@ def test_handoff_warning():
     assert ve.handoff_warning({"content": "Build Verse then drag in Details."})
     assert ve.handoff_warning({"content": "tell me to continue when ready"})
     assert ve.handoff_warning({"content": "All good, no next steps."}) is None
+
+
+def test_handoff_silent_on_destructive_question_or_ask_user():
+    msg = {"content": "The listener is stale. Should I restart UEFN? Unsaved tabs would close."}
+    assert ve.handoff_warning(msg) is None
+    assert ve.handoff_warning({"content": "Build Verse then drag in Details."}, asked_user=True) is None
+    assert ve.handoff_warning({"content": "Done. Now restart UEFN and playtest and see."})

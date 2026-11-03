@@ -53,6 +53,19 @@ def test_silent_when_no_write_claim() -> None:
     assert fake_write_warning(msg, set()) is None
 
 
+def test_silent_when_reply_left_file_alone() -> None:
+    msg = {
+        "content": (
+            "I wrote the guard fix into `Verse/LimoRide/limo_ride.verse`. "
+            "I left `Verse/LimoRide/limo_controller.verse` alone; it already compiles."
+        )
+    }
+    assert fake_write_warning(msg, {"Verse/LimoRide/limo_ride.verse"}) is None
+    # The edited file still counts as a claim when it did not land.
+    warning = fake_write_warning(msg, set())
+    assert warning and "limo_ride.verse" in warning and "limo_controller" not in warning
+
+
 def test_record_write_success_and_failure() -> None:
     written: set[str] = set()
     failures: list[str] = []
