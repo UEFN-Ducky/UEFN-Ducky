@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build && node scripts/check-shipped-dist.mjs",
     "lint": "eslint src && node scripts/check-no-inline-styles.mjs && node scripts/check-automations-css.mjs && node scripts/check-shipped-ui.mjs",
     "test": "node scripts/run-vitest.mjs",
+    "test:soak": "vitest run src/perf/soak.test.tsx",
     "preview": "vite preview"
   },
   "dependencies": {
