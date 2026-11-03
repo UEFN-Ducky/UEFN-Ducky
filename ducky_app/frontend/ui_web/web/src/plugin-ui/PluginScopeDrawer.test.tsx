@@ -158,10 +158,15 @@ describe("source control tabs", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Release pack" }));
     await waitFor(() => expect(api.plugin_scope_unlock).toHaveBeenCalledWith("forge", "doc:pack"));
+    // Each action holds every button until it's done; a click before that is (rightly) ignored.
+    const ask = screen.getByRole("button", { name: "Ask Ana to release MEGA_Duel_Stadium" }) as HTMLButtonElement;
+    await waitFor(() => expect(ask.disabled).toBe(false));
 
-    fireEvent.click(screen.getByRole("button", { name: "Ask Ana to release MEGA_Duel_Stadium" }));
+    fireEvent.click(ask);
     await waitFor(() => expect(api.plugin_scope_ask).toHaveBeenCalledWith("forge", "tree:scenes/ab12"));
     expect(await screen.findByText("Asked Ana to release MEGA_Duel_Stadium.")).toBeTruthy();
+    const breakBtn = screen.getByRole("button", { name: "Break Ana's lock on MEGA_Duel_Stadium" }) as HTMLButtonElement;
+    await waitFor(() => expect(breakBtn.disabled).toBe(false));
 
     fireEvent.click(screen.getByRole("button", { name: "Break Ana's lock on MEGA_Duel_Stadium" }));
     expect(await screen.findByText("Break Ana's lock on MEGA_Duel_Stadium?")).toBeTruthy();
