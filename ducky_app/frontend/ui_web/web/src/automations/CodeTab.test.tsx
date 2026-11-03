@@ -283,8 +283,9 @@ describe("Code tab of a custom code node", () => {
     api.get_workflow_node_code.mockResolvedValue({ ...builtinInfo(), kind: "custom", code: node.config.code, code_sha: "sha1",
       pins: { exec: true, inputs: [{ id: "prompt", label: "Prompt", type: "text" }, { id: "image", label: "Image", type: "image" }], outputs: [{ id: "text", label: "Text", type: "text" }] } });
     setup(node, { pins: { exec: true, inputs: [{ id: "prompt", label: "Prompt", type: "text" }], outputs: [{ id: "text", label: "Text", type: "text" }] } });
-    await waitFor(() => expect(screen.getByText("1 wire will be disconnected")).toBeTruthy());
-    expect(screen.getByText("− input “image”")).toBeTruthy();
+    // The dropped wire shows from the props at once; the removed pin only once the saved pins load.
+    expect(await screen.findByText("− input “image”")).toBeTruthy();
+    expect(screen.getByText("1 wire will be disconnected")).toBeTruthy();
   });
 
   it("revert asks first and lists the wires the built-in can't take", async () => {
