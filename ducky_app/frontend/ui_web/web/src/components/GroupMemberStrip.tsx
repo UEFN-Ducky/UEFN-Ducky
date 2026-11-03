@@ -150,8 +150,6 @@ function isOutside(target: EventTarget | null, root: HTMLElement | null): boolea
 
 /** Many agents start with their groups folded; a small team shows everyone. */
 const AUTO_EXPAND_UP_TO = 12;
-/** Avatars on the bar before "+N". */
-const BAR_AVATARS = 12;
 /** A filter box once the team is this big. */
 const FILTER_FROM = 6;
 
@@ -404,7 +402,6 @@ export function GroupMemberStrip({
   const runningCount = agents.filter((a) => runningIds.has(a.id)).length;
   const waitingCount = agents.filter((a) => waitingIds.has(a.id)).length;
   const conflictTotal = agents.reduce((sum, a) => sum + (conflicts[a.id] ?? 0), 0);
-  const totalTokens = agents.reduce((sum, a) => sum + a.contextTokens, 0);
   const visible = useMemo(() => filterRoster(roster, query), [roster, query]);
   const isFolded = useCallback(
     (key: string) => (query.trim() ? false : folded[key] ?? agents.length > AUTO_EXPAND_UP_TO),
@@ -1032,8 +1029,6 @@ export function GroupMemberStrip({
     }
     return total ? { done, total, pct: Math.round((done / total) * 100), parts: [...parts.values()] } : null;
   })();
-  const barAgents = agents.slice(0, BAR_AVATARS);
-  const more = agents.length - barAgents.length;
   const groupCount = rosterGroupIds(roster).length;
 
   return (
@@ -1074,31 +1069,6 @@ export function GroupMemberStrip({
           ) : null}
           <span className="team-bar-chevron" aria-hidden>{open ? <Icons.ChevronDown /> : <Icons.ChevronRight />}</span>
         </button>
-        <div className="team-bar-avatars" aria-label="Agents">
-          {barAgents.map((a) => {
-            const state = waitingIds.has(a.id) ? "waiting" : runningIds.has(a.id) ? "running" : "idle";
-            const progress = progressOf(a);
-            return (
-              <button
-                key={a.key}
-                type="button"
-                className={`team-bar-avatar team-bar-avatar--${state}`}
-                title={`${a.name} · ${aiTypeLabel(a.model, a.codingAgent)} · ${fmtCompactTokens(a.contextTokens)}${state === "idle" ? "" : ` · ${state}`}${progress ? `\n${progressText(progress)}` : ""}`}
-                aria-label={isMuted(a) ? `${a.name}, muted` : `Open ${a.name}`}
-                disabled={isMuted(a)}
-                onClick={() => openNode(a)}
-              >
-                <DuckyAvatar styleId={a.styleId} size={DUCKY_AVATAR_SIZES.compact} />
-                {a.isLeader ? <span className="sidebar-leader-badge" aria-hidden><Icons.Star /></span> : null}
-              </button>
-            );
-          })}
-          {more > 0 ? (
-            <button type="button" className="team-bar-more" onClick={() => { if (!open) toggleOpen(); }} title="Show every agent">
-              +{more}
-            </button>
-          ) : null}
-        </div>
         <div className="group-member-invite-wrap" ref={inviteWrapRef}>
           <button
             type="button"
@@ -1174,7 +1144,6 @@ export function GroupMemberStrip({
       {open ? (
         <div className="team-roster" id={`team-roster-${groupId}`}>
           <div className="team-roster-tools">
-            <span className="team-roster-summary">Total context {fmtCompactTokens(totalTokens)}</span>
             {agents.length >= FILTER_FROM ? (
               <label className="team-roster-filter">
                 <Icons.Search />

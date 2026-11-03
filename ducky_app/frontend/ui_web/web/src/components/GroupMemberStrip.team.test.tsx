@@ -54,8 +54,9 @@ describe("team bar and roster", () => {
     state.running = new Set(["Builder"]);
     state.waiting = new Set(["Reviewer"]);
     setup();
-    await screen.findByRole("button", { name: "Open Reviewer" });
-    expect(screen.getByText("3 agents · 1 group")).toBeTruthy();
+    await screen.findByText("3 agents · 1 group");
+    // No avatar row on the bar: the roster lists everyone.
+    expect(screen.queryByRole("button", { name: "Open Reviewer" })).toBeNull();
     expect(screen.getByText("1 running")).toBeTruthy();
     expect(screen.getByText("1 waiting")).toBeTruthy();
     // The roster stays closed until asked for, and remembers being opened.

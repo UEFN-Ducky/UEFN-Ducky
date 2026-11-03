@@ -4347,18 +4347,17 @@
   text-decoration: underline;
 }
 
-/* ── Group chat team: one compact bar, the roster under it on demand ── */
+/* ── Group chat team: one compact bar, the roster under it on demand. It floats (no band of its
+   own) and keeps the chat text's width, so it never runs into the sidebars. ── */
 .team-bar-wrap {
   container-type: inline-size;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 92%, var(--fg) 4%);
+  padding: 6px var(--chat-column-pad-left, 12px) 0;
 }
 .team-bar {
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 38px;
-  padding: 4px 12px;
 }
 .team-bar-toggle {
   display: inline-flex;
@@ -4387,51 +4386,12 @@
 .team-bar-stat--conflict { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
 .team-bar-chevron { display: inline-flex; color: var(--muted); }
 .team-bar-chevron svg { width: 12px; height: 12px; }
-.team-bar-avatars {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  padding: 3px 4px;
-  overflow: hidden;
-}
-.team-bar-avatar {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--bg);
-  box-shadow: 0 0 0 2px var(--bg);
-  cursor: pointer;
-}
-.team-bar-avatar:hover { z-index: 1; box-shadow: 0 0 0 2px var(--fg-dim, var(--fg)); }
-.team-bar-avatar--running { box-shadow: 0 0 0 2px var(--blue); }
-.team-bar-avatar--waiting { box-shadow: 0 0 0 2px var(--amber); }
-.team-bar-avatar .sidebar-leader-badge { position: absolute; right: -4px; bottom: -4px; }
+.team-bar .group-member-invite-wrap { margin-left: auto; }
 .team-bar .group-member-invite-btn { flex: none; border-style: solid; color: var(--fg); }
 .team-bar .group-member-invite-btn:hover:not(:disabled) { background: var(--tab-hover); }
-.team-bar-more {
-  flex: none;
-  margin-left: 4px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-}
-.team-bar-more:hover { color: var(--fg); }
-.team-roster { max-height: min(48vh, 520px); padding: 0 12px 10px; overflow: auto; }
-.team-roster-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 2px 0 8px; }
-.team-roster-summary { margin-right: auto; color: var(--muted); font-size: 12px; }
+.team-roster { max-height: min(48vh, 520px); padding: 6px 0 10px; overflow: auto; }
+.team-roster-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 0 0 8px; }
+.team-roster-tools:empty { display: none; }
 .team-roster-filter {
   display: inline-flex;
   align-items: center;

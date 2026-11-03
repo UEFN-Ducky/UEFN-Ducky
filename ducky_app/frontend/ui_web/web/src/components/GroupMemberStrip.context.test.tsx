@@ -64,8 +64,8 @@ describe("group roster context", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Team/ }));
     expect(screen.getByText("0")).toBeTruthy();
     expect(screen.getByText("Painter")).toBeTruthy();
-    // Painter's own row and the group's total.
+    // Painter's own row and the nested group's row.
     expect(screen.getAllByText("1.2K")).toHaveLength(2);
-    expect(screen.getByText("Total context 1.2K")).toBeTruthy();
+    expect(screen.queryByText(/Total context/)).toBeNull();
   });
 });

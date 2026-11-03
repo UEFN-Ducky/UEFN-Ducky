@@ -129,7 +129,6 @@ describe("team bar progress", () => {
     expect(screen.getAllByTitle("No assigned sub plan seen")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Details for Searcher" }));
     expect(screen.getByText("Progress: Search: 1/3 steps (33%) · now: Prune the walk")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open Searcher" }).getAttribute("title")).toContain("now: Prune the walk");
   });
 
   it("a nested group row shows its rolled-up % and its agents n/m", async () => {
