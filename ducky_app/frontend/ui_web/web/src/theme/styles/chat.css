@@ -7764,6 +7764,51 @@
   background: var(--bg-hover, rgba(255, 255, 255, 0.08));
 }
 
+/* The team keeper on this plan: shown so it is never a hidden actor, with Pause/Resume. */
+.chat-plan-popup-keeper {
+  flex-shrink: 0;
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-secondary, var(--fg));
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.chat-plan-popup-keeper:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+}
+
+.chat-plan-popup-keeper:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-plan-popup-keeper.is-paused {
+  color: var(--amber, #e0a040);
+}
+
+.chat-plan-popup-keeper-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green, #4caf50);
+}
+
+.chat-plan-popup-keeper.is-waiting .chat-plan-popup-keeper-dot {
+  background: var(--blue, #4a90e2);
+}
+
+.chat-plan-popup-keeper.is-parked .chat-plan-popup-keeper-dot {
+  background: var(--amber, #e0a040);
+}
+
 .chat-plan-popup-bar-stop:disabled {
   opacity: 0.35;
   cursor: default;

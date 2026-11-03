@@ -4379,6 +4379,10 @@ export interface PanelApi {
     conv_id: string,
     project_root?: string | null,
   ): Promise<ChatContextMemoryDto>;
+  /** The team keeper for this lead's plan: off, watching, waiting (work runs) or parked. */
+  team_keeper_status?(
+    chat_id: string,
+  ): Promise<{ state: "off" | "watching" | "waiting" | "parked"; next_wake?: number }>;
   delete_plan(
     chat_id: string,
     project_root?: string | null,

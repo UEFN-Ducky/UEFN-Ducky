@@ -889,6 +889,23 @@ def stop_team(group_id: str, cancel: Callable[[str], Any]) -> dict[str, Any]:
     return {"ok": True, "stopped": len(stopped), "groups": len(ids), "stopped_ids": stopped, "lead_kept": lead}
 
 
+def status(chat_id: str) -> dict[str, Any]:
+    """What the keeper does for this lead's plan right now, for the Plan bar: ``off`` (not kept:
+    no team, paused, finished), ``watching`` (it wakes the lead when nothing moves), ``waiting``
+    (a long job or workflow runs, or the team works) or ``parked`` (woken enough; waits for the
+    plan to change)."""
+    with _lock:
+        st = dict(_teams.get(chat_id) or {})
+    if not st:
+        return {"state": "off"}
+    if st.get("wakes", 0) >= _PARK_AFTER:
+        return {"state": "parked"}
+    # tick() sets quiet_since to the tick's time while the team or a long job is busy.
+    busy = time.time() - float(st.get("quiet_since") or 0) < _TICK_S * 1.5
+    return {"state": "waiting" if busy else "watching",
+            "next_wake": max(float(st.get("next_wake") or 0), float(st.get("quiet_since") or 0) + _IDLE_S)}
+
+
 def _unpark(cid: str, st: dict[str, Any]) -> None:
     if st["wakes"] >= _PARK_AFTER:
         _save_parked(cid, None)

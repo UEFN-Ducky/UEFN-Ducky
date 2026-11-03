@@ -3,6 +3,7 @@ import type { ChatPlan, PlanProgress } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
 import { requestOpenPlanTab } from "../navigation/openPlanTab";
 import { PlanTodoCard, countProgress } from "./PlanTodoCard";
+import { PlanKeeperPill } from "./PlanKeeperPill";
 import { RichContentRenderer } from "./rich-content/RichContentRenderer";
 
 interface ChatPlanPopupProps {
@@ -107,6 +108,7 @@ export const ChatPlanPopup = memo(function ChatPlanPopup({
             </svg>
           </span>
         </button>
+        {allDone ? null : <PlanKeeperPill plan={plan} />}
         {plan.team_plan ? (
           <button
             type="button"

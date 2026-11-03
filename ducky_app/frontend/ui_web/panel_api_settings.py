@@ -1187,6 +1187,12 @@ class PanelApiSettingsMixin:
             project_root=s.uefn_project_root,
         )
 
+    def team_keeper_status(self, chat_id: str) -> dict[str, Any]:
+        """The team keeper's state for this lead's plan (the Plan bar's Keeper pill)."""
+        from frontend.ui_web import team_keeper
+
+        return team_keeper.status(chat_id)
+
     def get_plan(self, chat_id: str, project_root: str | None = None) -> dict[str, Any]:
         from backend.agent.coding_agents.plans import (
             load_plan_view,

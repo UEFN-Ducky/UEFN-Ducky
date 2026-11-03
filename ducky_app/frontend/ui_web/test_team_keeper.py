@@ -27,6 +27,20 @@ def _fresh(monkeypatch):
     keeper.reset_for_tests()
 
 
+def test_status_says_what_the_keeper_does_for_a_plan(monkeypatch):
+    """The Plan bar shows it: off for a plan it doesn't keep (paused, no team), watching,
+    waiting while work runs, parked after its wakes."""
+    assert keeper.status("coord") == {"state": "off"}
+    now = 10_000.0
+    monkeypatch.setattr(keeper.time, "time", lambda: now)
+    keeper._teams["coord"] = {"quiet_since": now - 10 * MIN, "wakes": 0.0, "next_wake": 0.0}
+    assert keeper.status("coord") == {"state": "watching", "next_wake": now - 8 * MIN}
+    keeper._teams["coord"]["quiet_since"] = now - 5  # this tick saw the team or a workflow busy
+    assert keeper.status("coord")["state"] == "waiting"
+    keeper._teams["coord"]["wakes"] = float(keeper._PARK_AFTER)
+    assert keeper.status("coord") == {"state": "parked"}
+
+
 @pytest.fixture(autouse=True)
 def _world(monkeypatch):
     """Members are the owners themselves, nobody is blocked, the broker allows work."""
