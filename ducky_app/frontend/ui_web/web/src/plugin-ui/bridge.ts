@@ -435,7 +435,10 @@ export function pushBrowserPaneBounds(tabId: string, iframe?: HTMLIFrameElement 
     .then((res) => {
       // Remote deny / missing method → undefined. Do not retry every frame.
       if (res === undefined) return;
-      // "pane not open" during boot must not poison the dedupe — retry next frame.
+      // "pane not open" is an answer, not a hiccup: a plugin tab with no browser pane
+      // retried it every frame (~7 bridge calls/s, the app's main UI lag). It waits for the
+      // heartbeat; browser.open clears the dedupe once the pane exists.
+      if (res?.error === "pane not open") return;
       if (!res || res.ok === false) lastSentBounds.delete(tabId);
     })
     .catch(() => lastSentBounds.delete(tabId));
@@ -677,7 +680,10 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     // A pending "open in new tab" URL wins over the plugin's own start URL.
     const url = takeBrowserPaneInitialUrl(paneId) || (typeof params.url === "string" ? params.url : "");
     lastSentBounds.delete(paneId);
-    return await api.browser_pane_open(paneId, url, hostWindowWid());
+    const opened = await api.browser_pane_open(paneId, url, hostWindowWid());
+    // A frame that pinned while the pane was still opening got "pane not open": pin again now.
+    lastSentBounds.delete(paneId);
+    return opened;
   },
   "browser.bounds": (ctx, params) => {
     // Params are CSS px in the IFRAME's coordinate space. Store as edge insets so

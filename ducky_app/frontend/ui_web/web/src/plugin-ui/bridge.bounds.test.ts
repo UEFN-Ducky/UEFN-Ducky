@@ -40,6 +40,19 @@ it("an idle pane re-pinned every frame for 10 minutes sends almost nothing", asy
   expect(api.browser_pane_set_bounds.mock.calls.length).toBeLessThan(15);
 });
 
+it("a plugin tab with no browser pane does not resend every frame", async () => {
+  api.browser_pane_set_bounds.mockImplementation(async () => ({ ok: false, error: "pane not open" }) as never);
+  const el = frame();
+  document.elementFromPoint = () => el;
+  beginBrowserPaneMount(TAB);
+  for (let t = 0; t < 60_000; t += 16) {
+    pushBrowserPaneBounds(TAB, el);
+    await vi.advanceTimersByTimeAsync(16);
+  }
+  api.browser_pane_set_bounds.mockImplementation(async () => ({ ok: true }));
+  expect(api.browser_pane_set_bounds.mock.calls.length).toBeLessThan(3);
+});
+
 it("a sub-pixel jitter sends nothing; a moved pane sends once", async () => {
   const el = frame();
   document.elementFromPoint = () => el;
