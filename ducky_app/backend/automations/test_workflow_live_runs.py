@@ -119,6 +119,23 @@ def test_the_start_tells_the_calling_chat_every_step(events):
     assert [(p["node"], p["label"]) for p in started["plan"]] == [("s", "start.manual"), ("w", "Pause"), ("e", "flow.end")]
 
 
+def test_live_card_labels_name_the_runs_inputs(events):
+    """'Release a desktop Store plugin' never said which plugin it was releasing."""
+    wid = str(store.save_workflow({"name": "Release", "graph": {"nodes": [
+        {"id": "in", "type": "flow.input", "label": "Plugin: {{plugin}}", "config": {"inputs": [{"name": "plugin", "default": "playtester"}]}},
+        {"id": "w", "type": "flow.wait", "label": "Publish {{plugin}}", "config": {"seconds": 0}},
+    ], "edges": [{"source": "in", "target": "w", "kind": "main"}]}})["id"])
+
+    def labels() -> list[str]:
+        started = [e for e in events if e["type"] == "workflow_run" and e["state"] == "started"][-1]
+        return [p["label"] for p in started["plan"]]
+
+    runner.run_workflow(wid, payload={"plugin": "google"}, caller_conv_id="chat-1")
+    assert labels() == ["Plugin: google", "Publish google"]
+    runner.run_workflow(wid, caller_conv_id="chat-1")
+    assert labels() == ["Plugin: playtester", "Publish playtester"]
+
+
 def test_stop_also_stops_the_ducky_an_agent_step_waits_for(monkeypatch):
     """A stopped workflow's launch ducky kept going and started a Fortnite session."""
     stopped: list[str] = []

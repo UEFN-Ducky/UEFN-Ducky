@@ -627,7 +627,7 @@ def run_workflow(
             "type": "workflow_run", "id": wid, "run": run_id, "state": "started",
             # The chat that started it shows a live card: its name, every step, which one is running.
             "conv": str(ctx.get("caller_conv_id") or ""), "name": str(wf.get("name") or ""),
-            "plan": _plan_steps(edges, starts, flow),
+            "plan": _fill_labels(_plan_steps(edges, starts, flow), nodes, ctx),
         })
         steps, ok, error, _seen = _walk(nodes, edges, ctx, starts, flow=flow) if starts else ([], True, "", 0)
         if ok:
@@ -2643,6 +2643,21 @@ def _tool_output(name: str, result: Any) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- reusable workflows
+
+
+def _fill_labels(plan: list[dict[str, Any]], nodes: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """Step labels may name the run's inputs ("Plugin: {{plugin}}"): the live card shows what
+    this run works on. A value not passed in falls back to its Inputs node's default."""
+    fields: dict[str, Any] = {}
+    for node in nodes.values():
+        if node.get("type") == "flow.input":
+            for name, row in _named_rows((node.get("config") or {}).get("inputs")):
+                fields[name] = row.get("default")
+    fields.update(ctx)
+    return [
+        {**step, "label": _as_text(_template(step["label"], fields))} if "{{" in str(step.get("label") or "") else step
+        for step in plan
+    ]
 
 
 def _template(value: Any, payload: dict[str, Any]) -> Any:
