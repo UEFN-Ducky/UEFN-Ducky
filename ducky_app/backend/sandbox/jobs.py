@@ -25,6 +25,9 @@ _CREATE_NO_WINDOW = 0x08000000
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _KILL_ON_JOB_CLOSE = 0x2000
 _LIMIT_JOB_MEMORY = 0x0200
+_LIMIT_PRIORITY_CLASS = 0x0020
+_BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+_EXTENDED_LIMIT_INFO = 9
 _PROCESS_SET_QUOTA_AND_TERMINATE = 0x0100 | 0x0001
 
 
@@ -35,49 +38,27 @@ class _Job:
     not let programs leave: Git Bash (Cygwin) moves every program it starts out of any job
     that allows that, which hid exactly the programs it is there to find."""
 
-    def __init__(self, memory_mb: int, *, track_only: bool = False) -> None:
+    def __init__(self, memory_mb: int, *, track_only: bool = False, below_normal: bool = False) -> None:
+        """memory_mb > 0 caps what every process in the job holds together; below_normal runs
+        them all at below-normal priority, so the PC's own apps stay responsive."""
         self.handle: int = 0
+        self.memory_mb = max(0, int(memory_mb))
         if not _WIN:
             return
-        from ctypes import wintypes
-
-        class _Basic(ctypes.Structure):
-            _fields_ = [
-                ("PerProcessUserTimeLimit", ctypes.c_int64),
-                ("PerJobUserTimeLimit", ctypes.c_int64),
-                ("LimitFlags", wintypes.DWORD),
-                ("MinimumWorkingSetSize", ctypes.c_size_t),
-                ("MaximumWorkingSetSize", ctypes.c_size_t),
-                ("ActiveProcessLimit", wintypes.DWORD),
-                ("Affinity", ctypes.c_size_t),
-                ("PriorityClass", wintypes.DWORD),
-                ("SchedulingClass", wintypes.DWORD),
-            ]
-
-        class _Io(ctypes.Structure):
-            _fields_ = [(name, ctypes.c_uint64) for name in ("r", "w", "o", "rb", "wb", "ob")]
-
-        class _Extended(ctypes.Structure):
-            _fields_ = [
-                ("BasicLimitInformation", _Basic),
-                ("IoInfo", _Io),
-                ("ProcessMemoryLimit", ctypes.c_size_t),
-                ("JobMemoryLimit", ctypes.c_size_t),
-                ("PeakProcessMemoryUsed", ctypes.c_size_t),
-                ("PeakJobMemoryUsed", ctypes.c_size_t),
-            ]
-
         k32 = _kernel32()
         job = k32.CreateJobObjectW(None, None)
         if not job:
             raise OSError(ctypes.get_last_error(), "CreateJobObject failed")
-        info = _Extended()
+        info = _extended_info()()
         flags = 0 if track_only else _KILL_ON_JOB_CLOSE
         if memory_mb > 0:
             flags |= _LIMIT_JOB_MEMORY
             info.JobMemoryLimit = int(memory_mb) * 1024 * 1024
+        if below_normal:
+            flags |= _LIMIT_PRIORITY_CLASS
+            info.BasicLimitInformation.PriorityClass = _BELOW_NORMAL_PRIORITY_CLASS
         info.BasicLimitInformation.LimitFlags = flags
-        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info)):
+        if not k32.SetInformationJobObject(job, _EXTENDED_LIMIT_INFO, ctypes.byref(info), ctypes.sizeof(info)):
             k32.CloseHandle(job)
             raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
         self.handle = int(job)
@@ -114,6 +95,28 @@ class _Job:
             return []
         return [int(info.Ids[i]) for i in range(min(int(info.InList), 512))]
 
+    def limits(self) -> tuple[int, int, int]:
+        """(limit flags, priority class, memory limit MB) as Windows holds them for the job."""
+        info = self._query()
+        if info is None:
+            return 0, 0, 0
+        basic = info.BasicLimitInformation
+        return int(basic.LimitFlags), int(basic.PriorityClass), int(info.JobMemoryLimit // (1024 * 1024))
+
+    def peak_mb(self) -> int:
+        """The most memory the job's processes ever held at once, in MB (0 when unknown)."""
+        info = self._query()
+        return int(info.PeakJobMemoryUsed // (1024 * 1024)) if info is not None else 0
+
+    def _query(self) -> Any:
+        if not self.handle:
+            return None
+        info = _extended_info()()
+        if not _kernel32().QueryInformationJobObject(self.handle, _EXTENDED_LIMIT_INFO, ctypes.byref(info),
+                                                     ctypes.sizeof(info), None):
+            return None
+        return info
+
     def terminate(self) -> None:
         if self.handle:
             _kernel32().TerminateJobObject(self.handle, 1)
@@ -122,6 +125,45 @@ class _Job:
         if self.handle:
             _kernel32().CloseHandle(self.handle)
             self.handle = 0
+
+
+_extended: Any = None
+
+
+def _extended_info() -> Any:
+    """The JOBOBJECT_EXTENDED_LIMIT_INFORMATION structure type."""
+    global _extended
+    if _extended is None:
+        from ctypes import wintypes
+
+        class _Basic(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class _Io(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_uint64) for name in ("r", "w", "o", "rb", "wb", "ob")]
+
+        class _Extended(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _Basic),
+                ("IoInfo", _Io),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        _extended = _Extended
+    return _extended
 
 
 _k32: Any = None

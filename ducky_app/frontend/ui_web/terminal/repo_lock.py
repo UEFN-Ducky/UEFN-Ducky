@@ -2,7 +2,7 @@
 
 Oct 24 2026: a team's agents ran pytest suites in the same repo side by side, each taking
 minutes and gigabytes. A heavy command now waits for the one already running in its repo
-(the git top of its folder); other repos run in parallel.
+(the git top of its folder), then for the one running anywhere on the PC (PC).
 """
 
 from __future__ import annotations
@@ -13,8 +13,12 @@ import threading
 from typing import Callable
 
 HEAVY_RE = re.compile(
-    r"\b(?:pytest|vitest|npm (?:run )?test|pnpm test|cargo (?:test|build)|build_exes|publish_app|release\.sh|tsc -b)\b"
+    r"\b(?:pytest|vitest|npm (?:run )?(?:test|build)|pnpm (?:run )?(?:test|build)|"
+    r"cargo (?:test|build|check|clippy|nextest)|rustc|msbuild|dotnet (?:build|test)|gradlew?|"
+    r"go (?:build|test)|cmake --build|vite build|build_exes|publish_app|release\.sh|tsc -b)\b"
 )
+# The lock key every heavy run also holds: one at a time on the whole PC.
+PC = "<this PC>"
 
 _cond = threading.Condition()
 _held: dict[str, str] = {}  # repo -> label of the run holding it

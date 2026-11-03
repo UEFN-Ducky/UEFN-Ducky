@@ -12,7 +12,7 @@ import uuid
 from typing import Any, Callable
 
 from frontend.settings import PanelSettings
-from frontend.ui_web.terminal import commit_guard, repo_lock, run_durations
+from frontend.ui_web.terminal import commit_guard, repo_lock, resource_guard, run_durations
 from frontend.ui_web.terminal.bridge import TerminalBridge
 from frontend.ui_web.terminal.session import (
     _OUTPUT_RING_CHARS,
@@ -164,6 +164,7 @@ class TerminalManager:
                 hidden=hidden,
                 spawn_argv=argv,
                 env_extra=extra,
+                agent=bool(conv_id or from_agent),
             )  # type: ignore[arg-type]
             bridge = TerminalBridge(
                 on_input=lambda data, s=session: self._user_write(s.id, data),
@@ -752,6 +753,8 @@ class TerminalManager:
             return {**out, "fail": fail, "error": error, **({"hint": ran["hint"]} if ran.get("hint") else {})}
         code = ran.get("exit_code")
         out["exit_code"] = code
+        if ran.get("hint"):
+            out["hint"] = ran["hint"]
         if code not in (None, 0):
             return {**out, "ok": False, "fail": "exit_nonzero", "error": f"Command failed (exit code {code})."}
         return out
@@ -767,22 +770,50 @@ class TerminalManager:
         try:
             # ponytail: background commands are never locked; their end can't be seen.
             if not repo_lock.is_heavy(command):
-                return session.run_command(command, background=False, timeout_s=timeout_s)
+                return self._run_watched(session, command, timeout_s)
             repo = repo_lock.repo_of(str(getattr(session, "cwd", "") or "."))
+            label = _chat_title(conv_id) or "another terminal"
 
-            def waiting(holder: str) -> None:
-                note = getattr(session, "note", None)
-                if note:
-                    note(f"Waiting for {holder}'s test run in this repo")
+            def waiting(where: str) -> Callable[[str], None]:
+                def tell(holder: str) -> None:
+                    note = getattr(session, "note", None)
+                    if note:
+                        note(f"Waiting for {holder}'s test or build run {where}")
+                return tell
 
-            repo_lock.acquire(repo, _chat_title(conv_id) or "another terminal", on_wait=waiting)
+            # The repo first, then the PC: Nov 3 2026 a Rust build (6.4 GB) and two repos'
+            # test suites ran side by side beside UEFN; one heavy run at a time on the PC.
+            repo_lock.acquire(repo, label, on_wait=waiting("in this repo"))
             try:
-                return session.run_command(command, background=False, timeout_s=timeout_s)
+                repo_lock.acquire(repo_lock.PC, label, on_wait=waiting("on this PC"))
+                try:
+                    return self._run_watched(session, command, timeout_s)
+                finally:
+                    repo_lock.release(repo_lock.PC)
             finally:
                 repo_lock.release(repo)
         finally:
             with self._lock:
                 self._in_command.discard(sid)
+
+    @staticmethod
+    def _run_watched(session: TerminalSession, command: str, timeout_s: float) -> dict[str, Any]:
+        """session.run_command; when the terminal's memory peaked at its cap meanwhile, the
+        result says so (hint), so the agent runs less at once instead of retrying."""
+        def peak_and_cap() -> tuple[int, int]:
+            try:
+                peak, cap = session.memory_peak_and_cap_mb()
+            except Exception:
+                return 0, 0
+            return (peak, cap) if isinstance(peak, int) and isinstance(cap, int) else (0, 0)
+
+        before, cap = peak_and_cap()
+        ran = session.run_command(command, background=False, timeout_s=timeout_s)
+        if cap:
+            after, _cap = peak_and_cap()
+            if resource_guard.hit_cap(before, after, cap) and isinstance(ran, dict):
+                ran = {**ran, "hint": resource_guard.cap_hint(after, cap)}
+        return ran
 
     def read_output(self, session_id: str, max_chars: int = 8000) -> dict[str, Any]:
         session = self.get_session(session_id)

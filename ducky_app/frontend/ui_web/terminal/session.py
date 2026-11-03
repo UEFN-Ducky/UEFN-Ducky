@@ -186,15 +186,18 @@ def shell_has_foreground_child(shell_pid: int, snapshot: ProcessSnapshot | None 
     return True
 
 
-def _tracking_job(shell_pid: int) -> Any:
+def _tracking_job(shell_pid: int, *, guarded: bool = False) -> Any:
     """A job holding the shell and what it already started, so every later process joins it;
-    None off Windows or when Windows refuses."""
+    None off Windows or when Windows refuses. guarded (an agent's terminal): the job is also
+    capped in memory and runs below normal priority (resource_guard)."""
     if os.name != "nt" or not shell_pid:
         return None
     try:
         from backend.sandbox.jobs import _Job
+        from frontend.ui_web.terminal import resource_guard
 
-        job = _Job(0, track_only=True)
+        cap = resource_guard.memory_cap_mb() if guarded else 0
+        job = _Job(cap, track_only=True, below_normal=guarded)
         if not job.assign_pid(shell_pid):
             job.close()
             return None
@@ -335,8 +338,11 @@ class TerminalSession:
         env_extra: dict[str, str] | None = None,
         on_output: Callable[[str], None] | None = None,
         on_exit: Callable[[int], None] | None = None,
+        agent: bool = False,
     ) -> None:
         self.id = uuid.uuid4().hex[:12]
+        # An agent opened it: what it runs is memory-capped and below normal priority.
+        self.agent = bool(agent)
         self.shell = shell_label(shell)
         self.cwd = cwd
         self.title = (title or f"{self.shell}").strip()[:80]
@@ -416,13 +422,23 @@ class TerminalSession:
                 env=env,
                 dimensions=(self._rows, self._cols),
             )
-        self._job = _tracking_job(int(getattr(self._pty, "pid", 0) or 0))
+        self._job = _tracking_job(int(getattr(self._pty, "pid", 0) or 0), guarded=self.agent)
         self._stop.clear()
         self._read_thread = threading.Thread(target=self._read_loop, daemon=True, name=f"pty-{self.id}")
         self._read_thread.start()
         # No prompt "kick": both shells print their first prompt unprompted, and
         # the output ring replays it to clients that attach late. Kicks raced the
         # shell's own startup and stacked 2-3 prompts per new terminal.
+
+    def memory_peak_and_cap_mb(self) -> tuple[int, int]:
+        """(the most memory this terminal's processes held at once, its cap); (0, 0) unknown."""
+        job = self._job
+        if job is None:
+            return 0, 0
+        try:
+            return int(job.peak_mb()), int(getattr(job, "memory_mb", 0) or 0)
+        except Exception:
+            return 0, 0
 
     def _read_loop(self) -> None:
         pty = self._pty

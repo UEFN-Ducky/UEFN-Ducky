@@ -178,7 +178,8 @@ def test_a_terminal_waiting_for_its_repos_test_lock_is_not_closed(mgr, tmp_path,
     monkeypatch.setattr(repo_lock, "acquire", acquire)
     monkeypatch.setattr(shell, "run_command", lambda *a, **k: {"ok": True, "exit_code": 0})
     assert mgr._run_command(shell, "py -3 -m pytest", timeout_s=5)["ok"]
-    assert reaped == [[]] and sid in mgr._sessions
+    # The repo's lock, then the PC's: neither wait lets the reaper close it.
+    assert reaped == [[], []] and sid in mgr._sessions
     assert mgr.close_idle_agent_terminals(now=later, running=set()) == [sid]  # done: closes as before
 
 

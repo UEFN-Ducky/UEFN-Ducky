@@ -1,4 +1,4 @@
-"""One test or build run per repo at a time; other repos run in parallel."""
+"""One test or build run per repo, and one on the whole PC, at a time."""
 
 from __future__ import annotations
 
@@ -49,9 +49,11 @@ def _start(mgr: TerminalManager, session: _Run, command: str = "py -m pytest -q"
 
 def test_heavy_commands() -> None:
     for cmd in ("pytest -q", "npm test", "npm run test", "pnpm test", "cargo build", "npx vitest run",
-                "py release/publish_app.py", "bash release.sh", "tsc -b", "py build_exes.py"):
+                "py release/publish_app.py", "bash release.sh", "tsc -b", "py build_exes.py",
+                "cargo test -p duckyos-core --lib ducky_ai::", "cargo check", "npm run build", "msbuild x.sln",
+                "dotnet test", "./gradlew assemble", "go test ./..."):
         assert repo_lock.is_heavy(cmd), cmd
-    for cmd in ("git status", "npm install", "ls tests", "cargo fmt"):
+    for cmd in ("git status", "npm install", "ls tests", "cargo fmt", "cargo --version"):
         assert not repo_lock.is_heavy(cmd), cmd
 
 
@@ -69,7 +71,7 @@ def test_a_second_run_in_the_same_repo_waits(tmp_path) -> None:
     t2 = _start(mgr, second)
     time.sleep(0.2)
     assert not second.started.is_set()
-    assert second.notes == ["Waiting for another terminal's test run in this repo"]
+    assert second.notes == ["Waiting for another terminal's test or build run in this repo"]
     first.finish.set()
     t1.join(2)
     assert second.started.wait(2)
@@ -78,16 +80,21 @@ def test_a_second_run_in_the_same_repo_waits(tmp_path) -> None:
     assert repo_lock.holder(repo_lock.repo_of(cwd)) == ""
 
 
-def test_different_repos_run_at_once(tmp_path) -> None:
+def test_different_repos_take_turns_on_the_pc(tmp_path) -> None:
     mgr = TerminalManager()
     a, b = _Run(_repo(tmp_path, "a")), _Run(_repo(tmp_path, "b"))
-    threads = [_start(mgr, a), _start(mgr, b)]
-    assert a.started.wait(2) and b.started.wait(2)
-    assert a.notes == [] and b.notes == []
+    t1 = _start(mgr, a, "cargo test -p core")
+    assert a.started.wait(2)
+    t2 = _start(mgr, b)
+    time.sleep(0.2)
+    assert not b.started.is_set()
+    assert b.notes == ["Waiting for another terminal's test or build run on this PC"]
     a.finish.set()
+    t1.join(2)
+    assert b.started.wait(2)
     b.finish.set()
-    for t in threads:
-        t.join(2)
+    t2.join(2)
+    assert repo_lock.holder(repo_lock.PC) == ""
 
 
 def test_a_light_command_never_waits(tmp_path) -> None:
