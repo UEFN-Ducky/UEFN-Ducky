@@ -12,7 +12,6 @@ vi.mock("../contexts/QuickOpenBridge", () => ({ useQuickOpenBridge: () => ({ ope
 vi.mock("./ProjectSelector", () => ({ ProjectSelector: () => null }));
 vi.mock("./ConnectionStatusDropdown", () => ({ ConnectionStatusDropdown: () => null }));
 vi.mock("./BackgroundActivityDropdown", () => ({ BackgroundActivityDropdown: () => null }));
-vi.mock("./TeamLiveDropdown", () => ({ TeamLiveDropdown: () => <div data-testid="builtin-team" /> }));
 vi.mock("./PluginHeaderMenu", () => ({
   PluginMenuButton: ({ menu }: { menu: { id: string } }) => <div data-testid={`plugin-menu-${menu.id}`} />,
 }));
@@ -31,23 +30,19 @@ afterEach(() => {
   menus = [];
 });
 
-describe("Header team menu: built-in until the plugin contributes one", () => {
-  it("an account plugin without header.menus keeps the built-in team menu", () => {
+describe("Header team menu: Ducky Account's header.menus entry", () => {
+  it("no plugin menu: no team menu in the title bar", () => {
     renderHeader();
-    expect(screen.getByTestId("builtin-team")).toBeTruthy();
+    expect(screen.queryByTestId("plugin-menu-team")).toBeNull();
   });
 
-  it("another plugin's menu doesn't replace it", () => {
-    menus = [{ id: "notes", ui: "panel:notes", plugin_id: "notes" }];
+  it("the account plugin's `team` menu shows next to other plugins' menus", () => {
+    menus = [
+      { id: "notes", ui: "panel:notes", plugin_id: "notes" },
+      { id: "team", ui: "panel:account-team-menu", plugin_id: "account" },
+    ];
     renderHeader();
-    expect(screen.getByTestId("builtin-team")).toBeTruthy();
-    expect(screen.getByTestId("plugin-menu-notes")).toBeTruthy();
-  });
-
-  it("a `team` menu shows the plugin's only", () => {
-    menus = [{ id: "team", ui: "panel:account-team-menu", plugin_id: "account" }];
-    renderHeader();
-    expect(screen.queryByTestId("builtin-team")).toBeNull();
     expect(screen.getByTestId("plugin-menu-team")).toBeTruthy();
+    expect(screen.getByTestId("plugin-menu-notes")).toBeTruthy();
   });
 });

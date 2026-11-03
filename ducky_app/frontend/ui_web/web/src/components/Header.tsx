@@ -4,7 +4,6 @@ import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
 import { BackgroundActivityDropdown } from "./BackgroundActivityDropdown";
-import { TeamLiveDropdown } from "./TeamLiveDropdown";
 import { PluginMenuButton } from "./PluginHeaderMenu";
 import { VerseProblemsDropdown } from "./VerseProblemsDropdown";
 import { TerminalHeaderDropdown } from "../terminal/TerminalHeaderDropdown";
@@ -766,8 +765,6 @@ export function Header({
             <PluginMenuButton menu={menu} />
           </PluginSurfaceBoundary>
         ))}
-        {/* ponytail: built-in team menu until the plugin's `team` header.menus entry replaces it (older account plugins). */}
-        {pluginHeaderMenus.some((m) => m.id === "team") ? null : <TeamLiveDropdown />}
         <BackgroundActivityDropdown />
 
         <div className="app-header-divider" />
