@@ -164,15 +164,12 @@ def test_owners_come_from_the_provider_with_its_names(who: _Who, fake: FakeWorkf
     assert owner["slug"] == "spacet" and owner["sync"]["members"] == 2 and owner["readOnly"] is False
 
 
-def test_shared_workflow_lists_under_its_space_and_queues_for_a_round(who: _Who, fake: FakeWorkflowSpaces) -> None:
-    ana = join(fake, who, "ana@x.org")
+def test_shared_workflow_lists_under_its_space_and_only_its_account_sees_it(who: _Who, fake: FakeWorkflowSpaces) -> None:
+    """Its sync rounds run in the team engine (Ducky Account) and are tested there."""
+    join(fake, who, "ana@x.org")
     wf = store.save_workflow({"name": "Nightly build", "graph": CRON}, owner="spaceT")
     assert wf["owner"]["kind"] == "shared" and wf["owner"]["label"] == "Alpha Studio" and wf["run_here"] is True
     assert owners_by_id()["spaceT"]["sync"]["pending"] == 1
-    # Update online: the space's workflows are queued again and a round runs now.
-    repo.clear_dirty(ana, "spaceT", owned.DOC_PLUGIN, "doc", wf["id"])
-    assert shared.sync(force=True, space_id="spaceT", upload=True)["ok"] is True
-    assert fake.rounds == [(ana, "spaceT")] and repo.count_dirty(ana, "spaceT") == 1
     assert shared.sync(space_id="spaceNope")["ok"] is False
 
     # Another account on this PC, and another space, never see it.
@@ -290,27 +287,6 @@ def test_a_lost_space_hides_its_workflows_until_access_returns(who: _Who, fake: 
     assert [o["id"] for o in shared.owners()["owners"]] == ["local"]
     assert repo.rows(ana, "spaceT", owned.DOC_PLUGIN, "doc") == []
     assert runtime.runtime_get(ana, wf["id"])["run_here"] is False
-
-
-def test_a_round_that_raises_shows_on_its_space_and_the_next_space_still_syncs(who: _Who, fake: FakeWorkflowSpaces) -> None:
-    ana = join(fake, who, "ana@x.org")
-    join(fake, who, "ana@x.org", space="spaceU")
-    synced = fake.sync
-
-    def sync(account: str, space_id: str, *, force: bool = False) -> dict[str, Any]:
-        if space_id == "spaceT":
-            raise KeyError("rev")
-        return synced(account, space_id, force=force)
-
-    fake.sync = sync  # type: ignore[method-assign]
-    shared._round([(ana, "spaceT"), (ana, "spaceU")], False)
-    assert fake.rounds == [(ana, "spaceU")]
-    st = repo.sync_get(ana, "spaceT")
-    assert st["state"] == "error" and "KeyError" in st["error"]
-    assert owners_by_id()["spaceT"]["sync"]["state"] == "error"
-    # Save and Update online wait for the round: its error comes back instead of escaping.
-    out = shared.sync(force=True, space_id="spaceT", upload=True)
-    assert out["ok"] is False and "KeyError" in out["error"]
 
 
 def test_saving_while_the_space_is_locked_here_is_refused_never_forked_into_local(
