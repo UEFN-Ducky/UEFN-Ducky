@@ -204,6 +204,18 @@ def test_a_batch_the_store_keeps_refusing_is_dropped_not_resent_forever() -> Non
     assert us.flush() is True and us.queued() == 0
 
 
+def test_a_store_that_is_busy_or_rate_limited_never_drops_the_batch(monkeypatch) -> None:
+    # The Store answers 200 {"error": ...}; a failed store write says "try again:".
+    from frontend import duckyos_account
+
+    errors = iter(["try again: store busy (db timeout)"] * 5 + ["too soon: one batch per install every 30 s", ""])
+    monkeypatch.setattr(duckyos_account, "_store_collect", lambda *a, **k: {"error": next(errors)})
+    us.track("feature.open", tab="chat")
+    for _ in range(6):
+        assert us.flush() is False and us.queued() == 1   # kept every time, never dropped
+    assert us.flush() is True and us.queued() == 0
+
+
 def test_switch_off_means_no_queue_and_no_network() -> None:
     sent: list[dict[str, Any]] = []
     us.send_override = lambda body: sent.append(body) or True

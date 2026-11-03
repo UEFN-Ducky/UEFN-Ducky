@@ -384,7 +384,9 @@ def _send(body: dict[str, Any]) -> str:
         return "failed"
     if not error:
         return "ok"
-    return "failed" if "too soon" in error else "refused"
+    # "too soon" (rate) and "try again:" (the Store's own read/write failed) are sent
+    # again later; only a batch the Store can never take counts toward dropping it.
+    return "failed" if ("too soon" in error or "try again" in error) else "refused"
 
 
 def flush() -> bool:
