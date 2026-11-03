@@ -851,6 +851,132 @@ def _tool_input_schema(name: str) -> Any:
     return f"schema unavailable — call ducky_get_tools(name={name!r}) for the exact parameters"
 
 
+# Nov 2 2026 error log: models send the right value under a neighbour's name.
+# target param -> keys models use for it (only used when target is a real param and absent).
+_ARG_ALIASES: dict[str, tuple[str, ...]] = {
+    "pattern": ("query", "search", "q"),
+    "query": ("pattern", "search", "q"),
+    "conv_id": ("conversation_id", "chat_id"),
+    "new_text": ("content", "replacement", "text"),
+    "path": ("relative_path", "file_path", "filepath"),
+    "relative_path": ("path", "file_path", "filepath"),
+    "asset_path": ("definition_path",),
+}
+_ARG_WRAPPERS = ("arguments", "args", "input")
+
+
+def _schema_types(prop: Any) -> set[str]:
+    if not isinstance(prop, dict):
+        return set()
+    out: set[str] = set()
+    typ = prop.get("type")
+    if isinstance(typ, str):
+        out.add(typ)
+    elif isinstance(typ, list):
+        out.update(t for t in typ if isinstance(t, str))
+    for key in ("anyOf", "oneOf"):
+        for sub in prop.get(key) or ():
+            out |= _schema_types(sub)
+    return out
+
+
+def _coerce(value: Any, types: set[str]) -> Any:
+    """String value -> the schema's int/number/bool/array/object; anything else unchanged."""
+    if not isinstance(value, str) or not types or "string" in types:
+        return value
+    text = value.strip()
+    if "integer" in types:
+        try:
+            return int(text)
+        except ValueError:
+            pass
+    if "number" in types:
+        try:
+            return float(text)
+        except ValueError:
+            pass
+    if "boolean" in types and text.lower() in ("true", "false"):
+        return text.lower() == "true"
+    if ("array" in types and text.startswith("[")) or ("object" in types and text.startswith("{")):
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            return value
+        if isinstance(parsed, list if text.startswith("[") else dict):
+            return parsed
+    return value
+
+
+def repair_args(name: str, args: dict[str, Any], schema: Any = None) -> tuple[dict[str, Any], list[str]]:
+    """Fix wrong argument names / string-typed values against the tool's schema.
+
+    Returns (args, notes); notes is empty when nothing changed. Never invents values.
+    """
+    if schema is None:
+        schema = _tool_input_schema(name)
+    if not isinstance(args, dict) or not isinstance(schema, dict):
+        return args, []
+    props = schema.get("properties")
+    if not isinstance(props, dict) or not props:
+        return args, []
+    out = dict(args)
+    notes: list[str] = []
+    # 1. {"arguments": {...}} / {"arguments": "<json>"} for a tool with no such param.
+    for wrap in _ARG_WRAPPERS:
+        if wrap in out and wrap not in props:
+            inner = out[wrap]
+            if isinstance(inner, str) and inner.strip().startswith("{"):
+                try:
+                    inner = json.loads(inner)
+                except ValueError:
+                    continue
+            if isinstance(inner, dict):
+                del out[wrap]
+                out = {**out, **inner}
+                notes.append(f"unwrapped {wrap}")
+    # 2. Alias table.
+    for target, sources in _ARG_ALIASES.items():
+        if target not in props or target in out:
+            continue
+        for src in sources:
+            if src in out and src not in props:
+                out[target] = out.pop(src)
+                notes.append(f"{src}→{target}")
+                break
+    # 3. One missing required + one unknown key: that key is it.
+    required = [r for r in schema.get("required") or () if r not in out]
+    unknown = [k for k in out if k not in props]
+    if len(required) == 1 and len(unknown) == 1:
+        out[required[0]] = out.pop(unknown[0])
+        notes.append(f"{unknown[0]}→{required[0]}")
+    # 4. Types.
+    for key, value in list(out.items()):
+        fixed = _coerce(value, _schema_types(props.get(key)))
+        if fixed is not value:
+            out[key] = fixed
+            notes.append(f"{key} {type(value).__name__}→{type(fixed).__name__}")
+    return out, notes
+
+
+async def _plugin_input_schema(name: str) -> Any:
+    try:
+        from backend.mcp_plugins.client_pool import get_plugin_pool
+        from backend.mcp_plugins.registry import PLUGIN_TOOL_SEP, is_plugin_tool
+        from backend.mcp_plugins.store import ensure_plugin_prefix_cache
+
+        if PLUGIN_TOOL_SEP in name:
+            ensure_plugin_prefix_cache()
+        if not is_plugin_tool(name):
+            return None
+
+        for tool in await get_plugin_pool().list_all_plugin_tools():
+            if tool.name == name:
+                return getattr(tool, "inputSchema", None)
+    except Exception:
+        pass
+    return None
+
+
 def _record_tool_failure(name: str, message: str) -> None:
     try:
         from backend.tools.verse.verse_stats import record_tool_failure
@@ -1016,6 +1142,30 @@ def _request_render_trim() -> None:
 
 
 async def _execute_tool_inner(
+    name: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    cancel_event: Any | None = None,
+    _alias_tried: bool = False,
+) -> ToolCallResult:
+    """Repair argument names/types against the schema (MCP and plugin tools), then dispatch."""
+    notes: list[str] = []
+    if isinstance(arguments, dict) and arguments:
+        schema = _tool_input_schema(name)
+        if not isinstance(schema, dict):
+            schema = await _plugin_input_schema(name)
+        arguments, notes = repair_args(name, arguments, schema)
+    result = await _dispatch_tool(name, arguments, cancel_event=cancel_event, _alias_tried=_alias_tried)
+    if notes:
+        note = f"[args repaired: {', '.join(notes)} — use the schema's names next time]"
+        if result.ok:
+            result.data = f"{result.data}\n{note}" if result.data else note
+        else:
+            result.hint = f"{note} {result.hint}".strip()
+    return result
+
+
+async def _dispatch_tool(
     name: str,
     arguments: dict[str, Any] | None = None,
     *,
