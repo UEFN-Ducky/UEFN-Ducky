@@ -127,6 +127,68 @@ def _log_agent_crash(
         pass
 
 
+AUTO_RESUME_DELAY_S = 60.0
+_auto_resumed_at: dict[str, float] = {}
+
+
+def _crash_row(
+    partial: dict[str, Any] | None,
+    error: str,
+    *,
+    tools_run: int,
+    written: set[str] | list[str],
+    auto_resume: bool,
+) -> dict[str, Any]:
+    """The incomplete assistant row a crashed turn leaves: its partial reply, and after
+    any tool ran, one line saying what ran, the files written and what happens next."""
+    row = dict(partial) if partial else {"role": "assistant", "content": "", "ts": time.time()}
+    row["incomplete"] = True
+    row["error"] = error
+    if tools_run:
+        files = sorted(written)
+        shown = ", ".join(f"`{f}`" for f in files[:8]) + (f" and {len(files) - 8} more" if len(files) > 8 else "")
+        line = f"**Interrupted** ({error}) after {tools_run} tool call{'s' if tools_run != 1 else ''}"
+        line += f"; files written: {shown}." if files else "; no files written."
+        line += " Resuming in 60 s." if auto_resume else " Press Resume to continue."
+        prior = str(row.get("content") or "").rstrip()
+        row["content"] = f"{prior}\n\n{line}" if prior else line
+    return row
+
+
+def _is_transient(error: str) -> bool:
+    try:
+        from backend.agent.providers import _TRANSIENT_RE
+
+        return bool(_TRANSIENT_RE.search(error or ""))
+    except Exception:
+        return False
+
+
+def _schedule_auto_resume(conv_id: str, error: str, mode: str) -> bool:
+    """One automatic Continue, 60 s after a turn died on a service hiccup. Skipped when the
+    chat moved on meanwhile (the person sent, resumed or stopped)."""
+    # ponytail: once per chat per 10 min, so a resumed turn that dies again waits for Resume.
+    now = time.time()
+    if now - _auto_resumed_at.get(conv_id, 0.0) < 600:
+        return False
+    _auto_resumed_at[conv_id] = now
+
+    def fire() -> None:
+        conv = load_conversation(conv_id)
+        last = (getattr(conv, "messages", None) or [None])[-1] if conv else None
+        if not (isinstance(last, dict) and last.get("incomplete") and last.get("error") == error):
+            return
+        try:
+            run_message(conv_id, "", mode, "", resume=True)
+        except Exception:
+            pass
+
+    t = threading.Timer(AUTO_RESUME_DELAY_S, fire)
+    t.daemon = True
+    t.start()
+    return True
+
+
 # --- Cross-process push forwarding (bridge process → panel process) ---------
 # ducky_spawn_chat / ducky_send_chat_message run inside the stdio MCP bridge,
 # a DIFFERENT process from the panel UI, where _panel_push is never set. Without
@@ -1073,6 +1135,7 @@ async def _run_agent_loop(
     delegation_tools_called: set[str] = set()
     written_relpaths: set[str] = set()
     write_failures: list[str] = []
+    tools_run = 0
     asked_user = False
     turn_started = time.time()  # pictures made for this chat from now on show in the reply
     from backend.agent.coding_agents.runner import _TurnCheckpoint
@@ -1122,6 +1185,7 @@ async def _run_agent_loop(
                 )
             elif event.kind == "tool_end" and event.tool:
                 rec = event.tool
+                tools_run += 1
                 record_write_from_tool(rec, written_relpaths, write_failures)
                 if plan_filter and not is_plan_safe_tool(rec.name):
                     continue
@@ -1148,22 +1212,17 @@ async def _run_agent_loop(
                 else:
                     partial = event.partial_message
                     err_text = event.text or "LLM error"
-                    if partial:
-                        upsert_in_flight_assistant(conv, partial, run_id=run_id)
-                    else:
-                        # Persist so reload / empty stream still shows the crash
-                        # (UI used to drop standalone role=error rows → empty Done).
-                        upsert_in_flight_assistant(
-                            conv,
-                            {
-                                "role": "assistant",
-                                "content": "",
-                                "incomplete": True,
-                                "error": err_text,
-                                "ts": time.time(),
-                            },
-                            run_id=run_id,
-                        )
+                    auto = bool(tools_run) and _is_transient(err_text)
+                    if auto:
+                        auto = _schedule_auto_resume(conv.id, err_text, "plan" if plan_filter else "agent")
+                    # Persist so reload / empty stream still shows the crash and what the
+                    # turn already did (UI used to drop standalone role=error rows).
+                    upsert_in_flight_assistant(
+                        conv,
+                        _crash_row(partial, err_text, tools_run=tools_run,
+                                   written=written_relpaths, auto_resume=auto),
+                        run_id=run_id,
+                    )
                     _log_agent_crash(
                         conv,
                         provider=config.provider,
