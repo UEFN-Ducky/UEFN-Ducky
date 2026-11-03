@@ -54,6 +54,13 @@ _END_TYPES = frozenset({"pipeline.finish", "flow.end", "flow.output"})
 # Active terminal tools register cleanup so Stop also terminates their process trees.
 _CANCEL: ContextVar[threading.Event | None] = ContextVar("workflow_cancel", default=None)
 _ACTIVE: dict[str, dict[str, threading.Event]] = {}
+
+
+def has_active_runs() -> bool:
+    """Any workflow run of this process is still going."""
+    with _ACTIVE_LOCK:
+        return any(_ACTIVE.values())
+
 _CANCEL_HOOKS: dict[threading.Event, set[Callable[[], None]]] = {}
 # Called when the run ends however it ends (lets go of the terminals it held open).
 _RUN_END: ContextVar[list[Callable[[], None]] | None] = ContextVar("workflow_run_end", default=None)

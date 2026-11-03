@@ -19,6 +19,7 @@ import re
 import secrets
 import socket
 import struct
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1060,10 +1061,24 @@ def _cancel_idle_timer() -> None:
         _idle_timer = None
 
 
+def _runs_here() -> bool:
+    """A workflow run started through this server (run_workflow) is still going."""
+    runner = sys.modules.get("backend.automations.runner")  # no run ever started: never imported
+    return bool(runner is not None and runner.has_active_runs())
+
+
 def _idle_expired(gen: int) -> None:
-    """Stop only if nobody has connected since this idle timer started."""
+    """Stop only if nobody has connected since this idle timer started and no workflow run
+    started here is still going: its thread lives in this process. Nov 3 2026: a release
+    started from chat died as "Stopped" 15 minutes after the agent's turn ended."""
+    global _idle_timer
     with _clients_lock:
         if _clients > 0 or gen != _idle_gen:
+            return
+        if _runs_here():
+            _idle_timer = threading.Timer(_IDLE_EXIT_S, _idle_expired, args=(gen,))
+            _idle_timer.daemon = True
+            _idle_timer.start()
             return
     request_stop()
 

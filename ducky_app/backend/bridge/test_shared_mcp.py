@@ -505,6 +505,28 @@ def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_pa
         thread.join(timeout=6)
 
 
+def test_a_workflow_run_started_here_keeps_the_server_past_idle(monkeypatch, tmp_path) -> None:
+    """Nov 3 2026: a release started from chat (its thread lives in this server) died as
+    "Stopped" when the server idled out 15 minutes after the agent's turn ended."""
+    from backend.automations import runner
+
+    monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.3)
+    monkeypatch.setitem(runner._ACTIVE, "release", {"run1": threading.Event()})
+    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        sock = _hello("run-1")
+        shared_mcp.write_frame(sock, {"op": "bye"})
+        shared_mcp.close_handle(sock)
+        time.sleep(1.2)  # several idle windows pass while the run goes on
+        assert shared_mcp.serving() and thread.is_alive()
+        runner._ACTIVE.pop("release")  # the run ends: the next idle window stops it
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+
+
 def test_reconnects_keep_one_idle_timer(monkeypatch, tmp_path) -> None:
     """Every disconnect started a 15-minute idle timer thread that was never
     cancelled, so a team run piled up one sleeping thread per agent turn."""
