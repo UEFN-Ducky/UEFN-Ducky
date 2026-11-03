@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { HeaderProblemsAction } from "../contexts/AppHeaderActionsContext";
+import type { HeaderProblemsAction, HeaderVerseWorkflowAction } from "../contexts/AppHeaderActionsContext";
 import { useProblemsMenuOpen } from "../contexts/AppHeaderActionsContext";
 import type { ScanFileStatus } from "../verse-editor/lsp/fileDiagnosticRegistry";
 import { Icons } from "../icons/Icons";
@@ -10,6 +10,8 @@ import { VerseProblemsDuckyMenu } from "./VerseProblemsDuckyMenu";
 
 type VerseProblemsDropdownProps = HeaderProblemsAction & {
   onOpenChange?: (open: boolean) => void;
+  /** Verse build/push buttons, shown in the menu header instead of the app header. */
+  workflow?: HeaderVerseWorkflowAction | null;
 };
 
 const MENU_WIDTH = 400;
@@ -72,6 +74,7 @@ export function VerseProblemsDropdown({
   activeFileName,
   onStopScan,
   onOpenChange,
+  workflow,
 }: VerseProblemsDropdownProps) {
   const { problemsMenuOpen: open, setProblemsMenuOpen } = useProblemsMenuOpen();
 
@@ -158,6 +161,38 @@ export function VerseProblemsDropdown({
                     ? `Problems (${totalCount})`
                     : "Problems"}
             </span>
+            {workflow ? (
+              <>
+                <button
+                  type="button"
+                  className="icon-btn verse-problems-refresh-btn app-header-workflow-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    workflow.onCompile();
+                  }}
+                  disabled={workflow.busy || workflow.buildState === 3}
+                  title={workflow.lastLog || "Build Verse project"}
+                  aria-label="Build Verse project"
+                >
+                  <img src={workflow.buildIconSrc} alt="" draggable={false} />
+                </button>
+                {workflow.canPush ? (
+                  <button
+                    type="button"
+                    className="icon-btn verse-problems-refresh-btn app-header-workflow-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      workflow.onPush();
+                    }}
+                    disabled={workflow.busy}
+                    title="Push Verse changes"
+                    aria-label="Push Verse changes"
+                  >
+                    <img src="./verse-workflow/verse-icon-upload.svg" alt="" draggable={false} />
+                  </button>
+                ) : null}
+              </>
+            ) : null}
             {onRefreshActiveFile ? (
               <button
                 type="button"

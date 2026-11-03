@@ -912,8 +912,9 @@ body.native-caption-input-ready .app-header .drag-region {
   height: 16px;
   flex-shrink: 0;
 }
+/* Phones: the editor tools sit in the Ducky menu; Problems stays up top as the build status. */
 .app-header--compact .app-header-nav,
-.app-header--compact .app-header-editor-actions {
+.app-header--compact .app-header-editor-actions > :not(.app-header-problems) {
   display: none;
 }
 .app-header--compact .app-header-center {
@@ -1036,7 +1037,12 @@ body.native-caption-input-ready .app-header .drag-region {
   display: flex;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  flex-shrink: 0;
+}
+/* Header icons keep their size side by side; a squeezed header folds plugins away instead. */
+.app-header-editor-actions > *,
+.app-header-trailing > * {
+  flex-shrink: 0;
 }
 .app-header-verse-workflow {
   display: flex;
@@ -1070,9 +1076,8 @@ body.native-caption-input-ready .app-header .drag-region {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
+  flex: 1 0 auto;
   justify-content: flex-end;
-  min-width: 0;
   z-index: 1;
 }
 .app-header--remote {

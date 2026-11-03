@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
@@ -382,7 +382,34 @@ export function Header({
   );
   const headerMenu = useContextMenuState<null>();
   const compactHeader = narrowHeader;
-  const pluginHeader = compactHeader ? (
+  // Too many plugin icons for the center: fold them into the Plugins menu, like phones do.
+  // Unfold once the center is as wide as the icons needed.
+  const centerRef = useRef<HTMLDivElement>(null);
+  const [pluginsOverflow, setPluginsOverflow] = useState(false);
+  const pluginsExpandAt = useRef(0);
+  useLayoutEffect(() => setPluginsOverflow(false), [pluginHeaderButtons.length]);
+  useLayoutEffect(() => {
+    const el = centerRef.current;
+    if (!el || compactHeader || typeof ResizeObserver === "undefined") return;
+    const check = () => {
+      if (pluginsOverflow) {
+        if (el.clientWidth >= pluginsExpandAt.current) setPluginsOverflow(false);
+        return;
+      }
+      const kids = Array.from(el.children) as HTMLElement[];
+      const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+      const need = kids.reduce((w, k) => w + k.offsetWidth, 0) + gap * Math.max(0, kids.length - 1);
+      if (need > el.clientWidth + 1) {
+        pluginsExpandAt.current = need;
+        setPluginsOverflow(true);
+      }
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [compactHeader, pluginsOverflow, pluginHeaderButtons.length]);
+  const pluginHeader = compactHeader || pluginsOverflow ? (
     <PluginHeaderMenu buttons={pluginHeaderButtons} />
   ) : (
     pluginHeaderButtons.map((btn) => (
@@ -607,6 +634,7 @@ export function Header({
 
       {!isFocus ? (
         <div
+          ref={centerRef}
           className="app-header-center drag-region app-drag-surface"
           data-header-menu
           onContextMenu={(e) => headerMenu.open(e, null)}
@@ -650,7 +678,7 @@ export function Header({
         {streaming ? null : (
         <>
         <span className="app-header-editor-actions">
-          {showWorkflow && workflowAction ? (
+          {showWorkflow && workflowAction && !problemsAction ? (
             <div
               className="app-header-verse-workflow no-drag"
               title={workflowAction.lastLog || "Verse workflow"}
@@ -679,7 +707,11 @@ export function Header({
           ) : null}
           {problemsAction ? (
             <span className="app-header-problems">
-              <VerseProblemsDropdown {...problemsAction} onOpenChange={onProblemsOpenChange} />
+              <VerseProblemsDropdown
+                {...problemsAction}
+                onOpenChange={onProblemsOpenChange}
+                workflow={showWorkflow ? workflowAction : null}
+              />
             </span>
           ) : null}
           {terminalAction ? (
