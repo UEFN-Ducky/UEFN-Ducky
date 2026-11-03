@@ -125,11 +125,14 @@ describe("summarizeQuality", () => {
 describe("clientTag / netTag", () => {
   it("buckets the UA and connection, never passing them through", () => {
     expect(clientTag("Mozilla/5.0 (Linux; Android 14) Chrome/130 UEFNDuckyAndroid/1.2")).toBe("android_app");
-    expect(clientTag("Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile")).toBe("android_browser");
-    expect(clientTag("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Safari")).toBe("ios_browser");
-    expect(clientTag("Mozilla/5.0 (Windows NT 10.0) Chrome/130")).toBe("desktop_browser");
-    expect(netTag({ type: "cellular", effectiveType: "4g" })).toBe("cellular");
-    expect(netTag({ effectiveType: "3g" })).toBe("3g");
+    expect(clientTag("Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile")).toBe("phone_web");
+    expect(clientTag("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Safari")).toBe("phone_web");
+    expect(clientTag("Mozilla/5.0 (iPad; CPU OS 18_0) Safari")).toBe("tablet_web");
+    expect(clientTag("Mozilla/5.0 (Linux; Android 14) Chrome/130")).toBe("tablet_web");
+    expect(clientTag("Mozilla/5.0 (Windows NT 10.0) Chrome/130")).toBe("desktop_web");
+    expect(netTag({ type: "cellular", effectiveType: "4g" })).toBe("cell");
+    expect(netTag({ type: "wifi" })).toBe("wifi");
+    expect(netTag({ effectiveType: "3g" })).toBe("unknown");
     expect(netTag({ type: "bluetooth", effectiveType: "weird" })).toBe("unknown");
     expect(netTag(undefined)).toBe("unknown");
   });
@@ -145,7 +148,7 @@ describe("load and session end", () => {
     t.reportFirstFrame();
     const load = reports.filter((r) => "load" in r);
     expect(load).toHaveLength(1);
-    expect(load[0]).toMatchObject({ load: { first_frame_ms: expect.any(Number) }, client: "desktop_browser" });
+    expect(load[0]).toMatchObject({ load: { first_frame_ms: expect.any(Number) }, client: "desktop_web" });
   });
 
   it("sends background when hidden while live, and only one end per session", async () => {
@@ -231,7 +234,7 @@ describe("DirectTransport quality reports", () => {
     FakePc.stats = statsMap({ fps: 30, freezes: 3, lost: 20, received: 1990, bytes: 7_500_000, jitter: 0.009, rtt: 0.08 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(quality()).toEqual([{ fps: 30, freezes: 2, loss_pct: 1, jitter_ms: 9, kbps: 1000, rtt_ms: 80 }]);
-    expect(reports.find((r) => "quality" in r)).toMatchObject({ client: "desktop_browser", net: "unknown", viewer_version: "1" });
+    expect(reports.find((r) => "quality" in r)).toMatchObject({ client: "desktop_web", net: "unknown", viewer_version: "1" });
     FakePc.all[0].drop();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(quality()).toHaveLength(1);

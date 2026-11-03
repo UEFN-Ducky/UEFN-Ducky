@@ -85,20 +85,19 @@ const QUALITY_SAMPLES_PER_REPORT = 2;
 const INPUT_PROBE_EVERY = 10;
 const INPUT_LOST_MS = 5_000;
 
-/** Which viewer this is, from the UA only: the Android app, or a phone/desktop browser. */
+/** Which viewer this is, from the UA only. Values are the usage vocabulary (usage_events.py REMOTE client). */
 export function clientTag(ua: string): string {
   if (ua.includes("UEFNDuckyAndroid/")) return "android_app";
-  if (/iPhone|iPad|iPod/.test(ua)) return "ios_browser";
-  if (/Android/.test(ua)) return "android_browser";
-  return "desktop_browser";
+  if (/iPad|Tablet/.test(ua) || (/Android/.test(ua) && !/Mobile/.test(ua))) return "tablet_web";
+  if (/iPhone|iPod|Android|Mobile/.test(ua)) return "phone_web";
+  return "desktop_web";
 }
 
-/** Network kind from `navigator.connection` (Chromium only): wifi / cellular / ethernet, else the speed class. */
+/** Network kind from `navigator.connection.type` (Chromium only); effectiveType is a speed class, not a network. */
 export function netTag(conn: { type?: string; effectiveType?: string } | undefined): string {
   const type = conn?.type ?? "";
-  if (type === "wifi" || type === "cellular" || type === "ethernet") return type;
-  const eff = conn?.effectiveType ?? "";
-  return ["slow-2g", "2g", "3g", "4g"].includes(eff) ? eff : "unknown";
+  if (type === "cellular") return "cell";
+  return type === "wifi" || type === "ethernet" ? type : "unknown";
 }
 
 /** The Android app leaves why its last run ended here; read once on start. */
