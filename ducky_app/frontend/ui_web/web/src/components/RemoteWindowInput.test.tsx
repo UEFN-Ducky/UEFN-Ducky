@@ -21,6 +21,7 @@ const { fake, sent } = vi.hoisted(() => {
     },
     retry: () => {},
     restart: () => {},
+    reportFirstFrame: () => {},
   };
   return { fake, sent };
 });
