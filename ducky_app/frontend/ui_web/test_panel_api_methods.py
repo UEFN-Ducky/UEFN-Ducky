@@ -568,6 +568,7 @@ _PUBLIC_METHODS = frozenset({
     'steer_message',
     'stop_verse_diagnostics_scan',
     'stop_verse_lsp',
+    'team_keeper_status',
     'terminal_approve_command',
     'terminal_busy',
     'terminal_busy_many',
