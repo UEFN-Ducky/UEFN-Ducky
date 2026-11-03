@@ -101,7 +101,9 @@ def test_other_window_remains_ordered_when_one_closes(channels):
     for script in ("first", "second", "third"):
         dispatch.schedule_evaluate_js(live, script)
     dispatch._channels[id(live)].queue.join()
-    assert seen == ["first", "second", "third"]
+    # Queued scripts may arrive in one batched call; their order is what matters.
+    joined = "".join(seen)
+    assert joined.index("first") < joined.index("second") < joined.index("third")
 
 
 def test_repeated_close_releases_windows_and_rejects_stale_producers(channels):

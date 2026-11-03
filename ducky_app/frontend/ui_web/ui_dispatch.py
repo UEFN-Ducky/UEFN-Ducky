@@ -22,6 +22,9 @@ from typing import Any
 from weakref import WeakValueDictionary
 
 _STALL_DUMP_AFTER_SEC = 3.0
+# Scripts already queued for a window go in ONE evaluate_js: each call costs a 20-90 ms
+# UI-thread round trip whatever its size, so a burst of small replies froze the window.
+_BATCH_MAX_BYTES = 256 * 1024
 
 _lock = threading.Lock()
 _channels: dict[int, _Channel] = {}
@@ -66,15 +69,31 @@ class _Channel:
             self.queue.put(("stop", None))
 
     def _worker(self) -> None:
+        held: tuple[str, Any] | None = None
         while True:
-            kind, payload = self.queue.get()
+            kind, payload = held if held is not None else self.queue.get()
+            held = None
+            extra = 0
             try:
                 if kind == "stop":
                     return
                 if self._stopped:
                     continue
                 if kind == "js":
-                    self._run_js(payload)
+                    batch = [payload]
+                    size = len(payload[1]) if isinstance(payload[1], str) else 0
+                    while size < _BATCH_MAX_BYTES:
+                        try:
+                            nxt = self.queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if nxt[0] != "js" or nxt[1][0] is not payload[0]:
+                            held = nxt  # a call or a stop keeps its place: right after this batch
+                            break
+                        extra += 1
+                        batch.append(nxt[1])
+                        size += len(nxt[1][1]) if isinstance(nxt[1][1], str) else 0
+                    self._run_js_batch(batch)
                 elif kind == "call":
                     payload()
             except Exception:
@@ -83,9 +102,21 @@ class _Channel:
                 # queue.get() blocks before assigning the next payload. Without
                 # this, an idle worker pins its last script/closure and window.
                 del payload
-                self.queue.task_done()
+                batch = []
+                for _ in range(1 + extra):
+                    self.queue.task_done()
 
-    def _run_js(self, payload: tuple[Any, ...]) -> None:
+    def _run_js_batch(self, batch: list[tuple[Any, ...]]) -> None:
+        if len(batch) == 1:
+            self._run_js(batch[0])
+            return
+        window = batch[0][0]
+        # Each script in its own try: one that throws must not drop the replies after it.
+        js = "\n".join(f"try{{{p[1]}\n}}catch(e){{console.error(e)}}" for p in batch)
+        enqueued_at = batch[0][2]
+        self._run_js((window, js, enqueued_at, batch[0][3], ""), parts=batch)
+
+    def _run_js(self, payload: tuple[Any, ...], parts: list[tuple[Any, ...]] | None = None) -> None:
         window, js, enqueued_at, depth, *rest = payload
         source = str(rest[0]) if rest and rest[0] else ""
         if window is None:
@@ -103,16 +134,22 @@ class _Channel:
             try:
                 from frontend.perf_trace import trace
 
-                trace(
-                    "ui_js",
-                    "evaluate_js",
-                    elapsed_ms,
-                    js_bytes=self.inflight_js_bytes,
-                    queue_depth=int(depth or 0),
-                    queue_wait_ms=round(wait_ms, 3),
-                    window=self.label,
-                    source=source or None,
-                )
+                # One row per reply (its own source and bytes) so per-method counts stay true.
+                rows = parts or [payload]
+                for part in rows:
+                    part_js = part[1]
+                    part_src = str(part[4]) if len(part) > 4 and part[4] else ""
+                    trace(
+                        "ui_js",
+                        "evaluate_js",
+                        elapsed_ms / len(rows),
+                        js_bytes=len(part_js) if isinstance(part_js, str) else 0,
+                        queue_depth=int(part[3] or 0),
+                        queue_wait_ms=round(wait_ms, 3),
+                        window=self.label,
+                        source=part_src or None,
+                        batch=len(rows) if parts else None,
+                    )
             except Exception:
                 pass
 
