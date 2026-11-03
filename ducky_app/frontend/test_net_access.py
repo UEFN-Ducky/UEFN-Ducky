@@ -11,6 +11,19 @@ V6B = (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::2", 443, 0, 0))
 V4A = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.21.73.49", 443))
 
 
+class _Sock:
+    """A connected socket that remembers its timeout."""
+
+    def __init__(self, timeout=None):
+        self.timeout = timeout
+
+    def settimeout(self, value):
+        self.timeout = value
+
+    def gettimeout(self):
+        return self.timeout
+
+
 def test_dead_ipv6_falls_to_ipv4_after_a_short_try(monkeypatch):
     calls = []
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [V6A, V6B, V4A])
@@ -19,11 +32,40 @@ def test_dead_ipv6_falls_to_ipv4_after_a_short_try(monkeypatch):
         calls.append((addr[0], timeout))
         if ":" in addr[0]:
             raise TimeoutError("timed out")
-        return "sock"
+        return _Sock(timeout)
 
     monkeypatch.setattr(na, "_orig_create_connection", fake)
-    assert na.create_connection(("uefnducky.org", 443), 8) == "sock"
+    sock = na.create_connection(("uefnducky.org", 443), 8)
     assert calls == [("2606:4700::1", 2.0), ("104.21.73.49", 2.0)]
+    # The short try is for connecting only: the socket reads with the caller's timeout.
+    assert sock.gettimeout() == 8
+
+
+def test_a_fast_first_address_keeps_the_callers_read_timeout(monkeypatch):
+    """1.2.464: the first address connected with 2 s and kept it, so every slower read died."""
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [V6A, V4A])
+    monkeypatch.setattr(na, "_orig_create_connection", lambda addr, timeout=None, source=None, **_: _Sock(timeout))
+    assert na.create_connection(("uefnducky.org", 443), 60).gettimeout() == 60
+    assert na.create_connection(("uefnducky.org", 443), None).gettimeout() is None
+    previous = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(30)
+    try:
+        assert na.create_connection(("uefnducky.org", 443)).gettimeout() == 30
+    finally:
+        socket.setdefaulttimeout(previous)
+
+
+def test_a_real_socket_reads_with_the_callers_timeout(monkeypatch):
+    """Against a real listener on both families' loopback when IPv6 is there."""
+    import contextlib
+
+    srv = socket.create_server(("127.0.0.1", 0))
+    port = srv.getsockname()[1]
+    v4 = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))
+    v6dead = (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 1, 0, 0))
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [v4, v6dead])
+    with contextlib.closing(srv), contextlib.closing(na.create_connection(("localhost", port), 45)) as s:
+        assert s.gettimeout() == 45
 
 
 def test_last_address_gets_the_whole_timeout_and_the_error_surfaces(monkeypatch):

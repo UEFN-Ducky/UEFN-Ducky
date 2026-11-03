@@ -102,40 +102,60 @@ def _request(url: str, *, start: int | None = None, end: int | None = None, time
     return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
 
 
-def _with_retries(fn: Callable[[], Any]) -> Any:
-    from frontend.update_network import ATTEMPTS, retry_delay, retryable
-
-    for attempt in range(ATTEMPTS):
-        try:
-            return fn()
-        except (OSError, ValueError, http.client.HTTPException) as exc:
-            if attempt + 1 == ATTEMPTS or not retryable(exc):
-                raise
-            time.sleep(retry_delay(attempt))
-    raise StageError("download failed")
-
-
 def fetch(url: str) -> bytes:
-    def once() -> bytes:
-        with _request(url) as resp:
-            return resp.read()
+    """The whole of ``url``; a dropped connection continues where it stopped (Range)."""
+    from frontend.update_network import backoff, download_resumable
 
-    return _with_retries(once)
+    buf = io.BytesIO()
+    download_resumable(url, buf, headers={"User-Agent": f"UEFN-Ducky/{__version__}"}, timeout=60.0, delay=backoff)
+    return buf.getvalue()
+
+
+def _content_range_start(resp: Any) -> int | None:
+    text = str(resp.headers.get("Content-Range") or "")
+    try:
+        return int(text.split(" ", 1)[1].split("-", 1)[0]) if text.startswith("bytes ") else None
+    except (IndexError, ValueError):
+        return None
 
 
 def fetch_range(url: str, start: int, end: int) -> bytes | None:
-    """Bytes ``[start, end)`` of ``url``, or ``None`` when the server ignored the range."""
+    """Bytes ``[start, end)`` of ``url``, or ``None`` when the server ignored the range.
 
-    def once() -> bytes | None:
-        with _request(url, start=start, end=end) as resp:
-            if getattr(resp, "status", 200) != 206:
-                return None
-            data = resp.read()
-        if len(data) != end - start:
-            raise http.client.IncompleteRead(data, end - start - len(data))
-        return data
+    A span is up to 32 MB. A connection that drops part way (TLS EOF, reset, short body)
+    asks for the rest only, and every try that got new bytes starts the count again; it
+    gives up after ATTEMPTS tries in a row with nothing new, waiting longer each time.
+    """
+    from frontend.update_network import ATTEMPTS, MAX_TRIES, backoff, retryable
 
-    return _with_retries(once)
+    want = end - start
+    buf = bytearray()
+    misses = 0
+    for _ in range(MAX_TRIES):
+        before = len(buf)
+        try:
+            with _request(url, start=start + before, end=end) as resp:
+                if getattr(resp, "status", 200) != 206:
+                    return None
+                got = _content_range_start(resp)
+                if got is not None and got != start + before:
+                    raise StageError("the update server sent the wrong part of the update")
+                while len(buf) < want:
+                    chunk = resp.read(min(256 * 1024, want - len(buf)))
+                    if not chunk:
+                        break
+                    buf += chunk
+            if len(buf) == want:
+                return bytes(buf)
+            raise http.client.IncompleteRead(bytes(), want - len(buf))
+        except (OSError, ValueError, http.client.HTTPException) as exc:
+            if not retryable(exc):
+                raise
+            misses = 0 if len(buf) > before else misses + 1
+            if misses >= ATTEMPTS:
+                raise
+            time.sleep(backoff(misses - 1 if misses else 0))
+    raise StageError("the update kept stopping part way")
 
 
 def _sha256_file(path: Path) -> str:

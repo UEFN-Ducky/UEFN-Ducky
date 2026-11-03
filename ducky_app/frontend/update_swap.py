@@ -31,6 +31,8 @@ STARTUP_SWITCH_S = 3 * 60.0
 # Downloads that failed this many times in a row bring back the Setup popup (version_check).
 FAILURES_FOR_SETUP = 2
 CHECK_EVERY_S = 30 * 60.0
+# A download the network cut off is tried again this soon; what it already has stays.
+RETRY_FAILED_S = 5 * 60.0
 IDLE_TICK_S = 30.0
 # Nobody touched Ducky for this long (or every window is hidden): it may switch.
 AWAY_AFTER_S = 5 * 60.0
@@ -231,6 +233,24 @@ def _auto_update_allowed() -> bool:
     return channel == "installed" or (channel != "dev" and is_loopback(update_base_url()))
 
 
+def failure_message(exc: BaseException) -> str:
+    """What the update row says when a download stopped: plain words, raw error in brackets."""
+    from frontend.app_stage import StageError
+    from frontend.update_network import retryable
+
+    if isinstance(exc, StageError):
+        return str(exc)[:300]
+    raw = str(getattr(exc, "reason", "") or exc)[:160]
+    if retryable(exc):
+        return (
+            "The connection to the update server kept dropping. Ducky keeps what it got and "
+            f"tries again in {int(RETRY_FAILED_S // 60)} minutes. ({raw})"
+        )
+    from frontend.net_access import explain
+
+    return explain(exc, "the update server")[1][:300]
+
+
 def check_and_stage() -> dict[str, Any] | None:
     """Fetch the feed and get its newer version ready. Returns the update, or ``None``."""
     from frontend import app_stage
@@ -253,7 +273,10 @@ def check_and_stage() -> dict[str, Any] | None:
     except Exception as exc:  # a failed download is retried at the next check
         _log.warning("update %s did not download: %s", version, exc)
         with _lock:
-            _state.update(phase="failed", error=str(exc)[:300], failures=int(_state.get("failures") or 0) + 1)
+            # A try that moved the download forward resumes in a few minutes: only tries
+            # that got nothing count toward bringing back Setup.
+            failures = int(_state.get("failures") or 0) + (0 if int(_state.get("done") or 0) > 0 else 1)
+            _state.update(phase="failed", error=failure_message(exc), failures=failures)
         return None
     _set(phase="ready", error="", failures=0)
     app_stage.prune()
@@ -332,6 +355,9 @@ def _loop() -> None:
             except Exception:
                 _log.warning("update check failed", exc_info=True)
                 _set(phase="idle")
+            with _lock:
+                if _state.get("phase") == "failed":
+                    next_check = min(next_check, now + RETRY_FAILED_S)
         with _lock:
             phase, version = _state.get("phase"), str(_state.get("version") or "")
         if phase == "ready" and version and not idle_reasons():

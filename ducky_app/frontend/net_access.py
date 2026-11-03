@@ -62,9 +62,16 @@ def create_connection(address: tuple, timeout: Any = socket._GLOBAL_DEFAULT_TIME
     for n, info in enumerate(order):
         last = n == len(order) - 1
         try:
-            return _orig_create_connection(info[4][:2], timeout if last else short, source_address)
+            sock = _orig_create_connection(info[4][:2], timeout if last else short, source_address)
         except OSError as exc:
             err = exc
+            continue
+        if not last:
+            # The short timeout is for connecting only. Left on the socket, every TLS
+            # handshake and read on it gave up after 2 s (1.2.464: update ranges, slow
+            # Store answers and long polls failed while the browser was fine).
+            sock.settimeout(socket.getdefaulttimeout() if timeout is socket._GLOBAL_DEFAULT_TIMEOUT else timeout)  # type: ignore[attr-defined]
+        return sock
     raise err  # type: ignore[misc]
 
 

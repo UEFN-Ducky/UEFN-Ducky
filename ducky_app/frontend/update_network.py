@@ -35,6 +35,13 @@ def retry_delay(attempt: int) -> float:
     return 0.5 * (attempt + 1)
 
 
+def backoff(attempt: int) -> float:
+    """Background downloads wait longer each time (1, 2, 4, 8, 16 s): a link that is down
+    for half a minute (Wi-Fi switch, VPN reconnect, a busy storage edge) still finishes,
+    where 5 tries in 5 s gave up."""
+    return min(30.0, 2.0 ** attempt)
+
+
 # A try that moved the file forward never counts against ATTEMPTS, so a link that drops
 # every few hundred KB still finishes; this caps the total so it can't loop forever.
 MAX_TRIES = 200
@@ -100,7 +107,9 @@ def download_resumable(url: str, out: BinaryIO, **kwargs: Any) -> None:
     """``fetch_into`` until the body is complete, resuming after every dropped connection.
 
     Gives up after ATTEMPTS tries in a row that got no new bytes, or a non-retryable error.
+    ``delay`` (attempt -> seconds) is the wait between tries (default ``retry_delay``).
     """
+    delay = kwargs.pop("delay", None) or retry_delay
     cancelled = kwargs.get("cancelled")
     misses = 0
     for _ in range(MAX_TRIES):
@@ -114,5 +123,5 @@ def download_resumable(url: str, out: BinaryIO, **kwargs: Any) -> None:
             misses = 0 if out.tell() > before else misses + 1
             if misses >= ATTEMPTS or (cancelled and cancelled()):
                 raise
-            time.sleep(retry_delay(misses))
+            time.sleep(delay(misses))
     raise http.client.IncompleteRead(b"")
