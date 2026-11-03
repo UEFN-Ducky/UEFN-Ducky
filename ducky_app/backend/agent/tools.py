@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -79,6 +80,10 @@ from backend.agent.tool_result_compact import API_TOOL_RESULT_MAX, tool_result_m
 
 def _hint_for_error(tool: str, text: str) -> str:
     low = text.lower()
+    if "validation error for" in low:
+        sig = _signature_hint(tool)
+        if sig:
+            return sig
     if "verse_compile_required" in low or ("stop" in low and "wiring blocked" in low):
         return (
             "STOP is advisory. get_verse_editables on this same device; wire fields "
@@ -754,14 +759,41 @@ _LISTENER_OFFLINE_HINT = (
 )
 
 
+_PYDANTIC_URL = re.compile(r"\s*For further information visit https?://errors\.pydantic\.dev\S*")
+
+
 def _failure_text(text: str) -> str:
     """A failed call's message; an empty answer still says what happened."""
-    return (text or "").strip()[:8000] or "The tool returned no output."
+    return _PYDANTIC_URL.sub("", text or "").strip()[:8000] or "The tool returned no output."
 
 
 def _exception_text(exc: BaseException) -> str:
     """str(exc), or the exception's type when it carries no message (a bare timeout)."""
-    return str(exc).strip() or f"{type(exc).__name__} (no message)"
+    return _PYDANTIC_URL.sub("", str(exc)).strip() or f"{type(exc).__name__} (no message)"
+
+
+_PY_TYPES = {"integer": "int", "string": "str", "boolean": "bool", "number": "float", "array": "list", "object": "dict"}
+
+
+def _signature_hint(tool: str) -> str:
+    """`Call it as tool(required: a:int; optional: b:str)` from the registered schema, or ""."""
+    schema = _tool_input_schema(tool)
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    if not isinstance(props, dict):
+        return ""
+
+    def one(key: str) -> str:
+        types = [_PY_TYPES.get(t, t) for t in sorted(_schema_types(props[key])) if t != "null"]
+        return f"{key}:{'|'.join(types)}" if types else key
+
+    required = [k for k in schema.get("required") or () if k in props]
+    optional = [k for k in props if k not in required and k not in _HIDDEN_PARAMS]
+    parts = []
+    if required:
+        parts.append("required: " + ", ".join(one(k) for k in required))
+    if optional:
+        parts.append("optional: " + ", ".join(one(k) for k in optional))
+    return f"Call it as {tool}({'; '.join(parts)})."
 
 
 def _looks_like_tool_failure(name: str, text: str) -> bool:

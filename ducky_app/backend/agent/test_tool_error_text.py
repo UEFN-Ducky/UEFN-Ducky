@@ -19,6 +19,35 @@ def test_an_exception_without_a_message_names_its_type() -> None:
     assert tools._exception_text(ValueError("bad path")) == "bad path"
 
 
+_PYDANTIC = (
+    "1 validation error for workspace_replace_linesArguments\n"
+    "end_line\n  Field required [type=missing, input_value={'start_line': 3}, input_type=dict]\n"
+    "    For further information visit https://errors.pydantic.dev/2.11/v/missing"
+)
+
+
+def test_a_validation_error_answers_with_the_real_signature() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "start_line": {"type": "integer"},
+            "end_line": {"type": "integer"},
+            "new_text": {"type": "string"},
+            "path": {"default": "", "type": "string"},
+            "pretty": {"type": "boolean"},
+        },
+        "required": ["start_line", "end_line", "new_text"],
+    }
+    with patch.object(tools, "_tool_input_schema", return_value=schema):
+        hint = tools._hint_for_error("workspace_replace_lines", _PYDANTIC)
+    assert hint == (
+        "Call it as workspace_replace_lines(required: start_line:int, end_line:int, new_text:str; optional: path:str)."
+    )
+    assert "pydantic.dev" not in tools._failure_text(_PYDANTIC)
+    assert "Field required" in tools._failure_text(_PYDANTIC)
+    assert "pydantic.dev" not in tools._exception_text(ValueError(_PYDANTIC))
+
+
 def test_get_editor_log_with_nothing_new_says_so() -> None:
     from backend.tools.core import system
 
