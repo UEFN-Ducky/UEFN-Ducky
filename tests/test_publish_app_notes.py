@@ -47,6 +47,17 @@ def test_long_changes_and_more_than_five_stay_out_of_the_window():
     assert left_out == [long.rstrip("."), "Change number 0 works now"]
 
 
+def test_internal_engine_commits_and_repeats_stay_out_of_the_notes():
+    pub = _load()
+    assert pub.public_subjects([
+        "Add team_engine facade: core reaches the team-sync engine through the spaces provider",
+        "General fixes and improvements",
+        "Open chats with the newest 80 rows",
+        "The sync engine moves elsewhere",
+        "General fixes and improvements",
+    ]) == ["General fixes and improvements", "Open chats with the newest 80 rows"]
+
+
 def test_notes_file_is_read_and_checked(tmp_path):
     pub = _load()
     good = tmp_path / "notes.json"

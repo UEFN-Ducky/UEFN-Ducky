@@ -261,7 +261,20 @@ def commit_subjects_since_release() -> list[str]:
         return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True, check=True).stdout
 
     last = git("log", "-1", "--format=%H", "--", INIT_PY.relative_to(ROOT).as_posix()).strip()
-    return git("log", "--reverse", "--no-merges", "--format=%s", f"{last}..HEAD" if last else "-20").splitlines()
+    return public_subjects(git("log", "--reverse", "--no-merges", "--format=%s", f"{last}..HEAD" if last else "-20").splitlines())
+
+
+# Internal team-sync engine work is never described in release notes.
+_PRIVATE_SUBJECT = re.compile(r"team[ _-]?engine|sync[ -]engine", re.IGNORECASE)
+
+
+def public_subjects(subjects: list[str]) -> list[str]:
+    """The subjects release notes may show: internal engine work left out, each once."""
+    out: list[str] = []
+    for s in subjects:
+        if s.strip() and not _PRIVATE_SUBJECT.search(s) and s not in out:
+            out.append(s)
+    return out
 
 
 def notes_from_git() -> str:
