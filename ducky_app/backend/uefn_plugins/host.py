@@ -3441,6 +3441,17 @@ def _bind_folders(pid: str) -> int | None:
         return None
 
 
+def bind_folders_after_engine() -> None:
+    """The team-sync engine arrived (Ducky Account registered): plugins that loaded before
+    it get their declared folders bound now, and a reload epoch to follow moves by."""
+    for pid in list(_LOADED_SIGNATURE):
+        if pid in _FOLDER_EPOCH:
+            continue
+        epoch = _bind_folders(pid)
+        if epoch is not None:
+            _FOLDER_EPOCH[pid] = epoch
+
+
 def _folder_reload_lock(pid: str) -> threading.Lock:
     with _FOLDER_RELOAD_GUARD:
         return _FOLDER_RELOAD_LOCKS.setdefault(pid, threading.Lock())

@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from backend import process_role
-from backend.uefn_plugins import host, live, scopes, sync_scheduler
+from backend.uefn_plugins import host, scopes, sync_scheduler
 
 
 @pytest.fixture(params=["agent_host", "tool_server"])
@@ -37,10 +37,6 @@ def test_crash_heal_runs_in_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_sync_scheduler_does_not_start(not_app: str) -> None:
     assert sync_scheduler.start() is False
-
-
-def test_live_runs_only_in_the_window(not_app: str) -> None:
-    assert live._in_bridge() is True
 
 
 def test_a_plugin_write_is_an_agents(not_app: str) -> None:

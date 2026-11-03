@@ -155,46 +155,6 @@ def test_plugin_data_from_schema_19_upgrades_with_a_fresh_sync_state(monkeypatch
     assert index is not None and "WHERE dirty=1" in index[0]
 
 
-def test_plugin_data_from_schema_20_upgrades_to_the_team_repo_tables(monkeypatch) -> None:
-    """0021 adds each row's write group and the team repo's tables. Rows from before keep
-    everything they had, are in no group, and still go out (as one changeset); the new
-    tables start empty and work."""
-    from backend.store.repos import plugin_data, space_vcs
-
-    real_files = db.migration_files
-    monkeypatch.setattr(db, "migration_files", lambda: [(n, p) for n, p in real_files() if n <= 20])
-    db.reset_for_tests()
-    conn = db.connect()
-    assert db.user_version(conn) == 20
-    with db.write_txn(conn):
-        conn.execute(
-            "INSERT INTO plugin_data(account_id, scope_id, plugin_id, kind, key, value, size, sha256, rev, dirty, "
-            "deleted, sensitive, updated, sync_state, sync_error, attempts) VALUES ('a_1', 'spaceT', 'cards', 'doc', "
-            "'card.pip', 'v', 1, 'abc', 4, 1, 0, 0, 1.0, 'refused', 'too big', 2)"
-        )
-        conn.execute("INSERT INTO plugin_data(account_id, scope_id, plugin_id, kind, key, value, size, sha256, rev, "
-                     "dirty, deleted, sensitive, updated) VALUES ('a_1', 'spaceT', 'cards', 'doc', 'card.zed', 'z', 1, "
-                     "'def', 2, 1, 0, 0, 2.0)")
-    db.reset_for_tests()
-    monkeypatch.setattr(db, "migration_files", real_files)
-
-    conn = db.connect()
-    assert db.user_version(conn) == db.head_version()
-    row = space_vcs.row(None, "a_1", "spaceT", "cards", "doc", "card.pip")
-    assert (row["group_id"], row["rev"], row["dirty"], row["sync_state"], row["sync_error"], row["attempts"]) == (
-        "", 4, 1, "refused", "too big", 2)
-    assert plugin_data.get("a_1", "spaceT", "cards", "doc", "card.pip")["sha256"] == "abc"
-    assert [r["key"] for r in space_vcs.outgoing_rows("a_1", "spaceT", "cards")] == ["card.zed"]
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    assert {"space_heads", "space_changesets", "space_conflicts", "space_incoming_blocked", "space_locks",
-            "space_presence", "space_activity", "space_groups", "space_lock_requests", "plugin_data_base",
-            "space_units", "space_lost_choice"} <= tables
-    assert space_vcs.head_get("a_1", "spaceT", "cards")["engine"] == "v1"  # every plugin stays on v1 until a ledger
-    space_vcs.head_put("a_1", "spaceT", "cards", seq=4, engine="v2")
-    assert space_vcs.head_get("a_1", "spaceT", "cards")["seq"] == 4
-    assert space_vcs.pending_unsent("a_1", "spaceT") == 2
-
-
 def test_links_to_a_space_already_unavailable_go_so_those_plugins_keep_local(monkeypatch) -> None:
     """Before 0020 a plugin linked to a space the provider couldn't use read and wrote its
     Local copy. The upgrade keeps it there instead of switching it to that space's old
@@ -225,49 +185,27 @@ def test_links_to_a_space_already_unavailable_go_so_those_plugins_keep_local(mon
     assert plugin_data.sync_get("a_1", "spaceOk")["cursor_rev"] == 9
 
 
-def test_schema_21_upgrades_to_the_folder_tables(monkeypatch) -> None:
-    """0022 adds the folder copies of plugins that keep their own folders. Everything from
-    before stays; the new tables start empty and work, and the per-plugin epoch row the
-    data change log already uses gains a reload mark without losing its entries."""
-    from backend.store.repos import folder_files, plugin_data, space_vcs
-
+def test_schema_22_creates_the_team_repo_and_folder_tables(monkeypatch) -> None:
+    """0021/0022 add the team repo and folder tables; rows from schema 20 keep their sync
+    state. Reading and writing those tables is the team engine's (Ducky Account) and is
+    tested there."""
     real_files = db.migration_files
-    monkeypatch.setattr(db, "migration_files", lambda: [(n, p) for n, p in real_files() if n <= 21])
+    monkeypatch.setattr(db, "migration_files", lambda: [(n, p) for n, p in real_files() if n <= 20])
     db.reset_for_tests()
     conn = db.connect()
-    assert db.user_version(conn) == 21
     with db.write_txn(conn):
-        conn.execute("INSERT INTO plugin_data(account_id, scope_id, plugin_id, kind, key, value, size, sha256, rev, "
-                     "dirty, deleted, sensitive, updated, group_id) VALUES ('a_1', 'spaceT', 'forge', 'doc', 'ui.tab', "
-                     "'v', 1, 'abc', 3, 1, 0, 0, 1.0, 'g1')")
-        conn.execute("INSERT INTO space_heads(account_id, space_id, plugin_id, seq, engine) VALUES "
-                     "('a_1', 'spaceT', 'forge', 7, 'v2')")
-        space_vcs.change_log_bump(conn, "forge", ["ui.tab"])
+        conn.execute(
+            "INSERT INTO plugin_data(account_id, scope_id, plugin_id, kind, key, value, size, sha256, rev, dirty, "
+            "deleted, sensitive, updated, sync_state, sync_error, attempts) VALUES ('a_1', 'spaceT', 'cards', 'doc', "
+            "'card.pip', 'v', 1, 'abc', 4, 1, 0, 0, 1.0, 'refused', 'too big', 2)"
+        )
     db.reset_for_tests()
     monkeypatch.setattr(db, "migration_files", real_files)
 
     conn = db.connect()
     assert db.user_version(conn) == db.head_version() >= 22
-    assert plugin_data.get("a_1", "spaceT", "forge", "doc", "ui.tab")["rev"] == 3
-    assert space_vcs.head_get("a_1", "spaceT", "forge")["seq"] == 7
+    row = conn.execute("SELECT group_id, rev, dirty, sync_state, attempts FROM plugin_data WHERE key='card.pip'").fetchone()
+    assert tuple(row) == ("", 4, 1, "refused", 2)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    assert {"folder_files", "folder_links", "folder_copies", "folder_merge_base"} <= tables
-
-    with db.write_txn(conn):
-        folder_files.file_put(conn, "a_1", "spaceT", "forge", "scenes", "MEGA/scene.json", unit="MEGA", size=5,
-                              mtime_ns=1_789_000_000_123_456_700, sha256="s1", dirty=True, changed_at=2.0)
-    row = folder_files.file_get("a_1", "spaceT", "forge", "scenes", "MEGA/scene.json")
-    assert (row["unit"], row["mtime_ns"], row["dirty"], row["base_seq"], row["project_id"]) == (
-        "MEGA", 1_789_000_000_123_456_700, 1, 0, "")
-    assert folder_files.dirty_units("a_1", "spaceT", "forge")[("scenes", "MEGA")]["files"] == 1
-    folder_files.link_put("forge", "scenes", "", root="C:/x/scenes", target="C:/y", account="_pc", space="personal")
-    assert folder_files.link_get("forge", "scenes")["adopted_at"] > 0
-    folder_files.copy_put("a_1", "spaceT", "forge", "scenes", ready=1, pulled_at=3.0)
-    assert folder_files.ever_synced("a_1", "spaceT", "forge")
-    assert folder_files.reload_bump("forge", "switch") == 2
-    log = space_vcs.change_log("forge")
-    assert log["epoch"] == 2 and log["changes"] == [[1, ["ui.tab"]], [2, []]]
-    assert folder_files.reload_epoch("forge") == 2
-    space_vcs.forget_space("a_1", "spaceT")
-    folder_files.forget_files("a_1", "spaceT")
-    assert folder_files.files("a_1", "spaceT", "forge", "scenes") == []
+    assert {"space_heads", "space_changesets", "space_conflicts", "space_locks", "space_presence", "plugin_data_base",
+            "folder_files", "folder_links", "folder_copies", "folder_merge_base"} <= tables

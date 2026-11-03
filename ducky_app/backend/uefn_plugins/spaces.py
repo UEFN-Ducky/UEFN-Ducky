@@ -103,6 +103,11 @@ class Provider:
         the server (``Heads.v2`` false): core then keeps it read-only, "Team sync paused"."""
         return None
 
+    def engine(self) -> Any | None:
+        """The team-sync engine (:mod:`backend.uefn_plugins.team_engine` lists what it
+        holds), or None: core then keeps team copies readable and syncs nothing."""
+        return None
+
     def open_web(self, *, space_id: str = "", plugin: str = "", page: str = "") -> dict[str, Any]:
         """Open the space (or its ``page``, e.g. ``workflows`` / ``plugins``) on the web."""
         return {"ok": False, "error": "Nothing to open."}
@@ -206,6 +211,12 @@ def register(plugin_id: str, impl: Provider) -> None:
             raise PermissionError(f"Shared spaces are already provided by {current}.")
         _ACTIVE.update(plugin=plugin_id, provider=impl)
     _log.info("shared spaces provided by %s", plugin_id)
+    try:
+        from backend.uefn_plugins import team_engine
+
+        team_engine.engine_arrived()
+    except Exception:  # noqa: BLE001 — the next app start starts it
+        _log.debug("starting team sync failed", exc_info=True)
 
 
 def unregister(plugin_id: str) -> None:
