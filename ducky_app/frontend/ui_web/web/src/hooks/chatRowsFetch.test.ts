@@ -25,6 +25,15 @@ it("a load that answers with nothing fails instead of handing the chat an undefi
   await expect(fetchChatRows("chat-1")).resolves.toHaveLength(1);
 });
 
+it("a dropped load is retried once, a second drop fails", async () => {
+  api.load_messages.mockResolvedValueOnce(undefined).mockResolvedValueOnce([{ id: 1, role: "user", text: "hi" }]);
+  await expect(fetchChatRows("chat-1", 1000, 80)).resolves.toHaveLength(1);
+  expect(api.load_messages).toHaveBeenCalledTimes(2);
+  api.load_messages.mockReset().mockResolvedValue(undefined);
+  await expect(fetchChatRows("chat-1", 1000, 80)).rejects.toThrow("no messages came back");
+  expect(api.load_messages).toHaveBeenCalledTimes(2);
+});
+
 it("a reload asks for the newest rows only and splices them onto what is shown", async () => {
   api.load_messages.mockResolvedValue([]);
   await fetchChatRows("chat-1", 1000, 3);

@@ -50,6 +50,11 @@ function sizeTag(rows: number): string {
  *  newest rows: a team lead's 2,000-row chat took 12-27 s to re-send in full (Oct 24 2026). */
 const RELOAD_TAIL_ROWS = 300;
 
+/** Opening a chat with nothing on screen yet fetches only this many newest rows, so a
+ *  300-751 message chat shows in under a second (10-24 s whole, Nov 2 2026); older rows
+ *  come from loadOlder as the reader scrolls up. */
+const FIRST_PAGE_ROWS = 80;
+
 /** Seed reducer state from the in-memory cache so a tab switch restores instantly.
  *  ChatPane is keyed by chat.id, so chatId is constant for the hook's lifetime and
  *  this runs exactly once per mount. */
@@ -119,8 +124,9 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       // Only the newest page, never the whole chat: an 867-message chat sent in full took
       // 16 s to open, and every open tab holding its full transcript ran WebView2 out of
       // memory (Oct 2026). Older rows come one page at a time from loadOlder.
-      const page = await fetchChatRows(chatId, CHAT_LOAD_TIMEOUT_MS, RELOAD_TAIL_ROWS);
-      const rows = shown ? spliceTail(stateRef.current.messages, page, RELOAD_TAIL_ROWS) ?? page : page;
+      const limit = shown ? RELOAD_TAIL_ROWS : FIRST_PAGE_ROWS;
+      const page = await fetchChatRows(chatId, CHAT_LOAD_TIMEOUT_MS, limit);
+      const rows = shown ? spliceTail(stateRef.current.messages, page, limit) ?? page : page;
       const tookMs = performance.now() - startedAt;
       if (tookMs > SLOW_CHAT_LOAD_MS) {
         report("chat_slow", `Chat ${chatId.slice(0, 8)} took ${(tookMs / 1000).toFixed(1)}s to load (${rows.length} messages).`, sizeTag(rows.length));

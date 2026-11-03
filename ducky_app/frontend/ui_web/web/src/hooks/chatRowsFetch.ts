@@ -42,6 +42,22 @@ export async function fetchChatRows(
   limit?: number,
   beforeId: number | null = null,
 ): Promise<ChatMessage[]> {
+  try {
+    return await fetchChatRowsOnce(chatId, timeoutMs, limit, beforeId);
+  } catch (err) {
+    // A dropped connection (4 "connection dropped" loads, Nov 2 2026) gets one more try;
+    // a timeout already waited its full budget, so it is not repeated.
+    if (err instanceof ChatLoadTimeout) throw err;
+    return fetchChatRowsOnce(chatId, timeoutMs, limit, beforeId);
+  }
+}
+
+async function fetchChatRowsOnce(
+  chatId: string,
+  timeoutMs: number,
+  limit: number | undefined,
+  beforeId: number | null,
+): Promise<ChatMessage[]> {
   const api = getApi();
   if (!api) return [];
   if (canCallOverHttp()) {

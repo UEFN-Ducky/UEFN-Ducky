@@ -61,3 +61,25 @@ def test_big_tool_results_are_cut_and_fetched_whole(tmp_path: Path) -> None:
         seen = page + seen
         before_id = page[0]["id"]
     assert [r["id"] for r in seen] == [r["id"] for r in rows]
+
+
+def test_a_750_message_chat_opens_its_first_page_under_a_second(tmp_path: Path) -> None:
+    import time
+
+    project = str(tmp_path / "Island")
+    Path(project).mkdir()
+    s = PanelSettings.load()
+    s.uefn_project_root = project
+    s.save()
+    conv = pc.create_conversation(title="Long", project_root=project, skill_snapshot="x")
+    conv = pc.load_conversation(conv.id, project)
+    conv.messages = _transcript(750)
+    pc.save_conversation(conv, project, wait=True)
+    api = PanelApiChatsMixin()
+
+    started = time.perf_counter()
+    page = api.load_messages(conv.id, limit=80)
+    took = time.perf_counter() - started
+    print(f"first page of 750 msgs: {took * 1000:.0f} ms, {len(page)} rows")
+    assert len(page) == 80 and page[-1]["id"] == api.load_messages(conv.id)[-1]["id"]
+    assert took < 1.0
