@@ -36,7 +36,14 @@ describe("agent event bus batching", () => {
     commits = 0;
     for (const e of interleaved()) bus.pushLocalAgentEvent(e);
     expect(frames).toHaveLength(1);
-    runFrame();
+    // This test is about coalescing into one frame; the 8 ms time budget has its own test below.
+    // Frozen clock: a busy PC (a release run) must not push half the batch to a second frame.
+    const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+    try {
+      runFrame();
+    } finally {
+      now.mockRestore();
+    }
     expect(commits).toBe(1);
     expect(frames).toHaveLength(0); // nothing left for a second frame
     expect(container.textContent).toBe("50");

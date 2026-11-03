@@ -147,5 +147,7 @@ describe("chat list perf: 2,000 messages", () => {
     // Budgets: only the tail is mounted, and a token touches only the streaming row.
     expect(mountedTurns).toBeLessThanOrEqual(4);
     expect(stats.rerendersPerTokenMax).toBeLessThanOrEqual(2);
-  });
+    // Its budgets are counts, not times: building 2,000 messages and streaming TOKENS rerenders
+    // can pass vitest's 5 s default on a loaded PC (a release run), which says nothing about them.
+  }, 60_000);
 });
