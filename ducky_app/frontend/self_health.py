@@ -249,6 +249,7 @@ def snapshot(detail: bool = False) -> dict[str, Any]:
         "running_agents": _running_agents(),
         "agent_hosts": agent_hosts(procs, cpu),
         "agents_in_window": agents_in_window(),
+        "ui_last_hour": _ui_last_hour(),
     }
     if detail:
         out["perf"] = _perf()
@@ -367,6 +368,22 @@ def _perf() -> Any:
         return {"error": str(exc)}
 
 
+UI_STALLS_PER_HOUR = 120  # two frozen frames a minute, all hour
+UI_CALLS_PER_HOUR = 600  # one bridge method every 6 s, all hour: a loop, not a person clicking
+
+
+def _ui_last_hour() -> dict[str, Any]:
+    """The app window's frozen frames and busiest bridge calls over the last hour (the perf log),
+    so a flood that started before this check still shows: the live ring only holds seconds."""
+    try:
+        from frontend.perf_trace import per_process_report
+
+        rep = per_process_report(hours=1.0)
+        return next((p for p in rep.get("processes") or [] if p.get("role") == "app window"), {})
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
     """Plain-words causes, most important first, each with the fix (a self-care action or a step)."""
     out: list[dict[str, str]] = []
@@ -406,6 +423,20 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
         out.append({"severity": "medium", "what": f"Window calls are piling up: {names}",
                     "why": "The window asks faster than Python answers (or one call hangs), so the UI shows Loading.",
                     "fix": "ducky_perf_report names the slow calls; fewer running agents"})
+    ui = snap.get("ui_last_hour") or {}
+    stalls = int(ui.get("ui_stalls") or 0)
+    if stalls > UI_STALLS_PER_HOUR or (stalls >= 20 and float(ui.get("ui_stall_p95_ms") or 0) >= 1000):
+        out.append({"severity": "high" if stalls > 5 * UI_STALLS_PER_HOUR else "medium",
+                    "what": f"Ducky's window froze {stalls} times in the last hour (p95 {ui.get('ui_stall_p95_ms', 0):.0f} ms).",
+                    "why": "The UI thread is kept busy: a loop or a flood of bridge replies.",
+                    "fix": "ducky_perf_report: per_process names the busiest calls and slowest scripts."})
+    for method, n in ui.get("top_ui_calls") or []:
+        if int(n) > UI_CALLS_PER_HOUR:
+            out.append({"severity": "high",
+                        "what": f"The window called {method} {n} times in the last hour.",
+                        "why": "Something re-asks it all the time (a per-frame loop, a retry that never backs off); "
+                               "every answer costs the UI thread.",
+                        "fix": f"Find the caller of {method} in the web UI and make it send only on change."})
     if app_cpu_pc > 15:
         out.append({"severity": "high", "what": f"Ducky's window process uses {app_cpu_pc:.0f}% of the PC's CPU.",
                     "why": "Something in the app is busy while it should idle (a stuck loop, a flood of UI updates).",

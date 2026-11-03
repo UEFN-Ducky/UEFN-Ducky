@@ -411,6 +411,7 @@ def per_process_block(rows: list[dict[str, Any]], minutes: float) -> dict[str, A
     saves: list[float] = []
     stalls: list[float] = []
     js_bytes: dict[str, float] = {}
+    js_calls: dict[str, int] = {}
     for row in rows:
         e = row.get("payload") or {}
         kind, ms = e.get("kind"), float(e.get("duration_ms") or 0)
@@ -423,6 +424,7 @@ def per_process_block(rows: list[dict[str, Any]], minutes: float) -> dict[str, A
         elif kind == "ui_js":
             src = str(e.get("source") or e.get("name") or "?")
             js_bytes[src] = js_bytes.get(src, 0.0) + float(e.get("js_bytes") or 0)
+            js_calls[src] = js_calls.get(src, 0) + 1
     mb = 1024 * 1024
     return {
         "chat_load_p50_s": round(_p(loads, 50) / 1000, 2), "chat_load_p95_s": round(_p(loads, 95) / 1000, 2),
@@ -432,6 +434,7 @@ def per_process_block(rows: list[dict[str, Any]], minutes: float) -> dict[str, A
         "ui_js_mb_per_min": round(sum(js_bytes.values()) / mb / max(minutes, 1.0), 2),
         "top_ui_js": [[src, round(b / mb, 1)] for src, b in sorted(js_bytes.items(), key=lambda kv: -kv[1])[:10]],
         "ui_stalls": len(stalls), "ui_stall_p95_ms": _p(stalls, 95),
+        "top_ui_calls": sorted(([s, n] for s, n in js_calls.items()), key=lambda kv: -kv[1])[:5],
     }
 
 

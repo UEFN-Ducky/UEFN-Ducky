@@ -25,6 +25,20 @@ def _base() -> dict:
             "helpers": [], "other_ducky_processes": [], "uefn": [], "sandboxes": {}, "terminals": {}, "storage": {}}
 
 
+def test_a_frozen_window_and_a_call_flood_are_named():
+    snap = _base()
+    snap["ui_last_hour"] = {"ui_stalls": 1200, "ui_stall_p95_ms": 1063.2,
+                            "top_ui_calls": [["browser_pane_set_bounds", 4333], ["get_settings", 70]]}
+    whats = [f["what"] for f in self_health.findings(snap)]
+    assert any("froze 1200 times" in w for w in whats)
+    assert any("browser_pane_set_bounds 4333 times" in w for w in whats)
+    assert not any("get_settings" in w for w in whats)
+    assert self_health.findings(_base())[0]["severity"] == "ok"
+    # Few freezes, but each over a second, is still a frozen window.
+    snap["ui_last_hour"] = {"ui_stalls": 45, "ui_stall_p95_ms": 3016.8, "top_ui_calls": []}
+    assert any("froze 45 times" in f["what"] for f in self_health.findings(snap))
+
+
 def _spin(stop, busy_ms: float = 100.0) -> None:
     import time
 
