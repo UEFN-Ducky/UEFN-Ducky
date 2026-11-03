@@ -69,6 +69,34 @@ def all_providers() -> tuple[str, ...]:
 
 _QUOTA_RE = re.compile(r"\b429\b|rate[_ ]?limit|insufficient_quota|quota", re.IGNORECASE)
 _OUTPUT_KINDS = (StreamEventKind.TEXT_DELTA, StreamEventKind.TOOL_CALLS, StreamEventKind.THINKING)
+# Service hiccups worth re-opening the step for (only before any output streamed).
+_TRANSIENT_RE = re.compile(
+    r"\bbusy\b|overloaded|\b50[234]\b|timed out|timeout|connection reset", re.IGNORECASE
+)
+_RETRY_AFTER_RE = re.compile(r"retry(?:_after|[ -]after| in)\D{0,4}(\d+)", re.IGNORECASE)
+_RETRY_DELAYS: tuple[float, ...] = (2.0, 5.0, 12.0)
+
+
+def _retry_delay(text: str, attempt: int) -> float:
+    """Server's ``retry_after`` when it sent one (capped 30 s), else the backoff step."""
+    m = _RETRY_AFTER_RE.search(text or "")
+    if m:
+        return float(min(int(m.group(1)), 30))
+    return _RETRY_DELAYS[min(attempt, len(_RETRY_DELAYS) - 1)]
+
+
+async def _cancel_aware_sleep(seconds: float, cancel_event: Any) -> bool:
+    """Sleep; True when the turn was cancelled meanwhile."""
+    import asyncio
+
+    end = asyncio.get_running_loop().time() + seconds
+    while True:
+        if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+            return True
+        left = end - asyncio.get_running_loop().time()
+        if left <= 0:
+            return False
+        await asyncio.sleep(min(left, 0.25))
 
 
 def _account_for_key(provider: str, api_key: str) -> str | None:
@@ -170,15 +198,28 @@ class _UsageTrackingProvider:
 
         tried = {self._account} if self._account else set()
         started = False
+        transient_tries = 0
+
+        def _transient(text: str) -> bool:
+            return (
+                not started
+                and transient_tries < len(_RETRY_DELAYS)
+                and bool(_TRANSIENT_RE.search(str(text or "")))
+            )
+
         try:
             while True:
                 quota_event = None
+                retry_text = None
                 stream = self._inner.stream_turn(**kwargs)
                 try:
                     async for event in stream:
                         kind = getattr(event, "kind", None)
                         if not started and kind == StreamEventKind.ERROR and self._quota(event.error):
                             quota_event = event
+                            break
+                        if kind == StreamEventKind.ERROR and _transient(event.error):
+                            retry_text = str(event.error)
                             break
                         started = started or kind in _OUTPUT_KINDS
                         if getattr(event, "usage", None):
@@ -193,17 +234,31 @@ class _UsageTrackingProvider:
                         yield event
                 except Exception as exc:
                     if not self._quota(str(exc)):
-                        raise
-                    if started:
+                        if not _transient(str(exc)):
+                            raise
+                        retry_text = str(exc)
+                    elif started:
                         self._switch_account(set(tried))
                         raise
-                    if not self._switch_account(tried):
+                    elif not self._switch_account(tried):
                         raise
-                    continue
+                    else:
+                        continue
                 finally:
                     aclose = getattr(stream, "aclose", None)
                     if aclose is not None:
                         await aclose()
+                if retry_text is not None:
+                    delay = _retry_delay(retry_text, transient_tries)
+                    transient_tries += 1
+                    yield StreamEvent(
+                        kind=StreamEventKind.STATUS,
+                        text=f"Ducky AI busy, retrying ({transient_tries}/{len(_RETRY_DELAYS)}) in {delay:g} s",
+                    )
+                    if await _cancel_aware_sleep(delay, kwargs.get("cancel_event")):
+                        yield StreamEvent(kind=StreamEventKind.ERROR, error=retry_text)
+                        return
+                    continue
                 if quota_event is None:
                     return
                 if not self._switch_account(tried):
