@@ -1814,6 +1814,7 @@ export function RemoteWindowOverlay({ hwnd }: { hwnd: string }) {
       const frame = video.videoWidth > 0 && video.readyState >= 2;
       setHasFrame(frame);
       setRemotePicture(frame ? { w: video.videoWidth, h: video.videoHeight } : null);
+      if (frame) getDirectTransport()?.reportFirstFrame();
     };
     const kinds = ["loadeddata", "playing", "resize", "emptied"] as const;
     for (const k of kinds) video.addEventListener(k, check);

@@ -7,7 +7,7 @@ vi.mock("../hooks/usePanelApi", async (importOriginal) => ({
   getApi: () => api,
 }));
 
-import { DENY_WAIT_MS, deniedMethods, forgetDeniedMethodsForTest, installDirectPeerOnDesktop } from "./directPeer";
+import { DENY_WAIT_MS, deniedMethods, forgetDeniedMethodsForTest, installDirectPeerOnDesktop, onInput } from "./directPeer";
 import { pushLocalAgentEvent } from "../hooks/useAgentEventBus";
 import type { AgentEvent } from "../types/panel";
 
@@ -41,6 +41,32 @@ describe("installDirectPeerOnDesktop", () => {
       delete w.chrome;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("onInput", () => {
+  it("applies the input without its seq and echoes the seq once applied", async () => {
+    const applied: unknown[] = [];
+    (api as { window_input?: unknown }).window_input = (hwnd: unknown, ev: unknown) => {
+      applied.push([hwnd, ev]);
+      return Promise.resolve();
+    };
+    const ch = { readyState: "open" as RTCDataChannelState, sent: [] as string[], send(s: string) {
+      this.sent.push(s);
+    } };
+    await onInput(ch, 7, JSON.stringify({ type: "tap", x: 1, seq: 42 }));
+    await onInput(ch, 7, JSON.stringify({ type: "tap", x: 2 }));
+    expect(applied).toEqual([[7, { type: "tap", x: 1 }], [7, { type: "tap", x: 2 }]]);
+    expect(ch.sent).toEqual([JSON.stringify({ echo: 42 })]);
+  });
+
+  it("still echoes a probe when no window is watched, so the phone does not count it lost", async () => {
+    const ch = { readyState: "open" as RTCDataChannelState, sent: [] as string[], send(s: string) {
+      this.sent.push(s);
+    } };
+    await onInput(ch, undefined, JSON.stringify({ type: "tap", seq: 3 }));
+    await onInput(ch, undefined, "not json");
+    expect(ch.sent).toEqual([JSON.stringify({ echo: 3 })]);
   });
 });
 

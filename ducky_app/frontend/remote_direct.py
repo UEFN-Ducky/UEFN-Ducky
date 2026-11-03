@@ -28,6 +28,9 @@ _lock = threading.Lock()
 _waiters: dict[str, threading.Event] = {}
 _answers: dict[str, dict[str, Any]] = {}
 _last_report: dict[str, Any] = {}
+_LINK_KEYS = ("state", "reason", "connect_ms", "candidate", "attempt")
+# Phone link health, bucketed by usage_stats.remote_link; client/net/viewer_version ride along.
+_HEALTH_KEYS = ("quality", "input", "load", "end", "client", "net", "viewer_version")
 
 
 def _clean_sdp(desc: Any) -> dict[str, str] | None:
@@ -141,13 +144,14 @@ def note_report(payload: Any) -> None:
     if not isinstance(payload, dict):
         return
     keep = {}
-    for key in ("state", "reason", "connect_ms", "candidate", "attempt"):
+    for key in _LINK_KEYS + _HEALTH_KEYS:
         if key in payload:
             keep[key] = payload[key]
-    keep["at"] = time.time()
-    with _lock:
-        _last_report.clear()
-        _last_report.update(keep)
+    if any(key in keep for key in _LINK_KEYS):
+        # Health reports (quality, input lag, load, end) don't replace the link state the heartbeat shows.
+        with _lock:
+            _last_report.clear()
+            _last_report.update({k: v for k, v in keep.items() if k in _LINK_KEYS}, at=time.time())
     try:
         from frontend import usage_stats
 

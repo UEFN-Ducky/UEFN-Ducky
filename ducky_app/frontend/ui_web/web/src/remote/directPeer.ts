@@ -231,18 +231,30 @@ function wireChannel(s: Session, ch: RTCDataChannel) {
       ch.onmessage = (ev) => typeof ev.data === "string" && void onBlob(s, ch, ev.data);
       break;
     case CHANNEL_INPUT:
-      ch.onmessage = (ev) => {
-        if (typeof ev.data !== "string" || !s.watch) return;
-        try {
-          void getApi()?.window_input?.(s.watch.hwnd, JSON.parse(ev.data) as Record<string, unknown>);
-        } catch {
-          /* ignore */
-        }
-      };
+      ch.onmessage = (ev) => typeof ev.data === "string" && void onInput(ch, s.watch?.hwnd, ev.data);
       break;
     default:
       break;
   }
+}
+
+/** Applies one viewer input; a probe (`seq`) is echoed once applied so the phone can time the round trip. */
+export async function onInput(ch: Pick<RTCDataChannel, "readyState" | "send">, hwnd: string | number | undefined, raw: string) {
+  let msg: Record<string, unknown>;
+  try {
+    msg = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const { seq, ...input } = msg;
+  if (hwnd !== undefined) {
+    try {
+      await getApi()?.window_input?.(hwnd, input);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (typeof seq === "number" && ch.readyState === "open") ch.send(JSON.stringify({ echo: seq }));
 }
 
 async function onRpc(s: Session, ch: RTCDataChannel, raw: string) {

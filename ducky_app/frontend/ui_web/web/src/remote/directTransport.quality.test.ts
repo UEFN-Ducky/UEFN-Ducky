@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DirectTransport, qualityCounters, summarizeInput, summarizeQuality } from "./directTransport";
+import { DirectTransport, clientTag, netTag, qualityCounters, summarizeInput, summarizeQuality } from "./directTransport";
 
 /** A getStats map the way Chrome shapes it: video inbound-rtp + one nominated pair. */
 function statsMap(v: { fps: number; freezes: number; lost: number; received: number; bytes: number; jitter: number; rtt: number }) {
@@ -122,6 +122,79 @@ describe("summarizeQuality", () => {
   });
 });
 
+describe("clientTag / netTag", () => {
+  it("buckets the UA and connection, never passing them through", () => {
+    expect(clientTag("Mozilla/5.0 (Linux; Android 14) Chrome/130 UEFNDuckyAndroid/1.2")).toBe("android_app");
+    expect(clientTag("Mozilla/5.0 (Linux; Android 14) Chrome/130 Mobile")).toBe("android_browser");
+    expect(clientTag("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Safari")).toBe("ios_browser");
+    expect(clientTag("Mozilla/5.0 (Windows NT 10.0) Chrome/130")).toBe("desktop_browser");
+    expect(netTag({ type: "cellular", effectiveType: "4g" })).toBe("cellular");
+    expect(netTag({ effectiveType: "3g" })).toBe("3g");
+    expect(netTag({ type: "bluetooth", effectiveType: "weird" })).toBe("unknown");
+    expect(netTag(undefined)).toBe("unknown");
+  });
+});
+
+describe("load and session end", () => {
+  const ends = (reports: Record<string, unknown>[]) => reports.filter((r) => "end" in r).map((r) => r.end);
+
+  it("reports first frame once per page load", async () => {
+    const reports: Record<string, unknown>[] = [];
+    const t = await liveTransport(reports);
+    t.reportFirstFrame();
+    t.reportFirstFrame();
+    const load = reports.filter((r) => "load" in r);
+    expect(load).toHaveLength(1);
+    expect(load[0]).toMatchObject({ load: { first_frame_ms: expect.any(Number) }, client: "desktop_browser" });
+  });
+
+  it("sends background when hidden while live, and only one end per session", async () => {
+    const reports: Record<string, unknown>[] = [];
+    await liveTransport(reports);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+    FakePc.all[0].drop();
+    expect(ends(reports)).toEqual([{ why: "background" }]);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+  });
+
+  it("sends network when a live link fails, again after it was live once more", async () => {
+    const reports: Record<string, unknown>[] = [];
+    await liveTransport(reports);
+    FakePc.all[0].drop();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flush();
+    FakePc.all[1].drop(); // a failed redial is the same session
+    expect(ends(reports)).toEqual([{ why: "network" }]);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flush();
+    FakePc.all[2].up();
+    FakePc.all[2].drop();
+    expect(ends(reports)).toEqual([{ why: "network" }, { why: "network" }]);
+  });
+
+  it("passes on the Android app's ud:app-end reason", async () => {
+    const reports: Record<string, unknown>[] = [];
+    await liveTransport(reports);
+    document.dispatchEvent(new CustomEvent("ud:app-end", { detail: { why: "crash" } }));
+    expect(ends(reports)).toEqual([{ why: "crash" }]);
+  });
+
+  it("reports a crash the app left in localStorage, and clears it", () => {
+    const reports: Record<string, unknown>[] = [];
+    const orig = DirectTransport.prototype["reportHealth" as keyof DirectTransport] as unknown;
+    localStorage.setItem("ud-last-end", "crash");
+    (DirectTransport.prototype as unknown as { reportHealth: (p: Record<string, unknown>) => void }).reportHealth = (p) => reports.push(p);
+    try {
+      new DirectTransport({ bridge: "local", desktopOrigin: "", panelVersion: "1" });
+    } finally {
+      (DirectTransport.prototype as unknown as { reportHealth: unknown }).reportHealth = orig;
+    }
+    expect(reports).toEqual([{ end: { why: "crash" } }]);
+    expect(localStorage.getItem("ud-last-end")).toBeNull();
+  });
+});
+
 describe("summarizeInput", () => {
   it("gives median and worst round trip plus the lost count", () => {
     expect(summarizeInput([80, 20, 50], 1)).toEqual({ probes: 4, lost: 1, p50_ms: 50, max_ms: 80 });
@@ -158,6 +231,7 @@ describe("DirectTransport quality reports", () => {
     FakePc.stats = statsMap({ fps: 30, freezes: 3, lost: 20, received: 1990, bytes: 7_500_000, jitter: 0.009, rtt: 0.08 });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(quality()).toEqual([{ fps: 30, freezes: 2, loss_pct: 1, jitter_ms: 9, kbps: 1000, rtt_ms: 80 }]);
+    expect(reports.find((r) => "quality" in r)).toMatchObject({ client: "desktop_browser", net: "unknown", viewer_version: "1" });
     FakePc.all[0].drop();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(quality()).toHaveLength(1);

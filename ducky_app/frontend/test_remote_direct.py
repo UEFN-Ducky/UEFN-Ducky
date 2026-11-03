@@ -57,3 +57,16 @@ def test_note_report_keeps_only_known_fields() -> None:
     rd.note_report({"state": "live", "reason": "", "connect_ms": 812, "candidate": "srflx", "junk": 1})
     rep = rd.last_report()
     assert rep["state"] == "live" and rep["connect_ms"] == 812 and "junk" not in rep and "at" in rep
+
+
+def test_note_report_forwards_health_without_wiping_link_state(monkeypatch) -> None:
+    from frontend import usage_stats
+
+    sent: list[dict] = []
+    monkeypatch.setattr(usage_stats, "remote_link", sent.append)
+    rd.note_report({"state": "live", "candidate": "host"})
+    probe = {"input": {"probes": 6, "lost": 1, "p50_ms": 40, "max_ms": 90}, "client": "android_app", "net": "wifi", "junk": 1}
+    rd.note_report(probe)
+    assert sent[-1] == {k: v for k, v in probe.items() if k != "junk"}
+    rep = rd.last_report()
+    assert rep["state"] == "live" and rep["candidate"] == "host" and "input" not in rep

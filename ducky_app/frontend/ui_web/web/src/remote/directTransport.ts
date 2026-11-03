@@ -85,6 +85,26 @@ const QUALITY_SAMPLES_PER_REPORT = 2;
 const INPUT_PROBE_EVERY = 10;
 const INPUT_LOST_MS = 5_000;
 
+/** Which viewer this is, from the UA only: the Android app, or a phone/desktop browser. */
+export function clientTag(ua: string): string {
+  if (ua.includes("UEFNDuckyAndroid/")) return "android_app";
+  if (/iPhone|iPad|iPod/.test(ua)) return "ios_browser";
+  if (/Android/.test(ua)) return "android_browser";
+  return "desktop_browser";
+}
+
+/** Network kind from `navigator.connection` (Chromium only): wifi / cellular / ethernet, else the speed class. */
+export function netTag(conn: { type?: string; effectiveType?: string } | undefined): string {
+  const type = conn?.type ?? "";
+  if (type === "wifi" || type === "cellular" || type === "ethernet") return type;
+  const eff = conn?.effectiveType ?? "";
+  return ["slow-2g", "2g", "3g", "4g"].includes(eff) ? eff : "unknown";
+}
+
+/** The Android app leaves why its last run ended here; read once on start. */
+const LAST_END_KEY = "ud-last-end";
+let firstFrameSent = false;
+
 /** One minute of input probes: echoed round trips plus probes that never came back. */
 export function summarizeInput(rtts: number[], lost: number): Record<string, number> {
   const s = [...rtts].sort((a, b) => a - b);
@@ -332,6 +352,8 @@ export class DirectTransport {
   private inputProbes = new Map<number, number>();
   private inputRtts: number[] = [];
   private inputLost = 0;
+  /** A session end was reported since the link last went live (one `end` per session). */
+  private endSent = false;
 
   private mark(event: string) {
     this.timeline.push({ t: Math.round(performance.now() - this.t0), event });
@@ -349,6 +371,51 @@ export class DirectTransport {
           : parentBridge();
     installServiceWorkerBlobBridge(this);
     this.installWakeRedial();
+    this.installEndReports();
+  }
+
+  /** Health reports carry the client and network kind (buckets only, never the UA itself). */
+  private reportHealth(payload: Record<string, unknown>) {
+    const nav = typeof navigator !== "undefined" ? navigator : undefined;
+    this.bridge.report({
+      ...payload,
+      client: clientTag(nav?.userAgent ?? ""),
+      net: netTag((nav as Navigator & { connection?: { type?: string; effectiveType?: string } } | undefined)?.connection),
+      viewer_version: this.config.panelVersion,
+    });
+  }
+
+  /** Why a session ended: background, network, or the Android app's own reason. */
+  private reportEnd(why: string) {
+    if (this.endSent) return;
+    this.endSent = true;
+    this.reportHealth({ end: { why } });
+  }
+
+  /** Page start → first decoded frame, once per page load. */
+  reportFirstFrame(): void {
+    if (firstFrameSent) return;
+    firstFrameSent = true;
+    this.reportHealth({ load: { first_frame_ms: Math.round(performance.now()) } });
+  }
+
+  private installEndReports() {
+    if (typeof window === "undefined") return;
+    try {
+      const last = window.localStorage.getItem(LAST_END_KEY);
+      window.localStorage.removeItem(LAST_END_KEY);
+      if (last === "crash") this.reportEnd("crash");
+    } catch {
+      /* storage blocked */
+    }
+    this.endSent = false;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden" && this.status.state === "live") this.reportEnd("background");
+    });
+    document.addEventListener("ud:app-end", (ev) => {
+      const why = String((ev as CustomEvent<{ why?: string }>).detail?.why || "");
+      if (why === "background" || why === "crash") this.reportEnd(why);
+    });
   }
 
   /** Screen back on, network back, page restored, or the site's Retry: dial now. */
@@ -456,6 +523,7 @@ export class DirectTransport {
         this.dialing = false;
         this.redialMs = 0;
         this.wasLive = true;
+        this.endSent = false;
         this.setStatus("live", "");
         // Events sent while the link was down never arrive: views reload instead.
         if (resuming) for (const fn of this.eventListeners) fn({ type: REMOTE_RESYNC } as unknown as AgentEvent);
@@ -508,6 +576,7 @@ export class DirectTransport {
     // Already torn down (a second state change for the same dead link).
     if (this.status.state === "reconnecting" && !this.pc && !this.dialing) return;
     this.dialing = false;
+    if (this.wasLive) this.reportEnd("network");
     this.setStatus(this.wasLive ? "reconnecting" : "failed", reason);
     const pc = this.pc;
     if (pc) {
@@ -823,7 +892,7 @@ export class DirectTransport {
     const input = summarizeInput(this.inputRtts, this.inputLost);
     this.inputRtts = [];
     this.inputLost = 0;
-    this.bridge.report({ input });
+    this.reportHealth({ input });
   }
 
   onVideo(fn: (stream: MediaStream | null) => void): () => void {
@@ -927,7 +996,7 @@ export class DirectTransport {
     const quality = summarizeQuality(this.qualityBase, this.qualitySamples, this.qualitySamples.length * QUALITY_SAMPLE_MS);
     this.qualityBase = q;
     this.qualitySamples = [];
-    this.bridge.report({ quality });
+    this.reportHealth({ quality });
   }
 
   private async reportCandidatePair() {
