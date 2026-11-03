@@ -77,10 +77,20 @@ def _mtime(path: Path) -> float:
         return 0.0
 
 
+def lsp_false_positive(d: dict[str, Any]) -> bool:
+    """verse-lsp disagrees with UEFN's compiler here. Nov 2 2026: 26 "Invalid access of internal
+    function" errors on event/listenable .Await() that the build accepted; an agent spent a
+    whole turn rewriting good code."""
+    low = str(d.get("message") or "").lower()
+    return "invalid access of internal function" in low and ("await" in low or "listenable" in low)
+
+
 def _count_severities(diagnostics: list[dict[str, Any]]) -> tuple[int, int]:
     errors = 0
     warnings = 0
     for d in diagnostics:
+        if lsp_false_positive(d):
+            continue
         sev = d.get("severity")
         if sev == 2:
             warnings += 1
@@ -95,6 +105,8 @@ def _diagnostics_to_items(diags: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # verse-lsp often emits the same Unknown-identifier twice on one line (type + ctor).
     best: dict[tuple[str, int, str], dict[str, Any]] = {}
     for d in diags:
+        if lsp_false_positive(d):
+            continue
         rng = d.get("range") or {}
         start = rng.get("start") or {}
         sev = d.get("severity")

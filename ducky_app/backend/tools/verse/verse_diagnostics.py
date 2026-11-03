@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,31 @@ _VERSE_FILE_RE = re.compile(r"[\w\-./\\]+\.verse\b")
 
 # An agent's check answers within this; a slow or stuck verse-lsp never holds its turn.
 _AGENT_SCAN_SECONDS = 90.0
+
+# project root -> (time.time() of the last real UEFN build, its error count).
+# ponytail: per process; a build from another Ducky process isn't seen, persist it if that matters.
+_LAST_COMPILE: dict[str, tuple[float, int]] = {}
+
+
+def _defer_to_clean_build(root: str, payload: dict[str, Any]) -> None:
+    """A clean UEFN build newer than every flagged file outranks verse-lsp: report its 0 errors."""
+    built = _LAST_COMPILE.get(root)
+    flagged = [f for f in payload.get("files") or [] if f.get("errors")]
+    if not built or built[1] or not flagged:
+        return
+    try:
+        newest = max(Path(root, f["path"]).stat().st_mtime for f in flagged)
+    except (OSError, KeyError, ValueError):
+        return
+    if newest >= built[0]:
+        return
+    payload["files"] = [f for f in payload["files"] if not f.get("errors")]
+    payload["lsp_only"] = flagged
+    payload["note"] = (
+        f"UEFN's last Verse build ({time.strftime('%H:%M:%S', time.localtime(built[0]))}) is newer than "
+        f"every flagged file and had 0 errors: the {len(flagged)} file(s) in lsp_only are verse-lsp "
+        "disagreements, not errors. Do not edit code for them."
+    )
 
 
 def _project_root() -> str:
@@ -129,6 +155,7 @@ def workspace_list_verse_errors(pretty: bool = False, full: bool = False, rescan
     payload = dict(merged)
     payload["project_root"] = root
     payload["note"] = OFFLINE_SCAN_NOTE
+    _defer_to_clean_build(root, payload)
     if not finished:
         unchecked = sorted(stale_keys(root))
         payload["complete"] = False
@@ -251,6 +278,8 @@ def workspace_compile_verse(pretty: bool = False) -> str:
         )
     try:
         result = client.compile_project()
+        if isinstance(result, dict) and _project_root():
+            _LAST_COMPILE[_project_root()] = (time.time(), int(result.get("numErrors") or 0))
     except TimeoutError as exc:
         # The build never answered: UEFN is behind a popup or busy. Say which, don't hang
         # (workspace_compile_verse past 5 min was agent.stuck 3x on Oct 31 2026).
