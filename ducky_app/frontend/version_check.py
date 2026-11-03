@@ -12,7 +12,7 @@ import urllib.request
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from frontend import __version__
 from frontend.bundle_root import is_packaged_runtime
@@ -21,6 +21,8 @@ from frontend.bundle_root import is_packaged_runtime
 # (http://127.0.0.1:<port>) — see that folder's README. Loopback only; the
 # updater still refuses plain-http installer URLs from anywhere else.
 UPDATE_BASE_URL_ENV = "DUCKY_UPDATE_BASE_URL"
+# net_access.NET_STAGES word for the last failed feed request ("" after a success).
+last_net_stage = ""
 
 
 def update_base_url() -> str:
@@ -185,8 +187,11 @@ def clock_skew_message(base: str) -> str | None:
     return describe_clock_skew(date, time.time())
 
 
-def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None, str | None]:
-    """Return ``(payload, error)`` for the Store app-version collect endpoint."""
+def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[dict[str, Any] | None, str | None]:
+    """Return ``(payload, error)`` for the Store app-version collect endpoint.
+
+    ``attempts`` 0 = update_network.ATTEMPTS (background); the on-screen check passes 2.
+    """
     base = update_base_url()
     url = f"{base}/api/v1/plugins/uefn-ducky-store/collect/app-version"
     # Collect endpoints require Origin to match Host (same as duckyos_account.api_request).
@@ -203,7 +208,8 @@ def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None
     )
     from frontend.update_network import ATTEMPTS, retryable, retry_delay
 
-    for attempt in range(ATTEMPTS):
+    tries = attempts or ATTEMPTS
+    for attempt in range(tries):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
@@ -211,8 +217,18 @@ def fetch_remote_payload(*, timeout: float = 8.0) -> tuple[dict[str, Any] | None
         except (OSError, ValueError, http.client.HTTPException) as exc:
             if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
                 return None, clock_skew_message(base) or str(exc)
-            if attempt + 1 == ATTEMPTS or not retryable(exc):
-                return None, str(exc)
+            if attempt + 1 == tries or not retryable(exc):
+                from frontend.net_access import explain, proxy_mode
+
+                global last_net_stage
+                last_net_stage, text = explain(exc, urlsplit(base).hostname or base)
+                try:
+                    from frontend import usage_stats
+
+                    usage_stats.net_fail("update_check", last_net_stage, proxy_mode())
+                except Exception:
+                    pass
+                return None, text
             time.sleep(retry_delay(attempt))
 
     try:
@@ -304,7 +320,8 @@ def _app_update_status() -> dict[str, Any]:
         "error": None,
     }
 
-    payload, error = fetch_remote_payload()
+    # Someone is looking at the button: answer in ~10 s, not 5 tries x 8 s.
+    payload, error = fetch_remote_payload(timeout=5.0, attempts=2)
     if payload:
         result["versions"] = extract_release_versions(payload)
         result["release_notes"] = _extract_str(payload, "releaseNotes") or _extract_str(
@@ -330,6 +347,7 @@ def _app_update_status() -> dict[str, Any]:
     if error or payload is None:
         result["feed_status"] = "error"
         result["error"] = error or "Empty version-check response"
+        result["net_stage"] = last_net_stage or "other"
         return result
 
     if feed_is_paused(payload):

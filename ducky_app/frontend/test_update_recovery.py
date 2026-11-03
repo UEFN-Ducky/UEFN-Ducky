@@ -172,6 +172,24 @@ def test_update_feed_recovers_reset_while_reading(monkeypatch):
     assert len(calls) == 2
 
 
+def test_on_screen_check_gives_up_after_two_short_tries(monkeypatch):
+    calls = []
+
+    def timed_out(req, timeout=None, **_):
+        calls.append(timeout)
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr(version_check.urllib.request, "urlopen", timed_out)
+    monkeypatch.setattr(version_check, "update_base_url", lambda: "https://example.test")
+    monkeypatch.setattr(version_check.time, "sleep", lambda s: None)
+    payload, error = version_check.fetch_remote_payload(timeout=5.0, attempts=2)
+    assert payload is None and "timed out" in error
+    assert calls == [5.0, 5.0]
+    calls.clear()
+    version_check.fetch_remote_payload()
+    assert len(calls) == ATTEMPTS  # background checks keep every try
+
+
 def test_packaged_panel_recovers_when_listener_folder_is_missing(tmp_path, monkeypatch):
     import sys
     from frontend.bundle_root import packaged_data_root

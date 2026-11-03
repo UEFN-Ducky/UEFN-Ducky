@@ -18,6 +18,18 @@ export interface InstallInfo {
   quiet_uninstall_command: string | null;
 }
 
+/** Settings → App Info "Test network" (frontend/net_access.diagnose); never leaves the PC. */
+export interface NetworkTest {
+  ok: boolean;
+  host: string;
+  proxy_mode: "none" | "static" | "pac";
+  proxy: string;
+  dns: { ok: boolean; ms?: number; ipv4?: number; ipv6?: number; error?: string };
+  ipv4: { ok: boolean | null; ms?: number; error?: string };
+  ipv6: { ok: boolean | null; ms?: number; error?: string };
+  https: { ok: boolean; status?: number; ms?: number; stage?: string; error?: string };
+}
+
 export interface AppUpdateStatus {
   local_version: string;
   remote_version: string | null;
@@ -3490,6 +3502,7 @@ export interface PanelApi {
   minimize_window(): Promise<void>;
   get_version(): Promise<string>;
   get_app_update_status(): Promise<AppUpdateStatus>;
+  run_network_test?(): Promise<NetworkTest>;
   get_app_patch_notes(): Promise<{
     versions: DuckyOSStorePatchNote[];
     cached: boolean;

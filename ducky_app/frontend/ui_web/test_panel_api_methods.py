@@ -199,6 +199,7 @@ _PUBLIC_METHODS = frozenset({
     'check_auto_update_now',
     'mark_whats_new_seen',
     'get_app_update_status',
+    'run_network_test',
     'get_appearance',
     'get_workflow_version',
     'get_chat_context_memory',

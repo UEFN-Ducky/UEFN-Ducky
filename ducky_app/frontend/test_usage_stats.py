@@ -109,6 +109,20 @@ def test_free_text_and_unknown_names_never_pass() -> None:
     assert ev.validate("feature.open", {"tab": "my-secret-project"}) == {}
 
 
+def test_net_fail_says_where_the_route_died_once_per_session() -> None:
+    us._net_fail_sent.clear()
+    us.net_fail("update_check", "timeout", "pac")
+    us.net_fail("update_check", "timeout", "pac")  # the same failure again: not counted twice
+    us.net_fail("update_check", "dns", "none")
+    rows, _ = us._take(100)
+    errors = [r["props"] for r in rows if r["name"] == "error.code"]
+    assert [(e["code"], e["kind"], e["net_stage"], e["proxy"], e["where"]) for e in errors] == [
+        ("update_check", "timeout", "timeout", "pac", "store"),
+        ("update_check", "offline", "dns", "none", "store"),
+    ]
+    assert ev.validate("error.code", {"net_stage": "carrier_pigeon", "proxy": "10.0.0.1:8080"}) == {}
+
+
 def test_error_source_becomes_a_code_never_a_message() -> None:
     assert ev.code_of("Agent stream") == "agent_stream"
     assert ev.where_of("uefn listener") == "bridge"

@@ -420,6 +420,14 @@ def main() -> None:
         truststore.inject_into_ssl()
     except Exception:
         pass
+    # Same idea for the route: the PC's proxy auto-config and a fast IPv4 fallback, as in Edge.
+    try:
+        _ensure_repo_on_path()
+        from frontend import net_access
+
+        net_access.install()
+    except Exception:
+        pass
     if len(sys.argv) > 1 and sys.argv[1] == "agent-host":
         # The supervisor's child (frozen: this EXE). Falling through to the GUI booted a whole
         # second app on every agent turn: logo splash, hand-off to the open window, no host.

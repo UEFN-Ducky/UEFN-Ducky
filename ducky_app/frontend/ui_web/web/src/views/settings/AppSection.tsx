@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
-import type { AppUpdateStatus, AutoUpdateStatus, DuckyOSStorePatchNote } from "../../types/panel";
+import type { AppUpdateStatus, AutoUpdateStatus, DuckyOSStorePatchNote, NetworkTest } from "../../types/panel";
 import {
   getAppUpdateState,
   startAppUpdate,
@@ -34,6 +34,23 @@ function classifyCheck(next: AppUpdateStatus): CheckResult {
   if (next.feed_status === "no_release") return "no_release";
   if (next.feed_status === "up_to_date" || next.remote_version) return "latest";
   return "no_release";
+}
+
+function step(label: string, r: { ok: boolean | null; ms?: number; error?: string }): string {
+  if (r.ok === null) return `${label}: not offered`;
+  return r.ok ? `${label}: ok${r.ms != null ? ` (${r.ms} ms)` : ""}` : `${label}: failed${r.error ? ` (${r.error})` : ""}`;
+}
+
+/** One line per check, plain enough to paste into a support message. */
+export function networkTestLines(t: NetworkTest): string[] {
+  return [
+    `${t.host}: ${t.ok ? "reachable" : "NOT reachable"} from UEFN Ducky`,
+    step("DNS", t.dns) + (t.dns.ok ? ` · ${t.dns.ipv4 ?? 0} IPv4, ${t.dns.ipv6 ?? 0} IPv6` : ""),
+    step("IPv4", t.ipv4),
+    step("IPv6", t.ipv6),
+    `Proxy: ${t.proxy_mode === "none" ? "none" : `${t.proxy_mode} → ${t.proxy}`}`,
+    t.https.ok ? `HTTPS: ok (${t.https.status}, ${t.https.ms} ms)` : `HTTPS: failed at ${t.https.stage} · ${t.https.error ?? ""}`,
+  ];
 }
 
 function formatBytes(n: number): string {
@@ -76,6 +93,7 @@ export function AppSection() {
   const [phase, setPhase] = useState<AppActionPhase>("idle");
   const [checkResult, setCheckResult] = useState<CheckResult>("idle");
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [netTest, setNetTest] = useState<NetworkTest | "running" | null>(null);
   const [updateState, setUpdateState] = useState<AppUpdateState>(() => getAppUpdateState());
   const [auto, setAuto] = useState<AutoUpdateStatus | null>(null);
   const { confirm } = useConfirmModal();
@@ -160,6 +178,13 @@ export function AppSection() {
     setErrorText(null);
     const result = await api.apply_auto_update_now().catch(() => null);
     if (result && !result.ok) setErrorText(result.error || "The update could not start.");
+  };
+
+  const handleNetworkTest = async () => {
+    const api = getApi();
+    if (!api || typeof api.run_network_test !== "function") return;
+    setNetTest("running");
+    setNetTest(await api.run_network_test().catch(() => null));
   };
 
   const handleCheckForUpdates = async () => {
@@ -379,6 +404,18 @@ export function AppSection() {
       ) : null}
       {errorText && !updating ? (
         <p className="general-tab-section-note general-tab-section-note--error">{errorText}</p>
+      ) : null}
+      {checkResult === "error" && !updating ? (
+        <div className="general-tab-section-note">
+          <button type="button" className="settings-btn" disabled={netTest === "running"} onClick={() => void handleNetworkTest()}>
+            {netTest === "running" ? "Testing network…" : "Test network"}
+          </button>
+          {netTest && netTest !== "running" ? (
+            <pre className="general-tab-section-note" style={{ whiteSpace: "pre-wrap", userSelect: "text" }}>
+              {networkTestLines(netTest).join("\n")}
+            </pre>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

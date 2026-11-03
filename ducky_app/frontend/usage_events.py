@@ -133,7 +133,10 @@ EVENTS: dict[str, dict[str, Any]] = {
     "error.code": {"code": ("slug",), "where": WHERE, "kind": ERROR_KINDS, "version": ("version",), "at": ("slug",),
                    "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s"),
                    # app_unclean_exit: the dead run's app and WebView2 memory at its last heartbeat.
-                   "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb")},
+                   "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb"),
+                   # net_fail only: where the request to the site died (net_access.NET_STAGES) and how the PC routes.
+                   "net_stage": ("dns", "connect", "tls", "proxy", "timeout", "http", "other"),
+                   "proxy": ("none", "static", "pac")},
     # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",)},
     "ui.crash": {"code": ("slug",)},

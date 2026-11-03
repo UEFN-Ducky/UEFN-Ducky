@@ -756,6 +756,19 @@ def error(source: str, message: str = "", at: str = "", kind: str = "") -> None:
           kind=kind or ev.kind_of(message), version=_app_version(), at=at)
 
 
+_net_fail_sent: set[tuple[str, str]] = set()
+
+
+def net_fail(code: str, stage: str, proxy: str) -> None:
+    """The app couldn't reach the site (code: what it tried). Once per session per code and stage."""
+    if (code, stage) in _net_fail_sent:
+        return
+    _net_fail_sent.add((code, stage))
+    kind = "timeout" if stage == "timeout" else "offline" if stage in ("dns", "connect", "proxy") else "other"
+    track("error.code", code=ev.code_of(code), where="store", kind=kind, version=_app_version(),
+          net_stage=stage, proxy=proxy)
+
+
 def agent_crash(provider: str) -> None:
     track("error.code", code="agent_crash_" + (ev.slug(provider) or "other"), where="agent",
           kind="crash", version=_app_version())

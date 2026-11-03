@@ -1197,7 +1197,9 @@ _SITE_OPENER: urllib.request.OpenerDirector | None = None
 def _site_urlopen(req: urllib.request.Request, *, timeout: float) -> Any:
     global _SITE_OPENER
     if _SITE_OPENER is None:
-        _SITE_OPENER = urllib.request.build_opener(_KeepAliveHTTPHandler(), _KeepAliveHTTPSHandler())
+        from frontend.net_access import proxy_handler
+
+        _SITE_OPENER = urllib.request.build_opener(proxy_handler(), _KeepAliveHTTPHandler(), _KeepAliveHTTPSHandler())
     return _SITE_OPENER.open(req, timeout=timeout)
 
 
