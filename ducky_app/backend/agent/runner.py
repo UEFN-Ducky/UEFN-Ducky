@@ -211,6 +211,17 @@ def _tool_gate(conv_id: str, name: str) -> str:
         return "refuse" if destructive and not _allows_everything(conv_id) else "run"
 
 
+def _post_to_loop(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[Any], item: Any) -> bool:
+    """Hand ``item`` to the turn's loop; False when that loop already closed (Stop / crash)."""
+    try:
+        loop.call_soon_threadsafe(queue.put_nowait, item)
+        return True
+    except RuntimeError:
+        if loop.is_closed():
+            return False
+        raise
+
+
 class _CancelBridge:
     """Unify asyncio + threading cancel signals for Stop button."""
 
@@ -496,15 +507,14 @@ class AgentRunner:
                         cancel_event=bridge,
                         cache=cache,
                     ):
-                        if bridge.is_set():
+                        if bridge.is_set() or not _post_to_loop(loop, queue, event):
                             break
-                        loop.call_soon_threadsafe(queue.put_nowait, event)
 
                 asyncio.run(collect())
             except Exception as exc:
-                loop.call_soon_threadsafe(queue.put_nowait, exc)
+                _post_to_loop(loop, queue, exc)
             finally:
-                loop.call_soon_threadsafe(queue.put_nowait, None)
+                _post_to_loop(loop, queue, None)
 
         try:
             ctx = contextvars.copy_context()
