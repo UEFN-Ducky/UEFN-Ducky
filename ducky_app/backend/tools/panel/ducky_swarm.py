@@ -340,6 +340,15 @@ def _swarm_from_plan(confirm: bool, api: Any, edits: list[dict[str, Any]] | None
         except ValueError as exc:
             return {"status": "error", "error": str(exc)}
         plan = api.load_plan(lead) or plan  # re-preview what the plan now says
+    elif edits:
+        # A build sent straight with {seat, model} edits (no preview first) still seats that model;
+        # one the plan already says is skipped, so a resent card never applies it twice.
+        models = {s["name"]: s.get("model") for s in walk_seats(plan_preview(plan)["tree"])}
+        new = [e for e in edits if isinstance(e, dict) and e.get("seat") and e.get("model")
+               and str(e["seat"]).strip() in models and models[str(e["seat"]).strip()] != str(e["model"]).strip()]
+        if new:
+            apply_plan_edits(lead, plan, new, store or PlanStore())
+            plan = api.load_plan(lead) or plan
     preview = plan_preview(plan)
     if warnings:
         preview["warnings"] = warnings

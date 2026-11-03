@@ -385,7 +385,10 @@ def _ping_text(swarm_id: str, seat: dict[str, Any]) -> str:
 
 
 def _answer(out: dict[str, Any]) -> dict[str, Any]:
-    if out.get("status") == "done" and str(out.get("assistant_text") or "").strip():
+    # A finished turn means the seat started, even when its reply text wasn't read back yet
+    # (Nov 3 2026: seats that answered "ok" came back done with no assistant_text and were
+    # reported "didn't start (done)"). A turn still running is alive too.
+    if out.get("status") in ("done", "running"):
         return {"ok": True}
     return {"ok": False, "error": str(out.get("error") or out.get("status") or "no reply")}
 
