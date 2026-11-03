@@ -1221,6 +1221,20 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     if method in _STEER_ARGS:
                         self._send_json(200, _steer_rpc(method, params))
                         return
+                    if method == "workflow_start":
+                        # An agent's run_workflow: the run lives here, not in the tool server.
+                        from backend.tools.panel.panel_automations import start_background_run
+
+                        files = params.get("files")
+                        start_background_run(
+                            str(params.get("workflow_id") or ""), str(params.get("run_id") or ""),
+                            str(params.get("caller") or ""), prompt=str(params.get("prompt") or ""),
+                            files=files if isinstance(files, list) else None,
+                            payload=params.get("payload") if isinstance(params.get("payload"), dict) else None,
+                            trigger_id=str(params.get("trigger_id") or ""),
+                        )
+                        self._send_json(200, {"result": {"ok": True}})
+                        return
                     if method == "agent_runs":
                         # The MCP bridge asks which chats run here (and may stop one).
                         from frontend.ui_web.agent_modes import run_state

@@ -436,6 +436,8 @@ def _slow_run(monkeypatch):
     monkeypatch.setattr("backend.automations.store.get_workflow", lambda wid: {"id": wid, "name": "UEFN Ducky Release", "graph": {}})
     monkeypatch.setattr("backend.agent.a2a_client.send_notice", lambda **kw: notices.append(kw))
     monkeypatch.setattr(panel, "_reveal_graph", lambda *a, **k: None)
+    # No app to hand the run to: it runs in this process (test_workflow_start_in_app covers the app).
+    monkeypatch.setattr("backend.panel.rpc.panel_rpc", lambda method, params, timeout=30.0: {"error": "panel not open"})
     return panel, finish, ended, notices
 
 

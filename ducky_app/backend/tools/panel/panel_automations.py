@@ -774,6 +774,45 @@ async def _record_release_run(plugin: str, workflow_id: str, known: set[str], ru
         await asyncio.sleep(0.05)
 
 
+def start_background_run(workflow_id: str, run_id: str, caller: str, *, prompt: str = "",
+                         files: list[Any] | None = None, payload: dict[str, Any] | None = None,
+                         trigger_id: str = "") -> threading.Thread:
+    """Run a workflow on its own thread in this process; the caller chat hears when it ends.
+    The app calls this for agents (``workflow_start`` on ``/__panel_rpc``): a run inside the
+    shared tool server died with it ("The process running this workflow ended") whenever that
+    server restarted or idled out, Nov 3 2026, five releases in one morning."""
+    from backend.automations.runner import public_payload
+    from backend.automations.runner import run_workflow as _run
+
+    def work() -> None:
+        try:
+            out = _run(workflow_id, trigger_id=trigger_id, payload=public_payload(payload), prompt=prompt,
+                       files=files, caller_conv_id=caller, run_id=run_id)
+        except Exception as exc:
+            out = {"ok": False, "error": str(exc), "id": workflow_id, "run": run_id}
+        _tell_caller(caller, workflow_id, out)
+
+    thread = threading.Thread(target=contextvars.copy_context().run, args=(work,),
+                              name=f"workflow-{workflow_id}-{run_id}", daemon=True)
+    thread.start()
+    return thread
+
+
+def _start_in_app(workflow_id: str, run_id: str, caller: str, *, prompt: str, files: list[Any] | None,
+                  payload: dict[str, Any] | None, trigger_id: str) -> bool:
+    """Ask the app to run it (it lives as long as Ducky is open); False when it can't."""
+    from backend.panel.rpc import panel_rpc
+
+    try:
+        out = panel_rpc("workflow_start", {
+            "workflow_id": workflow_id, "run_id": run_id, "caller": caller, "prompt": prompt,
+            "files": files or [], "payload": payload or {}, "trigger_id": trigger_id,
+        }, timeout=10.0)
+    except Exception:
+        return False
+    return bool(out.get("ok"))
+
+
 def _caller_chat(conv_id: str) -> str:
     if conv_id:
         return conv_id
@@ -889,6 +928,13 @@ async def run_workflow(
         _reveal_graph(workflow_id, "saved")
     plugin = release_plugin_of(workflow_id, payload)
     if not plugin:
+        # ponytail: plugin releases and wait=true stay here (the caller is connected the whole
+        # time, and a release run's bookkeeping watches this process); move them when one dies.
+        if not wait and await asyncio.to_thread(
+                _start_in_app, workflow_id, run_id, caller, prompt=prompt, files=files,
+                payload=public_payload(payload), trigger_id=trigger_id):
+            return tool_json({"ok": True, "run_id": run_id, "status": "running", "workflow": workflow_id},
+                             pretty=pretty)
         return await result(start())
     else:
         from backend.tools.panel.panel_ai_plugins import release_busy
