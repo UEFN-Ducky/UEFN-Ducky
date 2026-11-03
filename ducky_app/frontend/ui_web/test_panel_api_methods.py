@@ -699,6 +699,28 @@ def test_team_screen_api_result_keys(monkeypatch) -> None:
     assert {'ok', 'visible', 'error'} <= set(api.plugin_scope_status('p'))
 
 
+def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> None:
+    from backend.uefn_plugins import host
+    from frontend import perf_trace
+
+    rows: list[tuple] = []
+    monkeypatch.setattr(perf_trace, 'trace', lambda kind, name='', ms=0.0, **meta: rows.append((kind, name, meta)))
+    api = PanelApi.__new__(PanelApi)
+
+    monkeypatch.setattr(host, 'call_panel_rpc', lambda p, m, a: {'ok': True, 'rows': ['x' * 1000] * 100})
+    assert api.plugin_call('account', 'list_models', {})['ok']
+    assert len(rows) == 1
+    kind, name, meta = rows[0]
+    assert kind == 'ui_js_big'
+    assert name == meta['source'] == 'plugin_call:account.list_models'
+    assert meta['js_bytes'] > 64 * 1024
+
+    rows.clear()
+    monkeypatch.setattr(host, 'call_panel_rpc', lambda p, m, a: {'ok': True})
+    api.plugin_call('account', 'ping', {})
+    assert rows == []  # small replies trace nothing
+
+
 def test_panel_api_public_methods() -> None:
     names = {
         n

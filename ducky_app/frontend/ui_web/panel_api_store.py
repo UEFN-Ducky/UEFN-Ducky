@@ -6,6 +6,37 @@ from typing import Any
 
 import frontend.ui_web.panel_api as _pa
 
+PLUGIN_REPLY_BIG_BYTES = 64 * 1024
+
+
+def plugin_rpc_source(plugin_id: str, method: str) -> str:
+    """The perf-trace name of one plugin panel RPC: ``plugin_call:<plugin>.<method>``."""
+    return f"plugin_call:{plugin_id or '?'}.{method or '?'}"
+
+
+def _reply_bytes(reply: Any) -> int:
+    import json
+
+    try:
+        return len(json.dumps(reply, ensure_ascii=False, default=str, separators=(",", ":")))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _trace_big_plugin_reply(plugin_id: str, method: str, reply: Any) -> int:
+    """The bridge only sees ``plugin_call``; name the plugin RPC behind a big reply
+    as a ``ui_js_big`` row so ``ui_js_big_top`` ranks it per plugin and method."""
+    nbytes = _reply_bytes(reply)
+    if nbytes > PLUGIN_REPLY_BIG_BYTES:
+        try:
+            from frontend.perf_trace import trace
+
+            source = plugin_rpc_source(plugin_id, method)
+            trace("ui_js_big", source, 0.0, source=source, js_bytes=nbytes)
+        except Exception:  # noqa: BLE001
+            pass
+    return nbytes
+
 
 def _cache_store_catalog(result: dict[str, Any], account: str = "") -> dict[str, Any]:
     """ADR 0003 phase 6: keep the last good catalog in ducky.db so the Store tab
@@ -1532,11 +1563,11 @@ class PanelApiStoreMixin:
                 str(method or ""),
                 dict(params or {}) if isinstance(params, dict) else {},
             )
-            if isinstance(result, dict):
-                return result
-            return {"ok": True, "result": result}
+            out = result if isinstance(result, dict) else {"ok": True, "result": result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+        _trace_big_plugin_reply(str(plugin_id or ""), str(method or ""), out)
+        return out
 
     def draft_skill_pack(self, description: str, model: str, provider: str = "") -> dict[str, Any]:
         from frontend.ui_web.skill_pack_draft import draft_skill_pack
