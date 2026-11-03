@@ -815,8 +815,24 @@ def remote_connect(out: dict[str, Any]) -> None:
     track("remote.connect", outcome=outcome)
 
 
+def _remote_keys(name: str) -> set[str]:
+    """The keys an ev.EVENTS remote.* spec reads: its props plus bucket source names."""
+    spec = ev.EVENTS[name]
+    return set(spec) | {rule[2] for rule in spec.values() if rule[0] == "bucket"}
+
+
 def remote_link(report: dict[str, Any]) -> None:
-    """One viewer link report (state, connect time or path); its free-text reason never leaves."""
+    """One viewer report: link state/connect time/path, plus optional ``quality``, ``input``,
+    ``load`` and ``end`` dicts (each one remote.<key> event). ``client``, ``net`` and
+    ``viewer_version`` ride on all of them. Free text (``reason``) never leaves: only the
+    spec's keys are passed on and ev.validate keeps listed values only."""
+    common = {k: report[k] for k in ev.REMOTE_COMMON if k in report}
+    for part in ("quality", "input", "load", "end"):
+        sub = report.get(part)
+        if isinstance(sub, dict):
+            name = f"remote.{part}"
+            keys = _remote_keys(name)
+            track(name, **{**{k: v for k, v in sub.items() if k in keys}, **common})
     props: dict[str, Any] = {}
     if report.get("state"):
         state = str(report["state"])
@@ -827,7 +843,7 @@ def remote_link(report: dict[str, Any]) -> None:
     if "connect_ms" in report:
         props["connect_ms"] = report["connect_ms"]
     if props:
-        track("remote.link", **props)
+        track("remote.link", **props, **common)
 
 
 PERF_SETTLE_S = 300.0

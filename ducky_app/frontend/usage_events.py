@@ -36,6 +36,22 @@ INSTALL_AGE_S: Buckets = ((86400, "day0"), (7 * 86400, "week1"), (30 * 86400, "m
 REVISION_S: Buckets = ((10, "10s"), (60, "1m"), (180, "3m"), (None, "more"))
 # Remote View: offer to a live peer link.
 CONNECT_MS: Buckets = ((1000, "1s"), (3000, "3s"), (10000, "10s"), (None, "more"))
+# Remote View stream health, as the viewer measures it (getStats / input echo / page timing).
+FPS: Buckets = ((14.99, "<15"), (29.99, "15-30"), (None, "30+"))
+LAG_MS: Buckets = ((50, "50ms"), (150, "150ms"), (400, "400ms"), (None, "more"))
+JITTER_MS: Buckets = ((10, "10ms"), (30, "30ms"), (100, "100ms"), (None, "more"))
+LOSS_PCT: Buckets = ((0, "0"), (1, "1pct"), (5, "5pct"), (None, "more"))
+FREEZES: Buckets = ((0, "0"), (3, "1-3"), (None, "more"))
+BITRATE_KBPS: Buckets = ((500, "500kbps"), (2000, "2mbps"), (5000, "5mbps"), (None, "more"))
+# Frame height to a resolution label: anything over 720 lines reads as 1080p.
+RES_HEIGHT: Buckets = ((480, "480p"), (720, "720p"), (None, "1080p"))
+DROPPED: Buckets = ((0, "0"), (5, "1-5"), (None, "more"))
+# Every remote.* event: which viewer, on what network, which viewer build.
+REMOTE_COMMON: dict[str, Any] = {
+    "client": ("android_app", "phone_web", "tablet_web", "desktop_web"),
+    "net": ("wifi", "cell", "ethernet", "unknown"),
+    "viewer_version": ("version",),
+}
 
 PROVIDERS = ("claude", "codex", "cursor", "ollama", "ducky_ai", "other")
 # The first-run setup's Connect AI step: which AI, and how it ended up connected (or not).
@@ -125,10 +141,27 @@ EVENTS: dict[str, dict[str, Any]] = {
     "revision.op": {"op": ("push", "pull"), "outcome": ("ok", "up_to_date", "blocked", "fail"),
                     "reason": REVISION_REASONS, "took": ("bucket", REVISION_S, "took_s")},
     # Remote View: the PC's answer to a viewer's offer, then the viewer's link reports.
-    "remote.connect": {"outcome": ("ok", "timeout", "error", "bad_offer", "old_protocol")},
+    "remote.connect": {"outcome": ("ok", "timeout", "error", "bad_offer", "old_protocol"), **REMOTE_COMMON},
     "remote.link": {"link": ("connecting", "live", "reconnecting", "failed", "other"),
                     "candidate": ("host", "srflx", "prflx", "relay", "other"),
-                    "connect": ("bucket", CONNECT_MS, "connect_ms")},
+                    "connect": ("bucket", CONNECT_MS, "connect_ms"), **REMOTE_COMMON},
+    # One sample of a live stream's health (the viewer sends one every so often while live).
+    "remote.quality": {"fps": ("bucket", FPS, "fps_n"), "rtt": ("bucket", LAG_MS, "rtt_ms"),
+                       "jitter": ("bucket", JITTER_MS, "jitter_ms"), "loss": ("bucket", LOSS_PCT, "loss_pct"),
+                       "freezes": ("bucket", FREEZES, "freezes_n"),
+                       "bitrate": ("bucket", BITRATE_KBPS, "bitrate_kbps"),
+                       "res": ("bucket", RES_HEIGHT, "height_px"), **REMOTE_COMMON},
+    # Remote control: tap/key to the PC's echo, and inputs that never arrived.
+    "remote.input": {"lag": ("bucket", LAG_MS, "lag_ms"), "dropped": ("bucket", DROPPED, "dropped_n"),
+                     **REMOTE_COMMON},
+    # Open to first video frame, and the viewer page's own load.
+    "remote.load": {"first_frame": ("bucket", CONNECT_MS, "first_frame_ms"),
+                    "page": ("bucket", CONNECT_MS, "page_ms"), **REMOTE_COMMON},
+    # A session's end: why, how long it lasted, and where a link that never came up died.
+    "remote.end": {"why": ("user", "network", "pc_closed", "background", "crash", "other"),
+                   "length": ("bucket", DURATION_S, "length_s"),
+                   "fail_stage": ("signaling", "ice_gather", "ice_check", "dtls", "datachannel", "none"),
+                   **REMOTE_COMMON},
     "perf.sample": {
         "startup": ("bucket", STARTUP_S, "startup_s"),
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),

@@ -61,6 +61,10 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "revision.op": {"op": "pull", "outcome": "blocked", "reason": "both_changed", "took_s": 4},
     "remote.connect": {"outcome": "timeout"},
     "remote.link": {"link": "live", "candidate": "relay", "connect_ms": 812},
+    "remote.quality": {"fps_n": 24, "rtt_ms": 120, "loss_pct": 0.5, "client": "android_app", "net": "cell"},
+    "remote.input": {"lag_ms": 90, "dropped_n": 0},
+    "remote.load": {"first_frame_ms": 2500, "page_ms": 600},
+    "remote.end": {"why": "network", "length_s": 400, "fail_stage": "none", "viewer_version": "1.4.2"},
 }
 
 
@@ -75,6 +79,24 @@ def test_every_listed_event_validates_and_buckets() -> None:
     assert ev.validate("chat.turn", SAMPLES["chat.turn"])["duration"] == "5m"
     assert ev.validate("tool.call", SAMPLES["tool.call"]) == {"tool": "spawn_actor", "ok": "yes", "duration": "10s"}
     assert ev.validate("perf.sample", SAMPLES["perf.sample"]) == {"startup": "5s", "idle_cpu": "1pct", "memory": "1gb"}
+    assert ev.validate("remote.quality", SAMPLES["remote.quality"]) == {
+        "fps": "15-30", "rtt": "150ms", "loss": "1pct", "client": "android_app", "net": "cell"}
+    assert ev.validate("remote.quality", {"fps_n": 14.5, "height_px": 1080, "freezes_n": 2, "jitter_ms": 5,
+                                          "bitrate_kbps": 1500}) == {
+        "fps": "<15", "res": "1080p", "freezes": "1-3", "jitter": "10ms", "bitrate": "2mbps"}
+    assert ev.validate("remote.quality", {"fps": "30+", "res": "720p"}) == {"fps": "30+", "res": "720p"}
+    assert ev.validate("remote.input", {"lag_ms": 500, "dropped_n": 3}) == {"lag": "more", "dropped": "1-5"}
+    assert ev.validate("remote.load", SAMPLES["remote.load"]) == {"first_frame": "3s", "page": "1s"}
+    assert ev.validate("remote.end", SAMPLES["remote.end"]) == {
+        "why": "network", "length": "20m", "fail_stage": "none", "viewer_version": "1.4.2"}
+
+
+def test_remote_events_drop_anything_identifying() -> None:
+    leaky = {"ip": "10.0.0.4", "device_id": "a1b2c3", "reason": "No path from 10.0.0.4", "client": "Pixel 9 / Chrome",
+             "net": "MyHomeWifi", "viewer_version": "1.4.2-dev+me", "why": "user closed it at 10.0.0.4",
+             "fail_stage": "C:/Users/x", "res": "1920x1080", "fps": "lots"}
+    for name in ("remote.connect", "remote.link", "remote.quality", "remote.input", "remote.load", "remote.end"):
+        assert ev.validate(name, leaky) == {}, name
 
 
 def test_free_text_and_unknown_names_never_pass() -> None:
@@ -210,6 +232,27 @@ def test_source_control_and_remote_view_report_words_only() -> None:
         ("remote.link", {"candidate": "relay", "connect": "3s"}),
     ]
     assert "Secret" not in str(rows) and "10.0.0.4" not in str(rows)
+
+
+def test_remote_link_forwards_quality_input_load_and_end() -> None:
+    tag = {"client": "android_app", "net": "cell", "viewer_version": "1.4.2"}
+    us.remote_link({**tag, "quality": {"fps_n": 24, "rtt_ms": 120, "loss_pct": 0.5, "height_px": 720, "ip": "10.0.0.4"}})
+    us.remote_link({**tag, "input": {"lag_ms": 90, "dropped_n": 7, "name": "x"}})
+    us.remote_link({"client": "phone_web", "net": "wifi", "load": {"first_frame_ms": 2500, "page_ms": 600}})
+    us.remote_link({**tag, "state": "failed", "reason": "No path from 10.0.0.4",
+                    "end": {"why": "network", "length_s": 400, "fail_stage": "ice_check", "reason": "Pixel 9 at 10.0.0.4"}})
+    us.remote_link({"client": "Pixel 9", "net": "MyHomeWifi", "end": {"why": "free text"}})
+    rows, _ = us._take(100)
+    got = [(r["name"], r["props"]) for r in rows]
+    assert got == [
+        ("remote.quality", {"fps": "15-30", "rtt": "150ms", "loss": "1pct", "res": "720p", **tag}),
+        ("remote.input", {"lag": "150ms", "dropped": "more", **tag}),
+        ("remote.load", {"first_frame": "3s", "page": "1s", "client": "phone_web", "net": "wifi"}),
+        ("remote.end", {"why": "network", "length": "20m", "fail_stage": "ice_check", **tag}),
+        ("remote.link", {"link": "failed", **tag}),
+        ("remote.end", {}),
+    ]
+    assert "10.0.0.4" not in str(rows) and "Pixel" not in str(rows)
 
 
 def test_turn_outcome_tells_limits_logins_and_closed_apps_from_errors() -> None:
