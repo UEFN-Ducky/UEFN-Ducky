@@ -2972,6 +2972,9 @@ def _locks_from(account: str, space: str, live: Iterable[LockInfo], *, now: floa
             r = space_vcs.row(None, account, space, lk["plugin_id"], *row)
             if r and r["sync_state"] == "locked_out":
                 repo.set_state(account, space, lk["plugin_id"], *row, "")
+    # Any row still locked out with no live foreign lock left (a lease that ran out, a
+    # lock this PC took over, a cache that lost it) would otherwise wait forever.
+    _tell_bars(space_vcs.requeue_unlocked(account, space, now=now))
     for lk in change["lost"]:
         row = _row_of_unit(lk["unit"])
         r = space_vcs.row(None, account, space, lk["plugin_id"], *row) if row else None

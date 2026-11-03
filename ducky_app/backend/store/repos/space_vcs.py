@@ -591,6 +591,26 @@ def foreign_lock(account: str, space: str, plugin: str, unit: str, *, now: float
     return _lock_row(r, now) if r else None
 
 
+def requeue_unlocked(account: str, space: str, *, now: float | None = None) -> list[str]:
+    """Rows held ``locked_out`` while no live foreign lock holds their unit go back in the
+    queue (the lock went without a ``freed`` transition: its lease ran out, it was taken
+    over by this PC, or the cache lost it). Returns the plugins that had any. A push still
+    meets the server's lock if one is really there, and marks the row again."""
+    now = _now(now)
+    stale = ("account_id=? AND scope_id=? AND sync_state='locked_out' AND NOT EXISTS ("
+             "SELECT 1 FROM space_locks l WHERE l.account_id=plugin_data.account_id "
+             "AND l.space_id=plugin_data.scope_id AND l.plugin_id=plugin_data.plugin_id "
+             "AND l.unit=plugin_data.kind || ':' || plugin_data.key AND l.mine=0 AND l.lease_left_at>?)")
+    args = (account, space, now)
+    conn = db.connect()
+    with db.write_txn(conn):
+        plugins = [str(r[0]) for r in conn.execute(f"SELECT DISTINCT plugin_id FROM plugin_data WHERE {stale}", args)]
+        if plugins:
+            conn.execute("UPDATE plugin_data SET sync_state='', sync_error='', attempts=0, next_try=0 "
+                         f"WHERE {stale}", args)
+    return plugins
+
+
 def lock_put(account: str, space: str, plugin: str, unit: str, *, name: str = "", holder_user: str = "",
              holder_name: str = "", holder_device: str = "", since: float = 0.0, lease_left: float = 0.0,
              fence: int = 0, mine: bool = False, reason: str = "", now: float | None = None,

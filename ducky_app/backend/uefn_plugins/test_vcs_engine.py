@@ -503,6 +503,49 @@ def test_rows_under_someone_elses_lock_wait_and_go_after_it_is_released(pc: PC, 
     assert pc.run()["pushed"] == 1 and ben.doc("card.pip") == {"hp": 2}
 
 
+def test_a_locked_out_row_whose_lock_left_the_cache_another_way_still_goes_out(pc: PC, ben: Ben) -> None:
+    """The lock that held a row out went without a ``freed`` transition (this PC took the
+    unit and released it): the row must not stay locked out forever."""
+    pc.data.put("card.pip", {"hp": 1})
+    pc.run()
+    ben.client.lock(SPACE, PLUGIN, [LockUnit("doc:card.pip", "card.pip")], "best", {"doc:card.pip": 1})
+    pc.data.put("card.pip", {"hp": 2})
+    pc.run()
+    assert pc.row("card.pip")["sync_state"] == "locked_out"
+    ben.client.unlock(SPACE, PLUGIN, ["doc:card.pip"])
+    assert vcs_engine.acquire(pc.account, SPACE, PLUGIN, pc.backend, [("doc:card.pip", "card.pip")])[
+        "doc:card.pip"]["ok"]
+    assert vcs_engine.release(pc.account, SPACE, PLUGIN, pc.backend, ["doc:card.pip"])["ok"]
+    assert space_vcs.locks(pc.account, SPACE) == []
+    assert vcs_engine.refresh(pc.account, SPACE, [PLUGIN], pc.backend)["state"] == "ok"
+    assert pc.row("card.pip")["sync_state"] == ""
+    assert pc.run()["pushed"] == 1 and ben.doc("card.pip") == {"hp": 2}
+
+
+def test_a_locked_out_row_stays_out_while_its_lock_is_really_held(pc: PC, ben: Ben) -> None:
+    pc.data.put("card.pip", {"hp": 1})
+    pc.run()
+    ben.client.lock(SPACE, PLUGIN, [LockUnit("doc:card.pip", "card.pip")], "best", {"doc:card.pip": 1})
+    pc.data.put("card.pip", {"hp": 2})
+    pc.run()
+    assert vcs_engine.refresh(pc.account, SPACE, [PLUGIN], pc.backend)["state"] == "ok"
+    r = pc.row("card.pip")
+    assert (r["sync_state"], r["sync_error"]) == ("locked_out", "Locked by Ben")
+    assert pc.run()["pushed"] == 0 and ben.doc("card.pip") == {"hp": 1}
+
+
+def test_requeue_unlocked_frees_rows_whose_lock_lease_ran_out(pc: PC, ben: Ben) -> None:
+    pc.data.put("card.pip", {"hp": 1})
+    pc.run()
+    ben.client.lock(SPACE, PLUGIN, [LockUnit("doc:card.pip", "card.pip")], "best", {"doc:card.pip": 1})
+    pc.data.put("card.pip", {"hp": 2})
+    pc.run()
+    lease_end = space_vcs.foreign_lock(pc.account, SPACE, PLUGIN, "doc:card.pip")["lease_left"] + time.time()
+    assert space_vcs.requeue_unlocked(pc.account, SPACE) == []  # still held: kept out
+    assert space_vcs.requeue_unlocked(pc.account, SPACE, now=lease_end + 1) == [PLUGIN]
+    assert pc.row("card.pip")["sync_state"] == ""
+
+
 def test_a_lock_on_a_unit_this_pc_is_behind_on_pulls_first(pc: PC, ben: Ben) -> None:
     pc.data.put("card.pip", {"hp": 1})
     pc.run()
