@@ -37,7 +37,7 @@ REVISION_S: Buckets = ((10, "10s"), (60, "1m"), (180, "3m"), (None, "more"))
 # Remote View: offer to a live peer link.
 CONNECT_MS: Buckets = ((1000, "1s"), (3000, "3s"), (10000, "10s"), (None, "more"))
 # Remote View stream health, as the viewer measures it (getStats / input echo / page timing).
-FPS: Buckets = ((14.99, "<15"), (29.99, "15-30"), (None, "30+"))
+FPS: Buckets = ((14.99, "under15"), (29.99, "15-30"), (None, "30+"))
 LAG_MS: Buckets = ((50, "50ms"), (150, "150ms"), (400, "400ms"), (None, "more"))
 JITTER_MS: Buckets = ((10, "10ms"), (30, "30ms"), (100, "100ms"), (None, "more"))
 LOSS_PCT: Buckets = ((0, "0"), (1, "1pct"), (5, "5pct"), (None, "more"))

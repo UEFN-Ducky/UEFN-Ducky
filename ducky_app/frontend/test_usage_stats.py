@@ -83,7 +83,7 @@ def test_every_listed_event_validates_and_buckets() -> None:
         "fps": "15-30", "rtt": "150ms", "loss": "1pct", "client": "android_app", "net": "cell"}
     assert ev.validate("remote.quality", {"fps_n": 14.5, "height_px": 1080, "freezes_n": 2, "jitter_ms": 5,
                                           "bitrate_kbps": 1500}) == {
-        "fps": "<15", "res": "1080p", "freezes": "1-3", "jitter": "10ms", "bitrate": "2mbps"}
+        "fps": "under15", "res": "1080p", "freezes": "1-3", "jitter": "10ms", "bitrate": "2mbps"}
     assert ev.validate("remote.quality", {"fps": "30+", "res": "720p"}) == {"fps": "30+", "res": "720p"}
     assert ev.validate("remote.input", {"lag_ms": 500, "dropped_n": 3}) == {"lag": "more", "dropped": "1-5"}
     assert ev.validate("remote.load", SAMPLES["remote.load"]) == {"first_frame": "3s", "page": "1s"}

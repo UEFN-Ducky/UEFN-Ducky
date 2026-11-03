@@ -78,6 +78,68 @@ const REDIAL_MAX_MS = 15_000;
 export const UD_DIRECT_RETRY = "ud-direct-retry";
 export { REMOTE_RESYNC };
 const LOOPBACK_ORIGINS = ["http://127.0.0.1:4199", "http://localhost:4199"];
+/** Link health: getStats every 30 s while live, one aggregated report per minute. */
+const QUALITY_SAMPLE_MS = 30_000;
+const QUALITY_SAMPLES_PER_REPORT = 2;
+/** Input lag: every Nth input carries a seq the desktop echoes; no echo in this long = lost. */
+const INPUT_PROBE_EVERY = 10;
+const INPUT_LOST_MS = 5_000;
+
+/** One minute of input probes: echoed round trips plus probes that never came back. */
+export function summarizeInput(rtts: number[], lost: number): Record<string, number> {
+  const s = [...rtts].sort((a, b) => a - b);
+  return {
+    probes: s.length + lost,
+    lost,
+    p50_ms: s.length ? Math.round(s[Math.floor((s.length - 1) / 2)]) : 0,
+    max_ms: s.length ? Math.round(s[s.length - 1]) : 0,
+  };
+}
+
+/** Cumulative video counters plus the instant readings of one getStats call. */
+export type QualityCounters = {
+  fps: number;
+  freezes: number;
+  lost: number;
+  received: number;
+  bytes: number;
+  jitterMs: number;
+  rttMs: number;
+};
+
+/** Reads the video `inbound-rtp` row and the nominated `candidate-pair` from a getStats map. */
+export function qualityCounters(stats: { forEach(fn: (row: unknown) => void): void }): QualityCounters {
+  const q: QualityCounters = { fps: 0, freezes: 0, lost: 0, received: 0, bytes: 0, jitterMs: 0, rttMs: 0 };
+  stats.forEach((row) => {
+    const r = row as Record<string, unknown>;
+    if (r.type === "inbound-rtp" && (r.kind ?? r.mediaType) === "video") {
+      q.fps = Number(r.framesPerSecond) || 0;
+      q.freezes = Number(r.freezeCount) || 0;
+      q.lost = Math.max(0, Number(r.packetsLost) || 0);
+      q.received = Number(r.packetsReceived) || 0;
+      q.bytes = Number(r.bytesReceived) || 0;
+      q.jitterMs = (Number(r.jitter) || 0) * 1000;
+    } else if (r.type === "candidate-pair" && r.nominated && r.state === "succeeded") {
+      q.rttMs = (Number(r.currentRoundTripTime) || 0) * 1000;
+    }
+  });
+  return q;
+}
+
+/** One minute of samples against the counters at its start: averages, deltas and worst readings. */
+export function summarizeQuality(base: QualityCounters, samples: QualityCounters[], windowMs: number): Record<string, number> {
+  const last = samples[samples.length - 1] ?? base;
+  const lost = Math.max(0, last.lost - base.lost);
+  const got = Math.max(0, last.received - base.received);
+  return {
+    fps: Math.round(samples.reduce((s, x) => s + x.fps, 0) / Math.max(1, samples.length)),
+    freezes: Math.max(0, last.freezes - base.freezes),
+    loss_pct: lost + got ? Math.round((lost * 1000) / (lost + got)) / 10 : 0,
+    jitter_ms: Math.round(Math.max(0, ...samples.map((x) => x.jitterMs))),
+    kbps: Math.round((Math.max(0, last.bytes - base.bytes) * 8) / windowMs),
+    rtt_ms: Math.round(Math.max(0, ...samples.map((x) => x.rttMs))),
+  };
+}
 
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number };
@@ -260,6 +322,16 @@ export class DirectTransport {
   timeline: Array<{ t: number; event: string }> = [];
   lastFailure: Record<string, unknown> | null = null;
   private t0 = 0;
+  private qualityTimer = 0;
+  private qualityBase: QualityCounters | null = null;
+  private qualitySamples: QualityCounters[] = [];
+  private qualityTicks = 0;
+  private inputCount = 0;
+  private inputSeq = 0;
+  /** seq → send time of probes still waiting for their echo. */
+  private inputProbes = new Map<number, number>();
+  private inputRtts: number[] = [];
+  private inputLost = 0;
 
   private mark(event: string) {
     this.timeline.push({ t: Math.round(performance.now() - this.t0), event });
@@ -391,6 +463,7 @@ export class DirectTransport {
         if (this.blob?.readyState === "open") this.flushBlobs();
         this.bridge.report({ connect_ms: Math.round(performance.now() - t0), candidate: "" });
         void this.reportCandidatePair();
+        this.startQuality();
       } else if (st === "failed" || st === "closed") {
         if (this.pc !== pc) return;
         this.fail(this.status.state === "live" ? "Peer connection dropped." : "Peer connection failed.");
@@ -482,6 +555,7 @@ export class DirectTransport {
   }
 
   private teardown() {
+    this.stopQuality();
     const pc = this.pc;
     this.pc = null;
     for (const s of this.streamSockets.values()) s.closeFromPeer();
@@ -715,8 +789,41 @@ export class DirectTransport {
   sendInput(payload: Record<string, unknown>): boolean {
     const ch = this.input;
     if (!ch || ch.readyState !== "open") return false;
-    ch.send(JSON.stringify(payload));
+    this.inputCount += 1;
+    if (this.inputCount % INPUT_PROBE_EVERY === 0) {
+      this.inputSeq += 1;
+      this.inputProbes.set(this.inputSeq, performance.now());
+      ch.send(JSON.stringify({ ...payload, seq: this.inputSeq }));
+    } else ch.send(JSON.stringify(payload));
     return true;
+  }
+
+  private onInputEcho(raw: string) {
+    let seq: unknown;
+    try {
+      seq = (JSON.parse(raw) as { echo?: unknown }).echo;
+    } catch {
+      return;
+    }
+    const sent = typeof seq === "number" ? this.inputProbes.get(seq) : undefined;
+    if (sent === undefined) return;
+    this.inputProbes.delete(seq as number);
+    this.inputRtts.push(performance.now() - sent);
+  }
+
+  /** Probes older than INPUT_LOST_MS count as lost; nothing is sent for a minute with no input. */
+  private reportInput() {
+    const now = performance.now();
+    for (const [seq, t] of this.inputProbes) {
+      if (now - t < INPUT_LOST_MS) continue;
+      this.inputProbes.delete(seq);
+      this.inputLost += 1;
+    }
+    if (!this.inputRtts.length && !this.inputLost) return;
+    const input = summarizeInput(this.inputRtts, this.inputLost);
+    this.inputRtts = [];
+    this.inputLost = 0;
+    this.bridge.report({ input });
   }
 
   onVideo(fn: (stream: MediaStream | null) => void): () => void {
@@ -768,6 +875,7 @@ export class DirectTransport {
       };
     }
     if (this.events) this.events.onmessage = (ev) => typeof ev.data === "string" && this.onEventMessage(ev.data);
+    if (this.input) this.input.onmessage = (ev) => typeof ev.data === "string" && this.onInputEcho(ev.data);
     if (this.blob) {
       this.blob.onmessage = (ev) => this.onBlobMessage(ev.data as string | ArrayBuffer);
       this.blob.onopen = () => {
@@ -775,6 +883,51 @@ export class DirectTransport {
         this.flushBlobs();
       };
     }
+  }
+
+  private startQuality() {
+    this.stopQuality();
+    void this.sampleQuality();
+    this.qualityTimer = window.setInterval(() => {
+      void this.sampleQuality();
+      this.qualityTicks += 1;
+      if (this.qualityTicks % QUALITY_SAMPLES_PER_REPORT === 0) this.reportInput();
+    }, QUALITY_SAMPLE_MS);
+  }
+
+  private stopQuality() {
+    window.clearInterval(this.qualityTimer);
+    this.qualityTimer = 0;
+    this.qualityBase = null;
+    this.qualitySamples = [];
+    this.qualityTicks = 0;
+    // ponytail: probes in flight when the link drops are dropped too; the drop itself is reported.
+    this.inputProbes.clear();
+    this.inputRtts = [];
+    this.inputLost = 0;
+  }
+
+  /** First call sets the baseline; every QUALITY_SAMPLES_PER_REPORT samples after it send one report. */
+  private async sampleQuality() {
+    const pc = this.pc;
+    if (!pc || this.status.state !== "live") return;
+    let q: QualityCounters;
+    try {
+      q = qualityCounters(await pc.getStats());
+    } catch {
+      return;
+    }
+    if (this.pc !== pc) return;
+    if (!this.qualityBase) {
+      this.qualityBase = q;
+      return;
+    }
+    this.qualitySamples.push(q);
+    if (this.qualitySamples.length < QUALITY_SAMPLES_PER_REPORT) return;
+    const quality = summarizeQuality(this.qualityBase, this.qualitySamples, this.qualitySamples.length * QUALITY_SAMPLE_MS);
+    this.qualityBase = q;
+    this.qualitySamples = [];
+    this.bridge.report({ quality });
   }
 
   private async reportCandidatePair() {
