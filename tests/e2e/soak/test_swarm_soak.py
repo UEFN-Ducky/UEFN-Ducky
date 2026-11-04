@@ -1,5 +1,6 @@
 """The swarm soak's numbers from canned samples (no running app needed)."""
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -276,6 +277,43 @@ def test_burst_bar_holds_the_cap_and_names_each_miss():
         "min_free 1.2 GB < 6 GB",
         "listener_requests 3 (UEFN closed: must be 0)",
     ]
+
+
+def test_tool_kind_uses_the_apps_own_names():
+    assert soak.tool_kind(["x.exe", "bridge", "--shared-daemon"]) == "daemon"
+    assert soak.tool_kind(["x.exe", "bridge", "--adapter"]) == "adapter"
+    assert soak.tool_kind(["x.exe", "agent-host", "--slot", "0"]) == "host"
+    assert soak.tool_kind(["x.exe", "bridge", "--port", "4200"]) == "bridge"
+    assert soak.tool_kind(["x.exe"]) == ""
+
+
+def test_tool_numbers_flag_idle_daemons_and_fallbacks():
+    samples = []
+    for i in range(12):  # one sample every 100 s; daemon 7 has a client only at the start
+        samples.append(soak.Sample(t=i * 100.0, tools={
+            "kinds": {"daemon": {"count": 1, "private_mb": 600.0}, "adapter": {"count": 3 + (i == 5), "private_mb": 105.0}},
+            "daemons": [{"pid": 7, "alive": True, "clients": 1 if i == 0 else 0}],
+            "fallbacks": 0 if i < 6 else 2}))
+    nums = soak.tool_numbers(samples)
+    assert nums["tool_kinds"]["adapter"]["count_max"] == 4
+    assert nums["dedicated_fallbacks"] == {"start": 0, "end": 2}
+    assert nums["daemon_idle_longest_s"] == {"7": 1000}
+    summary = {"minutes": 20.0, "agents": 0, "seats_done": 0, **nums}
+    assert soak.bar_failures(summary, cpus=16) == [
+        "dedicated-bridge fallbacks 2 (must be 0)",
+        "daemon 7 alive with 0 clients for 1000 s (idle window 900 s)",
+    ]
+
+
+def test_tool_server_census_reads_daemon_state_and_fallbacks(tmp_path):
+    import os
+
+    (tmp_path / "shared_mcp-h0.json").write_text(json.dumps({"pid": os.getpid(), "port": 1}), encoding="utf-8")
+    (tmp_path / "shared_mcp_fallbacks.json").write_text(json.dumps({"count": 3}), encoding="utf-8")
+    census = soak.tool_server_census(os.getpid(), tmp_path)
+    assert census["fallbacks"] == 3
+    assert census["daemons"] == [{"file": "shared_mcp-h0.json", "pid": os.getpid(), "port": 1,
+                                  "alive": True, "clients": 0}]
 
 
 def test_cpu_meter_sums_committed_bytes_of_the_tree():

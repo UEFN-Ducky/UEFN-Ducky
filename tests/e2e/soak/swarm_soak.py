@@ -76,6 +76,7 @@ class Sample:
     commit_gb: float | None = None  # the PC's commit charge (what Windows has promised to back)
     commit_limit_gb: float | None = None
     tree_private_mb: float | None = None  # committed bytes of the app's whole process tree (agents too)
+    tools: dict[str, Any] = field(default_factory=dict)  # tool_server_census(): kinds, daemons, fallbacks
 
 
 @dataclass
@@ -291,6 +292,7 @@ def seat_numbers(run: Run) -> dict[str, Any]:
         "starts_per_5s": starts_per_window(run.stub_events),
         "commit_gb": _span([x.commit_gb for x in s]),
         "tree_private_mb": _span([x.tree_private_mb for x in s]),
+        **tool_numbers(s),
         "commit_limit_gb": next((x.commit_limit_gb for x in reversed(s) if x.commit_limit_gb), None),
     }
 
@@ -346,6 +348,12 @@ def bar_failures(summary: dict[str, Any], *, squeezed: bool = False, burst: bool
     if page.get("max") is not None and page.get("first") is not None \
             and page["max"] - page["first"] > BAR_PAGEFILE_SPIKE_GB:
         out.append(f"pagefile spike {round(page['max'] - page['first'], 2)} GB > {BAR_PAGEFILE_SPIKE_GB:g} GB")
+    fallbacks = (summary.get("dedicated_fallbacks") or {}).get("end")
+    if fallbacks:
+        out.append(f"dedicated-bridge fallbacks {fallbacks} (must be 0)")
+    for pid, longest in (summary.get("daemon_idle_longest_s") or {}).items():
+        if longest > DAEMON_IDLE_EXIT_S + 60:
+            out.append(f"daemon {pid} alive with 0 clients for {longest} s (idle window {DAEMON_IDLE_EXIT_S:g} s)")
     if squeezed and not summary.get("waiting_max"):
         out.append("squeezed pass queued no seat (admission let every seat start)")
     return out
@@ -704,6 +712,98 @@ class CpuMeter:
         return out
 
 
+def tool_kind(cmdline: list[str]) -> str:
+    """The app's own names for its helper processes (self_health._role)."""
+    args = " ".join(cmdline[1:]).lower()
+    if "--shared-daemon" in args:
+        return "daemon"
+    if "--adapter" in args:
+        return "adapter"
+    if " agent-host" in f" {args}":
+        return "host"
+    if " bridge" in f" {args}" or args.startswith("bridge"):
+        return "bridge"  # a dedicated tool server: one agent, not shared
+    return ""
+
+
+def tool_server_census(root_pid: int, appdata: Path) -> dict[str, Any]:
+    """Tool-server processes of the app's tree by kind (count, private MB), each shared daemon
+    from its ``shared_mcp*.json`` with its live client connections, and the dedicated-bridge
+    fallback count from ``shared_mcp_fallbacks.json``."""
+    import psutil
+
+    kinds: dict[str, dict[str, float]] = {}
+    try:
+        root = psutil.Process(root_pid)
+        procs = [root, *root.children(recursive=True)]
+    except psutil.Error:
+        procs = []
+    for proc in procs:
+        try:
+            kind = tool_kind(proc.cmdline())
+            mem = proc.memory_info()
+        except psutil.Error:
+            continue
+        if kind:
+            row = kinds.setdefault(kind, {"count": 0, "private_mb": 0.0})
+            row["count"] += 1
+            row["private_mb"] = round(row["private_mb"] + getattr(mem, "private", mem.rss) / 2**20, 1)
+    daemons = []
+    states = sorted(appdata.glob("shared_mcp*.json")) if appdata.is_dir() else []
+    states = [p for p in states if p.name != "shared_mcp_fallbacks.json"]
+    conns = None
+    for path in states:
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        pid, port = int(state.get("pid") or 0), int(state.get("port") or 0)
+        if conns is None:
+            try:
+                conns = psutil.net_connections(kind="tcp")
+            except (psutil.Error, OSError):
+                conns = []
+        clients = sum(1 for c in conns if c.status == psutil.CONN_ESTABLISHED and c.raddr
+                      and c.raddr.port == port and c.pid != pid)
+        daemons.append({"file": path.name, "pid": pid, "port": port,
+                        "alive": bool(pid) and psutil.pid_exists(pid), "clients": clients})
+    try:
+        fallbacks = int(json.loads((appdata / "shared_mcp_fallbacks.json").read_text(encoding="utf-8"))
+                        .get("count") or 0)
+    except (OSError, ValueError, AttributeError):
+        fallbacks = 0
+    return {"kinds": kinds, "daemons": daemons, "fallbacks": fallbacks}
+
+
+DAEMON_IDLE_EXIT_S = 900.0  # backend/bridge/shared_mcp._IDLE_EXIT_S
+
+
+def tool_numbers(samples: list[Sample]) -> dict[str, Any]:
+    """Over the run: most processes and private MB per tool-server kind, dedicated fallbacks at the
+    start and end, and each daemon's longest stretch alive with 0 clients."""
+    kinds: dict[str, dict[str, float]] = {}
+    idle: dict[int, dict[str, float]] = {}  # pid -> {since, longest}
+    for s in samples:
+        for kind, row in (s.tools.get("kinds") or {}).items():
+            best = kinds.setdefault(kind, {"count_max": 0, "private_mb_max": 0.0})
+            best["count_max"] = max(best["count_max"], row.get("count", 0))
+            best["private_mb_max"] = max(best["private_mb_max"], row.get("private_mb", 0.0))
+        for d in s.tools.get("daemons") or []:
+            run = idle.setdefault(int(d.get("pid") or 0), {"since": None, "longest": 0.0})
+            if d.get("alive") and not d.get("clients"):
+                run["since"] = s.t if run["since"] is None else run["since"]
+                run["longest"] = max(run["longest"], s.t - run["since"])
+            else:
+                run["since"] = None
+    with_tools = [s for s in samples if s.tools]
+    return {
+        "tool_kinds": kinds,
+        "dedicated_fallbacks": {"start": with_tools[0].tools.get("fallbacks") if with_tools else None,
+                                "end": with_tools[-1].tools.get("fallbacks") if with_tools else None},
+        "daemon_idle_longest_s": {str(pid): round(r["longest"]) for pid, r in idle.items() if pid},
+    }
+
+
 def memory_compression_mb() -> float | None:
     """Resident size of Windows' Memory Compression process; None when it can't be read."""
     import psutil
@@ -1009,7 +1109,8 @@ def send_refused(reply: Any) -> str:
 
 def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: float, stub_log: Path,
              director: Any = None, *, members_as_agent: bool = False, drain_minutes: float = 0.0,
-             listener: ListenerCounter | None = None, terminal_s: float = 30.0) -> Run:
+             listener: ListenerCounter | None = None, terminal_s: float = 30.0,
+             appdata: Path | None = None) -> Run:
     """``members_as_agent``: the lead's task is the person's send; every member's comes from the
     lead (agent_send), as a team runs, so member turns pass memory admission. ``drain_minutes``:
     after ``minutes``, keep measuring until every seat's turn ended (or this much longer)."""
@@ -1051,6 +1152,8 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
                        listener_requests=listener.count if listener is not None else None)
             s.commit_gb, s.commit_limit_gb = commit_charge_gb()
             s.tree_private_mb = round(cpu["tree_private_mb"], 1)
+            if appdata is not None:
+                s.tools = tool_server_census(app_pid, appdata)
             try:
                 snap = panel.call("ducky_health_snapshot", timeout=30) or {}
                 app = snap.get("app") or {}
@@ -1224,7 +1327,8 @@ def main() -> int:
         run = run_soak(panel, proc.pid, chats, args.minutes, stub_log,
                        director=interrupt_director if args.scenario == "interrupt" else None,
                        members_as_agent=args.members_as_agent, drain_minutes=args.drain_minutes,
-                       listener=listener, terminal_s=args.terminal_s)
+                       listener=listener, terminal_s=args.terminal_s,
+                       appdata=box / "Local" / "UEFN-Ducky")
         run.index_lock_left = (repo / ".git" / "index.lock").exists()
         after = pc_state(exclude_root=proc.pid)
         summary = summarize(run)
