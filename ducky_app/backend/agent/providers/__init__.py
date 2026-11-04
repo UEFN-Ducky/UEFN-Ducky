@@ -69,10 +69,18 @@ def all_providers() -> tuple[str, ...]:
 
 _QUOTA_RE = re.compile(r"\b429\b|rate[_ ]?limit|insufficient_quota|quota", re.IGNORECASE)
 _OUTPUT_KINDS = (StreamEventKind.TEXT_DELTA, StreamEventKind.TOOL_CALLS, StreamEventKind.THINKING)
-# Service hiccups worth re-opening the step for (only before any output streamed).
+# Service hiccups worth re-opening the step for (only before any output streamed). A site
+# at its stream limit says "too many streams … retry shortly", and a stream a proxy cut
+# ends in IncompleteRead (Nov 3 2026): both crashed the turn before.
 _TRANSIENT_RE = re.compile(
-    r"\bbusy\b|overloaded|\b50[234]\b|timed out|timeout|connection reset", re.IGNORECASE
+    r"\bbusy\b|overloaded|\b50[234]\b|timed out|timeout|connection reset"
+    r"|too many streams|retry shortly|service unavailable|incompleteread"
+    r"|connection (?:dropped|aborted)|remote end closed",
+    re.IGNORECASE,
 )
+# What the chat shows while a step waits to be sent again: it looks like work. A person
+# never reads about busy services or retries.
+_RETRY_STATUS = "Working…"
 _RETRY_AFTER_RE = re.compile(r"retry(?:_after|[ -]after| in)\D{0,4}(\d+)", re.IGNORECASE)
 _RETRY_DELAYS: tuple[float, ...] = (2.0, 5.0, 12.0)
 # The person's Ducky AI plan limit ("You've used your Ducky AI for now. It's back in 4 h."):
@@ -258,10 +266,7 @@ class _UsageTrackingProvider:
                 if retry_text is not None:
                     delay = _retry_delay(retry_text, transient_tries)
                     transient_tries += 1
-                    yield StreamEvent(
-                        kind=StreamEventKind.STATUS,
-                        text=f"Ducky AI busy, retrying ({transient_tries}/{len(_RETRY_DELAYS)}) in {delay:g} s",
-                    )
+                    yield StreamEvent(kind=StreamEventKind.STATUS, text=_RETRY_STATUS)
                     if await _cancel_aware_sleep(delay, kwargs.get("cancel_event")):
                         yield StreamEvent(kind=StreamEventKind.ERROR, error=retry_text)
                         return

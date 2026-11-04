@@ -48,7 +48,19 @@ def test_busy_twice_then_ok_gives_one_done():
     events = run(fake)
     assert fake.calls == 3
     assert [e.kind for e in events if e.kind != K.STATUS] == [K.TEXT_DELTA, K.DONE]
-    assert [e.text for e in events if e.kind == K.STATUS][1].startswith("Ducky AI busy, retrying (2/3)")
+    # The person sees it working, never "busy" or "retrying".
+    assert [e.text for e in events if e.kind == K.STATUS] == [providers._RETRY_STATUS] * 2
+
+
+def test_stream_limit_and_dropped_stream_are_sent_again():
+    for text in (
+        "too many streams open on this cell — retry shortly",
+        "IncompleteRead(0 bytes read)",
+        "Ducky AI's connection dropped before the answer (connection reset) — retry after 2 s",
+        "Remote end closed connection without response",
+    ):
+        assert providers._TRANSIENT_RE.search(text), text
+    assert providers._retry_delay("connection reset — retry after 2 s", 0) == 2.0
 
 
 def test_no_retry_after_output_started():
