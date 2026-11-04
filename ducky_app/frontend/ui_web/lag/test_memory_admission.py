@@ -74,7 +74,7 @@ def test_free_5_gb_queues_past_the_floor_of_two(pc):
     pushed = []
     assert not adm.may_start("c", "agent", start=lambda: None, push=pushed.append)
     assert [w.conv_id for w in adm._waiting] == ["c"]
-    assert pushed[-1]["text"] == "Waiting for memory (5.0 GB free) — 1st in line"
+    assert pushed[-1]["text"] == "Waiting for memory (5.0 GB free, keeps 6 GB free) — 1st in line"
 
 
 def test_a_queued_turn_starts_when_free_ram_returns(pc):

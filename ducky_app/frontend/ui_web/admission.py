@@ -2,7 +2,7 @@
 
 Agents kept starting while the PC had 0.1 GB free, and the window process died out of
 memory. A sub-lead's or member's turn now waits in one FIFO line until starting it leaves at
-least ``agent_min_free_ram_gb`` (default 6 GB) free, or fewer than ``FLOOR`` member turns run
+least ``agent_min_free_ram_gb`` (default 15% of the PC's RAM, 1.5 to 6 GB) free, or fewer than ``FLOOR`` member turns run
 (so a team always moves). Starting one costs what an agent measurably uses: the rolling
 average of the live agent processes (claude.exe, node, its bridges) per running agent, not a
 constant. Agents started in the last ``RESERVE_S`` are counted as already using it, since a
@@ -23,7 +23,11 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-START_FREE_GB = 6.0  # default for the agent_min_free_ram_gb setting
+# Default for the agent_min_free_ram_gb setting: a share of the PC's RAM, kept between these.
+# A flat 6 GB held a 16 GB PC with UEFN open at FLOOR turns, and an 8 GB one could never pass it.
+START_FREE_GB = 6.0
+MIN_START_FREE_GB = 1.5
+START_FREE_SHARE = 0.15
 FLOOR = 2
 # Until agents run to measure: a real coding agent is ~230 MB plus node and two bridges.
 DEFAULT_AGENT_GB = 0.3
@@ -94,12 +98,22 @@ def free_memory_gb() -> float:
 _read_free = free_memory_gb
 
 
+def default_min_free_gb(total_gb: float | None = None) -> float:
+    """15% of the PC's RAM, at least 1.5 GB and at most 6 GB (8 GB -> 1.5, 16 -> 2.4, 32 -> 4.8)."""
+    if total_gb is None:
+        from frontend.ui_web.seat_queue import total_memory_gb
+
+        total_gb = total_memory_gb()
+    return round(min(START_FREE_GB, max(MIN_START_FREE_GB, START_FREE_SHARE * float(total_gb))), 2)
+
+
 def min_free_gb() -> float:
-    """The ``agent_min_free_ram_gb`` setting (env ``UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB`` wins)."""
+    """The ``agent_min_free_ram_gb`` setting (env ``UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB`` wins), else
+    ``default_min_free_gb``."""
     now = _now()
     if now - _floor_cache["at"] < COST_EVERY_S:
         return _floor_cache["gb"]
-    gb = START_FREE_GB
+    gb = default_min_free_gb()
     raw = os.environ.get("UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB")
     try:
         if raw:
@@ -314,7 +328,8 @@ def _show_positions() -> None:
         return
     free = _read_free()
     for w, pos in moved:
-        _say(w, f"Waiting for memory ({free:.1f} GB free) — {_ordinal(pos)} in line", position=pos)
+        _say(w, f"Waiting for memory ({free:.1f} GB free, keeps {min_free_gb():g} GB free) — {_ordinal(pos)} in line",
+             position=pos)
 
 
 def biggest_users(n: int = 5) -> list[dict[str, Any]]:

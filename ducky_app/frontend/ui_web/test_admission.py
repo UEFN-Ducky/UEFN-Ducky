@@ -50,9 +50,9 @@ def test_low_memory_starts_two_members_and_lines_up_the_rest(line):
     assert not _ask(line, "m4", pushed=pushed)
     assert not _ask(line, "m5", pushed=pushed)
     assert [w.conv_id for w in adm._waiting] == ["m3", "m4", "m5"]
-    assert [e["text"] for e in pushed] == ["Waiting for memory (2.5 GB free) — 1st in line",
-                                           "Waiting for memory (2.5 GB free) — 2nd in line",
-                                           "Waiting for memory (2.5 GB free) — 3rd in line"]
+    assert [e["text"] for e in pushed] == ["Waiting for memory (2.5 GB free, keeps 6 GB free) — 1st in line",
+                                           "Waiting for memory (2.5 GB free, keeps 6 GB free) — 2nd in line",
+                                           "Waiting for memory (2.5 GB free, keeps 6 GB free) — 3rd in line"]
     adm.release("m1")  # a turn ended: the floor lets exactly the oldest one in
     line["wait"](1)
     assert line["started"] == ["m3"]
@@ -121,3 +121,37 @@ def test_a_five_minute_wait_names_the_five_biggest_memory_users(line, monkeypatc
 
 def test_free_memory_reads_something():
     assert adm.free_memory_gb() > 0
+
+
+@pytest.mark.parametrize("total, floor", [(8, 1.5), (16, 2.4), (32, 4.8), (64, 6.0), (97, 6.0), (4, 1.5)])
+def test_the_default_floor_scales_with_the_pcs_ram(total, floor):
+    assert adm.default_min_free_gb(total) == floor
+
+
+def test_the_setting_and_env_still_win_over_the_ram_based_floor(monkeypatch):
+    from frontend.ui_web import seat_queue
+    from frontend.settings import PanelSettings
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(adm, "_now", lambda: clock["t"])
+    monkeypatch.setattr(adm, "_floor_cache", {"gb": 0.0, "at": float("-inf")})
+    monkeypatch.setattr(seat_queue, "total_memory_gb", lambda: 16.0)
+    monkeypatch.delenv("UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB", raising=False)
+    settings = type("S", (), {"agent_min_free_ram_gb": None})()
+    monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls: settings))
+    assert adm.min_free_gb() == 2.4  # the 16 GB default
+    settings.agent_min_free_ram_gb = 3.0
+    clock["t"] += adm.COST_EVERY_S
+    assert adm.min_free_gb() == 3.0
+    monkeypatch.setenv("UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB", "1")
+    clock["t"] += adm.COST_EVERY_S
+    assert adm.min_free_gb() == 1.0
+
+
+def test_the_waiting_message_names_the_floor_in_use(line, monkeypatch):
+    monkeypatch.setattr(adm, "min_free_gb", lambda: 2.4)
+    pushed: list[dict] = []
+    line["free"]["gb"] = 2.0
+    assert _ask(line, "m1") and _ask(line, "m2")
+    assert not _ask(line, "m3", pushed=pushed)
+    assert pushed[-1]["text"] == "Waiting for memory (2.0 GB free, keeps 2.4 GB free) — 1st in line"
