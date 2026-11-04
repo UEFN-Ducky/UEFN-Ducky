@@ -187,7 +187,8 @@ export function summarizeQuality(base: QualityCounters, samples: QualityCounters
 }
 
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number };
+/** `resend`: ask again with the same `rid` on the next link (a drop lost the answer). */
+type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number; resend: () => void };
 
 let singleton: DirectTransport | null = null;
 
@@ -332,6 +333,9 @@ export class DirectTransport {
 
   private videoStream: MediaStream | null = null;
   private nextId = 1;
+  /** Request ids that survive a redial: `<page>:<n>`; the desktop runs each rid once. */
+  private readonly pageId = Math.random().toString(36).slice(2, 10);
+  private nextRid = 1;
   private pending = new Map<number, Pending>();
   private parts = new PartAssembler();
   private eventListeners = new Set<(event: AgentEvent) => void>();
@@ -669,11 +673,15 @@ export class DirectTransport {
     }
     this.mark(`failed: ${reason}`);
     this.teardown();
-    for (const p of this.pending.values()) {
-      window.clearTimeout(p.timer);
-      p.reject(new Error(reason));
-    }
+    // Calls in flight: resent with the same rid once the redial is up (the desktop answers a
+    // rid once, so nothing runs twice); a link that never went live gives up as before.
+    const calls = [...this.pending.values()];
     this.pending.clear();
+    for (const p of calls) {
+      window.clearTimeout(p.timer);
+      if (this.wasLive) this.queueInvoke(p.resend, p.reject);
+      else p.reject(new Error(reason));
+    }
     // Pictures and videos mid-download: ask again once the redial is up (nothing else would,
     // so they stayed broken after a phone slept or switched network); give up when not redialing.
     const inflight = [...this.blobWaiters.values()];
@@ -730,7 +738,20 @@ export class DirectTransport {
 
   // ── rpc ──────────────────────────────────────────────────────────────────
 
+  /** Wait for the link with a deadline: gone after RPC_TIMEOUT_MS if it never came back. */
+  private queueInvoke(send: () => void, reject: (e: Error) => void) {
+    this.queuedInvokes.push(send);
+    window.setTimeout(() => {
+      const i = this.queuedInvokes.indexOf(send);
+      if (i >= 0) {
+        this.queuedInvokes.splice(i, 1);
+        reject(new Error("desktop not connected"));
+      }
+    }, RPC_TIMEOUT_MS);
+  }
+
   invoke(method: string, args: unknown[]): Promise<unknown> {
+    const rid = `${this.pageId}:${this.nextRid++}`;
     return new Promise((resolve, reject) => {
       const send = () => {
         const ch = this.rpc;
@@ -753,24 +774,16 @@ export class DirectTransport {
           resolve: (v) => resolve(rewriteLoopbackUrls(v, LOOPBACK_ORIGINS, assetBase())),
           reject,
           timer,
+          resend: send,
         });
-        const text = JSON.stringify({ id, method, args });
+        const text = JSON.stringify({ id, rid, method, args });
         const pieces = splitText(text);
         void sendPaced(ch, pieces.length === 1 ? [text] : pieces.map((data, part) => JSON.stringify({ id, part, of: pieces.length, data })));
       };
       if (this.status.state === "live" && this.rpc?.readyState === "open") send();
       // A redial in progress (or waiting on a wake): the call goes once the link is back.
       else if (this.status.state === "failed") reject(new Error(this.status.reason || "desktop not connected"));
-      else {
-        this.queuedInvokes.push(send);
-        window.setTimeout(() => {
-          const i = this.queuedInvokes.indexOf(send);
-          if (i >= 0) {
-            this.queuedInvokes.splice(i, 1);
-            reject(new Error("desktop not connected"));
-          }
-        }, RPC_TIMEOUT_MS);
-      }
+      else this.queueInvoke(send, reject);
     });
   }
 

@@ -164,6 +164,63 @@ describe("a link that drops after it was live (a phone that slept)", () => {
     await expect(call).resolves.toBe("pong");
   });
 
+  it("resends a call whose answer a drop lost, with the same rid, and it resolves once", async () => {
+    const t = await liveTransport();
+    const call = t.invoke("send_message", ["c1", "hi"]);
+    await flush();
+    const first = pcOf(t).channels.find((c) => c.label === "rpc")!;
+    const sent = JSON.parse(first.sent[0]) as { id: number; rid: string; method: string };
+    expect(sent.method).toBe("send_message");
+    expect(sent.rid).toMatch(/^[a-z0-9]+:\d+$/);
+    pcOf(t).drop(); // the desktop ran it, but the answer never arrived
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flush();
+    const pc = pcOf(t);
+    pc.up();
+    await flush();
+    const rpc = pc.channels.find((c) => c.label === "rpc")!;
+    const again = JSON.parse(rpc.sent[0]) as { id: number; rid: string };
+    expect(again.rid).toBe(sent.rid);
+    rpc.onmessage?.({ data: JSON.stringify({ id: again.id, ok: true, result: "sent once" }) });
+    await expect(call).resolves.toBe("sent once");
+  });
+
+  it("1,000 calls across 5 drops: all delivered, each rid run once", async () => {
+    const t = await liveTransport();
+    const runs = new Map<string, number>();
+    const answers = new Map<string, unknown>();
+    const results: Array<Promise<unknown>> = [];
+    let n = 0;
+    // The desktop: runs a rid the first time it sees it, answers a resend from its record.
+    const serve = (answerEvery: number) => {
+      const rpc = pcOf(t).channels.find((c) => c.label === "rpc")!;
+      const reqs = rpc.sent.splice(0).map((s) => JSON.parse(s) as { id: number; rid: string });
+      reqs.forEach((req, i) => {
+        if (!answers.has(req.rid)) {
+          runs.set(req.rid, (runs.get(req.rid) ?? 0) + 1);
+          answers.set(req.rid, req.rid);
+        }
+        if (i % answerEvery === 0) rpc.onmessage?.({ data: JSON.stringify({ id: req.id, ok: true, result: answers.get(req.rid) }) });
+      });
+    };
+    for (let round = 0; round < 6; round += 1) {
+      if (round < 5) for (let i = 0; i < 200; i += 1) results.push(t.invoke("ping_effect", [n++]));
+      await flush();
+      serve(round < 5 ? 2 : 1); // half the answers lost to the drop, the last round answers all
+      if (round === 5) break;
+      pcOf(t).drop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await flush();
+      pcOf(t).up();
+      await flush();
+    }
+    const got = await Promise.all(results);
+    expect(got).toHaveLength(1000);
+    expect(new Set(got).size).toBe(1000);
+    expect(runs.size).toBe(1000);
+    expect([...runs.values()].every((c) => c === 1)).toBe(true);
+  });
+
   it("backs off between failed redials, capped at 15 s", async () => {
     const t = await liveTransport();
     FakePc.all[0].drop();
