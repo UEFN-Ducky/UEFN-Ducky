@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+import frontend.ui_web.panel_api  # noqa: F401  (loads panel_api_chats without the import cycle)
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 
 
