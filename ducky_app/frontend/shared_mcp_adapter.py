@@ -18,7 +18,14 @@ import time
 from pathlib import Path
 
 _STATE = "shared_mcp.json"
+# backend.bridge.shared_mcp.SLOT_ENV: set on every agent host, its agents and their adapters.
+_SLOT_ENV = "UEFN_DUCKY_SHARED_MCP_SLOT"
+_FALLBACKS = "shared_mcp_fallbacks.json"
 _MAX_FRAME = 16 * 1024 * 1024
+# A busy daemon can miss the hello window; one more try before spawning or falling back
+# to a dedicated bridge (a whole backend, 300-700 MB, per agent).
+_HELLO_TIMEOUT_S = 10.0
+_HELLO_BACKOFF_S = 1.0
 
 
 def _moved_panel_port() -> int:
@@ -63,9 +70,24 @@ def _app_data() -> Path:
     return Path(base) / "UEFN-Ducky"
 
 
+def _slot() -> str:
+    slot = (os.environ.get(_SLOT_ENV) or "").strip()
+    return slot if slot.isdigit() else ""
+
+
+def _state_name() -> str:
+    """Same file as ``shared_mcp.state_path``: an agent host's agents join that host's daemon.
+
+    Nov 4 2026: adapters always read ``shared_mcp.json``, so every host agent joined the
+    app's daemon and each host's own daemon idled at 0 clients and ~700 MB.
+    """
+    slot = _slot()
+    return f"shared_mcp-h{slot}.json" if slot else _STATE
+
+
 def _read_state() -> dict | None:
     try:
-        data = json.loads((_app_data() / _STATE).read_text(encoding="utf-8"))
+        data = json.loads((_app_data() / _state_name()).read_text(encoding="utf-8"))
         return data if isinstance(data, dict) and data.get("token") and data.get("port") else None
     except (OSError, ValueError):
         return None
@@ -151,23 +173,63 @@ def _stop_bridge_pid(pid: int) -> None:
         pass
 
 
-def _try_hello(state: dict) -> socket.socket | None:
+def _hello_attempt(state: dict, read_timeout: float = _HELLO_TIMEOUT_S) -> tuple[socket.socket | None, bool]:
+    """(socket or None, True when the daemon accepted but missed the hello window)."""
     try:
         sock = socket.create_connection((str(state.get("host") or "127.0.0.1"), int(state["port"])), timeout=2.0)
     except OSError:
-        return None
+        return None, False
     try:
-        sock.settimeout(10.0)
+        sock.settimeout(read_timeout)
         _write_frame(sock, {"op": "hello", "token": str(state["token"]), "key": state.get("key") or {}, "identity": _identity()})
         reply = _read_frame(sock)
+    except (socket.timeout, TimeoutError):
+        sock.close()
+        return None, True
     except (OSError, ValueError, EOFError):
         sock.close()
-        return None
+        return None, False
     if reply.get("op") != "hello_ok":
         sock.close()
-        return None
+        return None, False
     sock.settimeout(None)
+    return sock, False
+
+
+def _try_hello(state: dict) -> socket.socket | None:
+    return _hello_attempt(state)[0]
+
+
+def _hello_with_retry(state: dict) -> socket.socket | None:
+    """A daemon that is up but slow gets one more, longer, try after a short backoff."""
+    sock, slow = _hello_attempt(state)
+    if sock is None and slow:
+        time.sleep(_HELLO_BACKOFF_S)
+        sock, _slow = _hello_attempt(state, _HELLO_TIMEOUT_S * 2)
     return sock
+
+
+def _record_fallback(reason: str) -> int:
+    """Count each agent that runs its own dedicated bridge instead of the shared daemon."""
+    path = _app_data() / _FALLBACKS
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        count = int(data.get("count") or 0) if isinstance(data, dict) else 0
+    except (OSError, ValueError, TypeError):
+        count = 0
+    count += 1
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"count": count, "last_at": time.time(), "slot": _slot(),
+                                    "reason": reason, "pid": os.getpid()}), encoding="utf-8")
+    except OSError:
+        pass
+    try:
+        sys.stderr.write(f"[ducky] shared tool server unreachable ({reason}): dedicated bridge #{count}\n")
+        sys.stderr.flush()
+    except (OSError, ValueError, AttributeError):
+        pass
+    return count
 
 
 def _ask_app_to_start() -> bool:
@@ -194,7 +256,10 @@ def _ask_app_to_start() -> bool:
 
 
 def _spawn_daemon(bridge_args: list[str]) -> None:
-    if _ask_app_to_start():
+    # An agent host's agent never asks the app: the app has no slot and would start an
+    # unslotted daemon. Its host's readiness gate already started the slot's daemon; this
+    # only replaces one that died, with the slot env inherited (proc_exec spares it).
+    if not _slot() and _ask_app_to_start():
         return
     # No app running (an IDE on its own): start it here, outside this agent's job if allowed.
     if getattr(sys, "frozen", False):
@@ -229,7 +294,7 @@ def connect(bridge_args: list[str], timeout_s: float = 30.0) -> socket.socket | 
         while time.time() < deadline and state and _stale(state):
             time.sleep(0.1)
             state = _read_state()
-    if state and not _stale(state) and (sock := _try_hello(state)):
+    if state and not _stale(state) and (sock := _hello_with_retry(state)):
         return sock
     _spawn_daemon(bridge_args)
     deadline = time.time() + timeout_s
@@ -254,6 +319,7 @@ def run(bridge_args: list[str]) -> bool:
     """
     first = connect(bridge_args)
     if first is None:
+        _record_fallback("no shared daemon answered")
         return False
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
