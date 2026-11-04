@@ -73,6 +73,8 @@ class Sample:
     pagefile_gb: float | None = None  # page file in use (psutil swap on Windows)
     waiting: int | None = None  # seats sent a task whose turn has not started (the admission line)
     listener_requests: int | None = None  # connections to the sandbox's listener port so far
+    commit_gb: float | None = None  # the PC's commit charge (what Windows has promised to back)
+    commit_limit_gb: float | None = None
 
 
 @dataclass
@@ -195,6 +197,69 @@ def _span(values: list[float | None]) -> dict[str, float | None]:
     return {"first": _r(vals[0]), "max": _r(max(vals)), "last": _r(vals[-1]), "growth": _r(vals[-1] - vals[0])}
 
 
+def max_concurrent_turns(events: list[dict[str, Any]]) -> int:
+    """Most stub turns alive at the same moment (turn_start .. turn_end per session)."""
+    edges: list[tuple[float, int]] = []
+    open_at: dict[str, float] = {}
+    for e in events:
+        key = str(e.get("session") or e.get("pid") or "")
+        if e.get("kind") == "turn_start":
+            open_at[key] = float(e.get("t") or 0)
+            edges.append((float(e.get("t") or 0), 1))
+        elif e.get("kind") == "turn_end" and key in open_at:
+            open_at.pop(key)
+            edges.append((float(e.get("t") or 0), -1))
+    alive = peak = 0
+    for _t, step in sorted(edges, key=lambda x: (x[0], x[1])):  # an end before a start at the same t
+        alive += step
+        peak = max(peak, alive)
+    return peak
+
+
+def starts_per_window(events: list[dict[str, Any]], window_s: float = 5.0, windows: int = 24) -> list[int]:
+    """How many turns started in each window from the first start: waves show as small, even counts."""
+    starts = sorted(float(e.get("t") or 0) for e in events if e.get("kind") == "turn_start")
+    if not starts:
+        return []
+    out = [0] * windows
+    for t in starts:
+        i = int((t - starts[0]) // window_s)
+        if i < windows:
+            out[i] += 1
+    return out
+
+
+def pc_seat_cap() -> int:
+    """The seat queue's default cap on this PC (seat_queue.pc_limit): half the cores, half the GB."""
+    import psutil
+
+    return max(1, min((os.cpu_count() or 2) // 2, int(psutil.virtual_memory().total / 2**30) // 2))
+
+
+def commit_charge_gb() -> tuple[float | None, float | None]:
+    """(commit in use, commit limit) in GB from GetPerformanceInfo; (None, None) off Windows."""
+    if sys.platform != "win32":
+        return None, None
+    import ctypes
+    from ctypes import wintypes
+
+    class PerfInfo(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("CommitTotal", ctypes.c_size_t), ("CommitLimit", ctypes.c_size_t),
+                    ("CommitPeak", ctypes.c_size_t), ("PhysicalTotal", ctypes.c_size_t),
+                    ("PhysicalAvailable", ctypes.c_size_t), ("SystemCache", ctypes.c_size_t),
+                    ("KernelTotal", ctypes.c_size_t), ("KernelPaged", ctypes.c_size_t),
+                    ("KernelNonpaged", ctypes.c_size_t), ("PageSize", ctypes.c_size_t),
+                    ("HandleCount", wintypes.DWORD), ("ProcessCount", wintypes.DWORD),
+                    ("ThreadCount", wintypes.DWORD)]
+
+    info = PerfInfo()
+    info.cb = ctypes.sizeof(info)
+    if not ctypes.windll.psapi.GetPerformanceInfo(ctypes.byref(info), info.cb):
+        return None, None
+    page = info.PageSize / 2**30
+    return round(info.CommitTotal * page, 2), round(info.CommitLimit * page, 2)
+
+
 def seat_numbers(run: Run) -> dict[str, Any]:
     """Final check 2's measures: memory per role over the run, Memory Compression, page file,
     the admission line, listener requests, terminal waits, UI stalls and seats finished."""
@@ -217,23 +282,32 @@ def seat_numbers(run: Run) -> dict[str, Any]:
                             "max": _r(max(waits), 2) if waits else None},
         "ui_stalls": run.ui.get("ui_stalls"), "ui_stall_p95_ms": run.ui.get("ui_stall_p95_ms"),
         "seats_started": len(started - {None, ""}), "seats_done": len(ended - {None, ""}),
+        "max_concurrent_turns": max_concurrent_turns(run.stub_events),
+        "starts_per_5s": starts_per_window(run.stub_events),
+        "commit_gb": _span([x.commit_gb for x in s]),
+        "commit_limit_gb": next((x.commit_limit_gb for x in reversed(s) if x.commit_limit_gb), None),
     }
 
 
 # Final check 2's pass bar (the person's: 300 seats, UEFN closed, memory under control).
 BAR_STALLS_PER_15_MIN = 20
 BAR_STALL_P95_MS = 200.0
-BAR_WEBVIEW_CPU = 25.0
+BAR_WEBVIEW_CPU = 25.0  # % of ONE core, averaged (the soak samples % of the whole PC)
 BAR_TERMINAL_WAIT_S = 5.0
 BAR_GROWTH_MB = 300.0
 BAR_MIN_FREE_GB = 6.0
 BAR_MEMCOMP_CLIMB_MB = 500.0
 BAR_PAGEFILE_SPIKE_GB = 1.0
+BAR_COMMIT_CLIMB_GB = 4.0  # burst: commit may not climb toward the limit
 
 
-def bar_failures(summary: dict[str, Any], *, squeezed: bool = False) -> list[str]:
+def bar_failures(summary: dict[str, Any], *, squeezed: bool = False, burst: bool = False,
+                 seat_cap: int | None = None, cpus: int | None = None) -> list[str]:
     """One line per missed bar ([] = the run passes). A squeezed pass checks queueing and paging;
-    its free-RAM floor is the squeeze itself, so the 6 GB floor is not applied there."""
+    its free-RAM floor is the squeeze itself, so the 6 GB floor is not applied there. A burst pass
+    (every seat sent at once, a few minutes) checks the seat cap, waves, commit and listener only."""
+    if burst:
+        return burst_failures(summary, seat_cap=seat_cap)
     out: list[str] = []
     minutes = max(float(summary.get("minutes") or 0), 1e-9)
     stalls = summary.get("ui_stalls")
@@ -243,8 +317,9 @@ def bar_failures(summary: dict[str, Any], *, squeezed: bool = False) -> list[str
     if stalls and p95 is not None and p95 >= BAR_STALL_P95_MS:
         out.append(f"ui_stall_p95 {p95} ms >= {BAR_STALL_P95_MS:g} ms")
     web = ((summary.get("cpu_pct_of_pc") or {}).get("webview2") or {}).get("avg")
-    if web is not None and web >= BAR_WEBVIEW_CPU:
-        out.append(f"webview2_cpu avg {web}% >= {BAR_WEBVIEW_CPU:g}%")
+    core = round(web * (cpus or os.cpu_count() or 1), 1) if web is not None else None
+    if core is not None and core >= BAR_WEBVIEW_CPU:
+        out.append(f"webview2_cpu avg {core}% of one core >= {BAR_WEBVIEW_CPU:g}%")
     wait = (summary.get("terminal_wait_s") or {}).get("max")
     if wait is not None and wait > BAR_TERMINAL_WAIT_S:
         out.append(f"terminal_wait max {wait} s > {BAR_TERMINAL_WAIT_S:g} s")
@@ -267,6 +342,33 @@ def bar_failures(summary: dict[str, Any], *, squeezed: bool = False) -> list[str
         out.append(f"pagefile spike {round(page['max'] - page['first'], 2)} GB > {BAR_PAGEFILE_SPIKE_GB:g} GB")
     if squeezed and not summary.get("waiting_max"):
         out.append("squeezed pass queued no seat (admission let every seat start)")
+    return out
+
+
+def burst_failures(summary: dict[str, Any], *, seat_cap: int | None = None) -> list[str]:
+    """Pass B: every seat sent at once. Turns stay at or under the seat cap, the rest wait and
+    start in waves, commit and free RAM don't climb, no listener request, and seats did start."""
+    out: list[str] = []
+    cap = seat_cap if seat_cap is not None else pc_seat_cap()
+    peak = summary.get("max_concurrent_turns")
+    if peak is not None and peak > cap:
+        out.append(f"max_concurrent_turns {peak} > seat cap {cap}")
+    if not summary.get("seats_started"):
+        out.append("no seat started")
+    elif summary.get("agents", 0) > cap and not summary.get("waiting_max"):
+        out.append("no seat waited in line (the cap did not hold the rest back)")
+    first = (summary.get("starts_per_5s") or [0])[0]
+    if first > cap:
+        out.append(f"{first} turns started in the first 5 s (> cap {cap}: no waves)")
+    commit = summary.get("commit_gb") or {}
+    if commit.get("max") is not None and commit.get("first") is not None \
+            and commit["max"] - commit["first"] > BAR_COMMIT_CLIMB_GB:
+        out.append(f"commit climbed {round(commit['max'] - commit['first'], 2)} GB > {BAR_COMMIT_CLIMB_GB:g} GB")
+    low = summary.get("min_free_gb")
+    if low is not None and low < BAR_MIN_FREE_GB:
+        out.append(f"min_free {low} GB < {BAR_MIN_FREE_GB:g} GB")
+    if summary.get("listener_requests"):
+        out.append(f"listener_requests {summary['listener_requests']} (UEFN closed: must be 0)")
     return out
 
 
@@ -936,6 +1038,7 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
                        pagefile_gb=round(psutil.swap_memory().used / 2**30, 2),
                        waiting=len(sent - tail.started),
                        listener_requests=listener.count if listener is not None else None)
+            s.commit_gb, s.commit_limit_gb = commit_charge_gb()
             try:
                 snap = panel.call("ducky_health_snapshot", timeout=30) or {}
                 app = snap.get("app") or {}
@@ -1045,6 +1148,9 @@ def main() -> int:
     ap.add_argument("--terminal-s", type=float, default=30.0, help="STUB_TERMINAL_S: each terminal command")
     ap.add_argument("--squeeze-free-gb", type=float, default=0.0,
                     help="hold memory in a filler process until the PC has about this much free")
+    ap.add_argument("--burst", action="store_true",
+                    help="pass B: judge the seat cap, waves, commit and listener only (every seat sent at once)")
+    ap.add_argument("--seat-cap", type=int, default=0, help="the seat cap to hold (default: this PC's pc_limit)")
     ap.add_argument("--port-base", type=int, default=PANEL_PORT,
                     help="sandbox listener port; panel API = base-1, bridge = base+1 (two soaks at once)")
     args = ap.parse_args()
@@ -1137,7 +1243,8 @@ def main() -> int:
     if args.budget:
         md += "\n## Budgets\n\n" + ("\n".join(f"- FAIL {f}" for f in failures) or "- PASS: every budget met") + "\n"
     if args.bar:
-        missed = bar_failures(results["summary"], squeezed=bool(args.squeeze_free_gb))
+        missed = bar_failures(results["summary"], squeezed=bool(args.squeeze_free_gb), burst=args.burst,
+                              seat_cap=args.seat_cap or None)
         failures += missed
         md += "\n## Pass bar\n\n" + ("\n".join(f"- FAIL {f}" for f in missed) or "- PASS: every bar met") + "\n"
         by_request = results.get("listener_by_request") or {}

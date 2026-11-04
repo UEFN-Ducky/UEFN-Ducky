@@ -213,15 +213,16 @@ def test_seat_numbers_read_memory_waits_and_finished_seats():
 def test_pass_bar_passes_a_clean_run_and_names_each_miss():
     summary = soak.summarize(_seat_run())
     summary["minutes"] = 15.0
-    assert soak.bar_failures(summary) == []
+    summary["cpu_pct_of_pc"] = {"webview2": {"avg": 1.2}}  # 19.2 % of one core on a 16-core PC
+    assert soak.bar_failures(summary, cpus=16) == []
     bad = {**summary, "ui_stalls": 30, "ui_stall_p95_ms": 450.0, "listener_requests": 7, "seats_done": 2,
-           "cpu_pct_of_pc": {"webview2": {"avg": 31.0}}, "terminal_wait_s": {"max": 9.0}, "min_free_gb": 4.0,
+           "cpu_pct_of_pc": {"webview2": {"avg": 2.0}}, "terminal_wait_s": {"max": 9.0}, "min_free_gb": 4.0,
            "memory_mb": {"ducky_total": {"growth": 640.0}},
            "memory_compression_mb": {"growth": 900.0}, "pagefile_gb": {"first": 2.0, "max": 5.5}}
-    assert soak.bar_failures(bad) == [
+    assert soak.bar_failures(bad, cpus=16) == [
         "ui_stalls 30 in 15.0 min (>= 20 per 15 min)",
         "ui_stall_p95 450.0 ms >= 200 ms",
-        "webview2_cpu avg 31.0% >= 25%",
+        "webview2_cpu avg 32.0% of one core >= 25%",
         "terminal_wait max 9.0 s > 5 s",
         "listener_requests 7 (UEFN closed: must be 0)",
         "seats_done 2 of 3",
@@ -231,7 +232,53 @@ def test_pass_bar_passes_a_clean_run_and_names_each_miss():
         "pagefile spike 3.5 GB > 1 GB",
     ]
     squeezed = {**summary, "waiting_max": 0, "min_free_gb": 4.0}
-    assert soak.bar_failures(squeezed, squeezed=True) == ["squeezed pass queued no seat (admission let every seat start)"]
+    assert soak.bar_failures(squeezed, squeezed=True, cpus=16) == [
+        "squeezed pass queued no seat (admission let every seat start)"]
+
+
+def _turns(spans):
+    events = []
+    for i, (start, end) in enumerate(spans):
+        events.append({"kind": "turn_start", "session": f"s{i}", "t": start})
+        if end is not None:
+            events.append({"kind": "turn_end", "session": f"s{i}", "t": end})
+    return sorted(events, key=lambda e: e["t"])
+
+
+def test_max_concurrent_turns_counts_overlap_and_back_to_back_turns_once():
+    assert soak.max_concurrent_turns(_turns([(0, 10), (2, 12), (5, None), (10, 20)])) == 3
+    assert soak.max_concurrent_turns(_turns([(0, 5), (5, 10), (10, 15)])) == 1
+    assert soak.max_concurrent_turns([]) == 0
+
+
+def test_starts_per_window_shows_waves():
+    events = _turns([(100, None), (101, None), (102, None), (106, None), (107, None), (112, None)])
+    assert soak.starts_per_window(events, window_s=5.0, windows=4) == [3, 2, 1, 0]
+
+
+def test_burst_bar_holds_the_cap_and_names_each_miss():
+    good = {"agents": 300, "max_concurrent_turns": 8, "seats_started": 40, "waiting_max": 292,
+            "starts_per_5s": [3, 3, 2], "commit_gb": {"first": 60.0, "max": 62.5}, "min_free_gb": 15.0,
+            "listener_requests": 0}
+    assert soak.bar_failures(good, burst=True, seat_cap=8) == []
+    bad = {**good, "max_concurrent_turns": 97, "waiting_max": 0, "starts_per_5s": [60, 40],
+           "commit_gb": {"first": 40.0, "max": 75.8}, "min_free_gb": 1.2, "listener_requests": 3}
+    assert soak.bar_failures(bad, burst=True, seat_cap=8) == [
+        "max_concurrent_turns 97 > seat cap 8",
+        "no seat waited in line (the cap did not hold the rest back)",
+        "60 turns started in the first 5 s (> cap 8: no waves)",
+        "commit climbed 35.8 GB > 4 GB",
+        "min_free 1.2 GB < 6 GB",
+        "listener_requests 3 (UEFN closed: must be 0)",
+    ]
+
+
+def test_commit_charge_reads_windows_or_nothing():
+    used, limit = soak.commit_charge_gb()
+    if sys.platform == "win32":
+        assert 0 < used <= limit
+    else:
+        assert (used, limit) == (None, None)
 
 
 def test_listener_counter_counts_connections():
