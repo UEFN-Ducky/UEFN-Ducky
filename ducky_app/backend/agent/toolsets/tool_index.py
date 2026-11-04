@@ -14,7 +14,12 @@ from typing import Any
 _DESC_MAX = 200
 _DESC_MAX_LOCAL = 70
 _META_TOOLS = frozenset({"ducky_get_tools", "ducky_call_tool", "ducky_find_tools"})
-_BLURB_GROUPS = frozenset({"core", "workspace", "panel", "verse", "testing"})
+# Tools listed with a blurb: the coding loop every chat runs (files, Verse, tests). The rest
+# (Ducky's panel and editor tools, nested servers, each Store plugin) go by name only, the way
+# Cursor and Claude Code list theirs: every plugin tool fell into "core" and got a blurb, so
+# 1,383 blurbs were ~57% of each step's prompt (Nov 3 2026). A schema is one
+# ducky_get_tools(name=…) away, which a call needs first anyway.
+_BLURB_GROUPS = frozenset({"workspace", "verse", "testing"})
 _CACHE_LOCK = threading.Lock()
 # Keep only the latest snapshot for each rendering size.
 _INDEX_CACHE: dict[int, tuple[str, str]] = {}
@@ -91,10 +96,23 @@ def truncate_desc(text: str, limit: int = _DESC_MAX) -> str:
     return one[: max(0, limit - 16)].rstrip() + "... [truncated]"
 
 
+def _plugin_owner(name: str) -> str:
+    """The Store plugin that registered ``name``, else "ducky" (Ducky's own tools)."""
+    try:
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_for_tool
+
+        return plugin_for_tool(name) or "ducky"
+    except Exception:
+        return "ducky"
+
+
 def tool_group(name: str) -> str:
     n = name or ""
     if "__" in n:
         return f"nested:{n.split('__', 1)[0]}"
+    owner = _plugin_owner(n)
+    if owner != "ducky":
+        return f"plugin:{owner}"
     if n.startswith("blender_") or n.startswith("discord_"):
         return "desktop"
     if n.startswith("workspace_") or n.startswith("code_"):
@@ -127,8 +145,10 @@ def build_tool_index_text(
 
     lines = [
         "## Tool index (lazy — schemas via ducky_get_tools)",
-        "Full JSON schemas are NOT in this prompt. Call `ducky_get_tools(name=…)` or "
-        "`ducky_get_tools(pattern=…)` then `ducky_call_tool(name, arguments)` for non-floor tools. "
+        "Most tools are listed by name only, and no JSON schema is in this prompt. For a non-floor "
+        "tool call `ducky_get_tools(name=…)` (or `pattern=…` for a family) then "
+        "`ducky_call_tool(name, arguments)`. A Store plugin's skill (skill_search) says which of its "
+        "tools fit the job. "
         "Look up every schema the task needs in ONE turn (several ducky_get_tools calls together), "
         "never the same one twice; a skill's call line already has the arguments, so call it directly. "
         "Floor tools (workspace_*, ducky_get_status, ducky_ask_user, get/call, skill_search) are always in tools[].",

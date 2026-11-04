@@ -71,3 +71,34 @@ def test_literal_canonical_identity_precedes_alias_and_order_is_stable():
     assert index.catalog_revision(rows) == index.catalog_revision(list(reversed(rows)))
     # Unknown prefixes do not manufacture rows or grant local identity.
     assert index.search_tool_catalog(rows, "unregistered__missing")["total"] == 0
+
+
+def test_plugin_tools_go_by_name_under_their_plugin_and_the_coding_loop_keeps_blurbs(monkeypatch):
+    # Nov 3 2026: every plugin tool fell into "core" and got a blurb; 1,383 of them were
+    # ~57% of each Ducky AI step. Cursor and Claude Code list such tools by name only.
+    owners = {"photoshop_open": "adobe", "photoshop_layer": "adobe", "imk_cut": "island-media-kit"}
+    monkeypatch.setattr(index, "_plugin_owner", lambda name: owners.get(name, "ducky"))
+    rows = [
+        tool("photoshop_open", description="Open a PSD in Photoshop " * 5),
+        tool("photoshop_layer", description="Add or edit layers " * 5),
+        tool("imk_cut", description="Cut a trailer " * 5),
+        tool("ducky_create_plan", description="Make a plan with steps " * 5),
+        tool("workspace_read_file", description="Read a file in the project"),
+    ]
+    text = index.build_tool_index_text(rows, desc_max=200)
+    assert "### plugin:adobe" in text and "plugin:adobe: 2 tools (`photoshop_layer`, `photoshop_open`)" in text
+    assert "### plugin:island-media-kit" in text and "`imk_cut`" in text
+    assert "Open a PSD" not in text and "Cut a trailer" not in text, "plugin tools carry no blurb"
+    assert "Make a plan" not in text and "`ducky_create_plan`" in text, "panel tools are named only"
+    assert "- `workspace_read_file` — Read a file in the project" in text, "the coding loop keeps its blurb"
+    every_group = frozenset({"plugin:adobe", "plugin:island-media-kit", "panel", "workspace"})
+    monkeypatch.setattr(index, "_BLURB_GROUPS", every_group)
+    blurbed = index.build_tool_index_text(rows, desc_max=200)
+    assert len(text) < len(blurbed) - 300, "names only is far smaller than the blurbs it replaces"
+
+
+def test_a_missing_plugin_registry_keeps_ducky_grouping(monkeypatch):
+    monkeypatch.setattr(index, "_plugin_owner", lambda name: "ducky")
+    assert index.tool_group("blender_status") == "desktop"
+    assert index.tool_group("workspace_read_file") == "workspace"
+    assert index.tool_group("foo__list") == "nested:foo"

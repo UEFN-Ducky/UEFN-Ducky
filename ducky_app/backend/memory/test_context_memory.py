@@ -246,3 +246,47 @@ def test_compress_now_same_low_water(isolated_appdata, tmp_path, monkeypatch):
     m = compress_conversation(manual, settings=s, project_root=root, force=True, use_llm=False)
     assert a["compressed"] and m["compressed"]
     assert auto.context_summary_through == manual.context_summary_through == 12 - 4
+
+
+def test_a_big_fold_reaches_the_digest_in_order(monkeypatch):
+    # Nov 3 2026: one summary call read the first 24k chars of a fold; at the 80k-token
+    # high-water most turns of a big job never reached the digest.
+    import asyncio
+
+    from backend.agent import context_memory as cm
+    from backend.agent import batch_backends
+    from frontend.ui_web import plugin_llm
+
+    seen: list[str] = []
+
+    async def fake_complete(*, provider_name, model, system, user):
+        seen.append(user)
+        return f"digest after {len(seen)} folds"
+
+    monkeypatch.setattr(cm, "_resolve_summary_model", lambda s: ("uefn_ducky", "ducky-ai"))
+    monkeypatch.setattr(batch_backends, "supports_batch_complete", lambda p: True)
+    monkeypatch.setattr(plugin_llm, "_complete_text", fake_complete)
+    turns = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"turn-{i:03d} " + "x" * 3000} for i in range(60)]
+
+    digest = asyncio.run(cm._llm_digest("old digest", turns, None, original_goal="Build Neon Orbit"))
+
+    assert len(seen) > 1, "a big fold is read in chunks"
+    assert len(seen) <= cm._FOLD_MAX_CHUNKS
+    every = "\n".join(seen)
+    for i in range(60):
+        assert f"turn-{i:03d}" in every, f"turn {i} never reached the digest"
+    assert "…[truncated]" not in every
+    assert all("Build Neon Orbit" in u for u in seen), "the goal rides along with every chunk"
+    assert "old digest" in seen[0] and "digest after 1 folds" in seen[1], "each chunk merges into the digest so far"
+    order = [every.index(f"turn-{i:03d}") for i in range(60)]
+    assert order == sorted(order)
+    assert digest == f"digest after {len(seen)} folds"
+
+
+def test_a_huge_fold_costs_at_most_the_chunk_cap(monkeypatch):
+    from backend.agent import context_memory as cm
+
+    turns = [{"role": "user", "content": "y" * 3900} for _ in range(400)]
+    chunks = cm._fold_chunks(turns)
+    assert len(chunks) <= cm._FOLD_MAX_CHUNKS
+    assert sum(len(c) for c in chunks) == 400

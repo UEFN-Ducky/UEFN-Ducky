@@ -294,6 +294,35 @@ def _format_messages_for_llm(messages: list[dict[str, Any]], *, max_chars: int =
     return text
 
 
+# One summary call reads this much of the turns it folds; a bigger fold is read in order,
+# chunk by chunk, each merged into the digest so far.
+_FOLD_CHUNK_CHARS = 24_000
+_FOLD_MAX_CHUNKS = 16
+
+
+def _fold_chunks(messages: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Consecutive runs of ``messages`` whose formatted text fits one summary call.
+
+    A fold at the 80k-token high-water is ~10x one call's 24k chars: read as one call, all but
+    its first turns were cut and never reached the digest (Nov 3 2026). Past
+    ``_FOLD_MAX_CHUNKS`` the chunks grow instead, so a huge fold costs at most that many calls.
+    """
+    sizes = [len(_format_messages_for_llm([m], max_chars=10**9)) + 2 for m in messages]
+    limit = max(_FOLD_CHUNK_CHARS, -(-sum(sizes) // _FOLD_MAX_CHUNKS))
+    chunks: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    used = 0
+    for message, size in zip(messages, sizes):
+        if current and used + size > limit:
+            chunks.append(current)
+            current, used = [], 0
+        current.append(message)
+        used += size
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 async def _llm_digest(
     prior_summary: str,
     new_slice: list[dict[str, Any]],
@@ -308,19 +337,25 @@ async def _llm_digest(
     provider_name, model = _resolve_summary_model(settings)
     if not supports_batch_complete(provider_name):
         raise ValueError("Summary needs an API model (Settings → LLMs gateway)")
-    user_parts = []
-    if original_goal.strip():
-        user_parts.append("## Original user goal (carry verbatim)\n" + original_goal.strip())
-    if prior_summary.strip():
-        user_parts.append("## Existing digest (merge / update)\n" + prior_summary.strip()[:6000])
-    user_parts.append("## New turns to fold in\n" + _format_messages_for_llm(new_slice))
-    user_parts.append("Return ONLY the updated digest markdown.")
-    return await _complete_text(
-        provider_name=provider_name,
-        model=model,
-        system=_SUMMARY_SYSTEM,
-        user="\n\n".join(user_parts),
-    )
+    digest = prior_summary
+    for chunk in _fold_chunks(new_slice) or [[]]:
+        user_parts = []
+        if original_goal.strip():
+            user_parts.append("## Original user goal (carry verbatim)\n" + original_goal.strip())
+        if digest.strip():
+            user_parts.append("## Existing digest (merge / update)\n" + digest.strip()[:6000])
+        user_parts.append(
+            "## New turns to fold in\n" + _format_messages_for_llm(chunk, max_chars=_FOLD_CHUNK_CHARS * _FOLD_MAX_CHUNKS)
+        )
+        user_parts.append("Return ONLY the updated digest markdown.")
+        folded = await _complete_text(
+            provider_name=provider_name,
+            model=model,
+            system=_SUMMARY_SYSTEM,
+            user="\n\n".join(user_parts),
+        )
+        digest = (folded or "").strip() or digest
+    return digest
 
 
 def _maybe_extract_durable(
