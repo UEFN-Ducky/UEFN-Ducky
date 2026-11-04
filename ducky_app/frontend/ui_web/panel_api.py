@@ -1157,36 +1157,50 @@ class PanelApi(
         return True
 
     def get_listener_status(self) -> dict[str, Any]:
-        if not self._listener_status_lock.acquire(blocking=False):
-            if self._last_listener_status is not None:
-                return dict(self._last_listener_status)
-            # Another poll is in flight and we have no cache yet — do not claim Offline.
-            return {
-                "online": False,
-                "wedged": False,
-                "busy": False,
-                "version": __version__,
-                "uptime_sec": 0,
-                "status_text": "Checking…",
-                "uefn_project_dir": "",
-                "uefn_project_name": "",
-                "project_match": True,
-                "port": PANEL_LISTENER_PORT,
-            }
-        try:
-            result = self._fetch_listener_status()
-            try:
-                from backend.uefn_plugins.host import attach_plugin_connections
+        """The last listener status at once; older than 2 s, one background fetch refreshes it."""
+        return self._listener_status_cache().get()
 
-                result = attach_plugin_connections(result)
-            except Exception:
-                result.setdefault("plugin_connections", [])
-            self._last_listener_status = result
-            self._maybe_ship_on_listener_online(result)
-            self._listener_auto_revive.observe(result, PANEL_LISTENER_PORT)
-            return result
-        finally:
-            self._listener_status_lock.release()
+    def _listener_status_cache(self) -> Any:
+        cache = getattr(self, "_status_cache", None)
+        if cache is None:
+            from frontend.ui_web.lag.listener_status_cache import ListenerStatusCache
+
+            with self._listener_status_lock:
+                cache = getattr(self, "_status_cache", None)
+                if cache is None:
+                    cache = ListenerStatusCache(self._refresh_listener_status, self._checking_listener_status)
+                    self._status_cache = cache
+        return cache
+
+    @staticmethod
+    def _checking_listener_status() -> dict[str, Any]:
+        # No fetch has finished yet: do not claim Offline.
+        return {
+            "online": False,
+            "wedged": False,
+            "busy": False,
+            "version": __version__,
+            "uptime_sec": 0,
+            "status_text": "Checking…",
+            "uefn_project_dir": "",
+            "uefn_project_name": "",
+            "project_match": True,
+            "port": PANEL_LISTENER_PORT,
+        }
+
+    def _refresh_listener_status(self) -> dict[str, Any]:
+        """One fetch, run on the status cache's thread (never on a window call)."""
+        result = self._fetch_listener_status()
+        try:
+            from backend.uefn_plugins.host import attach_plugin_connections
+
+            result = attach_plugin_connections(result)
+        except Exception:
+            result.setdefault("plugin_connections", [])
+        self._last_listener_status = result
+        self._maybe_ship_on_listener_online(result)
+        self._listener_auto_revive.observe(result, PANEL_LISTENER_PORT)
+        return result
 
     def restart_listener(self) -> dict[str, Any]:
         """Header menu button: restart the UEFN listener, or turn Python on in UEFN so it starts."""
@@ -1198,6 +1212,7 @@ class PanelApi(
             result = {"ok": False, "action": "failed", "message": str(e)}
         if not result.get("ok"):
             record_error(error_source("listener_restart", result), str(result.get("message") or "Listener restart failed"))
+        self._listener_status_cache().refresh()
         return result
 
     def _maybe_ship_on_listener_online(self, status: dict[str, Any]) -> None:
