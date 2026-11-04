@@ -1309,30 +1309,13 @@ def load_active_plan() -> dict[str, Any] | None:
 
 
 def plan_mutator_block_reason(tool_name: str) -> str | None:
-    """Block mutators until an open plan leaf is marked in_progress."""
-    n = (tool_name or "").strip()
-    if not n or n in _PLAN_TICK_SKIP:
-        return None
-    try:
-        from backend.agent.toolsets.plan_safe import is_plan_safe_tool
+    """Never blocks (2026-11-03): an unticked plan step refused real work.
 
-        if is_plan_safe_tool(n):
-            return None
-    except Exception:
-        pass
-    plan = load_active_plan()
-    if not plan:
-        return None
-    tick = next_tick_dict(plan)
-    if not tick:
-        return None
-    if tick["status"] == "in_progress":
-        return None
-    return (
-        f"Plan tick required before `{n}`: no leaf is in_progress. "
-        f"Call {tick['call']} first, then retry. "
-        f"Next leaf {tick['n']} `{tick['id']}` — {tick['content']}"
-    )
+    Kept so existing callers (the coding-agent bridge gate) get None until Wave 2 removes
+    them. The reminder rides on the tool's result: format_plan_tick_nudge_for_tool.
+    """
+    del tool_name
+    return None
 
 
 def format_plan_tick_nudge_for_tool(tool_name: str) -> str:

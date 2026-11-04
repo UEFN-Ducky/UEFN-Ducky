@@ -1281,21 +1281,8 @@ async def _dispatch_tool(
         ms = int((time.time() - t0) * 1000)
         return ToolCallResult(ok=False, tool=name, error=cap_block, duration_ms=ms)
 
-    try:
-        from backend.agent.coding_agents.plans import plan_mutator_block_reason
-
-        blocked = plan_mutator_block_reason(name)
-    except Exception:
-        blocked = None
-    if blocked:
-        ms = int((time.time() - t0) * 1000)
-        return ToolCallResult(
-            ok=False,
-            tool=name,
-            error=blocked,
-            hint="Call ducky_plan_update_node(node_id, status=\"in_progress\") first, then retry.",
-            duration_ms=ms,
-        )
+    # No plan-tick block (2026-11-03): a successful result carries the plan reminder instead
+    # (_with_plan_tick_nudge); nothing is refused for an unticked step.
 
     # Write lanes: early, event-emitting denial for laned group members. The pipeline
     # re-checks inside the write itself (authoritative, covers the bridge process).
