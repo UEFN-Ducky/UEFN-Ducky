@@ -682,12 +682,45 @@ class TerminalManager:
             auto_approve = _chat_always_allows(conv_id, command, str(getattr(known, "cwd", "") or ""))
         # ponytail: reads the terminal's opening folder; a `cd` typed in an earlier command
         # isn't followed (one in this command is).
+        cwd = str(getattr(known, "cwd", "") or "")
         try:
-            refused = commit_guard.check(command, str(getattr(known, "cwd", "") or ""), conv_id) if known else ""
+            refused = commit_guard.check(command, cwd, conv_id) if known else ""
         except Exception:  # noqa: BLE001 - the guard never blocks a command by failing
             refused = ""
         if refused:
             return {"ok": False, "fail": "foreign_files", "error": refused}
+        try:
+            # A vague or sprawling commit still runs; the agent is told why it should not.
+            warning = commit_guard.warn(command, cwd, conv_id) if known else ""
+        except Exception:  # noqa: BLE001
+            warning = ""
+        out = self._approve_and_run(
+            session_id, command, source=source, conv_id=conv_id, background=background,
+            runs_here=runs_here, steer=steer, auto_approve=auto_approve,
+            approval_timeout_s=approval_timeout_s, command_timeout_s=command_timeout_s,
+            expect_minutes=expect_minutes, early_return=early_return,
+        )
+        if warning:
+            out = {**out, "commit_warning": warning}
+        return out
+
+    def _approve_and_run(
+        self,
+        session_id: str,
+        command: str,
+        *,
+        source: str,
+        conv_id: str,
+        background: bool,
+        runs_here: bool,
+        steer: Callable[[], bool] | None,
+        auto_approve: bool,
+        approval_timeout_s: float,
+        command_timeout_s: float,
+        expect_minutes: float,
+        early_return: bool,
+    ) -> dict[str, Any]:
+        """run_agent_command after the commit guard: the Allow card (or auto-approve), then the run."""
         req = self.request_command(
             session_id,
             command,
