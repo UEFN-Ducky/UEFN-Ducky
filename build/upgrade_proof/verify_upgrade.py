@@ -17,6 +17,7 @@ expected = json.loads((scratch / "legacy_report.json").read_text(encoding="utf-8
 os.environ["LOCALAPPDATA"] = str(scratch)
 os.environ["APPDATA"] = str(scratch / "Roaming")
 os.environ["UEFN_DUCKY_PROJECT_ROOT"] = str(project)
+os.environ["UEFN_VSCODE_WORKSPACE_FOLDERS"] = str(project)  # never an agent shell's real island
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ducky_app"))  # this checkout (new code)
 
 root = scratch / "UEFN-Ducky"
@@ -62,10 +63,10 @@ check(isinstance(b, dict) and int(b.get("width") or 0) == 1200, f"window bounds 
 dock = workspace_dock.load_window("main")
 check(isinstance(dock, dict) and dock.get("widths", {}).get("left") == 320, f"dock layout imported ({dock})")
 
-from frontend.ui_web import project_chats as pc  # noqa: E402
+from frontend.ui_web.chats import conversations as chat_convs  # noqa: E402
+from frontend.ui_web.chats.store import project_slug  # noqa: E402
 
-slug = pc.project_slug(str(project))
-convs = pc.list_conversations(str(project)) if hasattr(pc, "list_conversations") else None
+slug = project_slug(str(project))
 n_conv = conn.execute("SELECT count(*) FROM conversations WHERE project_id=?", (slug,)).fetchone()[0]
 n_msg = conn.execute(
     "SELECT count(*) FROM messages WHERE conv_id IN (SELECT id FROM conversations WHERE project_id=?)", (slug,)
@@ -74,7 +75,7 @@ n_fold = conn.execute("SELECT count(*) FROM folders WHERE project_id=? AND id<>'
 check(n_conv == expected["chats"]["conversations"], f"chats: {n_conv} conversations")
 check(n_msg == expected["chats"]["messages"], f"chats: {n_msg} messages")
 check(n_fold == expected["chats"]["folders"], f"chats: {n_fold} folders")
-first = pc.load_conversation(expected["chats"]["conv_ids"][0], str(project))
+first = chat_convs.load_conversation(expected["chats"]["conv_ids"][0], str(project))
 check(first is not None and first.title == "Legacy chat one" and len(first.messages) == 4, "chats: conversation loads with title + 4 messages")
 hits = chats.search_messages(slug, "legacy message 3", limit=5)
 check(bool(hits), "chats: body search finds an imported message")
@@ -120,7 +121,7 @@ check(all((root / "tool_captures" / n).exists() for n in expected["captures"]), 
 # ---- what is left on disk after boot 1 ----------------------------------------
 top = sorted(p.name for p in root.iterdir())
 print("  root after boot 1:", top)
-stray = [n for n in top if n not in {"ducky.db", "ducky.db-wal", "ducky.db-shm", "legacy", "tool_captures", "mcp.json", "snapshots", "config.json"}]
+stray = [n for n in top if n not in {"ducky.db", "ducky.db-wal", "ducky.db-shm", "legacy", "tool_captures", "mcp.json", "snapshots", "config.json", "ducky.db.open-lock", "account_file_keys.json"}]
 check(not stray, f"no stray files/folders after boot 1 (stray: {stray})")
 legacy_stores = sorted(p.name for p in (root / "legacy").iterdir())
 print("  legacy/ stores:", legacy_stores)

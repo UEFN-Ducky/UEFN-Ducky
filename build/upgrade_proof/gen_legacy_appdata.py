@@ -20,6 +20,9 @@ scratch.mkdir(parents=True, exist_ok=True)
 os.environ["LOCALAPPDATA"] = str(scratch)
 os.environ["APPDATA"] = str(scratch / "Roaming")
 os.environ["UEFN_DUCKY_PROJECT_ROOT"] = str(project)
+# The writer reads this before UEFN_DUCKY_PROJECT_ROOT; inherited from an agent shell it
+# names the person's real island, and the ledger writes landed there.
+os.environ["UEFN_VSCODE_WORKSPACE_FOLDERS"] = str(project)
 (scratch / "Roaming").mkdir(exist_ok=True)
 sys.path.insert(0, str(Path(sys.argv[3]).resolve() / "ducky_app"))  # the OLD (pre-database) checkout
 
@@ -49,7 +52,18 @@ window_bounds.save_bounds("main", 40, 60, 1200, 800)
 workspace_dock.save_window("main", {"left": ["chat"], "right": ["editor"], "widths": {"left": 320}})
 
 # chats ----------------------------------------------------------------------
-from frontend.ui_web import project_chats as pc  # noqa: E402
+try:  # the old checkout: one project_chats module
+    from frontend.ui_web import project_chats as pc  # noqa: E402
+except ImportError:  # a checkout after the chats split: the same writers, by owner
+    from types import SimpleNamespace
+
+    from frontend.ui_web.chats import conversations as _convs, folders as _folders, saves as _saves  # noqa: E402
+
+    pc = SimpleNamespace(
+        create_folder=_folders.create_folder,
+        create_conversation=_convs.create_conversation,
+        append_message=_saves.append_message,
+    )
 
 folder = pc.create_folder("Ideas", project_root=str(project))
 conv = pc.create_conversation(title="Legacy chat one", project_root=str(project), skill_snapshot="snapshot-text-1")
