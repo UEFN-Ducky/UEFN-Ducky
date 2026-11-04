@@ -18,6 +18,7 @@ Env:
   STUB_FIXTURE_REPO     repo the tools read/search/write (default: the cwd)
   STUB_MEMORY_MB        allocate and hold this many MB for the whole run
   STUB_COMMAND_S        interrupt scenario: length of the long command (default 180)
+  STUB_TERMINAL_S       swarm scenario: length of each terminal command (default 30)
   STUB_LOG              append one JSON line per turn start/end, tool call and message read
 
 A ``control_request`` interrupt on stdin (with ``--input-format stream-json``) or
@@ -288,7 +289,6 @@ class Turn:
         if not self.stream_text(self.step_text()):
             return ""
         self.counts["tool_calls"] += 1
-        self.log("tool", tool=name)
         called = time.monotonic()
         if name == "ducky_ask_user":
             self.counts["ask_user"] += 1
@@ -320,6 +320,8 @@ class Turn:
         self.out.line({"type": "user", "session_id": self.session_id, "parent_tool_use_id": None, "message": {
             "role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": content,
                                          "is_error": failed}]}})
+        # seconds: how long Ducky took to answer (the harness reads terminal waits from it).
+        self.log("tool", tool=name, seconds=round(time.monotonic() - called, 3), failed=failed)
         text = "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
         if name == "ducky_ask_user":
             path = "answer"
@@ -380,7 +382,7 @@ class Turn:
             elif kind == "search":
                 self.tool("workspace_search", {"pattern": "stub", "path": str(self.repo), "max_results": 20})
             elif kind == "terminal":
-                self.terminal('python -c "import time; time.sleep(30)"', 120)
+                self.terminal(f'python -c "import time; time.sleep({terminal_s():g})"', 120)
             else:
                 self.tool("workspace_write_file", {"path": str(self.repo / "stub_out" / f"{self.session_id[:8]}-{step}.txt"),
                                                    "content": self.step_text()})
@@ -461,6 +463,11 @@ class Turn:
             "modelUsage": {self.model: {"inputTokens": self.usage["input_tokens"],
                                         "outputTokens": self.usage["output_tokens"], "contextWindow": 200000}}})
         return 0 if status == "connected" else 1
+
+
+def terminal_s() -> float:
+    """Seconds the swarm scenario's terminal command sleeps (STUB_TERMINAL_S, default 30)."""
+    return float(os.environ.get("STUB_TERMINAL_S") or 30)
 
 
 def hold_memory() -> bytearray | None:

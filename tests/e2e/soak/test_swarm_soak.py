@@ -183,3 +183,83 @@ def test_panel_client_refuses_the_live_ports():
             continue
         raise AssertionError(f"Panel({port}) must refuse")
     assert soak.Panel(4399).base == "http://127.0.0.1:4399/__panel_api/"
+
+
+def _seat_run():
+    run = soak.Run(started=0.0, ended=900.0, agents=3, terminal_s=5.0)
+    for i, (app, web, tool, comp, page) in enumerate([(300, 400, 200, 900, 2.0), (350, 500, 900, 950, 2.1),
+                                                       (320, 450, 250, 920, 2.0)]):
+        run.samples.append(soak.Sample(t=i * 5.0, app_mb=app, webview_mb=web, tool_mb=tool, memcomp_mb=comp,
+                                       pagefile_gb=page, waiting=[2, 1, 0][i], listener_requests=0,
+                                       free_gb=20.0, webview_cpu=10.0))
+    run.stub_events = ([{"kind": "turn_start", "conv": c} for c in "abc"]
+                       + [{"kind": "turn_end", "conv": c} for c in "abc"]
+                       + [{"kind": "tool", "tool": "ducky_terminal_run", "seconds": s} for s in (5.2, 6.0, 7.5)]
+                       + [{"kind": "tool", "tool": "workspace_read_file", "seconds": 40.0}])
+    run.ui = {"ui_stalls": 4, "ui_stall_p95_ms": 120.0}
+    return run
+
+
+def test_seat_numbers_read_memory_waits_and_finished_seats():
+    nums = soak.seat_numbers(_seat_run())
+    assert nums["memory_mb"]["ducky_total"] == {"first": 900.0, "max": 1750.0, "last": 1020.0, "growth": 120.0}
+    assert nums["memory_compression_mb"]["growth"] == 20.0
+    assert nums["terminal_wait_s"]["max"] == 2.5  # 7.5 s minus the 5 s command; other tools don't count
+    assert nums["waiting_max"] == 2 and nums["listener_requests"] == 0
+    assert nums["seats_started"] == 3 and nums["seats_done"] == 3
+    assert (nums["ui_stalls"], nums["ui_stall_p95_ms"]) == (4, 120.0)
+
+
+def test_pass_bar_passes_a_clean_run_and_names_each_miss():
+    summary = soak.summarize(_seat_run())
+    summary["minutes"] = 15.0
+    assert soak.bar_failures(summary) == []
+    bad = {**summary, "ui_stalls": 30, "ui_stall_p95_ms": 450.0, "listener_requests": 7, "seats_done": 2,
+           "cpu_pct_of_pc": {"webview2": {"avg": 31.0}}, "terminal_wait_s": {"max": 9.0}, "min_free_gb": 4.0,
+           "memory_mb": {"ducky_total": {"growth": 640.0}},
+           "memory_compression_mb": {"growth": 900.0}, "pagefile_gb": {"first": 2.0, "max": 5.5}}
+    assert soak.bar_failures(bad) == [
+        "ui_stalls 30 in 15.0 min (>= 20 per 15 min)",
+        "ui_stall_p95 450.0 ms >= 200 ms",
+        "webview2_cpu avg 31.0% >= 25%",
+        "terminal_wait max 9.0 s > 5 s",
+        "listener_requests 7 (UEFN closed: must be 0)",
+        "seats_done 2 of 3",
+        "ducky_memory_growth 640.0 MB >= 300 MB",
+        "min_free 4.0 GB < 6 GB",
+        "memory_compression climbed 900.0 MB > 500 MB",
+        "pagefile spike 3.5 GB > 1 GB",
+    ]
+    squeezed = {**summary, "waiting_max": 0, "min_free_gb": 4.0}
+    assert soak.bar_failures(squeezed, squeezed=True) == ["squeezed pass queued no seat (admission let every seat start)"]
+
+
+def test_listener_counter_counts_connections():
+    import socket
+    import time
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    counter = soak.ListenerCounter((port,))
+    try:
+        for _ in range(3):
+            socket.create_connection(("127.0.0.1", port), timeout=2).close()
+        deadline = time.monotonic() + 5
+        while counter.count < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert counter.count == 3
+    finally:
+        counter.close()
+
+
+def test_log_tail_reads_only_new_whole_lines(tmp_path):
+    log = tmp_path / "stub.jsonl"
+    log.write_text('{"kind": "turn_start", "conv": "a"}\n{"kind": "tool"', encoding="utf-8")
+    tail = soak.LogTail(log)
+    tail.poll()
+    assert tail.started == {"a"}
+    with open(log, "a", encoding="utf-8") as fh:
+        fh.write('}\n{"kind": "turn_start", "conv": "b"}\n')
+    tail.poll()
+    assert tail.started == {"a", "b"}

@@ -66,6 +66,13 @@ class Sample:
     tool_cpu: float = 0.0
     free_gb: float | None = None
     tool_servers: int | None = None  # Ducky tool-server processes alive at this sample
+    app_mb: float = 0.0  # resident memory per role, summed over the app's process tree
+    webview_mb: float = 0.0
+    tool_mb: float = 0.0
+    memcomp_mb: float | None = None  # Windows' Memory Compression process
+    pagefile_gb: float | None = None  # page file in use (psutil swap on Windows)
+    waiting: int | None = None  # seats sent a task whose turn has not started (the admission line)
+    listener_requests: int | None = None  # connections to the sandbox's listener port so far
 
 
 @dataclass
@@ -106,6 +113,8 @@ class Run:
     sends: list[MessageSend] = field(default_factory=list)
     stops: list[StopPress] = field(default_factory=list)
     index_lock_left: bool | None = None
+    ui: dict[str, Any] = field(default_factory=dict)  # the app window's ui_last_hour at the end
+    terminal_s: float = 30.0  # STUB_TERMINAL_S: what each terminal command sleeps
 
 
 def percentile(values: list[float], pct: float) -> float | None:
@@ -175,7 +184,90 @@ def summarize(run: Run) -> dict[str, Any]:
         "messages_sent": run.messages_sent,
         "messages_delivered": len(messages),
         "questions_answered": run.questions_answered,
+        **seat_numbers(run),
     }
+
+
+def _span(values: list[float | None]) -> dict[str, float | None]:
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return {"first": None, "max": None, "last": None, "growth": None}
+    return {"first": _r(vals[0]), "max": _r(max(vals)), "last": _r(vals[-1]), "growth": _r(vals[-1] - vals[0])}
+
+
+def seat_numbers(run: Run) -> dict[str, Any]:
+    """Final check 2's measures: memory per role over the run, Memory Compression, page file,
+    the admission line, listener requests, terminal waits, UI stalls and seats finished."""
+    s = run.samples
+    ducky = [x.app_mb + x.webview_mb + x.tool_mb for x in s]
+    runs = [e for e in run.stub_events if e.get("kind") == "tool" and e.get("tool") == "ducky_terminal_run"
+            and e.get("seconds") is not None]
+    waits = [max(float(e["seconds"]) - run.terminal_s, 0.0) for e in runs]
+    ended = {e.get("conv") for e in run.stub_events if e.get("kind") == "turn_end" and not e.get("interrupted")}
+    started = {e.get("conv") for e in run.stub_events if e.get("kind") == "turn_start"}
+    listener = [x.listener_requests for x in s if x.listener_requests is not None]
+    return {
+        "memory_mb": {"ducky_total": _span(ducky), "app": _span([x.app_mb for x in s]),
+                      "webview2": _span([x.webview_mb for x in s]), "tool_servers": _span([x.tool_mb for x in s])},
+        "memory_compression_mb": _span([x.memcomp_mb for x in s]),
+        "pagefile_gb": _span([x.pagefile_gb for x in s]),
+        "waiting_max": max((x.waiting for x in s if x.waiting is not None), default=None),
+        "listener_requests": listener[-1] if listener else None,
+        "terminal_wait_s": {"count": len(waits), "p95": _r(percentile(waits, 95), 2),
+                            "max": _r(max(waits), 2) if waits else None},
+        "ui_stalls": run.ui.get("ui_stalls"), "ui_stall_p95_ms": run.ui.get("ui_stall_p95_ms"),
+        "seats_started": len(started - {None, ""}), "seats_done": len(ended - {None, ""}),
+    }
+
+
+# Final check 2's pass bar (the person's: 300 seats, UEFN closed, memory under control).
+BAR_STALLS_PER_15_MIN = 20
+BAR_STALL_P95_MS = 200.0
+BAR_WEBVIEW_CPU = 25.0
+BAR_TERMINAL_WAIT_S = 5.0
+BAR_GROWTH_MB = 300.0
+BAR_MIN_FREE_GB = 6.0
+BAR_MEMCOMP_CLIMB_MB = 500.0
+BAR_PAGEFILE_SPIKE_GB = 1.0
+
+
+def bar_failures(summary: dict[str, Any], *, squeezed: bool = False) -> list[str]:
+    """One line per missed bar ([] = the run passes). A squeezed pass checks queueing and paging;
+    its free-RAM floor is the squeeze itself, so the 6 GB floor is not applied there."""
+    out: list[str] = []
+    minutes = max(float(summary.get("minutes") or 0), 1e-9)
+    stalls = summary.get("ui_stalls")
+    if stalls is not None and stalls * 15.0 / minutes >= BAR_STALLS_PER_15_MIN:
+        out.append(f"ui_stalls {stalls} in {minutes} min (>= {BAR_STALLS_PER_15_MIN} per 15 min)")
+    p95 = summary.get("ui_stall_p95_ms")
+    if stalls and p95 is not None and p95 >= BAR_STALL_P95_MS:
+        out.append(f"ui_stall_p95 {p95} ms >= {BAR_STALL_P95_MS:g} ms")
+    web = ((summary.get("cpu_pct_of_pc") or {}).get("webview2") or {}).get("avg")
+    if web is not None and web >= BAR_WEBVIEW_CPU:
+        out.append(f"webview2_cpu avg {web}% >= {BAR_WEBVIEW_CPU:g}%")
+    wait = (summary.get("terminal_wait_s") or {}).get("max")
+    if wait is not None and wait > BAR_TERMINAL_WAIT_S:
+        out.append(f"terminal_wait max {wait} s > {BAR_TERMINAL_WAIT_S:g} s")
+    if summary.get("listener_requests"):
+        out.append(f"listener_requests {summary['listener_requests']} (UEFN closed: must be 0)")
+    if summary.get("seats_done") != summary.get("agents"):
+        out.append(f"seats_done {summary.get('seats_done')} of {summary.get('agents')}")
+    growth = ((summary.get("memory_mb") or {}).get("ducky_total") or {}).get("growth")
+    if growth is not None and growth >= BAR_GROWTH_MB:
+        out.append(f"ducky_memory_growth {growth} MB >= {BAR_GROWTH_MB:g} MB")
+    low = summary.get("min_free_gb")
+    if not squeezed and low is not None and low < BAR_MIN_FREE_GB:
+        out.append(f"min_free {low} GB < {BAR_MIN_FREE_GB:g} GB")
+    comp = summary.get("memory_compression_mb") or {}
+    if comp.get("growth") is not None and comp["growth"] > BAR_MEMCOMP_CLIMB_MB:
+        out.append(f"memory_compression climbed {comp['growth']} MB > {BAR_MEMCOMP_CLIMB_MB:g} MB")
+    page = summary.get("pagefile_gb") or {}
+    if page.get("max") is not None and page.get("first") is not None \
+            and page["max"] - page["first"] > BAR_PAGEFILE_SPIKE_GB:
+        out.append(f"pagefile spike {round(page['max'] - page['first'], 2)} GB > {BAR_PAGEFILE_SPIKE_GB:g} GB")
+    if squeezed and not summary.get("waiting_max"):
+        out.append("squeezed pass queued no seat (admission let every seat start)")
+    return out
 
 
 DELIVER_LIMIT_S = 15.0
@@ -459,7 +551,8 @@ class CpuMeter:
 
     def sample(self) -> dict[str, float]:
         now = time.monotonic()
-        out = {"app": 0.0, "webview2": 0.0, "tool": 0.0, "agent": 0.0, "other": 0.0, "agents": 0, "tools": 0}
+        out = {"app": 0.0, "webview2": 0.0, "tool": 0.0, "agent": 0.0, "other": 0.0, "agents": 0, "tools": 0,
+               "app_mb": 0.0, "webview2_mb": 0.0, "tool_mb": 0.0}
         cur: dict[int, float] = {}
         try:
             procs = [self.root, *self.root.children(recursive=True)]
@@ -471,13 +564,107 @@ class CpuMeter:
                 t = proc.cpu_times()
                 cur[proc.pid] = t.user + t.system
                 role = classify(proc)
+                rss = proc.memory_info().rss / 2**20
             except self.psutil.Error:
                 continue
+            if role in ("app", "webview2", "tool"):
+                out[f"{role}_mb"] += rss
             out[role] += max(cur[proc.pid] - self.prev.get(proc.pid, cur[proc.pid]), 0.0) / span * 100.0
             out["agents"] += role == "agent"
             out["tools"] += role == "tool"
         self.prev, self.prev_t = cur, now
         return out
+
+
+def memory_compression_mb() -> float | None:
+    """Resident size of Windows' Memory Compression process; None when it can't be read."""
+    import psutil
+
+    for proc in psutil.process_iter(["name"]):
+        if (proc.info["name"] or "").lower() in ("memory compression", "memcompression"):
+            try:
+                return round(proc.memory_info().rss / 2**20, 1)
+            except psutil.Error:
+                return None
+    return None
+
+
+class ListenerCounter:
+    """Stands in for UEFN's listener on the sandbox's listener ports (the panel's and the tool
+    servers') and counts every connection. UEFN is closed for this check, so the right count is 0.
+    It answers nothing."""
+
+    def __init__(self, ports: tuple[int, ...]) -> None:
+        import socket
+
+        self.count = 0
+        self.socks = []
+        self.stopped = threading.Event()
+        for port in ports:
+            if port in LIVE_PORTS:
+                raise ValueError(f"port {port} is the person's own Ducky")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(("127.0.0.1", port))
+            sock.listen(64)
+            sock.settimeout(1.0)
+            self.socks.append(sock)
+            threading.Thread(target=self._loop, args=(sock,), name=f"listener-counter-{port}", daemon=True).start()
+
+    def _loop(self, sock: Any) -> None:
+        while not self.stopped.is_set():
+            try:
+                conn, _ = sock.accept()
+            except OSError:
+                continue
+            self.count += 1
+            conn.close()
+
+    def close(self) -> None:
+        self.stopped.set()
+        for sock in self.socks:
+            sock.close()
+
+
+def start_filler(free_target_gb: float) -> subprocess.Popen | None:
+    """Hold memory in a child process until the PC has about ``free_target_gb`` free (the
+    squeezed pass). None when the PC already has less free."""
+    import psutil
+
+    need_gb = psutil.virtual_memory().available / 2**30 - free_target_gb
+    if need_gb <= 0.5:
+        return None
+    code = ("import sys,time\n"
+            f"b=bytearray({int(need_gb * 2**30)})\n"
+            "b[::4096]=b'\\x01'*len(range(0,len(b),4096))\n"
+            "print('held',flush=True)\n"
+            "time.sleep(86400)\n")
+    proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    proc.stdout.readline()  # "held": every page is committed
+    return proc
+
+
+class LogTail:
+    """New lines of the stub log since the last read (the log grows for the whole run)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path, self.pos = path, 0
+        self.started: set[str] = set()
+
+    def poll(self) -> None:
+        if not self.path.is_file():
+            return
+        with open(self.path, "rb") as fh:
+            fh.seek(self.pos)
+            data = fh.read()
+        cut = data.rfind(b"\n") + 1
+        self.pos += cut
+        for line in data[:cut].splitlines():
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get("kind") == "turn_start" and e.get("conv"):
+                self.started.add(str(e["conv"]))
 
 
 def pc_state(exclude_root: int | None = None) -> dict[str, Any]:
@@ -667,23 +854,43 @@ def interrupt_director(panel: Panel, chats: list[dict[str, str]], stub_log: Path
 
 
 def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: float, stub_log: Path,
-             director: Any = None) -> Run:
-    run = Run(started=time.time(), ended=0.0, agents=len(chats))
+             director: Any = None, *, members_as_agent: bool = False, drain_minutes: float = 0.0,
+             listener: ListenerCounter | None = None, terminal_s: float = 30.0) -> Run:
+    """``members_as_agent``: the lead's task is the person's send; every member's comes from the
+    lead (agent_send), as a team runs, so member turns pass memory admission. ``drain_minutes``:
+    after ``minutes``, keep measuring until every seat's turn ended (or this much longer)."""
+    run = Run(started=time.time(), ended=0.0, agents=len(chats), terminal_s=terminal_s)
     stop = threading.Event()
-    for chat in chats:
+    tail = LogTail(stub_log)
+    sent: set[str] = set()
+    lead = chats[0]["id"] if chats else ""
+    for i, chat in enumerate(chats):
+        task = TASK.format(name=chat["name"])
         try:
-            panel.call("send_message", conv_id=chat["id"], text=TASK.format(name=chat["name"]), mode="agent",
-                       model=MODEL, coding_agent="claude_code")
+            if members_as_agent and i:
+                panel.call("agent_send", sender=lead, to=chat["id"], message=task)
+            else:
+                panel.call("send_message", conv_id=chat["id"], text=task, mode="agent",
+                           model=MODEL, coding_agent="claude_code")
             run.messages_sent += 1
+            sent.add(chat["id"])
         except Exception as exc:  # noqa: BLE001 - counted as not sent
             print(f"send to {chat['name']} failed: {exc}", flush=True)
 
     def sampler() -> None:
+        import psutil
+
         meter = CpuMeter(app_pid)
         while not stop.wait(5.0):
             cpu = meter.sample()
+            tail.poll()
             s = Sample(t=time.time(), app_cpu=cpu["app"], webview_cpu=cpu["webview2"], tool_cpu=cpu["tool"],
-                       agents_running=cpu["agents"], tool_servers=int(cpu["tools"]))
+                       agents_running=cpu["agents"], tool_servers=int(cpu["tools"]),
+                       app_mb=round(cpu["app_mb"], 1), webview_mb=round(cpu["webview2_mb"], 1),
+                       tool_mb=round(cpu["tool_mb"], 1), memcomp_mb=memory_compression_mb(),
+                       pagefile_gb=round(psutil.swap_memory().used / 2**30, 2),
+                       waiting=len(sent - tail.started),
+                       listener_requests=listener.count if listener is not None else None)
             try:
                 snap = panel.call("ducky_health_snapshot", timeout=30) or {}
                 app = snap.get("app") or {}
@@ -741,7 +948,13 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
     for w in workers:
         w.start()
     end = time.monotonic() + minutes * 60
-    while time.monotonic() < end:
+    hard_end = end + drain_minutes * 60
+
+    def all_done() -> bool:
+        ended = {e.get("conv") for e in read_stub_log(stub_log) if e.get("kind") == "turn_end"}
+        return sent <= ended
+
+    while time.monotonic() < end or (drain_minutes and time.monotonic() < hard_end and not all_done()):
         time.sleep(15)
         last = run.samples[-1] if run.samples else None
         print(f"{time.strftime('%H:%M:%S')}  samples {len(run.samples)}  opens {len(run.opens)} "
@@ -753,6 +966,7 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
     run.ended = time.time()
     try:
         snap = panel.call("ducky_health_snapshot", timeout=60, detail=True) or {}
+        run.ui = snap.get("ui_last_hour") or {}
         metric = find_metric(snap.get("perf"), "conv_save")
         run.conv_save_p95_ms = float(metric["p95"]) if metric and metric.get("p95") is not None else None
     except Exception as exc:  # noqa: BLE001
@@ -775,6 +989,17 @@ def main() -> int:
     ap.add_argument("--memory-mb", type=int, default=0, help="STUB_MEMORY_MB per agent (memory scenario: 300)")
     ap.add_argument("--budget", action="store_true",
                     help="exit 1 when chat-open p95, app threads, tool servers or memory miss their budget")
+    ap.add_argument("--bar", action="store_true",
+                    help="final check 2: count listener connections, exit 1 when a pass-bar measure misses")
+    ap.add_argument("--members-as-agent", action="store_true",
+                    help="members get their task from the lead (agent_send), so their turns pass admission")
+    ap.add_argument("--drain-minutes", type=float, default=0.0,
+                    help="after --minutes, keep measuring until every seat's turn ended (at most this long)")
+    ap.add_argument("--turn-s", type=float, default=0.0, help="STUB_TURN_S: each stub turn's length")
+    ap.add_argument("--gap", default="", help="STUB_GAP_S: 'min-max' seconds between stub steps")
+    ap.add_argument("--terminal-s", type=float, default=30.0, help="STUB_TERMINAL_S: each terminal command")
+    ap.add_argument("--squeeze-free-gb", type=float, default=0.0,
+                    help="hold memory in a filler process until the PC has about this much free")
     args = ap.parse_args()
     try:
         import psutil  # noqa: F401
@@ -809,8 +1034,15 @@ def main() -> int:
              "STUB_SCENARIO": "interrupt" if args.scenario == "interrupt" else "swarm"}
     if args.memory_mb:
         extra["STUB_MEMORY_MB"] = str(args.memory_mb)
+    if args.turn_s:
+        extra["STUB_TURN_S"] = str(args.turn_s)
+    if args.gap:
+        extra["STUB_GAP_S"] = args.gap
+    extra["STUB_TERMINAL_S"] = str(args.terminal_s)
     env = sandbox_env(box, extra)
 
+    filler = start_filler(args.squeeze_free_gb) if args.squeeze_free_gb else None
+    listener = ListenerCounter((PANEL_PORT, BRIDGE_PORT)) if args.bar else None
     before = pc_state()
     proc = subprocess.Popen([str(exe)], cwd=str(box), env=env)
     print(f"sandbox Ducky pid {proc.pid}, panel :{PANEL_PORT - 1}, box {box}", flush=True)
@@ -820,7 +1052,9 @@ def main() -> int:
         panel.wait_ready(60.0)
         chats = seed(panel, box, launcher, args.agents)
         run = run_soak(panel, proc.pid, chats, args.minutes, stub_log,
-                       director=interrupt_director if args.scenario == "interrupt" else None)
+                       director=interrupt_director if args.scenario == "interrupt" else None,
+                       members_as_agent=args.members_as_agent, drain_minutes=args.drain_minutes,
+                       listener=listener, terminal_s=args.terminal_s)
         run.index_lock_left = (repo / ".git" / "index.lock").exists()
         after = pc_state(exclude_root=proc.pid)
         summary = summarize(run)
@@ -834,6 +1068,10 @@ def main() -> int:
             results["memory"] = memory_table(summary, args.memory_mb, before.get("free_gb"))
     finally:
         stop_tree(proc.pid)
+        if listener is not None:
+            listener.close()
+        if filler is not None:
+            filler.kill()
         for crash in (box / "Local" / "CrashDumps", *(box / "Local" / "UEFN-Ducky").glob("crash*")):
             shutil.rmtree(crash, ignore_errors=True)
     (out / "results.json").write_text(json.dumps(results, indent=1, default=str), encoding="utf-8")
@@ -848,6 +1086,12 @@ def main() -> int:
     failures = budget_failures(results["summary"], before.get("free_gb")) if args.budget else []
     if args.budget:
         md += "\n## Budgets\n\n" + ("\n".join(f"- FAIL {f}" for f in failures) or "- PASS: every budget met") + "\n"
+    if args.bar:
+        missed = bar_failures(results["summary"], squeezed=bool(args.squeeze_free_gb))
+        failures += missed
+        md += "\n## Pass bar\n\n" + ("\n".join(f"- FAIL {f}" for f in missed) or "- PASS: every bar met") + "\n"
+        md += "\n```json\n" + json.dumps({k: results["summary"].get(k) for k in seat_numbers(Run(0, 0, 0))},
+                                          indent=1, default=str) + "\n```\n"
     for key, label in (("pc_before", "PC before"), ("pc_after", "PC after"), ("db", "Database rows")):
         md += f"\n## {label}\n\n```json\n{json.dumps(results[key], indent=1, default=str)[:6000]}\n```\n"
     (out / "results.md").write_text(md, encoding="utf-8")
