@@ -776,6 +776,18 @@ def _uefn_unreachable(name: str, text: str) -> bool:
     return _requires_uefn_listener(name)
 
 
+def _note_uefn_call_ok(name: str) -> None:
+    """A UEFN tool just worked: start the island watch (it stops itself once UEFN closes)."""
+    try:
+        if not _requires_uefn_listener(name):
+            return
+        from frontend.ui_web.verse_editor.urc import island_watch
+
+        island_watch.on_uefn_call_ok()
+    except Exception:  # noqa: BLE001 - the watch is a nicety; the call already succeeded
+        pass
+
+
 def uefn_closed_text(name: str) -> str:
     return f"UEFN isn't open with an island: open it to use {name}; everything else works"
 
@@ -1404,6 +1416,7 @@ async def _dispatch_tool(
 
         data = inline_or_spill(name, text)
         _record_plugin_sidecar(name, args, data, ok=True)
+        _note_uefn_call_ok(name)
         return _with_plan_tick_nudge(
             name, ToolCallResult(ok=True, tool=name, data=data, duration_ms=ms)
         )

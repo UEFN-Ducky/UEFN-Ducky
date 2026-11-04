@@ -389,13 +389,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 start_team_keeper()
             except Exception:
                 pass
-            try:
-                # Another PC pushed to the open island: tell the person (never pulls).
-                from frontend.ui_web.verse_editor.urc import island_watch
-
-                island_watch.start()
-            except Exception:
-                pass
+            # island_watch is not started here (2026-11-03): the first successful UEFN tool
+            # call starts it, and it stops itself once UEFN is closed.
 
         def _presence_bg() -> None:
             try:

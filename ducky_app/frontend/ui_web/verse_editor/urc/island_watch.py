@@ -33,6 +33,10 @@ never alert.
 
 Rounds: every :data:`ACTIVE_S` while the person uses this PC, :data:`IDLE_S` once they've
 been away :data:`notifications.AWAY_S`; a failing lore call backs off to :data:`ERROR_MAX_S`.
+
+When it runs (2026-11-03): never at app boot. The first successful UEFN tool call starts it
+(:func:`on_uefn_call_ok`); after :data:`STOP_AFTER_MISSES` rounds in a row with no island
+(UEFN closed) it stops itself, so a closed UEFN costs no listener requests.
 """
 
 from __future__ import annotations
@@ -55,12 +59,14 @@ KEY = "island_updates"  # workspace_state doc
 LOCKS_KEY = "island_locks"  # workspace_state doc: the open island's file locks
 LOCKS_STALE_ROUNDS = 3  # a locks doc older than this many rounds (+ slack) means nothing
 LOCKS_SLACK_S = 15.0  # lore calls take ~1 s each; leaves room for a slow round
+STOP_AFTER_MISSES = 2  # rounds in a row with no island (UEFN closed): the watch stops
 
 _lock = threading.Lock()
 _wake = threading.Event()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
 _st: dict[str, Any] = {}
+_misses = 0  # rounds in a row with no island
 
 
 def _reset(island: str = "") -> None:
@@ -299,10 +305,12 @@ def _refresh_locks(island: str, lore: Any, every_s: float) -> None:
 
 def tick() -> float:
     """One round. Returns the seconds until the next one. Never raises."""
+    global _misses
     try:
         island = _open_island()
     except Exception:  # noqa: BLE001
         island = ""
+    _misses = 0 if island else _misses + 1
     with _lock:
         if island != _st["island"]:
             _reset(island)
@@ -429,24 +437,53 @@ def wake() -> None:
     _wake.set()
 
 
-def _loop() -> None:
-    while not _stop.is_set():
+def _should_stop() -> bool:
+    return _stop.is_set() or _misses >= STOP_AFTER_MISSES
+
+
+def run_rounds(wait=None) -> None:
+    """The watch's rounds until it stops (``wait(delay)`` sleeps; tests pass a fake clock)."""
+    wait = wait or _wake.wait
+    while not _should_stop():
         try:
             delay = tick()
         except Exception:  # noqa: BLE001 - one bad round must not end the watch (and the lock guard) for the session
             delay = _failed("round raised")
-        _wake.wait(delay)
+        if _should_stop():
+            break
+        wait(delay)
         _wake.clear()
 
 
-def start() -> None:
+def _loop() -> None:
     global _thread
+    try:
+        run_rounds()
+    finally:
+        with _lock:
+            if _thread is threading.current_thread():
+                _thread = None
+
+
+def running() -> bool:
+    return _thread is not None and _thread.is_alive()
+
+
+def start() -> None:
+    global _thread, _misses
     with _lock:
         if _thread is not None and _thread.is_alive():
             return
         _stop.clear()
+        _misses = 0
         _thread = threading.Thread(target=_loop, daemon=True, name="island-watch")
         _thread.start()
+
+
+def on_uefn_call_ok() -> None:
+    """A UEFN tool call just worked: UEFN is open, so watch its island (no-op when running)."""
+    if not running():
+        start()
 
 
 def stop() -> None:
@@ -455,6 +492,8 @@ def stop() -> None:
 
 
 def reset_for_tests() -> None:
+    global _misses
     with _lock:
         _reset()
+        _misses = 0
     _wake.clear()

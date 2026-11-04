@@ -14,6 +14,14 @@ import backend.agent.tools as tools
 pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
 
+@pytest.fixture(autouse=True)
+def _no_island_watch_thread(monkeypatch):
+    # A working UEFN call starts the island watch; these tests don't want a real thread.
+    from frontend.ui_web.verse_editor.urc import island_watch
+
+    monkeypatch.setattr(island_watch, "on_uefn_call_ok", lambda: None)
+
+
 def test_host_vs_editor_classification(monkeypatch) -> None:
     monkeypatch.setattr(
         "backend.uefn_plugins.host.is_plugin_host_only_tool",
