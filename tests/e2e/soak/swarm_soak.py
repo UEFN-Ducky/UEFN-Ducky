@@ -435,6 +435,14 @@ def refuse_reason(exe: Path, box: Path) -> str:
     return ""
 
 
+def remove_tree(path: Path) -> None:
+    """rmtree that also clears read-only files (git objects), so a box can be used again."""
+    def clear(func: Any, name: str, _exc: BaseException) -> None:
+        os.chmod(name, 0o700)
+        func(name)
+    shutil.rmtree(path, onexc=clear)
+
+
 def set_ports(base: int) -> None:
     """Move the sandbox's ports so a second soak can run beside the first."""
     global PANEL_PORT, BRIDGE_PORT
@@ -1032,7 +1040,7 @@ def main() -> int:
         print("REFUSED: --out and --box must be outside the repo", file=sys.stderr)
         return 2
     if box.exists():
-        shutil.rmtree(box)
+        remove_tree(box)
     for sub in ("Local", "Roaming", "home", "temp"):
         (box / sub).mkdir(parents=True, exist_ok=True)
     out.mkdir(parents=True, exist_ok=True)

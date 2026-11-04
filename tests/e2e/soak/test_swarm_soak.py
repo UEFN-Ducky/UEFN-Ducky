@@ -275,3 +275,14 @@ def test_port_base_moves_both_ports_and_spares_the_live_app(monkeypatch):
     assert (env["UEFN_DUCKY_PANEL_PORT"], env["UEFN_DUCKY_PORT"]) == ("4500", "4501")
     with pytest.raises(SystemExit):
         soak.set_ports(4200)
+
+
+def test_remove_tree_clears_read_only_files(tmp_path):
+    import os
+    import stat
+    obj = tmp_path / "box" / "repo" / ".git" / "objects" / "06" / "abc"
+    obj.parent.mkdir(parents=True)
+    obj.write_text("x", encoding="utf-8")
+    os.chmod(obj, stat.S_IREAD)
+    soak.remove_tree(tmp_path / "box")
+    assert not (tmp_path / "box").exists()
