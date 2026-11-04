@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from mcp.types import Tool, ToolAnnotations
 
 from backend.bridge import shared_mcp
-from backend.bridge.test_shared_mcp import FakeMcp, _serve
+from backend.bridge.test_shared_mcp import FakeMcp, serve
 from frontend import shared_mcp_adapter as adapter
 
 
@@ -45,7 +45,7 @@ def test_model_rows_keep_policy_and_full_schema():
 
 def test_existing_stdio_client_receives_changes_and_updated_catalog(monkeypatch, tmp_path):
     mcp = FakeMcp()
-    server = _serve(mcp, monkeypatch, tmp_path)
+    server = serve(mcp, monkeypatch, tmp_path)
     state = shared_mcp.wait_ready()
     monkeypatch.setattr(adapter, "connect", lambda args: adapter._try_hello(state))
     incoming_r, incoming_w = os.pipe()
@@ -128,7 +128,7 @@ def test_shared_watchers_skip_an_unchanged_catalog(monkeypatch, tmp_path):
     from backend.bridge.test_shared_mcp import _hello, _rpc
 
     mcp = FakeMcp()
-    server = _serve(mcp, monkeypatch, tmp_path)
+    server = serve(mcp, monkeypatch, tmp_path)
     rows: list[str] = []
     real_row = shared_mcp._tool_row
 
