@@ -28,6 +28,12 @@ _lock = threading.Lock()
 _waiters: dict[str, threading.Event] = {}
 _answers: dict[str, dict[str, Any]] = {}
 _last_report: dict[str, Any] = {}
+# A viewer whose mailbox reply got lost asks again with the same session: it gets the
+# answer the page already made (or joins the wait still running), never a second offer.
+RESUME_KEEP_S = 60.0
+_done: dict[str, tuple[float, dict[str, Any]]] = {}
+# Sessions that timed out: a late answer from the page is kept for the viewer's retry.
+_late: dict[str, float] = {}
 _LINK_KEYS = ("state", "reason", "connect_ms", "candidate", "attempt")
 # Phone link health, bucketed by usage_stats.remote_link; client/net/viewer_version ride along.
 _HEALTH_KEYS = ("quality", "input", "load", "end", "client", "net", "viewer_version")
@@ -89,29 +95,56 @@ def _connect(args: dict[str, Any] | None) -> dict[str, Any]:
         return {"error": "invalid offer"}
     if protocol != PROTOCOL_VERSION:
         return {"error": "protocol mismatch", "protocol": PROTOCOL_VERSION, "version": __version__}
-    ev = threading.Event()
     with _lock:
-        _waiters[session] = ev
-        _answers.pop(session, None)
-    from frontend.ui_web.panel_httpd import publish_panel_events
+        _prune(time.monotonic())
+        kept = _done.get(session)
+        if kept is not None and not kept[1].get("error"):
+            return _reply(kept[1])
+        ev = _waiters.get(session)
+        owner = ev is None
+        if owner:
+            ev = _waiters[session] = threading.Event()
+            _answers.pop(session, None)
+            _done.pop(session, None)
+            _late.pop(session, None)
+    if owner:
+        from frontend.ui_web.panel_httpd import publish_panel_events
 
-    publish_panel_events(
-        [
-            {
-                "type": "direct_rtc",
-                "session": session,
-                "offer": offer,
-                "ice": _clean_ice(raw.get("ice")),
-                "ts": time.time(),
-            }
-        ]
-    )
+        publish_panel_events(
+            [
+                {
+                    "type": "direct_rtc",
+                    "session": session,
+                    "offer": offer,
+                    "ice": _clean_ice(raw.get("ice")),
+                    "ts": time.time(),
+                }
+            ]
+        )
     ok = ev.wait(ANSWER_WAIT_S)
     with _lock:
-        _waiters.pop(session, None)
-        answer = _answers.pop(session, None)
+        if owner:
+            _waiters.pop(session, None)
+            answer = _answers.pop(session, None)
+            if answer:
+                _done[session] = (time.monotonic(), answer)
+            else:
+                _late[session] = time.monotonic()
+        else:
+            kept = _done.get(session)
+            answer = kept[1] if kept is not None else _answers.get(session)
     if not ok or not answer:
         return {"error": "desktop did not answer in time", "version": __version__, "protocol": PROTOCOL_VERSION}
+    return _reply(answer)
+
+
+def _prune(now: float) -> None:
+    for table in (_done, _late):
+        for sid in [k for k, v in table.items() if now - (v[0] if isinstance(v, tuple) else v) > RESUME_KEEP_S]:
+            table.pop(sid, None)
+
+
+def _reply(answer: dict[str, Any]) -> dict[str, Any]:
     if answer.get("error"):
         return {"error": str(answer["error"]), "version": __version__, "protocol": PROTOCOL_VERSION}
     return {
@@ -130,11 +163,17 @@ def resolve_answer(session: str, answer: Any, *, error: str = "", fingerprint: s
     clean = _clean_sdp(answer)
     if not error and (clean is None or clean["type"] != "answer"):
         error = "invalid answer"
+    row = {"answer": clean, "error": error, "fingerprint": fingerprint}
     with _lock:
         ev = _waiters.get(sid)
         if ev is None:
+            if sid in _late and not error:
+                # Too late for that mailbox reply, in time for the viewer's retry.
+                _late.pop(sid, None)
+                _done[sid] = (time.monotonic(), row)
+                return True
             return False
-        _answers[sid] = {"answer": clean, "error": error, "fingerprint": fingerprint}
+        _answers[sid] = row
         ev.set()
     return True
 
