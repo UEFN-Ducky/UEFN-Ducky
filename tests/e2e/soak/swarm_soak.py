@@ -783,7 +783,11 @@ def seed(panel: Panel, box: Path, launcher: Path | None, agents: int) -> list[di
     chats = []
     for i in range(agents):
         name = "Soak lead" if i == 0 else f"Soak member {i}"
-        conv = panel.call("create_conversation", folder_id=group["folder_id"], config={"title": name})
+        # The chat's own model, as a profile-spawned member has: a turn the broker starts
+        # (agent_send) passes no model, and a chat without one waits for the person to pick.
+        conv = panel.call("create_conversation", folder_id=group["folder_id"],
+                          config={"title": name, "favorite_models": [f"claude_code:{MODEL}"],
+                                  "coding_agent": "claude_code"})
         panel.call("group_add_member", group_id=group["id"], conv_id=conv["id"], as_leader=i == 0)
         panel.call("set_agent_allow_everything", conv_id=conv["id"], on=True)
         chats.append({"id": conv["id"], "name": name})
@@ -869,6 +873,19 @@ def interrupt_director(panel: Panel, chats: list[dict[str, str]], stub_log: Path
                 send(conv, what)
 
 
+def send_refused(reply: Any) -> str:
+    """Why agent_send didn't queue the message ('' when it did): the broker answers
+    {ok: False, error} or {value: {not_sent, note}} instead of raising."""
+    if not isinstance(reply, dict):
+        return ""
+    if reply.get("ok") is False:
+        return str(reply.get("error") or "agent_send refused")
+    value = reply.get("value") if isinstance(reply.get("value"), dict) else reply
+    if value.get("not_sent"):
+        return f"not sent ({value['not_sent']}): {value.get('note') or ''}".strip()
+    return ""
+
+
 def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: float, stub_log: Path,
              director: Any = None, *, members_as_agent: bool = False, drain_minutes: float = 0.0,
              listener: ListenerCounter | None = None, terminal_s: float = 30.0) -> Run:
@@ -884,7 +901,10 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
         task = TASK.format(name=chat["name"])
         try:
             if members_as_agent and i:
-                panel.call("agent_send", sender=lead, to=chat["id"], message=task)
+                reply = panel.call("agent_send", sender=lead, to=chat["id"], message=task)
+                why = send_refused(reply)
+                if why:
+                    raise RuntimeError(why)
             else:
                 panel.call("send_message", conv_id=chat["id"], text=task, mode="agent",
                            model=MODEL, coding_agent="claude_code")

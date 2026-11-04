@@ -277,6 +277,14 @@ def test_port_base_moves_both_ports_and_spares_the_live_app(monkeypatch):
         soak.set_ports(4200)
 
 
+def test_send_refused_reads_the_brokers_answers():
+    assert soak.send_refused({"ok": True, "value": {"response_id": "", "queued_for": "c1"}}) == ""
+    assert soak.send_refused({"ok": False, "error": "Unknown broker operation"}) == "Unknown broker operation"
+    assert soak.send_refused({"ok": True, "value": {"not_sent": "repeat", "note": "Don't."}}).startswith(
+        "not sent (repeat)")
+    assert soak.send_refused(None) == ""
+
+
 def test_remove_tree_clears_read_only_files(tmp_path):
     import os
     import stat
