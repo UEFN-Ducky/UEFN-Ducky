@@ -68,7 +68,7 @@ _MUTATION = re.compile(
 )
 _ALLOWED = {
     ("chat_store.py", "conv.messages.append(message)"),
-    ("ui_web/project_chats.py", "conv.messages.append(message)"),
+    ("ui_web/chats/saves.py", "conv.messages.append(message)"),
 }
 
 
