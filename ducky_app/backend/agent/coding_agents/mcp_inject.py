@@ -12,7 +12,7 @@ from typing import Any
 from backend.agent.coding_agents.core_tools import CORE_TOOLS
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 from backend.agent.hard_rules import hard_rules_for
-from backend.agent.prompt import CHAT_REPORT_RULE, OFFLINE_RULES
+from backend.agent.prompt import CHAT_REPORT_RULE, UEFN_LINE
 from backend.agent.chat_title import self_naming_instruction
 from backend.workspace.identity import RunContext
 from frontend.mcp_block import build_uefn_server_block
@@ -261,8 +261,8 @@ def _folder_project_note(project_root: str) -> str:
 def bootstrap_system_prompt(
     *,
     project_root: str,
-    listener_online: bool,
     conv_id: str,
+    listener_online: bool = False,  # ignored: the prompt never asks UEFN (2026-11-03)
     ducky_name: str = "",
     ducky_personality: str = "",
     skills_dir: str = "",
@@ -271,12 +271,8 @@ def bootstrap_system_prompt(
 ) -> str:
     root = (project_root or "").strip() or "(no project selected)"
     folder_note = _folder_project_note(project_root)
-    if folder_note:
-        listener_line = ""  # a folder project never needs the editor
-    elif listener_online:
-        listener_line = "UEFN listener: online\n"
-    else:
-        listener_line = f"UEFN listener: offline (only live-editor tools wait for it){OFFLINE_RULES}"
+    # A folder project never needs the editor; an island gets the one fixed line.
+    listener_line = "" if folder_note else f"{UEFN_LINE}\n"
     persona = ""
     name = (ducky_name or "").strip()
     personality = (ducky_personality or "").strip()

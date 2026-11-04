@@ -839,17 +839,14 @@ class AgentRunner:
         from backend.agent.local_slim import provider_wants_local_slim
 
         local_slim = provider_wants_local_slim(self.config.provider)
+        # The prompt carries no listener state: a UEFN tool finds out itself when called.
         parts = get_system_prompt_parts(
-            listener_online=self.config.listener_online,
             listener_port=self.config.listener_port,
             project_root=self.config.project_root,
             skill_text=skill_text,
             mode_suffix=self.config.mode_suffix,
-            listener_wedged=self.config.listener_wedged,
             ducky_name=self.config.ducky_name,
             ducky_personality=self.config.ducky_personality,
-            uefn_project_name=self.config.uefn_project_name,
-            project_match=self.config.project_match,
             conv_id=self.config.conv_id or "",
             local_slim=local_slim,
         )

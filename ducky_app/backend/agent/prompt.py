@@ -128,16 +128,14 @@ FOLDER_PROJECT_NOTE = (
 )
 
 
-# What still works while the UEFN listener is down. Every agent gets it when UEFN is closed
-# (coding agents too): a bare "listener: offline" read as "can't do anything".
-OFFLINE_RULES = """
-- **Listener offline — file work still proceeds:** creating/editing `Verse/**/*.verse` (`workspace_read_file` → `workspace_write_file`) and `workspace_list_verse_errors` work right now. Never ask the user to deploy the listener before doing file edits — do them immediately. Do **not** reply with "I need the Outliner label" or "open UEFN first" when the task is Verse source logic; read `Verse/` and write the file. When UEFN is open, you compile and wire yourself (`workspace_compile_verse`, `wire_verse_device_ref`) — never hand Details-panel steps to the user.
-- **Digest tools work offline** (disk read): `list_verse_digests`, `search_verse_digest`, `get_verse_api`, `list_verse_types`, `list_verse_modules`, `list_verse_devices`. Use them freely while the listener is down.
-- **No global UEFN gate:** only tools that talk to the live editor (spawn/wire/save/materials/…) need the listener. Verse writes, digests, panel tools (`ducky_*`), Blender (`blender_*`), and web lookup (`web_search`, `web_fetch`, `web_video`, `web_github`) run now — never wait for the listener / "UEFN MCP server" / "tools still loading". A request for pictures is one `web_search` call with `images=true`. That call asks in this chat. Do not answer that the listener is offline instead of calling it.
-- **Delegation works offline:** `ducky_group_create` / `ducky_group_invite` / `ducky_spawn_chat` / `ducky_send_chat_message` — call them immediately.
-- Do **not** call `get_project_info` or other *listener* tools until online. `ducky_get_status` / `ducky_get_local_project` answer status questions; `ducky_get_errors` shows recent failures. Call each of these **at most once per turn** — they do not change on their own, so never poll them in a loop waiting for the listener to come online. If offline, say so and move on.
-- **Another project:** full paths reach every project (`ducky_list_projects` gives them); `ducky_set_project` only when the person asks to switch their selected project.
-"""
+# The one fixed UEFN line every agent gets (2026-11-03). Building a prompt never asks the
+# listener anything: a UEFN tool finds out itself when it is called.
+UEFN_LINE = (
+    "UEFN tools need UEFN open with the island; everything else (files, code, git, "
+    "terminal, web, any project) works now."
+)
+# Old name kept for importers until the Wave 2 rewire.
+OFFLINE_RULES = UEFN_LINE
 
 
 def folder_project_note(project_root: str) -> str:
@@ -171,7 +169,7 @@ def format_ducky_personality_block(name: str, personality: str) -> str:
 
 def get_system_prompt_parts(
     *,
-    listener_online: bool,
+    listener_online: bool = False,
     listener_port: int,
     project_root: str = "",
     skill_text: str = "",
@@ -190,67 +188,13 @@ def get_system_prompt_parts(
     titles-only skill index. Must feed the frozen prompt snapshot — do not slim
     only at assemble time.
     """
-    if listener_wedged:
-        status = "wedged (GET ok but commands not processing)"
-    elif listener_online:
-        status = "online"
-    else:
-        status = "offline"
+    # 2026-11-03: no listener, Epic MCP or project-match probe here. listener_online,
+    # listener_wedged, uefn_project_name and project_match are accepted and ignored.
+    del listener_online, listener_wedged, uefn_project_name, project_match
     project_line = project_root.strip() or "(not set — configure in Settings → Agent)"
-
-    # Live UEFN map vs panel project. The panel project is where `workspace_*`/file edits land;
-    # listener tools (devices, level save) act on whatever map UEFN actually has open. When they
-    # differ, editing files or wiring devices silently targets the wrong project — warn loudly.
-    from pathlib import Path
-    from backend.mcp_plugins.epic import probe_epic_mcp
-
-    panel_name = Path(project_root.strip()).name if project_root.strip() else "the panel project"
-    uefn_name = uefn_project_name.strip()
     folder_note = folder_project_note(project_root)
-    if folder_note and listener_online and uefn_name:
-        # A folder project is not an island: UEFN having one open is no mismatch.
-        project_context_line = f"\n- UEFN editor map (live): {uefn_name} (UEFN tools act on it)"
-    elif listener_online and uefn_name and not project_match:
-        # Oct 23 2026: this said "Do NOT edit files until they match" and sent duckies to
-        # switch the person's selected project. Duckies work in every project; the live
-        # map only decides where device and level tools land.
-        project_context_line = (
-            f"\n- UEFN editor map (live): {uefn_name}, another island than the selected project "
-            f"{panel_name}. Device, level and Verse-build tools act on {uefn_name}; file tools "
-            f"work in every project (relative paths land in {panel_name}). Open another island "
-            f"in UEFN only when the task needs live editor work there."
-        )
-    elif listener_online and uefn_name and uefn_name.casefold() != panel_name.casefold():
-        # Same island under a different mount name (UEFN names some root plugins by a GUID).
-        project_context_line = (
-            f"\n- UEFN editor map (live): {uefn_name} — this IS the panel project {panel_name} "
-            f"(its content mount); asset paths start with /{uefn_name}/."
-        )
-    elif listener_online and uefn_name:
-        project_context_line = f"\n- UEFN editor map (live): {uefn_name} (matches the panel project)"
-    else:
-        project_context_line = ""
-
-    epic = probe_epic_mcp(project_root=project_root.strip() or None)
-    if epic.get("epic_mcp_online") and epic.get("epic_mcp_editor") == "unreal":
-        epic_line = (
-            f"- Epic Unreal MCP: online in Unreal Editor ({epic.get('epic_mcp_url')}): full Unreal "
-            "Engine, not UEFN. No Verse, Fortnite devices or islands there; find its tools with "
-            "`unreal__list_toolsets`."
-            + (f" Tell the user once: {epic['epic_mcp_note']}" if epic.get("epic_mcp_note") else "")
-            + "\n"
-        )
-    elif epic.get("epic_mcp_online"):
-        epic_line = f"- Epic UEFN MCP: online ({epic.get('epic_mcp_url')})\n"
-    else:
-        epic_line = (
-            f"- Epic UEFN MCP: offline ({epic.get('epic_mcp_reason') or 'unreachable'} "
-            f"at {epic.get('epic_mcp_url')}). Greetings, questions and file-only work: "
-            "just answer — do not mention Epic MCP, setup, or reconnect steps. When a step "
-            "needs the live editor (Verse build, devices, entities, PIC), do every other part "
-            "first, then paste `epic_mcp_setup_steps` from `ducky_get_status` once for that "
-            "step. Do not use pruned Ducky editor tools.\n"
-        )
+    project_context_line = ""
+    epic_line = ""
     beta_line = ""
     try:
         from frontend.uefn_project_beta import read_uefn_beta_access
@@ -263,30 +207,12 @@ def get_system_prompt_parts(
             )
             if beta.get("python_and_toolsets"):
                 beta_line += " (both on — coexistence mode; Epic :8000 ≠ Ducky :4200)"
-            if not listener_online and beta.get("listener_init_race"):
-                beta_line += (
-                    "\n- ⚠ **Listener init race:** both Beta flags on → Engine "
-                    "EditorToolset / Documents hooks may skip. Stay on "
-                    "`workspace_*`. Call `reload_listener` once. If still offline: "
-                    "Tools → Execute Python Script → the island "
-                    "`Content/Python/init_unreal.py` (Ducky-managed — **never delete "
-                    "it**) or `%LOCALAPPDATA%/UEFN-Ducky/listener/launch_listener.py`. "
-                    "**Never restart UEFN.** Do **not** disable UEFN MCP Toolsets to "
-                    "“fix” Ducky. Continue Verse/`workspace_*` offline; Epic "
-                    "`unreal__*` if epic_mcp_online."
-                )
-            elif beta.get("python_and_toolsets") and listener_online:
-                beta_line += (
-                    "\n- Coexistence OK: Ducky listener :4200 + Epic MCP :8000. "
-                    "Never restart Epic MCP from Ducky tools; prefer unreal__* for "
-                    "devices/entities/PIC."
-                )
             beta_line += f"\n- Beta note: {beta.get('agent_note')}\n"
     except Exception:
         beta_line = ""
     runtime_context = (
         "## Runtime context\n"
-        f"- Listener: {status} on port {listener_port}\n"
+        f"- {UEFN_LINE}\n"
         f"{epic_line}"
         f"{beta_line}"
         f"- Project root: {project_line}"
@@ -294,11 +220,7 @@ def get_system_prompt_parts(
         f"{folder_note}"
     )
 
-    offline_rules = OFFLINE_RULES if not listener_online else ""
-    if listener_wedged:
-        offline_rules += (
-            "- **Listener wedged:** Try `reload_listener` once; if still wedged, stay on `workspace_*` / `ducky_get_status`. **Never restart UEFN.**\n"
-        )
+    offline_rules = ""
 
     # Always present (even on an empty project) so the capture + cross-project
     # guidance is in every ducky's context — the tools that back it are CORE.
@@ -501,7 +423,7 @@ def assemble_system_prompt(parts: dict[str, str], *, omit: frozenset[str] | None
 
 def get_system_prompt(
     *,
-    listener_online: bool,
+    listener_online: bool = False,
     listener_port: int,
     project_root: str = "",
     skill_override: str | None = None,

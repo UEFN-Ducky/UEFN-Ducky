@@ -125,19 +125,23 @@ def test_uefn_server_config_leaves_server_level_always_load_unset(monkeypatch) -
     assert "alwaysLoad" not in servers["uefn"]
 
 
-@pytest.mark.parametrize("folder,online,offline_rules,listener_line", [
-    (False, False, True, "UEFN listener: offline (only live-editor tools wait for it)"),
-    (False, True, False, "UEFN listener: online"),
-    (True, False, False, None),  # a folder project never mentions the listener
+@pytest.mark.parametrize("folder,online", [
+    (False, False),
+    (False, True),
+    (True, False),  # a folder project never mentions UEFN
 ])
-def test_coding_agents_hear_what_still_works_offline(monkeypatch, folder, online, offline_rules, listener_line):
+def test_coding_agents_get_one_fixed_uefn_line(monkeypatch, folder, online):
+    # 2026-11-03: no online/offline status, no OFFLINE_RULES block; the same line either way.
+    from backend.agent.prompt import UEFN_LINE
+
     monkeypatch.setattr("frontend.project_kind.is_folder_project", lambda root: folder)
     text = bootstrap_system_prompt(project_root="/tmp/p", listener_online=online, conv_id="chat-a")
-    assert ("No global UEFN gate" in text) is offline_rules
-    if listener_line is None:
-        assert "UEFN listener:" not in text and "### UEFN popups" not in text
+    assert "No global UEFN gate" not in text
+    assert "UEFN listener:" not in text
+    if folder:
+        assert UEFN_LINE not in text and "### UEFN popups" not in text
     else:
-        assert listener_line in text and "### UEFN popups" in text
+        assert text.count(UEFN_LINE) == 1 and "### UEFN popups" in text
 
 
 def test_bootstrap_names_the_up_front_tools() -> None:
