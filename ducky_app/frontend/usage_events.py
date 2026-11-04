@@ -334,6 +334,10 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("memory", r"memoryerror|out of memory|\boom\b"),
         ("permission", r"permission denied|access is denied|permissionerror|winerror 5\b"),
         ("not_found", r"not found|no such file|filenotfounderror|does not exist"),
+        # A turn that died before its first tool call: Ducky's MCP tools never connected, or the
+        # CLI quit. The Store takes only ERROR_KINDS words, so these read as offline and crash.
+        ("offline", r"tools didn.t connect|mcp (server )?(failed|error)|could not connect to (ducky|mcp)"),
+        ("crash", r"exited unsuccessfully|exited with code|process exited"),
         ("crash", r"traceback|crash|exit code|exited with"),
     )
 )
