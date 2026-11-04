@@ -58,6 +58,42 @@ def test_hide_restore_and_minimize_keep_scripts_running(window):
     assert core.MemoryUsageTargetLevel == Level.Normal
 
 
+def test_minimized_or_hidden_the_controller_goes_invisible_and_low_and_back(window):
+    control = window.native.Controls[0]
+    control.CoreWebView2Controller = SimpleNamespace(IsVisible=True)
+    memory.install(window)
+    window.events.shown.fire()
+    form, core, controller = window.native, control.CoreWebView2, control.CoreWebView2Controller
+    form.WindowState = "Minimized"
+    form.Resize.fire(None, None)
+    assert (controller.IsVisible, core.MemoryUsageTargetLevel) == (False, Level.Low)
+    form.WindowState = "Normal"
+    form.Resize.fire(None, None)
+    assert (controller.IsVisible, core.MemoryUsageTargetLevel) == (True, Level.Normal)
+    form.Visible = False  # closed to the tray
+    form.VisibleChanged.fire(None, None)
+    assert (controller.IsVisible, core.MemoryUsageTargetLevel) == (False, Level.Low)
+    form.Visible = True
+    form.VisibleChanged.fire(None, None)
+    assert (controller.IsVisible, core.MemoryUsageTargetLevel) == (True, Level.Normal)
+
+
+def test_a_controller_that_refuses_still_gets_the_memory_target(window):
+    class Stubborn:
+        @property
+        def IsVisible(self):  # noqa: N802 - .NET name
+            return True
+
+        @IsVisible.setter
+        def IsVisible(self, value):  # noqa: N802
+            raise RuntimeError("disposed")
+
+    control = window.native.Controls[0]
+    control.CoreWebView2Controller = Stubborn()
+    assert memory.update_control(control, active=False)
+    assert control.CoreWebView2.MemoryUsageTargetLevel == Level.Low
+
+
 def test_loaded_retries_core_initialization_and_closed_detaches(window):
     control = window.native.Controls[0]
     control.CoreWebView2 = None

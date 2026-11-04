@@ -10,6 +10,10 @@
 
 const IDLE_AFTER_MS = 30_000;
 export const APP_IDLE_CLASS = "app-idle";
+/** Only while the page is hidden (minimized, covered, IsVisible off): every infinite CSS
+ *  animation pauses (theme `app-hidden` rule). Agent events still arrive and update state,
+ *  so the window shows everything at once when it comes back. */
+export const APP_HIDDEN_CLASS = "app-hidden";
 
 const listeners = new Set<(idle: boolean) => void>();
 let idle = false;
@@ -26,6 +30,7 @@ function setIdle(next: boolean): void {
 function update(): void {
   window.clearTimeout(timer);
   timer = 0;
+  document.documentElement.classList.toggle(APP_HIDDEN_CLASS, document.hidden);
   if (document.hidden) {
     setIdle(true);
     return;
@@ -60,6 +65,7 @@ export function installAppIdle(): () => void {
     window.clearTimeout(timer);
     timer = 0;
     uninstall = null;
+    document.documentElement.classList.remove(APP_HIDDEN_CLASS);
     setIdle(false);
   };
   return uninstall;

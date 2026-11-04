@@ -124,6 +124,13 @@ body.native-caption-input-ready .app-header .drag-region {
   100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 0%, transparent); }
 }
 @keyframes spin-slow { 100% { transform: rotate(360deg); } }
+/* A hidden page (minimized, covered, WebView2 IsVisible off) runs no animation at all;
+   they carry on from the same frame when it is shown (utils/appIdle `app-hidden`). */
+:root.app-hidden *,
+:root.app-hidden *::before,
+:root.app-hidden *::after {
+  animation-play-state: paused !important;
+}
 .tool-card-collapse {
   display: grid;
   grid-template-rows: 0fr;

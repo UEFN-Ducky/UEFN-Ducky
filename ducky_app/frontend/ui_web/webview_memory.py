@@ -17,10 +17,39 @@ def enabled() -> bool:
     return sys.platform == "win32" and os.environ.get("UEFN_DUCKY_LOW_MEMORY", "1") != "0"
 
 
+def _controller(control: Any) -> Any:
+    """The control's CoreWebView2Controller: the WinForms control keeps it in a non-public
+    field (no public property), so read it by reflection; None when this SDK has none."""
+    found = getattr(control, "CoreWebView2Controller", None)
+    if found is not None:
+        return found
+    try:
+        from System.Reflection import BindingFlags
+
+        flags = BindingFlags.NonPublic | BindingFlags.Instance
+        for name in ("_coreWebView2Controller", "coreWebView2Controller"):
+            field = control.GetType().GetField(name, flags)
+            if field is not None:
+                return field.GetValue(control)
+    except Exception:
+        pass
+    return None
+
+
 def update_control(control: Any, *, active: bool) -> bool:
-    """Called on the WinForms UI thread. Old SDKs and disposed controls are safe."""
+    """Called on the WinForms UI thread. Old SDKs and disposed controls are safe.
+
+    Off screen (hidden or minimized) the page's controller is also made invisible: WebView2
+    then stops rendering and throttles its timers; agent events still reach the page, and it
+    shows them all when it is visible again. Back on screen both are set back."""
     if not enabled():
         return False
+    try:
+        controller = _controller(control)
+        if controller is not None and bool(controller.IsVisible) != bool(active):
+            controller.IsVisible = bool(active)
+    except Exception:
+        pass
     try:
         core = control.CoreWebView2
         current = core.MemoryUsageTargetLevel

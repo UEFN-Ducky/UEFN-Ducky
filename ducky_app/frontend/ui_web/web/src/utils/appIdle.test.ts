@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { APP_IDLE_CLASS, installAppIdle, isAppIdle, subscribeAppIdle } from "./appIdle";
+import { APP_HIDDEN_CLASS, APP_IDLE_CLASS, installAppIdle, isAppIdle, subscribeAppIdle } from "./appIdle";
 
 let focused = true;
 let hidden = false;
@@ -47,6 +47,27 @@ it("is idle at once while hidden and awake again when shown", () => {
   hidden = false;
   document.dispatchEvent(new Event("visibilitychange"));
   expect(isAppIdle()).toBe(false);
+});
+
+it("marks the root app-hidden only while the page is hidden, not when it just lost focus", () => {
+  installAppIdle();
+  const rootHidden = () => document.documentElement.classList.contains(APP_HIDDEN_CLASS);
+  blur();
+  vi.advanceTimersByTime(30_000);
+  expect(isAppIdle()).toBe(true);
+  expect(rootHidden()).toBe(false); // visible but unfocused: busy spinners still turn
+  hidden = true;
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(rootHidden()).toBe(true);
+  hidden = false;
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(rootHidden()).toBe(false);
+});
+
+it("a hidden page pauses every animation (one global rule)", () => {
+  const css = readFileSync(`${process.cwd()}/src/theme/styles/global.css`, "utf8");
+  const rule = css.match(/:root\.app-hidden \*,\s*:root\.app-hidden \*::before,\s*:root\.app-hidden \*::after\s*\{([^}]*)\}/);
+  expect(rule?.[1]).toMatch(/animation-play-state:\s*paused\s*!important/);
 });
 
 it("wakes when the pointer moves over a window in the background", () => {
