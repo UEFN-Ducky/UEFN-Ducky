@@ -134,6 +134,8 @@ EVENTS: dict[str, dict[str, Any]] = {
                    "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s"),
                    # app_unclean_exit: the dead run's app and WebView2 memory at its last heartbeat.
                    "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb"),
+                   # ...and every agent process Ducky started (boot.json heartbeat agents_mb), a bucket only.
+                   "agents": ("bucket", MEMORY_MB, "agents_mb"),
                    # net_fail only: where the request to the site died (net_access.NET_STAGES) and how the PC routes.
                    "net_stage": ("dns", "connect", "tls", "proxy", "timeout", "http", "other"),
                    "proxy": ("none", "static", "pac"),

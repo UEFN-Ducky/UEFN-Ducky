@@ -651,6 +651,44 @@ def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) 
     assert row["stage"] == "other" and row["uptime"] == "more"
 
 
+def test_an_unclean_exit_carries_the_agents_memory_bucket_when_the_heartbeat_had_it(monkeypatch) -> None:
+    from frontend import boot_report, error_log
+
+    meta: dict[str, str] = {us.META_LAST_VERSION: "1.2.400"}
+    monkeypatch.setattr(us, "_meta_get", meta.get)
+    monkeypatch.setattr(us, "_meta_set", meta.__setitem__)
+    monkeypatch.setattr(us, "start", lambda: None)
+    monkeypatch.setattr(error_log, "install_crash_hooks", lambda: None)
+    monkeypatch.setattr(us, "_memory_now", lambda: {"memory_mb": 700})
+    us.send_override = lambda body: True
+
+    def unclean() -> dict[str, Any]:
+        rows, _ = us._take(100)
+        us._mem_queue.clear()
+        return [r["props"] for r in rows if r["name"] == "error.code" and r["props"]["code"] == "app_unclean_exit"][-1]
+
+    state = {"started": time.time() - 20, "stages": [["launch", 0.0]],
+             "heartbeat": {"agents_n": 6, "agents_mb": 1050, "top_other": [["chrome", 4500]]}}
+    monkeypatch.setattr(boot_report, "_state", state)
+    us.app_opened()
+    assert json_loads(meta[us.META_LAST_SEEN])["agents_mb"] == 1050
+    us.app_opened()   # the run above never closed
+    row = unclean()
+    assert row["agents"] == "2gb" and "agents_mb" not in row and "chrome" not in str(row)
+    # An older boot.json heartbeat without agents_mb: no agents prop.
+    monkeypatch.setattr(boot_report, "_state", {"started": time.time() - 20, "stages": [["launch", 0.0]],
+                                                "heartbeat": {"free_gb": 2.0}})
+    us._note_alive()
+    us.app_opened()
+    assert "agents" not in unclean()
+
+
+def json_loads(text: str) -> Any:
+    import json
+
+    return json.loads(text)
+
+
 def test_outside_agents_refusals_fail_and_ducky_call_tool_counts_as_its_tool(monkeypatch) -> None:
     from backend.bridge import shared_mcp
 

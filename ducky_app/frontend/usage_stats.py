@@ -539,11 +539,16 @@ def _note_alive() -> None:
         stages = state.get("stages") or []
         stage = str(stages[-1][0]) if stages else ""
         started = float(state.get("started") or 0.0)
+        # The last boot.json heartbeat's agent processes' memory (older beats have none).
+        beat = state.get("heartbeat")
+        agents_mb = beat.get("agents_mb") if isinstance(beat, dict) else None
     except Exception:
-        stage, started = "", 0.0
+        stage, started, agents_mb = "", 0.0, None
     uptime = time.time() - started if started else (time.monotonic() - _opened_at if _opened_at else 0.0)
     seen: dict[str, Any] = {"stage": stage, "uptime_s": round(max(0.0, uptime))}
     seen.update(_memory_now())
+    if isinstance(agents_mb, (int, float)) and not isinstance(agents_mb, bool):
+        seen["agents_mb"] = round(agents_mb)
     _meta_set(META_LAST_SEEN, json.dumps(seen))
 
 
@@ -580,7 +585,7 @@ def _last_seen() -> dict[str, Any]:
     out: dict[str, Any] = {}
     if seen.get("stage"):
         out["stage"] = seen["stage"] if seen["stage"] in ev.BOOT_STAGES else "other"
-    for k in ("uptime_s", "memory_mb", "webview_mb"):
+    for k in ("uptime_s", "memory_mb", "webview_mb", "agents_mb"):
         if k in seen:
             out[k] = seen[k]
     return out
