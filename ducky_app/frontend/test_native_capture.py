@@ -1,3 +1,4 @@
+import ctypes
 import sys
 import time
 
@@ -21,38 +22,79 @@ def test_even_rect_keeps_sizes_even_and_non_zero():
 class _FakeGrabber:
     closed = False
 
-    def grab(self, left, top, w, h):
-        return b"\0" * (w * h * 4)
+    def grab_into(self, left, top, w, h, dst):
+        ctypes.memset(dst, 7, w * h * 4)
+        return True
 
     def close(self):
         _FakeGrabber.closed = True
 
 
+class _Target:
+    """A consumer with one buffer; busy (None) while `busy` is set."""
+
+    def __init__(self):
+        self.buf = ctypes.create_string_buffer(0)
+        self.busy = False
+
+    def __call__(self, w, h):
+        if self.busy:
+            return None
+        if len(self.buf) < w * h * 4:
+            self.buf = ctypes.create_string_buffer(w * h * 4)
+        return ctypes.addressof(self.buf)
+
+
 def test_capturer_paces_frames_follows_the_rect_and_stops_fast():
     frames = []
-    cap = native_capture.Capturer(
-        lambda: (0, 0, 8, 4), 30, lambda buf, w, h: frames.append((len(buf), w, h)), _FakeGrabber
-    ).start()
+    t = _Target()
+    cap = native_capture.Capturer(lambda: (0, 0, 8, 4), 30, t, lambda w, h: frames.append((w, h)), _FakeGrabber).start()
     time.sleep(0.5)
     t0 = time.perf_counter()
     cap.stop()
     assert time.perf_counter() - t0 < 0.2
     assert not cap.running and _FakeGrabber.closed
     assert 12 <= len(frames) <= 17
-    assert frames[0] == (8 * 4 * 4, 8, 4)
+    assert frames[0] == (8, 4) and t.buf.raw[:4] == bytes([7]) * 4
 
 
-def test_capturer_drops_frames_while_the_consumer_is_slow():
+def test_capturer_skips_frames_while_the_consumer_is_busy_and_slows_down(monkeypatch):
+    monkeypatch.setattr(native_capture, "WINDOW_S", 0.1)
     frames = []
+    t = _Target()
 
-    def slow(buf, w, h):
+    def on_frame(w, h):
         frames.append(1)
-        time.sleep(0.1)
+        t.busy = True  # the consumer holds the frame for 100 ms
 
-    cap = native_capture.Capturer(lambda: (0, 0, 2, 2), 60, slow, _FakeGrabber).start()
+        def release():
+            time.sleep(0.1)
+            t.busy = False
+
+        import threading
+
+        threading.Thread(target=release, daemon=True).start()
+
+    cap = native_capture.Capturer(lambda: (0, 0, 2, 2), 60, t, on_frame, _FakeGrabber).start()
     time.sleep(0.45)
     cap.stop()
-    assert len(frames) <= 6  # 60 fps asked, ~10/s possible: the rest were dropped, not queued
+    assert len(frames) <= 6  # ~10/s possible: the rest were skipped, not queued
+    assert cap.skipped > 0 and cap.fps < 30
+
+
+def test_capturer_starts_at_30_and_rises_to_60_only_while_under_budget(monkeypatch):
+    monkeypatch.setattr(native_capture, "WINDOW_S", 0.05)
+    cap = native_capture.Capturer(lambda: (0, 0, 2, 2), 60, _Target(), lambda w, h: None, _FakeGrabber)
+    assert cap.fps == 30
+    cap.start()
+    time.sleep(0.4)
+    assert cap.fps == 60
+    # The consumer runs late (a busy UI thread): back down.
+    for _ in range(4):
+        cap.report_lag(0.5)
+        time.sleep(0.07)
+    cap.stop()
+    assert cap.fps <= 30
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="DXGI")
@@ -70,6 +112,8 @@ def test_dxgi_grabs_every_monitor_fast_enough_for_60fps_and_always_gives_a_first
             # A new rect on a still screen still gets its first picture.
             first = g.grab(left, top, w, h)
             assert first is not None and len(first) == w * h * 4
+            dst = ctypes.create_string_buffer(w * h * 4)
+            g.grab_into(left, top, w, h, ctypes.addressof(dst))  # straight into a caller buffer
             t0 = time.perf_counter()
             for _ in range(20):
                 g.grab(left, top, w, h)
@@ -82,11 +126,11 @@ def test_dxgi_grabs_every_monitor_fast_enough_for_60fps_and_always_gives_a_first
 
 def test_capturer_sends_nothing_while_the_screen_is_still():
     class _Still(_FakeGrabber):
-        def grab(self, left, top, w, h):
-            return None
+        def grab_into(self, left, top, w, h, dst):
+            return False
 
     frames = []
-    cap = native_capture.Capturer(lambda: (0, 0, 2, 2), 60, lambda *a: frames.append(a), _Still).start()
+    cap = native_capture.Capturer(lambda: (0, 0, 2, 2), 60, _Target(), lambda *a: frames.append(a), _Still).start()
     time.sleep(0.2)
     cap.stop()
     assert frames == []
@@ -105,3 +149,14 @@ def test_real_grab_of_a_1080p_rect_is_fast_enough_for_30fps():
         g.close()
     print(f"BitBlt 1920x1080: {per * 1000:.1f} ms")
     assert per < 1 / 30
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="GDI")
+def test_grab_into_fills_the_callers_buffer():
+    g = native_capture._Grabber()
+    dst = ctypes.create_string_buffer(b"\x55" * (16 * 8 * 4))
+    try:
+        assert g.grab_into(0, 0, 16, 8, ctypes.addressof(dst)) is True
+    finally:
+        g.close()
+    assert dst.raw != b"\x55" * (16 * 8 * 4)  # overwritten with screen pixels

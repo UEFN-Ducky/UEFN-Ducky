@@ -66,11 +66,20 @@ class _Grabber:
         self._old = self._g.SelectObject(self._mem, self._bmp)
         self._size = (w, h)
 
-    def grab(self, left: int, top: int, w: int, h: int) -> bytes:
+    def _blit(self, left: int, top: int, w: int, h: int) -> None:
         self._ensure(w, h)
         if not self._g.BitBlt(self._mem, 0, 0, w, h, self._screen, left, top, _SRCCOPY | _CAPTUREBLT):
             raise OSError("BitBlt failed")
+
+    def grab(self, left: int, top: int, w: int, h: int) -> bytes:
+        self._blit(left, top, w, h)
         return self._ct.string_at(self._bits, w * h * 4)
+
+    def grab_into(self, left: int, top: int, w: int, h: int, dst: int) -> bool:
+        """The rect at address dst. memmove drops the GIL; string_at would hold it for the copy."""
+        self._blit(left, top, w, h)
+        self._ct.memmove(dst, self._bits, w * h * 4)
+        return True
 
     def close(self) -> None:
         if self._bmp:
@@ -111,13 +120,13 @@ class _BestGrabber:
         except Exception:
             self._dxgi = None
 
-    def grab(self, left: int, top: int, w: int, h: int) -> bytes | None:
+    def grab_into(self, left: int, top: int, w: int, h: int, dst: int) -> bool:
         if self._dxgi is not None:
             try:
-                return self._dxgi.grab(left, top, w, h)
+                return self._dxgi.grab_into(left, top, w, h, dst)
             except OSError:
                 pass
-        return self._gdi.grab(left, top, w, h)
+        return self._gdi.grab_into(left, top, w, h, dst)
 
     def close(self) -> None:
         if self._dxgi is not None:
@@ -126,22 +135,39 @@ class _BestGrabber:
 
 
 RectFn = Callable[[], "tuple[int, int, int, int] | None"]
-FrameFn = Callable[[bytes, int, int], None]
+# Where the next w x h frame goes: an address with room for w*h*4 bytes, or None when the
+# consumer still has the last frame (then this one is skipped, never queued).
+TargetFn = Callable[[int, int], "int | None"]
+FrameFn = Callable[[int, int], None]  # the frame target_fn gave is filled: send it
+
+START_FPS = 30
+MIN_FPS = 10
+WINDOW_S = 1.0  # fps adapts once per window
 
 
 class Capturer:
-    """Grabs rect_fn()'s (left, top, right, bottom) at fps and hands each frame to on_frame.
+    """Grabs rect_fn()'s (left, top, right, bottom) into target_fn's buffer and calls on_frame.
 
-    Frames that come due while on_frame still runs are dropped, never queued (latency first).
+    Latency first: a frame due while the consumer is busy is dropped, never queued. The rate
+    starts at min(START_FPS, fps) and adapts once a second: grabs that eat over half the period
+    or a consumer that skips over a quarter of the frames lower it by a third (not below
+    MIN_FPS); a clean second raises it by 10 up to fps. report_lag(s) tells it how late the
+    consumer ran (e.g. the UI thread's queue).
     """
 
-    def __init__(self, rect_fn: RectFn, fps: int, on_frame: FrameFn, grabber_factory=None) -> None:
+    def __init__(self, rect_fn: RectFn, fps: int, target_fn: TargetFn, on_frame: FrameFn, grabber_factory=None) -> None:
         self._rect_fn = rect_fn
-        self._period = 1.0 / max(1, min(60, int(fps)))
+        self.max_fps = max(1, min(60, int(fps)))
+        self.fps = min(START_FPS, self.max_fps)
+        self._target_fn = target_fn
         self._on_frame = on_frame
         self._factory = grabber_factory or _BestGrabber
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="native-capture", daemon=True)
+        self._lag = 0.0
+        self._win = [0, 0, time.perf_counter()]  # frames due, over budget, window start
+        self.sent = 0
+        self.skipped = 0
 
     def start(self) -> "Capturer":
         self._thread.start()
@@ -156,22 +182,52 @@ class Capturer:
     def running(self) -> bool:
         return self._thread.is_alive()
 
+    def report_lag(self, seconds: float) -> None:
+        """The consumer ran this long after on_frame handed it a frame."""
+        self._lag = max(self._lag, seconds)
+
+    def _adapt(self, over: bool, now: float) -> None:
+        win = self._win
+        win[0] += 1
+        win[1] += 1 if over else 0
+        if now - win[2] < WINDOW_S:
+            return
+        due, bad = win[0], win[1]
+        if self._lag > 2.0 / self.fps or bad * 4 > due:
+            self.fps = max(MIN_FPS, self.fps * 2 // 3)
+        elif bad == 0 and self.fps < self.max_fps:
+            self.fps = min(self.max_fps, self.fps + 10)
+        self._win = [0, 0, now]
+        self._lag = 0.0
+
+    def _tick(self, g) -> bool:
+        """One due frame; True when it went over budget (slow grab or consumer still busy)."""
+        rect = self._rect_fn()
+        if not rect:
+            return False
+        left, top, w, h = even_rect(*rect)
+        dst = self._target_fn(w, h)
+        if dst is None:
+            self.skipped += 1
+            return True
+        t0 = time.perf_counter()
+        if g.grab_into(left, top, w, h, dst):  # False: nothing changed on screen, nothing to send
+            self._on_frame(w, h)
+            self.sent += 1
+        return time.perf_counter() - t0 > 0.5 / self.fps
+
     def _run(self) -> None:
         g = self._factory()
         try:
             due = time.perf_counter()
             while not self._stop.is_set():
-                rect = self._rect_fn()
-                if rect:
-                    left, top, w, h = even_rect(*rect)
-                    try:
-                        buf = g.grab(left, top, w, h)
-                        if buf is not None:  # None: nothing changed on screen, nothing to send
-                            self._on_frame(buf, w, h)
-                    except Exception:
-                        pass  # ponytail: a failed grab (secure desktop, mid-resize) skips one frame
-                due += self._period
+                try:
+                    over = self._tick(g)
+                except Exception:
+                    over = False  # ponytail: a failed grab (secure desktop, mid-resize) skips one frame
                 now = time.perf_counter()
+                self._adapt(over, now)
+                due += 1.0 / self.fps
                 if due < now:
                     due = now  # behind: drop the missed frames
                 self._stop.wait(due - now)

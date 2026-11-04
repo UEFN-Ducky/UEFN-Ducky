@@ -3,8 +3,9 @@
 GDI BitBlt waits on the compositor in 10 ms steps (Nov 1 2026: 822x1032 10 ms, 1920x1080
 20 ms, 3840x1080 30 ms), so a 1080p UEFN window topped out near 48 fps. Duplication hands
 over each composed desktop frame as a GPU texture; only the watched rect is copied to a
-staging texture and read back. Same interface as native_capture._Grabber, except grab()
-returns None when nothing changed on screen since the last frame (nothing to send).
+staging texture and read back. Same interface as native_capture._Grabber: grab_into() writes
+the rect straight into the caller's buffer (no bytes copy, GIL released) and returns False when
+nothing changed on screen since the last frame (nothing to send); grab() returns None then.
 
 ponytail: outputs of the first adapter only and no rotation; anything else raises and the
 caller falls back to BitBlt.
@@ -189,9 +190,16 @@ class DxgiGrabber:
             "CreateTexture2D",
         )
         self._staging_size = (w, h)
-        self._out_buf = ctypes.create_string_buffer(w * h * 4)
 
     def grab(self, left: int, top: int, w: int, h: int) -> bytes | None:
+        if len(self._out_buf) != w * h * 4:
+            self._out_buf = ctypes.create_string_buffer(w * h * 4)
+        if not self.grab_into(left, top, w, h, ctypes.addressof(self._out_buf)):
+            return None
+        return self._out_buf.raw
+
+    def grab_into(self, left: int, top: int, w: int, h: int, dst: int) -> bool:
+        """w*h*4 BGRA bytes of the rect at address dst; False: nothing new on screen."""
         out = self._output_for(left, top, w, h)
         if out is None:
             raise OSError("rect spans outputs")
@@ -205,13 +213,13 @@ class DxgiGrabber:
             raise OSError("access lost")
         if hr == WAIT_TIMEOUT:
             if self._rect == (left, top, w, h):
-                return None  # nothing new on screen: nothing to send
+                return False  # nothing new on screen: nothing to send
             # A new viewer or a new rect on a still screen still needs its first picture:
             # a fresh duplication always starts with the whole current desktop.
             out.open()
             hr = _vcall(out.dup, 8, acquire, 100, ctypes.byref(info), ctypes.byref(res))
             if hr == WAIT_TIMEOUT:
-                return None
+                return False
         _ok(hr, "AcquireNextFrame")
         try:
             tex = _qi(res, IID_ID3D11Texture2D)
@@ -230,23 +238,22 @@ class DxgiGrabber:
             _release(res)
             _vcall(out.dup, 14, [])  # ReleaseFrame
         self._rect = (left, top, w, h)
-        return self._read(w, h)
+        self._read_into(w, h, dst)
+        return True
 
-    def _read(self, w: int, h: int) -> bytes:
+    def _read_into(self, w: int, h: int, dst: int) -> None:
         m = _Mapped()
         # Map(resource, sub, D3D11_MAP_READ, flags, out)
         _ok(_vcall(self._ctx, 14, [ctypes.c_void_p, wintypes.UINT, wintypes.UINT, wintypes.UINT, ctypes.POINTER(_Mapped)], self._staging, 0, 1, 0, ctypes.byref(m)), "Map")
         try:
             row = w * 4
             if m.RowPitch == row:
-                ctypes.memmove(self._out_buf, m.pData, row * h)
+                ctypes.memmove(dst, m.pData, row * h)
             else:
-                base = ctypes.addressof(self._out_buf)
                 for y in range(h):
-                    ctypes.memmove(base + y * row, m.pData + y * m.RowPitch, row)
+                    ctypes.memmove(dst + y * row, m.pData + y * m.RowPitch, row)
         finally:
             _vcall(self._ctx, 15, [ctypes.c_void_p, wintypes.UINT], self._staging, 0, restype=None)
-        return self._out_buf.raw
 
     def close(self) -> None:
         for o in getattr(self, "_outputs", []):

@@ -1,17 +1,21 @@
 """Native capture frames into the main panel page through a WebView2 SharedBuffer.
 
 Per watched view: a 2-slot BGRA buffer posted once (again when the size changes) with
-additionalData {view, w, h, slots}; each frame is copied into slot seq % 2 from the capture
-thread, then a {type:"native-frame", view, seq, slot, w, h} web message says it is ready.
+additionalData {view, w, h, slots}; the capture thread grabs each frame straight into slot
+seq % 2, then a {type:"native-frame", view, seq, slot, w, h, fps} web message says it is ready.
 The page (remote/nativeCapture.ts) turns it into a VideoFrame for the WebRTC sender.
+
+The UI thread does one tiny post per frame and never more than one per view is queued: a
+frame due while the last post still waits for the UI thread is skipped, and that lag slows
+the capturer down. Nothing on the UI thread ever waits for the capture thread.
 """
 
 from __future__ import annotations
 
-import ctypes
 import json
 import logging
 import threading
+import time
 from typing import Any, Callable
 
 from frontend.native_capture import Capturer
@@ -67,10 +71,17 @@ class _View:
         self.ptr = 0
         self.size = (0, 0)
         self.seq = 0
-        self.cap = Capturer(rect_fn, fps, self._frame)
+        self.inflight = False  # a native-frame post waits for the UI thread
+        self.closed = False
+        self._want: object = None
+        self.cap = Capturer(rect_fn, fps, self._target, self._frame)
 
     def _post_buffer(self, w: int, h: int) -> None:
+        token = self._want = object()
+
         def make() -> Any:
+            if self._want is not token:
+                return None  # the capture thread gave up waiting: don't leak a buffer
             try:
                 from Microsoft.Web.WebView2.Core import CoreWebView2SharedBufferAccess  # type: ignore
 
@@ -86,23 +97,51 @@ class _View:
             return buf, int(buf.Buffer.ToInt64())
 
         old = self.buf
-        self.buf, self.ptr = _on_ui(make, wait=True)
+        try:
+            self.buf, self.ptr = _on_ui(make, wait=True)
+        except TimeoutError:
+            self._want = None
+            raise
         self.size = (w, h)
         if old is not None:
             _on_ui(lambda: _close(old), wait=False)
 
-    def _frame(self, data: bytes, w: int, h: int) -> None:
+    def _target(self, w: int, h: int) -> int | None:
+        """Capture thread: the slot for the next frame, None while the last post is queued."""
+        if self.closed or self.inflight:
+            return None
         if (w, h) != self.size:
             self._post_buffer(w, h)
-        slot = self.seq % 2
-        ctypes.memmove(self.ptr + slot * w * h * 4, data, len(data))
-        msg = json.dumps({"type": "native-frame", "view": self.view, "seq": self.seq, "slot": slot, "w": w, "h": h})
+        return self.ptr + (self.seq % 2) * w * h * 4
+
+    def _frame(self, w: int, h: int) -> None:
+        msg = json.dumps({"type": "native-frame", "view": self.view, "seq": self.seq, "slot": self.seq % 2, "w": w, "h": h, "fps": self.cap.fps})
         core = _host["core"]
-        _on_ui(lambda: core.PostWebMessageAsJson(msg), wait=False)
+        queued = time.perf_counter()
+
+        def post() -> None:
+            self.cap.report_lag(time.perf_counter() - queued)
+            try:
+                if not self.closed:
+                    core.PostWebMessageAsJson(msg)
+            finally:
+                self.inflight = False
+
+        self.inflight = True
         self.seq += 1
+        try:
+            _on_ui(post, wait=False)
+        except Exception:
+            self.inflight = False
+            raise
 
     def stop(self) -> None:
+        self.closed = True
         self.cap.stop()
+        if self.cap.running:
+            # Still inside a grab into the buffer (the UI thread was busy): closing it now
+            # would free memory that thread writes to. It stops at its next frame; leave it.
+            return
         if self.buf is not None:
             buf, self.buf = self.buf, None
             _on_ui(lambda: _close(buf), wait=False)
