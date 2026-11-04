@@ -18,5 +18,7 @@ export default defineConfig({
     // vitest's 5 s per-test default is a wall clock, not a check: a release run on a busy PC
     // (UEFN open, ~14 s to start each file) timed out tests that pass. Budgets stay in each test.
     testTimeout: 30_000,
+    // Same for Testing Library's findBy*/waitFor (1 s default): see the setup file.
+    setupFiles: ["./src/test/asyncTimeout.setup.ts"],
   },
 });
