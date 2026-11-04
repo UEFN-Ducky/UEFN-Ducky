@@ -201,4 +201,4 @@ def test_read_only_tools_never_wait_for_a_plan_tick(monkeypatch):
     for name in ("ducky_read_tool_spill", "ducky_read_chat", "ducky_terminal_read_output", "get_editor_log"):
         assert is_plan_safe_tool(name), name
         assert plans.plan_mutator_block_reason(name) is None, name
-    assert plans.plan_mutator_block_reason("save_current_level")
+    assert plans.plan_mutator_block_reason("save_current_level") is None  # nothing blocks (2026-11-03)

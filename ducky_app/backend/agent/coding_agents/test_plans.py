@@ -261,7 +261,8 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(tick["action"], "completed")
         self.assertIn("status=\"completed\"", tick["call"])
 
-    def test_plan_mutator_gate_requires_in_progress(self) -> None:
+    def test_an_unticked_plan_never_blocks_a_tool(self) -> None:
+        # 2026-11-03: "Plan tick required before ..." refused real work; now it only reminds.
         plan = plans.create_plan(
             "chat-tick",
             title="Tick me",
@@ -270,14 +271,8 @@ class PlansStoreTests(unittest.TestCase):
             project_root=self.root,
         )
         with patch("backend.agent.coding_agents.plans.load_active_plan", return_value=plan):
-            reason = plans.plan_mutator_block_reason("workspace_write_file")
-            self.assertIsNotNone(reason)
-            assert reason is not None
-            self.assertIn("in_progress", reason)
-            self.assertIn("write", reason)
-            self.assertIsNone(plans.plan_mutator_block_reason("workspace_read_file"))
-            self.assertIsNone(plans.plan_mutator_block_reason("ducky_plan_update_node"))
-            self.assertIsNone(plans.plan_mutator_block_reason("ducky_call_tool"))
+            for name in ("workspace_write_file", "ducky_terminal_run", "spawn_actor", "workspace_read_file"):
+                self.assertIsNone(plans.plan_mutator_block_reason(name))
 
         plan["nodes"][0]["status"] = "in_progress"
         with patch("backend.agent.coding_agents.plans.load_active_plan", return_value=plan):
