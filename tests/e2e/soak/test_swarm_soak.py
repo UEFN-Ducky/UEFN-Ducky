@@ -263,3 +263,15 @@ def test_log_tail_reads_only_new_whole_lines(tmp_path):
         fh.write('}\n{"kind": "turn_start", "conv": "b"}\n')
     tail.poll()
     assert tail.started == {"a", "b"}
+
+
+def test_port_base_moves_both_ports_and_spares_the_live_app(monkeypatch):
+    import pytest
+    monkeypatch.setattr(soak, "PANEL_PORT", 4400)
+    monkeypatch.setattr(soak, "BRIDGE_PORT", 4401)
+    soak.set_ports(4500)
+    assert (soak.PANEL_PORT, soak.BRIDGE_PORT) == (4500, 4501)
+    env = soak.sandbox_env(Path("box"), {})
+    assert (env["UEFN_DUCKY_PANEL_PORT"], env["UEFN_DUCKY_PORT"]) == ("4500", "4501")
+    with pytest.raises(SystemExit):
+        soak.set_ports(4200)

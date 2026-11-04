@@ -435,6 +435,14 @@ def refuse_reason(exe: Path, box: Path) -> str:
     return ""
 
 
+def set_ports(base: int) -> None:
+    """Move the sandbox's ports so a second soak can run beside the first."""
+    global PANEL_PORT, BRIDGE_PORT
+    if base - 1 <= max(LIVE_PORTS) and base + 1 >= min(LIVE_PORTS):
+        raise SystemExit(f"REFUSED: port base {base} overlaps the person's Ducky {LIVE_PORTS}")
+    PANEL_PORT, BRIDGE_PORT = base, base + 1
+
+
 def sandbox_env(box: Path, extra: dict[str, str]) -> dict[str, str]:
     """os.environ with every profile folder pointed into the sandbox (as backend/sandbox/env.py)."""
     env = dict(os.environ)
@@ -1000,7 +1008,10 @@ def main() -> int:
     ap.add_argument("--terminal-s", type=float, default=30.0, help="STUB_TERMINAL_S: each terminal command")
     ap.add_argument("--squeeze-free-gb", type=float, default=0.0,
                     help="hold memory in a filler process until the PC has about this much free")
+    ap.add_argument("--port-base", type=int, default=PANEL_PORT,
+                    help="sandbox listener port; panel API = base-1, bridge = base+1 (two soaks at once)")
     args = ap.parse_args()
+    set_ports(args.port_base)
     try:
         import psutil  # noqa: F401
     except ImportError:
