@@ -184,11 +184,33 @@ def ack_steer(conv_id: str, lease_id: str) -> None:
         _agent_rpc("steer_ack", {"conv_id": conv_id, "lease_id": lease_id}, 5.0)
 
 
-def wait_for_question_answers(conv_id: str) -> None:
-    """Check the owning panel, including when this bridge is a separate process."""
+# The stop event of the tool call this context runs (bind_gate_stop). Threads started with
+# asyncio.to_thread copy the context, so the gate sees it without a new argument.
+_GATE_STOP: contextvars.ContextVar[Any] = contextvars.ContextVar("question_gate_stop", default=None)
+
+
+def bind_gate_stop(stop: Any) -> contextvars.Token:
+    """Make ``stop`` (a threading.Event) end this context's question gate once it is set."""
+    return _GATE_STOP.set(stop)
+
+
+def unbind_gate_stop(token: contextvars.Token) -> None:
+    _GATE_STOP.reset(token)
+
+
+def wait_for_question_answers(conv_id: str, stop: Any = None) -> bool:
+    """Check the owning panel, including when this bridge is a separate process.
+
+    True once no question is open. False when ``stop`` (or the bound :func:`bind_gate_stop`
+    event) is set: the call was given up on, so its thread stops polling within one round
+    instead of waiting for an answer that may never come.
+    """
+    stop = stop if stop is not None else _GATE_STOP.get()
     while True:
+        if stop is not None and stop.is_set():
+            return False
         response = _agent_rpc("question_gate", {"conv_id": conv_id}, float("inf"))
         if "error" in response or "blocked" not in response:
             raise RuntimeError("Cannot verify the user's answers: panel unavailable. Task tools remain blocked.")
         if response["blocked"] is False:
-            return
+            return True

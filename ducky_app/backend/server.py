@@ -138,7 +138,33 @@ class ProtectedFastMCP(FastMCP):
                                  _catalog_revision([_tool_row(t) for t in available]))
         return available
 
+    def _progress_target(self):
+        """``(session, token, request_id)`` when this call asked for progress, else None."""
+        try:
+            context = self._mcp_server.request_context
+        except LookupError:  # not inside an MCP request (the shared daemon calls in directly)
+            return None
+        token = getattr(getattr(context, "meta", None), "progressToken", None)
+        if not isinstance(token, (str, int)) or isinstance(token, bool):
+            return None
+        return context.session, token, getattr(context, "request_id", None)
+
     async def call_tool(self, name, arguments):
+        # A dedicated bridge's long call (ducky_ask_user waits for the person) beats
+        # notifications/progress like the shared daemon does, so the client's own abort
+        # never fires while it is still running.
+        target = self._progress_target()
+        if target is None:
+            return await self._guarded_call(name, arguments)
+        import asyncio
+
+        beat = asyncio.ensure_future(_beat_progress(*target, name))
+        try:
+            return await self._guarded_call(name, arguments)
+        finally:
+            beat.cancel()
+
+    async def _guarded_call(self, name, arguments):
         from backend.agent.run_context import current_mode
         from backend.agent.toolsets.plan_safe import mode_permission_answer, mode_tool_block_reason
         from mcp.server.fastmcp.exceptions import ToolError
@@ -163,11 +189,19 @@ class ProtectedFastMCP(FastMCP):
         import asyncio
         from backend.workspace.identity import resolve_context
         from backend.agent.chat_title import require_self_name
-        from backend.panel.rpc import wait_for_question_answers
+        import threading
+        from backend.panel.rpc import bind_gate_stop, unbind_gate_stop, wait_for_question_answers
 
         ctx = resolve_context()
         if ctx is not None and ctx.conv_id:
-            await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
+            # A cancelled call can't stop its thread; the set event ends the gate's polling.
+            stop = threading.Event()
+            token = bind_gate_stop(stop)
+            try:
+                await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
+            finally:
+                stop.set()
+                unbind_gate_stop(token)
             effective = (arguments or {}).get("name", name) if name == "ducky_call_tool" else name
             require_self_name(effective, ctx.conv_id)
         try:
@@ -196,6 +230,25 @@ class ProtectedFastMCP(FastMCP):
                 # the lease runs out and the next tool call carries the message.
                 await asyncio.to_thread(ack_steer, ctx.conv_id, lease_id)
         return result
+
+
+async def _beat_progress(session, token, request_id, name):
+    """Send notifications/progress every ``shared_mcp.PROGRESS_EVERY_S`` until cancelled."""
+    import asyncio
+
+    from backend.bridge import shared_mcp
+
+    every = float(shared_mcp.PROGRESS_EVERY_S)
+    beats = 0
+    while True:
+        await asyncio.sleep(every)
+        beats += 1
+        try:
+            await session.send_progress_notification(
+                token, beats, message=f"{name} still running ({beats * every:.0f} s)",
+                related_request_id=request_id)
+        except (anyio.ClosedResourceError, anyio.BrokenResourceError, OSError):
+            return  # the client is gone
 
 
 mcp = ProtectedFastMCP(
