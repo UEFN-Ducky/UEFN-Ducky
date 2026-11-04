@@ -211,6 +211,50 @@ def test_append_creates_then_extends(isolated_appdata, tmp_path):
     assert "— Scout" in entry["content"]  # second block is attributed
 
 
+def test_append_to_a_full_entry_rolls_over_never_drops(isolated_appdata, tmp_path):
+    from backend.memory.project import append_entry, read_entry, save_entry
+
+    root = str(tmp_path / "Proj")
+    save_entry("crash-watch", "x" * 15_990, project_root=root)
+    note = "n" * 100
+    out = append_entry("crash-watch", note, author="Lead", project_root=root)
+    assert out["ok"] is True
+    assert out["rolled_over"] == "crash-watch/2"
+    assert out["appended_chars"] == 100
+    assert read_entry("crash-watch", root)["content"] == "x" * 15_990  # head kept, not trimmed
+    assert note in read_entry("crash-watch/2", root)["content"]
+    assert out["chars"] == len(read_entry("crash-watch/2", root)["content"])
+
+    # The next append goes to the rollover sub while it has room.
+    again = append_entry("crash-watch", "second", project_root=root)
+    assert again["rolled_over"] == "crash-watch/2"
+    assert "second" in read_entry("crash-watch/2", root)["content"]
+
+
+def test_append_under_the_cap_stays_in_the_entry(isolated_appdata, tmp_path):
+    from backend.memory.project import append_entry, read_entry, save_entry
+
+    root = str(tmp_path / "Proj")
+    save_entry("lessons", "x" * 1000, project_root=root)
+    out = append_entry("lessons", "short note", project_root=root)
+    assert out["ok"] is True and "rolled_over" not in out
+    assert out["appended_chars"] == len("short note")
+    assert out["chars"] == len(read_entry("lessons", root)["content"])
+
+
+def test_append_tool_reports_rollover_and_refuses_a_note_too_long(isolated_appdata, tmp_path, monkeypatch):
+    from backend.memory.project import save_entry
+    from backend.tools.uefn import memory as tools
+
+    root = str(tmp_path / "Proj")
+    monkeypatch.setattr(tools, "_read_root", lambda project: root)
+    save_entry("crash-watch", "x" * 15_990, project_root=root)
+    out = json.loads(tools.project_memory_append("crash-watch", "y" * 100))
+    assert out["ok"] is True and out["rolled_over"] == "crash-watch/2"
+    huge = json.loads(tools.project_memory_append("crash-watch", "z" * 16_001))
+    assert huge["ok"] is False and huge["appended_chars"] == 0
+
+
 def test_delete_entry(isolated_appdata, tmp_path):
     from backend.memory.project import delete_entry, list_entries, save_entry
 

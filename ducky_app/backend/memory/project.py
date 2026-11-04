@@ -365,26 +365,53 @@ def append_entry(
     description: str = "",
     project_root: str = "",
 ) -> dict[str, Any]:
-    """Append an attributed block to ``entry`` or ``entry/sub``, creating it if missing."""
+    """Append an attributed block to ``entry`` or ``entry/sub``, creating it if missing.
+
+    A full entry rolls over to the next sub-entry (``entry/2``, ``entry/3`` …; a sub
+    ``entry/sub`` rolls to ``entry/sub-2``) and says so in ``rolled_over``. save_entry
+    keeps only the last _MAX_ENTRY_CHARS, so appending past the cap used to drop text
+    while answering ok (Nov 4 2026, crash-watch). ``ok`` is False when nothing was stored.
+    """
     slug = slugify_entry_name(name)
     note = (text or "").strip()
     if not note:
         raise ValueError("text is required")
-    existing = read_entry(slug, project_root)
-    if existing is None:
-        return save_entry(
-            slug, note, description=description, author=author, project_root=project_root
-        )
+    if len(note) > _MAX_ENTRY_CHARS:
+        return {
+            "ok": False,
+            "name": slug,
+            "appended_chars": 0,
+            "error": f"note too long ({len(note)} chars, cap {_MAX_ENTRY_CHARS}): split it into sub-entries",
+        }
     who = (author or "").strip()
     suffix = f" — {who}" if who else ""
-    body = existing["content"].strip() + f"\n\n## {_now_stamp()}{suffix}\n{note}"
-    return save_entry(
-        slug,
-        body,
-        description=description or existing["description"],
-        author=who or existing["author"],
-        project_root=project_root,
-    )
+    block = f"## {_now_stamp()}{suffix}\n{note}"
+    entry, sub = _split_slug(slug)
+    target = slug
+    for n in range(2, 1000):
+        existing = read_entry(target, project_root)
+        if existing is None:
+            body = note if target == slug else block
+            saved = save_entry(target, body, description=description, author=author, project_root=project_root)
+            break
+        body = existing["content"].strip() + "\n\n" + block
+        if len(body) <= _MAX_ENTRY_CHARS:
+            saved = save_entry(
+                target,
+                body,
+                description=description or existing["description"],
+                author=who or existing["author"],
+                project_root=project_root,
+            )
+            break
+        target = f"{entry}/{n}" if not sub else f"{entry}/{sub}-{n}"
+    else:
+        return {"ok": False, "name": slug, "appended_chars": 0, "error": f"entry full ({_MAX_ENTRY_CHARS} chars): save a sub-entry"}
+    out = {**saved, "ok": True, "appended_chars": len(note)}
+    if target != slug:
+        out["rolled_over"] = target
+        out["note"] = f"{slug} is full ({_MAX_ENTRY_CHARS} chars); this note was stored in {target}."
+    return out
 
 
 def delete_entry(name: str, project_root: str = "") -> bool:

@@ -106,10 +106,11 @@ def project_memory_append(
     """Append a timestamped note to a memory entry (created if missing). Does not rewrite the entry.
 
     Use to extend an existing topic without rewriting it. Keep notes short and factual.
-    `project` as in project_memory_save (empty = the selected project).
+    `project` as in project_memory_save (empty = the selected project). A full entry
+    rolls over to its next sub-entry; the reply's `rolled_over` names it.
     """
     result = append_entry(name, text, author=author, project_root=_read_root(project))
-    return tool_json({**result, "ok": True}, pretty=pretty)
+    return tool_json({"ok": True, **result}, pretty=pretty)
 
 
 @plugin_mcp_tool("uefn")
