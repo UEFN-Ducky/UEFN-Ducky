@@ -42,8 +42,12 @@ _LIST_WAIT_S = 3.0
 
 _loop: asyncio.AbstractEventLoop | None = None
 _clients = 0
-# Bumped on every connect: an idle timer started before a reconnect must not stop us.
+# Bumped every time the idle timer is armed: only the newest timer may stop us.
 _idle_gen = 0
+# Last real client traffic (monotonic). A readiness hello (hello + bye, no MCP request)
+# is not traffic: on Nov 4 2026 an agent host's daemon sat at 0 clients and ~700 MB for
+# hours because each turn's readiness check restarted its 15-minute idle window.
+_last_traffic = 0.0
 # The one pending idle timer. Each agent turn connects and disconnects, and a new
 # 15-minute timer thread per disconnect piled up dozens of sleeping threads.
 _idle_timer: threading.Timer | None = None
@@ -949,6 +953,7 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
     catalog_lock = threading.Lock()
     closed = threading.Event()
     last_revision: str | None = None
+    real = False  # sent an MCP request: an agent, not a readiness hello
 
     def _send(payload: dict[str, Any]) -> None:
         with write_lock:
@@ -1021,12 +1026,16 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
             if op != "mcp":
                 _send({"op": "error", "error": "unknown op"})
                 continue
+            real = True
+            _note_traffic()
             threading.Thread(
                 target=_dispatch, args=(msg,), daemon=True, name=f"shared-mcp-call-{conn_id}"
             ).start()
     except (EOFError, OSError):
         return
     finally:
+        if real:
+            _note_traffic()  # the idle window runs from when the agent left
         closed.set()
         wake_catalog_watchers()
         close_handle(handle)
@@ -1067,25 +1076,46 @@ def _runs_here() -> bool:
     return bool(runner is not None and runner.has_active_runs())
 
 
+def _note_traffic() -> None:
+    global _last_traffic
+    _last_traffic = time.monotonic()
+
+
+def _arm_idle_timer(delay: float) -> None:
+    """Caller holds ``_clients_lock``. Replaces any pending timer: there is only ever one."""
+    global _idle_timer, _idle_gen
+    _cancel_idle_timer()
+    _idle_gen += 1
+    _idle_timer = threading.Timer(max(0.01, delay), _idle_expired, args=(_idle_gen,))
+    _idle_timer.daemon = True
+    _idle_timer.start()
+
+
+def _idle_left() -> float:
+    return _IDLE_EXIT_S - (time.monotonic() - _last_traffic)
+
+
 def _idle_expired(gen: int) -> None:
-    """Stop only if nobody has connected since this idle timer started and no workflow run
-    started here is still going: its thread lives in this process. Nov 3 2026: a release
-    started from chat died as "Stopped" 15 minutes after the agent's turn ended."""
-    global _idle_timer
+    """Stop once no client is connected, the last real traffic is a full idle window old,
+    and no workflow run started here is still going: its thread lives in this process.
+    Nov 3 2026: a release started from chat died as "Stopped" 15 minutes after the
+    agent's turn ended."""
     with _clients_lock:
-        if _clients > 0 or gen != _idle_gen:
+        if gen != _idle_gen or _clients > 0:
+            return  # a newer timer owns the window, or the last disconnect re-arms it
+        left = _idle_left()
+        if left > 0.01:
+            _arm_idle_timer(left)
             return
         if _runs_here():
-            _idle_timer = threading.Timer(_IDLE_EXIT_S, _idle_expired, args=(gen,))
-            _idle_timer.daemon = True
-            _idle_timer.start()
+            _arm_idle_timer(_IDLE_EXIT_S)
             return
     request_stop()
 
 
 def serve_daemon(mcp: Any) -> None:
     """Block until idle after the last adapter disconnects."""
-    global _shared_serving, _clients, _idle_gen, _listen_sock
+    global _shared_serving, _clients, _listen_sock
     lock = _acquire_single_instance()
     if lock is None:
         return  # a daemon is already serving; the adapter will find it via state
@@ -1105,6 +1135,7 @@ def serve_daemon(mcp: Any) -> None:
     _ready_info.update({"token": token, "key": key, "host": host, "port": int(port)})
     _ready.set()
     _ensure_loop()
+    _note_traffic()  # the idle window starts when we start serving
     conn_seq = 0
     # No adapter within the grace window (spawner died / raced) → do not linger.
     grace = threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop())
@@ -1126,22 +1157,19 @@ def serve_daemon(mcp: Any) -> None:
             conn_seq += 1
             with _clients_lock:
                 _clients += 1
-                _idle_gen += 1
                 _cancel_idle_timer()
             cid = conn_seq
 
             def _run_client(h: socket.socket = conn, n: int = cid) -> None:
-                global _clients, _idle_timer
+                global _clients
                 try:
                     _client_loop(mcp, h, token, key, n)
                 finally:
                     with _clients_lock:
                         _clients -= 1
                         if _clients <= 0 and not _stop.is_set():
-                            _cancel_idle_timer()
-                            _idle_timer = threading.Timer(_IDLE_EXIT_S, _idle_expired, args=(_idle_gen,))
-                            _idle_timer.daemon = True
-                            _idle_timer.start()
+                            # Counted from the last real traffic, so a probe cannot extend it.
+                            _arm_idle_timer(_idle_left())
 
             threading.Thread(target=_run_client, daemon=True, name=f"shared-mcp-{cid}").start()
     finally:

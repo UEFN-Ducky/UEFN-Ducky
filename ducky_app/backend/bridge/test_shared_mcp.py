@@ -19,6 +19,12 @@ from frontend import mcp_block
 from frontend.settings import PanelSettings
 
 
+@pytest.fixture(autouse=True)
+def _outside_any_agent_host(monkeypatch):
+    """Run from an agent host's shell, the slot env would point every state file at h<slot>."""
+    monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
+
+
 def _fake_tools() -> list[SimpleNamespace]:
     return [
         SimpleNamespace(
@@ -554,6 +560,54 @@ def test_reconnects_keep_one_idle_timer(monkeypatch, tmp_path) -> None:
         shared_mcp.request_stop()
         thread.join(timeout=6)
         shared_mcp.reset_for_tests()
+
+
+def _probe() -> None:
+    """What the agent host's readiness gate does every turn: hello, then bye."""
+    sock = _hello("readiness")
+    shared_mcp.write_frame(sock, {"op": "bye"})
+    shared_mcp.read_frame(sock)
+    shared_mcp.close_handle(sock)
+
+
+def test_readiness_hellos_do_not_keep_an_idle_daemon_alive(monkeypatch, tmp_path) -> None:
+    """Nov 4 2026: a host's daemon with 0 agents stayed up for hours at ~700 MB because each
+    turn's readiness hello restarted its idle window."""
+    monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.6)
+    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        started = time.monotonic()
+        while thread.is_alive() and time.monotonic() - started < 3.0:
+            try:
+                _probe()  # far more often than the idle window
+            except (OSError, RuntimeError, EOFError):
+                break  # it stopped between probes
+            time.sleep(0.1)
+        thread.join(timeout=3)
+        assert not thread.is_alive()
+        assert time.monotonic() - started < 2.0  # one idle window after start, not never
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+
+
+def test_a_daemon_with_a_connected_agent_stays_up(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.3)
+    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        agent = _hello("run-1")
+        _rpc(agent, "tools/list")
+        _probe()  # a probe leaving must not stop the agent's daemon
+        time.sleep(1.0)
+        assert shared_mcp.serving() and thread.is_alive()
+        assert [t["name"] for t in _rpc(agent, "tools/list", req_id=2)["tools"]] == ["ping", "workspace_write_file"]
+        shared_mcp.write_frame(agent, {"op": "bye"})
+        shared_mcp.close_handle(agent)
+        thread.join(timeout=5)  # agent gone: one idle window later it stops
+        assert not thread.is_alive()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
 
 
 def test_an_adapter_never_stops_a_newer_daemon(monkeypatch) -> None:
