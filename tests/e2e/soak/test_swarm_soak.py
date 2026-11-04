@@ -249,6 +249,11 @@ def test_max_concurrent_turns_counts_overlap_and_back_to_back_turns_once():
     assert soak.max_concurrent_turns(_turns([(0, 10), (2, 12), (5, None), (10, 20)])) == 3
     assert soak.max_concurrent_turns(_turns([(0, 5), (5, 10), (10, 15)])) == 1
     assert soak.max_concurrent_turns([]) == 0
+    lead = [{**e, "conv": "lead"} for e in _turns([(0, 100)])]
+    members = [{**e, "conv": "m", "session": "m" + e["session"]} for e in _turns([(1, 50), (2, 60)])]
+    both = sorted(lead + members, key=lambda e: e["t"])
+    assert soak.max_concurrent_turns(both) == 3
+    assert soak.max_concurrent_turns(both, skip_conv="lead") == 2
 
 
 def test_starts_per_window_shows_waves():

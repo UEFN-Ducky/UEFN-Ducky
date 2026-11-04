@@ -118,6 +118,7 @@ class Run:
     index_lock_left: bool | None = None
     ui: dict[str, Any] = field(default_factory=dict)  # the app window's ui_last_hour at the end
     terminal_s: float = 30.0  # STUB_TERMINAL_S: what each terminal command sleeps
+    lead_conv: str = ""  # the team lead's chat: a top lead is never held by the seat cap
 
 
 def percentile(values: list[float], pct: float) -> float | None:
@@ -198,11 +199,14 @@ def _span(values: list[float | None]) -> dict[str, float | None]:
     return {"first": _r(vals[0]), "max": _r(max(vals)), "last": _r(vals[-1]), "growth": _r(vals[-1] - vals[0])}
 
 
-def max_concurrent_turns(events: list[dict[str, Any]]) -> int:
-    """Most stub turns alive at the same moment (turn_start .. turn_end per session)."""
+def max_concurrent_turns(events: list[dict[str, Any]], skip_conv: str = "") -> int:
+    """Most stub turns alive at the same moment (turn_start .. turn_end per session).
+    ``skip_conv``: leave this chat's turns out (the lead, which the seat cap never holds)."""
     edges: list[tuple[float, int]] = []
     open_at: dict[str, float] = {}
     for e in events:
+        if skip_conv and e.get("conv") == skip_conv:
+            continue
         key = str(e.get("session") or e.get("pid") or "")
         if e.get("kind") == "turn_start":
             open_at[key] = float(e.get("t") or 0)
@@ -283,7 +287,7 @@ def seat_numbers(run: Run) -> dict[str, Any]:
                             "max": _r(max(waits), 2) if waits else None},
         "ui_stalls": run.ui.get("ui_stalls"), "ui_stall_p95_ms": run.ui.get("ui_stall_p95_ms"),
         "seats_started": len(started - {None, ""}), "seats_done": len(ended - {None, ""}),
-        "max_concurrent_turns": max_concurrent_turns(run.stub_events),
+        "max_concurrent_turns": max_concurrent_turns(run.stub_events, run.lead_conv),
         "starts_per_5s": starts_per_window(run.stub_events),
         "commit_gb": _span([x.commit_gb for x in s]),
         "tree_private_mb": _span([x.tree_private_mb for x in s]),
@@ -1014,6 +1018,7 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
     tail = LogTail(stub_log)
     sent: set[str] = set()
     lead = chats[0]["id"] if chats else ""
+    run.lead_conv = lead if members_as_agent else ""
     for i, chat in enumerate(chats):
         task = TASK.format(name=chat["name"])
         try:
@@ -1155,6 +1160,8 @@ def main() -> int:
     ap.add_argument("--terminal-s", type=float, default=30.0, help="STUB_TERMINAL_S: each terminal command")
     ap.add_argument("--squeeze-free-gb", type=float, default=0.0,
                     help="hold memory in a filler process until the PC has about this much free")
+    ap.add_argument("--shared-mcp", action="store_true",
+                    help="UEFN_DUCKY_SHARED_MCP=1: agents share tool servers (the setting is off on a fresh install)")
     ap.add_argument("--burst", action="store_true",
                     help="pass B: judge the seat cap, waves, commit and listener only (every seat sent at once)")
     ap.add_argument("--seat-cap", type=int, default=0, help="the seat cap to hold (default: this PC's pc_limit)")
@@ -1200,6 +1207,8 @@ def main() -> int:
     if args.gap:
         extra["STUB_GAP_S"] = args.gap
     extra["STUB_TERMINAL_S"] = str(args.terminal_s)
+    if args.shared_mcp:
+        extra["UEFN_DUCKY_SHARED_MCP"] = "1"
     env = sandbox_env(box, extra)
 
     filler = start_filler(args.squeeze_free_gb) if args.squeeze_free_gb else None
