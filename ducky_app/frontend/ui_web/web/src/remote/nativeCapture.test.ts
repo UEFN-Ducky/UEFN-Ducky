@@ -93,6 +93,35 @@ it("turns each native-frame into a BGRX VideoFrame of its slot and stops on abor
   expect(stopped).toBe(1);
 });
 
+it("keeps one frame in flight: frames that come while the encoder is busy are dropped", async () => {
+  let finish: () => void = () => {};
+  vi.stubGlobal(
+    "MediaStreamTrackGenerator",
+    class {
+      kind = "video";
+      writable = {
+        getWriter: () => ({
+          desiredSize: 1,
+          write: (f: { init: { codedWidth: number } }) => {
+            written.push({ format: "BGRX", w: f.init.codedWidth, h: 2, first: 0 });
+            return new Promise<void>((r) => (finish = r));
+          },
+        }),
+      };
+      stop() {}
+    },
+  );
+  startOk([]);
+  await nativeTrack("monitor:1", new AbortController().signal);
+  await vi.waitFor(() => expect(written.length).toBe(1));
+  for (let seq = 2; seq < 12; seq++) emit("message", { data: { type: "native-frame", view: "monitor:1", seq, slot: seq % 2, w: 4, h: 2 } });
+  expect(written.length).toBe(1); // a stalled writer drops, never queues
+  finish();
+  await new Promise((r) => setTimeout(r, 0));
+  emit("message", { data: { type: "native-frame", view: "monitor:1", seq: 12, slot: 0, w: 4, h: 2 } });
+  expect(written.length).toBe(2);
+});
+
 it("rejects and cleans up when Python refuses or no frame ever comes", async () => {
   const stops: string[] = [];
   api.native_capture_start = async () => ({ ok: false, error: "no main WebView2" });
