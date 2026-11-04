@@ -19,7 +19,6 @@ import json
 import re
 import shutil
 import sys
-import threading
 import time
 import zipfile
 from contextlib import contextmanager
@@ -29,6 +28,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.skills.ownership import (  # re-exported until callers import ownership directly
+    _is_plugin_owned_pack_id,
+    _plugin_owned_skill_map,
+    plugin_owner_for_skill,
+)
 from backend.skills.versions import next_skill_version, skill_version, skill_version_key
 
 EXPORT_FORMAT = "ducky-skill-pack"
@@ -40,9 +44,6 @@ DEFAULT_COMMERCIAL_LICENSE = "All Rights Reserved"
 SKILL_PACKS_DIR = "skill_packs"
 PACK_FILE = "SKILL.md"
 REFERENCES_DIR = "references"
-# (plugin fingerprint, enabled ids) -> pack_id → dir (see _plugin_owned_skill_map).
-_OWNED_MAP_CACHE: dict[Any, dict[str, Path]] = {}
-_OWNED_MAP_LOCK = threading.Lock()
 # One indexing pass (backend.search.indexer): per-pack stat passes, the plugin skill map
 # and the bundled packs folder are computed once per pass instead of two or three times
 # per pack. Per thread/context, so passes never share it.
@@ -430,72 +431,6 @@ def _license_text_for_pack(manifest: dict[str, Any]) -> str:
 # --- Manifest synthesis (derived from SKILL.md + references) ---
 
 
-def _plugin_owned_skill_map() -> dict[str, Path]:
-    """pack_id → skill dir for skills bundled inside *enabled* desktop plugins.
-
-    Cached on (plugin-tree fingerprint, enabled ids): _pack_roots() calls this for
-    every pack lookup, and the uncached version re-stat'd every plugin skill dir
-    and reloaded panel_settings.json per entry. Inside :func:`pass_memo` even the
-    fingerprint and settings read run once per pass.
-    """
-    memo = _PASS_MEMO.get()
-    if memo is not None:
-        if "owned_map" not in memo:
-            memo["owned_map"] = _plugin_owned_skill_map_uncached()
-        return dict(memo["owned_map"])
-    return _plugin_owned_skill_map_uncached()
-
-
-def _plugin_owned_skill_map_uncached() -> dict[str, Path]:
-    try:
-        from backend.uefn_plugins.host import is_plugin_enabled
-        from backend.uefn_plugins.store import (
-            _plugin_tree_fingerprint,
-            appdata_uefn_plugins_dir,
-            get_enabled_plugin_ids,
-            list_plugin_owned_skills,
-        )
-
-        key = (
-            _plugin_tree_fingerprint(appdata_uefn_plugins_dir()),
-            tuple(sorted(get_enabled_plugin_ids())),
-        )
-        with _OWNED_MAP_LOCK:
-            cached = _OWNED_MAP_CACHE.get(key)
-        if cached is not None:
-            return dict(cached)
-
-        out: dict[str, Path] = {}
-        for entry in list_plugin_owned_skills():
-            owner = str(entry.get("plugin_id") or "").strip()
-            if owner and not is_plugin_enabled(owner):
-                continue
-            pack_id = str(entry.get("pack_id") or "").strip()
-            path = Path(str(entry.get("path") or ""))
-            if pack_id and path.is_dir() and (path / PACK_FILE).is_file():
-                out[pack_id] = path
-        with _OWNED_MAP_LOCK:
-            _OWNED_MAP_CACHE.clear()
-            _OWNED_MAP_CACHE[key] = dict(out)
-        return out
-    except Exception:
-        return {}
-
-
-def plugin_owner_for_skill(pack_id: str) -> str | None:
-    """Return owning desktop plugin id when ``pack_id`` is plugin-bundled."""
-    try:
-        from backend.uefn_plugins.store import list_plugin_owned_skills
-
-        for entry in list_plugin_owned_skills():
-            if str(entry.get("pack_id") or "") == pack_id:
-                owner = str(entry.get("plugin_id") or "").strip()
-                return owner or None
-    except Exception:
-        return None
-    return None
-
-
 def _pack_roots(pack_id: str) -> list[Path]:
     roots = [appdata_skill_packs_dir() / pack_id]
     plugin_map = _plugin_owned_skill_map()
@@ -514,10 +449,6 @@ def _is_pack_dir(root: Path) -> bool:
 def _is_bundled_pack_id(pack_id: str) -> bool:
     bundled = bundled_skill_packs_dir()
     return bool(bundled and _is_pack_dir(bundled / pack_id))
-
-
-def _is_plugin_owned_pack_id(pack_id: str) -> bool:
-    return plugin_owner_for_skill(pack_id) is not None
 
 
 def _reference_files(root: Path) -> list[Path]:

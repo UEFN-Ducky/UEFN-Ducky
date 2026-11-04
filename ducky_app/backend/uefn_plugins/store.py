@@ -680,6 +680,11 @@ def _plugin_tree_fingerprint(root: Path) -> tuple[tuple[str, int], ...]:
     return fingerprint
 
 
+def plugin_tree_fingerprint(root: Path) -> tuple[tuple[str, int], ...]:
+    """Public: the memoized (name, mtime_ns) fingerprint of the plugin tree at ``root``."""
+    return _plugin_tree_fingerprint(root)
+
+
 def invalidate_plugin_skill_caches() -> None:
     """Drop plugin-owned-skill caches after install / uninstall / enable changes."""
     global _FINGERPRINT, _FINGERPRINT_AT, _FINGERPRINT_ROOT
@@ -689,14 +694,10 @@ def invalidate_plugin_skill_caches() -> None:
         _FINGERPRINT_AT = 0.0
         _OWNED_SKILLS_CACHE.clear()
     try:
-        from backend.skills.store import (
-            _OWNED_MAP_CACHE,
-            _OWNED_MAP_LOCK,
-            invalidate_skills_revision,
-        )
+        from backend.skills import ownership
+        from backend.skills.store import invalidate_skills_revision
 
-        with _OWNED_MAP_LOCK:
-            _OWNED_MAP_CACHE.clear()
+        ownership.invalidate()
         # Open chats compare this revision to decide whether their frozen skill
         # index needs rebuilding — drop it with the rest.
         invalidate_skills_revision()
