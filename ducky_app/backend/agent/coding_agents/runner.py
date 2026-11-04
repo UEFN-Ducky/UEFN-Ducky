@@ -902,15 +902,10 @@ def _run_coding_agent_message(
                                        "effective_mode": effective_mode})
 
     from backend.bridge import set_port_override
-    from backend.bridge.status import fetch_listener_status
     from frontend.settings import PANEL_LISTENER_PORT
 
     set_port_override(PANEL_LISTENER_PORT)
-    listener_status = fetch_listener_status(
-        PANEL_LISTENER_PORT,
-        selected_project_root=settings.uefn_project_root,
-    )
-    listener_online = bool(listener_status.get("online"))
+    # No listener status read per turn (2026-11-03): a UEFN tool finds out when it's called.
     cwd = project_root or "."
     cli_path = str(cfg.get("cli_path") or "")
 
@@ -980,7 +975,6 @@ def _run_coding_agent_message(
     skills_dir, skill_names = deployed_skill_packs(agent_id)
     system_prompt = bootstrap_system_prompt(
         project_root=project_root,
-        listener_online=listener_online,
         conv_id=conv.id,
         ducky_name=(conv.ducky_name or "").strip(),
         ducky_personality=(conv.ducky_personality or "").strip(),
