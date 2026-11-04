@@ -33,7 +33,21 @@ from backend.agent.verify_evidence import (
 from backend.agent.toolsets import is_plan_safe_tool
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 
-PushFn = Callable[[dict[str, Any]], None]
+from frontend.ui_web.agent_turns import push as _push_part
+from frontend.ui_web.agent_turns.push import (
+    PushFn,
+    _forward_to_panel,
+    _in_bridge_process,
+    _post_panel_run,
+    _resolve_push,
+    _set_active_conv_id,
+    get_active_conv_id,
+    get_panel_push,
+    notify_chats_changed,
+    notify_context_changed,
+    push_ui_event,
+    set_panel_push,
+)
 
 _ASK_SUFFIX = "\n\n[Mode: Ask] Read, search and discover evidence, then answer. Do not modify projects, plans, settings or assets, rename chats, delegate, or execute code."
 
@@ -53,28 +67,6 @@ _AGENT_SUFFIX = (
     f"{PLAN_PROTOCOL} "
     "Never replace the tool plan with chat prose."
 )
-
-_panel_push: PushFn | None = None
-_active_conv_id = threading.local()
-
-
-def set_panel_push(push: PushFn | None) -> None:
-    """Register UI push handler so MCP chat tools update the React panel."""
-    global _panel_push
-    _panel_push = push
-
-
-def get_panel_push() -> PushFn | None:
-    return _panel_push
-
-
-def get_active_conv_id() -> str | None:
-    return getattr(_active_conv_id, "conv_id", None)
-
-
-def _set_active_conv_id(conv_id: str | None) -> None:
-    _active_conv_id.conv_id = conv_id
-
 
 def _log_agent_crash(
     conv,
@@ -221,153 +213,6 @@ def _continue_on_claude_code(conv_id: str, mode: str, push: PushFn) -> bool:
     # queue_if_busy: this crashed turn may still be closing its session.
     run_message(conv_id, "", mode, QUOTA_FALLBACK_MODEL, resume=True, queue_if_busy=True)
     return True
-
-
-# --- Cross-process push forwarding (bridge process → panel process) ---------
-# ducky_spawn_chat / ducky_send_chat_message run inside the stdio MCP bridge,
-# a DIFFERENT process from the panel UI, where _panel_push is never set. Without
-# this, notify_chats_changed and the sub-agent's stream events go to a no-op, so
-# spawned chats/agents run invisibly (created on disk but never shown live). We
-# forward every event to the panel's loopback HTTP server, which replays it onto
-# its own push pipeline. A single daemon sender coalesces bursts into one POST so
-# high-frequency stream deltas don't block the agent thread.
-import queue as _queue
-import urllib.request as _urlreq
-
-_forward_queue: _queue.Queue[dict[str, Any]] = _queue.Queue(maxsize=4000)
-_forward_started = False
-_forward_lock = threading.Lock()
-
-
-def _panel_event_url() -> str:
-    return f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/__panel_event"
-
-
-def _forward_sender() -> None:
-    url = _panel_event_url()
-    while True:
-        batch = [_forward_queue.get()]
-        try:
-            while len(batch) < 250:
-                batch.append(_forward_queue.get_nowait())
-        except _queue.Empty:
-            pass
-        try:
-            data = json.dumps(batch, ensure_ascii=False).encode("utf-8")
-            req = _urlreq.Request(
-                url, data=data, headers={"Content-Type": "application/json"}, method="POST"
-            )
-            _urlreq.urlopen(req, timeout=2.0).close()
-        except Exception as _exc:
-            # Panel closed / not yet listening — drop this batch silently.
-            pass
-
-
-def _ensure_forwarder() -> None:
-    global _forward_started
-    with _forward_lock:
-        if _forward_started:
-            return
-        _forward_started = True
-    threading.Thread(target=_forward_sender, name="bridge-panel-forward", daemon=True).start()
-
-
-def _forward_to_panel(event: dict[str, Any]) -> None:
-    _ensure_forwarder()
-    try:
-        _forward_queue.put_nowait(dict(event))
-    except _queue.Full:
-        pass
-
-
-def _resolve_push(push: PushFn | None) -> PushFn:
-    if push is not None:
-        return push
-    if _panel_push is not None:
-        return _panel_push
-    # No local panel (we're in the stdio bridge process) — forward to the panel.
-    return _forward_to_panel
-
-
-def push_ui_event(event: dict[str, Any]) -> None:
-    """Send a one-off UI event to the panel from any process.
-
-    Routes to the local panel push when running inside the panel process, and
-    forwards over loopback HTTP when running in the stdio MCP bridge — so
-    settings/plugin change notifications from UI tools reach React either way.
-    """
-    _resolve_push(None)(event)
-
-
-# --- Run delegation (bridge process → panel process) ------------------------
-# A run started from the stdio MCP bridge (ducky_spawn_chat / ducky_send_chat_
-# message called by an external coding agent like Cursor) would otherwise
-# execute the agent loop inside the bridge process, invisible to the panel's
-# session registry, running-agent dots, streaming, and reconcile safety net. We
-# instead ask the panel to run it, so the spawned duck is a first-class panel
-# session. When no panel is reachable we fall back to running locally so spawns
-# still work headless.
-def _in_bridge_process() -> bool:
-    return _panel_push is None
-
-
-def _post_panel_run(payload: dict[str, Any], *, http_timeout: float | None) -> dict[str, Any] | None:
-    """POST a run request to the panel.
-
-    Returns the panel's JSON outcome on success; ``{"_delegation_timeout": True}``
-    if the panel accepted the connection but didn't answer in time (it is running
-    the turn — callers must NOT re-run locally or they'd duplicate it); ``None``
-    only when the panel is unreachable (no panel open → safe to run locally).
-    """
-    import socket
-
-    url = f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/__panel_run"
-    try:
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = _urlreq.Request(
-            url, data=data, headers={"Content-Type": "application/json"}, method="POST"
-        )
-        with _urlreq.urlopen(req, timeout=http_timeout) as resp:
-            body = resp.read().decode("utf-8")
-        return json.loads(body) if body else {}
-    except (TimeoutError, socket.timeout):
-        return {"_delegation_timeout": True}
-    except Exception as _exc:
-        return None
-
-
-def notify_chats_changed(
-    conv_id: str = "",
-    title: str = "",
-    folder_id: str = "",
-    *,
-    push: PushFn | None = None,
-    open_tab: bool = True,
-    removed_conv_ids: list[str] | None = None,
-    removed_folder_ids: list[str] | None = None,
-) -> None:
-    """Tell the React panel to reload the sidebar (new chat/folder from MCP tools).
-
-    Deleted or archived chats and deleted folders are named, so every open window
-    drops those rows at once instead of showing them until its next reload.
-    """
-    event: dict[str, Any] = {"type": "chats_changed"}
-    if conv_id:
-        event["conv_id"] = conv_id
-        event["title"] = title
-        event["folder_id"] = folder_id
-    if not open_tab:
-        event["open"] = False
-    if removed_conv_ids:
-        event["removed_conv_ids"] = [str(cid) for cid in removed_conv_ids if cid]
-    if removed_folder_ids:
-        event["removed_folder_ids"] = [str(fid) for fid in removed_folder_ids if fid]
-    _resolve_push(push)(event)
-
-
-def notify_context_changed(conv_id: str, *, push: PushFn | None = None) -> None:
-    """Tell the React panel to reload messages/context for a chat after context reset."""
-    _resolve_push(push)({"type": "context_changed", "conv_id": conv_id})
 
 
 def _push_token_usage(conv, push: PushFn, *, call_input: int = 0, call_output: int = 0, step: int = 0, usage: dict[str, int] | None = None) -> None:
@@ -2392,3 +2237,45 @@ def run_message(
 
     session.start(work, run_id)
     return run_id
+
+
+# --- Old import path for the code moved to agent_turns/ ----------------------
+# Callers and tests still read and patch ``agent_modes.<name>``. A patch here is applied to
+# every agent_turns module that holds that name, so the moved code sees it exactly as it
+# did when it all lived in this one module.
+import sys as _sys
+import types as _types
+
+_PARTS: tuple[_types.ModuleType, ...] = (_push_part,)
+# Rebound inside their own module (``global``): always read live, never copied here.
+_LIVE = frozenset({"_panel_push", "_forward_started", "_panel_runs_cache"})
+
+
+class _AgentModesShim(_types.ModuleType):
+    def __getattr__(self, name: str) -> Any:
+        for part in _PARTS:
+            if name in vars(part):
+                return vars(part)[name]
+        raise AttributeError(f"module {self.__name__!r} has no attribute {name!r}")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        for part in _PARTS:
+            if name in vars(part):
+                setattr(part, name, value)
+        if name not in _LIVE:
+            super().__setattr__(name, value)
+
+    def __delattr__(self, name: str) -> None:
+        for part in _PARTS:
+            if name in vars(part):
+                delattr(part, name)
+        if name in self.__dict__:
+            super().__delattr__(name)
+
+
+for _part in _PARTS:
+    for _name, _value in vars(_part).items():
+        if not _name.startswith("__") and _name not in _LIVE:
+            globals().setdefault(_name, _value)
+del _part, _name, _value
+_sys.modules[__name__].__class__ = _AgentModesShim
