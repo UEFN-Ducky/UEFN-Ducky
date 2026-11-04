@@ -179,7 +179,7 @@ def release_held_for_model(conv_id: str) -> int:
         return 0
 
     def _worker() -> None:
-        from frontend.ui_web.agent_modes import run_message
+        from frontend.ui_web.agent_turns.routing import run_message
 
         for item in held:
             run_message(conv_id, item["text"], item["mode"], "", attachments=item["attachments"] or None,
@@ -264,7 +264,7 @@ def _deliver_pending_agent_messages(conv_id: str) -> None:
             return
 
     def _worker() -> None:
-        from frontend.ui_web.agent_modes import run_message
+        from frontend.ui_web.agent_turns.routing import run_message
 
         if not wait_for_idle(conv_id, SESSION_JOIN_TIMEOUT):
             return

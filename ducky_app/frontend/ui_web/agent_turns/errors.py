@@ -110,7 +110,7 @@ def _schedule_auto_resume(conv_id: str, error: str, mode: str) -> bool:
     _auto_resumed_at[conv_id] = now
 
     def fire() -> None:
-        from frontend.ui_web.agent_modes import run_message
+        from frontend.ui_web.agent_turns.routing import run_message
 
         conv = load_conversation(conv_id)
         last = (getattr(conv, "messages", None) or [None])[-1] if conv else None
@@ -135,7 +135,7 @@ def _continue_on_claude_code(conv_id: str, mode: str, push: PushFn) -> bool:
     """Ducky AI plan limit hit: carry on with this chat on Claude Code, Opus 5.5 only
     (the person's choice, Nov 2026). Claude Code missing or signed out: say so and stop."""
     from backend.agent.coding_agents.base import get_adapter
-    from frontend.ui_web.agent_modes import run_message
+    from frontend.ui_web.agent_turns.routing import run_message
 
     try:
         adapter = get_adapter(QUOTA_FALLBACK_AGENT)
