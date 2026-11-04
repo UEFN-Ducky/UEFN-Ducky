@@ -337,9 +337,15 @@ def _heartbeat_lines(beat: dict[str, Any], ended: float | None) -> list[str]:
         parts.append(f"WebView2 {float(beat['webview_gb']):.1f} GB")
     if beat.get("agents") is not None:
         parts.append(f"{int(beat['agents'])} agents")
+    if beat.get("agents_n") is not None:
+        parts.append(f"agent processes {int(beat['agents_n'])}, {size_bucket(beat.get('agents_mb'))}")
     if beat.get("threads") is not None:
         parts.append(f"{int(beat['threads'])} threads")
     lines = [f"Last heartbeat {age}: " + ", ".join(parts) + "."]
+    others = [row for row in beat.get("top_other") or [] if isinstance(row, (list, tuple)) and len(row) == 2]
+    if others:
+        # Names only here: error_log goes to staff in a report the person chose to send.
+        lines.append("Biggest other programs: " + ", ".join(f"{_scrub(str(n))} {size_bucket(m)}" for n, m in others) + ".")
     if free is not None and float(free) < 1.0:
         when = f"{secs} before" if secs else f"less than {HEARTBEAT_S:.0f} s before"
         lines.append(f"Why: The PC had {float(free):.1f} GB free {when} Ducky closed.")
@@ -735,9 +741,11 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
         me = procs.get(os.getpid())
         if me is not None:
             beat.update(app_gb=round(me.private / gb, 2), threads=me.threads)
+            mine = proc_table.tree(procs, me.pid)
             beat["webview_gb"] = round(
-                sum(procs[p].private for p in proc_table.tree(procs, me.pid) if procs[p].name.lower() == "msedgewebview2.exe") / gb, 2
+                sum(procs[p].private for p in mine if procs[p].name.lower() == WEBVIEW_EXE) / gb, 2
             )
+            beat.update(process_census(procs, me.pid, mine))
     except Exception:
         # Out of commit the process table can fail: still say how big Ducky itself was.
         beat.setdefault("threads", threading.active_count())
@@ -750,6 +758,52 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
         except Exception:
             pass
     return beat
+
+
+WEBVIEW_EXE = "msedgewebview2.exe"
+TOP_OTHER_N = 3
+# Windows' own memory accounting, not programs anyone can close.
+_NOT_PROGRAMS = {"system", "registry", "memory compression", "secure system", "idle", "system idle process", ""}
+
+
+def process_census(procs: dict[int, Any], root: int, mine: list[int] | None = None) -> dict[str, Any]:
+    """What else held memory at this beat, from the one process table the beat already read.
+
+    ``agents_mb`` / ``agents_n``: every process Ducky started, and theirs, except WebView2
+    (agent CLIs: claude, node, the bridge). ``top_other``: the TOP_OTHER_N biggest programs
+    outside Ducky, summed by name, as ``[name, MB]`` (kept on this PC; only the crash report the
+    person chooses to send names them)."""
+    if mine is None:
+        from backend.util import proc_table
+
+        mine = proc_table.tree(procs, root)
+    ours = set(mine)
+    mb = 1024**2
+    agents = [procs[p] for p in mine if p != root and procs[p].name.lower() != WEBVIEW_EXE]
+    by_name: dict[str, int] = {}
+    for pid, proc in procs.items():
+        if pid in ours or proc.name.lower() in _NOT_PROGRAMS:
+            continue
+        name = re.sub(r"(?i)[.]exe$", "", proc.name)
+        by_name[name] = by_name.get(name, 0) + int(proc.private)
+    top = sorted(by_name.items(), key=lambda kv: kv[1], reverse=True)[:TOP_OTHER_N]
+    return {
+        "agents_mb": round(sum(int(p.private) for p in agents) / mb),
+        "agents_n": len(agents),
+        "top_other": [[name, round(size / mb)] for name, size in top],
+    }
+
+
+def size_bucket(mb: Any) -> str:
+    """A size the report can carry without an exact number: '1-2 GB'."""
+    try:
+        n = float(mb)
+    except (TypeError, ValueError):
+        return "?"
+    for bound, label in ((512, "under 0.5 GB"), (1024, "0.5-1 GB"), (2048, "1-2 GB"), (4096, "2-4 GB"), (8192, "4-8 GB")):
+        if n < bound:
+            return label
+    return "over 8 GB"
 
 
 def _own_private_bytes() -> int:

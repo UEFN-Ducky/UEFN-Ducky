@@ -548,3 +548,76 @@ def test_a_dotnet_exception_goes_into_the_next_report(crash) -> None:
     boot_report.begin("1.2.440")  # it died: the next launch reports
     log = crash["sent"][0]["error_log"]
     assert ".NET exception:\nSystem.Runtime.InteropServices.COMException (0x8001010D)" in log
+
+
+# Nov 4 2026 (1.2.463): "closed by itself" with Ducky at 1.2-1.5 GB while the PC fell to 0.8 GB
+# free, and nothing said whether the agents' claude/node children or another program held it.
+
+MB = 1024**2
+
+
+def _proc_tree(extra: int = 0) -> dict:
+    from backend.util.proc_table import Proc
+
+    def p(pid, ppid, name, mb, started=200.0):
+        return Proc(pid, ppid, name, 0, int(mb * MB), 1, 1, 0.0, started)
+
+    rows = [
+        p(100, 1, "UEFN Ducky.exe", 900, started=100.0), p(101, 100, "msedgewebview2.exe", 600),
+        p(102, 101, "msedgewebview2.exe", 300),
+        *[p(110 + i, 100, "claude.exe", 200) for i in range(3)],
+        *[p(120 + i, 110 + i, "node.exe", 150) for i in range(3)],
+        p(5, 1, "Memory Compression", 9000), p(6, 1, "chrome.exe", 3000), p(7, 1, "chrome.exe", 1500),
+        p(8, 1, "UnrealEditorFortnite.exe", 5000), p(9, 1, "Discord.exe", 700), p(10, 1, "node.exe", 400),
+        *[p(1000 + i, 1, f"svc{i}.exe", 5) for i in range(extra)],
+    ]
+    return {r.pid: r for r in rows}
+
+
+def test_census_counts_agent_children_but_not_webview2() -> None:
+    got = boot_report.process_census(_proc_tree(), 100)
+    assert got["agents_n"] == 6 and got["agents_mb"] == 3 * 200 + 3 * 150
+
+
+def test_census_names_the_three_biggest_other_programs() -> None:
+    got = boot_report.process_census(_proc_tree(), 100)
+    # Windows' own Memory Compression is not a program; chrome's processes add up.
+    assert got["top_other"] == [["UnrealEditorFortnite", 5000], ["chrome", 4500], ["Discord", 700]]
+
+
+def test_census_of_500_processes_stays_under_20_ms() -> None:
+    import time
+
+    procs = _proc_tree(extra=500)
+    start = time.perf_counter()
+    for _ in range(5):
+        boot_report.process_census(procs, 100)
+    assert (time.perf_counter() - start) / 5 < 0.020
+
+
+def test_heartbeat_sample_carries_the_census_from_one_table(monkeypatch) -> None:
+    import backend.util.proc_table as proc_table
+
+    procs = _proc_tree()
+    reads: list[int] = []
+    monkeypatch.setattr(proc_table, "table", lambda: reads.append(1) or procs)
+    monkeypatch.setattr(boot_report.os, "getpid", lambda: 100)
+    beat = boot_report._memory_sample(None)
+    assert reads == [1]
+    assert beat["agents_n"] == 6 and beat["agents_mb"] == 1050 and beat["webview_gb"] == 0.88
+    assert beat["top_other"][0] == ["UnrealEditorFortnite", 5000]
+
+
+def test_crash_report_shows_agents_and_other_programs_as_size_buckets() -> None:
+    beat = {"at": 1000.0, "free_gb": 0.8, "total_gb": 16, "app_gb": 1.3, "agents_n": 6, "agents_mb": 1050,
+            "top_other": [["UnrealEditorFortnite", 5000], ["chrome", 4500], ["Discord", 700]]}
+    lines = boot_report._heartbeat_lines(beat, 1010.0)
+    assert "agent processes 6, 1-2 GB" in lines[0] and "1050" not in lines[0]
+    assert "Biggest other programs: UnrealEditorFortnite 4-8 GB, chrome 4-8 GB, Discord 0.5-1 GB." in lines
+    assert not any("5000" in line or "4500" in line for line in lines)
+
+
+@pytest.mark.parametrize(("mb", "label"), [(100, "under 0.5 GB"), (700, "0.5-1 GB"), (1050, "1-2 GB"),
+                                           (5000, "4-8 GB"), (9000, "over 8 GB"), (None, "?")])
+def test_size_bucket(mb, label) -> None:
+    assert boot_report.size_bucket(mb) == label
