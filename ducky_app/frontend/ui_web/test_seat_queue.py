@@ -188,3 +188,49 @@ def test_a_good_turn_resets_the_retry(q):
 
 def test_pc_limit_reads_something():
     assert sq.pc_limit() >= 2 and sq.total_memory_gb() > 0
+
+
+@pytest.fixture
+def restarts(q, monkeypatch):
+    """Seats named m* are team members; a restart's start is the fake starter."""
+    monkeypatch.setattr(sq, "_restarted", {})
+    monkeypatch.setattr(sq, "_team_seat", lambda cid: cid.startswith("m"))
+    monkeypatch.setattr(sq, "_continue_start", lambda cid: q["starter"](cid))
+    return q
+
+
+def test_an_interrupted_member_restarts_once_then_is_skipped_for_ten_minutes(restarts):
+    q = restarts
+    assert sq.restart("m1") == "started"
+    assert q["started"] == ["m1"]
+    q["end"]("m1", "interrupted")  # the host died again
+    assert sq.restart("m1") == "skipped"
+    q["clock"]["t"] += sq.RESTART_EVERY_S
+    assert sq.restart("m1") == "started"
+    assert q["started"] == ["m1", "m1"]
+
+
+def test_seven_restarts_at_once_keep_the_cap(restarts):
+    q = restarts
+    results = [sq.restart(f"m{i}") for i in range(7)]
+    assert results == ["started"] * 4 + ["queued"] * 3  # pc_limit() == 4
+    assert len(q["started"]) == 4
+    q["end"]("m0")
+    assert q["started"][-1] == "m4" and len(q["alive"]) == 4
+
+
+def test_a_solo_chat_or_a_running_seat_is_skipped(restarts):
+    q = restarts
+    assert sq.restart("solo") == "skipped"
+    sq.request("m2", q["starter"]("m2"))
+    assert sq.restart("m2") == "skipped"  # its turn already runs
+    assert q["started"] == ["m2"]
+
+
+def test_the_restart_sends_the_continue_message(monkeypatch):
+    sent: list[tuple] = []
+    import frontend.ui_web.agent_turns.routing as routing
+
+    monkeypatch.setattr(routing, "run_message", lambda *a, **kw: sent.append((a, kw)) or "started")
+    sq._continue_start("m1")()
+    assert sent == [(("m1", sq.RESTART_TEXT, "agent", ""), {"queue_if_busy": True})]

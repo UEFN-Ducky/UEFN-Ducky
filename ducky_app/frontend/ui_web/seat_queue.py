@@ -186,6 +186,49 @@ def request(conv_id: str, start: Callable[[], Any]) -> str:
         return "queued" if any(s.conv_id == conv_id for s in _line) else "started"
 
 
+RESTART_EVERY_S = 600.0
+RESTART_TEXT = "[Ducky] Your agent host restarted; continue your plan point."
+_restarted: dict[str, float] = {}  # seat -> when it was last restarted
+
+
+def _team_seat(conv_id: str) -> bool:
+    try:
+        from backend.agent.a2a_broker import team_role
+
+        return team_role(conv_id) in ("member", "sub_lead")
+    except Exception:
+        return False
+
+
+def _continue_start(conv_id: str) -> Callable[[], Any]:
+    def start() -> Any:
+        from frontend.ui_web.agent_turns.routing import run_message
+
+        return run_message(conv_id, RESTART_TEXT, "agent", "", queue_if_busy=True)
+
+    return start
+
+
+def restart(conv_id: str, reason: str = "host_died") -> str:
+    """Start a team seat's turn again after its agent host died mid-turn (the turn ended
+    ``interrupted`` and nothing else would start it). It goes through the same line, cap and
+    waves as ``request`` and tells the seat to go on with its point. Returns ``started``,
+    ``queued`` or ``skipped``: not a team seat, a turn already runs or waits, or this seat was
+    restarted in the last ``RESTART_EVERY_S`` (a host that keeps dying must not loop)."""
+    del reason  # ponytail: one reason today; log it when there are several
+    now = _now()
+    with _lock:
+        last = _restarted.get(conv_id)
+        if last is not None and now - last < RESTART_EVERY_S:
+            return "skipped"
+    if not _team_seat(conv_id) or _agent_running(conv_id) or is_busy(conv_id):
+        return "skipped"
+    with _lock:
+        _restarted[conv_id] = now
+    got = request(conv_id, _continue_start(conv_id))
+    return "skipped" if got == "busy" else got
+
+
 def drop(conv_id: str) -> None:
     """Take the seat out of the line (Stop)."""
     with _lock:
