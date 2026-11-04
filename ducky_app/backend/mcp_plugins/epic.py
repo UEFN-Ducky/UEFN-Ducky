@@ -355,7 +355,27 @@ async def call_epic_tool(tool_name: str, arguments: dict[str, Any] | None, fn: A
         f"{EPIC_MCP_PREFIX}__{tool_name}",
         epic_tool_mutating(tool_name, arguments),
         fn,
+        heavy=epic_tool_heavy(tool_name, arguments),
     )
+
+
+def epic_tool_heavy(tool_name: str, arguments: dict[str, Any] | None = None) -> bool:
+    """True for an Epic call the gateway's memory guard checks: for ``call_tool`` the inner
+    tool (``VerseToolset...Build``, an unfiltered ``FindActors``...) and its own arguments."""
+    from backend.bridge import editor_gateway
+
+    if tool_name != "call_tool":
+        return editor_gateway.is_heavy_op(tool_name, arguments)
+    args = arguments or {}
+    inner = args.get("arguments")
+    if isinstance(inner, str):
+        try:
+            import json
+
+            inner = json.loads(inner)
+        except ValueError:
+            inner = {}
+    return editor_gateway.is_heavy_op(str(args.get("tool_name") or ""), inner if isinstance(inner, dict) else {})
 
 
 def invalidate_epic_mcp_probe() -> None:

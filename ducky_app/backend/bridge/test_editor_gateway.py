@@ -18,6 +18,99 @@ def _own_lease(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(editor_gateway, "_chat_title", lambda chat_id: {"lead": "Lead: Limo Ride"}.get(chat_id, chat_id))
 
 
+GB = 1024 ** 3
+
+
+@pytest.fixture(autouse=True)
+def memory(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
+    """Fake UEFN process and PC RAM; ``reads`` counts every memory read."""
+    state = {"uefn": None, "free": 32 * GB, "reads": 0}
+
+    def _uefn():
+        state["reads"] += 1
+        return state["uefn"]
+
+    def _free():
+        state["reads"] += 1
+        return state["free"]
+
+    monkeypatch.setattr(editor_gateway, "_uefn_memory", _uefn)
+    monkeypatch.setattr(editor_gateway, "_pc_free_bytes", _free)
+    monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
+    monkeypatch.setattr(editor_gateway, "_growth_limit_gb", lambda: 4.0)
+    return state
+
+
+def test_growth_of_1_gb_since_load_passes(memory) -> None:
+    memory["uefn"] = (100, 5.0, 21 * GB)
+    assert editor_gateway.call("", "execute_python", True, lambda: "first") == "first"  # baseline 21 GB
+    memory["uefn"] = (100, 5.0, 22 * GB)
+    assert editor_gateway.call("", "execute_python", True, lambda: "ok") == "ok"
+
+
+def test_growth_of_4_5_gb_since_load_refuses(memory) -> None:
+    memory["uefn"] = (100, 5.0, 21 * GB)
+    editor_gateway.call("", "import_asset", True, lambda: None)
+    memory["uefn"] = (100, 5.0, int(25.5 * GB))
+    ran: list[str] = []
+    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"UEFN grew 4\.5 GB since the island loaded \(PC free 32\.0 GB\): save and restart UEFN first \(ask the person\)"):
+        editor_gateway.call("", "unreal__VerseToolset.Build", True, lambda: ran.append("x"))
+    assert ran == []
+
+
+def test_low_pc_free_ram_refuses(memory) -> None:
+    memory["uefn"] = (100, 5.0, 21 * GB)
+    memory["free"] = 3 * GB
+    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"PC free 3\.0 GB"):
+        editor_gateway.call("", "play_in_editor", True, lambda: None)
+
+
+def test_a_new_uefn_pid_resets_the_baseline(memory) -> None:
+    memory["uefn"] = (100, 5.0, 21 * GB)
+    editor_gateway.call("", "execute_python", True, lambda: None)
+    memory["uefn"] = (200, 9.0, 26 * GB)  # UEFN restarted: 26 GB is its new baseline
+    assert editor_gateway.call("", "execute_python", True, lambda: "ok") == "ok"
+    memory["uefn"] = (200, 9.0, 27 * GB)
+    assert editor_gateway.call("", "execute_python", True, lambda: "ok") == "ok"
+
+
+def test_a_non_heavy_call_never_reads_memory(memory) -> None:
+    memory["uefn"] = (100, 5.0, 60 * GB)
+    memory["free"] = 1 * GB
+    assert editor_gateway.call("", "get_project_info", False, lambda: "info") == "info"
+    assert editor_gateway.call("", "spawn_actor", True, lambda: "spawned") == "spawned"
+    assert memory["reads"] == 0
+
+
+@pytest.mark.parametrize(
+    ("op", "args", "heavy"),
+    [
+        ("execute_python", None, True),
+        ("import_asset", None, True),
+        ("play_in_editor", None, True),
+        ("get_all_actors", None, True),
+        ("VerseToolset.BuildVerse", None, True),
+        ("workspace_compile_verse", None, True),
+        ("FindActors", {}, True),
+        ("FindActors", {"limit": 50}, True),
+        ("FindActors", {"class_name": "BP_Limo"}, False),
+        ("get_project_info", None, False),
+        ("spawn_actor", None, False),
+    ],
+)
+def test_is_heavy_op(op, args, heavy) -> None:
+    assert editor_gateway.is_heavy_op(op, args) is heavy
+
+
+def test_epic_heavy_reads_the_inner_tool_and_its_arguments() -> None:
+    from backend.mcp_plugins.epic import epic_tool_heavy
+
+    assert epic_tool_heavy("call_tool", {"tool_name": "LevelToolset.FindActors", "arguments": "{}"}) is True
+    assert epic_tool_heavy("call_tool", {"tool_name": "LevelToolset.FindActors", "arguments": {"label": "Limo"}}) is False
+    assert epic_tool_heavy("call_tool", {"tool_name": "SetDeviceProperty"}) is False
+    assert epic_tool_heavy("list_toolsets", {}) is False
+
+
 @pytest.fixture(autouse=True)
 def crash_watch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Lines the gateway appends to the project's crash-watch memory."""
@@ -81,13 +174,13 @@ def spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, bool]]:
     calls: list[tuple[str, str, bool]] = []
     real_call, real_acall = editor_gateway.call, editor_gateway.acall
 
-    def _call(chat_id, op, mutating, fn):
+    def _call(chat_id, op, mutating, fn, **kw):
         calls.append((chat_id, op, mutating))
-        return real_call(chat_id, op, mutating, fn)
+        return real_call(chat_id, op, mutating, fn, **kw)
 
-    async def _acall(chat_id, op, mutating, fn):
+    async def _acall(chat_id, op, mutating, fn, **kw):
         calls.append((chat_id, op, mutating))
-        return await real_acall(chat_id, op, mutating, fn)
+        return await real_acall(chat_id, op, mutating, fn, **kw)
 
     monkeypatch.setattr(editor_gateway, "call", _call)
     monkeypatch.setattr(editor_gateway, "acall", _acall)

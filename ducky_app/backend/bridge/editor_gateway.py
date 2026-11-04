@@ -20,6 +20,15 @@ Rules:
   (:func:`call_editor_process`); a no or a timeout cancels it. Each one, the person's
   own included, appends ``time, chat id, reason`` to the open project's memory entry
   :data:`CRASH_WATCH_ENTRY`, so a reopened editor is never mistaken for a crash.
+* **Memory guard** -- before a heavy call (:func:`is_heavy_op`: Verse compile/build, a
+  play session, an import, ``execute_python``, an unfiltered actor census) the gateway
+  reads UEFN's private bytes and the PC's free RAM. It refuses with
+  :class:`EditorMemoryLow` when UEFN grew more than ``uefn_memory_growth_limit_gb``
+  (default 4) since the island loaded, or the PC has under :data:`MIN_FREE_RAM_GB` free.
+  An island alone is ~21 GB, so the guard watches growth, not the total. The baseline
+  is UEFN's size at the first guarded call for that UEFN process (pid + start time),
+  kept in app data so every agent process shares it, and reset when UEFN restarts.
+  Memory is read only here, never polled, and never for other calls.
 """
 
 from __future__ import annotations
@@ -55,6 +64,32 @@ class EditorBusy(RuntimeError):
 
 class EditorProcessRefused(RuntimeError):
     """The person said no to (or never answered) an agent's UEFN launch / close / restart."""
+
+
+class EditorMemoryLow(RuntimeError):
+    """UEFN grew too much since the island loaded, or the PC is low on free RAM."""
+
+
+_GB = 1024 ** 3
+MIN_FREE_RAM_GB = 4.0
+DEFAULT_GROWTH_LIMIT_GB = 4.0
+BASELINE_FILE = "uefn_memory_baseline.json"
+# Name words of heavy editor calls (op names are compared in snake_case).
+_HEAVY_WORDS = (
+    "compile",
+    "build_verse",
+    "verse_build",
+    "play_in_editor",
+    "start_pie",
+    "start_session",
+    "launch_session",
+    "start_play",
+    "import",
+    "execute_python",
+    "get_all_actors",
+)
+# A FindActors census is heavy only without a filter: these arguments do not narrow it.
+_CENSUS_NON_FILTERS = frozenset({"limit", "max_results", "offset", "fields", "page", "page_size"})
 
 
 def current_chat_id() -> str:
@@ -138,14 +173,121 @@ def release_lease(chat_id: str) -> None:
             _write_lease({})
 
 
-def _check(chat_id: str, op: str, mutating: bool) -> None:
+def _snake(name: str) -> str:
+    import re
+
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name or "").lower()
+
+
+def is_heavy_op(op: str, arguments: dict[str, Any] | None = None) -> bool:
+    """True for an editor call that can add GBs to UEFN: Verse compile/build, a play
+    session, an import, ``execute_python``, an unfiltered actor census."""
+    name = _snake(op)
+    if any(word in name for word in _HEAVY_WORDS):
+        return True
+    if "verse" in name and "build" in name:
+        return True
+    if "find_actors" in name:
+        narrowing = {k: v for k, v in (arguments or {}).items() if k.lower() not in _CENSUS_NON_FILTERS and v}
+        return not narrowing
+    return False
+
+
+def _uefn_memory() -> tuple[int, float, int] | None:
+    """(pid, start time, private bytes) of the running UEFN, or None (not running / no psutil)."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    best: tuple[int, float, int] | None = None
+    for proc in psutil.process_iter(["name", "pid"]):
+        try:
+            if not str(proc.info.get("name") or "").lower().startswith("unrealeditorfortnite"):
+                continue
+            info = proc.memory_full_info()
+            private = int(getattr(info, "private", 0) or getattr(info, "uss", 0) or info.rss)
+            if best is None or private > best[2]:
+                best = (proc.pid, proc.create_time(), private)
+        except Exception:
+            continue
+    return best
+
+
+def _pc_free_bytes() -> int | None:
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().available)
+    except Exception:
+        return None
+
+
+def _growth_limit_gb() -> float:
+    try:
+        from frontend.settings import PanelSettings
+
+        value = float(getattr(PanelSettings.load(), "uefn_memory_growth_limit_gb", DEFAULT_GROWTH_LIMIT_GB))
+        return value if value > 0 else DEFAULT_GROWTH_LIMIT_GB
+    except Exception:
+        return DEFAULT_GROWTH_LIMIT_GB
+
+
+def _baseline_path() -> Path:
+    from frontend.settings import default_app_data_dir
+
+    return Path(default_app_data_dir()) / BASELINE_FILE
+
+
+def _baseline_for(pid: int, started: float, private: int) -> int:
+    """UEFN's private bytes when this UEFN process was first guarded; set now if new."""
+    path = _baseline_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if isinstance(data, dict) and data.get("pid") == pid and float(data.get("started") or 0) == started:
+        return int(data.get("private") or private)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"pid": pid, "started": started, "private": private}), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+    return private
+
+
+def check_memory(op: str) -> None:
+    """Raise :class:`EditorMemoryLow` when a heavy ``op`` would push UEFN or the PC too far."""
+    uefn = _uefn_memory()
+    free = _pc_free_bytes()
+    growth = 0.0
+    if uefn is not None:
+        pid, started, private = uefn
+        growth = (private - _baseline_for(pid, started, private)) / _GB
+    free_gb = free / _GB if free is not None else None
+    limit = _growth_limit_gb()
+    if growth > limit or (free_gb is not None and free_gb < MIN_FREE_RAM_GB):
+        free_text = f"{free_gb:.1f} GB" if free_gb is not None else "unknown"
+        raise EditorMemoryLow(
+            f"UEFN grew {growth:.1f} GB since the island loaded (PC free {free_text}): save and "
+            f"restart UEFN first (ask the person). `{op}` not sent; the limits are "
+            f"{limit:g} GB of growth and {MIN_FREE_RAM_GB:g} GB free RAM."
+        )
+
+
+def _check(chat_id: str, op: str, mutating: bool, heavy: bool | None = None) -> None:
     if mutating:
         take_lease(chat_id, op)
+    if is_heavy_op(op) if heavy is None else heavy:
+        check_memory(op)
 
 
-def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T]) -> T:
-    """Run one editor call ``fn`` for ``chat_id`` once the gateway's rules let it through."""
-    _check(chat_id, op, mutating)
+def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T], *, heavy: bool | None = None) -> T:
+    """Run one editor call ``fn`` for ``chat_id`` once the gateway's rules let it through.
+
+    ``heavy`` overrides :func:`is_heavy_op` (a caller that knows the call's arguments)."""
+    _check(chat_id, op, mutating, heavy)
     return fn()
 
 
@@ -207,9 +349,11 @@ def call_editor_process(chat_id: str, op: str, reason: str, fn: Callable[[], T])
     return call(chat_id, op, True, fn)
 
 
-async def acall(chat_id: str, op: str, mutating: bool, fn: Callable[[], Awaitable[Any]]) -> Any:
+async def acall(
+    chat_id: str, op: str, mutating: bool, fn: Callable[[], Awaitable[Any]], *, heavy: bool | None = None
+) -> Any:
     """:func:`call` for a coroutine: ``fn()`` returns an awaitable, which is awaited."""
-    _check(chat_id, op, mutating)
+    _check(chat_id, op, mutating, heavy)
     result = fn()
     if inspect.isawaitable(result):
         return await result
