@@ -58,3 +58,32 @@ def test_own_files_by_name_an_archived_writer_and_the_override_pass(tmp_path):
     assert _check("git add -A", tmp_path) == ""  # no commit in it
     git("add", "backend/images.py")  # staged earlier, by anyone: still theirs
     assert "images.py" in _check("git commit -m x", tmp_path)
+
+
+SPRAWL = ["ducky_app/backend/skills/store.py", "ducky_app/backend/uefn_plugins/host.py",
+          "ducky_app/frontend/ui_web/agent_modes.py", "ducky_app/frontend/chat_store.py"]
+
+
+def test_a_generic_message_is_warned():
+    # 5f47f6cb / 340be847 / b56660c0: "General fixes and improvements" bundled many fixes.
+    for cmd in ('git commit -m "General fixes and improvements"', "git commit -am 'misc fixes'",
+                'git add a.py && git commit -m "Various changes"', "git commit --message=Improvements"):
+        assert "name the one change this commit makes" in commit_guard.warn(cmd, ".", "me", files=["a.py"]), cmd
+
+
+def test_a_commit_across_more_than_three_packages_is_warned():
+    why = commit_guard.warn('git commit -m "Move plugin ownership into skills/ownership.py"', ".", "me",
+                            files=SPRAWL)
+    assert "spans 4 packages" in why and "backend/skills" in why and "frontend/chat_store" in why
+    assert "name the one change" not in why
+    assert commit_guard.warn("git commit -m x", ".", "me", files=SPRAWL[:3]) == ""  # 3 is fine
+
+
+def test_a_clean_commit_and_non_commits_get_no_warning(tmp_path):
+    clean = 'git add ducky_app/backend/skills/ownership.py && git commit -m "Move plugin ownership into skills/ownership.py"'
+    assert commit_guard.warn(clean, ".", "me", files=["ducky_app/backend/skills/ownership.py",
+                                                    "ducky_app/backend/skills/test_ownership.py"]) == ""
+    assert commit_guard.warn('git log --grep "general fixes"', ".", "me") == ""
+    assert commit_guard.warn('git commit -m "General fixes"', ".", "") == ""  # the person, not an agent
+    _repo(tmp_path)  # real lookup of what is staged: two files in one package
+    assert commit_guard.warn("git add backend && git commit -m 'Team tab: roles'", str(tmp_path), "me") == ""

@@ -6,6 +6,11 @@ Before an agent's command with ``git commit`` runs, the files it would commit (s
 plus what a ``git add`` or ``commit -a`` in the same command takes) are looked up in the
 change journal's last-writer index; a file another chat wrote, while that chat is live (not
 archived or deleted), refuses the command with the files and the chat named.
+
+``warn`` is softer: an agent commit whose message names no one change ("General fixes and
+improvements", 5f47f6cb / 340be847 / b56660c0) or whose files span more than
+MAX_PACKAGES top-level packages under ``ducky_app/`` still runs, with a note to split it, so
+a regression can be found and reverted on its own.
 """
 
 from __future__ import annotations
@@ -20,6 +25,10 @@ from typing import Callable
 # Ends the refusal: the agent means to commit the other chat's work (a lead integrating).
 OVERRIDE = "ducky:commit-others"
 _SPLIT = re.compile(r"&&|\|\||[;|\n]")
+# A message that could describe any commit.
+_GENERIC = re.compile(r"\b(general|misc(ellaneous)?|various)\b.*\b(fix(es)?|changes|improvements|updates|tweaks)\b"
+                      r"|^\s*(improvements|fixes|updates|changes|wip)\s*\.?\s*$", re.IGNORECASE)
+MAX_PACKAGES = 3
 
 
 def _git(cwd: str, *args: str) -> str:
@@ -89,6 +98,58 @@ def to_commit(command: str, cwd: str) -> tuple[str, list[str]]:
                                       or fnmatch.fnmatch(full, a) for a in adds):
                     files.add(rel)
     return top, sorted(files)
+
+
+def _messages(command: str) -> list[str]:
+    """The ``-m`` / ``--message`` texts of the command's ``git commit``."""
+    found: list[str] = []
+    for segment in _SPLIT.split(command or ""):
+        sub, args, _ = _git_call(_words(segment.strip()), "")
+        if sub != "commit":
+            continue
+        for i, arg in enumerate(args):
+            if arg in ("-m", "--message") and i + 1 < len(args):
+                found.append(args[i + 1])
+            elif arg.startswith("--message="):
+                found.append(arg.split("=", 1)[1])
+            elif re.fullmatch(r"-[a-zA-Z]*m", arg) and i + 1 < len(args):  # -am "msg"
+                found.append(args[i + 1])
+            elif re.fullmatch(r"-m.+", arg):
+                found.append(arg[2:])
+    return found
+
+
+def packages(files: list[str]) -> list[str]:
+    """The top-level packages under ``ducky_app/`` the files touch (``backend/skills``,
+    ``frontend/ui_web``; a module right under backend/frontend counts as its own)."""
+    found = set()
+    for rel in files:
+        parts = rel.replace("\\", "/").split("/")
+        if "ducky_app" not in parts:
+            continue
+        under = parts[parts.index("ducky_app") + 1:]
+        if len(under) >= 2 and under[0] in ("backend", "frontend"):
+            found.add("/".join(under[:2]).removesuffix(".py"))
+        elif under:
+            found.add(under[0].removesuffix(".py"))
+    return sorted(found)
+
+
+def warn(command: str, cwd: str, conv_id: str, *, files: list[str] | None = None) -> str:
+    """'' for a commit that names its one change, else a note for the agent (the command
+    still runs). *files*: the files it commits (default: looked up like ``check``)."""
+    if not conv_id or "commit" not in (command or ""):
+        return ""
+    notes = []
+    if any(_GENERIC.search(m) for m in _messages(command)):
+        notes.append("commit_guard: name the one change this commit makes (not 'general fixes').")
+    if files is None:
+        files = to_commit(command, cwd)[1]
+    spread = packages(files)
+    if len(spread) > MAX_PACKAGES:
+        notes.append(f"commit_guard: this commit spans {len(spread)} packages ({', '.join(spread)}); "
+                     "commit each change on its own so it can be reverted alone.")
+    return " ".join(notes)
 
 
 def _writer(path: str) -> tuple[str, str]:
