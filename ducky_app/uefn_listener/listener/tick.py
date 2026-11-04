@@ -168,6 +168,7 @@ from listener.dispatch import dispatch
 from listener.logutil import log_msg
 from listener.save_coalesce import flush_pending_save
 from listener.state import accept_lock, command_queue, main_queue, metrics, response_events, responses, responses_lock
+from listener.traffic import TRAFFIC
 
 
 def _clear_in_flight() -> None:
@@ -236,6 +237,16 @@ def _self_heal_stuck_inflight() -> None:
 
 
 def tick_handler(delta_time: float) -> None:
+    """Every editor frame. Timed into listener.traffic (handler ms and the frame gap)."""
+    started = time.time()
+    t0 = time.perf_counter()
+    try:
+        _tick(delta_time)
+    finally:
+        TRAFFIC.record_tick(started, (time.perf_counter() - t0) * 1000.0)
+
+
+def _tick(delta_time: float) -> None:
     # Heartbeat for zero-cost GET health (status polls must never POST ping).
     unreal._mcp_last_tick_at = time.time()
     lookup.invalidate()

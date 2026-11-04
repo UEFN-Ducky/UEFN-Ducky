@@ -13,6 +13,7 @@ import unreal
 from listener.config import HTTP_TIMEOUT_SEC, PROTOCOL_VERSION
 from listener.dispatch import handler_names
 from listener.state import accept_lock, command_queue, response_events, responses, responses_lock
+from listener.traffic import TRAFFIC, client_key
 
 _CONN_ERRORS = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
 
@@ -71,6 +72,10 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, code: int, body: bytes) -> None:
         try:
+            TRAFFIC.record_request(client_key(self.headers, self.client_address), self.command, code, len(body))
+        except Exception:  # noqa: BLE001 - counting never breaks a reply
+            pass
+        try:
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -124,6 +129,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "content_root": str(project.get("content_root") or ""),
             "island_dir": str(project.get("island_dir") or ""),
             "command_timings": list(metrics.get("command_timings") or [])[-20:],
+            # Totals for the last 10 min; the listener_traffic command has the full table.
+            "traffic": TRAFFIC.summary(),
         }).encode()
         self._send_json(200, body)
 
