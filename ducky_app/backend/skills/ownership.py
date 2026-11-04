@@ -6,7 +6,7 @@ plugin is enabled and the folder holds a SKILL.md, so agents may load it.
 
 Cached on (plugin-tree fingerprint, enabled ids): ``_pack_roots()`` asks for this on
 every pack lookup, and the uncached walk re-stat'd every plugin skill dir and reloaded
-panel_settings.json per entry. Inside ``store.pass_memo()`` even the fingerprint and
+panel_settings.json per entry. Inside ``passes.pass_memo()`` even the fingerprint and
 settings read run once per pass. Install / uninstall / enable call :func:`invalidate`.
 """
 
@@ -30,7 +30,7 @@ def invalidate() -> None:
 
 
 def _build() -> OwnedMap:
-    from backend.skills.store import PACK_FILE
+    from backend.skills.layout import PACK_FILE
     from backend.uefn_plugins.host import is_plugin_enabled
     from backend.uefn_plugins.store import (
         appdata_uefn_plugins_dir,
@@ -70,7 +70,7 @@ def _build() -> OwnedMap:
 
 def owned_map() -> OwnedMap:
     """Every plugin-owned pack, enabled or not. Empty when plugins can't be read."""
-    from backend.skills.store import _PASS_MEMO
+    from backend.skills.passes import _PASS_MEMO
 
     memo = _PASS_MEMO.get()
     if memo is not None:

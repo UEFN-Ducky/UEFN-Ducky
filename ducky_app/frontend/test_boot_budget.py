@@ -14,7 +14,7 @@ import pytest
 
 import backend.skills.store as _skill
 import frontend.skill_deploy as sd
-from backend.skills import ownership
+from backend.skills import discovery, ownership
 from backend.uefn_plugins import host as plugin_host
 from backend.uefn_plugins import store as plugin_store
 
@@ -65,7 +65,7 @@ def boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(plugin_store, "plugin_tree_fingerprint", lambda root: ("v1",))
     monkeypatch.setattr(plugin_store, "get_enabled_plugin_ids", lambda: ["kit"])
     monkeypatch.setattr(plugin_host, "is_plugin_enabled", lambda pid: pid == "kit")
-    monkeypatch.setattr(_skill, "bundled_skill_packs_dir", lambda: None)
+    monkeypatch.setattr(discovery, "bundled_skill_packs_dir", lambda: None)
     monkeypatch.setattr(_skill, "seed_skill_packs", lambda force=False: [])
     roots = {tmp_path / f"ide{i}" / sd.SKILLS_DIRNAME for i in range(ROOTS)}
     monkeypatch.setattr(sd, "registered_coding_agent_skills_roots", lambda: set(roots))

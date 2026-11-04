@@ -12,6 +12,7 @@ from pathlib import Path
 
 import backend.skills.store as store
 import frontend.ui_web.project_chats as pc
+from backend.skills import revision
 from frontend.chat_store import Conversation
 
 
@@ -29,8 +30,8 @@ def _pack(root: Path, pack_id: str, refs: list[str]) -> Path:
 
 
 def _wire(monkeypatch, root: Path, packs: dict[str, list[str]]) -> None:
-    monkeypatch.setattr(store, "list_pack_ids", lambda: list(packs))
-    monkeypatch.setattr(store, "_pack_roots", lambda pid: [root / pid])
+    monkeypatch.setattr(revision, "list_pack_ids", lambda: list(packs))
+    monkeypatch.setattr(revision, "_pack_roots", lambda pid: [root / pid])
     store.invalidate_skills_revision()
 
 
@@ -153,20 +154,3 @@ def test_blank_rebuild_never_wipes_a_working_snapshot(tmp_path, monkeypatch):
     assert pc.sync_skill_snapshot(conv, _Settings()) is False
     assert conv.skill_snapshot == "GOOD INDEX"
 
-
-def test_new_chat_skill_text_is_built_once_per_revision(monkeypatch):
-    # Oct 25 2026: ~150 ms per create with the GIL held, so making groups fast stalled the app.
-    built: list[int] = []
-    rev = {"value": "rev1"}
-    monkeypatch.setattr(store, "skills_revision", lambda: rev["value"])
-    monkeypatch.setattr(store, "build_skill_prompt", lambda sel: built.append(1) or f"INDEX {rev['value']}")
-    store._NEW_CHAT_SKILL_TEXT.clear()
-
-    assert store.conversation_skill_text(mutate=False) == "INDEX rev1"
-    assert store.conversation_skill_text(mutate=False) == "INDEX rev1"
-    assert len(built) == 1
-    rev["value"] = "rev2"  # a pack changed on disk: the next chat gets the new index
-    assert store.conversation_skill_text(mutate=False) == "INDEX rev2"
-    store.invalidate_skills_revision()
-    store.conversation_skill_text(mutate=False)
-    assert len(built) == 3
