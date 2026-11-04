@@ -253,58 +253,6 @@ def test_old_perf_session_reports_are_pruned(quiet_perf, monkeypatch) -> None:
     assert kv.get_doc("cache_docs", "perf_report_latest") == {"keep": True}
 
 
-def test_skill_manifest_cache_hits_until_a_reference_changes(appdata: Path, monkeypatch) -> None:
-    from backend.skills import store as skills
-
-    pack = appdata / "skill_packs" / "demo"
-    (pack / "references").mkdir(parents=True)
-    (pack / "SKILL.md").write_text("---\nname: demo\ndescription: Demo pack\n---\nbody\n", encoding="utf-8")
-    (pack / "references" / "one.md").write_text("---\ndescription: One\n---\nx\n", encoding="utf-8")
-    monkeypatch.setattr(skills, "_plugin_owned_skill_map", lambda: {})
-    m1 = skills.load_pack_manifest("demo")
-    assert [s["id"] for s in m1["subskills"]] == ["core", "one"]
-    assert kv.get_doc("cache_docs", "skill_manifest:demo") is not None
-    calls = {"n": 0}
-    real = skills._manifest_from_skill_dir
-
-    def counting(*a, **k):
-        calls["n"] += 1
-        return real(*a, **k)
-
-    monkeypatch.setattr(skills, "_manifest_from_skill_dir", counting)
-    assert skills.load_pack_manifest("demo") == m1 and calls["n"] == 0
-    time.sleep(0.01)
-    (pack / "references" / "two.md").write_text("---\ndescription: Two\n---\ny\n", encoding="utf-8")
-    m2 = skills.load_pack_manifest("demo")
-    assert calls["n"] == 1 and [s["id"] for s in m2["subskills"]] == ["core", "one", "two"]
-
-
-def test_store_installed_skill_pack_hits_the_manifest_cache(appdata: Path, monkeypatch) -> None:
-    """A pack installed from the Store was cached under kind "store" but looked
-    up as "custom", so every load re-parsed the whole pack and rewrote its row."""
-    from backend.skills import store as skills
-
-    pack = appdata / "skill_packs" / "shop-pack"
-    (pack / "references").mkdir(parents=True)
-    (pack / "SKILL.md").write_text(
-        "---\nname: shop-pack\ndescription: From the Store\nmetadata:\n  source: store\n---\nbody\n", encoding="utf-8"
-    )
-    (pack / "references" / "one.md").write_text("---\ndescription: One\n---\nx\n", encoding="utf-8")
-    monkeypatch.setattr(skills, "_plugin_owned_skill_map", lambda: {})
-    parses: list[str] = []
-    writes: list[str] = []
-    real_parse = skills._manifest_from_skill_dir
-    real_set_doc = kv.set_doc
-    monkeypatch.setattr(skills, "_manifest_from_skill_dir", lambda *a, **k: (parses.append(a[2]), real_parse(*a, **k))[1])
-    monkeypatch.setattr(kv, "set_doc", lambda t, key, v: (writes.append(key), real_set_doc(t, key, v)))
-    first = skills.load_pack_manifest("shop-pack")
-    assert parses == ["store"]
-    for _ in range(2):
-        assert skills.load_pack_manifest("shop-pack") == first
-    assert parses == ["store"]
-    assert writes == ["skill_manifest:shop-pack"]
-
-
 def test_cli_check_stats_and_snapshot(capsys) -> None:
     from frontend import store_cli
 

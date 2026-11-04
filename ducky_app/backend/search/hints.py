@@ -60,7 +60,7 @@ def context_for_conversation(conv: Any) -> Any:
     from backend.search.query import Context, chat_context
 
     try:
-        from backend.skills.store import resolve_conversation_selection
+        from backend.skills.selection import resolve_conversation_selection
         from frontend.settings import PanelSettings
 
         sel = resolve_conversation_selection(conv, PanelSettings.load())

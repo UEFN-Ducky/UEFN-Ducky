@@ -115,7 +115,7 @@ def test_index_labels_yours_and_store(isolated_appdata: Path) -> None:
         store_slug="demo-tips",
     )
     create_subskill("demo-tips", "my_notes", "My Notes", "user notes")
-    from backend.skills.store import SkillSelection
+    from backend.skills.selection import SkillSelection
 
     text = build_skill_prompt(SkillSelection(disabled_packs=[]))
     assert "`demo-tips` [store]" in text

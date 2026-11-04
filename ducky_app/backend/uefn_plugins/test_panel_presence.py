@@ -107,7 +107,7 @@ def test_plugins_get_a_seekable_link_for_local_media(tmp_path) -> None:
 
 
 def test_plugins_get_a_plain_local_folder_for_rebuildable_files(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("backend.skills.store.appdata_dir", lambda: tmp_path)
+    monkeypatch.setattr("backend.skills.discovery.appdata_dir", lambda: tmp_path)
     folder = pp.plugin_local_dir("island-media-kit", "proxies")
     assert folder == tmp_path / "plugin_local" / "island-media-kit" / "proxies" and folder.is_dir()
     assert pp.plugin_local_dir("island-media-kit", "../../etc") == tmp_path / "plugin_local" / "island-media-kit" / "etc"

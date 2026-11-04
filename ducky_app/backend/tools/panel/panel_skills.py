@@ -1,6 +1,6 @@
 """Skills pathway: list/create packs, additive subskills, enablement, studio nav.
 
-Wraps :mod:`backend.skills.store`. Store packs are additive-only (origin=user subskills
+Wraps the :mod:`backend.skills` modules. Store packs are additive-only (origin=user subskills
 survive Store updates). Reading content uses skill_read_subskill.
 """
 
@@ -22,7 +22,8 @@ def _notify_changed() -> None:
 
 
 def create_pack_tool(pack_id: str, label: str = "", description: str = "") -> dict[str, Any]:
-    from backend.skills.store import create_skill_pack, normalize_pack_id
+    from backend.skills.authoring import create_skill_pack
+    from backend.skills.discovery import normalize_pack_id
 
     try:
         pid = normalize_pack_id(pack_id)
@@ -40,7 +41,7 @@ def create_pack_tool(pack_id: str, label: str = "", description: str = "") -> di
 
 def _pack_is_user_owned(man: dict[str, Any]) -> bool:
     """True when the pack itself is user-authored (not store/bundled/plugin)."""
-    from backend.skills.store import ORIGIN_USER, SOURCE_STORE
+    from backend.skills.layout import ORIGIN_USER, SOURCE_STORE
 
     kind = str(man.get("kind") or "").strip().lower()
     if kind in ("store", "bundled", "plugin"):
@@ -61,15 +62,10 @@ def write_subskill_tool(
     description: str = "",
 ) -> dict[str, Any]:
     """Create or update a user-origin subskill. Additive-only on Store packs."""
-    from backend.skills.store import (
-        CORE_ID,
-        ORIGIN_USER,
-        create_subskill,
-        load_pack_manifest,
-        normalize_pack_id,
-        normalize_subskill_id,
-        save_subskill,
-    )
+    from backend.skills.authoring import create_subskill, save_subskill
+    from backend.skills.discovery import normalize_pack_id, normalize_subskill_id
+    from backend.skills.layout import CORE_ID, ORIGIN_USER
+    from backend.skills.manifest import load_pack_manifest
 
     try:
         pid = normalize_pack_id(pack_id)
@@ -148,7 +144,7 @@ def write_subskill_tool(
 
 def set_pack_scoped(pack_id: str, enabled: bool, *, scope: str = "global", chat_id: str = "") -> dict[str, Any]:
     """Allow/deny a skill pack globally or for one chat (deny-list). Shared with the guide."""
-    from backend.skills.store import list_pack_ids
+    from backend.skills.discovery import list_pack_ids
 
     pid = (pack_id or "").strip()
     if pid not in list_pack_ids():
@@ -207,7 +203,7 @@ def ducky_skills_list_packs(pretty: bool = False) -> str:
 
     `default_enabled` is True when the pack is not on the global deny-list.
     """
-    from backend.skills.store import list_skill_packs
+    from backend.skills.manifest import list_skill_packs
     from frontend.settings import PanelSettings
 
     denied = set(PanelSettings.load().default_disabled_packs or [])

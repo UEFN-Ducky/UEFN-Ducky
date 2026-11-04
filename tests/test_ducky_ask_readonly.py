@@ -19,7 +19,7 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     from frontend.settings import PanelSettings
     from frontend.ui_web import project_chats as pc
     from backend.uefn_plugins import host
-    from backend.skills import store
+    from backend.skills import seeding, skill_index
     from backend.mcp_plugins import store as mcp_store
     from backend.bridge import status
     settings = PanelSettings.load()
@@ -43,8 +43,9 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     monkeypatch.setattr(am, "_log_agent_crash", lambda *a, **kw: None)
     monkeypatch.setattr(host, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr(host, "ensure_plugins_loaded", lambda: None)
-    monkeypatch.setattr(store, "seed_skill_packs", lambda: None)
-    monkeypatch.setattr(store, "build_skill_prompt", lambda *a: "")
+    monkeypatch.setattr(seeding, "seed_skill_packs", lambda: None)
+    monkeypatch.setattr(skill_index, "seed_skill_packs", lambda: None)
+    monkeypatch.setattr(skill_index, "build_skill_prompt", lambda *a: "")
     monkeypatch.setattr(mcp_store, "seed_mcp_plugins", lambda: None)
     monkeypatch.setattr("frontend.duckyos_account.fetch_agent_caps", lambda: {})
     monkeypatch.setattr(status, "fetch_listener_status", lambda *a, **kw: {"online": False})

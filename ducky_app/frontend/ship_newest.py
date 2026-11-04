@@ -212,7 +212,7 @@ def ship_newest_everywhere(
 
         try:
             if keep_ides:
-                from backend.skills.store import seed_skill_packs
+                from backend.skills.seeding import seed_skill_packs
 
                 for ln in seed_skill_packs(force=force_skills):
                     _log(ln)

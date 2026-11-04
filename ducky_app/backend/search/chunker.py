@@ -163,7 +163,8 @@ def pack_docs(
     plugin_id: str = "",
 ) -> list[Doc]:
     """Rows for one pack folder (SKILL.md + references/*.md) described by ``manifest``."""
-    from backend.skills.store import PACK_FILE, parse_frontmatter
+    from backend.skills.frontmatter import parse_frontmatter
+    from backend.skills.layout import PACK_FILE
 
     source_key = f"pack:{pack_id}"
     label = str(manifest.get("label") or pack_id)

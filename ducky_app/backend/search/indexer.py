@@ -76,7 +76,8 @@ def _origin_for(manifest: dict[str, Any]) -> str:
 
 def live_pack_sources() -> list[PackSource]:
     """Every pack on this PC, including packs of installed plugins that are switched off."""
-    from backend.skills import store as skills
+    from backend.skills import discovery, layout
+    from backend.skills import manifest as skill_manifest
 
     owned: dict[str, tuple[str, Path]] = {}
     try:
@@ -90,18 +91,18 @@ def live_pack_sources() -> list[PackSource]:
         pass
     out: list[PackSource] = []
     seen: set[str] = set()
-    for pack_id in [*skills.list_pack_ids(), *owned]:
+    for pack_id in [*discovery.list_pack_ids(), *owned]:
         if pack_id in seen:
             continue
         seen.add(pack_id)
-        manifest = skills.load_pack_manifest(pack_id)
-        root = next((r for r in skills._pack_roots(pack_id) if skills._is_pack_dir(r)), None)
+        manifest = skill_manifest.load_pack_manifest(pack_id)
+        root = next((r for r in discovery._pack_roots(pack_id) if discovery._is_pack_dir(r)), None)
         if manifest is None or root is None:
             plugin_id, path = owned.get(pack_id, ("", Path()))
-            if not (path / skills.PACK_FILE).is_file():
+            if not (path / layout.PACK_FILE).is_file():
                 continue
             root = path
-            manifest = skills._manifest_from_skill_dir(path, pack_id, "plugin")
+            manifest = skill_manifest._manifest_from_skill_dir(path, pack_id, "plugin")
         plugin_id = owned.get(pack_id, ("", Path()))[0] or str(manifest.get("source_plugin_id") or "")
         out.append(PackSource(pack_id, root, manifest, _origin_for(manifest), plugin_id))
     return out
@@ -109,12 +110,13 @@ def live_pack_sources() -> list[PackSource]:
 
 def pack_sources_from_dirs(entries: Iterable[tuple[str, Path, str, str]]) -> list[PackSource]:
     """Explicit packs: (pack_id, folder, origin, plugin_id). Used by the eval runner and tests."""
-    from backend.skills import store as skills
+    from backend.skills import layout
+    from backend.skills import manifest as skill_manifest
 
     out: list[PackSource] = []
     for pack_id, root, origin, plugin_id in entries:
-        if (Path(root) / skills.PACK_FILE).is_file():
-            manifest = skills._manifest_from_skill_dir(Path(root), pack_id, "plugin" if plugin_id else "custom")
+        if (Path(root) / layout.PACK_FILE).is_file():
+            manifest = skill_manifest._manifest_from_skill_dir(Path(root), pack_id, "plugin" if plugin_id else "custom")
             out.append(PackSource(pack_id, Path(root), manifest, origin, plugin_id))
     return out
 
@@ -253,7 +255,7 @@ def index_source(source_key: str, docs: list[repo.Doc], revision: str, *, keep: 
 
 
 def _pack_revision(src: PackSource, model: str) -> str:
-    from backend.skills.store import _pack_stamp
+    from backend.skills.manifest import _pack_stamp
 
     return f"{chunker.CHUNKER_VERSION}|{model}|{src.root}|{src.origin}|{src.plugin_id}|{_pack_stamp(src.root)}"
 
@@ -351,7 +353,7 @@ def refresh_now(*, packs: bool = True, tools: bool = True) -> dict[str, Any]:
     report: dict[str, Any] = {}
     if packs:
         try:
-            from backend.skills.store import pass_memo
+            from backend.skills.passes import pass_memo
 
             with pass_memo():  # each pack's files are stat'd once per pass, not three times
                 report["packs"] = index_packs(live_pack_sources())

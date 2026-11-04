@@ -96,7 +96,7 @@ def clear_conversation_messages(conv: Conversation, project_root: str | None = N
 
 def _clear_skill_data(conv: Conversation) -> None:
     from backend.agent.prompt_cache import invalidate_conv_cache
-    from backend.skills.store import list_pack_ids
+    from backend.skills.discovery import list_pack_ids
 
     conv.skill_snapshot = ""
     conv.disabled_packs = list(list_pack_ids())
@@ -107,7 +107,9 @@ def _clear_skill_data(conv: Conversation) -> None:
 
 
 def _restore_skill_data(conv: Conversation, project_root: str | None = None) -> None:
-    from backend.skills.store import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
+    from backend.skills.seeding import seed_skill_packs
+    from backend.skills.selection import resolve_conversation_selection
+    from backend.skills.skill_index import build_skill_prompt
 
     seed_skill_packs()
     from backend.mcp_plugins.store import seed_mcp_plugins

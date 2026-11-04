@@ -118,7 +118,7 @@ def store_version(raw: object) -> str:
 
 
 def build_kit_dir() -> Path:
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
 
     return appdata_dir() / "build_kit"
 

@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from backend.skills.store import appdata_dir
+from backend.skills.discovery import appdata_dir
 from backend.uefn_plugins.plugin_version import format_plugin_version
 
 PLUGIN_MANIFEST = "plugin.json"
@@ -695,7 +695,7 @@ def invalidate_plugin_skill_caches() -> None:
         _OWNED_SKILLS_CACHE.clear()
     try:
         from backend.skills import ownership
-        from backend.skills.store import invalidate_skills_revision
+        from backend.skills.revision import invalidate_skills_revision
 
         ownership.invalidate()
         # Open chats compare this revision to decide whether their frozen skill
@@ -764,7 +764,7 @@ def validate_plugin_skills(
     Raises ``ValueError`` on path/id/collision problems.
     """
     gone_plugins, gone_packs = replacing
-    from backend.skills.store import appdata_skill_packs_dir, normalize_pack_id
+    from backend.skills.discovery import appdata_skill_packs_dir, normalize_pack_id
 
     pid = normalize_plugin_id(plugin_id)
     plugin_root = Path(plugin_root).resolve()
@@ -803,7 +803,7 @@ def validate_plugin_skills(
             )
         # Frontmatter name should match folder when present.
         try:
-            from backend.skills.store import parse_frontmatter
+            from backend.skills.frontmatter import parse_frontmatter
 
             raw = (skill_dir / PLUGIN_SKILL_FILE).read_text(encoding="utf-8")
             meta, _ = parse_frontmatter(raw)
@@ -1098,7 +1098,7 @@ UEFN_REPLACES_SKILL_PACKS: frozenset[str] = frozenset({"npc-ai"})
 
 def uefn_takes_over(plugin_id: str, version: object) -> tuple[list[str], list[str]]:
     """(installed Store plugins, standalone skill packs) an install of this version replaces."""
-    from backend.skills.store import appdata_skill_packs_dir
+    from backend.skills.discovery import appdata_skill_packs_dir
     from backend.uefn_plugins.plugin_version import plugin_version_newer
 
     if plugin_id != "uefn" or plugin_version_newer("1.1.0", version):
@@ -1430,7 +1430,7 @@ def _import_plugin_from_bytes(
         except Exception:  # noqa: BLE001 — gone already, or the next UEFN install takes it
             logging.getLogger(__name__).warning("could not remove %s after %s landed", other, pid, exc_info=True)
     if replacing[1]:
-        from backend.skills.store import appdata_skill_packs_dir
+        from backend.skills.discovery import appdata_skill_packs_dir
 
         for pack in replacing[1]:
             shutil.rmtree(appdata_skill_packs_dir() / pack, ignore_errors=True)

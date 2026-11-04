@@ -666,7 +666,7 @@ def run_message(
         # the whole run (worker thread context; asyncio.run below inherits it).
         from backend.agent.builtin_toolsets import set_active_builtin_groups
         from backend.mcp_plugins.store import set_active_plugin_ids
-        from backend.skills.store import set_active_disabled_packs, set_active_enabled_subskills
+        from backend.skills.selection import set_active_disabled_packs, set_active_enabled_subskills
         from backend.uefn_plugins.host import set_active_uefn_agent_plugin_ids
 
         try:
@@ -702,7 +702,9 @@ def run_message(
             # delay run_id (hence is_agent_running) long enough that the UI's
             # reconcile tore the fresh run down. The thread is already live now, so
             # the run reads as running the instant send_message returns.
-            from backend.skills.store import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
+            from backend.skills.seeding import seed_skill_packs
+            from backend.skills.selection import resolve_conversation_selection
+            from backend.skills.skill_index import build_skill_prompt
             from backend.mcp_plugins.store import seed_mcp_plugins
             from backend.uefn_plugins.host import ensure_plugins_loaded
 

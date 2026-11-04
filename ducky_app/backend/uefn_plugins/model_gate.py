@@ -19,7 +19,7 @@ _LOCK = threading.Lock()
 
 
 def _path() -> Path:
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
 
     return appdata_dir() / _FILE
 

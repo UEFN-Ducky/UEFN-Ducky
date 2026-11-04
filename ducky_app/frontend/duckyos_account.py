@@ -2174,7 +2174,7 @@ def store_catalog() -> dict[str, Any]:
     installed_skills: dict[str, dict[str, Any]] = {}
     skill_denied: set[str] = set()
     try:
-        from backend.skills.store import list_skill_packs
+        from backend.skills.manifest import list_skill_packs
         from frontend.settings import PanelSettings
 
         skill_denied = set(PanelSettings.load().default_disabled_packs or [])
@@ -2288,7 +2288,7 @@ def store_catalog() -> dict[str, Any]:
             # standalone Store skill row so Update All cannot try (and fail) to
             # overwrite a plugin-owned pack (physics / virtualpointer).
             try:
-                from backend.skills.store import plugin_owner_for_skill
+                from backend.skills.ownership import plugin_owner_for_skill
 
                 skill_owner = plugin_owner_for_skill(slug)
             except Exception:
@@ -2710,7 +2710,7 @@ def _store_download_and_install_unlocked(
             raw, source="store", replace=bool(replace), signed_record=signed_record, replace_old=replace_old
         )
     else:
-        from backend.skills.store import import_skill_pack_from_bytes
+        from backend.skills.archive import import_skill_pack_from_bytes
 
         result = import_skill_pack_from_bytes(
             raw,

@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 
-import backend.skills.store as _skill
 import frontend.skill_deploy as sd
-from backend.skills import discovery, ownership
+from backend.skills import discovery, ownership, seeding, skill_index
+from backend.skills.layout import PACK_FILE, REFERENCES_DIR
 from backend.uefn_plugins import host as plugin_host
 from backend.uefn_plugins import store as plugin_store
 
@@ -24,9 +24,9 @@ PLUGIN_PACKS = 5
 
 
 def _write_pack(folder: Path, pack_id: str) -> None:
-    refs = folder / _skill.REFERENCES_DIR
+    refs = folder / REFERENCES_DIR
     refs.mkdir(parents=True, exist_ok=True)
-    (folder / _skill.PACK_FILE).write_text(
+    (folder / PACK_FILE).write_text(
         f"---\nname: {pack_id}\ndescription: {pack_id} tips\nmetadata:\n  label: {pack_id}\n---\n\nBody.\n",
         encoding="utf-8",
     )
@@ -42,7 +42,7 @@ def boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
-    packs_dir = _skill.appdata_skill_packs_dir()
+    packs_dir = discovery.appdata_skill_packs_dir()
     for i in range(PACKS - PLUGIN_PACKS):
         _write_pack(packs_dir / f"pack{i:02d}", f"pack{i:02d}")
 
@@ -66,7 +66,8 @@ def boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(plugin_store, "get_enabled_plugin_ids", lambda: ["kit"])
     monkeypatch.setattr(plugin_host, "is_plugin_enabled", lambda pid: pid == "kit")
     monkeypatch.setattr(discovery, "bundled_skill_packs_dir", lambda: None)
-    monkeypatch.setattr(_skill, "seed_skill_packs", lambda force=False: [])
+    monkeypatch.setattr(seeding, "seed_skill_packs", lambda force=False: [])
+    monkeypatch.setattr(skill_index, "seed_skill_packs", lambda force=False: [])
     roots = {tmp_path / f"ide{i}" / sd.SKILLS_DIRNAME for i in range(ROOTS)}
     monkeypatch.setattr(sd, "registered_coding_agent_skills_roots", lambda: set(roots))
     state["roots"] = sorted(roots)
@@ -81,7 +82,7 @@ def test_deploy_reads_ownership_once_per_pass(boot: dict) -> None:
     for root in boot["roots"]:
         deployed = {p.name for p in root.iterdir() if p.is_dir()}
         assert len(deployed) == PACKS
-        md = (root / "plug0" / _skill.PACK_FILE).read_text(encoding="utf-8")
+        md = (root / "plug0" / PACK_FILE).read_text(encoding="utf-8")
         assert "source_plugin_id: kit" in md
         assert f"managed_by: {sd.MANAGED_BY}" in md
 
@@ -101,7 +102,7 @@ def test_unchanged_redeploy_fits_boot_budget(boot: dict) -> None:
 
 def test_fast_path_still_restores_a_hand_edit(boot: dict) -> None:
     sd.sync_skill()
-    ref = boot["roots"][0] / "pack00" / _skill.REFERENCES_DIR / "one.md"
+    ref = boot["roots"][0] / "pack00" / REFERENCES_DIR / "one.md"
     ref.write_text("edited by hand, a bit longer", encoding="utf-8")
     (ref.parent / "extra.md").write_text("stray", encoding="utf-8")
     logs = sd.sync_skill()

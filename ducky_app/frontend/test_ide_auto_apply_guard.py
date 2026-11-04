@@ -67,7 +67,7 @@ def test_a_non_default_panel_port_skips_auto_apply(monkeypatch):
 def _ship(monkeypatch, skip_reason: str) -> tuple[list[str], list[str]]:
     """Run ship_newest_everywhere with every disk / listener step stubbed; return (calls, log)."""
     from backend import bridge
-    from backend.skills import store as skill_store
+    from backend.skills import seeding, skill_index
     from frontend import deploy, skill_deploy
 
     calls: list[str] = []
@@ -78,7 +78,9 @@ def _ship(monkeypatch, skip_reason: str) -> tuple[list[str], list[str]]:
     monkeypatch.setattr(deploy, "refresh_inits", lambda: [])
     monkeypatch.setattr(bridge, "listener_get_health", lambda *_a, **_k: None)
     monkeypatch.setattr(ide_apply, "auto_apply_skip_reason", lambda: skip_reason)
-    monkeypatch.setattr(skill_store, "seed_skill_packs", lambda force=False: calls.append("seed") or [])
+    fake_seed = lambda force=False: calls.append("seed") or []  # noqa: E731
+    monkeypatch.setattr(seeding, "seed_skill_packs", fake_seed)
+    monkeypatch.setattr(skill_index, "seed_skill_packs", fake_seed)
     monkeypatch.setattr(
         skill_deploy, "sync_skill_all_ides", lambda *_a, **_k: calls.append("ide skills") or []
     )
@@ -134,11 +136,13 @@ def test_manual_apply_is_not_guarded(monkeypatch):
 def test_automatic_skill_syncs_leave_ide_folders_alone_when_sandboxed(monkeypatch):
     # Plugin install/update/uninstall, Store actions and MCP startup all sync through
     # sync_skill_all_ides; a sandbox on port 4300 rewrote ~/.claude/skills that way.
-    from backend.skills import store as skill_store
+    from backend.skills import seeding, skill_index
     from frontend import skill_deploy
 
     calls: list[str] = []
-    monkeypatch.setattr(skill_store, "seed_skill_packs", lambda force=False: calls.append("seed") or [])
+    fake_seed = lambda force=False: calls.append("seed") or []  # noqa: E731
+    monkeypatch.setattr(seeding, "seed_skill_packs", fake_seed)
+    monkeypatch.setattr(skill_index, "seed_skill_packs", fake_seed)
     monkeypatch.setattr(skill_deploy, "sync_skill", lambda **_k: calls.append("ide skills") or [])
     monkeypatch.setattr(ide_apply, "auto_apply_skip_reason", lambda: "panel port 4300 is not the default 4200")
     log = skill_deploy.sync_skill_all_ides()

@@ -17,7 +17,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from backend.skills.store import appdata_dir
+from backend.skills.discovery import appdata_dir
 
 log = logging.getLogger("uefn.plugin_host_api")
 

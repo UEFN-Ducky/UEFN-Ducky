@@ -18,7 +18,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
-from backend.skills.store import appdata_dir
+from backend.skills.discovery import appdata_dir
 from urllib.parse import urlparse
 
 PLUGIN_MANIFEST = "plugin.json"

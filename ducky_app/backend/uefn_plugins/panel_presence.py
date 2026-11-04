@@ -140,7 +140,7 @@ _LOCAL_NAME = re.compile(r"[^A-Za-z0-9_-]+")
 
 def plugin_local_dir(plugin_id: str, name: str = "") -> Path:
     """``<AppData>/plugin_local/<plugin>/<name>``: a plugin's rebuildable files on this PC."""
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
 
     pid = _LOCAL_NAME.sub("", str(plugin_id or "").strip().lower())
     if not pid:
@@ -156,7 +156,7 @@ def plugin_local_dir(plugin_id: str, name: str = "") -> Path:
 def erase_plugin_local(plugin_id: str) -> None:
     import shutil
 
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
 
     pid = _LOCAL_NAME.sub("", str(plugin_id or "").strip().lower())
     if pid:

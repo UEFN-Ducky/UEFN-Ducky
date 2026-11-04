@@ -1,25 +1,14 @@
-"""The ``skills.store`` shim: every old name still imports, and patches on it still land."""
+"""``backend.skills.store`` is the Store-plugin facade: ``appdata_dir`` and nothing else."""
 
 from __future__ import annotations
 
-from backend.skills import archive, authoring, discovery, manifest, ownership, store
+from backend.skills import discovery, store
 
 
-def test_old_names_are_the_new_objects() -> None:
-    assert store.load_pack_manifest is manifest.load_pack_manifest
-    assert store.export_skill_pack_to_zip is archive.export_skill_pack_to_zip
-    assert store.list_pack_ids is discovery.list_pack_ids
-    assert store.plugin_owner_for_skill is ownership.plugin_owner_for_skill
+def test_facade_serves_store_plugins_appdata_dir() -> None:
+    assert store.appdata_dir is discovery.appdata_dir
 
 
-def test_patching_the_shim_reaches_every_split_module(monkeypatch) -> None:
-    def fake(pack_id: str) -> str:
-        return "kit"
-
-    real = ownership.plugin_owner_for_skill
-    monkeypatch.setattr(store, "plugin_owner_for_skill", fake)
-    for module in (archive, authoring, manifest, ownership):
-        assert module.plugin_owner_for_skill is fake
-    monkeypatch.undo()
-    for module in (archive, authoring, manifest, ownership, store):
-        assert module.plugin_owner_for_skill is real
+def test_facade_carries_no_other_names() -> None:
+    public = {n for n in vars(store) if not n.startswith("_") and n != "annotations"}
+    assert public == {"appdata_dir"}

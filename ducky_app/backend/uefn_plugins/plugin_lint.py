@@ -598,7 +598,7 @@ _BLOCK_SCALARS = frozenset({">", ">-", ">+", "|", "|-", "|+"})
 
 def _skill_description(path: Path) -> str | None:
     """The one-line ``description:`` of a skill file; None when missing or multi-line."""
-    from backend.skills.store import parse_frontmatter
+    from backend.skills.frontmatter import parse_frontmatter
 
     try:
         meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))

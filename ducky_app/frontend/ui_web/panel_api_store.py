@@ -638,11 +638,9 @@ class PanelApiStoreMixin:
         self.open_path_in_explorer(str(folder))
 
     def get_skill_info(self) -> dict[str, Any]:
-        from backend.skills.store import (
-            appdata_skill_packs_dir,
-            list_skill_packs,
-            seed_skill_packs,
-        )
+        from backend.skills.discovery import appdata_skill_packs_dir
+        from backend.skills.manifest import list_skill_packs
+        from backend.skills.seeding import seed_skill_packs
 
         error = ""
         settings = _pa.PanelSettings.load()
@@ -710,7 +708,7 @@ class PanelApiStoreMixin:
     def save_subskill(self, pack_id: str, subskill_id: str, text: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skills.store import save_subskill
+        from backend.skills.authoring import save_subskill
 
         path = save_subskill(pack_id, subskill_id, text)
         clear_skill_cache()
@@ -729,7 +727,7 @@ class PanelApiStoreMixin:
     def create_skill_pack(self, pack_id: str, label: str, description: str = "") -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skills.store import create_skill_pack
+        from backend.skills.authoring import create_skill_pack
 
         path = create_skill_pack(pack_id, label, description)
         clear_skill_cache()
@@ -1621,7 +1619,7 @@ class PanelApiStoreMixin:
     def delete_skill_pack(self, pack_id: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skills.store import delete_skill_pack
+        from backend.skills.authoring import delete_skill_pack
 
         try:
             ok = delete_skill_pack(pack_id)
@@ -1641,7 +1639,7 @@ class PanelApiStoreMixin:
         parent_id: str = "",
         load_condition: str = "",
     ) -> dict[str, Any]:
-        from backend.skills.store import create_subskill
+        from backend.skills.authoring import create_subskill
 
         path = create_subskill(
             pack_id,
@@ -1669,7 +1667,7 @@ class PanelApiStoreMixin:
     def save_pack_manifest(self, pack_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skills.store import save_pack_manifest
+        from backend.skills.authoring import save_pack_manifest
 
         try:
             path = save_pack_manifest(pack_id, patch or {})
@@ -1680,7 +1678,7 @@ class PanelApiStoreMixin:
         return {"ok": True, "path": str(path), "pack_id": pack_id}
 
     def get_skill_pack_graph(self, pack_id: str) -> dict[str, Any]:
-        from backend.skills.store import get_skill_pack_graph
+        from backend.skills.authoring import get_skill_pack_graph
 
         try:
             return {"ok": True, **get_skill_pack_graph(pack_id)}
@@ -1688,7 +1686,7 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": str(e), "pack_id": pack_id}
 
     def get_skill_pack_files(self, pack_id: str) -> dict[str, Any]:
-        from backend.skills.store import get_skill_pack_files
+        from backend.skills.authoring import get_skill_pack_files
 
         try:
             return {"ok": True, **get_skill_pack_files(pack_id)}
@@ -1698,7 +1696,7 @@ class PanelApiStoreMixin:
     def save_skill_node(self, pack_id: str, node_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skills.store import save_skill_node
+        from backend.skills.authoring import save_skill_node
 
         try:
             path = save_skill_node(pack_id, node_id, patch)
@@ -1709,7 +1707,7 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": str(e), "node_id": node_id}
 
     def save_skill_layout(self, pack_id: str, layout: dict[str, Any]) -> dict[str, Any]:
-        from backend.skills.store import save_skill_layout
+        from backend.skills.authoring import save_skill_layout
 
         try:
             path = save_skill_layout(pack_id, layout)
@@ -1718,7 +1716,8 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": str(e)}
 
     def export_skill_pack(self, pack_id: str) -> dict[str, Any]:
-        from backend.skills.store import export_skill_pack_bytes, normalize_pack_id
+        from backend.skills.archive import export_skill_pack_bytes
+        from backend.skills.discovery import normalize_pack_id
 
         pid = normalize_pack_id(pack_id)
         default_name = f"{pid}.ducky-skill-pack"
@@ -1769,7 +1768,7 @@ class PanelApiStoreMixin:
     def import_skill_pack(self, pack_id: str = "", replace: bool = False) -> dict[str, Any]:
         """Legacy path-based import (file dialog). Prefer import_skill_pack_bytes from the UI."""
 
-        from backend.skills.store import import_skill_pack_from_zip
+        from backend.skills.archive import import_skill_pack_from_zip
 
         win = self._window
         src: str | None = None
@@ -1808,7 +1807,7 @@ class PanelApiStoreMixin:
     ) -> dict[str, Any]:
         import base64
 
-        from backend.skills.store import import_skill_pack_from_bytes
+        from backend.skills.archive import import_skill_pack_from_bytes
 
         try:
             raw = base64.b64decode(data_base64 or "")
@@ -1833,7 +1832,7 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": str(e)}
 
     def delete_subskill(self, pack_id: str, subskill_id: str) -> dict[str, Any]:
-        from backend.skills.store import delete_subskill
+        from backend.skills.authoring import delete_subskill
 
         try:
             ok = delete_subskill(pack_id, subskill_id)
@@ -1844,7 +1843,7 @@ class PanelApiStoreMixin:
     def reset_skill_pack(self, pack_id: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
-        from backend.skills.store import reset_skill_pack
+        from backend.skills.authoring import reset_skill_pack
 
         dest = reset_skill_pack(pack_id)
         clear_skill_cache()
@@ -1855,7 +1854,8 @@ class PanelApiStoreMixin:
         self.open_skill_packs_folder()
 
     def open_skill_packs_folder(self) -> None:
-        from backend.skills.store import appdata_skill_packs_dir, seed_skill_packs
+        from backend.skills.discovery import appdata_skill_packs_dir
+        from backend.skills.seeding import seed_skill_packs
 
         seed_skill_packs()
         d = appdata_skill_packs_dir()
@@ -1863,7 +1863,7 @@ class PanelApiStoreMixin:
         _pa.os.startfile(str(d))  # type: ignore[attr-defined]
 
     def open_skill_pack_folder(self, pack_id: str) -> None:
-        from backend.skills.store import appdata_skill_packs_dir
+        from backend.skills.discovery import appdata_skill_packs_dir
 
         d = appdata_skill_packs_dir() / pack_id
         d.mkdir(parents=True, exist_ok=True)
@@ -2196,7 +2196,7 @@ class PanelApiStoreMixin:
         import subprocess
 
         from backend.mcp_plugins.store import mcp_config_path, seed_mcp_plugins
-        from backend.skills.store import appdata_dir
+        from backend.skills.discovery import appdata_dir
 
         seed_mcp_plugins()
         path = mcp_config_path()

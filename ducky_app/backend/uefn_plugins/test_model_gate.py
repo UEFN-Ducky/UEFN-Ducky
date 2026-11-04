@@ -17,7 +17,7 @@ class _T:
 @pytest.fixture
 def gmail_plugin(tmp_path, monkeypatch):
     """A loaded 'gmailtest' plugin: gmail_send is sensitive, gmail_ping is not."""
-    monkeypatch.setattr("backend.skills.store.appdata_dir", lambda: tmp_path)
+    monkeypatch.setattr("backend.skills.discovery.appdata_dir", lambda: tmp_path)
     monkeypatch.setattr(host, "ensure_plugins_loaded", lambda timeout=None: True)
     monkeypatch.setattr(host, "is_plugin_enabled", lambda pid: pid == "gmailtest")
     monkeypatch.setattr(host, "_plugin_label", lambda pid: "Gmail Test")

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from backend.skills import ownership
-from backend.skills.store import pass_memo
+from backend.skills.passes import pass_memo
 from backend.uefn_plugins import host as plugin_host
 from backend.uefn_plugins import store as plugin_store
 
@@ -103,9 +103,3 @@ def test_broken_plugin_tree_means_no_owners(plugins: dict, monkeypatch: pytest.M
     assert ownership.plugin_owner_for_skill("materials") is None
     assert ownership._plugin_owned_skill_map() == {}
 
-
-def test_store_reexports_ownership_names() -> None:
-    from backend.skills import store
-
-    assert store.plugin_owner_for_skill is ownership.plugin_owner_for_skill
-    assert store._plugin_owned_skill_map is ownership._plugin_owned_skill_map

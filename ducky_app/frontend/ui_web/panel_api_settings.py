@@ -1987,7 +1987,7 @@ class PanelApiSettingsMixin:
         import shutil
         import uuid
 
-        from backend.skills.store import appdata_dir
+        from backend.skills.discovery import appdata_dir
 
         allowed = {".mp3", ".wav", ".ogg", ".m4a", ".webm"}
         picked: str | None = None

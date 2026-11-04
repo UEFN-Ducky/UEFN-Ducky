@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import backend.skills.store as _skill
 import frontend.skill_deploy as sd
+from backend.skills import discovery, manifest, revision, selection
+from backend.skills.layout import PACK_FILE, REFERENCES_DIR
 
 
 def _managed_md(pack_id: str, body: str = "body") -> str:
@@ -30,16 +31,17 @@ def _managed_md(pack_id: str, body: str = "body") -> str:
 
 def _fake_pack(tmp_path: Path, pack_id: str, refs: dict[str, str]) -> Path:
     src = tmp_path / "src" / pack_id
-    (src / _skill.REFERENCES_DIR).mkdir(parents=True, exist_ok=True)
-    (src / _skill.PACK_FILE).write_text(_managed_md(pack_id), encoding="utf-8")
+    (src / REFERENCES_DIR).mkdir(parents=True, exist_ok=True)
+    (src / PACK_FILE).write_text(_managed_md(pack_id), encoding="utf-8")
     for name, text in refs.items():
-        (src / _skill.REFERENCES_DIR / name).write_text(text, encoding="utf-8")
+        (src / REFERENCES_DIR / name).write_text(text, encoding="utf-8")
     return src
 
 
 def _wire(monkeypatch, tmp_path: Path, packs: dict[str, dict[str, str]]) -> None:
     srcs = {pid: _fake_pack(tmp_path, pid, refs) for pid, refs in packs.items()}
-    monkeypatch.setattr(_skill, "list_pack_ids", lambda: list(packs))
+    for module in (discovery, manifest, revision, selection):
+        monkeypatch.setattr(module, "list_pack_ids", lambda: list(packs))
     monkeypatch.setattr(sd, "_pack_source_dir", lambda pid: srcs.get(pid))
     monkeypatch.setattr(sd, "_deployed_skill_md", lambda pid: _managed_md(pid))
 
@@ -49,22 +51,22 @@ def test_pack_root_leftover_is_pruned(tmp_path, monkeypatch):
     stale = root / "verse" / "old_subskill.md"
     stale.parent.mkdir(parents=True)
     stale.write_text("wrong info from an older version", encoding="utf-8")
-    (root / "verse" / _skill.PACK_FILE).write_text(_managed_md("verse"), encoding="utf-8")
+    (root / "verse" / PACK_FILE).write_text(_managed_md("verse"), encoding="utf-8")
 
     _wire(monkeypatch, tmp_path, {"verse": {"effects.md": "effects"}})
     logs = sd.deploy_skill_folders(root)
 
     assert not stale.exists(), "pack-root leftover survived the deploy"
-    assert (root / "verse" / _skill.REFERENCES_DIR / "effects.md").is_file()
+    assert (root / "verse" / REFERENCES_DIR / "effects.md").is_file()
     assert any("Stale skill file pruned" in ln for ln in logs)
 
 
 def test_removed_reference_is_pruned(tmp_path, monkeypatch):
     root = tmp_path / "skills"
-    refs = root / "verse" / _skill.REFERENCES_DIR
+    refs = root / "verse" / REFERENCES_DIR
     refs.mkdir(parents=True)
     (refs / "dropped.md").write_text("removed in the new version", encoding="utf-8")
-    (root / "verse" / _skill.PACK_FILE).write_text(_managed_md("verse"), encoding="utf-8")
+    (root / "verse" / PACK_FILE).write_text(_managed_md("verse"), encoding="utf-8")
 
     _wire(monkeypatch, tmp_path, {"verse": {"effects.md": "effects"}})
     sd.deploy_skill_folders(root)
@@ -82,7 +84,7 @@ def test_vanished_pack_pruned_even_with_unreadable_skill_md(tmp_path, monkeypatc
 
     # The pack disappears AND its SKILL.md is corrupted, so the managed tag is
     # unreadable — the ledger is what still identifies the folder as ours.
-    (root / "gone" / _skill.PACK_FILE).write_text("not frontmatter", encoding="utf-8")
+    (root / "gone" / PACK_FILE).write_text("not frontmatter", encoding="utf-8")
     _wire(monkeypatch, tmp_path, {"verse": {"a.md": "a"}})
     logs = sd.deploy_skill_folders(root)
 
@@ -96,14 +98,14 @@ def test_user_authored_skill_folder_is_untouched(tmp_path, monkeypatch):
     root = tmp_path / "skills"
     mine = root / "my_own_skill"
     mine.mkdir(parents=True)
-    (mine / _skill.PACK_FILE).write_text("---\nname: my_own_skill\n---\nmine\n", encoding="utf-8")
+    (mine / PACK_FILE).write_text("---\nname: my_own_skill\n---\nmine\n", encoding="utf-8")
     (mine / "notes.md").write_text("keep me", encoding="utf-8")
 
     _wire(monkeypatch, tmp_path, {"verse": {"a.md": "a"}})
     sd.deploy_skill_folders(root)
 
     assert (mine / "notes.md").read_text(encoding="utf-8") == "keep me"
-    assert (mine / _skill.PACK_FILE).is_file()
+    assert (mine / PACK_FILE).is_file()
 
 
 def test_unmanaged_folder_with_pack_id_keeps_its_extra_files(tmp_path, monkeypatch):
@@ -111,7 +113,7 @@ def test_unmanaged_folder_with_pack_id_keeps_its_extra_files(tmp_path, monkeypat
     root = tmp_path / "skills"
     clash = root / "verse"
     clash.mkdir(parents=True)
-    (clash / _skill.PACK_FILE).write_text("---\nname: verse\n---\nuser copy\n", encoding="utf-8")
+    (clash / PACK_FILE).write_text("---\nname: verse\n---\nuser copy\n", encoding="utf-8")
     (clash / "user_note.md").write_text("hand written", encoding="utf-8")
 
     _wire(monkeypatch, tmp_path, {"verse": {"a.md": "a"}})

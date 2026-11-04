@@ -21,7 +21,6 @@ _SKIP_DIRS = {"__pycache__", "node_modules", ".venv", "venv", "build", "dist"}
 SPLITTING: dict[str, int] = {
     'backend/agent/coding_agents/plans.py': 2176,
     'backend/automations/runner.py': 2817,
-    'backend/skills/store.py': 2002,
     'backend/tools/panel/ducky_panel.py': 2840,
     'backend/uefn_plugins/host.py': 3192,
     'backend/workspace/journal.py': 2080,

@@ -291,11 +291,9 @@ def sync_skill_snapshot(
     changed — a body-only fix moves the revision but not the index, and costs
     no cache miss.
     """
-    from backend.skills.store import (
-        build_skill_prompt,
-        resolve_conversation_selection,
-        skills_revision,
-    )
+    from backend.skills.revision import skills_revision
+    from backend.skills.selection import resolve_conversation_selection
+    from backend.skills.skill_index import build_skill_prompt
 
     if not str(getattr(conv, "skill_snapshot", "") or "").strip():
         return False  # no snapshot: the send path rebuilds from selection anyway
@@ -429,7 +427,9 @@ def create_conversation(
     now = time.time()
     s = settings or PanelSettings.load()
     root = project_root if project_root is not None else s.uefn_project_root
-    from backend.skills.store import conversation_skill_text, merge_selection, skills_revision
+    from backend.skills.revision import skills_revision
+    from backend.skills.selection import merge_selection
+    from backend.skills.skill_index import conversation_skill_text
     from backend.agent.coding_agents.base import normalize_coding_agent
     from backend.agent.thinking_effort import normalize_thinking_effort
 
@@ -709,7 +709,7 @@ def set_conversation_disabled_packs(
         disabled_packs=disabled_packs,
     )
     del _packs, _subs
-    from backend.skills.store import merge_selection
+    from backend.skills.selection import merge_selection
 
     return merge_selection(disabled_packs=disabled_packs).disabled_packs
 
@@ -723,7 +723,8 @@ def set_conversation_skill_selection(
     disabled_packs: list[str] | None = None,
 ) -> tuple[list[str], dict[str, list[str]]]:
     """Persist pack deny-list + optional per-pack subskill allowlists."""
-    from backend.skills.store import conversation_skill_text, merge_selection
+    from backend.skills.selection import merge_selection
+    from backend.skills.skill_index import conversation_skill_text
 
     conv = load_conversation(conv_id, project_root)
     if not conv:
@@ -748,7 +749,7 @@ def set_conversation_skill_selection(
         skill_snapshot="",
         mutate=False,
     )
-    from backend.skills.store import skills_revision
+    from backend.skills.revision import skills_revision
 
     conv.skill_snapshot_rev = skills_revision()
     from backend.agent.prompt_cache import invalidate_conv_cache

@@ -349,7 +349,7 @@ def ducky_store_remove(
         return tool_json({"ok": False, "error": str(exc), "slug": sid}, pretty=pretty)
 
     try:
-        from backend.skills.store import delete_skill_pack
+        from backend.skills.authoring import delete_skill_pack
 
         ok = delete_skill_pack(sid)
         if ok:

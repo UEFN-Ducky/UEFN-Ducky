@@ -240,7 +240,9 @@ def set_muted(self, conv_id: str, muted: bool) -> dict[str, Any]:
 
 
 def get_conversation_skills(self, conv_id: str) -> dict[str, Any]:
-    from backend.skills.store import list_skill_packs, resolve_conversation_selection, seed_skill_packs
+    from backend.skills.manifest import list_skill_packs
+    from backend.skills.seeding import seed_skill_packs
+    from backend.skills.selection import resolve_conversation_selection
     from backend.mcp_plugins.store import seed_mcp_plugins
 
     seed_skill_packs()
@@ -251,7 +253,7 @@ def get_conversation_skills(self, conv_id: str) -> dict[str, Any]:
     if conv:
         sel = resolve_conversation_selection(conv, settings)
     else:
-        from backend.skills.store import default_selection_from_settings
+        from backend.skills.selection import default_selection_from_settings
 
         sel = default_selection_from_settings(settings)
     # For UI: packs with no stored allowlist show every toggleable root as on.
@@ -313,7 +315,7 @@ def set_default_skill_selection(
 ) -> dict[str, Any]:
     """Legacy API — clears the default deny-list (all packs available)."""
     del enabled_packs, enabled_subskills
-    from backend.skills.store import merge_selection
+    from backend.skills.selection import merge_selection
 
     settings = _pa.PanelSettings.load()
     sel = merge_selection(disabled_packs=[])

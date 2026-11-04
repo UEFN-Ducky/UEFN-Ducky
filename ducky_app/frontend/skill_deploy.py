@@ -29,7 +29,13 @@ import shutil
 from pathlib import Path
 from typing import Iterable, Sequence
 
-import backend.skills.store as _skill
+import backend.skills.discovery as _discovery
+import backend.skills.manifest as _manifest
+import backend.skills.seeding as _seeding
+import backend.skills.skill_index as _skill_index
+from backend.skills.frontmatter import parse_frontmatter, serialize_frontmatter, subskill_index_tag
+from backend.skills.layout import CORE_ID, PACK_FILE, REFERENCES_DIR
+from backend.skills.passes import pass_cached, pass_memo, shared_pass_memo
 
 PROJECT_SKILL_FILENAME = "UEFN-Ducky-SKILL.md"
 SKILLS_DIRNAME = "skills"
@@ -42,8 +48,8 @@ DEPLOY_LEDGER = ".ducky-skills.json"
 
 def seed_skill_appdata(force: bool = False) -> tuple[Path | None, bool]:
     """Seed bundled skill packs into AppData. Returns ``(packs_dir, upgraded)``."""
-    logs = _skill.seed_skill_packs(force=force)
-    dest = _skill.appdata_skill_packs_dir()
+    logs = _seeding.seed_skill_packs(force=force)
+    dest = _discovery.appdata_skill_packs_dir()
     upgraded = any("seeded" in ln for ln in logs)
     if dest.is_dir():
         return dest, upgraded
@@ -59,7 +65,7 @@ def write_skill_beside_config(config_path: Path, text: str | None = None) -> Pat
     try:
         dest = Path(config_path).parent / PROJECT_SKILL_FILENAME
         dest.parent.mkdir(parents=True, exist_ok=True)
-        body = _skill.load_skill_text() if text is None else text
+        body = _skill_index.load_skill_text() if text is None else text
         if _write_if_changed(dest, body.encode("utf-8")):
             return dest
         return None
@@ -69,8 +75,8 @@ def write_skill_beside_config(config_path: Path, text: str | None = None) -> Pat
 
 def _pack_source_dir(pack_id: str) -> Path | None:
     """First existing pack root (AppData, plugin-owned, or bundled)."""
-    for root in _skill._pack_roots(pack_id):
-        if (root / _skill.PACK_FILE).is_file():
+    for root in _discovery._pack_roots(pack_id):
+        if (root / PACK_FILE).is_file():
             return root
     return None
 
@@ -81,12 +87,12 @@ def _deployed_skill_md(pack_id: str) -> str | None:
     if src_dir is None:
         return None
     try:
-        raw = (src_dir / _skill.PACK_FILE).read_text(encoding="utf-8")
+        raw = (src_dir / PACK_FILE).read_text(encoding="utf-8")
     except OSError:
         return None
-    meta, body = _skill.parse_frontmatter(raw)
+    meta, body = parse_frontmatter(raw)
     # load_pack_manifest already looked up the owning plugin: one ownership lookup per pack.
-    manifest = _skill.load_pack_manifest(pack_id) or {}
+    manifest = _manifest.load_pack_manifest(pack_id) or {}
     md = meta.setdefault("metadata", {})
     if isinstance(md, dict):
         md["managed_by"] = MANAGED_BY
@@ -94,11 +100,11 @@ def _deployed_skill_md(pack_id: str) -> str | None:
         if owner:
             md["source_plugin_id"] = owner
     ref_lines: list[str] = []
-    for sub in _skill.list_subskills(manifest):
+    for sub in _manifest.list_subskills(manifest):
         sid = str(sub.get("id") or "")
-        if not sid or sid == _skill.CORE_ID:
+        if not sid or sid == CORE_ID:
             continue
-        tag = _skill.subskill_index_tag(sub, manifest)
+        tag = subskill_index_tag(sub, manifest)
         desc = str(sub.get("description") or sub.get("label") or sid)
         ref_lines.append(f"- `{sid}` [{tag}] — {desc}")
         cond = str(sub.get("load_condition") or "").strip()
@@ -111,16 +117,16 @@ def _deployed_skill_md(pack_id: str) -> str | None:
             + "`~/.claude/skills` / `~/.cursor/skills` / `references/*.md`.\n"
             + "\n".join(ref_lines)
         )
-    return _skill.serialize_frontmatter(meta, body)
+    return serialize_frontmatter(meta, body)
 
 
 def _is_managed_skill_dir(path: Path) -> bool:
     raw = None
     try:
-        raw = (path / _skill.PACK_FILE).read_text(encoding="utf-8")
+        raw = (path / PACK_FILE).read_text(encoding="utf-8")
     except OSError:
         return False
-    meta, _ = _skill.parse_frontmatter(raw)
+    meta, _ = parse_frontmatter(raw)
     md = meta.get("metadata")
     return isinstance(md, dict) and md.get("managed_by") == MANAGED_BY
 
@@ -149,7 +155,7 @@ def _sync_references(src: Path | None, dest: Path) -> bool:
             return True
         return False
     # Every skills root mirrors the same source: walk and read it once per pass.
-    src_dirs, src_files = _skill.pass_cached(("refs_tree", str(src)), lambda: _read_tree(src))
+    src_dirs, src_files = pass_cached(("refs_tree", str(src)), lambda: _read_tree(src))
     have_dirs, have_files = _list_tree(dest)
     if not have_dirs and not have_files:
         dest.mkdir(parents=True, exist_ok=True)
@@ -283,7 +289,7 @@ def _source_key(skill_md: str, refs_src: Path | None) -> str:
     """Hash of everything a pack deploys: SKILL.md text + its references tree."""
     digest = hashlib.sha1(skill_md.encode("utf-8"))
     if refs_src is not None and refs_src.is_dir():
-        dirs, files = _skill.pass_cached(("refs_tree", str(refs_src)), lambda: _read_tree(refs_src))
+        dirs, files = pass_cached(("refs_tree", str(refs_src)), lambda: _read_tree(refs_src))
         for rel in sorted(dirs):
             digest.update(b"d\0" + rel.encode("utf-8") + b"\0")
         for rel in sorted(files):
@@ -300,7 +306,7 @@ def _prune_pack_root(dest: Path) -> list[str]:
     ``references/``, and the pack-root write only touches ``SKILL.md``. Agents
     can still read those leftovers, so they must go.
     """
-    keep = {_skill.PACK_FILE, _skill.REFERENCES_DIR}
+    keep = {PACK_FILE, REFERENCES_DIR}
     removed: list[str] = []
     try:
         children = list(dest.iterdir())
@@ -333,13 +339,13 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
     Runs inside one skills pass (joins the caller's): the plugin ownership map, the
     bundled folder and per-pack stat passes are read once, not once per pack.
     """
-    with _skill.shared_pass_memo():
+    with shared_pass_memo():
         return _deploy_skill_folders(skills_root)
 
 
 def _deploy_skill_folders(skills_root: Path) -> list[str]:
     logs: list[str] = []
-    pack_ids = _skill.list_pack_ids()
+    pack_ids = _discovery.list_pack_ids()
     try:
         skills_root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -351,13 +357,13 @@ def _deploy_skill_folders(skills_root: Path) -> list[str]:
     deployed: list[str] = []
     for pack_id in pack_ids:
         # Same text for every root: built once per pass, not once per root.
-        skill_md = _skill.pass_cached(("deploy_md", pack_id), lambda: _deployed_skill_md(pack_id))
+        skill_md = pass_cached(("deploy_md", pack_id), lambda: _deployed_skill_md(pack_id))
         if skill_md is None:
             continue
         dest = skills_root / pack_id
-        src_dir = _skill.pass_cached(("deploy_src", pack_id), lambda: _pack_source_dir(pack_id))
-        refs_src = (src_dir / _skill.REFERENCES_DIR) if src_dir else None
-        src_key = _skill.pass_cached(("deploy_key", pack_id), lambda: _source_key(skill_md, refs_src))
+        src_dir = pass_cached(("deploy_src", pack_id), lambda: _pack_source_dir(pack_id))
+        refs_src = (src_dir / REFERENCES_DIR) if src_dir else None
+        src_key = pass_cached(("deploy_key", pack_id), lambda: _source_key(skill_md, refs_src))
         state = _dest_state(dest)
         # Unchanged since our last deploy: same source, and nobody touched the folder.
         if state and old_stamps.get(pack_id) == {"src": src_key, "dest": state}:
@@ -374,9 +380,9 @@ def _deploy_skill_folders(skills_root: Path) -> list[str]:
         try:
             dest.mkdir(parents=True, exist_ok=True)
             touched = _write_if_changed(
-                dest / _skill.PACK_FILE, skill_md.encode("utf-8")
+                dest / PACK_FILE, skill_md.encode("utf-8")
             )
-            touched |= _sync_references(refs_src, dest / _skill.REFERENCES_DIR)
+            touched |= _sync_references(refs_src, dest / REFERENCES_DIR)
             if owned:
                 for name in _prune_pack_root(dest):
                     touched = True
@@ -455,9 +461,9 @@ def sync_skill(
     ``managed_by: uefn-ducky`` are never pruned.
     """
     logs: list[str] = []
-    pack_logs = _skill.seed_skill_packs(force=force_appdata)
+    pack_logs = _seeding.seed_skill_packs(force=force_appdata)
     logs.extend(pack_logs)
-    dest = _skill.appdata_skill_packs_dir()
+    dest = _discovery.appdata_skill_packs_dir()
     if not dest.is_dir():
         logs.append("AppData skill_packs/ not written (bundled packs missing)")
         return logs
@@ -467,8 +473,8 @@ def sync_skill(
     configs = list(ide_config_paths or ())
     # One pass for every root: before this, each root re-read the plugin ownership map
     # and re-stat'd every pack (~8 min of 87% CPU after a boot with ship-newest).
-    with _skill.pass_memo():
-        combined = _skill.load_skill_text() if configs else ""
+    with pass_memo():
+        combined = _skill_index.load_skill_text() if configs else ""
         for cfg in configs:
             beside = write_skill_beside_config(Path(cfg), combined)
             if beside:
@@ -498,7 +504,7 @@ def sync_skill_all_ides(antigravity_override: str = "", *, force_appdata: bool =
 
     reason = auto_apply_skip_reason()
     if reason:
-        return [*_skill.seed_skill_packs(force=force_appdata), f"IDE skill folders left alone: {reason}"]
+        return [*_seeding.seed_skill_packs(force=force_appdata), f"IDE skill folders left alone: {reason}"]
     return sync_skill(
         ide_config_paths=ide_config_paths(antigravity_override),
         force_appdata=force_appdata,

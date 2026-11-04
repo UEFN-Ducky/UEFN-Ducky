@@ -3,12 +3,10 @@
 import asyncio
 
 from backend.server import mcp
-from backend.skills.store import (
-    build_skill_prompt,
-    default_skill_selection,
-    seed_skill_packs,
-    skill_read_subskill as _read_subskill,
-)
+from backend.skills.seeding import seed_skill_packs
+from backend.skills.selection import default_skill_selection
+from backend.skills.skill_index import build_skill_prompt
+from backend.skills.skill_index import skill_read_subskill as _read_subskill
 from backend.util.json_util import tool_json
 
 

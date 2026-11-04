@@ -16,7 +16,7 @@ def _pack(root: Path, files: dict[str, str]) -> Path:
 
 
 def _manifest(root: Path, pack_id: str) -> dict:
-    from backend.skills.store import _manifest_from_skill_dir
+    from backend.skills.manifest import _manifest_from_skill_dir
 
     return _manifest_from_skill_dir(root, pack_id, "custom")
 

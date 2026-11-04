@@ -1002,7 +1002,9 @@ def compute_context_report(
         )
 
     apply_workspace_env(settings.uefn_project_root)
-    from backend.skills.store import build_skill_prompt, resolve_conversation_selection, seed_skill_packs
+    from backend.skills.seeding import seed_skill_packs
+    from backend.skills.selection import resolve_conversation_selection
+    from backend.skills.skill_index import build_skill_prompt
 
     seed_skill_packs()
     from backend.mcp_plugins.store import seed_mcp_plugins

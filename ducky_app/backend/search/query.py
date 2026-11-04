@@ -86,8 +86,8 @@ class Context:
 
 
 def chat_context(*, allowed_tools: set[str] | None = None) -> Context:
-    """The current run's skill selection and plugin switches (see backend.skills.store)."""
-    from backend.skills.store import active_disabled_packs, active_enabled_subskills
+    """The current run's skill selection and plugin switches (see backend.skills.selection)."""
+    from backend.skills.selection import active_disabled_packs, active_enabled_subskills
 
     try:
         from backend.uefn_plugins.host import is_plugin_enabled

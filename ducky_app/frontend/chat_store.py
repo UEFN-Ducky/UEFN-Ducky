@@ -489,7 +489,9 @@ def create_conversation(
     del enabled_packs, enabled_subskills, enabled_skills
     now = time.time()
     s = settings or PanelSettings.load()
-    from backend.skills.store import conversation_skill_text, merge_selection, skills_revision
+    from backend.skills.revision import skills_revision
+    from backend.skills.selection import merge_selection
+    from backend.skills.skill_index import conversation_skill_text
 
     sel = merge_selection(disabled_packs=disabled_packs)
     snapshot = skill_snapshot or conversation_skill_text(

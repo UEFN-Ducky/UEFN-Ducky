@@ -107,7 +107,9 @@ def get_agent_profile_editor_catalog(self) -> dict[str, Any]:
         list_mcp_plugins,
         seed_mcp_plugins,
     )
-    from backend.skills.store import default_selection_from_settings, list_skill_packs, seed_skill_packs
+    from backend.skills.manifest import list_skill_packs
+    from backend.skills.seeding import seed_skill_packs
+    from backend.skills.selection import default_selection_from_settings
     from backend.uefn_plugins.host import (
         ensure_plugins_loaded_async,
         plugins_ready,

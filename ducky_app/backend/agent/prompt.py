@@ -317,7 +317,8 @@ def get_system_prompt_parts(
     skill_block = skill_text or ""
     if local_slim:
         try:
-            from backend.skills.store import build_skill_prompt_compact, resolve_conversation_selection
+            from backend.skills.selection import resolve_conversation_selection
+            from backend.skills.skill_index import build_skill_prompt_compact
             from frontend.settings import PanelSettings
 
             sel = None
@@ -438,7 +439,7 @@ def get_system_prompt(
     skill = skill_override if skill_override is not None else _skill_cache
     if skill is None:
         try:
-            from backend.skills.store import load_skill_text
+            from backend.skills.skill_index import load_skill_text
 
             skill = load_skill_text()
         except FileNotFoundError:

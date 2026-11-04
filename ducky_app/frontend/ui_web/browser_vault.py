@@ -45,7 +45,7 @@ def keep_logins() -> bool:
 
 def profile_dir(mode: str) -> Path:
     """``saved``: the profile that keeps logins; ``memory``: the one InPrivate panes use."""
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
 
     p = appdata_dir() / ("webview2_browser" if mode == "saved" else "webview2_browser_private")
     p.mkdir(parents=True, exist_ok=True)

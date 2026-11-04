@@ -88,7 +88,7 @@ def packs_for_this_pc(manifest: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def packs_root() -> Path:
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
 
     return appdata_dir() / PACKS_DIR
 
