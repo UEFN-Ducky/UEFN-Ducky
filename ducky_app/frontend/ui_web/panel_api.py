@@ -1028,6 +1028,14 @@ class PanelApi(
             pass
         return True
 
+    def set_visible_terminals(self, ids: list | None = None, viewer_id: str = "") -> bool:
+        """The terminals a window shows now. Output to terminals no window shows is held
+        (one status frame a second) and replayed when one is shown."""
+        from frontend.ui_web.terminal.manager import get_terminal_manager
+
+        get_terminal_manager().set_visible_terminals([str(i) for i in (ids or []) if i], viewer_id or "main")
+        return True
+
     def report_open_tabs(self, window_id: str = "", tab_ids: list | None = None) -> None:
         wid = window_id or "main"
         with _tabs_lock:

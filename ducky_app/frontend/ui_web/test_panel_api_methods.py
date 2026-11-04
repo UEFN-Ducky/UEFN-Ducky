@@ -478,6 +478,7 @@ _PUBLIC_METHODS = frozenset({
     'native_capture_start',
     'native_capture_stop',
     'set_visible_chats',
+    'set_visible_terminals',
     'plan_progress',
     'swarm_preview',
     'swarm_suggest',

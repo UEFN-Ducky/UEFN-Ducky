@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useTerminalSession } from "./useTerminalSession";
+import { setTerminalShown } from "./visibleTerminals";
 
 interface TerminalPaneProps {
   sessionId: string;
@@ -14,6 +16,10 @@ export function TerminalPane({
   variant = "default",
 }: TerminalPaneProps) {
   const { containerRef } = useTerminalSession(sessionId, wsUrl, visible);
+  useEffect(() => {
+    setTerminalShown(sessionId, visible);
+    return () => setTerminalShown(sessionId, false);
+  }, [sessionId, visible]);
 
   return (
     <div
