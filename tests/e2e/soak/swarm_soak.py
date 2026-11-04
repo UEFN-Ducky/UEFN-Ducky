@@ -75,6 +75,7 @@ class Sample:
     listener_requests: int | None = None  # connections to the sandbox's listener port so far
     commit_gb: float | None = None  # the PC's commit charge (what Windows has promised to back)
     commit_limit_gb: float | None = None
+    tree_private_mb: float | None = None  # committed bytes of the app's whole process tree (agents too)
 
 
 @dataclass
@@ -285,6 +286,7 @@ def seat_numbers(run: Run) -> dict[str, Any]:
         "max_concurrent_turns": max_concurrent_turns(run.stub_events),
         "starts_per_5s": starts_per_window(run.stub_events),
         "commit_gb": _span([x.commit_gb for x in s]),
+        "tree_private_mb": _span([x.tree_private_mb for x in s]),
         "commit_limit_gb": next((x.commit_limit_gb for x in reversed(s) if x.commit_limit_gb), None),
     }
 
@@ -670,7 +672,7 @@ class CpuMeter:
     def sample(self) -> dict[str, float]:
         now = time.monotonic()
         out = {"app": 0.0, "webview2": 0.0, "tool": 0.0, "agent": 0.0, "other": 0.0, "agents": 0, "tools": 0,
-               "app_mb": 0.0, "webview2_mb": 0.0, "tool_mb": 0.0}
+               "app_mb": 0.0, "webview2_mb": 0.0, "tool_mb": 0.0, "tree_private_mb": 0.0}
         cur: dict[int, float] = {}
         try:
             procs = [self.root, *self.root.children(recursive=True)]
@@ -682,9 +684,13 @@ class CpuMeter:
                 t = proc.cpu_times()
                 cur[proc.pid] = t.user + t.system
                 role = classify(proc)
-                rss = proc.memory_info().rss / 2**20
+                mem = proc.memory_info()
+                rss = mem.rss / 2**20
             except self.psutil.Error:
                 continue
+            # Committed bytes (Windows "private"), every process in the tree: a process can commit
+            # GBs it never touches, which RSS doesn't show but the PC's commit limit does.
+            out["tree_private_mb"] += getattr(mem, "private", mem.rss) / 2**20
             if role in ("app", "webview2", "tool"):
                 out[f"{role}_mb"] += rss
             out[role] += max(cur[proc.pid] - self.prev.get(proc.pid, cur[proc.pid]), 0.0) / span * 100.0
@@ -1039,6 +1045,7 @@ def run_soak(panel: Panel, app_pid: int, chats: list[dict[str, str]], minutes: f
                        waiting=len(sent - tail.started),
                        listener_requests=listener.count if listener is not None else None)
             s.commit_gb, s.commit_limit_gb = commit_charge_gb()
+            s.tree_private_mb = round(cpu["tree_private_mb"], 1)
             try:
                 snap = panel.call("ducky_health_snapshot", timeout=30) or {}
                 app = snap.get("app") or {}

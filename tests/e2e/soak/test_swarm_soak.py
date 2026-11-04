@@ -273,6 +273,13 @@ def test_burst_bar_holds_the_cap_and_names_each_miss():
     ]
 
 
+def test_cpu_meter_sums_committed_bytes_of_the_tree():
+    import os
+
+    out = soak.CpuMeter(os.getpid()).sample()
+    assert out["tree_private_mb"] > 1.0  # this test process commits at least a few MB
+
+
 def test_commit_charge_reads_windows_or_nothing():
     used, limit = soak.commit_charge_gb()
     if sys.platform == "win32":
