@@ -614,6 +614,7 @@ class ListenerCounter:
         import socket
 
         self.count = 0
+        self.requests: dict[str, int] = {}  # ":port <first request line>" -> count
         self.socks = []
         self.stopped = threading.Event()
         for port in ports:
@@ -633,6 +634,14 @@ class ListenerCounter:
             except OSError:
                 continue
             self.count += 1
+            port = sock.getsockname()[1]
+            try:
+                conn.settimeout(0.5)
+                head = conn.recv(512).split(b"\r\n", 1)[0].decode("latin-1", "replace")[:120]
+            except OSError:
+                head = ""
+            key = f":{port} {head or '(no request line)'}"
+            self.requests[key] = self.requests.get(key, 0) + 1
             conn.close()
 
     def close(self) -> None:
@@ -1105,6 +1114,8 @@ def main() -> int:
             results["interrupt"] = interrupt_table(run)
         if args.scenario == "memory":
             results["memory"] = memory_table(summary, args.memory_mb, before.get("free_gb"))
+        if listener is not None:
+            results["listener_by_request"] = dict(sorted(listener.requests.items(), key=lambda kv: -kv[1]))
     finally:
         stop_tree(proc.pid)
         if listener is not None:
@@ -1129,6 +1140,10 @@ def main() -> int:
         missed = bar_failures(results["summary"], squeezed=bool(args.squeeze_free_gb))
         failures += missed
         md += "\n## Pass bar\n\n" + ("\n".join(f"- FAIL {f}" for f in missed) or "- PASS: every bar met") + "\n"
+        by_request = results.get("listener_by_request") or {}
+        if by_request:
+            md += "\n## Listener requests by first line\n\n" + "\n".join(
+                f"- {n} × `{line}`" for line, n in by_request.items()) + "\n"
         md += "\n```json\n" + json.dumps({k: results["summary"].get(k) for k in seat_numbers(Run(0, 0, 0))},
                                           indent=1, default=str) + "\n```\n"
     for key, label in (("pc_before", "PC before"), ("pc_after", "PC after"), ("db", "Database rows")):

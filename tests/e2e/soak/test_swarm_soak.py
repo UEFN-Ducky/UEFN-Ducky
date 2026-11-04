@@ -253,6 +253,27 @@ def test_listener_counter_counts_connections():
         counter.close()
 
 
+def test_listener_counter_names_each_request_line():
+    import socket
+    import time
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    counter = soak.ListenerCounter((port,))
+    try:
+        for _ in range(2):
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
+                conn.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n")
+                time.sleep(0.1)
+        deadline = time.monotonic() + 5
+        while counter.count < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert counter.requests == {f":{port} GET /health HTTP/1.1": 2}
+    finally:
+        counter.close()
+
+
 def test_log_tail_reads_only_new_whole_lines(tmp_path):
     log = tmp_path / "stub.jsonl"
     log.write_text('{"kind": "turn_start", "conv": "a"}\n{"kind": "tool"', encoding="utf-8")
