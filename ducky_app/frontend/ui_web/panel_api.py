@@ -728,9 +728,11 @@ from backend.voice.panel_mixin import PanelApiVoiceLaneMixin  # noqa: E402
 # Whether the UEFN listener was online at the last status check, for the whole app. HTTP,
 # phone and website requests each build a new PanelApi; kept per instance, every one of
 # their status polls looked like "listener just came online" and re-shipped every skill
-# pack to every IDE every 5 s (two cores busy while Ducky sat idle).
-_listener_online_lock = threading.Lock()
-_listener_was_online = False
+# pack to every IDE every 5 s (two cores busy while Ducky sat idle). A busy UEFN also
+# flaps online/offline, so the listener must stay online for 10 s before it counts.
+from frontend.ui_web.lag.listener_flap import OnlineDebouncer  # noqa: E402
+
+_listener_online = OnlineDebouncer()
 
 _shared_api_lock = threading.Lock()
 _shared_api: PanelApi | None = None
@@ -1216,17 +1218,13 @@ class PanelApi(
         return result
 
     def _maybe_ship_on_listener_online(self, status: dict[str, Any]) -> None:
-        """When UEFN listener flips offline→online, re-ship newest listener/skills/IDE bridges."""
-        global _listener_was_online
+        """The UEFN listener came online and stayed 10 s: re-ship when its code is stale."""
         online = bool(status.get("online")) and not bool(status.get("wedged"))
-        with _listener_online_lock:
-            was = _listener_was_online
-            _listener_was_online = online
-        if online and not was:
+        if _listener_online.observe(online):
             try:
-                from frontend.ship_newest import ship_newest_everywhere_async
+                from frontend.ship_newest import ship_on_listener_online_async
 
-                ship_newest_everywhere_async(apply_ides=True, force_skills=False)
+                ship_on_listener_online_async()
             except Exception:
                 pass
 

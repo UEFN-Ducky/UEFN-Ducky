@@ -250,3 +250,35 @@ def ship_newest_everywhere_async(*, apply_ides: bool = True, force_skills: bool 
         daemon=True,
         name="ship-newest",
     ).start()
+
+
+def listener_stamp_stale() -> bool:
+    """True when the running UEFN listener was loaded from another tree than AppData's.
+
+    False when the listener is offline, the check fails, or nothing is deployed.
+    """
+    try:
+        from backend.bridge import listener_get_health, send_command
+        from frontend.deploy import appdata_listener_dir, listener_tree_stamp
+        from frontend.settings import PANEL_LISTENER_PORT
+
+        if listener_get_health(PANEL_LISTENER_PORT, timeout=0.5) is None:
+            return False
+        disk = listener_tree_stamp(appdata_listener_dir())
+        running = str(send_command("ping", timeout=4.0).get("source_stamp") or "")
+        return bool(disk) and running != disk
+    except Exception:
+        return False
+
+
+def ship_on_listener_online() -> list[str]:
+    """The listener came (back) online: a full ship only when its code is stale.
+
+    A flapping listener comes online many times an hour; the panel launch already
+    shipped, so a fresh stamp means there is nothing new to deploy.
+    """
+    return ship_newest_everywhere(apply_ides=True, skip_if_recently_shipped=not listener_stamp_stale())
+
+
+def ship_on_listener_online_async() -> None:
+    threading.Thread(target=ship_on_listener_online, daemon=True, name="ship-listener-online").start()

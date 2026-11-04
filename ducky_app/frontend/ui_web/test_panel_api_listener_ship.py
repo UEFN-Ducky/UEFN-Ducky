@@ -7,9 +7,11 @@ def test_new_panel_api_per_request_does_not_reship_every_poll(monkeypatch):
     # Oct 10 2026: every HTTP / phone / website request builds a new PanelApi. With the
     # flag on the instance, each of their status polls re-shipped every skill pack to every
     # IDE every 5 s, and Ducky kept two cores busy while idle.
+    from frontend.ui_web.lag.listener_flap import OnlineDebouncer
+
     shipped = []
-    monkeypatch.setattr(ship_newest, "ship_newest_everywhere_async", lambda **kw: shipped.append(kw))
-    monkeypatch.setattr(panel_api, "_listener_was_online", False)
+    monkeypatch.setattr(ship_newest, "ship_on_listener_online_async", lambda: shipped.append(1))
+    monkeypatch.setattr(panel_api, "_listener_online", OnlineDebouncer(hold_s=0))
     online, offline = {"online": True, "wedged": False}, {"online": False}
 
     def poll(status):  # what one request's fresh PanelApi does
