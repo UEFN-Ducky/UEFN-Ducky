@@ -63,6 +63,24 @@ _listen_sock: socket.socket | None = None
 # ducky_find_tools; agents (Claude Code) wait on an MCP call with no limit of their own.
 QUICK_TOOLS = frozenset({"ducky_get_tools", "ducky_find_tools", "skill_search", "skill_read_subskill"})
 QUICK_TOOL_LIMIT_S = 60.0
+# Reads that answer in milliseconds. Nov 4 2026: 13 of these hung until Claude Code's
+# 1800 s abort; past this limit the agent hears why instead of waiting half an hour.
+QUICK_READS = frozenset({
+    "ducky_get_plan", "ducky_health", "ducky_get_status", "ducky_agent_list", "ducky_agent_transcript",
+    "ducky_agent_inbox", "ducky_list_chats", "ducky_read_chat", "ducky_terminal_read_output",
+    "ducky_terminal_list", "ducky_get_errors", "workspace_read_file", "workspace_read_files",
+    "workspace_search", "workspace_find", "workspace_file_outline", "workspace_list_dir", "workspace_tree",
+    "workspace_git", "project_memory_list", "project_memory_get",
+})
+QUICK_READ_LIMIT_S = 30.0
+# A call still running sends MCP notifications/progress this often (when the client gave a
+# progressToken). Claude Code aborts a call with "no response or progress for 1800s": on
+# Nov 4 2026 five ducky_ask_user calls died that way while the person was still deciding.
+PROGRESS_EVERY_S = 30.0
+# Threads the daemon's loop may run at once for to_thread work (tools' waits included).
+_TOOL_THREADS_CAP = 256
+# Each call's first step (which mode its chat is in) runs here, never behind tool waits.
+_QUICK_THREADS = 8
 # Any other call still running this long: where it waits is recorded (events kind
 # "tool_stuck") and it keeps running, since workflows, renders and questions take minutes.
 STUCK_REPORT_S = 120.0
@@ -196,6 +214,61 @@ def identity_from_env(environ: dict[str, str] | None = None) -> dict[str, str]:
     }
 
 
+class _SpawnExecutor(concurrent.futures.ThreadPoolExecutor):
+    """One thread per job, up to ``cap`` running at once (past it, jobs wait for a slot).
+
+    A ThreadPoolExecutor only by type (asyncio's set_default_executor requires one): every
+    method that schedules or stops work is its own, so its worker pool is never used."""
+
+    def __init__(self, cap: int, prefix: str) -> None:
+        super().__init__(max_workers=1, thread_name_prefix=prefix)
+        self._slots = threading.BoundedSemaphore(max(1, int(cap)))
+        self._prefix = prefix
+        self._lock = threading.Lock()
+        self._threads: set[threading.Thread] = set()
+        self._seq = 0
+        self._closed = False
+
+    def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> concurrent.futures.Future[Any]:
+        fut: concurrent.futures.Future[Any] = concurrent.futures.Future()
+
+        def _job() -> None:
+            with self._slots:
+                try:
+                    if fut.set_running_or_notify_cancel():
+                        try:
+                            fut.set_result(fn(*args, **kwargs))
+                        except BaseException as exc:  # noqa: BLE001 — handed to the awaiting call
+                            fut.set_exception(exc)
+                finally:
+                    with self._lock:
+                        self._threads.discard(threading.current_thread())
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("cannot schedule new futures after shutdown")
+            self._seq += 1
+            thread = threading.Thread(target=_job, daemon=True, name=f"{self._prefix}_{self._seq}")
+            self._threads.add(thread)
+        thread.start()
+        return fut
+
+    def running(self) -> int:
+        with self._lock:
+            return len(self._threads)
+
+    def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:
+        with self._lock:
+            self._closed = True
+            threads = list(self._threads)
+        if wait:
+            for thread in threads:
+                thread.join()
+
+
+_quick_pool = concurrent.futures.ThreadPoolExecutor(max_workers=_QUICK_THREADS, thread_name_prefix="shared-mcp-quick")
+
+
 def _ensure_loop() -> asyncio.AbstractEventLoop:
     global _loop
     if _loop is not None:
@@ -206,11 +279,11 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
         if _loop.is_running():
             return _loop
     loop = asyncio.new_event_loop()
-    # Sync tools run on these threads (see _call_tool). Some wait minutes on an agent
-    # or on the user, so the pool is wider than asyncio's default.
-    loop.set_default_executor(
-        concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="shared-mcp-tool")
-    )
+    # Async tools' to_thread work (the question gate, panel calls, waits on the person) runs
+    # here. A fixed pool of 64 filled with waits that never ended (a question whose agent
+    # had given up) and every later call queued behind them: Nov 4 2026, quick reads hung
+    # 30 minutes. A thread per job never makes one call wait for another's.
+    loop.set_default_executor(_SpawnExecutor(_TOOL_THREADS_CAP, "shared-mcp-tool"))
 
     def _run() -> None:
         asyncio.set_event_loop(loop)
@@ -663,20 +736,27 @@ def _in_own_thread(fn: Any, thread: dict[str, Any], name: str) -> asyncio.Future
     return fut
 
 
+def _call_limit(name: str, inner: str) -> float | None:
+    """Seconds a call may take before it is stopped; None = no limit (it may wait by design)."""
+    if inner in QUICK_READS:
+        return QUICK_READ_LIMIT_S
+    if inner in QUICK_TOOLS:
+        return QUICK_TOOL_LIMIT_S
+    if name == "ducky_call_tool" and inner != name and inner not in WAITS_BY_DESIGN:
+        return PLUGIN_CALL_LIMIT_S
+    return None
+
+
 async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any], ident: Any,
                    waits: dict[str, Any] | None = None, arguments: dict[str, Any] | None = None) -> Any:
     """Await one tool call. A quick tool past :data:`QUICK_TOOL_LIMIT_S` is stopped and
     raises :class:`_CallTimedOut`; any call past the first check is recorded where it waits."""
-    limit = QUICK_TOOL_LIMIT_S if name in QUICK_TOOLS else None
     inner = name
     if name == "ducky_call_tool":
         from backend.agent.toolsets import effective_tool_name
 
         inner = effective_tool_name(name, arguments if isinstance(arguments, dict) else {})
-        if inner in QUICK_TOOLS:
-            limit = QUICK_TOOL_LIMIT_S
-        elif inner != name and inner not in WAITS_BY_DESIGN:
-            limit = PLUGIN_CALL_LIMIT_S
+    limit = _call_limit(name, inner)
     first = min(limit, STUCK_REPORT_S) if limit is not None else STUCK_REPORT_S
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
@@ -687,8 +767,9 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
             if not done and limit is not None:
                 work.cancel()
                 raise _CallTimedOut(
-                    f"{inner} did not answer within {limit:.0f} s and was stopped. Call it once more; "
-                    "if it stops again, carry on without it and tell the person."
+                    f"{inner} did not answer within {limit:.0f} s and was stopped. If this chat asked "
+                    "the person a question, tools wait for that answer first. Otherwise call it once "
+                    "more; if it stops again, carry on without it and tell the person."
                 )
             if not done:
                 await asyncio.wait({work})
@@ -842,7 +923,9 @@ async def _call_tool(mcp: Any, name: str, arguments: dict[str, Any], ident: Any)
     from backend.agent.run_context import set_mode, reset_mode
     from backend.agent.toolsets.plan_safe import mode_permission_answer, mode_tool_block_reason
 
-    mode = await asyncio.to_thread(_calling_mode, ident)
+    # Its own small pool: on the loop's shared threads this first step of every call
+    # queued behind other calls' waits.
+    mode = await asyncio.get_running_loop().run_in_executor(_quick_pool, _calling_mode, ident)
     mode_token = set_mode(mode)
     token = identity.bind(ident)
     shared = identity.mark_shared()
@@ -947,6 +1030,39 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
     raise ValueError(f"unsupported method {method}")
 
 
+def _progress_token(msg: dict[str, Any]) -> str | int | None:
+    params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+    meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
+    token = meta.get("progressToken")
+    return token if isinstance(token, (str, int)) and not isinstance(token, bool) else None
+
+
+def _start_progress(msg: dict[str, Any], send: Any) -> threading.Event:
+    """Heartbeat a running tools/call with notifications/progress until the returned event is set."""
+    stop = threading.Event()
+    token = _progress_token(msg) if msg.get("method") == "tools/call" else None
+    if token is None:
+        return stop
+    params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+    name = str(params.get("name") or "tool")
+    every = float(PROGRESS_EVERY_S)
+
+    def _beat() -> None:
+        beats = 0
+        while not stop.wait(every):
+            beats += 1
+            try:
+                send({"op": "mcp", "method": "notifications/progress", "params": {
+                    "progressToken": token, "progress": beats,
+                    "message": f"{name} still running ({beats * every:.0f} s)",
+                }})
+            except (OSError, ValueError):
+                return  # the client is gone
+
+    threading.Thread(target=_beat, daemon=True, name=f"shared-mcp-progress:{name}"[:60]).start()
+    return stop
+
+
 def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id: int) -> None:
     ident = identity_from_payload({})
     write_lock = threading.Lock()
@@ -962,6 +1078,7 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
     def _dispatch(msg: dict[str, Any]) -> None:
         nonlocal last_revision
         req_id = msg.get("id")
+        beat = _start_progress(msg, _send)
         try:
             if msg.get("method") == "tools/list":
                 with catalog_lock:
@@ -970,10 +1087,14 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
                     last_revision = result["_meta"]["revision"]
             else:
                 result = _handle_mcp(mcp, msg, ident, conn_id)
+                beat.set()
                 if req_id is not None:
                     _send({"op": "mcp", "id": req_id, "result": result})
         except Exception as exc:
+            beat.set()
             _send({"op": "mcp", "id": req_id, "error": {"code": -32000, "message": str(exc)}})
+        finally:
+            beat.set()
 
     def _watch_catalog() -> None:
         nonlocal last_revision
