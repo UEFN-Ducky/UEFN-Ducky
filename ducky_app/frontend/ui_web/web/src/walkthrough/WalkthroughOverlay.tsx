@@ -18,6 +18,7 @@ import {
   skipTour,
   subscribeWalkthrough,
 } from "./WalkthroughService";
+import { startSpotlightLoop } from "./spotlightLoop";
 import "./walkthrough.css";
 
 const TIP_W = 340;
@@ -51,60 +52,53 @@ export function WalkthroughOverlay() {
 
   useEffect(() => {
     if (!active || !stepTarget) return;
-    let raf = 0;
-    const tick = () => {
+    // What the spotlight shows now; written only when it changes (see spotlightLoop).
+    let vars: Record<string, string> = {};
+    let clip = "none";
+    let found = false;
+    const measure = (): string => {
       const el = resolveTarget(stepTarget);
-      const root = rootRef.current;
-      if (root) {
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          const hole = holeFor(rect, stepMode === "circle" ? "circle" : "rect");
-          const { left, top, width: rw, height: rh } = hole;
-          root.style.setProperty("--wt-x", `${left}px`);
-          root.style.setProperty("--wt-y", `${top}px`);
-          root.style.setProperty("--wt-w", `${rw}px`);
-          root.style.setProperty("--wt-h", `${rh}px`);
-          root.style.setProperty("--wt-r", hole.radius);
-          const tip = placeTooltip(
-            new DOMRect(left, top, rw, rh),
-            tipHRef.current,
-          );
-          root.style.setProperty("--wt-tip-x", `${tip.x}px`);
-          root.style.setProperty("--wt-tip-y", `${tip.y}px`);
-          if (missingRef.current) {
-            missingRef.current = false;
-            setMissing(false);
-          }
-
-          // Punch click-through hole for require_click via clip-path on blocker.
-          const blocker = root.querySelector(".walkthrough-blocker") as HTMLElement | null;
-          if (blocker) {
-            if (stepAdvance === "require_click") {
-              blocker.style.clipPath = clipOutside(hole);
-            } else {
-              blocker.style.clipPath = "none";
-            }
-          }
-        } else {
-          if (!missingRef.current) {
-            missingRef.current = true;
-            setMissing(true);
-          }
-          const tip = placeTooltip(null, tipHRef.current);
-          root.style.setProperty("--wt-x", `0px`);
-          root.style.setProperty("--wt-y", `0px`);
-          root.style.setProperty("--wt-w", `0px`);
-          root.style.setProperty("--wt-h", `0px`);
-          root.style.setProperty("--wt-tip-x", `${tip.x}px`);
-          root.style.setProperty("--wt-tip-y", `${tip.y}px`);
-          const blocker = root.querySelector(".walkthrough-blocker") as HTMLElement | null;
-          if (blocker) blocker.style.clipPath = "none";
-        }
+      found = Boolean(el);
+      if (el) {
+        const hole = holeFor(el.getBoundingClientRect(), stepMode === "circle" ? "circle" : "rect");
+        const { left, top, width: rw, height: rh } = hole;
+        const tip = placeTooltip(new DOMRect(left, top, rw, rh), tipHRef.current);
+        vars = {
+          "--wt-x": `${left}px`, "--wt-y": `${top}px`, "--wt-w": `${rw}px`, "--wt-h": `${rh}px`,
+          "--wt-r": hole.radius, "--wt-tip-x": `${tip.x}px`, "--wt-tip-y": `${tip.y}px`,
+        };
+        // Punch click-through hole for require_click via clip-path on blocker.
+        clip = stepAdvance === "require_click" ? clipOutside(hole) : "none";
+      } else {
+        const tip = placeTooltip(null, tipHRef.current);
+        vars = {
+          "--wt-x": "0px", "--wt-y": "0px", "--wt-w": "0px", "--wt-h": "0px",
+          "--wt-tip-x": `${tip.x}px`, "--wt-tip-y": `${tip.y}px`,
+        };
+        clip = "none";
       }
-      raf = requestAnimationFrame(tick);
+      return `${found}|${clip}|${Object.values(vars).join("|")}`;
     };
-    tick();
-    return () => cancelAnimationFrame(raf);
+    const apply = () => {
+      const root = rootRef.current;
+      if (!root) return;
+      for (const [name, value] of Object.entries(vars)) root.style.setProperty(name, value);
+      if (missingRef.current === found) {
+        missingRef.current = !found;
+        setMissing(!found);
+      }
+      const blocker = root.querySelector(".walkthrough-blocker") as HTMLElement | null;
+      if (blocker) blocker.style.clipPath = clip;
+    };
+    const loop = startSpotlightLoop(() => (rootRef.current ? measure() : ""), apply);
+    const wake = () => loop.wake();
+    window.addEventListener("resize", wake);
+    window.addEventListener("scroll", wake, true);
+    return () => {
+      loop.stop();
+      window.removeEventListener("resize", wake);
+      window.removeEventListener("scroll", wake, true);
+    };
   }, [active, stepTarget, stepAdvance, stepMode, epoch]);
 
   // Bring the target into view once the step's own setup (open a view, select a node) is
