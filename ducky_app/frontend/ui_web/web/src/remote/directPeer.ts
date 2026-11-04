@@ -59,6 +59,34 @@ type Session = {
 
 const sessions = new Map<string, Session>();
 let installed = false;
+/** Replies by the viewer's request id (`rid`): a call resent after a dropped link gets the
+ * first run's answer (or joins it while it runs) instead of running twice. Any session:
+ * a redial may land on a new peer connection. */
+const RID_KEEP_MS = 5 * 60_000;
+const RID_MAX = 512;
+const ridReplies = new Map<string, { at: number; reply: Promise<Record<string, unknown>> }>();
+
+export function runOnce(rid: string | undefined, run: () => Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  if (!rid) return run();
+  const now = Date.now();
+  for (const [key, row] of ridReplies) {
+    if (ridReplies.size <= RID_MAX && now - row.at <= RID_KEEP_MS) break;
+    ridReplies.delete(key);
+  }
+  const hit = ridReplies.get(rid);
+  if (hit) return hit.reply;
+  const reply = run().then((out) => {
+    // A failed call may be tried again for real.
+    if (out.ok === false) ridReplies.delete(rid);
+    return out;
+  });
+  ridReplies.set(rid, { at: now, reply });
+  return reply;
+}
+
+export function forgetRidRepliesForTest() {
+  ridReplies.clear();
+}
 /** How long one ask for the viewer deny list may take before the caller moves on. */
 export const DENY_WAIT_MS = 5000;
 let deniedCache: Set<string> | null = null;
@@ -308,12 +336,16 @@ async function onRpc(s: Session, ch: RTCDataChannel, raw: string) {
     reply({ id: req.id, ok: false, error: `method not allowed (no such method: ${method})` });
     return;
   }
-  try {
-    const result = await api[method](...args);
-    reply({ id: req.id, ok: true, result: result === undefined ? null : result });
-  } catch (err) {
-    reply({ id: req.id, ok: false, error: String((err as Error)?.message || err) });
-  }
+  const rid = typeof (req as { rid?: unknown }).rid === "string" ? (req as { rid?: string }).rid : undefined;
+  const out = await runOnce(rid, async () => {
+    try {
+      const result = await api[method](...args);
+      return { ok: true, result: result === undefined ? null : result };
+    } catch (err) {
+      return { ok: false, error: String((err as Error)?.message || err) };
+    }
+  });
+  reply({ id: req.id, ...out });
 }
 
 async function startWatch(s: Session, hwnd: string): Promise<{ ok: boolean; error?: string; result?: unknown }> {

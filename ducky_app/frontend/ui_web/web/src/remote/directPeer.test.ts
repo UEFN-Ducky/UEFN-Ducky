@@ -7,7 +7,15 @@ vi.mock("../hooks/usePanelApi", async (importOriginal) => ({
   getApi: () => api,
 }));
 
-import { DENY_WAIT_MS, deniedMethods, forgetDeniedMethodsForTest, installDirectPeerOnDesktop, onInput } from "./directPeer";
+import {
+  DENY_WAIT_MS,
+  deniedMethods,
+  forgetDeniedMethodsForTest,
+  forgetRidRepliesForTest,
+  installDirectPeerOnDesktop,
+  onInput,
+  runOnce,
+} from "./directPeer";
 import { pushLocalAgentEvent } from "../hooks/useAgentEventBus";
 import type { AgentEvent } from "../types/panel";
 
@@ -41,6 +49,40 @@ describe("installDirectPeerOnDesktop", () => {
       delete w.chrome;
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe("runOnce (a viewer's call resent after a dropped link)", () => {
+  it("runs a rid once: a resend while it runs joins it, a later one gets the same answer", async () => {
+    forgetRidRepliesForTest();
+    let runs = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const call = () =>
+      runOnce("pg:7", async () => {
+        runs += 1;
+        await gate;
+        return { ok: true, result: "sent" };
+      });
+    const first = call();
+    const resent = call();
+    release();
+    expect(await first).toEqual({ ok: true, result: "sent" });
+    expect(await resent).toEqual({ ok: true, result: "sent" });
+    expect(await call()).toEqual({ ok: true, result: "sent" });
+    expect(runs).toBe(1);
+  });
+
+  it("a failed call, or one without a rid, runs again", async () => {
+    forgetRidRepliesForTest();
+    let runs = 0;
+    const fail = () => runOnce("pg:8", async () => ((runs += 1), { ok: false, error: "busy" }));
+    await fail();
+    await fail();
+    const plain = () => runOnce(undefined, async () => ((runs += 1), { ok: true }));
+    await plain();
+    await plain();
+    expect(runs).toBe(4);
   });
 });
 
