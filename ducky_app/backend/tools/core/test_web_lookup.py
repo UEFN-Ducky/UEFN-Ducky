@@ -439,3 +439,69 @@ def test_bing_tracking_link_unwraps_and_private_image_is_dropped(monkeypatch):
     assert "SECRET" not in blob
     assert "secret.png" not in blob
     assert conv.web_fetch_urls == ["https://example.com/ref", "https://example.com/flag"]
+
+
+def test_query_reaches_each_engine_unchanged(monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    web.begin_web_turn()
+    query = "UEFN editor crash memory"
+    seen: list[str] = []
+
+    def transport(url: str) -> HttpResult:
+        seen.append(url)
+        return _html_ok("<h2><a href=\"https://example.com/x\">Gardening tips</a></h2><p>Roses</p>")
+
+    out = web.run_search(query, conv=None, mode="on", transport=transport, resolve=_public_resolve)
+    assert out["ok"] is True and out["query"] == query
+    assert [urlsplit(u).hostname for u in seen] == ["html.duckduckgo.com", "www.bing.com"]
+    for url in seen:
+        assert parse_qs(urlsplit(url).query)["q"] == [query]
+
+
+def test_duckduckgo_on_topic_rows_win_and_bing_is_not_asked(monkeypatch):
+    web.begin_web_turn()
+    ddg = (
+        '<div class="result results_links"><h2 class="result__title">'
+        '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fforums.unrealengine.com%2Ft%2Fuefn-memory-leak%2F1">'
+        "UEFN Memory Leak - Epic Developer Community Forums</a></h2>"
+        '<a class="result__snippet" href="x">The editor crashes after an hour.</a></div>'
+        '<h2><a href="https://duckduckgo.com/y.js?ad_domain=ads.example">Ad: buy RAM</a></h2>'
+    )
+    seen: list[str] = []
+
+    def transport(url: str) -> HttpResult:
+        seen.append(url)
+        if "duckduckgo" in url:
+            return _html_ok(ddg)
+        return _html_ok("<h2><a href=\"https://www.pandora.com/\">Pandora</a></h2><p>Music</p>")
+
+    out = web.run_search("UEFN editor crash memory", conv=None, mode="on", transport=transport, resolve=_public_resolve)
+    assert len(seen) == 1
+    assert out["results"] == [
+        {
+            "title": "UEFN Memory Leak - Epic Developer Community Forums",
+            "url": "https://forums.unrealengine.com/t/uefn-memory-leak/1",
+            "snippet": "The editor crashes after an hour.",
+        }
+    ]
+
+
+def test_bing_fallback_when_duckduckgo_fails():
+    web.begin_web_turn()
+
+    def transport(url: str) -> HttpResult:
+        if "duckduckgo" in url:
+            raise OSError("down")
+        return _html_ok("<h2><a href=\"https://dev.epicgames.com/uefn\">UEFN memory</a></h2><p>Docs</p>")
+
+    out = web.run_search("UEFN memory", conv=None, mode="on", transport=transport, resolve=_public_resolve)
+    assert out["ok"] is True
+    assert out["results"][0]["url"] == "https://dev.epicgames.com/uefn"
+
+
+def test_bing_url_safe_base64_link_unwraps():
+    # A real Bing token: "_" sits where the standard alphabet has "/".
+    target = "https://www.microsoft.com/en-us/?msockid=0bf4b445647265341bccac42654c643a"
+    token = "aHR0cHM6Ly93d3cubWljcm9zb2Z0LmNvbS9lbi11cy8_bXNvY2tpZD0wYmY0YjQ0NTY0NzI2NTM0MWJjY2FjNDI2NTRjNjQzYQ"
+    assert web.unwrap_bing_href(f"https://www.bing.com/ck/a?!&&p=1&u=a1{token}&ntb=1") == target

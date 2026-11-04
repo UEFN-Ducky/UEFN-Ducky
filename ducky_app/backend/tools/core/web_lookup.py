@@ -30,7 +30,14 @@ from backend.agent.a2a_format import wrap_untrusted
 from backend.server import mcp
 from backend.util.json_util import tool_json
 
-_SEARCH_URL = "https://www.bing.com/search?q="
+# Bing answers scripted requests with unrelated pages (Nov 2026: a UEFN crash query came
+# back as Pandora, sushi and Microsoft sign-in). DuckDuckGo's HTML page answers the query;
+# Bing stays as the fallback when DuckDuckGo is down or has nothing on topic.
+_SEARCH_URLS = (
+    "https://html.duckduckgo.com/html/?q=",
+    "https://www.bing.com/search?q=",
+)
+_ENGINE_HOSTS = ("duckduckgo.com", "bing.com")
 _IMAGE_URL = "https://www.bing.com/images/async?first=1&count=6&q="
 _MAX_QUERY = 200
 _MAX_TEXT = 80_000
@@ -312,6 +319,7 @@ class _SearchResults(HTMLParser):
         self._buf: list[str] = []
         self._want_snippet = False
         self._in_p = False
+        self._snip_tag = "p"
         self.rows: list[dict[str, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -330,9 +338,13 @@ class _SearchResults(HTMLParser):
             self._href = ad.get("href") or ""
             self._buf = []
             return
-        if t == "p" and self._want_snippet:
-            self._in_p = True
-            self._buf = []
+        if self._want_snippet and not self._in_p:
+            cls = next((v or "" for k, v in attrs if k == "class"), "")
+            # Bing: the next <p>. DuckDuckGo: <a|div class="result__snippet">.
+            if t == "p" or (t in ("a", "div") and "result__snippet" in cls):
+                self._in_p = True
+                self._snip_tag = t
+                self._buf = []
 
     def handle_endtag(self, tag: str) -> None:
         t = tag.lower()
@@ -350,7 +362,7 @@ class _SearchResults(HTMLParser):
         if t == "h2":
             self._in_h2 = False
             return
-        if t == "p" and self._in_p:
+        if self._in_p and t == self._snip_tag:
             snippet = sanitize_web_text("".join(self._buf))
             if snippet and self.rows and not self.rows[-1]["snippet"]:
                 self.rows[-1]["snippet"] = snippet
@@ -383,7 +395,9 @@ def unwrap_bing_href(href: str) -> str:
     if not token:
         return raw
     try:
-        decoded = base64.b64decode(token + "=" * (-len(token) % 4)).decode("utf-8", "replace")
+        # Bing writes URL-safe base64 (- and _); the standard alphabet drops those silently.
+        token = token.replace("+", "-").replace("/", "_")
+        decoded = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode("utf-8", "replace")
     except Exception:
         return raw
     if decoded.startswith("http://") or decoded.startswith("https://"):
@@ -406,6 +420,9 @@ def parse_search_results(
         url = unwrap_bing_href(unwrap_search_href(row.get("url") or ""))
         if reject_url(url, resolve):
             continue
+        host = (urlsplit(url).hostname or "").lower()
+        if any(host == h or host.endswith("." + h) for h in _ENGINE_HOSTS):
+            continue  # an ad or an engine link that did not unwrap
         title = sanitize_web_text(row.get("title") or "")
         snippet = sanitize_web_text(row.get("snippet") or "")
         if not title:
@@ -699,6 +716,49 @@ def _image_hits(
     return parse_image_results(_decode_body(result.body), resolve)
 
 
+def _query_words(query: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) >= 3}
+
+
+def on_topic(rows: list[dict[str, str]], query: str) -> int:
+    """How many rows mention a word of the query in their title, snippet or URL."""
+    words = _query_words(query)
+    if not words:
+        return len(rows)
+    hits = 0
+    for row in rows:
+        blob = " ".join((row.get("title", ""), row.get("snippet", ""), row.get("url", ""))).lower()
+        if any(w in blob for w in words):
+            hits += 1
+    return hits
+
+
+def _search_rows(
+    q: str,
+    transport: TransportFn | None,
+    resolve: ResolveFn | None,
+) -> tuple[list[dict[str, str]] | None, str | None]:
+    """Ask each engine in turn; the first with on-topic rows wins."""
+    first: list[dict[str, str]] | None = None
+    last_err: str | None = None
+    for base in _SEARCH_URLS:
+        result, err = exchange(base + quote_plus(q), transport, resolve)
+        if err or result is None:
+            last_err = err or "search failed"
+            continue
+        rows = parse_search_results(_decode_body(result.body), resolve)
+        if rows is None:
+            last_err = "search page could not be read"
+            continue
+        if rows and on_topic(rows, q):
+            return rows, None
+        if first is None:
+            first = rows
+    if first is not None:
+        return first, None
+    return None, last_err or "search failed"
+
+
 def run_search(
     query: str,
     *,
@@ -720,12 +780,9 @@ def run_search(
     limited = _charge("search", _MAX_SEARCHES)
     if limited:
         return {"ok": False, "error": limited}
-    result, err = exchange(_SEARCH_URL + quote_plus(q), transport, resolve)
-    if err or result is None:
-        return {"ok": False, "error": err or "search failed"}
-    rows = parse_search_results(_decode_body(result.body), resolve)
+    rows, err = _search_rows(q, transport, resolve)
     if rows is None:
-        return {"ok": False, "error": "search page could not be read"}
+        return {"ok": False, "error": err or "search failed"}
     pictures: list[dict[str, str]] = []
     if images or _IMAGE_QUERY.search(q):
         pictures = _image_hits(q, transport, resolve)
