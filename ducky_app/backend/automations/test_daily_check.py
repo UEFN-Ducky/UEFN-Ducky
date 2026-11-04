@@ -23,8 +23,10 @@ def files(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "_files_dir", lambda: tmp_path / "wf")
     (tmp_path / "wf").mkdir()
     monkeypatch.setattr(store, "_announce_graphs_changed", lambda: None)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", lambda _e: None)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.notify_chats_changed", lambda *a, **k: None)
+    from frontend.ui_web.agent_turns.testing import patch_turns
+
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", lambda _e: None)
+    patch_turns(monkeypatch, "notify_chats_changed", lambda *a, **k: None)
     monkeypatch.setattr(runner, "_ensure_pipeline_group", lambda *a: None)  # no agent group folder in tests
 
 
@@ -278,7 +280,7 @@ def test_an_agent_that_failed_gets_a_fresh_ducky_next_try(monkeypatch, tmp_path)
 
 
 def _chat(title: str):
-    from frontend.ui_web.project_chats import list_conversations, load_conversation
+    from frontend.ui_web.chats.conversations import list_conversations, load_conversation
 
     rows = [c for c in list_conversations() if c.title == title]
     return [load_conversation(c.id) for c in rows]
@@ -286,7 +288,7 @@ def _chat(title: str):
 
 def test_message_me_posts_to_the_reports_chat_or_the_chat_that_ran_it():
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
 
     wid = save([node("s", "start.manual"), node("m", "notify.message", inputs={"message": "Done: {{who}}"})], [go("s", "m")], name="Nightly")
     for _ in range(2):

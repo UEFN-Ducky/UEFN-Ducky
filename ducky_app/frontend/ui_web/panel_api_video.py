@@ -104,10 +104,10 @@ _READY_PREP: dict[str, Any] = {
 def _prep_frames(conv_id: str) -> int:
     """Frames per video for this chat's model (group/unknown chats: provider-agnostic)."""
     from backend.agent.video.limits import media_limits_for
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     provider = model = ""
-    conv = project_chats.load_conversation(conv_id) if conv_id else None
+    conv = chat_convs.load_conversation(conv_id) if conv_id else None
     if conv is not None and not getattr(conv, "is_group", False):
         provider = str(getattr(conv, "provider", "") or "")
         model = str(getattr(conv, "model", "") or "")
@@ -118,9 +118,9 @@ def _video_needs_ffmpeg(conv_id: str, staged: dict[str, Any]) -> bool:
     """Gemini-only single chats with a small supported video never need ffmpeg."""
     from backend.agent.coding_agents.base import normalize_coding_agent
     from backend.agent.video.routing import needs_frames
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
-    conv = project_chats.load_conversation(conv_id) if conv_id else None
+    conv = chat_convs.load_conversation(conv_id) if conv_id else None
     if conv is None or getattr(conv, "is_group", False):
         return True
     external = normalize_coding_agent(getattr(conv, "coding_agent", None) or "ducky") != "ducky"
@@ -141,10 +141,10 @@ def _auto_limits(conv_id: str, model: str = "", coding_agent: str = "") -> dict[
     """
     from backend.agent.attachments import file_text_budget
     from backend.agent.video.limits import AUTO_FRAMES_CAP, request_image_max
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     provider = saved_model = agent = ""
-    conv = project_chats.load_conversation(conv_id) if conv_id else None
+    conv = chat_convs.load_conversation(conv_id) if conv_id else None
     if conv is not None and not getattr(conv, "is_group", False):
         provider = str(getattr(conv, "provider", "") or "")
         saved_model = str(getattr(conv, "model", "") or "")

@@ -218,7 +218,7 @@ def _on_saved(conv_id: str, final: bool) -> None:
     the chat in the windows that show it."""
     if not final or not conv_id or not _on_screen(conv_id):
         return
-    from frontend.ui_web.agent_modes import notify_context_changed
+    from frontend.ui_web.agent_turns.push import notify_context_changed
 
     notify_context_changed(conv_id)
 
@@ -308,7 +308,7 @@ def _host_turn(channel: Any, frame: dict[str, Any]) -> None:
     try:
         from backend.agent.coding_agents.runner import run_coding_agent_message
         from frontend.settings import PanelSettings, apply_workspace_env
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         apply_workspace_env(PanelSettings.load().uefn_project_root)
         conv = load_conversation(conv_id)

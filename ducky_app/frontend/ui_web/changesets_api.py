@@ -34,7 +34,7 @@ def _close_orphans(journal: FileChangeJournal, root: str) -> list[str]:
     (importing ``agent_modes`` here used to stall the panel).
     """
     from frontend.ui_web.live_agent_runs import get_live_run_ids
-    from frontend.ui_web.project_chats import heal_killed_coding_turn
+    from frontend.ui_web.chats.saves import heal_killed_coding_turn
 
     try:
         closed = journal.close_orphan_runs(project_root=root, live_run_ids=get_live_run_ids())
@@ -69,7 +69,7 @@ def heal_orphans_on_panel_boot(*, sent_before: float | None = None) -> list[str]
     if journal is not None:
         healed += _close_orphans(journal, root)
     try:
-        from frontend.ui_web.project_chats import heal_usage_orphaned_turns_for_project
+        from frontend.ui_web.chats.saves import heal_usage_orphaned_turns_for_project
 
         healed += heal_usage_orphaned_turns_for_project(root, sent_before=sent_before)
     except Exception:
@@ -90,7 +90,7 @@ def heal_orphans_in_background() -> None:
         if not healed:
             return
         try:
-            from frontend.ui_web.agent_modes import notify_context_changed
+            from frontend.ui_web.agent_turns.push import notify_context_changed
 
             for conv_id in dict.fromkeys(healed):
                 notify_context_changed(conv_id)
@@ -147,7 +147,7 @@ def _refuse_live_run(run_id: str) -> dict[str, Any] | None:
         return None
     conv = str(run.get("conv_id") or "").strip()
     try:
-        from frontend.ui_web.agent_modes import is_agent_running, live_changeset_run_ids
+        from frontend.ui_web.agent_turns.state import is_agent_running, live_changeset_run_ids
 
         live = rid in live_changeset_run_ids() or (bool(conv) and is_agent_running(conv))
     except Exception:

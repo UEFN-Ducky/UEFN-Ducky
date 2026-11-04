@@ -101,7 +101,7 @@ def test_digest_trigram_search_matches_substring_scan(tmp_path: Path, monkeypatc
 def test_load_messages_paging_keeps_row_ids(tmp_path: Path) -> None:
     import frontend.ui_web.panel_api  # noqa: F401 — mixins import the package root first
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 
     project = str(tmp_path / "Island")
@@ -109,9 +109,9 @@ def test_load_messages_paging_keeps_row_ids(tmp_path: Path) -> None:
     s = PanelSettings.load()
     s.uefn_project_root = project
     s.save()
-    conv = pc.create_conversation(title="Paged", project_root=project, skill_snapshot="x")
+    conv = chat_convs.create_conversation(title="Paged", project_root=project, skill_snapshot="x")
     for i in range(6):
-        pc.append_message(conv, {"role": "user", "content": f"m{i}", "text": f"m{i}", "ts": time.time()}, project)
+        chat_saves.append_message(conv, {"role": "user", "content": f"m{i}", "text": f"m{i}", "ts": time.time()}, project)
     api = PanelApiChatsMixin()
     full = api.load_messages(conv.id)
     # Row id = message index * 1000 + row index in that message (chat_rows.ROW_ID_STEP).

@@ -32,7 +32,7 @@ def schedule_tk_call(fn: Callable[[], None]) -> None:
 
 def _stop_all_agents() -> None:
     try:
-        from frontend.ui_web.agent_modes import join_running_agents
+        from frontend.ui_web.agent_turns.state import join_running_agents
 
         join_running_agents(0.5)
     except Exception:

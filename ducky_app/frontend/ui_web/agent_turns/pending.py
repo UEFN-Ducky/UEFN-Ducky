@@ -30,7 +30,7 @@ from frontend.ui_web.agent_turns.state import (
     is_agent_running,
     wait_for_idle,
 )
-from frontend.ui_web.project_chats import save_conversation
+from frontend.ui_web.chats.saves import save_conversation
 
 
 def _with_admission(fn):

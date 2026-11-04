@@ -10,7 +10,8 @@ import pytest
 
 from backend.tools.panel import ducky_panel_terminal as tools
 from backend.tools.panel import permission_prompt as permissions
-from frontend.ui_web import agent_modes, terminal
+from frontend.ui_web import terminal
+from frontend.ui_web.agent_turns.testing import patch_turns
 from frontend.ui_web.panel_api import PanelApi
 from frontend.ui_web.terminal.manager import TerminalManager
 
@@ -26,7 +27,7 @@ def forwarded(monkeypatch):
     monkeypatch.setattr(mgr, "get_session", lambda sid: session if sid == "s1" else None)
     monkeypatch.setattr(mgr, "list_sessions", lambda: [{"session_id": "s1", "cwd": "C:/repo"}])
     monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
-    monkeypatch.setattr(agent_modes, "get_panel_push", lambda: None)
+    patch_turns(monkeypatch, "get_panel_push", lambda: None)
     monkeypatch.setattr(tools, "tool_json", lambda value, **kw: json.dumps(value))
     monkeypatch.setattr(tools, "_terminal_chat", lambda conv: "bound-chat")
     monkeypatch.setattr(permissions, "allows_everything", lambda chat: False)
@@ -207,7 +208,7 @@ def test_reopening_in_a_chat_reuses_its_idle_terminal(monkeypatch, tmp_path):
     monkeypatch.setattr(manager_mod, "TerminalBridge", FakeBridge)
     mgr, events, chat = TerminalManager(), [], ["chat-1"]
     monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
-    monkeypatch.setattr(agent_modes, "get_panel_push", lambda: events.append)
+    patch_turns(monkeypatch, "get_panel_push", lambda: events.append)
     monkeypatch.setattr(tools, "tool_json", lambda value, **kw: json.dumps(value))
     monkeypatch.setattr(tools, "_terminal_chat", lambda conv: chat[0])
 
@@ -235,7 +236,7 @@ def test_reopening_in_a_chat_reuses_its_idle_terminal(monkeypatch, tmp_path):
 
 def test_window_process_uses_local_manager(forwarded, monkeypatch):
     push = Mock()
-    monkeypatch.setattr(agent_modes, "get_panel_push", lambda: push)
+    patch_turns(monkeypatch, "get_panel_push", lambda: push)
     assert tools._terminal_manager() is forwarded.mgr
     assert forwarded.mgr._push is push
 
@@ -263,7 +264,7 @@ def test_real_loopback_background_output_after_sixty_seconds(monkeypatch, tmp_pa
     events = []
     mgr.set_push(events.append)
     monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
-    monkeypatch.setattr(agent_modes, "get_panel_push", lambda: None)
+    patch_turns(monkeypatch, "get_panel_push", lambda: None)
     monkeypatch.setattr(tools, "tool_json", lambda value, **kw: json.dumps(value))
     monkeypatch.setattr(tools, "_terminal_chat", lambda conv: "test-chat")
     monkeypatch.setattr(permissions, "allows_everything", lambda chat: True)

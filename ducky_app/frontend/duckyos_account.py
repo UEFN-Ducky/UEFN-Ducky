@@ -159,7 +159,7 @@ def _note_login_change(before: dict[str, Any], after: dict[str, Any]) -> None:
         return
     _tell_account_listeners(account_key(before), account_key(after))
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "duckyos_account_changed", "account": account_key(after)})
     except Exception:
@@ -167,7 +167,7 @@ def _note_login_change(before: dict[str, Any], after: dict[str, Any]) -> None:
     try:
         from backend.store import account_rows
         from backend.uefn_plugins.scopes import account_id_for
-        from frontend.ui_web.agent_modes import notify_chats_changed
+        from frontend.ui_web.agent_turns.push import notify_chats_changed
 
         # Chats are the signed-in account's: every window drops the old account's rows at
         # once and loads the new one's (the Duckies tab reloads on the account event).
@@ -2870,7 +2870,7 @@ def auto_apply_store_updates(*, force: bool = False) -> dict[str, Any]:
                 pass
         if updated:
             try:
-                from frontend.ui_web.agent_modes import push_ui_event
+                from frontend.ui_web.agent_turns.push import push_ui_event
 
                 push_ui_event({"type": "uefn_plugins_changed"})
             except Exception:

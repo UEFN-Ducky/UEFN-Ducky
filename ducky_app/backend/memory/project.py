@@ -48,7 +48,7 @@ def resolve_project_root(explicit: str = "") -> str:
 def memory_dir(project_root: str = "", *, for_write: bool = False) -> Path:
     # Same per-project keying as chats ("_no_project" when no root is set); the
     # slug embeds a path hash, so same-named projects can never share a folder.
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     root = resolve_project_root(project_root)
     d = default_app_data_dir() / "memory" / "projects" / project_slug(root)
@@ -97,7 +97,7 @@ def _use_db() -> bool:
 
 
 def _project_id(project_root: str) -> str:
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     return project_slug(resolve_project_root(project_root))
 

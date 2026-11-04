@@ -86,7 +86,8 @@ def used_tokens(conv: Any) -> int:
 
 def set_chat_limit(conv_id: str, value: Any, project_root: str | None = None) -> int:
     """Store a chat's own limit (``200k``, ``200000``; 0/empty clears it). Returns the tokens."""
-    from frontend.ui_web.project_chats import load_conversation, save_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     tokens = parse_tokens(value)
     conv = load_conversation(conv_id, project_root=project_root)
@@ -99,7 +100,7 @@ def set_chat_limit(conv_id: str, value: Any, project_root: str | None = None) ->
 
 def over_limit(conv_id: str, step: Any = None, project_root: str | None = None) -> tuple[int, int] | None:
     """``(used, limit)`` when the chat's context is past its limit, else None."""
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     try:
         conv = load_conversation(conv_id, project_root=project_root)
@@ -196,9 +197,11 @@ def start_fresh(conv_id: str, next_text: str, *, used: int = 0, limit: int = 0, 
     Runs between turns. A failed handoff (or reset) keeps the old session and still starts
     ``next_text``. Returns True when the chat started fresh."""
     from backend.tools.panel.ducky_panel import build_recycle_spawn_message
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import routing as turn_routing
+    from frontend.ui_web.agent_turns import state as turn_state
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import append_message
     from frontend.ui_web.context_control import reset_context
-    from frontend.ui_web.project_chats import append_message, load_conversation
 
     conv = load_conversation(conv_id, project_root=project_root)
     model = str(getattr(conv, "model", "") or "") if conv is not None else ""
@@ -211,18 +214,18 @@ def start_fresh(conv_id: str, next_text: str, *, used: int = 0, limit: int = 0, 
     limit = limit or FALLBACK_TOKENS
 
     def go_on(text: str) -> None:
-        agent_modes.run_message(conv_id, text, "agent", model, queue_if_busy=True)
+        turn_routing.run_message(conv_id, text, "agent", model, queue_if_busy=True)
 
     if handoff is None:
-        out = agent_modes.run_message_and_wait(conv_id, handoff_prompt(limit), "agent", model,
-                                               timeout_sec=_IDLE_WAIT_S, cancel_on_timeout=False)
+        out = turn_routing.run_message_and_wait(conv_id, handoff_prompt(limit), "agent", model,
+                                                timeout_sec=_IDLE_WAIT_S, cancel_on_timeout=False)
         handoff = str(out.get("assistant_text") or "").strip()
         if out.get("status") != "done" or not handoff:
             go_on(next_text)
             return False
     # A handoff's reply lands before its run is marked idle, and the reset refuses a running chat.
     idle_by = time.monotonic() + _IDLE_WAIT_S
-    while agent_modes.is_agent_running(conv_id) and time.monotonic() < idle_by:
+    while turn_state.is_agent_running(conv_id) and time.monotonic() < idle_by:
         time.sleep(0.5)
     try:
         reset_context(conv_id, ["session"], project_root=project_root)
@@ -237,5 +240,5 @@ def start_fresh(conv_id: str, next_text: str, *, used: int = 0, limit: int = 0, 
     if fresh is not None:
         line = f"Started fresh at {_k(used)} → {_k(len(text) // 4)} tokens"
         append_message(fresh, {"role": "assistant", "content": line, "ts": time.time()}, project_root=project_root)
-    agent_modes.run_message(conv_id, text, "agent", model)
+    turn_routing.run_message(conv_id, text, "agent", model)
     return True

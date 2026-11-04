@@ -88,7 +88,7 @@ def _changesets_storage(project_root: str) -> Path:
     land in one ledger instead of a ``Content_<hash>`` orphan.
     """
     from frontend.settings import default_app_data_dir
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     p = Path(project_root).resolve()
     for cand in (p, *p.parents[:3]):
@@ -205,7 +205,7 @@ def build_run_context(
     if parent_id:
         try:
             from frontend.ui_web.group_orchestrator import is_group_conversation
-            from frontend.ui_web.project_chats import load_conversation
+            from frontend.ui_web.chats.conversations import load_conversation
 
             parent = load_conversation(parent_id)
             if parent is not None and is_group_conversation(parent):

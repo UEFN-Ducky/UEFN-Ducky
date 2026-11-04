@@ -95,7 +95,7 @@ def test_first_boot_imports_everything_and_leaves_no_stray_files(tmp_path: Path)
     kinds = {k: n for k, n in conn.execute("SELECT kind, count(*) FROM events GROUP BY kind").fetchall()}
     assert kinds.get("error") == 1 and kinds.get("ui_crash") == 1
     # the per-project .ducky/ folder of a recent project is folded at boot, not on first open
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     assert count("SELECT count(*) FROM plans WHERE project_id=? AND kind='project'", project_slug(str(project))) == 1
     assert not (project / ".ducky" / "plans").exists()

@@ -117,7 +117,7 @@ def _alert(title: str, status: str, detail: str) -> None:
 
 def _push(event: dict[str, Any]) -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event(event)
     except Exception:  # noqa: BLE001 — the alert and the status still say it

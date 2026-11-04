@@ -14,7 +14,7 @@ MAX_RECENT = 20
 
 
 def slug_for(path: str) -> str:
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     return project_slug(path)
 

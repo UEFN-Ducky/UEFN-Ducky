@@ -7,6 +7,7 @@ from backend.panel import rpc
 from backend.server import ProtectedFastMCP
 from backend.workspace import ai_ignore, identity
 from frontend.ui_web import steer
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 @pytest.fixture
@@ -15,7 +16,7 @@ def server(monkeypatch):
 
     now = [100.0]
     monkeypatch.setattr(steer, "_now", lambda: now[0])
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     monkeypatch.setattr(ai_ignore, "require_safe_tool", lambda _name: None)
     monkeypatch.setattr(rpc, "wait_for_question_answers", lambda _conv_id: None)
     monkeypatch.setattr(chat_title, "require_self_name", lambda *_args: None)

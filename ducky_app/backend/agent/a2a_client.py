@@ -6,7 +6,7 @@ import urllib.request
 
 
 def _call(operation: str, *args, **kwargs):
-    from frontend.ui_web.agent_modes import get_panel_push
+    from frontend.ui_web.agent_turns.push import get_panel_push
 
     if get_panel_push() is not None:
         from backend.agent import a2a_broker

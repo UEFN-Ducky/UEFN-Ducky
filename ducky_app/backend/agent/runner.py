@@ -881,7 +881,7 @@ class AgentRunner:
             conv.prompt_cache_snapshot["agent_mode"] = current_mode()
         if self.config.conv is not None:
             try:
-                from frontend.ui_web.project_chats import save_conversation
+                from frontend.ui_web.chats.saves import save_conversation
 
                 save_conversation(self.config.conv, self.config.project_root or None)
             except Exception:

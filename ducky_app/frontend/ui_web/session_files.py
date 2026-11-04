@@ -78,7 +78,7 @@ def session_stats_from_messages(messages: list[Any]) -> dict[str, int]:
 
 def compute_session_files(conv_id: str) -> list[dict[str, Any]]:
     """Return deduplicated session file entries from successful write/path tools."""
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(conv_id)
     if not conv:

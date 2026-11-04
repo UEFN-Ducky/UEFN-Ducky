@@ -31,16 +31,16 @@ def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dic
     DPAPI call each: a 735-message chat out of the opened-row cache took 0.45 s for its
     first page on an idle PC (Nov 1 2026), and the cache keeps 8 chats. None: use the
     whole load (file store, or a save of this chat still queued for the writer)."""
-    from frontend.ui_web import project_chats as pc
     from frontend.ui_web.chat_rows import ROW_ID_STEP
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves, store as chat_store
 
-    writer = pc._WRITER
-    if not pc._use_db() or pc._queued(conv_id) is not None or (writer is not None and writer.checkpoint_waits(conv_id)):
+    writer = chat_saves._WRITER
+    if not chat_store._use_db() or chat_saves._queued(conv_id) is not None or (writer is not None and writer.checkpoint_waits(conv_id)):
         return None
-    conv = pc.load_conversation_meta(conv_id)
+    conv = chat_convs.load_conversation_meta(conv_id)
     if conv is None:
         return []
-    repo = pc._repo()
+    repo = chat_store._repo()
     stop = None if before_id is None else int(before_id) // ROW_ID_STEP + 1
     want = max(16, limit // 4)  # assistant turns give many rows each
     while True:

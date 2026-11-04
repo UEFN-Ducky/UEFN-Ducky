@@ -19,7 +19,7 @@ from backend.util.json_util import tool_json
 
 def _members(plan: dict[str, Any], root: str | None) -> list[str]:
     """Seats owning a sub plan (a group owner counts all its chats), never the lead."""
-    from frontend.ui_web.project_chats import list_conversations, load_conversation
+    from frontend.ui_web.chats.conversations import list_conversations, load_conversation
 
     lead = str(plan.get("chat_id") or "")
     owners: list[str] = []
@@ -67,7 +67,7 @@ def _commits(lane: list[str], since: float) -> list[str]:
 
 
 def _seat_name(conv_id: str, root: str | None) -> str:
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(conv_id, project_root=root)
     if conv is None:

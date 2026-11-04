@@ -28,7 +28,7 @@ def two_projects(isolated_appdata, tmp_path, monkeypatch):
     """Two fake projects; ProjA is active (env + settings + roster)."""
     from frontend.settings import PanelSettings
     from frontend.ui_web import project_switch
-    from frontend.ui_web.project_chats import project_display_name, project_slug
+    from frontend.ui_web.chats.store import project_display_name, project_slug
 
     proj_a = str(tmp_path / "ProjA")
     proj_b = str(tmp_path / "ProjB")
@@ -65,7 +65,7 @@ def test_empty_index(isolated_appdata, tmp_path):
 def test_save_and_get_entry_in_appdata_project_slug_dir(isolated_appdata, tmp_path, monkeypatch):
     monkeypatch.setenv("DUCKY_STORE_BACKEND_MEMORY", "files")  # legacy markdown layout contract
     from frontend.settings import default_app_data_dir
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
     from backend.memory.project import list_entries, read_entry, save_entry
 
     root = str(tmp_path / "Proj")
@@ -98,7 +98,7 @@ def test_nested_sub_entries_split_like_skills(isolated_appdata, tmp_path, monkey
     monkeypatch.setenv("DUCKY_STORE_BACKEND_MEMORY", "files")  # legacy markdown layout contract
     """Saving entry/sub converts a flat entry into a dir with MEMORY.md + sub files."""
     from frontend.settings import default_app_data_dir
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
     from backend.memory.project import list_entries, read_entry, save_entry
 
     root = str(tmp_path / "Proj")
@@ -336,7 +336,7 @@ def test_tools_write_another_projects_memory(two_projects):
 
 
 def test_memory_overview_spans_projects(two_projects):
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
     from backend.memory.project import save_entry
     from backend.tools.uefn.memory import ducky_memory_overview
 
@@ -355,7 +355,8 @@ def test_memory_overview_spans_projects(two_projects):
 
 
 def test_read_chat_cross_project(two_projects):
-    from frontend.ui_web.project_chats import append_message, create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
+    from frontend.ui_web.chats.saves import append_message
 
     proj_a, proj_b = two_projects
     conv = create_conversation(project_root=proj_b)

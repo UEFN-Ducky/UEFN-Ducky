@@ -8,7 +8,10 @@ import pytest
 
 from backend.tools.panel import ducky_panel as panel
 from frontend.settings import PanelSettings
-from frontend.ui_web import project_chats as pc
+from frontend.ui_web.chats import conversations as chat_convs
+from frontend.ui_web.chats import folders as chat_folders
+from frontend.ui_web.chats import saves as chat_saves
+from frontend.ui_web.chats import store as chat_store
 from frontend.ui_web.recent_projects import add_recent_project, remove_recent_project
 
 
@@ -30,8 +33,8 @@ def projects(request, monkeypatch, tmp_path):
 
 
 def _chat(root):
-    conv = pc.create_conversation(project_root=root, title="Home chat", skill_snapshot="test")
-    pc.append_message(conv, {"role": "assistant", "content": "Home knowledge", "ts": 1.0}, root)
+    conv = chat_convs.create_conversation(project_root=root, title="Home chat", skill_snapshot="test")
+    chat_saves.append_message(conv, {"role": "assistant", "content": "Home knowledge", "ts": 1.0}, root)
     return conv
 
 
@@ -54,7 +57,7 @@ def live_context(monkeypatch):
 
 def _kept_under(root, conv):
     """Where an older Ducky kept a chat: under its project, not in the one list."""
-    pc.move_chats_to_project([conv.id], [], pc.project_slug(root), "")
+    chat_folders.move_chats_to_project([conv.id], [], chat_store.project_slug(root), "")
     return conv
 
 
@@ -62,7 +65,7 @@ def _kept_under(root, conv):
 def test_every_ducky_gets_live_context_whatever_project_is_named(projects, live_context, requested):
     home = projects["HomeIsland"]
     conv = _chat(home)
-    project = home if requested == "path" else pc.project_slug(home) if requested == "slug" else requested
+    project = home if requested == "path" else chat_store.project_slug(home) if requested == "slug" else requested
 
     result = json.loads(panel.ducky_get_chat_context(conv.id, project=project, model="test-model", mode="ask"))
 
@@ -86,7 +89,7 @@ def test_a_chat_still_kept_under_a_project_gets_its_stored_summary(projects, liv
     # The label does not depend on the recent-project roster.
     remove_recent_project(home)
     result = json.loads(panel.ducky_get_chat_context(conv.id, project="ThirdIsland"))
-    assert result["project"] == pc.project_slug(home)
+    assert result["project"] == chat_store.project_slug(home)
 
 
 def test_context_with_no_selected_project(projects, live_context):

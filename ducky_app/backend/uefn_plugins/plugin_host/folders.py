@@ -165,7 +165,7 @@ def _restart_moved(pid: str) -> None:
     except Exception:  # noqa: BLE001 — its next tool call reloads it
         _log.warning("Plugin %s: restarting after its folders moved failed", pid, exc_info=True)
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         if live_pull:
             from backend.uefn_plugins import live

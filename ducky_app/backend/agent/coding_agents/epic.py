@@ -23,7 +23,7 @@ def _resolve_root(project_root: str | None) -> str:
 
 
 def _project_id(project_root: str | None) -> str:
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     return project_slug(_resolve_root(project_root))
 

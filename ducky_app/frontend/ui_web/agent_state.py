@@ -69,18 +69,18 @@ def classify(question: dict[str, Any] | None, approval: dict[str, Any] | None, t
 
 
 def agent_state(conv_id: str) -> dict[str, Any]:
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import state as turn_state
 
     cid = (conv_id or "").strip()
-    running = _call(agent_modes, "running_tool", cid)  # {name, started_at}
+    running = _call(turn_state, "running_tool", cid)  # {name, started_at}
     tool = {"tool": running.get("name"), "age_s": time.time() - float(running.get("started_at") or time.time())} \
         if running else None
-    return classify(_question(cid), _approval(cid), tool, _call(agent_modes, "last_output_age_s", cid))
+    return classify(_question(cid), _approval(cid), tool, _call(turn_state, "last_output_age_s", cid))
 
 
 def running_agents() -> list[dict[str, Any]]:
     """Every running agent with its state, ones that need the person first."""
-    from frontend.ui_web.agent_modes import list_running_agents
+    from frontend.ui_web.agent_turns.state import list_running_agents
 
     order = {"needs_answer": 0, "needs_approval": 1, "running_command": 2, "silent": 3, "working": 4}
     rows = [{"id": cid, **agent_state(cid)} for cid in list_running_agents()]

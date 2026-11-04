@@ -175,8 +175,8 @@ def _writer(path: str) -> tuple[str, str]:
 def _live(conv_id: str) -> bool:
     """The chat is running, or exists and isn't archived."""
     from frontend.archive_folder import is_archive_folder_id
-    from frontend.ui_web.agent_modes import is_agent_running
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.agent_turns.state import is_agent_running
+    from frontend.ui_web.chats.conversations import load_conversation
 
     if is_agent_running(conv_id):
         return True

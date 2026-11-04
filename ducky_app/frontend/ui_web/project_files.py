@@ -1457,7 +1457,7 @@ def _trash_root(root: Path) -> Path:
     ``git status`` never shows Ducky's undo slots."""
     if _is_folder_root(root):
         from frontend.settings import default_app_data_dir
-        from frontend.ui_web.project_chats import project_slug
+        from frontend.ui_web.chats.store import project_slug
 
         return default_app_data_dir() / "tmp" / "undo-trash" / project_slug(str(root))
     return root / TRASH_DIR_NAME

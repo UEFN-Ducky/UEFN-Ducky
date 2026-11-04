@@ -247,13 +247,13 @@ def test_a_chat_of_another_account_serves_none_of_its_files(who: _Who) -> None:
 
 def test_an_account_switch_drops_the_old_accounts_rows_in_every_window(who: _Who, monkeypatch) -> None:
     from frontend import duckyos_account
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     alice = who.be(ALICE)
     _write_chat("chat-a")
     pushed: list[dict] = []
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda push=None: pushed.append)
-    monkeypatch.setattr(agent_modes, "push_ui_event", pushed.append)
+    patch_turns(monkeypatch, "_resolve_push", lambda push=None: pushed.append)
+    patch_turns(monkeypatch, "push_ui_event", pushed.append)
     who.be(BOB)
     duckyos_account._note_login_change(
         {"device_key": "d1", "email": "alice@example.com", "base_url": "https://uefnducky.org"},

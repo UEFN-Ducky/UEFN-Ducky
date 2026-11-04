@@ -43,7 +43,7 @@ class PanelApiVoiceLaneMixin:
         s.validate()
         s.save()
         try:
-            from frontend.ui_web.agent_modes import push_ui_event
+            from frontend.ui_web.agent_turns.push import push_ui_event
 
             push_ui_event({"type": "settings_changed", "keys": list(data)})
         except Exception:
@@ -70,7 +70,7 @@ class PanelApiVoiceLaneMixin:
         recent: list[tuple[str, str]] = []
         if cid:
             try:
-                from frontend.ui_web.project_chats import load_conversation
+                from frontend.ui_web.chats.conversations import load_conversation
 
                 conv = load_conversation(cid)
                 if conv is not None:

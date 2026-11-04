@@ -7,7 +7,9 @@ from backend.agent.coding_agents.proc_exec import ProcResult
 
 def test_empty_codex_json_is_not_a_reply_and_usage_survives(monkeypatch):
     from backend.agent.coding_agents import runner
-    from frontend.ui_web import project_chats, agent_modes, group_orchestrator
+    from frontend.ui_web import group_orchestrator
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import saves
     raw = '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"turn.completed","usage":{"input_tokens":42,"output_tokens":0}}'
     result = finalize_cli_turn(proc=ProcResult(returncode=0, raw_tail=raw), reply='',
         streamed=False, blocks=[], session_id='', new_session='thread-1',
@@ -16,9 +18,9 @@ def test_empty_codex_json_is_not_a_reply_and_usage_survives(monkeypatch):
     assert result.usage == {'input_tokens': 42, 'output_tokens': 0}
     assert result.upstream_session_id == 'thread-1'
     saved, events = [], []
-    monkeypatch.setattr(project_chats, 'upsert_in_flight_assistant', lambda conv, msg, **kw: saved.append(msg))
-    monkeypatch.setattr(project_chats, 'save_conversation', lambda conv, **kw: None)
-    monkeypatch.setattr(agent_modes, 'close_changeset_run', lambda *a: None)
+    monkeypatch.setattr(saves, 'upsert_in_flight_assistant', lambda conv, msg, **kw: saved.append(msg))
+    monkeypatch.setattr(saves, 'save_conversation', lambda conv, **kw: None)
+    patch_turns(monkeypatch, 'close_changeset_run', lambda *a: None)
     monkeypatch.setattr(group_orchestrator, 'announce_private_member_talk', lambda *a, **kw: None)
     runner._emit_assistant(SimpleNamespace(id='chat'), agent_id='codex', reply=result.reply_text,
                            push=events.append, run_id='r', ok=result.ok, blocks=result.blocks)
@@ -37,14 +39,16 @@ def test_real_text_reply_survives():
 def test_a_coding_agents_reply_shows_the_pictures_it_made_this_turn(monkeypatch):
     # Oct 11 2026: Codex and Claude Code replies never showed pictures; only the built-in agent tried.
     from backend.agent.coding_agents import runner
-    from frontend.ui_web import agent_modes, generated_images, group_orchestrator, project_chats
+    from frontend.ui_web import generated_images, group_orchestrator
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import saves
     picture = {"kind": "image", "name": "exec-1.png", "mime": "image/png", "generated": "exec-1.png"}
     asked = []
     monkeypatch.setattr(generated_images, "turn_attachments", lambda conv_id, since: asked.append((conv_id, since)) or [picture])
     saved = []
-    monkeypatch.setattr(project_chats, "upsert_in_flight_assistant", lambda conv, msg, **kw: saved.append(msg))
-    monkeypatch.setattr(project_chats, "save_conversation", lambda conv, **kw: None)
-    monkeypatch.setattr(agent_modes, "close_changeset_run", lambda *a: None)
+    monkeypatch.setattr(saves, "upsert_in_flight_assistant", lambda conv, msg, **kw: saved.append(msg))
+    monkeypatch.setattr(saves, "save_conversation", lambda conv, **kw: None)
+    patch_turns(monkeypatch, "close_changeset_run", lambda *a: None)
     monkeypatch.setattr(group_orchestrator, "announce_private_member_talk", lambda *a, **kw: None)
     runner._emit_assistant(SimpleNamespace(id="chat"), agent_id="codex", reply="Here is your duck.",
                            push=lambda e: None, run_id="r", images_since=123.0)

@@ -20,7 +20,7 @@ _REPAIR_THREAD: threading.Thread | None = None
 def _notify_uefn_plugins_changed() -> None:
     """Tell React the Store plugin registry changed (HTTP bus — never evaluate_js)."""
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "uefn_plugins_changed"})
     except Exception:

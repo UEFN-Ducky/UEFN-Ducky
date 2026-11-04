@@ -9,7 +9,7 @@ from functools import lru_cache
 from typing import Any
 
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
-from frontend.ui_web.project_chats import load_conversation
+from frontend.ui_web.chats.conversations import load_conversation
 from frontend.ui_web.context_omit import (
     context_omit_set,
     mcp_tools_omitted,

@@ -16,7 +16,7 @@ from typing import Any
 
 from frontend.atomic_json import BACKUPS_DIR_NAME, MAX_BACKUP_AGE_SEC, prune_all_backups
 from frontend.settings import PanelSettings, default_app_data_dir
-from frontend.ui_web.project_chats import project_display_name, project_slug
+from frontend.ui_web.chats.store import project_display_name, project_slug
 from frontend.ui_web.recent_projects import load_saved_projects
 
 _log = logging.getLogger(__name__)

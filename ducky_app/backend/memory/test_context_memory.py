@@ -71,7 +71,7 @@ def test_compact_with_summary_keeps_messages(isolated_appdata, tmp_path, monkeyp
     from backend.agent.context_memory import build_compacted_messages, compress_conversation
     from frontend.chat_store import Conversation
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import saves as chat_saves
 
     root = str(tmp_path / "ChatProj")
     (tmp_path / "ChatProj").mkdir()
@@ -85,7 +85,7 @@ def test_compact_with_summary_keeps_messages(isolated_appdata, tmp_path, monkeyp
 
     msgs = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"turn {i}"} for i in range(10)]
     conv = Conversation(id="ctx-mem-test", title="T", messages=list(msgs))
-    project_chats.save_conversation(conv, root)
+    chat_saves.save_conversation(conv, root)
 
     before_len = len(conv.messages)
     result = compress_conversation(conv, settings=s, project_root=root, force=True, use_llm=False)
@@ -135,7 +135,7 @@ def test_epoch_hysteresis_and_append_only_head(isolated_appdata, tmp_path, monke
     )
     from frontend.chat_store import Conversation
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import saves as chat_saves
 
     root = str(tmp_path / "ChatProj2")
     (tmp_path / "ChatProj2").mkdir()
@@ -150,7 +150,7 @@ def test_epoch_hysteresis_and_append_only_head(isolated_appdata, tmp_path, monke
 
     msgs = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"turn {i}"} for i in range(12)]
     conv = Conversation(id="epoch-hyst", title="T", messages=list(msgs))
-    project_chats.save_conversation(conv, root)
+    chat_saves.save_conversation(conv, root)
     assert should_compress(conv, settings=s) is True
     result = compress_conversation(conv, settings=s, project_root=root, force=True, use_llm=False)
     assert result["compressed"] is True
@@ -226,7 +226,7 @@ def test_compress_now_same_low_water(isolated_appdata, tmp_path, monkeypatch):
     from backend.agent.context_memory import compress_conversation
     from frontend.chat_store import Conversation
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import saves as chat_saves
 
     root = str(tmp_path / "ChatProj3")
     (tmp_path / "ChatProj3").mkdir()
@@ -240,8 +240,8 @@ def test_compress_now_same_low_water(isolated_appdata, tmp_path, monkeypatch):
     msgs = [{"role": "user", "content": f"t{i}"} for i in range(12)]
     auto = Conversation(id="auto-ep", title="A", messages=list(msgs))
     manual = Conversation(id="man-ep", title="M", messages=list(msgs))
-    project_chats.save_conversation(auto, root)
-    project_chats.save_conversation(manual, root)
+    chat_saves.save_conversation(auto, root)
+    chat_saves.save_conversation(manual, root)
     a = compress_conversation(auto, settings=s, project_root=root, force=False, use_llm=False)
     m = compress_conversation(manual, settings=s, project_root=root, force=True, use_llm=False)
     assert a["compressed"] and m["compressed"]

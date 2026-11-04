@@ -6,7 +6,9 @@ import pytest
 
 from backend.automations import runner
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import create_conversation, load_conversation, save_conversation
+from frontend.ui_web.agent_turns.testing import patch_turns
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+from frontend.ui_web.chats.saves import save_conversation
 
 
 def test_agent_catalog_uses_picker_and_optional_instructions():
@@ -24,7 +26,7 @@ def test_existing_assignment_runs_selected_chat_and_returns_result(monkeypatch):
     monkeypatch.setattr(runner, "_run_message_and_wait", wait)
     monkeypatch.setattr(runner, "_seat_agent_cluster", spawn)
     monkeypatch.setattr(runner, "_create_pipeline_ducky", spawn)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
 
     out = runner._pipeline_agent({"ducky": f"chat:{conv.id}"}, {"prompt": "Build this", "caller_conv_id": "caller"})
 
@@ -42,7 +44,7 @@ def test_invalid_or_busy_existing_assignment_stops_without_sending(monkeypatch, 
     conv = create_conversation(PanelSettings.load(), "", title="Assigned")
     conv.is_group = reason == "group"
     save_conversation(conv)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: reason == "busy")
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: reason == "busy")
     wait = Mock(side_effect=AssertionError("Cannot send to this ducky"))
     monkeypatch.setattr(runner, "_run_message_and_wait", wait)
 
@@ -62,7 +64,7 @@ def test_create_at_runtime_uses_default_model_and_creates_fresh_ducky_each_run(m
 
     resolve = Mock(return_value=ResolveOk("ducky", "default-model", "provider", FavoriteSelection("provider", "default-model")))
     monkeypatch.setattr("frontend.ui_web.panel_api.resolve_model_selection", resolve)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.notify_chats_changed", Mock())
+    patch_turns(monkeypatch, "notify_chats_changed", Mock())
     monkeypatch.setattr(runner, "_resolve_profile", Mock(side_effect=AssertionError("No profile is required")))
     wait = Mock(return_value={"status": "done", "assistant_text": "Done"})
     monkeypatch.setattr(runner, "_run_message_and_wait", wait)
@@ -100,7 +102,7 @@ def test_create_at_runtime_reports_model_configuration_error(monkeypatch):
 
     monkeypatch.setattr("frontend.ui_web.panel_api.resolve_model_selection", lambda *a: ResolveErr("missing", "Choose a default model in Settings."))
     create = Mock(side_effect=AssertionError("Must resolve the model before creating a chat"))
-    monkeypatch.setattr("frontend.ui_web.project_chats.create_conversation", create)
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.create_conversation", create)
     out = runner._pipeline_agent({"ducky": "__new__"}, {})
     assert out == {"ok": False, "error": "Choose a default model in Settings."}
     create.assert_not_called()
@@ -157,7 +159,7 @@ def test_an_agent_step_may_use_the_run_s_folders_only_while_it_works(monkeypatch
         return {"status": "done", "assistant_text": "Done"}
 
     monkeypatch.setattr(runner, "_run_message_and_wait", wait)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
     out_ok = runner._pipeline_agent(
         {"ducky": f"chat:{conv.id}"}, {"prompt": "Read bible.json", "caller_conv_id": "caller", "_run_folders": [str(out)]}
     )

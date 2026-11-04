@@ -11,9 +11,9 @@ from backend.util.json_util import tool_json
 
 
 def _in_window(method: str, args: dict[str, Any], timeout_s: float = 90.0) -> dict[str, Any]:
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import push as agent_push
 
-    if not agent_modes._in_bridge_process():
+    if not agent_push._in_bridge_process():
         from frontend import self_health
 
         return self_health.snapshot(**args) if method == "ducky_health_snapshot" else self_health.self_care(**args)

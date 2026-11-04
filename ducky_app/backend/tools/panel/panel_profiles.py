@@ -60,7 +60,7 @@ def _team_caller() -> str:
 
 def _notify_changed() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "duckies_changed"})
     except Exception:

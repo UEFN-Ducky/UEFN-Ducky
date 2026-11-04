@@ -10,11 +10,12 @@ def test_member_reads_and_ticks_a_plan_stored_under_another_project(team, tmp_pa
     # Oct 25 2026: the lead chat was made before the project switched, so its plan stayed
     # under project A while the members' tool servers ran under project B.
     from backend.tools.panel import ducky_panel as panel
-    from frontend.ui_web import agent_modes, known_projects
+    from frontend.ui_web import known_projects
+    from frontend.ui_web.agent_turns.testing import patch_turns
     project_a = team
     project_b = str(tmp_path / "project-b")
     plans.update_node("coord", "a", assignee="group-a", project_root=project_a)
-    monkeypatch.setattr(agent_modes, "get_active_conv_id", lambda: "")
+    patch_turns(monkeypatch, "get_active_conv_id", lambda: "")
     monkeypatch.setenv("DUCKY_CONV_ID", "builder")
     monkeypatch.setattr(panel, "_project_root", lambda: project_b)
     monkeypatch.setattr(known_projects, "known_project_roots", lambda **_k: [project_b, project_a])

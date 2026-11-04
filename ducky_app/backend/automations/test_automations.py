@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import _use_db, create_conversation, load_conversation, project_slug
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+from frontend.ui_web.chats.store import _use_db, project_slug
 
 
 def test_save_graph_roundtrip():
@@ -99,7 +100,7 @@ def test_spawn_keeps_the_selected_project_and_lands_in_the_one_list(tmp_path, mo
     assert loaded is not None
     assert loaded.title == "Auto ducky"
     if _use_db():
-        from frontend.ui_web.project_chats import _repo
+        from frontend.ui_web.chats.store import _repo
 
         # Duckies are one list, in no project; the selected project did not move.
         assert _repo().conv_project_id(conv_id) == project_slug("")
@@ -540,7 +541,7 @@ def test_an_agent_step_that_never_runs_makes_no_group(monkeypatch):
 def test_a_solo_ducky_s_agent_step_gets_one_group_named_after_the_workflow(monkeypatch):
     from backend.automations import runner
     from backend.automations.store import save_workflow
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     fake = _FakeGroups()
     monkeypatch.setattr("backend.tools.panel.ducky_panel._panel_api", lambda: fake)
@@ -560,7 +561,7 @@ def test_a_grouped_ducky_s_agent_step_joins_its_own_group_not_a_nested_one(monke
     # Oct 23 2026: a deploy ducky running two release workflows got two empty groups nested in its group.
     from backend.automations import runner
     from backend.automations.store import save_workflow
-    from frontend.ui_web.project_chats import save_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     fake = _FakeGroups()
     monkeypatch.setattr("backend.tools.panel.ducky_panel._panel_api", lambda: fake)
@@ -862,7 +863,7 @@ def test_run_announces_header_jobs(monkeypatch):
 
     events: list[dict] = []
     monkeypatch.setattr(runner, "_run_message", lambda *a, **k: "run")
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", events.append)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", events.append)
     wf = save_workflow(
         {
             "name": "Tray",

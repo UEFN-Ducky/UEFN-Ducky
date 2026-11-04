@@ -550,12 +550,12 @@ class PanelApiSettingsMixin:
             s.terminals_enabled = bool(patch.get("terminals_enabled"))
         if "prompt_caching_enabled" in patch:
             s.prompt_caching_enabled = bool(patch.get("prompt_caching_enabled"))
-            from frontend.ui_web.project_chats import invalidate_all_conversation_caches
+            from frontend.ui_web.chats.conversations import invalidate_all_conversation_caches
 
             invalidate_all_conversation_caches(s.uefn_project_root or None)
         if "freeze_prompt_prefix" in patch:
             s.freeze_prompt_prefix = bool(patch.get("freeze_prompt_prefix"))
-            from frontend.ui_web.project_chats import invalidate_all_conversation_caches
+            from frontend.ui_web.chats.conversations import invalidate_all_conversation_caches
 
             invalidate_all_conversation_caches(s.uefn_project_root or None)
         if "anthropic_extended_cache_ttl" in patch:
@@ -775,7 +775,7 @@ class PanelApiSettingsMixin:
         _pa.save_conversation(conv)
         _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id, push=self._push, open_tab=False)
         if conv.model:
-            from frontend.ui_web.agent_modes import release_held_for_model
+            from frontend.ui_web.agent_turns.pending import release_held_for_model
 
             release_held_for_model(conv.id)
         return {
@@ -792,7 +792,7 @@ class PanelApiSettingsMixin:
         keep_agent: a branded chat that stays on Ducky's own agent never takes a coding-agent
         default, as when it was created."""
         from frontend.favorite_models import chat_model_choice
-        from frontend.ui_web.agent_modes import held_for_model, release_held_for_model
+        from frontend.ui_web.agent_turns.pending import held_for_model, release_held_for_model
 
         conv = _pa.load_conversation(conv_id)
         if not conv:
@@ -883,7 +883,7 @@ class PanelApiSettingsMixin:
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
         from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
         from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
-        from frontend.ui_web.agent_modes import get_panel_push
+        from frontend.ui_web.agent_turns.push import get_panel_push
 
         aid = normalize_coding_agent(agent_id)
         if not ensure_plugins_loaded(timeout=5.0):

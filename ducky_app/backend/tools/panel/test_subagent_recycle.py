@@ -30,7 +30,7 @@ import json
 from types import SimpleNamespace
 import pytest
 from backend.tools.panel import ducky_panel as panel, permission_prompt
-from frontend.ui_web import agent_modes
+from frontend.ui_web.agent_turns.testing import patch_turns
 from frontend.ui_web.test_context_session_reset import member  # noqa: F401  (fixture)
 
 @pytest.mark.parametrize("wait", [False, True])
@@ -44,11 +44,11 @@ def test_recycle_preserves_identity_history_membership_and_assignments(member, m
     conv.is_group = False
     group = SimpleNamespace(id="group", is_group=True, leader_conv_id="builder", group_members=[{"member_conv_id":"builder"}])
     from backend.agent.coding_agents import plans
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
     monkeypatch.setenv("DUCKY_STORE_BACKEND_PLANS", "files")
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: {"builder":conv,"group":group,"coord":SimpleNamespace(id="coord", title="Coordinator")}.get(cid))
-    monkeypatch.setattr(project_chats, "load_conversation_meta", project_chats.load_conversation)
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: lambda event: None)
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: {"builder":conv,"group":group,"coord":SimpleNamespace(id="coord", title="Coordinator")}.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation_meta", chat_convs.load_conversation)
+    patch_turns(monkeypatch, "_resolve_push", lambda _: lambda event: None)
     plans.create_plan("coord", nodes=[{"id":"section", "content":"Assigned work", "assignee":"group"}], project_root=str(tmp_path))
     assignments = plans.load_plan("coord", project_root=str(tmp_path))
     before_group = copy.deepcopy(vars(group))
@@ -78,8 +78,8 @@ def test_recycle_preserves_identity_history_membership_and_assignments(member, m
         assert conv.upstream_session_id == ""
         conv.upstream_session_id = "new-thread"
         return {"status":"done", "assistant_text":"Continued"}
-    monkeypatch.setattr(agent_modes, "run_message_and_wait", run)
-    monkeypatch.setattr(agent_modes, "run_message", run)
+    patch_turns(monkeypatch, "run_message_and_wait", run)
+    patch_turns(monkeypatch, "run_message", run)
     fn = panel.ducky_recycle_subagent if alias else panel.ducky_recycle_member
     out = json.loads(fn("builder", continue_message="Next task", wait_for_reply=wait))
     assert out["conv_id"] == out["old_conv_id"] == "builder"
@@ -105,8 +105,8 @@ def test_running_handoff_cannot_be_reset_or_replaced(member, monkeypatch):
     monkeypatch.setattr(panel, "_project_root", lambda: "project")
     monkeypatch.setattr(panel, "load_conversation", lambda cid, project_root=None: conv if cid == "builder" else group)
     monkeypatch.setattr(permission_prompt, "approvals_of", lambda _: {})
-    monkeypatch.setattr(agent_modes, "run_message_and_wait", lambda *a, **k: {"status":"timeout"})
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda _: True)
+    patch_turns(monkeypatch, "run_message_and_wait", lambda *a, **k: {"status":"timeout"})
+    patch_turns(monkeypatch, "is_agent_running", lambda _: True)
     clock = [0.0]
     monkeypatch.setattr(panel.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(panel.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
@@ -125,8 +125,8 @@ def test_stop_marks_only_a_running_chat_stopped(monkeypatch, running):
     marked = []
     monkeypatch.setattr(panel, "_project_root", lambda: "project")
     monkeypatch.setattr(panel, "load_conversation", lambda cid, project_root=None: SimpleNamespace(id=cid))
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda _: running)
-    monkeypatch.setattr(agent_modes, "cancel_agent", lambda cid: None)
+    patch_turns(monkeypatch, "is_agent_running", lambda _: running)
+    patch_turns(monkeypatch, "cancel_agent", lambda cid: None)
     monkeypatch.setattr(a2a_client, "on_agent_cancelled_by_user", marked.append)
     out = json.loads(panel.ducky_agent_stop("member"))
     assert out["stopped"] == (["member"] if running else [])
@@ -146,10 +146,10 @@ def test_recycle_waits_for_the_handoff_turn_to_go_idle(member, monkeypatch):
     monkeypatch.setattr(panel, "load_conversation", lambda cid, project_root=None: conv if cid == "builder" else group)
     monkeypatch.setattr(panel, "_resolve_sender", lambda _: "")
     monkeypatch.setattr(permission_prompt, "approvals_of", lambda _: {})
-    monkeypatch.setattr(agent_modes, "run_message_and_wait", lambda *a, **k: {"status": "done", "assistant_text": "Handoff"})
-    monkeypatch.setattr(agent_modes, "run_message", lambda *a, **k: "started")
+    patch_turns(monkeypatch, "run_message_and_wait", lambda *a, **k: {"status": "done", "assistant_text": "Handoff"})
+    patch_turns(monkeypatch, "run_message", lambda *a, **k: "started")
     still_running = [True, True, True]
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda _: bool(still_running and still_running.pop()))
+    patch_turns(monkeypatch, "is_agent_running", lambda _: bool(still_running and still_running.pop()))
     monkeypatch.setattr(panel.time, "sleep", lambda s: None)
     out = json.loads(panel.ducky_recycle_member("builder", wait_for_reply=False))
     assert out["status"] == "running" and not still_running

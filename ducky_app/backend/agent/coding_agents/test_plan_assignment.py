@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.agent.coding_agents import plans
-from frontend.ui_web import project_chats
+from frontend.ui_web.chats import conversations as chat_convs
 
 NODES = [
     {
@@ -24,8 +24,8 @@ NODES = [
 
 @pytest.fixture()
 def team(tmp_path, monkeypatch):
-    from frontend.ui_web import agent_modes
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: lambda event: None)
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    patch_turns(monkeypatch, "_resolve_push", lambda _: lambda event: None)
     monkeypatch.setenv("DUCKY_STORE_BACKEND_PLANS", "files")
     convs = {
         "builder": SimpleNamespace(parent_conv_id="group-a"),
@@ -34,7 +34,7 @@ def team(tmp_path, monkeypatch):
         "coord": SimpleNamespace(parent_conv_id="team"),
         "outsider": SimpleNamespace(parent_conv_id=""),
     }
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: convs.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: convs.get(cid))
     root = str(tmp_path)
     plans.create_plan("coord", title="Repair modes", nodes=NODES, project_root=root)
     plans.update_node("coord", "a1", status="in_progress", project_root=root)  # the plan is playing
@@ -107,11 +107,11 @@ def test_unknown_assignee_is_rejected_without_changing_plan(team):
 
 def test_deleted_member_and_deleted_group_do_not_resolve(team, monkeypatch):
     plans.update_node("coord", "a", assignee="group-a", project_root=team)
-    original = project_chats.load_conversation
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None:
+    original = chat_convs.load_conversation
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None:
                         None if cid == "builder" else original(cid, project_root))
     assert plans.assigned_plan_view("builder", team) is None
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None:
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None:
                         None if cid == "group-a" else original(cid, project_root))
     assert plans.assigned_plan_view("builder", team) is None
 
@@ -127,12 +127,12 @@ def test_multiple_matching_plans_refuse_instead_of_latest_save(team):
 
 
 def test_assignment_invalidation_is_scoped_and_contains_no_plan_body(team, monkeypatch):
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     events = []
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: events.append)
+    patch_turns(monkeypatch, "_resolve_push", lambda _: events.append)
     parents = {"builder": "group-a", "group-a": "team", "coord": "team", "outsider": ""}
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda root: [
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", lambda root: [
         SimpleNamespace(id=cid, parent_conv_id=parent) for cid, parent in parents.items()
     ])
     plans.update_node("coord", "a", assignee="group-a", project_root=team)
@@ -154,14 +154,14 @@ def test_assignment_invalidation_is_scoped_and_contains_no_plan_body(team, monke
 
 def test_a_tick_refreshes_every_owners_plan_bar(team, monkeypatch):
     # Oct 24 2026: only the lead got plan_updated, so a member's "Your sub plan" bar sat at 0/9.
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     plans.update_node("coord", "a", assignee="group-a", project_root=team)
     plans.update_node("coord", "b", assignee="outsider", project_root=team)
     plans.drain_after_save()
     events = []
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: events.append)
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda root: [
+    patch_turns(monkeypatch, "_resolve_push", lambda _: events.append)
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", lambda root: [
         SimpleNamespace(id="builder", parent_conv_id=""),  # seated with as_leader: filed elsewhere
         SimpleNamespace(id="group-a", parent_conv_id="team", is_group=True, leader_conv_id="builder",
                         group_members=[{"member_conv_id": "builder"}]),
@@ -180,23 +180,23 @@ def test_a_tick_on_a_big_team_plan_returns_fast(team, monkeypatch):
     # Oct 24 2026: a tick took 4-15 s. Each save walked every chat of the project with
     # load_conversation (whole histories) under the plan lock, to tell the members.
     import time as clock
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     seats = [f"m{i}" for i in range(6)]
     convs = {cid: SimpleNamespace(parent_conv_id="team") for cid in [*seats, "coord", "team"]}
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: convs.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: convs.get(cid))
     nodes = [{"id": f"s{i}", "content": f"Part {i}", "assignee": seat, "children": [
         {"id": f"s{i}-{j}", "content": f"Step {j}"} for j in range(8)]} for i, seat in enumerate(seats)]
     plans.create_plan("lead", title="Big", nodes=nodes, project_root=team, team_check=False)
     plans.drain_after_save()
     events = []
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _: events.append)
+    patch_turns(monkeypatch, "_resolve_push", lambda _: events.append)
 
     def slow_listing(root):
         clock.sleep(1.0)  # a big project's chat list
         return [SimpleNamespace(id=cid, parent_conv_id="team") for cid in convs]
 
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", slow_listing)
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", slow_listing)
     started = clock.perf_counter()
     for j in range(4):
         plans.update_node("lead", f"s0-{j}", status="completed", project_root=team)
@@ -219,8 +219,8 @@ def test_deleted_plan_owner_cannot_hide_valid_assignment(team, monkeypatch, back
     plans.create_plan('outsider', title='Live plan', nodes=[
         {'id': 'live-node', 'content': 'Live work', 'assignee': 'group-a'}
     ], project_root=team)
-    original = project_chats.load_conversation
-    monkeypatch.setattr(project_chats, 'load_conversation', lambda cid, project_root=None:
+    original = chat_convs.load_conversation
+    monkeypatch.setattr(chat_convs, 'load_conversation', lambda cid, project_root=None:
                         None if cid == 'coord' else original(cid, project_root))
     view = plans.assigned_plan_view('builder', team, report_ambiguity=True)
     assert view['assigned_from']['chat_id'] == 'outsider'
@@ -247,9 +247,9 @@ def test_assignment_reload_keeps_canonical_identity_and_project_scope(team, monk
 import json, sys
 from types import SimpleNamespace
 from backend.agent.coding_agents import plans
-from frontend.ui_web import project_chats
+from frontend.ui_web.chats import conversations as chat_convs
 parents = {'builder': 'group-a', 'group-a': 'team', 'coord': 'team', 'team': ''}
-project_chats.load_conversation = project_chats.load_conversation_meta = lambda cid, project_root=None: (
+chat_convs.load_conversation = chat_convs.load_conversation_meta = lambda cid, project_root=None: (
     SimpleNamespace(parent_conv_id=parents[cid]) if cid in parents else None)
 print(json.dumps(plans.assigned_plan_view('builder', sys.argv[1])))
 ''', team], capture_output=True, text=True, check=True, timeout=15)
@@ -301,7 +301,7 @@ def test_a_group_leads_plan_is_its_members_plan(team, monkeypatch):
         "crew": SimpleNamespace(parent_conv_id="", leader_conv_id="coord"),
         "coord": SimpleNamespace(parent_conv_id="crew"),
     }
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: convs.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: convs.get(cid))
     # No step assigned yet: the lead's plan is still the team's one plan.
     assert plans.team_plan_for('builder', team)['chat_id'] == 'coord'
     assert plans.team_plan_for('coord', team) is None
@@ -319,7 +319,7 @@ def test_a_member_makes_no_plan_while_its_lead_has_none(team, monkeypatch):
         "helper": SimpleNamespace(parent_conv_id="open-crew"),
         "open-crew": SimpleNamespace(parent_conv_id=""),  # the person leads this group
     }
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: convs.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: convs.get(cid))
     with pytest.raises(ValueError, match="has no plan yet") as err:
         plans.create_plan("builder", title="Mine", nodes=[{"id": "x", "content": "X"}], project_root=team)
     assert "chat lead" in str(err.value) and "do the task you were given" in str(err.value)
@@ -402,8 +402,8 @@ def test_archived_personal_reference_never_masks_canonical_assignment(team, monk
     if binding != 'missing':
         master = plans.update_node('coord', 'a', assignee='group-a', project_root=team)
     if binding == 'deleted_owner':
-        original = project_chats.load_conversation
-        monkeypatch.setattr(project_chats, 'load_conversation', lambda cid, project_root=None:
+        original = chat_convs.load_conversation
+        monkeypatch.setattr(chat_convs, 'load_conversation', lambda cid, project_root=None:
                             None if cid == 'coord' else original(cid, project_root))
     if binding == 'ambiguous':
         plans.create_plan('outsider', nodes=[{'id': 'other', 'content': 'Other', 'assignee': 'group-a'}], project_root=team)
@@ -477,7 +477,7 @@ def test_a_real_conflict_goes_to_the_teams_own_lead_or_says_how_to_fix_it(team, 
              "group-a": SimpleNamespace(parent_conv_id="team", leader_conv_id="coord"),
              "team": SimpleNamespace(parent_conv_id=""), "coord": SimpleNamespace(parent_conv_id="team"),
              "outsider": SimpleNamespace(parent_conv_id="")}
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: convs.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: convs.get(cid))
     assert plans.load_plan_view("builder", project_root=team)["chat_id"] == "coord"
 
 

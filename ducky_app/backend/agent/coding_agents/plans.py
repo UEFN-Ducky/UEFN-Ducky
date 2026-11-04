@@ -67,7 +67,7 @@ def _serialize_plan_edit(edit):
     @wraps(edit)
     def locked(chat_id, *args, **kwargs):
         from backend.util.file_lock import held_file_lock
-        from frontend.ui_web.project_chats import _conversation_lock
+        from frontend.ui_web.chats.store import _conversation_lock
 
         template_id = (kwargs.get("template_id") or "").strip()
         if template_id:
@@ -754,7 +754,7 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
         raise ValueError("chat_id required")
     if not _use_db() and not _resolve_project_root(project_root):
         raise ValueError("project_root required for project plans")
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     # Read without load_plan's repair-and-save path: saving a healed document
     # must not recursively try to heal the previous stored version again.
@@ -1286,7 +1286,7 @@ def next_open_leaf(plan: dict[str, Any] | None) -> tuple[str, dict[str, Any]] | 
 
 def active_plan_chat_id() -> str:
     try:
-        from frontend.ui_web.agent_modes import get_active_conv_id
+        from frontend.ui_web.agent_turns.push import get_active_conv_id
 
         cid = (get_active_conv_id() or "").strip()
         if cid:
@@ -1409,7 +1409,7 @@ def format_plan_prompt_block(
 
 def _chat_and_group_ids(chat_id: str, project_root: str | None) -> list[str]:
     """This chat, then the group it sits in, then that group's group, and so on."""
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     ids: list[str] = []
     cur = (chat_id or "").strip()
@@ -1439,7 +1439,7 @@ def team_plan_for(chat_id: str, project_root: str | None = None) -> dict[str, An
     plan: a member made its own private plan, the lead's plan never showed that work, and
     a teammate reported the same "blocked" for an hour while the fix sat out of sight.
     """
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     ids = _chat_and_group_ids(chat_id, project_root)
     if not ids:
@@ -1488,7 +1488,7 @@ def _refuse_if_lead_has_no_plan(chat_id: str, project_root: str | None) -> None:
 
     Oct 15 2026: a lead handed out work by message before writing its plan, a member wrote a
     plan of its own, and Ducky's keeper then woke that member as the team's lead."""
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     ids = _chat_and_group_ids(chat_id, project_root)
     for gid in ids[1:]:
@@ -1552,7 +1552,8 @@ def with_team_links(plan: dict[str, Any] | None, chat_id: str,
     if not plan or plan.get("assigned_from"):
         return plan
     try:
-        from frontend.ui_web.project_chats import island_for_conversation, load_conversation_meta
+        from frontend.ui_web.chats.conversations import load_conversation_meta
+        from frontend.ui_web.chats.groups import island_for_conversation
 
         convs, _folders = island_for_conversation(chat_id, project_root)
     except Exception:
@@ -1603,7 +1604,7 @@ def assigned_plan_view(chat_id: str, project_root: str | None = None, *,
     the coordinator's plan held their work. The view is read-only: edits go to the
     plan's own chat (``assigned_from.chat_id``).
     """
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     ids = _chat_and_group_ids(chat_id, project_root)
     if not ids:
@@ -1696,7 +1697,7 @@ def _outermost(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _team_leads(ids: list[str], project_root: str | None) -> set[str]:
     """Leaders of the groups this chat sits in (``ids``: the chat, then its groups)."""
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     leads: set[str] = set()
     for gid in ids[1:]:
@@ -1727,7 +1728,7 @@ def _two_plans_message(chat_id: str, by_plan: dict[str, tuple[dict[str, Any], li
 def list_plans(project_root: str | None = None) -> list[dict[str, Any]]:
     """List chat plans: every one in the database (they follow their duckies, not a
     project); the files store lists the active (or given) project's."""
-    from frontend.ui_web.project_chats import conversation_title
+    from frontend.ui_web.chats.conversations import conversation_title
 
     root = _resolve_project_root(project_root)
     if not root and not _use_db():
@@ -2145,7 +2146,7 @@ def drain_after_save(timeout: float = 10.0) -> None:
 def push_plan_updated(plan: dict[str, Any]) -> None:
     """Notify the panel UI that a chat plan changed."""
     try:
-        from frontend.ui_web.agent_modes import _resolve_push
+        from frontend.ui_web.agent_turns.push import _resolve_push
 
         _resolve_push(None)(
             {

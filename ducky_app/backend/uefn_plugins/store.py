@@ -526,7 +526,7 @@ def _defer_chat_enable_side_effects(plugin_id: str, *, enabled: bool) -> None:
 
     def _work() -> None:
         try:
-            from frontend.ui_web.project_chats import (
+            from frontend.ui_web.chats.conversations import (
                 invalidate_all_projects_conversation_caches,
                 opt_in_uefn_plugin_all_chats,
             )
@@ -988,7 +988,7 @@ def _uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool, wait: bool) -> d
     def _teardown() -> None:
         def _notify() -> None:
             try:
-                from frontend.ui_web.agent_modes import push_ui_event
+                from frontend.ui_web.agent_turns.push import push_ui_event
 
                 push_ui_event({"type": "uefn_plugins_changed"})
             except Exception:
@@ -1061,9 +1061,9 @@ def _reload_in_app_process(pid: str) -> None:
     plugin's RPCs in the app process, so it loads the new copy too; until it does,
     panels keep calling the code that was there before."""
     try:
-        from frontend.ui_web import agent_modes
+        from frontend.ui_web.agent_turns import push as agent_push
 
-        if not agent_modes._in_bridge_process():
+        if not agent_push._in_bridge_process():
             return
     except Exception:
         return

@@ -69,7 +69,7 @@ class PanelSwarmApi:
         return load_plan(chat_id, self.project_root())
 
     def is_chat(self, conv_id: str) -> bool:
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         return load_conversation(conv_id, self.project_root()) is not None
 
@@ -84,7 +84,7 @@ class PanelSwarmApi:
         _loads(ducky_group_set_lane(group_id=group_id, member_conv_id=conv_id, write_allowed=paths))
 
     def chat_home(self, conv_id: str) -> dict[str, str]:
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         conv = load_conversation(conv_id, self.project_root())
         return {"folder_id": str(getattr(conv, "folder_id", "") or ""),
@@ -92,7 +92,8 @@ class PanelSwarmApi:
 
     def restore_home(self, conv_id: str, home: dict[str, str]) -> None:
         """Put the lead back where it was, so archiving the root group doesn't take it along."""
-        from frontend.ui_web.project_chats import load_conversation, move_conversation, save_conversation
+        from frontend.ui_web.chats.conversations import load_conversation, move_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         root = self.project_root()
         move_conversation(conv_id, home.get("folder_id") or "", root)
@@ -148,7 +149,7 @@ class PanelSwarmApi:
         profile names no model; '' when the profile has one (it wins) or the lead has none."""
         from backend.tools.panel.ducky_panel import _resolve_ducky_profile
         from frontend.favorite_models import first_favorite, qualify
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         if first_favorite((_resolve_ducky_profile(profile) or {}).get("favorite_models")):
             return ""
@@ -166,7 +167,7 @@ class PanelSwarmApi:
     def ping(self, conv_id: str, text: str, timeout_s: float, later: Any = None) -> dict[str, Any]:
         """One tiny turn through K3's seat queue (see ``queued_ping``)."""
         from frontend.ui_web import seat_queue
-        from frontend.ui_web.agent_modes import run_message_and_wait
+        from frontend.ui_web.agent_turns.routing import run_message_and_wait
 
         def ask(cid: str, msg: str, secs: float) -> dict[str, Any]:
             # Never cancel: a seat that answers late is still assigned (``later``).
@@ -174,7 +175,7 @@ class PanelSwarmApi:
                                         cancel_on_timeout=False)
 
         def first_output(cid: str) -> bool:
-            from frontend.ui_web.agent_modes import last_output_age_s
+            from frontend.ui_web.agent_turns.state import last_output_age_s
 
             # In-process only: in the tool server this stays False and the reply itself ends the wait.
             return last_output_age_s(cid) is not None

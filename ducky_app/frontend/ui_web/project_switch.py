@@ -25,7 +25,7 @@ from frontend.project_kind import (
     resolve_project_root,
 )
 from frontend.settings import PanelSettings, apply_workspace_env
-from frontend.ui_web.project_chats import project_display_name, project_slug
+from frontend.ui_web.chats.store import project_display_name, project_slug
 from frontend.ui_web.recent_projects import (
     add_recent_project,
     load_recent_projects,

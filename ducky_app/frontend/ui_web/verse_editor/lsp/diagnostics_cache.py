@@ -45,7 +45,7 @@ def _rows():
 
 
 def _project_id(project_root: str) -> str:
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     return project_slug(project_root)
 

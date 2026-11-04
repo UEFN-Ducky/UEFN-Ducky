@@ -127,7 +127,7 @@ def ducky_plugin_data_scope(id: str, scope: str = "", pretty: bool = False) -> s
         return tool_json({"ok": False, "error": "Cancelled — data scope unchanged."}, pretty=pretty)
     # The app is on one copy: the same switch as the scope bar and the Team picker.
     import frontend.ui_web.panel_api  # noqa: F401 — panel_api_store is imported through it
-    from frontend.ui_web.agent_modes import push_ui_event
+    from frontend.ui_web.agent_turns.push import push_ui_event
     from frontend.ui_web.panel_api_store import PanelApiStoreMixin
 
     class _Switch(PanelApiStoreMixin):

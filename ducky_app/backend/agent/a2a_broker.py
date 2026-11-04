@@ -136,8 +136,9 @@ def acknowledge_reports(coordinator_id: str, member_id: str) -> None:
 
 
 def _owner_report_notice(conv_id: str, reports: list[UnansweredReport]) -> None:
-    from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
-    from frontend.ui_web.agent_modes import notify_context_changed
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import append_message, save_conversation
+    from frontend.ui_web.agent_turns.push import notify_context_changed
 
     conv = load_conversation(conv_id)
     if conv is None:
@@ -192,7 +193,8 @@ def _plan_work_done(coordinator_id: str, member_id: str) -> bool:
     try:
         from backend.agent.coding_agents import plans
         from backend.agent.coding_agents.team_plan_events import assigned_nodes
-        from frontend.ui_web.project_chats import conversation_project_slug, project_root_for_slug
+        from frontend.ui_web.chats.conversations import conversation_project_slug
+        from frontend.ui_web.chats.store import project_root_for_slug
 
         root = project_root_for_slug(conversation_project_slug(coordinator_id))
         plan = plans.load_plan(coordinator_id, root)
@@ -209,7 +211,7 @@ def _plan_work_done(coordinator_id: str, member_id: str) -> bool:
 
 def _retry_reports(conv_id: str) -> None:
     """Retry full reports, not the original assignments. Message text cannot disable this."""
-    from frontend.ui_web.agent_modes import is_agent_running
+    from frontend.ui_web.agent_turns.state import is_agent_running
 
     # A member whose plan work is all finished has nothing left to dispatch: the plan's
     # own notice already told the coordinator, and each retry costs it a whole turn.
@@ -246,7 +248,7 @@ def _schedule_reports(conv_id: str) -> None:
 
 
 def _account_key(conv_id: str) -> str:
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     conv = load_conversation_meta(conv_id)
     if conv is None:
@@ -319,7 +321,7 @@ def sweep_quiet_threads(max_age_s: float = _QUIET_SWEEP_S) -> int:
 def _conv_meta(conv_id: str) -> tuple[str, str]:
     """(title-ish name, coding_agent) for labels; tolerant of missing chats."""
     try:
-        from frontend.ui_web.project_chats import load_conversation_meta
+        from frontend.ui_web.chats.conversations import load_conversation_meta
 
         conv = load_conversation_meta(conv_id)
     except Exception:
@@ -479,9 +481,9 @@ def _show_in_group_chat(sender_conv_id: str, receiver_conv_id: str, body: str) -
 
     def run() -> None:
         try:
-            from frontend.ui_web import agent_modes
+            from frontend.ui_web.agent_turns import push as agent_push
 
-            if agent_modes._in_bridge_process():
+            if agent_push._in_bridge_process():
                 import urllib.request
 
                 from frontend.settings import PANEL_LISTENER_PORT
@@ -570,7 +572,7 @@ def _groups_by_member() -> dict[str, list[Any]] | None:
 
         from frontend.ui_web.group_orchestrator import group_members
 
-        chats = importlib.import_module("frontend.ui_web.project_chats")
+        chats = importlib.import_module("frontend.ui_web.chats.conversations")
         # Every project: the team's chats stay in their project when the user opens another.
         if hasattr(chats, "iter_conversations_by_project"):
             convs = [conv for _, conv in chats.iter_conversations_by_project()]
@@ -710,7 +712,8 @@ def _kick_delivery(conv_id: str) -> None:
         _delivery_inflight.add(conv_id)
 
     def _worker() -> None:
-        from frontend.ui_web.agent_modes import is_agent_running, run_message, wait_for_idle
+        from frontend.ui_web.agent_turns.routing import run_message
+        from frontend.ui_web.agent_turns.state import is_agent_running, wait_for_idle
         batch = []
         try:
             sweep_quiet_threads()
@@ -740,8 +743,8 @@ def _kick_delivery(conv_id: str) -> None:
             # Once handed to run_message, an empty result or exception is NOT
             # proof of non-execution. Never automatically requeue this batch.
             heading = "Reports you have not acted on\n\n" if any(e.redelivery for e in batch) else ""
-            from frontend.ui_web import agent_modes
-            take_held = getattr(agent_modes, "take_pending_agent_messages", None)
+            from frontend.ui_web.agent_turns import pending as turns_pending
+            take_held = getattr(turns_pending, "take_pending_agent_messages", None)
             held = take_held(conv_id) if callable(take_held) else []
             text = "\n\n".join([*held, heading + "\n\n".join(_format_envelope(e) for e in batch)])
             started = run_message(conv_id, text, "agent", "", queue_if_busy=True)
@@ -767,7 +770,7 @@ def _kick_delivery(conv_id: str) -> None:
 
 def _last_assistant_text(conv_id: str) -> str:
     try:
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         conv = load_conversation(conv_id)
     except Exception:
@@ -805,7 +808,7 @@ def _ancestor_leader_ids(conv_id: str) -> list[str]:
             group_leader_member,
             is_group_conversation,
         )
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
     except Exception:
         return []
 
@@ -909,8 +912,8 @@ def _retry_queue_later(conv_id: str) -> None:
                 _retry_queue_later(cid)
                 return
             _kick_delivery(cid)
-            from frontend.ui_web import agent_modes
-            drain = getattr(agent_modes, "_deliver_pending_agent_messages", None)
+            from frontend.ui_web.agent_turns import pending as turns_pending
+            drain = getattr(turns_pending, "_deliver_pending_agent_messages", None)
             if drain is not None and not automatic_work_blocked(cid, queued=True):
                 drain(cid)
 

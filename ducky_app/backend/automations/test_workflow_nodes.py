@@ -27,7 +27,7 @@ def files(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "_files_dir", lambda: tmp_path / "wf")
     (tmp_path / "wf").mkdir()
     monkeypatch.setattr(store, "_announce_graphs_changed", lambda: None)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", lambda _e: None)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", lambda _e: None)
 
 
 # --------------------------------------------------------------------------- helpers

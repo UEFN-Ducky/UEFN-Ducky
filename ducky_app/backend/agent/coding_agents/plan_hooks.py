@@ -112,7 +112,7 @@ def _move_lane(giver: str, receiver: str, paths: list[str]) -> None:
 
 
 def _group_of(conv_id: str) -> str:
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     group = str(getattr(load_conversation_meta(conv_id), "parent_conv_id", "") or "")
     if not group:
@@ -140,7 +140,7 @@ def _set_lane(conv_id: str, lane: list[str]) -> None:
 
 def _push_note(plan: dict[str, Any], receiver: str, text: str) -> None:
     try:
-        from frontend.ui_web.agent_modes import _resolve_push
+        from frontend.ui_web.agent_turns.push import _resolve_push
 
         push = _resolve_push(None)
         for cid in dict.fromkeys([str(plan.get("chat_id") or ""), receiver]):
@@ -222,7 +222,8 @@ def post_finish_card(plan: dict[str, Any], project_root: str | None = None) -> N
         return  # no Finish team tool in this build
     lead = str(plan.get("chat_id") or "")
     try:
-        from frontend.ui_web.project_chats import append_message, load_conversation_meta
+        from frontend.ui_web.chats.conversations import load_conversation_meta
+        from frontend.ui_web.chats.saves import append_message
 
         card = finish_card(plan, project_root)
         conv = load_conversation_meta(lead, project_root=project_root)
@@ -243,7 +244,7 @@ def _section_audience(owners: set[str], project_root: str | None) -> set[str]:
     filed in the outer group). Reads chat metadata only: walking parents with load_conversation
     loaded every chat's whole history on each tick (4-15 s per tick on Oct 24 2026)."""
     from frontend.ui_web.group_orchestrator import group_members
-    from frontend.ui_web.project_chats import list_all_conversation_metadata
+    from frontend.ui_web.chats.conversations import list_all_conversation_metadata
 
     convs = {str(getattr(c, "id", "")): c for c in list_all_conversation_metadata(project_root)}
     out = set(owners)
@@ -278,7 +279,7 @@ def _push_assignment_invalidated(before: dict[str, Any], after: dict[str, Any],
     if not was and not now:
         return
     try:
-        from frontend.ui_web.agent_modes import _resolve_push
+        from frontend.ui_web.agent_turns.push import _resolve_push
 
         changed = was != now
         recipients = _section_audience(set(was.values()) | set(now.values()) if changed else set(now.values()),

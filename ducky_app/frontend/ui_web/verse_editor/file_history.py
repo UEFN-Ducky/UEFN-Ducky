@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from frontend.settings import PanelSettings, default_app_data_dir
-from frontend.ui_web.project_chats import project_slug
+from frontend.ui_web.chats.store import project_slug
 
 SCHEMA_VERSION = 2
 # History is a browsing aid; durable revert lives in the changeset journal.

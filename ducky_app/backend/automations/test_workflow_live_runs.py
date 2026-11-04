@@ -6,6 +6,7 @@ import time
 import pytest
 
 from backend.automations import runner, store
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 def test_terminal_output_arrives_before_tool_finishes_and_reaches_parent(monkeypatch):
@@ -54,7 +55,7 @@ def events(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "_files_dir", lambda: tmp_path)
     monkeypatch.setattr(store, "_announce_graphs_changed", lambda: None)
     seen: list[dict] = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", seen.append)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", seen.append)
     return seen
 
 
@@ -139,7 +140,7 @@ def test_live_card_labels_name_the_runs_inputs(events):
 def test_stop_also_stops_the_ducky_an_agent_step_waits_for(monkeypatch):
     """A stopped workflow's launch ducky kept going and started a Fortnite session."""
     stopped: list[str] = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.cancel_agent", lambda conv_id=None: stopped.append(conv_id))
+    patch_turns(monkeypatch, "cancel_agent", lambda conv_id=None: stopped.append(conv_id))
     cancel = threading.Event()
     token = runner._CANCEL.set(cancel)
     try:
@@ -156,7 +157,7 @@ def test_stop_also_stops_the_ducky_an_agent_step_waits_for(monkeypatch):
 
 def test_a_ducky_that_answered_is_not_cancelled_later(monkeypatch):
     stopped: list[str] = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.cancel_agent", lambda conv_id=None: stopped.append(conv_id))
+    patch_turns(monkeypatch, "cancel_agent", lambda conv_id=None: stopped.append(conv_id))
     cancel = threading.Event()
     token = runner._CANCEL.set(cancel)
     try:

@@ -22,7 +22,7 @@ def _declared(plugin_id: str, kind: str, local_id: str) -> bool:
 
 def _push(event: dict[str, Any]) -> dict[str, Any] | None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({**event, "at": time.time()})
     except Exception as exc:  # noqa: BLE001 — told to the plugin, never raised into it

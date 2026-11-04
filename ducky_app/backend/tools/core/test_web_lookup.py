@@ -340,7 +340,9 @@ def test_ask_user_conv_is_the_coding_agent_chat(monkeypatch):
     from backend.tools.panel.panel_ui import _resolve_ask_user_conv_id
     from backend.workspace import identity
 
-    monkeypatch.setattr("frontend.ui_web.agent_modes.get_active_conv_id", lambda: "brain-chat")
+    from frontend.ui_web.agent_turns.testing import patch_turns
+
+    patch_turns(monkeypatch, "get_active_conv_id", lambda: "brain-chat")
     monkeypatch.setenv("DUCKY_CONV_ID", "env-chat")
     token = identity.bind(identity.RunContext(conv_id="opus-chat"))
     try:
@@ -348,7 +350,9 @@ def test_ask_user_conv_is_the_coding_agent_chat(monkeypatch):
     finally:
         identity.reset(token)
     assert _resolve_ask_user_conv_id() == "brain-chat"
-    monkeypatch.setattr("frontend.ui_web.agent_modes.get_active_conv_id", lambda: "")
+    from frontend.ui_web.agent_turns.testing import patch_turns
+
+    patch_turns(monkeypatch, "get_active_conv_id", lambda: "")
     assert _resolve_ask_user_conv_id() == "env-chat"
 
 
@@ -370,7 +374,7 @@ def test_web_search_deny_does_not_search_again(monkeypatch):
 
 def test_turn_saving_its_older_copy_keeps_the_web_allow():
     from frontend.chat_store import Conversation
-    from frontend.ui_web.project_chats import _keep_newer_settings
+    from frontend.ui_web.chats.conversations import _keep_newer_settings
 
     turn_copy = Conversation(id="chat-1")
     stored = {**turn_copy.to_dict(), "web_access_allowed": True, "web_fetch_urls": ["https://a.example/"], "settings_edited": 5.0}

@@ -458,7 +458,7 @@ def emit_for_bridge_tool(
 ) -> None:
     """Push editor_batch from MCP bridge tools. No-op in the panel process (avoids double-emit)."""
     try:
-        from frontend.ui_web.agent_modes import get_panel_push
+        from frontend.ui_web.agent_turns.push import get_panel_push
 
         if get_panel_push() is not None:
             return

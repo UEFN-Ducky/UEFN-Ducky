@@ -91,7 +91,7 @@ def maybe_bust_conversation_caches_for_app_version() -> bool:
     if not conversation_cache_bust_needed(_read_ship_stamp(), __version__):
         return False
     try:
-        from frontend.ui_web.project_chats import invalidate_all_projects_conversation_caches
+        from frontend.ui_web.chats.conversations import invalidate_all_projects_conversation_caches
 
         invalidate_all_projects_conversation_caches()
     except Exception:

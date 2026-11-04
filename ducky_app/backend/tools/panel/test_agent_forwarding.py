@@ -7,13 +7,13 @@ from unittest.mock import Mock
 import pytest
 
 from backend.agent import a2a_broker, a2a_client
-from frontend.ui_web import agent_modes
+from frontend.ui_web.agent_turns.testing import patch_turns
 from frontend.ui_web.panel_api import PanelApi
 
 
 @pytest.fixture
 def window(monkeypatch):
-    monkeypatch.setattr(agent_modes, 'get_panel_push', lambda: None)
+    patch_turns(monkeypatch, 'get_panel_push', lambda: None)
     calls = []
     api = PanelApi()
     def urlopen(request, timeout):
@@ -45,7 +45,7 @@ def test_every_broker_operation_reaches_window(window, monkeypatch, name, args, 
 
 
 def test_window_unavailable_never_queues_locally(monkeypatch):
-    monkeypatch.setattr(agent_modes, 'get_panel_push', lambda: None)
+    patch_turns(monkeypatch, 'get_panel_push', lambda: None)
     monkeypatch.setattr('urllib.request.urlopen', Mock(side_effect=OSError('offline')))
     local = Mock()
     monkeypatch.setattr(a2a_broker, 'send', local)
@@ -55,7 +55,7 @@ def test_window_unavailable_never_queues_locally(monkeypatch):
 
 
 def test_embedded_agent_calls_window_broker_directly(monkeypatch):
-    monkeypatch.setattr(agent_modes, 'get_panel_push', lambda: lambda e: None)
+    patch_turns(monkeypatch, 'get_panel_push', lambda: lambda e: None)
     local = Mock(return_value={'queued_for':'b'})
     monkeypatch.setattr(a2a_broker, 'send', local)
     http = Mock(side_effect=AssertionError('unexpected HTTP'))
@@ -80,7 +80,7 @@ def test_direct_chat_message_acknowledges_only_when_accepted(monkeypatch, starte
     monkeypatch.setattr(ducky_panel, '_project_root', lambda: '')
     monkeypatch.setattr(ducky_panel, 'load_conversation', lambda *a, **kw: SimpleNamespace(folder_id=''))
     monkeypatch.setattr(identity, 'resolve_context', lambda: SimpleNamespace(conv_id='coord'))
-    monkeypatch.setattr(agent_modes, 'run_message', lambda *a, **kw: started)
+    patch_turns(monkeypatch, 'run_message', lambda *a, **kw: started)
     ack = Mock()
     monkeypatch.setattr(a2a_client, 'acknowledge_reports', ack)
     ducky_panel.ducky_send_chat_message('member', 'next task', wait_for_reply=False)

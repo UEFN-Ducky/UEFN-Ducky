@@ -73,7 +73,7 @@ def test_never_archives_the_calling_chat(env):
 def test_folder_goes_to_archive_with_everything_inside(env, monkeypatch):
     folder = SimpleNamespace(id="f1", name="Engine", parent_id="")
     monkeypatch.setattr(ducky_panel, "load_folders", lambda root=None: [folder])
-    monkeypatch.setattr("frontend.ui_web.project_chats.folder_subtree_ids", lambda fid, root=None: [fid])
+    monkeypatch.setattr("frontend.ui_web.chats.folders.folder_subtree_ids", lambda fid, root=None: [fid])
     monkeypatch.setattr(ducky_panel, "list_conversations",
                         lambda project_root=None: [SimpleNamespace(id="c1", folder_id="f1")])
     out = json.loads(ducky_panel.ducky_archive_chats(folder_ids=["f1"]))

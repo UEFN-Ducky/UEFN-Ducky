@@ -23,8 +23,8 @@ def _team(monkeypatch):
     ]}
     own = {"title": "Timeline Editing", "status": "open", "nodes": [{"id": "s1", "content": "Do it", "status": "pending"}]}
     by_id = {c.id: c for c in convs}
-    monkeypatch.setattr("frontend.ui_web.project_chats.island_for_conversation", lambda cid, root=None: (convs, []))
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid, project_root=None: by_id.get(cid))
+    monkeypatch.setattr("frontend.ui_web.chats.groups.island_for_conversation", lambda cid, root=None: (convs, []))
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid, project_root=None: by_id.get(cid))
     monkeypatch.setattr(plans, "load_plan", lambda cid, root=None: {"lead": main, "timeline": own}.get(cid))
     return main, own
 

@@ -30,10 +30,10 @@ def _chat() -> str:
 
 def _forward(call: str, /, **args: Any) -> dict[str, Any]:
     """Hand ``call`` to the window. Positional-only: several tools have their own ``name`` argument."""
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import push as agent_push
 
     args["conv_id"] = args.get("conv_id") or _chat()
-    if not agent_modes._in_bridge_process():
+    if not agent_push._in_bridge_process():
         from backend.sandbox import service
 
         return service.call(call, args)

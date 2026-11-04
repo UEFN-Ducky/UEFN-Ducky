@@ -32,8 +32,8 @@ def env(monkeypatch):
         "team": SimpleNamespace(id="team", title="Team", is_group=True, parent_conv_id=""),
         "b": SimpleNamespace(id="b", ducky_name="Tester", is_group=False, parent_conv_id="team"),
     }
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid, project_root=None: chats.get(cid))
-    monkeypatch.setattr("frontend.ui_web.project_chats.list_conversations", lambda project_root=None: list(chats.values()))
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid, project_root=None: chats.get(cid))
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.list_conversations", lambda project_root=None: list(chats.values()))
     lanes = {"a": ["src/a/**"], "b": ["src/b/**"]}
     monkeypatch.setattr("backend.workspace.lanes.resolve_lane", lambda cid: lanes.get(cid, []))
     monkeypatch.setattr(ft, "_commits", lambda lane, since: {"src/a/**": ["c1", "c2"], "src/b/**": ["c3"]}[lane[0]])

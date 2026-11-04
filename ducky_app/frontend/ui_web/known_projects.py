@@ -137,7 +137,7 @@ def list_known_projects(*, rescan: bool = False) -> dict:
     kind, flavor, mount, source ('uefn' / 'other' / a plugin source id), last_opened,
     has_thumbnail, active and listener_ready."""
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import project_display_name, project_slug
+    from frontend.ui_web.chats.store import project_display_name, project_slug
     from frontend.ui_web.project_switch import _mount_for, normalize_project_path
     from frontend.ui_web.recent_projects import load_saved_projects
 
@@ -184,7 +184,7 @@ def list_known_projects(*, rescan: bool = False) -> dict:
 
 def thumbnail_for_slug(slug: str) -> str:
     """Key-art file for a known project's slug ("" when none): the thumbnail route."""
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     for root in known_project_roots():
         if project_slug(root) == slug:

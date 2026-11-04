@@ -441,7 +441,7 @@ def rename_folder(folder_id: str, name: str) -> None:
 def delete_folder(folder_id: str) -> None:
     folders = [f for f in load_folders() if f.id != folder_id]
     save_folders(folders)
-    from frontend.ui_web.project_chats import _load_all_conversations
+    from frontend.ui_web.chats.conversations import _load_all_conversations
 
     for conv in _load_all_conversations():
         if conv.folder_id == folder_id:
@@ -455,21 +455,21 @@ def conversation_path(conv_id: str) -> Path:
 
 def list_conversations(folder_id: str | None = None) -> list[Conversation]:
     """Deprecated global listing — delegates to project-scoped store."""
-    from frontend.ui_web.project_chats import list_conversations as _list
+    from frontend.ui_web.chats.conversations import list_conversations as _list
 
     return _list(folder_id)
 
 
 def load_conversation(conv_id: str) -> Conversation | None:
     """Deprecated global load — delegates to project-scoped store."""
-    from frontend.ui_web.project_chats import load_conversation as _load
+    from frontend.ui_web.chats.conversations import load_conversation as _load
 
     return _load(conv_id)
 
 
 def save_conversation(conv: Conversation) -> None:
     """Deprecated global save — delegates to project-scoped store."""
-    from frontend.ui_web.project_chats import save_conversation as _save
+    from frontend.ui_web.chats.saves import save_conversation as _save
 
     _save(conv)
 

@@ -174,9 +174,9 @@ def test_collect_image_paths_resolves_persisted_file(tmp_path, monkeypatch):
     img = att_dir / "shot.png"
     img.write_bytes(base64.b64decode(_PNG_B64))
 
-    import frontend.ui_web.project_chats as project_chats
+    import frontend.ui_web.chats.store as chat_store
 
-    monkeypatch.setattr(project_chats, "get_conversations_dir", lambda root=None: tmp_path)
+    monkeypatch.setattr(chat_store, "get_conversations_dir", lambda root=None: tmp_path)
 
     conv = SimpleNamespace(
         id=conv_id,

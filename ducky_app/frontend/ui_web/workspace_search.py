@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
-from frontend.ui_web.project_chats import list_conversations
+from frontend.ui_web.chats.conversations import list_conversations
 from frontend.ui_web.project_files import (
     _active_is_folder,
     _content_dir,
@@ -182,7 +182,7 @@ def _search_chats_rows(
     The file-store version iterated ``conv.messages`` on objects that the list
     call had stripped, so body search silently matched titles only.
     """
-    from frontend.ui_web.project_chats import _project_id, _repo
+    from frontend.ui_web.chats.store import _project_id, _repo
 
     repo = _repo()
     project_id = _project_id()
@@ -287,7 +287,7 @@ def _search_chats(
 
 def _search_memory(query: str, *, max_results: int) -> list[dict[str, Any]]:
     from backend.store.switch import use_db
-    from frontend.ui_web.project_chats import _project_id
+    from frontend.ui_web.chats.store import _project_id
 
     if not use_db("memory"):
         return []
@@ -307,7 +307,7 @@ def _search_memory(query: str, *, max_results: int) -> list[dict[str, Any]]:
 
 def _search_ledger(query: str, *, max_results: int) -> list[dict[str, Any]]:
     from backend.store.switch import use_db
-    from frontend.ui_web.project_chats import _project_id
+    from frontend.ui_web.chats.store import _project_id
 
     if not use_db("ledger"):
         return []
@@ -340,7 +340,7 @@ def _search_ledger(query: str, *, max_results: int) -> list[dict[str, Any]]:
 
 def _search_history(query: str, *, max_results: int) -> list[dict[str, Any]]:
     from backend.store.switch import use_db
-    from frontend.ui_web.project_chats import _project_id
+    from frontend.ui_web.chats.store import _project_id
 
     if not use_db("ledger"):
         return []

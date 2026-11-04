@@ -402,7 +402,7 @@ def compress_conversation(
 ) -> dict[str, Any]:
     """Advance rolling summary for ``conv``. Never deletes ``messages``."""
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import save_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     s = settings or PanelSettings.load()
     messages = list(getattr(conv, "messages", None) or [])
@@ -485,7 +485,7 @@ def compress_conversation(
 
 
 def clear_conversation_summary(conv: Any, *, project_root: str = "") -> dict[str, Any]:
-    from frontend.ui_web.project_chats import save_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     conv.context_summary = ""
     conv.context_summary_through = 0

@@ -117,7 +117,7 @@ def test_a_members_question_also_shows_in_its_leads_chat(monkeypatch):
     monkeypatch.setattr(panel_ui, "_resolve_ask_user_conv_id", lambda: "member")
     monkeypatch.setattr("frontend.ui_web.group_orchestrator.lookup_member_hub", lambda cid: (["group-core"], {}))
     monkeypatch.setattr(permission_prompt, "starter_root", lambda cid: "lead" if cid == "member" else "")
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation",
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation",
                         lambda cid, **_k: SimpleNamespace(ducky_name="Verse Coder", title="Verse Coder"))
     monkeypatch.setattr(panel_ui, "panel_rpc", lambda method, payload, timeout=0: sent.append(payload) or {"ok": True})
     out = json.loads(panel_ui.ducky_ask_user([{"id": "q", "prompt": "Which date format?"}]))

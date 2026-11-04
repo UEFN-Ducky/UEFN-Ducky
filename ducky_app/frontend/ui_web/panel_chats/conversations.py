@@ -58,7 +58,7 @@ def finish_first_run_setup(self) -> dict[str, Any]:
         WELCOME_DUCKY_TOURS,
         finish_setup,
     )
-    from frontend.ui_web.project_chats import append_message
+    from frontend.ui_web.chats.saves import append_message
 
     try:
         if not finish_setup():
@@ -158,7 +158,7 @@ def _new_conversation(
     project_root = None
     target_slug = str(cfg.get("project_slug") or "").strip()
     if target_slug:
-        from frontend.ui_web.project_chats import create_project_root
+        from frontend.ui_web.chats.store import create_project_root
 
         project_root = create_project_root(target_slug, settings.uefn_project_root or "")
 

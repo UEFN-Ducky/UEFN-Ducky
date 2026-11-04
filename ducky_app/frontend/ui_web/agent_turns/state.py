@@ -10,7 +10,7 @@ from typing import Any
 
 from backend.agent.runner import AgentRunner
 from frontend.ui_web.agent_turns.push import PushFn, _in_bridge_process
-from frontend.ui_web.project_chats import load_conversation
+from frontend.ui_web.chats.conversations import load_conversation
 
 SESSION_JOIN_TIMEOUT = 2.0
 

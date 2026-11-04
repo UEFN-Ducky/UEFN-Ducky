@@ -452,7 +452,7 @@ def _cancel_on_stop(cleanup: Callable[[], None]) -> Callable[[], None]:
 def _push(event: dict[str, Any]) -> None:
     live_runs.record(event)
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event(event)
     except Exception:
@@ -501,7 +501,7 @@ def _announce_run(
         "phase": phase,
     }
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event(payload)
         if phase in ("done", "error"):
@@ -1840,7 +1840,7 @@ def _prompt_ducky(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any
 
 def _spawn_ducky(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
 
     # Never set_project_root — spawn stays on the island the panel already has open.
     settings = PanelSettings.load()
@@ -1859,7 +1859,7 @@ def _spawn_ducky(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]
 
 
 def _run_message(conv_id: str, text: str, mode: str, model: str, *, parent: str = "") -> str:
-    from frontend.ui_web.agent_modes import run_message
+    from frontend.ui_web.agent_turns.routing import run_message
 
     return str(run_message(conv_id, text, mode, model, parent=parent) or "")
 
@@ -1881,7 +1881,7 @@ def _cancel_agent_on_stop(conv_id: str) -> Callable[[], None]:
             if cancel.wait(0.5):
                 if not finished.is_set():
                     try:
-                        from frontend.ui_web.agent_modes import cancel_agent
+                        from frontend.ui_web.agent_turns.state import cancel_agent
 
                         cancel_agent(conv_id)
                     except Exception:
@@ -1915,7 +1915,7 @@ def _run_message_and_wait(
     attachments: list[dict[str, Any]] | None = None,
     started_by: str | None = None,
 ) -> dict[str, Any]:
-    from frontend.ui_web.agent_modes import run_message_and_wait
+    from frontend.ui_web.agent_turns.routing import run_message_and_wait
 
     return dict(
         run_message_and_wait(
@@ -1971,7 +1971,7 @@ def _caller_group(caller: str) -> tuple[str, str] | None:
     if not caller:
         return None
     from frontend.ui_web.group_orchestrator import is_group_conversation
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(caller)
     if conv is None:
@@ -1989,7 +1989,7 @@ def _caller_group(caller: str) -> tuple[str, str] | None:
 def _caller_folder(caller: str) -> str:
     if not caller:
         return ""
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(caller)
     return str(getattr(conv, "folder_id", "") or "") if conv is not None else ""
@@ -2009,8 +2009,8 @@ def _ensure_pipeline_group(ctx: dict[str, Any], wf: dict[str, Any]) -> None:
     started the run), reused every run. Never a group nested inside the caller's group."""
     if str(ctx.get("group_id") or "").strip():
         return
-    from frontend.ui_web.project_chats import load_conversation, save_conversation
-
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import save_conversation
     caller = str(ctx.get("caller_conv_id") or "").strip()
     own = _caller_group(caller)
     if own:
@@ -2202,8 +2202,8 @@ def _archive_seat(seat: dict[str, Any], conv_id: str) -> None:
 
 
 def _existing_pipeline_ducky(conv_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    from frontend.ui_web.agent_modes import is_agent_running
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.agent_turns.state import is_agent_running
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(conv_id)
     if conv is None or getattr(conv, "is_group", False):
@@ -2218,9 +2218,9 @@ def _existing_pipeline_ducky(conv_id: str, payload: dict[str, Any]) -> dict[str,
 def _create_pipeline_ducky(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     from frontend.favorite_models import ResolveErr, allow_create_without_model
     from frontend.settings import PanelSettings
-    from frontend.ui_web.agent_modes import notify_chats_changed
+    from frontend.ui_web.agent_turns.push import notify_chats_changed
     from frontend.ui_web.panel_api import resolve_model_selection
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
 
     _ensure_pipeline_group(payload, {"name": str(payload.get("workflow_name") or "Workflow")})
     settings = PanelSettings.load()
@@ -2314,8 +2314,8 @@ def _pipeline_finish(cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, 
 
 def _post_to_chat(conv_id: str, text: str, files: Any) -> bool:
     """Post text and its pictures into a chat as the assistant; False when the chat is gone."""
-    from frontend.ui_web.project_chats import append_message, load_conversation
-
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import append_message
     conv = load_conversation(conv_id)
     if conv is None:
         return False

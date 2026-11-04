@@ -56,10 +56,10 @@ def team(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     from backend.tools.panel import swarm_build
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     monkeypatch.setenv("DUCKY_STORE_BACKEND_PLANS", "files")
-    monkeypatch.setattr(project_chats, "load_conversation_meta",
+    monkeypatch.setattr(chat_convs, "load_conversation_meta",
                         lambda cid, project_root=None: SimpleNamespace(parent_conv_id="grp"))
     monkeypatch.setattr(tick_gate, "check_tick", lambda cid, node: None)
     from backend.agent import a2a_client
@@ -183,13 +183,13 @@ def test_the_finish_card_lands_in_the_lead_chat_as_a_tool_result(monkeypatch):
     from types import SimpleNamespace
 
     from backend.tools.panel import ducky_finish_team
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     card = {"ok": True, "ui": "finish_team", "status": "needs_confirm", "lead": "lead"}
     appended = []
     monkeypatch.setattr(ducky_finish_team, "finish_card", lambda plan, root=None: card)
-    monkeypatch.setattr(project_chats, "load_conversation_meta", lambda cid, project_root=None: SimpleNamespace(id=cid))
-    monkeypatch.setattr(project_chats, "append_message", lambda conv, msg, project_root=None: appended.append((conv.id, msg)))
+    monkeypatch.setattr(chat_convs, "load_conversation_meta", lambda cid, project_root=None: SimpleNamespace(id=cid))
+    monkeypatch.setattr(chat_saves, "append_message", lambda conv, msg, project_root=None: appended.append((conv.id, msg)))
     plan_hooks.post_finish_card({"id": "p1", "chat_id": "lead"})
     (conv_id, msg), = appended
     block, = msg["blocks"]

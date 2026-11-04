@@ -116,7 +116,7 @@ def test_ask_naming_exemption_is_narrow(monkeypatch):
     from frontend.settings import PanelSettings
     from types import SimpleNamespace
     monkeypatch.setattr(PanelSettings, "load", lambda: SimpleNamespace(chat_auto_title=True))
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda _: SimpleNamespace(title="New ducky1"))
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda _: SimpleNamespace(title="New ducky1"))
     for mode in ("agent", "ask", "plan", "ask"):
         token = run_context.set_mode(mode)
         try:

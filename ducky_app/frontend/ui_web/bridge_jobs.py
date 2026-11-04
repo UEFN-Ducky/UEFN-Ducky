@@ -51,7 +51,7 @@ _current = threading.local()
 
 def _emit(event: dict[str, Any]) -> None:
     try:
-        from frontend.ui_web.agent_modes import get_panel_push
+        from frontend.ui_web.agent_turns.push import get_panel_push
 
         push = get_panel_push()
         if push:

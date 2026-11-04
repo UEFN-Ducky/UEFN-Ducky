@@ -1906,7 +1906,7 @@ class PanelApiStoreMixin:
         return self.set_mcp_server_enabled(plugin_id, enabled)
 
     def set_mcp_server_enabled(self, server_id: str, enabled: bool) -> dict[str, Any]:
-        from frontend.ui_web.project_chats import invalidate_all_conversation_caches
+        from frontend.ui_web.chats.conversations import invalidate_all_conversation_caches
         from backend.agent.builtin_toolsets import is_builtin_group, set_builtin_group_enabled
         from backend.mcp_plugins.store import set_mcp_server_enabled
         from backend.uefn_plugins.plugin_host.tool_registry import is_uefn_agent_tool_plugin

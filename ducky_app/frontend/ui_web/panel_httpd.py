@@ -56,7 +56,7 @@ def _alert_question(params: dict[str, Any]) -> None:
     def send() -> None:
         try:
             from frontend.notifications import alert
-            from frontend.ui_web.project_chats import load_conversation
+            from frontend.ui_web.chats.conversations import load_conversation
 
             # A team member's question opens its lead's chat, where the person works with the team.
             conv_id = str(params.get("lead_conv_id") or params.get("conv_id") or "").strip()
@@ -272,7 +272,7 @@ def _flush_chat_saves() -> None:
     """The tool server is another process: it must read a chat save made just before
     it asked (D23). Cheap when nothing waits; never holds a request past 5 s."""
     try:
-        from frontend.ui_web.project_chats import flush_chat_saves
+        from frontend.ui_web.chats.saves import flush_chat_saves
 
         flush_chat_saves(timeout=5.0)
     except Exception:
@@ -1020,7 +1020,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         return
                     events = payload if isinstance(payload, list) else [payload]
                     try:
-                        from frontend.ui_web.agent_modes import get_panel_push
+                        from frontend.ui_web.agent_turns.push import get_panel_push
 
                         push = get_panel_push()
                         if push is not None:
@@ -1079,7 +1079,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         )
                         return
                     try:
-                        from frontend.ui_web.agent_modes import run_message, run_message_and_wait
+                        from frontend.ui_web.agent_turns.routing import run_message, run_message_and_wait
 
                         if payload.get("wait"):
                             outcome = run_message_and_wait(
@@ -1179,7 +1179,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         self._send_json(400, {"error": "method and params required"})
                         return
                     from frontend.ui_web import ui_rpc
-                    from frontend.ui_web.agent_modes import get_panel_push
+                    from frontend.ui_web.agent_turns.push import get_panel_push
 
                     if method == "question_gate":
                         conv_id = str(params.get("conv_id") or "").strip()
@@ -1206,7 +1206,7 @@ def start_panel_ui_server(dist_root: Path) -> str:
                         return
                     if method == "agent_runs":
                         # The MCP bridge asks which chats run here (and may stop one).
-                        from frontend.ui_web.agent_modes import run_state
+                        from frontend.ui_web.agent_turns.state import run_state
 
                         self._send_json(200, {"result": run_state(
                             str(params.get("cancel") or "").strip(), bool(params.get("by_user", True))

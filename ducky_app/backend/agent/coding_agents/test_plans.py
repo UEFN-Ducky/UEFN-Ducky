@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from frontend.ui_web.agent_turns.testing import turns_patched
+
 from backend.agent.coding_agents import plans
 
 
@@ -83,9 +85,9 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(node["body_markdown"], "Done: tests pass.")
 
     def test_fix_for_a_finished_section_reopens_it_for_its_seat(self) -> None:
-        from frontend.ui_web import project_chats
+        from frontend.ui_web.chats import conversations as chat_convs
 
-        with patch.object(project_chats, "load_conversation_meta", return_value=object()):
+        with patch.object(chat_convs, "load_conversation_meta", return_value=object()):
             plans.create_plan("chat-fix", nodes=[
                 {"id": "ui", "content": "UI: tab shell", "assignee": "seat-ui", "children": [
                     {"id": "u1", "content": "Tabs"}, {"id": "u2", "content": "List"}]},
@@ -107,11 +109,11 @@ class PlansStoreTests(unittest.TestCase):
             plans.add_node("chat-fix", content="Under a leaf", parent_id="u1", project_root=self.root)
 
     def test_planned_assignee_is_set_and_cleared_without_starting_anyone(self) -> None:
-        from frontend.ui_web import agent_modes, project_chats
+        from frontend.ui_web.chats import conversations as chat_convs
 
         pushes: list[dict] = []
-        with patch.object(project_chats, "load_conversation_meta", return_value=object()), \
-                patch.object(agent_modes, "_resolve_push", return_value=pushes.append):
+        with patch.object(chat_convs, "load_conversation_meta", return_value=object()), \
+                turns_patched("_resolve_push", return_value=pushes.append):
             plans.create_plan("chat-planned", nodes=[
                 {"id": "top", "content": "Top", "assignee": "seat-top", "children": [
                     {"id": "mid", "content": "Mid", "children": [
@@ -322,7 +324,7 @@ class PlansStoreTests(unittest.TestCase):
             "frontend.settings.PanelSettings.load",
             return_value=type("S", (), {"uefn_project_root": self.root})(),
         ), patch(
-            "frontend.ui_web.project_chats.load_conversation",
+            "frontend.ui_web.chats.conversations.load_conversation",
             return_value=None,
         ):
             listed = plans.list_plans()
@@ -662,7 +664,7 @@ class PlansStoreTests(unittest.TestCase):
 
             return sink
 
-        with patch("frontend.ui_web.agent_modes._resolve_push", side_effect=fake_resolve):
+        with turns_patched("_resolve_push", side_effect=fake_resolve):
             plans.push_plan_updated(plan)
 
         self.assertEqual(len(forwarded), 1)
@@ -681,14 +683,14 @@ class ResolvePlanChatIdTests(unittest.TestCase):
     def test_falls_back_to_ducky_conv_id_env(self) -> None:
         from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
-        with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value=None):
+        with turns_patched("get_active_conv_id", return_value=None):
             with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv-123"}, clear=False):
                 self.assertEqual(_resolve_plan_chat_id(""), "env-conv-123")
 
     def test_active_conv_beats_env(self) -> None:
         from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
-        with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value="active-conv"):
+        with turns_patched("get_active_conv_id", return_value="active-conv"):
             with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv"}, clear=False):
                 self.assertEqual(_resolve_plan_chat_id(""), "active-conv")
 
@@ -699,7 +701,7 @@ class ResolvePlanChatIdTests(unittest.TestCase):
 
         token = identity.bind(identity.RunContext(conv_id="codex-chat", coding_agent="codex"))
         try:
-            with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value="active-conv"):
+            with turns_patched("get_active_conv_id", return_value="active-conv"):
                 with patch.dict(os.environ, {"DUCKY_CONV_ID": "env-conv"}, clear=False):
                     self.assertEqual(_resolve_plan_chat_id(""), "codex-chat")
                     self.assertEqual(_resolve_plan_chat_id("explicit-id"), "explicit-id")
@@ -709,7 +711,7 @@ class ResolvePlanChatIdTests(unittest.TestCase):
     def test_empty_when_no_sources(self) -> None:
         from backend.tools.panel.ducky_panel import _resolve_plan_chat_id
 
-        with patch("frontend.ui_web.agent_modes.get_active_conv_id", return_value=None):
+        with turns_patched("get_active_conv_id", return_value=None):
             os.environ.pop("DUCKY_CONV_ID", None)
             self.assertEqual(_resolve_plan_chat_id(""), "")
 

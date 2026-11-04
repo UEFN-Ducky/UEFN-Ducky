@@ -45,7 +45,7 @@ def _until(check, secs=5.0):
 
 def _boxes(monkeypatch, mgr, repos):
     monkeypatch.setattr("frontend.ui_web.terminal.get_terminal_manager", lambda: mgr)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.get_panel_push", lambda: None)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.get_panel_push", lambda: None)
     for conv, repo in repos.items():
         repo.mkdir(exist_ok=True)
         box = paths.sandbox_dir(conv, create=True)

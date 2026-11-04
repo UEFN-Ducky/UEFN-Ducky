@@ -609,7 +609,7 @@ def _is_sync_tool(mcp: Any, name: str) -> bool:
 
 def _calling_mode(ident: Any) -> str:
     """Read the host-written turn checkpoint, never a client-supplied mode."""
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv_id = getattr(ident, "conv_id", "")
     run_id = getattr(ident, "run_id", "")

@@ -503,7 +503,7 @@ def test_signing_in_or_out_restarts_and_reloads_plugins_that_show_a_space(who: _
     import threading
 
     from backend.uefn_plugins import host, store
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     ana = open_space(fake_spaces, who, "ana@x.org", "spaceT", "Alpha Studio")
     open_space(fake_spaces, who, "ana@x.org", "spaceT", "Alpha Studio", plugin="forge")
@@ -512,7 +512,7 @@ def test_signing_in_or_out_restarts_and_reloads_plugins_that_show_a_space(who: _
     done = threading.Event()
     monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: ["brainrot-tcg", "tester"])
     monkeypatch.setattr(host, "reload_single_plugin", restarted.append)
-    monkeypatch.setattr(agent_modes, "push_ui_event", lambda e: (pushed.append(e), done.set()))
+    patch_turns(monkeypatch, "push_ui_event", lambda e: (pushed.append(e), done.set()))
 
     # Signing out: both plugins that showed space T move to Local; only the enabled one restarts.
     spaces.on_account_change(ana, scopes.LOCAL)
@@ -1100,9 +1100,9 @@ def test_offline_restart_uses_the_device_wrapped_key_and_sign_out_drops_it(monke
     from backend.agent import secrets as sec
     from backend.uefn_plugins import data_crypto
     from frontend import duckyos_account
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
-    monkeypatch.setattr(agent_modes, "push_ui_event", lambda event: None)
+    patch_turns(monkeypatch, "push_ui_event", lambda event: None)
     duckyos_account._save_blob({"base_url": "https://uefnducky.org", "email": "ana@x.org", "device_key": "dky_v1_ana"})
     cards = PluginData("brainrot-tcg")
     cards.put("card.pip", {"v": 1})

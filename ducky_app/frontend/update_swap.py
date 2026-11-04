@@ -93,8 +93,8 @@ def _plural(n: int, word: str) -> str:
 def _running_chats() -> tuple[list[dict[str, str]], int]:
     """Running chats a switch carries to the new version (``conv_id``, ``mode``, ``model``),
     and how many team chats run: a team chat can't be continued, so it holds the switch."""
-    from frontend.ui_web.agent_modes import list_running_agents, running_turn_settings
-    from frontend.ui_web.project_chats import load_conversation_meta
+    from frontend.ui_web.agent_turns.state import list_running_agents, running_turn_settings
+    from frontend.ui_web.chats.conversations import load_conversation_meta
 
     carried: list[dict[str, str]] = []
     teams = 0
@@ -108,7 +108,7 @@ def _running_chats() -> tuple[list[dict[str, str]], int]:
 
 def _stop_chats() -> list[dict[str, str]]:
     """Stop the running chats so their turns are saved; the new version continues them."""
-    from frontend.ui_web.agent_modes import cancel_agent, is_agent_running
+    from frontend.ui_web.agent_turns.state import cancel_agent, is_agent_running
 
     chats, _ = _running_chats()
     for chat in chats:
@@ -127,14 +127,15 @@ def continue_chats(chats: Any) -> None:
         return
 
     def run() -> None:
-        from frontend.ui_web import agent_modes
+        from frontend.ui_web.agent_turns import push as turn_push
+        from frontend.ui_web.agent_turns import routing as turn_routing
 
         deadline = time.time() + PANEL_WAIT_S
-        while agent_modes.get_panel_push() is None and time.time() < deadline:
+        while turn_push.get_panel_push() is None and time.time() < deadline:
             time.sleep(0.5)
         for chat in rows:
             try:
-                agent_modes.run_message(
+                turn_routing.run_message(
                     str(chat["conv_id"]), "", str(chat.get("mode") or "agent"), str(chat.get("model") or ""), resume=True
                 )
             except Exception:

@@ -17,7 +17,7 @@ _log = logging.getLogger("automations")
 
 def _reports_chat(title: str):
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import create_conversation, list_conversations, load_conversation
+    from frontend.ui_web.chats.conversations import create_conversation, list_conversations, load_conversation
 
     for conv in list_conversations():
         if (conv.title or "").strip() == title and not getattr(conv, "is_group", False):
@@ -29,7 +29,7 @@ def _announce(conv: Any, title: str, text: str) -> None:
     """A row in the header's activity list, and an alert: the message itself shows in the
     Windows notification only; the account and the phone get "Sent you a message."."""
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "background_job", "id": f"message:{conv.id}", "source": "message",
                        "title": title, "detail": "Sent you a message", "phase": "done", "conv_id": conv.id})
@@ -49,8 +49,9 @@ def post(text: str, cfg: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
     said = text
     if name and cfg.get("heading", True) is not False:
         text = f"**{name}**\n\n{text}"
-    from frontend.ui_web.agent_modes import notify_chats_changed
-    from frontend.ui_web.project_chats import append_message, load_conversation
+    from frontend.ui_web.agent_turns.push import notify_chats_changed
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import append_message
 
     caller = str(payload.get("caller_conv_id") or "").strip()
     conv = load_conversation(caller) if caller else None

@@ -106,7 +106,7 @@ _PLUGIN_REFERENCE = _load_plugin_reference()
 
 def _notify_plugins() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "uefn_plugins_changed"})
     except Exception:

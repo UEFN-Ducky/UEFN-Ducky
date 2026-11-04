@@ -76,7 +76,7 @@ print(json.dumps(runner.run_workflow(sys.argv[2])), flush=True)
 
 def test_stop_one_of_two_concurrent_runs(local_runs, monkeypatch):
     events = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", events.append)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", events.append)
     wid = workflow()
     results = [{}, {}]
     workers = [threading.Thread(target=lambda result=result: result.update(runner.run_workflow(wid)))

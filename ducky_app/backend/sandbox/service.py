@@ -161,7 +161,7 @@ def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: floa
     if why:
         return {"ok": False, "error": why}
     box = _sandbox(conv_id)
-    from frontend.ui_web.agent_modes import get_panel_push
+    from frontend.ui_web.agent_turns.push import get_panel_push
     from frontend.ui_web.terminal import get_terminal_manager
 
     mgr = get_terminal_manager()

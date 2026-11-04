@@ -7,7 +7,8 @@ from typing import Any
 
 from frontend.chat_store import Conversation
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import load_conversation, save_conversation
+from frontend.ui_web.chats.conversations import load_conversation
+from frontend.ui_web.chats.saves import save_conversation
 
 from frontend.ui_web.context_omit import (
     CONTEXT_OMIT_IDS,
@@ -63,7 +64,8 @@ def _remove_omit(conv: Conversation, segment_id: str) -> None:
 
 
 def _guard_conversation_clear(conv_id: str) -> None:
-    from frontend.ui_web.agent_modes import get_active_conv_id, is_agent_running
+    from frontend.ui_web.agent_turns.push import get_active_conv_id
+    from frontend.ui_web.agent_turns.state import is_agent_running
 
     if get_active_conv_id() == conv_id and is_agent_running(conv_id):
         raise ValueError(
@@ -73,7 +75,7 @@ def _guard_conversation_clear(conv_id: str) -> None:
 
 def clear_conversation_messages(conv: Conversation, project_root: str | None = None) -> None:
     from frontend.ui_web.conversation_attachments import conversation_attachments_dir
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
     from frontend.ui_web.token_usage import clear_token_usage
     from backend.agent.prompt_cache import invalidate_conv_cache
 
@@ -169,7 +171,7 @@ def reset_context(
     seg_set = _expand_mcp_tools(_expand_all(_normalize_segments(segments)))
     cleared: list[str] = []
 
-    from frontend.ui_web.agent_modes import cancel_agent, is_agent_running, wait_for_idle
+    from frontend.ui_web.agent_turns.state import cancel_agent, is_agent_running, wait_for_idle
 
     if SESSION_SEGMENT in seg_set:
         # Between tasks only: never stop a working agent to give it a new session.
@@ -274,6 +276,6 @@ def restore_context(
 
 
 def notify_context_changed(conv_id: str) -> None:
-    from frontend.ui_web.agent_modes import notify_context_changed as _notify
+    from frontend.ui_web.agent_turns.push import notify_context_changed as _notify
 
     _notify(conv_id)

@@ -584,7 +584,7 @@ def _stop_all_agents() -> None:
     """Cancel every running agent so the installer can replace the EXE cleanly."""
     _set_progress(stage="stopping_agents", error=None)
     try:
-        from frontend.ui_web.agent_modes import cancel_agent
+        from frontend.ui_web.agent_turns.state import cancel_agent
 
         cancel_agent()
     except Exception:

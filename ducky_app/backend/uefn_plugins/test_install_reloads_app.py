@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 from backend.uefn_plugins import store
-from frontend.ui_web import agent_modes
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 class _SyncThread:
@@ -44,7 +44,7 @@ def _capture_posts(monkeypatch) -> list[tuple[str, list]]:
 
 def test_tool_server_install_asks_the_app_to_reload(monkeypatch) -> None:
     posts = _capture_posts(monkeypatch)
-    monkeypatch.setattr(agent_modes, "_in_bridge_process", lambda: True)
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: True)
     store._reload_in_app_process("island-media-kit")
     assert len(posts) == 1
     url, args = posts[0]
@@ -54,7 +54,7 @@ def test_tool_server_install_asks_the_app_to_reload(monkeypatch) -> None:
 
 def test_the_app_itself_does_not_call_itself(monkeypatch) -> None:
     posts = _capture_posts(monkeypatch)
-    monkeypatch.setattr(agent_modes, "_in_bridge_process", lambda: False)
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: False)
     store._reload_in_app_process("island-media-kit")
     assert posts == []
 

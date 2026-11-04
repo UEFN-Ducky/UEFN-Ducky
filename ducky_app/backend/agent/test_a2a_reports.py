@@ -152,10 +152,10 @@ def test_two_tool_server_messages_both_start_window_turns(reports, tmp_path, rep
 from types import SimpleNamespace
 from backend.tools.panel import ducky_panel as t
 from backend.agent import a2a_broker as b
-from frontend.ui_web import agent_modes
+from frontend.ui_web.agent_turns import push as agent_push
 from frontend import settings
 settings.PANEL_LISTENER_PORT = int(sys.argv[1]) + 1
-agent_modes.get_panel_push = lambda: None
+agent_push.get_panel_push = lambda: None
 t._resolve_sender = lambda value: value
 t._project_root = lambda: ''
 t.load_conversation = lambda *a, **kw: SimpleNamespace(folder_id='')
@@ -381,8 +381,8 @@ def test_a_report_from_a_member_waiting_on_others_is_not_repeated(monkeypatch):
     ]}
     monkeypatch.setattr(plans, "load_plan", lambda cid, root=None: plan)
     monkeypatch.setattr(plans, "_chat_and_group_ids", lambda cid, root=None: [cid])
-    monkeypatch.setattr("frontend.ui_web.project_chats.conversation_project_slug", lambda cid: "repo")
-    monkeypatch.setattr("frontend.ui_web.project_chats.project_root_for_slug", lambda slug: "C:/Repo")
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.conversation_project_slug", lambda cid: "repo")
+    monkeypatch.setattr("frontend.ui_web.chats.store.project_root_for_slug", lambda slug: "C:/Repo")
     assert b._plan_work_done("lead", "m1") is True
     plan["nodes"][1]["status"] = "in_progress"  # working on it: its reports may need the lead
     assert b._plan_work_done("lead", "m1") is False

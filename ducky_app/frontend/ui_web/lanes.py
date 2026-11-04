@@ -14,7 +14,7 @@ from backend.workspace import lanes as lane_engine
 
 
 def _load(conv_id: str) -> Any:
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     return load_conversation(conv_id)
 
@@ -46,7 +46,8 @@ def _hub_project(hub_id: str) -> str:
     """The project a team's hub chat is stored under ('' for a projectless or unknown one).
     Lanes set before ``lane_root`` existed are anchored here."""
     try:
-        from frontend.ui_web.project_chats import conversation_project_slug, project_slug
+        from frontend.ui_web.chats.conversations import conversation_project_slug
+        from frontend.ui_web.chats.store import project_slug
 
         slug = conversation_project_slug(hub_id) or ""
         if not slug or slug == "_no_project":

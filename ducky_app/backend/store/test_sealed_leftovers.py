@@ -131,7 +131,7 @@ def test_attachments_are_sealed_while_their_owner_is_away(who: _Who) -> None:
 
 def test_an_attachment_read_before_the_pass_is_opened_on_the_spot(who: _Who) -> None:
     from frontend.ui_web import conversation_attachments as ca
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     alice = who.be(ALICE)
     _write_chat("chat-a")
@@ -402,7 +402,7 @@ def test_a_pass_cut_short_never_looks_done(who: _Who, monkeypatch) -> None:
 
 def test_a_still_sealed_attachment_is_read_in_memory_never_as_ciphertext(who: _Who, monkeypatch) -> None:
     from frontend.ui_web import conversation_attachments as ca
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     alice = who.be(ALICE)
     _write_chat("chat-a")

@@ -45,7 +45,7 @@ def _icon(raw: Any) -> str:
 
 def _announce_graphs_changed() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "graphs_changed"})
     except Exception:

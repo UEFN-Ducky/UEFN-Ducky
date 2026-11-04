@@ -121,7 +121,7 @@ def member_stopped(chat_id: str, reason: str = "error", detail: str = "") -> Non
     if reason != "error":
         return
     from backend.agent.coding_agents import plans
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
     ids = set(plans._chat_and_group_ids(chat_id, None))
     member = load_conversation(chat_id)
     who = getattr(member, "ducky_name", "") or getattr(member, "title", "") or chat_id

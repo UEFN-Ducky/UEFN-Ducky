@@ -38,7 +38,7 @@ def _folder_sidebar_row(
 def _one_list() -> None:
     """Duckies are one list, whatever project is selected; older per-project rows move
     into it the first time the sidebar loads."""
-    from frontend.ui_web.project_chats import merge_into_one_list
+    from frontend.ui_web.chats.folders import merge_into_one_list
 
     try:
         merge_into_one_list()
@@ -156,7 +156,7 @@ def create_folder(self, name: str, parent_id: str = "") -> dict[str, str]:
 def _folder_root(self, folder_id: str) -> str | None:
     """Where a folder lives (None: the open island). The sidebar lists Global Agents and,
     with every island shown, other islands' folders too."""
-    from frontend.ui_web.project_chats import folder_project_slug
+    from frontend.ui_web.chats.folders import folder_project_slug
 
     slug = folder_project_slug(folder_id)
     try:
@@ -181,7 +181,7 @@ def delete_folder(self, folder_id: str, archive_members: bool = False) -> list[s
     hub_ids = _pa.group_hub_ids_in(scope, root)
     archived: list[str] = []
     if hub_ids:
-        from frontend.ui_web.agent_modes import is_agent_running
+        from frontend.ui_web.agent_turns.state import is_agent_running
 
         for hub_id in hub_ids:
             targets = [hub_id]
@@ -219,7 +219,7 @@ def move_chats_to_project(
     target_slug: str,
     folder_id: str = "",
 ) -> None:
-    from frontend.ui_web.project_chats import move_chats_to_project
+    from frontend.ui_web.chats.folders import move_chats_to_project
 
     move_chats_to_project(
         [str(cid) for cid in (conv_ids or [])],
@@ -233,7 +233,7 @@ def move_chats_to_project(
 def _chat_root(self, conv_id: str) -> str | None:
     """The island a chat lives on (None: the open one): Global Agents and other
     islands' chats are in the sidebar too."""
-    from frontend.ui_web.project_chats import conversation_project_slug
+    from frontend.ui_web.chats.conversations import conversation_project_slug
 
     slug = conversation_project_slug(conv_id)
     try:
@@ -247,7 +247,7 @@ def move_conversation(self, conv_id: str, folder_id: str) -> None:
     root = self._chat_root(conv_id)
     leaving: list[str] = []
     if archiving:
-        from frontend.ui_web.agent_modes import is_agent_running
+        from frontend.ui_web.agent_turns.state import is_agent_running
 
         leaving = [conv_id, *_pa.conversation_descendant_ids(conv_id, root)]
         conv = _pa.load_conversation(conv_id, root)
@@ -268,7 +268,7 @@ def move_conversation(self, conv_id: str, folder_id: str) -> None:
 
 
 def delete_conversation(self, conv_id: str, keep_inside: bool = False) -> None:
-    from frontend.ui_web.agent_modes import is_agent_running
+    from frontend.ui_web.agent_turns.state import is_agent_running
 
     root = self._chat_root(conv_id)
     if keep_inside:
@@ -291,7 +291,7 @@ def delete_conversation(self, conv_id: str, keep_inside: bool = False) -> None:
 
 def _layout_project_root(slug: str) -> str | None:
     """Where a layout for this project is saved. None: the open island."""
-    from frontend.ui_web.project_chats import project_root_for_slug, project_slug
+    from frontend.ui_web.chats.store import project_root_for_slug, project_slug
 
     wanted = (slug or "").strip()
     if not wanted:

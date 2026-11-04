@@ -24,7 +24,7 @@ _ID_RE = re.compile(r"^custom:[a-z0-9]{8,32}$")
 
 def _announce_templates_changed() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "templates_changed"})
     except Exception:

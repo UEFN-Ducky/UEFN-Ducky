@@ -182,7 +182,7 @@ def ensure_project(project_root: str) -> dict[str, Any] | None:
     lift_content_dot_ducky(root)  # every open, not once: an older Ducky may write there again
     from backend.agent.coding_agents.plans import _normalize_plan_doc
     from backend.store import db
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     slug = project_slug(root)
     flag = _project_flag(slug)

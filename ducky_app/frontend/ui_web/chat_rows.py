@@ -42,7 +42,7 @@ def _messages_to_ui(
     """
     from frontend.settings import PanelSettings
     from frontend.ui_web.conversation_attachments import hydrate_attachment_dicts
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     root = project_root if project_root is not None else PanelSettings.load().uefn_project_root
     conv_dir = get_conversations_dir(root)

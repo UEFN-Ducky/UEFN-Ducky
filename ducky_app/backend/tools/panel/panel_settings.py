@@ -86,7 +86,7 @@ def apply_settings_patch(patch: dict[str, Any], *, dry_run: bool = False) -> dic
 
     settings.save()
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "settings_changed", "keys": list(coerced)})
     except Exception:

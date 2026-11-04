@@ -18,7 +18,7 @@ CONTRIB = {
 def pushed(monkeypatch) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     monkeypatch.setattr("backend.uefn_plugins.host.get_ui_contributions", lambda: CONTRIB)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", out.append)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", out.append)
     return out
 
 
@@ -50,6 +50,6 @@ def test_a_push_failure_is_returned_not_raised(monkeypatch) -> None:
         raise RuntimeError("no panel")
 
     monkeypatch.setattr("backend.uefn_plugins.host.get_ui_contributions", lambda: CONTRIB)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", broken)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", broken)
     out = events.emit_hook("card_shop", "card_shop.sold")
     assert out["ok"] is False and "no panel" in out["error"]

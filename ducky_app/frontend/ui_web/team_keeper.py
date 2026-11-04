@@ -90,7 +90,7 @@ def _total(plan: dict[str, Any]) -> int:
 def _tell_person(cid: str, minutes: int) -> None:
     try:
         from frontend.notifications import alert
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         conv = load_conversation(cid)
         name = str(getattr(conv, "title", "") or "").strip() or "Your team"
@@ -168,7 +168,7 @@ def _team_leaders(project_root: str | None) -> set[str]:
     the keeper nagged that owner, working the plan alone, about a team ("Working: none")."""
     from frontend.archive_folder import is_archive_folder_id
     from frontend.ui_web.group_orchestrator import group_members, is_group_conversation
-    from frontend.ui_web.project_chats import list_all_conversation_metadata
+    from frontend.ui_web.chats.conversations import list_all_conversation_metadata
 
     convs = list(list_all_conversation_metadata(project_root))
     live = {str(getattr(c, "id", "")) for c in convs if not is_archive_folder_id(str(getattr(c, "folder_id", "") or ""))}
@@ -257,8 +257,8 @@ def _staffed_leaders(project_root: str | None) -> set[str]:
 
 
 def _wake(chat_id: str, text: str) -> None:
-    from frontend.ui_web.agent_modes import run_message
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.agent_turns.routing import run_message
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(chat_id)
     model = str(getattr(conv, "model", "") or "") if conv is not None else ""
@@ -318,7 +318,7 @@ def _wake_member(member: str, text: str, wake: Callable[[str, str], None],
 def _team_context(plan: dict[str, Any], *, busy: set[str] = frozenset()) -> tuple[set[str], str]:
     from backend.agent.coding_agents.plans import _chat_and_group_ids
     from backend.agent.coding_agents.team_plan_events import assigned_nodes
-    from frontend.ui_web.project_chats import list_all_conversation_metadata
+    from frontend.ui_web.chats.conversations import list_all_conversation_metadata
 
     nodes = list(assigned_nodes(plan.get("nodes")))
     owners = {owner for _, owner in nodes if owner}
@@ -371,7 +371,7 @@ def tick(
     if plans is None:
         plans = kept_plans()
     if running is None:
-        from frontend.ui_web.agent_modes import list_running_agents
+        from frontend.ui_web.agent_turns.state import list_running_agents
 
         running = list(list_running_agents())
     if jobs is None:
@@ -550,7 +550,7 @@ def _open_leaves_by_member(plan: dict[str, Any]) -> dict[str, list[dict[str, Any
 
 def _member_chat(owner: str, project_root: str | None) -> str:
     """The chat that works an owner's sub plan: the member, or the lead of an owning group."""
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     try:
         conv = load_conversation(owner, project_root=project_root)
@@ -624,7 +624,7 @@ def _last_reply(member: str) -> tuple[str, int]:
             return chat_rows.last_reply(member)
     except Exception:
         pass
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     try:
         conv = load_conversation(member)
@@ -656,7 +656,7 @@ def _said_committed(member: str) -> bool:
 
 def _tell_lead(plan: dict[str, Any], member: str, work: dict[str, Any], reason: str) -> None:
     from backend.agent.a2a_client import send_notice
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(member)
     who = str(getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or member) if conv else member
@@ -681,7 +681,7 @@ def _ask_person(plan: dict[str, Any], member: str, work: dict[str, Any], reason:
     got done since, so the person hears it (Oct 12 2026: a lead answered each block with one
     more step asking for the same live-panel evidence, and the worker blocked on it again)."""
     from frontend.notifications import alert
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     conv = load_conversation(member)
     who = str(getattr(conv, "ducky_name", "") or getattr(conv, "title", "") or member) if conv else member
@@ -706,7 +706,7 @@ def _inherit_lead(member: str, lead: str) -> None:
 def _alert_waiting(lead: str) -> None:
     """Tell the person a team can't move until they act: its lead already had the block."""
     from frontend.notifications import alert
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     reasons = [str(st["blocked"]) for st in _members.values() if st.get("lead") == lead and st.get("blocked")]
     conv = load_conversation(lead)
@@ -873,14 +873,14 @@ def stop_team(group_id: str, cancel: Callable[[str], Any]) -> dict[str, Any]:
     """Stop every running member's turn in a group and the groups nested in it, never the
     group's lead (it is often the one stopping its team). Oct 24 2026: stopping a team also
     stopped its lead. Nothing is deleted; members can be started again."""
-    from frontend.ui_web.agent_modes import is_agent_running
+    from frontend.ui_web.agent_turns.state import is_agent_running
     from frontend.ui_web.group_orchestrator import (
         cancel_group_run,
         group_and_nested_ids,
         group_members,
         is_group_conversation,
     )
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     gid = (group_id or "").strip()
     group = load_conversation(gid)

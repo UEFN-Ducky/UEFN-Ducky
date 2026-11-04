@@ -22,7 +22,7 @@ def _row(item: Any, source_id: str) -> dict[str, Any] | None:
     except OSError:
         return None
     from frontend.project_kind import project_flavor
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     return {
         "path": path,

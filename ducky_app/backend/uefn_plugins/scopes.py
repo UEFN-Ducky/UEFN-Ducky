@@ -1023,7 +1023,7 @@ def _locked_out(plugin: str, unit: str, held: dict[str, Any]) -> LockedOut:
                 _REFUSED[(plugin, unit)] = now
         if fresh:
             try:
-                from frontend.ui_web.agent_modes import push_ui_event
+                from frontend.ui_web.agent_turns.push import push_ui_event
 
                 push_ui_event({"type": "plugin_write_refused", "plugin_id": plugin, "unit": unit, "unit_name": name,
                                "holder": holder, "elsewhere": pc, "since": since})

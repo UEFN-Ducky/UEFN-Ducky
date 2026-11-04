@@ -40,7 +40,7 @@ def test_external_mode_policy(monkeypatch, agent, mode, sync):
     conv = SimpleNamespace(messages=[{
         "role": "assistant", "run_id": "run", "requested_mode": mode,
     }])
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid: conv)
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid: conv)
     ident = shared_mcp.identity_from_payload({"conv_id": "chat", "run_id": "run", "coding_agent": agent, "mode": "agent"})
 
     async def check():
@@ -63,7 +63,7 @@ def test_external_mode_policy(monkeypatch, agent, mode, sync):
 
 def test_mode_is_reloaded_for_every_call(monkeypatch):
     conv = SimpleNamespace(messages=[{"role": "assistant", "run_id": "run", "requested_mode": "agent"}])
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid: conv)
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid: conv)
     ident = shared_mcp.identity_from_payload({"conv_id": "chat", "run_id": "run", "coding_agent": "codex"})
     mcp = ModeMcp(["workspace_write_file"], False)
     async def check():
@@ -77,7 +77,7 @@ def test_mode_is_reloaded_for_every_call(monkeypatch):
 @pytest.mark.parametrize("mode", [None, "invalid"])
 def test_unknown_external_mode_does_not_execute(monkeypatch, mode):
     messages = [] if mode is None else [{"role": "assistant", "run_id": "run", "requested_mode": mode}]
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid: SimpleNamespace(messages=messages))
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid: SimpleNamespace(messages=messages))
     ident = shared_mcp.identity_from_payload({"conv_id": "chat", "run_id": "run", "coding_agent": "codex"})
     mcp = ModeMcp(["workspace_write_file"], False)
     with pytest.raises(ValueError, match="mode"):

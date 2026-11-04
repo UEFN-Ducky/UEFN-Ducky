@@ -164,7 +164,7 @@ def test_tools_list_sends_core_tools_only() -> None:
 
 
 def test_cap_ui_result_truncates() -> None:
-    from frontend.ui_web.agent_modes import UI_TOOL_RESULT_MAX, _cap_ui_result
+    from frontend.ui_web.agent_turns.run import UI_TOOL_RESULT_MAX, _cap_ui_result
 
     small = "ok"
     assert _cap_ui_result(small) == small

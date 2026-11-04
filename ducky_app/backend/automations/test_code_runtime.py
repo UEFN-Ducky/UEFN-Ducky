@@ -244,7 +244,7 @@ def events(monkeypatch, tmp_path):
     monkeypatch.setattr(store, "_files_dir", lambda: tmp_path)
     monkeypatch.setattr(store, "_announce_graphs_changed", lambda: None)
     seen: list[dict] = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", seen.append)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", seen.append)
     return seen
 
 

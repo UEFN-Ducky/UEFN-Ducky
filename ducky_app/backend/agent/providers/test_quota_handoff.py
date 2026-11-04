@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
 from backend.agent import providers
-from frontend.ui_web import agent_modes as am
+from frontend.settings import PanelSettings
+from frontend.ui_web.agent_turns import errors as am
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 LIMIT = "You've used your Ducky AI for now. It's back in 4 h."
 
@@ -11,10 +13,10 @@ def _env(monkeypatch, *, available: bool):
     runs, pushed = [], []
     adapter = SimpleNamespace(detect=lambda _s: SimpleNamespace(enabled=True, available=available))
     monkeypatch.setattr("backend.agent.coding_agents.base.get_adapter", lambda aid: adapter if aid == "claude_code" else None)
-    monkeypatch.setattr(am.PanelSettings, "load", staticmethod(lambda: None))
-    monkeypatch.setattr(am, "load_conversation", lambda _cid: conv)
-    monkeypatch.setattr(am, "save_conversation", lambda _c: None)
-    monkeypatch.setattr(am, "run_message", lambda *a, **k: runs.append((a, k)))
+    monkeypatch.setattr(PanelSettings, "load", staticmethod(lambda: None))
+    patch_turns(monkeypatch, "load_conversation", lambda _cid: conv)
+    patch_turns(monkeypatch, "save_conversation", lambda _c: None)
+    patch_turns(monkeypatch, "run_message", lambda *a, **k: runs.append((a, k)))
     return conv, runs, pushed
 
 

@@ -239,7 +239,7 @@ def chat_attachments_dir(conv_id: str, *, create: bool = False) -> Path | None:
     cid = (conv_id or "").strip()
     if not _CONV_ID_RE.fullmatch(cid):
         return None
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     path = get_conversations_dir(create=create) / cid / "attachments"
     if create:

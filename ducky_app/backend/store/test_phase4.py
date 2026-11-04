@@ -120,7 +120,7 @@ def test_memory_parity(backend: str, island: str) -> None:
 
 def test_memory_import_from_markdown_tree(island: str, appdata: Path) -> None:
     from backend.memory import project as mem
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     slug = project_slug(island)
     d = appdata / "memory" / "projects" / slug

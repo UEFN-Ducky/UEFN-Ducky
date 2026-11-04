@@ -365,7 +365,7 @@ def collect_image_paths(conv: Conversation, project_root: str | None = None) -> 
     attachments = last_user.get("attachments")
     if not isinstance(attachments, list) or not attachments:
         return []
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     conv_dir = get_conversations_dir(project_root) / conv.id
     out: list[str] = []
@@ -418,7 +418,7 @@ def checkpoint_coding_turn(
 ) -> None:
     """Write the in-flight assistant to disk. Survives taskkill /F (no shutdown hooks)."""
     try:
-        from frontend.ui_web.project_chats import upsert_in_flight_assistant
+        from frontend.ui_web.chats.saves import upsert_in_flight_assistant
 
         text = (reply or "").strip()
         msg: dict[str, Any] = {
@@ -656,7 +656,7 @@ def _emit_assistant(
     effective_mode: str = "",
     images_since: float = 0.0,
 ) -> dict[str, Any]:
-    from frontend.ui_web.project_chats import save_conversation, upsert_in_flight_assistant
+    from frontend.ui_web.chats.saves import save_conversation, upsert_in_flight_assistant
 
     mode_metadata = {"requested_mode": requested_mode, "effective_mode": effective_mode}
     original_push = push
@@ -714,7 +714,7 @@ def _emit_assistant(
         conv.terminal_session_id = terminal_session_id
     save_conversation(conv)
     _notify_saved(conv.id, final=True)
-    from frontend.ui_web.agent_modes import close_changeset_run
+    from frontend.ui_web.agent_turns.state import close_changeset_run
 
     if ok:
         push({"type": "assistant_done", "conv_id": conv.id, "run_id": run_id})

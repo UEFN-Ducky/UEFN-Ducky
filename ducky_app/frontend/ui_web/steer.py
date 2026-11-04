@@ -41,7 +41,7 @@ def _expire(box: list[dict[str, Any]]) -> None:
 
 def post(conv_id: str, steer_id: str, text: str) -> bool:
     """Hold ``text`` for the chat's running turn. False when no turn runs (send it normally)."""
-    from frontend.ui_web.agent_modes import is_agent_running
+    from frontend.ui_web.agent_turns.state import is_agent_running
 
     cid = str(conv_id or "").strip()
     body = str(text or "").strip()
@@ -144,7 +144,7 @@ def ack(conv_id: str, lease_id: str) -> list[str]:
     if not done:
         return []
     if push is None:
-        from frontend.ui_web.agent_modes import get_panel_push
+        from frontend.ui_web.agent_turns.push import get_panel_push
 
         push = get_panel_push()
     for m in done:

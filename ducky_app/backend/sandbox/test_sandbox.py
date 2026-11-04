@@ -470,7 +470,9 @@ def test_tools_refuse_before_asking_and_hand_off_in_the_window(monkeypatch):
     monkeypatch.setattr(sandbox_tools, "_chat", lambda: CONV)
     out = json.loads(sandbox_tools.sandbox_run("winget install x"))
     assert out["ok"] is False and asked == []
-    monkeypatch.setattr("frontend.ui_web.agent_modes._in_bridge_process", lambda: False)
+    from frontend.ui_web.agent_turns.testing import patch_turns
+
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: False)
     called = []
     monkeypatch.setattr(service, "call", lambda name, args: called.append((name, args)) or {"ok": True})
     json.loads(sandbox_tools.sandbox_open())
@@ -490,7 +492,9 @@ def test_every_tool_hands_off_all_its_arguments(monkeypatch, in_window):
 
     monkeypatch.setattr("backend.sandbox.policy.ask_to_run", lambda *a: "once")
     monkeypatch.setattr(sandbox_tools, "_chat", lambda: CONV)
-    monkeypatch.setattr("frontend.ui_web.agent_modes._in_bridge_process", lambda: not in_window)
+    from frontend.ui_web.agent_turns.testing import patch_turns
+
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: not in_window)
     called: list[tuple[str, dict]] = []
     monkeypatch.setattr(service, "call", lambda call, args: called.append((call, args)) or {"ok": True})
 

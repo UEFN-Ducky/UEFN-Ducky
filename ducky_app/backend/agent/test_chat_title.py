@@ -18,14 +18,14 @@ def isolated_appdata(tmp_path, monkeypatch):
     ["", "   ", "New ducky", "new ducky1", "NewDucky1", "New ducky12", "Chat", "sub-agent 3"],
 )
 def test_placeholder_titles(title):
-    from frontend.ui_web.project_chats import is_placeholder_title
+    from frontend.ui_web.chats.conversations import is_placeholder_title
 
     assert is_placeholder_title(title)
 
 
 @pytest.mark.parametrize("title", ["Boss Fight", "Level Designer", "New ducky pen", "Ducky Wrangler"])
 def test_real_titles_are_kept(title):
-    from frontend.ui_web.project_chats import is_placeholder_title
+    from frontend.ui_web.chats.conversations import is_placeholder_title
 
     assert not is_placeholder_title(title)
 
@@ -51,7 +51,7 @@ def test_sanitize_role_title(raw, expected):
 
 
 def _new_conv(root: str, title: str):
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
     return create_conversation(title=title, project_root=root)
 
 
@@ -62,7 +62,9 @@ def test_first_turn_names_itself_without_an_extra_model(isolated_appdata, tmp_pa
     from backend.tools.panel.ducky_panel import ducky_rename_self
     from backend.workspace import identity
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import load_conversation, save_conversation
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats.conversations import load_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     root = str(tmp_path / "TitleProj")
     (tmp_path / "TitleProj").mkdir()
@@ -70,7 +72,7 @@ def test_first_turn_names_itself_without_an_extra_model(isolated_appdata, tmp_pa
     settings.uefn_project_root = root
     settings.save()
     conv = _new_conv(root, "New ducky2")
-    monkeypatch.setattr("frontend.ui_web.agent_modes.notify_chats_changed", lambda **_kw: None)
+    patch_turns(monkeypatch, "notify_chats_changed", lambda **_kw: None)
     assert start_auto_title(conv, "fix chat questions", project_root=root) == ""
     assert load_conversation(conv.id).title == "New ducky2"
     assert "FIRST tool call" in self_naming_instruction(conv.title, conv.id)

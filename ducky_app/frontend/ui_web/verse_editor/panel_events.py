@@ -6,7 +6,7 @@ from typing import Any
 
 
 def push_agent_event(event: dict[str, Any]) -> None:
-    from frontend.ui_web.agent_modes import _resolve_push
+    from frontend.ui_web.agent_turns.push import _resolve_push
 
     _resolve_push(None)(event)
 
@@ -18,7 +18,7 @@ def _has_local_panel() -> bool:
     per-file diagnostics event from those processes can wedge WebView2 while the
     agent already receives the authoritative scan result directly.
     """
-    from frontend.ui_web.agent_modes import get_panel_push
+    from frontend.ui_web.agent_turns.push import get_panel_push
 
     return get_panel_push() is not None
 

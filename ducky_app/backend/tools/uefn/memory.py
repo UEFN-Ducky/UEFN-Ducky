@@ -162,7 +162,7 @@ def ducky_memory_overview(include_chats: bool = True, pretty: bool = False) -> s
     out: dict[str, Any] = {"projects": projects_out}
     if include_chats:
         try:
-            from frontend.ui_web.project_chats import list_conversations
+            from frontend.ui_web.chats.conversations import list_conversations
 
             convs = list_conversations(None)
             convs.sort(key=lambda c: c.updated or 0.0, reverse=True)

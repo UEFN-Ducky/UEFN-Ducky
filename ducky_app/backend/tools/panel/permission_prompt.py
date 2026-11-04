@@ -824,7 +824,7 @@ def update_agent_plugin(agent: str) -> dict[str, Any]:
     if not result.get("ok"):
         raise ValueError(str(result.get("error") or f"Could not update {plugin['label']}."))
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "uefn_plugins_changed"})
     except Exception:

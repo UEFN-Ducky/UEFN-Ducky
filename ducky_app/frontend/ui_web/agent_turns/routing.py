@@ -58,7 +58,8 @@ from frontend.ui_web.agent_turns.state import (
     close_changeset_run,
     is_agent_running,
 )
-from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
+from frontend.ui_web.chats.conversations import load_conversation
+from frontend.ui_web.chats.saves import append_message, save_conversation
 
 _ASK_SUFFIX = "\n\n[Mode: Ask] Read, search and discover evidence, then answer. Do not modify projects, plans, settings or assets, rename chats, delegate, or execute code."
 
@@ -441,7 +442,7 @@ def run_message(
             return ""
         ts = time.time()
         from frontend.ui_web.conversation_attachments import persist_message_attachments
-        from frontend.ui_web.project_chats import get_conversations_dir
+        from frontend.ui_web.chats.store import get_conversations_dir
 
         conversations_dir = get_conversations_dir(settings.uefn_project_root)
         try:
@@ -719,7 +720,7 @@ def run_message(
                     # this chat was created, so an open chat still learns about
                     # subskills added by a plugin update. No-op when nothing moved.
                     try:
-                        from frontend.ui_web.project_chats import sync_skill_snapshot
+                        from frontend.ui_web.chats.conversations import sync_skill_snapshot
 
                         sync_skill_snapshot(conv, settings)
                     except Exception:

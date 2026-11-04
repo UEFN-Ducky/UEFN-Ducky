@@ -53,7 +53,7 @@ def group_create(
     project_root: str | None = None
     target_slug = (project_slug or "").strip()
     if target_slug:
-        from frontend.ui_web.project_chats import create_project_root
+        from frontend.ui_web.chats.store import create_project_root
 
         project_root = create_project_root(target_slug, settings.uefn_project_root or "")
     # Parent folder_id here means "create the group-folder inside this folder".
@@ -113,7 +113,8 @@ def group_find_or_create(
     ``group_create``, so a person can still make a duplicate on purpose.
     """
     from frontend.archive_folder import is_archive_folder_id
-    from frontend.ui_web.project_chats import conversation_project_slug, folder_project_slug
+    from frontend.ui_web.chats.conversations import conversation_project_slug
+    from frontend.ui_web.chats.folders import folder_project_slug
 
     title = (name or "").strip() or "Group"
     parent = (folder_id or "").strip()
@@ -122,7 +123,7 @@ def group_find_or_create(
     slug = folder_project_slug(parent) or conversation_project_slug((caller_conv_id or "").strip())
     project_root: str | None = None
     if slug:
-        from frontend.ui_web.project_chats import create_project_root
+        from frontend.ui_web.chats.store import create_project_root
 
         project_root = create_project_root(slug, _pa.PanelSettings.load().uefn_project_root or "")
     candidates = [
@@ -173,7 +174,7 @@ def group_seat_profile(
     pay-per-token API key the person has not opened to agents.
     """
     from frontend.agent_profiles import get_agent_profile
-    from frontend.ui_web.agent_modes import is_agent_running, wait_for_idle
+    from frontend.ui_web.agent_turns.state import is_agent_running, wait_for_idle
     from frontend.ui_web.group_orchestrator import group_members
 
     group = _pa.load_conversation(group_id)
@@ -368,7 +369,7 @@ def group_invite(
 
 def post_team_message(self, sender_id: str, receiver_id: str, body: str = "") -> dict[str, Any]:
     """Show a message one team member sent another in their group chat (from the tool server)."""
-    from frontend.ui_web.agent_modes import get_panel_push
+    from frontend.ui_web.agent_turns.push import get_panel_push
     from frontend.ui_web.group_orchestrator import post_team_message
 
     posted = post_team_message(str(sender_id or ""), str(receiver_id or ""), str(body or ""), push=get_panel_push())
@@ -411,7 +412,7 @@ def group_add_member(
         sync_group_members_from_folder,
     )
     from frontend.ui_web.group_orchestrator import _group_folder_id
-    from frontend.ui_web.project_chats import adopt_group_project, island_for_conversation
+    from frontend.ui_web.chats.groups import adopt_group_project, island_for_conversation
 
     group = _pa.load_conversation(group_id)
     if not group or not getattr(group, "is_group", False):
@@ -573,7 +574,7 @@ def group_set_member_lane(
     from backend.workspace import events, lanes as lane_engine
     from frontend.ui_web.group_orchestrator import group_members
 
-    from frontend.ui_web.project_chats import _conversation_lock
+    from frontend.ui_web.chats.store import _conversation_lock
 
     # Use the same reentrant group lock as save_conversation so competing
     # lane updates cannot both validate an obsolete roster snapshot.
@@ -606,7 +607,7 @@ def group_lane_authorities(self, group_id: str) -> list[str]:
     """Who may set lanes in this group: its leader, then the leader of every group it
     is nested in (an outer lead seats its subgroups' workers)."""
     from frontend.ui_web.group_orchestrator import _group_folder_id
-    from frontend.ui_web.project_chats import island_for_conversation
+    from frontend.ui_web.chats.groups import island_for_conversation
 
     gid = (group_id or "").strip()
     group = _pa.load_conversation(gid)
@@ -698,9 +699,10 @@ def group_members(self, group_id: str) -> dict[str, Any]:
             _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
     # Read observations only; never persist runtime or duplicate plan state.
     import time
-    from frontend.ui_web.project_chats import conversation_project_slug, project_root_for_slug
+    from frontend.ui_web.chats.conversations import conversation_project_slug
+    from frontend.ui_web.chats.store import project_root_for_slug
     from backend.agent.coding_agents.plans import load_plan_view
-    from frontend.ui_web.agent_modes import get_panel_push
+    from frontend.ui_web.agent_turns.push import get_panel_push
 
     members = group_members(group) if is_group_conversation(group) else []
     try:

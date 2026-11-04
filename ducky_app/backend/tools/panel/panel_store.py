@@ -17,7 +17,7 @@ _STRIP_KEYS = frozenset({"icon_data_url", "icon_mime", "has_icon"})
 
 def _notify_plugins() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "uefn_plugins_changed"})
     except Exception:
@@ -26,7 +26,7 @@ def _notify_plugins() -> None:
 
 def _notify_skills() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "skills_changed"})
     except Exception:
@@ -293,7 +293,7 @@ def ducky_store_set_enabled(
         _notify_plugins()
     elif result.get("needs_trust"):
         try:
-            from frontend.ui_web.agent_modes import push_ui_event
+            from frontend.ui_web.agent_turns.push import push_ui_event
 
             push_ui_event(
                 {

@@ -324,7 +324,7 @@ def get_system_prompt_parts(
             sel = None
             if conv_id:
                 try:
-                    from frontend.ui_web.project_chats import load_conversation
+                    from frontend.ui_web.chats.conversations import load_conversation
 
                     conv = load_conversation(conv_id)
                     if conv is not None:

@@ -232,7 +232,7 @@ def _add_to_bucket(bucket: dict[str, Any], *, inp: int, out: int, cr: int, cw: i
 def _conv_lookup() -> dict[str, dict[str, str]]:
     """Map conv_id → {title, ducky_name, agent} for report labels (fail-soft)."""
     try:
-        from frontend.ui_web.project_chats import list_all_conversation_metadata
+        from frontend.ui_web.chats.conversations import list_all_conversation_metadata
 
         out: dict[str, dict[str, str]] = {}
         for c in list_all_conversation_metadata():
@@ -433,7 +433,7 @@ def ducky_usage_report(
     chats: list[dict[str, Any]] = []
     conv_ids: set[str] = set()
     try:
-        from frontend.ui_web.project_chats import list_all_conversation_metadata
+        from frontend.ui_web.chats.conversations import list_all_conversation_metadata
 
         for c in list_all_conversation_metadata():
             cid = str(getattr(c, "id", "") or "")

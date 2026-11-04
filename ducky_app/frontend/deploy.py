@@ -491,7 +491,7 @@ def quarantine_python_root() -> Path:
 
 def _project_slug_for_quarantine(project_root: Path) -> str:
     try:
-        from frontend.ui_web.project_chats import project_slug
+        from frontend.ui_web.chats.store import project_slug
 
         return project_slug(str(project_root))
     except Exception:

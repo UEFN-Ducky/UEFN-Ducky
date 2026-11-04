@@ -74,7 +74,7 @@ def _chat_title(conv_id: str) -> str:
     if not conv_id:
         return ""
     try:
-        from frontend.ui_web.project_chats import conversation_title
+        from frontend.ui_web.chats.conversations import conversation_title
 
         return conversation_title(conv_id)
     except Exception:
@@ -283,7 +283,7 @@ class TerminalManager:
         workflow run) are never closed."""
         now = time.time() if now is None else now
         if running is None:
-            from frontend.ui_web.agent_modes import list_running_agents
+            from frontend.ui_web.agent_turns.state import list_running_agents
 
             running = set(list_running_agents())
         with self._lock:
@@ -999,7 +999,7 @@ def _lead_of(conv_id: str) -> tuple[str, str]:
         return "", ""
     try:
         from backend.tools.panel.permission_prompt import starter_root
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         lead = starter_root(conv_id)
         if not lead or lead == conv_id:
@@ -1019,7 +1019,7 @@ def _alert_command(conv_id: str, command: str, asked_by: str = "") -> None:
     def send() -> None:
         try:
             from frontend.notifications import alert
-            from frontend.ui_web.project_chats import load_conversation
+            from frontend.ui_web.chats.conversations import load_conversation
 
             conv = load_conversation(conv_id) if conv_id else None
             title = str(getattr(conv, "title", "") or "").strip() or "UEFN Ducky"

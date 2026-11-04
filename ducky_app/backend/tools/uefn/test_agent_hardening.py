@@ -564,7 +564,7 @@ def test_enrich_screenshot_uses_appdata_not_project(tmp_path, monkeypatch):
     from backend.workspace.identity import RunContext, bind, reset
 
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats._chats_root",
+        "frontend.ui_web.chats.store._chats_root",
         lambda: tmp_path / "chats" / "projects",
     )
     token = bind(RunContext(conv_id="chat-shot"))

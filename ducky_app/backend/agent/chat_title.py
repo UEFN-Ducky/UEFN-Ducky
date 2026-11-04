@@ -54,7 +54,7 @@ def self_naming_instruction(title: str, conv_id: str = "") -> str:
     if current_mode() == "ask":
         return ""
     from frontend.settings import PanelSettings
-    from frontend.ui_web.project_chats import is_placeholder_title, load_conversation
+    from frontend.ui_web.chats.conversations import is_placeholder_title, load_conversation
 
     if conv_id:
         conv = load_conversation(conv_id)
@@ -81,7 +81,7 @@ def require_self_name(name: str, conv_id: str) -> None:
     if not conv_id or name == "ducky_rename_self":
         return
     if self_naming_instruction("", conv_id):
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         if load_conversation(conv_id) is not None:
             raise ValueError("Call ducky_rename_self first with a 2–4 word task name, then retry this tool.")

@@ -41,33 +41,37 @@ from frontend.agent_profiles import (
     unarchive_agent_profile,
 )
 from frontend.archive_folder import is_archive_folder_id
-from frontend.ui_web.project_chats import (
-    adopt_group_project,
+from frontend.ui_web.chats.conversations import (
     apply_ducky_config,
-    apply_sidebar_layout,
     create_conversation,
-    create_folder,
-    conversation_descendant_ids,
     delete_conversation,
-    delete_folder,
     ensure_conversation_file_path,
-    ensure_group_folder_hubs,
-    folder_subtree_ids,
-    group_hub_ids_in,
     iter_conversations_by_project,
     list_all_conversation_metadata,
     list_conversations,
     list_conversations_for_file,
     load_conversation,
-    load_folders,
     move_conversation,
     remap_conversation_file_paths,
-    rename_folder,
-    save_conversation,
     set_conversation_ducky_style,
     set_conversation_enabled_skills,
     set_conversation_skill_selection,
 )
+from frontend.ui_web.chats.folders import (
+    apply_sidebar_layout,
+    create_folder,
+    delete_folder,
+    folder_subtree_ids,
+    load_folders,
+    rename_folder,
+)
+from frontend.ui_web.chats.groups import (
+    adopt_group_project,
+    conversation_descendant_ids,
+    ensure_group_folder_hubs,
+    group_hub_ids_in,
+)
+from frontend.ui_web.chats.saves import save_conversation
 from frontend.deploy import deploy_listener, resolve_uefn_project_root
 from frontend.error_log import (
     clear_activity,
@@ -90,7 +94,9 @@ from frontend.appearance_builtin_profiles import (
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env, default_app_data_dir
 from frontend.skill_deploy import sync_skill_for_ide, sync_skill_on_mcp_update
 from frontend.stdio_probe import probe_stdio_mcp
-from frontend.ui_web.agent_modes import cancel_agent, list_running_agents, notify_chats_changed, run_message, wait_for_idle
+from frontend.ui_web.agent_turns.push import notify_chats_changed
+from frontend.ui_web.agent_turns.routing import run_message
+from frontend.ui_web.agent_turns.state import cancel_agent, list_running_agents, wait_for_idle
 from frontend.ui_web.project_files import (
     content_entry_exists,
     content_entry_needs_uefn_delete,
@@ -1106,7 +1112,7 @@ class PanelApi(
             # Every window and the phone got the request: the others close it, so an
             # answer there can't land after this one and be dropped.
             try:
-                from frontend.ui_web.agent_modes import get_panel_push
+                from frontend.ui_web.agent_turns.push import get_panel_push
 
                 push = get_panel_push()
                 if push is not None:
@@ -1118,7 +1124,7 @@ class PanelApi(
     def answer_late_question(self, conv_id: str, text: str) -> dict[str, Any]:
         """A question card answered after the asking agent's turn ended: the answer goes to
         that chat as a message, after any turn still running (it never interrupts one)."""
-        from frontend.ui_web.agent_modes import run_message
+        from frontend.ui_web.agent_turns.routing import run_message
 
         cid = str(conv_id or "").strip()
         body = str(text or "").strip()

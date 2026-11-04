@@ -16,20 +16,13 @@ from frontend.archive_folder import is_archive_folder_id
 from frontend.error_log import read_errors
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
 from frontend.ui_web.project_switch import get_panel_project_info, list_panel_projects
-from frontend.ui_web.project_chats import (
-    append_message,
-    conversation_project_slug,
-    create_conversation,
-    delete_conversation,  # noqa: F401 - test_subagent_recycle patches it here as a guard
-    list_conversations,
-    load_conversation,
-    load_folders,
-    move_conversation,
-    project_slug,
-    project_slug_display_name,
-    rename_conversation,
-    save_conversation,
+from frontend.ui_web.chats.conversations import (  # delete_conversation: test_subagent_recycle patches it here
+    conversation_project_slug, create_conversation, delete_conversation, list_conversations,  # noqa: F401
+    load_conversation, move_conversation, rename_conversation,
 )
+from frontend.ui_web.chats.folders import load_folders
+from frontend.ui_web.chats.saves import append_message, save_conversation
+from frontend.ui_web.chats.store import project_slug, project_slug_display_name
 
 _SUBAGENT_HANDOFF_PROMPT = (
     "HANDOFF REQUIRED. Write a complete handoff for a fresh replacement of yourself "
@@ -783,11 +776,11 @@ def ducky_memory_report(start_trace: bool = False, stop_trace: bool = False, col
     ``start_trace=true``, ``tracemalloc`` (top allocation sites; ``grew``: what grew since
     the previous call). ``stop_trace=true`` ends tracing. Takes a few to ~30 seconds.
     """
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import push as agent_push
 
     args = {"start_trace": bool(start_trace), "stop_trace": bool(stop_trace), "collect": bool(collect),
             "top": int(top)}
-    if not agent_modes._in_bridge_process():
+    if not agent_push._in_bridge_process():
         from frontend.memory_report import report
 
         return tool_json(report(**args), pretty=pretty)
@@ -826,7 +819,7 @@ def _tool_ids_from_conv(conv: Any) -> list[str] | None:
 
 def _disabled_tool_ids_from_conv(conv: Any) -> list[str]:
     """Reconstruct deny-list so a recycled twin keeps the same tool surface."""
-    from frontend.ui_web.project_chats import all_available_tool_ids
+    from frontend.ui_web.chats.conversations import all_available_tool_ids
 
     effective = set(_tool_ids_from_conv(conv) or [])
     if not effective:
@@ -1207,7 +1200,7 @@ def ducky_rename_self(title: str, pretty: bool = False) -> str:
     """First tool call in an unnamed chat: choose your task-based Ducky name."""
     from backend.tools.panel.panel_ui import _resolve_ask_user_conv_id
     from backend.agent.chat_title import sanitize_role_title
-    from frontend.ui_web.agent_modes import notify_chats_changed
+    from frontend.ui_web.agent_turns.push import notify_chats_changed
 
     conv_id = _resolve_ask_user_conv_id()
     cleaned = sanitize_role_title(title)
@@ -1263,7 +1256,8 @@ def ducky_move_chat(conv_id: str, folder_id: str, pretty: bool = False) -> str:
 
 def _chats_leaving_with(conv: Any, root: str) -> set[str]:
     """Every chat that goes with ``conv``: its sub-agents, and for a group everything filed in its folder."""
-    from frontend.ui_web.project_chats import conversation_descendant_ids, folder_subtree_ids
+    from frontend.ui_web.chats.folders import folder_subtree_ids
+    from frontend.ui_web.chats.groups import conversation_descendant_ids
 
     out = {conv.id, *conversation_descendant_ids(conv.id, root)}
     if getattr(conv, "is_group", False):
@@ -1305,7 +1299,7 @@ def ducky_archive_chats(
             return tool_json({"ok": False, "error": f"“{conv.title or cid}” holds this chat; archive it from the sidebar "
                               "or move this chat out first."}, pretty=pretty)
         targets.append(conv)
-    from frontend.ui_web.project_chats import folder_subtree_ids
+    from frontend.ui_web.chats.folders import folder_subtree_ids
 
     folders = {f.id: f for f in load_folders(root)} if folder_ids else {}
     folder_targets = []
@@ -1377,7 +1371,8 @@ def ducky_send_chat_message(
     if is_archive_folder_id(target_conv.folder_id):
         raise ValueError("Archived chats cannot run agents. Restore this chat or use an active ducky.")
 
-    from frontend.ui_web.agent_modes import HELD_FOR_MODEL, run_message, run_message_and_wait
+    from frontend.ui_web.agent_turns.pending import HELD_FOR_MODEL
+    from frontend.ui_web.agent_turns.routing import run_message, run_message_and_wait
     from backend.workspace.identity import resolve_context
 
     context = resolve_context()
@@ -1564,7 +1559,7 @@ def _resolve_sender(sender: str) -> str:
     ctx = run_identity.current()
     if ctx is not None and ctx.conv_id:
         return ctx.conv_id
-    from frontend.ui_web.agent_modes import get_active_conv_id
+    from frontend.ui_web.agent_turns.push import get_active_conv_id
 
     active = get_active_conv_id()
     if active:
@@ -1587,7 +1582,7 @@ def ducky_agent_list(sender: str = "", pretty: bool = False) -> str:
     `parent_conv_id` is a group hub you lead or belong to (legacy key `my_subagents`
     kept as an alias for older prompts).
     """
-    from frontend.ui_web.agent_modes import is_agent_running, linked_parent_of
+    from frontend.ui_web.agent_turns.state import is_agent_running, linked_parent_of
     from frontend.ui_web.agent_state import agent_state
     from frontend.ui_web.group_orchestrator import is_group_conversation
 
@@ -1799,7 +1794,7 @@ def ducky_agent_stop(conv_id: str, cascade: bool = False, pretty: bool = False) 
 
     Open reply threads it owed are closed and senders get a receiver-cancelled notice.
     """
-    from frontend.ui_web.agent_modes import cancel_agent, is_agent_running, linked_children_of
+    from frontend.ui_web.agent_turns.state import cancel_agent, is_agent_running, linked_children_of
     from backend.agent.a2a_client import on_agent_cancelled_by_user
 
     target = conv_id.strip()
@@ -2091,7 +2086,7 @@ def ducky_spawn_chat(
         raise ValueError("group_invite did not return a member_conv_id")
     _store_context_limit(conv_id, context_limit)
 
-    from frontend.ui_web.agent_modes import run_message, run_message_and_wait
+    from frontend.ui_web.agent_turns.routing import run_message, run_message_and_wait
 
     text = _from_another_ducky(conv_id, text, _project_root(), sender=caller)
     mode_norm = (mode or "agent").lower()
@@ -2129,7 +2124,7 @@ def ducky_spawn_chat(
         )
         if outcome.get("status") in ("timeout", "queued") and caller:
             from backend.agent.a2a_client import on_agent_stopped, open_thread
-            from frontend.ui_web.agent_modes import is_agent_running
+            from frontend.ui_web.agent_turns.state import is_agent_running
 
             rid = open_thread(caller, conv_id, deliver_result=True)
             if not is_agent_running(conv_id):
@@ -2192,7 +2187,8 @@ def ducky_recycle_member(
             "Seat agents with ducky_group_invite / ducky_spawn_chat(group_id=…)."
         )
 
-    from frontend.ui_web.agent_modes import HELD_FOR_MODEL, run_message, run_message_and_wait
+    from frontend.ui_web.agent_turns.pending import HELD_FOR_MODEL
+    from frontend.ui_web.agent_turns.routing import run_message, run_message_and_wait
     from frontend.ui_web.context_control import reset_context
     from backend.tools.panel.permission_prompt import approvals_of
 
@@ -2219,7 +2215,7 @@ def ducky_recycle_member(
     # The handoff turn's reply lands before its run is marked idle (it runs in another
     # process), and the session reset refuses a running chat: every recycle failed with
     # "agent is working" after writing a handoff (Oct 25). Wait for idle first.
-    from frontend.ui_web.agent_modes import is_agent_running
+    from frontend.ui_web.agent_turns.state import is_agent_running
 
     idle_by = time.monotonic() + handoff_timeout
     while is_agent_running(old_id) and time.monotonic() < idle_by:
@@ -2525,7 +2521,7 @@ def _resolve_plan_chat_id(chat_id: str = "") -> str:
     if ctx is not None and ctx.conv_id:
         return str(ctx.conv_id).strip()
     try:
-        from frontend.ui_web.agent_modes import get_active_conv_id
+        from frontend.ui_web.agent_turns.push import get_active_conv_id
 
         active = get_active_conv_id()
         if active:

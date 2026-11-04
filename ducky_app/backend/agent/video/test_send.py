@@ -77,7 +77,7 @@ def test_collect_image_paths_includes_video_frames(tmp_path, monkeypatch):
     conv_dir = tmp_path / "convs" / "c1"
     (conv_dir / "attachments").mkdir(parents=True)
     (conv_dir / "attachments" / "f1.jpg").write_bytes(b"j")
-    monkeypatch.setattr("frontend.ui_web.project_chats.get_conversations_dir", lambda root=None: tmp_path / "convs")
+    monkeypatch.setattr("frontend.ui_web.chats.store.get_conversations_dir", lambda root=None: tmp_path / "convs")
     conv = SimpleNamespace(id="c1", messages=[{"role": "user", "attachments": [
         {"kind": "video", "path": "attachments/v.mp4", "frames": [{"path": "attachments/f1.jpg", "t_s": 0.5}]},
     ]}])

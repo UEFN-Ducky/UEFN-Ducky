@@ -62,7 +62,7 @@ _now = time.monotonic
 
 def _agent_running(conv_id: str) -> bool:
     try:
-        from frontend.ui_web.agent_modes import is_agent_running
+        from frontend.ui_web.agent_turns.state import is_agent_running
 
         return is_agent_running(conv_id)
     except Exception:

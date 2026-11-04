@@ -21,7 +21,7 @@ _RESERVED_IDS = {"uefn"}
 
 def _notify_changed() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "mcp_plugins_changed"})
     except Exception:
@@ -41,7 +41,8 @@ def set_plugin_scoped(plugin_id: str, enabled: bool, *, scope: str = "global", c
         cid = (chat_id or "").strip()
         if not cid:
             return {"error": "chat_id required for scope=chat"}
-        from frontend.ui_web.project_chats import load_conversation, save_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         conv = load_conversation(cid)
         if not conv:

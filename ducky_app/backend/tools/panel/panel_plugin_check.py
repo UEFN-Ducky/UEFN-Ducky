@@ -678,7 +678,7 @@ def _end_sandbox(pid: str, stragglers: list[threading.Thread]) -> None:
             worker.join(max(0.0, deadline - time.monotonic()))
         scopes.sandbox_end(pid)
         try:
-            from frontend.ui_web.agent_modes import push_ui_event
+            from frontend.ui_web.agent_turns.push import push_ui_event
 
             push_ui_event({"type": "plugin_scope_changed", "plugins": [pid], "status": True})
         except Exception:

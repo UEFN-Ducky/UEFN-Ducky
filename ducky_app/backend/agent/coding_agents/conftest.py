@@ -6,9 +6,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def _meta_reads_follow_faked_chats(monkeypatch):
     """Plans read chats through ``load_conversation_meta`` (no messages). Many tests fake
-    the chats by replacing ``project_chats.load_conversation``; the metadata read follows
+    the chats by replacing ``chats.conversations.load_conversation``; the metadata read follows
     such a fake so those tests keep describing the same chats."""
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as pc
 
     real_meta, real_load = pc.load_conversation_meta, pc.load_conversation
 

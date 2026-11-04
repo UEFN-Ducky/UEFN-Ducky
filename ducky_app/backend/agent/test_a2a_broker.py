@@ -13,7 +13,7 @@ import pytest
 
 class FakeAgentModes(ModuleType):
     def __init__(self) -> None:
-        super().__init__("frontend.ui_web.agent_modes")
+        super().__init__("frontend.ui_web.agent_turns")
         self.running: set[str] = set()
         self.sent: list[tuple[str, str]] = []
         self.delivered = threading.Event()
@@ -35,7 +35,7 @@ class FakeAgentModes(ModuleType):
 
 class FakeProjectChats(ModuleType):
     def __init__(self) -> None:
-        super().__init__("frontend.ui_web.project_chats")
+        super().__init__("frontend.ui_web.chats")
         self.convs: dict[str, SimpleNamespace] = {}
         self.full_loads: list[str] = []
 
@@ -69,6 +69,19 @@ class FakeGroupOrchestrator(ModuleType):
         return rows[0] if rows else None
 
 
+AGENT_TURNS = tuple(f"frontend.ui_web.agent_turns.{m}" for m in ("push", "state", "pending", "routing"))
+CHATS = tuple(f"frontend.ui_web.chats.{m}" for m in ("conversations", "saves", "store"))
+
+
+def install_fake(monkeypatch, fake: ModuleType, names: tuple[str, ...]) -> None:
+    """Serve ``fake`` for each module path, both ``import a.b.c`` and ``from a.b import c``."""
+    for name in names:
+        package, _, attr = name.rpartition(".")
+        pkg = importlib.import_module(package)  # import the real package before its part is faked
+        monkeypatch.setitem(sys.modules, name, fake)
+        monkeypatch.setattr(pkg, attr, fake, raising=False)
+
+
 @pytest.fixture()
 def broker(monkeypatch):
     fake_modes = FakeAgentModes()
@@ -90,10 +103,8 @@ def broker(monkeypatch):
         parent_conv_id="",
         is_group=False,
     )
-    monkeypatch.setitem(sys.modules, "frontend.ui_web.agent_modes", fake_modes)
-    import frontend.ui_web
-    monkeypatch.setattr(frontend.ui_web, "agent_modes", fake_modes, raising=False)
-    monkeypatch.setitem(sys.modules, "frontend.ui_web.project_chats", fake_chats)
+    install_fake(monkeypatch, fake_modes, AGENT_TURNS)
+    install_fake(monkeypatch, fake_chats, CHATS)
     monkeypatch.setitem(sys.modules, "frontend.ui_web.group_orchestrator", fake_groups)
     module = importlib.import_module("backend.agent.a2a_broker")
     importlib.reload(module)

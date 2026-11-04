@@ -8,7 +8,7 @@ from typing import Any
 
 from frontend.atomic_json import write_json_atomic
 from frontend.settings import PanelSettings, default_app_data_dir
-from frontend.ui_web.project_chats import project_slug
+from frontend.ui_web.chats.store import project_slug
 
 _VERSION = 1
 

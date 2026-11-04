@@ -148,7 +148,7 @@ def test_allow_everything_covers_the_runs_a_chat_starts(monkeypatch, conv) -> No
 
 
 def test_who_started_a_run_is_kept_by_follow_ups(monkeypatch, conv) -> None:
-    from frontend.ui_web.agent_modes import _note_run_starter
+    from frontend.ui_web.agent_turns.run import _note_run_starter
 
     monkeypatch.setattr(pp, "_chat_exists", lambda cid: True)
     pp._remember("lead", "*")

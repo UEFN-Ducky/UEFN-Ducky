@@ -5,16 +5,16 @@ from types import SimpleNamespace
 import pytest
 from backend.agent.coding_agents import plans
 from backend.agent.coding_agents.test_plan_assignment import team  # noqa: F401  (fixture)
-from frontend.ui_web import project_chats
+from frontend.ui_web.chats import conversations as chat_convs
 
 
 @pytest.mark.parametrize('backend', ['files', 'db'])
 @pytest.mark.parametrize('state', ['assigned', 'archived', 'own', 'missing', 'stale', 'ambiguous', 'other_project'])
 def test_mcp_assignment_read_preserves_raw_ownership(team, monkeypatch, backend, state, tmp_path):
     from backend.tools.panel import ducky_panel as panel
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
     monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
-    monkeypatch.setattr(agent_modes, 'get_active_conv_id', lambda: '')
+    patch_turns(monkeypatch, 'get_active_conv_id', lambda: '')
     monkeypatch.setenv('DUCKY_CONV_ID', 'builder')
     root = team
     if state != 'missing':
@@ -25,8 +25,8 @@ def test_mcp_assignment_read_preserves_raw_ownership(team, monkeypatch, backend,
         plans.create_plan('builder', nodes=[{'id': 'personal', 'content': 'Personal'}], project_root=team,
                           team_check=False)
     if state == 'stale':
-        original = project_chats.load_conversation
-        monkeypatch.setattr(project_chats, 'load_conversation', lambda cid, project_root=None:
+        original = chat_convs.load_conversation
+        monkeypatch.setattr(chat_convs, 'load_conversation', lambda cid, project_root=None:
                             None if cid == 'coord' else original(cid, project_root))
     if state == 'ambiguous':
         plans.create_plan('outsider', nodes=[{'id': 'other', 'content': 'Other', 'assignee': 'group-a'}], project_root=team)
@@ -54,7 +54,7 @@ def test_mcp_assignment_read_preserves_raw_ownership(team, monkeypatch, backend,
         plans.update_node('coord', 'a2', assignee='builder', project_root=team)
         resumed = json.loads(panel.ducky_get_plan())['plan']
         assert resumed['assigned_from']['node_id'] == 'a2'
-        monkeypatch.setattr(agent_modes, 'get_active_conv_id', lambda: 'builder')
+        patch_turns(monkeypatch, 'get_active_conv_id', lambda: 'builder')
         monkeypatch.setenv('DUCKY_CONV_ID', 'outsider')
         assert json.loads(panel.ducky_get_plan())['plan'] == resumed
     else:
@@ -125,9 +125,9 @@ def test_get_plan_outline_and_section_views(big_plan):
 
 def test_update_node_sets_planned_assignee_and_starts_nobody(team, monkeypatch):
     from backend.tools.panel import ducky_panel as panel
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
     pushes = []
-    monkeypatch.setattr(agent_modes, '_resolve_push', lambda _: pushes.append)
+    patch_turns(monkeypatch, '_resolve_push', lambda _: pushes.append)
     monkeypatch.setattr(panel, '_project_root', lambda: team)
     out = json.loads(panel.ducky_plan_update_node(node_id='a', planned_assignee='swarm-speed-developer',
                                                   chat_id='coord'))

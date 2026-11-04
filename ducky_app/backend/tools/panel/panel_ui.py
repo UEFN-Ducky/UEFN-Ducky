@@ -246,9 +246,9 @@ def ducky_ui_queue_file_pick(paths: list[str] | None = None, cancel: bool = Fals
     plugin panel's import flow (a person isn't needed at the PC). ``paths``: files to return
     (they must exist); ``cancel=true``: the next picker returns nothing, as when the person
     cancels. Used once; expires after 2 minutes. Queue it, then trigger the panel's pick."""
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import push as agent_push
 
-    if not agent_modes._in_bridge_process():
+    if not agent_push._in_bridge_process():
         from frontend.ui_web.picker_queue import queue_pick
 
         return tool_json(queue_pick(paths, cancel=bool(cancel)), pretty=pretty)
@@ -645,7 +645,7 @@ def _resolve_ask_user_conv_id() -> str:
     except Exception:
         pass
     try:
-        from frontend.ui_web.agent_modes import get_active_conv_id
+        from frontend.ui_web.agent_turns.push import get_active_conv_id
 
         active = get_active_conv_id()
         if active:
@@ -663,7 +663,7 @@ def _show_in_lead_chat(payload: dict[str, Any], conv_id: str) -> None:
     member chat nobody has open stopped the whole team (Oct 15 2026)."""
     try:
         from backend.tools.panel.permission_prompt import starter_root
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         lead = starter_root(conv_id)
         if not lead or lead == conv_id:

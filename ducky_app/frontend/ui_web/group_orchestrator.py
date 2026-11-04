@@ -10,7 +10,8 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
-from frontend.ui_web.project_chats import append_message, load_conversation, save_conversation
+from frontend.ui_web.chats.conversations import load_conversation
+from frontend.ui_web.chats.saves import append_message, save_conversation
 
 PushFn = Callable[[dict[str, Any]], None]
 
@@ -117,8 +118,8 @@ def save_group_roster(
     come from the newer of ``rows`` and the stored roster (see ``keep_stored_lanes``).
     Every roster save goes through here; ``load`` / ``save`` default to the chat store."""
     from backend.workspace.lanes import keep_stored_lanes
-    from frontend.ui_web.project_chats import _conversation_lock, load_conversation_meta
-
+    from frontend.ui_web.chats.conversations import load_conversation_meta
+    from frontend.ui_web.chats.store import _conversation_lock
     with _conversation_lock(group.id):
         stored = (load or (lambda cid: load_conversation_meta(cid, project_root)))(group.id)
         if stored is not None and stored is not group:
@@ -138,8 +139,8 @@ def group_and_nested_ids(group_id: str, project_root: str | None = None) -> list
     Inside = a hub whose parent_conv_id leads here (groups made in a group's folder), or a
     nested-group row in a roster (teams made before those hubs had a parent).
     """
-    from frontend.ui_web.project_chats import conversation_descendant_ids, load_conversation_meta
-
+    from frontend.ui_web.chats.conversations import load_conversation_meta
+    from frontend.ui_web.chats.groups import conversation_descendant_ids
     root = (group_id or "").strip()
     if not root:
         return []
@@ -176,8 +177,8 @@ _NESTED_GROUP_DEPTH = 3
 
 def evict_member_from_group(member_conv_id: str, project_root: str | None = None) -> None:
     """Move a leaf member to Duckies root, or un-nest a subgroup folder. Does not edit roster."""
-    from frontend.ui_web.project_chats import load_folders, move_conversation, save_folders
-
+    from frontend.ui_web.chats.conversations import move_conversation
+    from frontend.ui_web.chats.folders import load_folders, save_folders
     mid = (member_conv_id or "").strip()
     if not mid:
         return
@@ -206,7 +207,7 @@ def evict_member_from_group(member_conv_id: str, project_root: str | None = None
 
 
 def _group_folder_id(group_id: str, project_root: str | None = None) -> str:
-    from frontend.ui_web.project_chats import island_for_conversation
+    from frontend.ui_web.chats.groups import island_for_conversation
 
     gid = (group_id or "").strip()
     if not gid:
@@ -248,12 +249,11 @@ def stays_with_outer_group(
 
 def _rehome_group_roster(group: Any) -> bool:
     """Put roster chats on the group's island. Returns whether any moved."""
-    from frontend.ui_web.project_chats import _repo, _use_db, adopt_group_project
-
-    if not _use_db() or not is_group_conversation(group):
+    from frontend.ui_web.chats import groups as _chat_groups, store as _chat_store
+    if not _chat_store._use_db() or not is_group_conversation(group):
         return False
     gid = str(group.id)
-    home = (_repo().conv_project_id(gid) or "").strip()
+    home = (_chat_store._repo().conv_project_id(gid) or "").strip()
     if not home:
         return False
     moved = False
@@ -261,19 +261,19 @@ def _rehome_group_roster(group: Any) -> bool:
         cid = str(row.get("member_conv_id") or "").strip()
         if not cid or cid == gid or row.get("is_group"):
             continue
-        if (_repo().conv_project_id(cid) or "") == home:
+        if (_chat_store._repo().conv_project_id(cid) or "") == home:
             continue
         member = load_conversation(cid)
         if member is None:
             continue
-        adopt_group_project(member, gid)
+        _chat_groups.adopt_group_project(member, gid)
         moved = True
     return moved
 
 
 def sync_group_members_from_folder(group: Any, project_root: str | None = None) -> list[dict[str, Any]]:
     """Rebuild group_members from chats + nested group folders inside the group folder."""
-    from frontend.ui_web.project_chats import island_for_conversation
+    from frontend.ui_web.chats.groups import island_for_conversation
 
     if not group or not is_group_conversation(group):
         return []
@@ -444,8 +444,8 @@ def sync_group_members_from_folder(group: Any, project_root: str | None = None) 
 
 def reconcile_group_rosters_from_folders(project_root: str | None = None) -> list[str]:
     """Rebuild every group roster from its folder; clear parent on duckies that left."""
-    from frontend.ui_web.project_chats import list_conversations, load_folders
-
+    from frontend.ui_web.chats.conversations import list_conversations
+    from frontend.ui_web.chats.folders import load_folders
     hub_ids: list[str] = []
     folder_of_hub: dict[str, str] = {}
     for folder in load_folders(project_root):
@@ -577,7 +577,7 @@ def broadcast_group_briefing(
         mid = str(m.get("member_conv_id") or "").strip()
         if not mid or m.get("is_group") or mid in skip or _agent_running(mid):
             continue
-        from frontend.ui_web.agent_modes import append_if_idle
+        from frontend.ui_web.agent_turns.state import append_if_idle
 
         def append_briefing() -> bool:
             # Reload under the admission lock so an intervening completed turn
@@ -657,7 +657,7 @@ def _message_plain_text(msg: dict[str, Any]) -> str:
 
 def _agent_running(conv_id: str) -> bool:
     try:
-        from frontend.ui_web.agent_modes import is_agent_running
+        from frontend.ui_web.agent_turns.state import is_agent_running
 
         return bool(is_agent_running(conv_id))
     except Exception:
@@ -719,7 +719,7 @@ def _turn_origin(plain: str) -> tuple[str, str]:
 def _hub_chain(group_id: str, project_root: str | None = None) -> list[tuple[str, list[str], list[str]]]:
     """The member's own group, then every group above it, as (hub id, names of the groups
     between that hub and the member, their hub ids). The member's own group has none."""
-    from frontend.ui_web.project_chats import island_for_conversation
+    from frontend.ui_web.chats.groups import island_for_conversation
 
     _convs, folders = island_for_conversation(group_id, project_root)
     by_hub = {(f.group_hub_id or "").strip(): f for f in folders if (getattr(f, "group_hub_id", None) or "").strip()}
@@ -781,7 +781,7 @@ def post_team_message(sender_id: str, receiver_id: str, body: str, *, push: Push
 
 def _panel_push() -> PushFn | None:
     try:
-        from frontend.ui_web.agent_modes import get_panel_push
+        from frontend.ui_web.agent_turns.push import get_panel_push
 
         return get_panel_push()
     except Exception:
@@ -1297,7 +1297,7 @@ def _persist_group_attachments(
     from backend.agent.attachments import parse_attachment_dicts
     from frontend.settings import PanelSettings
     from frontend.ui_web.conversation_attachments import persist_message_attachments
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     parsed = parse_attachment_dicts(attachments, current=True, enforce_image_cap=False)
     if not parsed:
@@ -1324,8 +1324,8 @@ def run_group_turn(
     attachments: list[dict[str, Any]] | None = None,
 ) -> str:
     """Start a group orchestrator thread. Returns run_id (empty on immediate failure)."""
-    from frontend.ui_web.agent_modes import get_panel_push, is_agent_running
-
+    from frontend.ui_web.agent_turns.push import get_panel_push
+    from frontend.ui_web.agent_turns.state import is_agent_running
     push_fn: PushFn = push or get_panel_push() or (lambda _e: None)
     conv = load_conversation(group_id)
     if not conv or not is_group_conversation(conv):
@@ -1561,7 +1561,7 @@ def _run_member_turn(
     attachments: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], str, str]:
     """Run one member in the background. Returns (publish_speaker, reply, error)."""
-    from frontend.ui_web.agent_modes import run_message_and_wait
+    from frontend.ui_web.agent_turns.routing import run_message_and_wait
 
     if cancel.is_set():
         return publish_as or speaker, "", "cancelled"
@@ -1593,8 +1593,8 @@ def _run_member_turn(
     # on "waiting for linked agent" while the reply already finished.
     member_id = str(speaker["member_conv_id"])
     author = author_payload(badge)
-    from frontend.ui_web.agent_modes import is_agent_running, run_message
-
+    from frontend.ui_web.agent_turns.routing import run_message
+    from frontend.ui_web.agent_turns.state import is_agent_running
     if is_agent_running(member_id):
         # Busy with its own work: a group message never stops it. It goes next in line.
         _track_group_turn(member_id, group_id, late=True)

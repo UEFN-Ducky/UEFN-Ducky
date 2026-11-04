@@ -12,14 +12,14 @@ import pytest
 from backend.agent.coding_agents import plans
 from backend.agent.coding_agents.test_plan_assignment import team  # noqa: F401  (fixture)
 from backend.agent.coding_agents.test_plan_concurrency import race
-from frontend.ui_web import project_chats
+from frontend.ui_web.chats import conversations as chat_convs
 
 
 @pytest.mark.parametrize('backend', ['files', 'db'])
 def test_two_group_shared_plan_workflow(team, monkeypatch, backend, tmp_path):
     from backend.agent import a2a_broker as broker
     from backend.tools.panel import ducky_panel as panel
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     monkeypatch.setenv('DUCKY_STORE_BACKEND_PLANS', backend)
     root = team
@@ -28,11 +28,11 @@ def test_two_group_shared_plan_workflow(team, monkeypatch, backend, tmp_path):
     chats = {cid: SimpleNamespace(id=cid, parent_conv_id=parent, title=cid,
         ducky_name=cid, coding_agent='ducky', messages=[], is_group=False)
         for cid, parent in parents.items()}
-    monkeypatch.setattr(project_chats, 'load_conversation', lambda cid, project_root=None: chats.get(cid))
-    monkeypatch.setattr(project_chats, 'iter_conversations_by_project', lambda: [])
+    monkeypatch.setattr(chat_convs, 'load_conversation', lambda cid, project_root=None: chats.get(cid))
+    monkeypatch.setattr(chat_convs, 'iter_conversations_by_project', lambda: [])
     monkeypatch.setattr(plans, '_push_assignment_invalidated', lambda *args: None)
     monkeypatch.setattr(panel, '_project_root', lambda: root)
-    monkeypatch.setattr(agent_modes, 'get_active_conv_id', lambda: 'builder')
+    patch_turns(monkeypatch, 'get_active_conv_id', lambda: 'builder')
     master = plans.update_node('coord', 'a', assignee='group-a', project_root=root)
     plans.update_node('coord', 'b', assignee='group-b', project_root=root)
 
@@ -70,9 +70,9 @@ def test_two_group_shared_plan_workflow(team, monkeypatch, backend, tmp_path):
     def deliver(cid, text, *args, **kwargs):
         sent.append((cid, text))
         return 'synthetic-run-' + cid
-    monkeypatch.setattr(agent_modes, 'run_message', deliver)
-    monkeypatch.setattr(agent_modes, 'is_agent_running', lambda cid: False)
-    monkeypatch.setattr(agent_modes, 'wait_for_idle', lambda *args: True)
+    patch_turns(monkeypatch, 'run_message', deliver)
+    patch_turns(monkeypatch, 'is_agent_running', lambda cid: False)
+    patch_turns(monkeypatch, 'wait_for_idle', lambda *args: True)
     def settle(count):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
@@ -115,9 +115,9 @@ def test_two_group_shared_plan_workflow(team, monkeypatch, backend, tmp_path):
 import json, sys
 from types import SimpleNamespace
 from backend.agent.coding_agents import plans
-from frontend.ui_web import project_chats
+from frontend.ui_web.chats import conversations as chat_convs
 parents = json.loads(sys.argv[2])
-project_chats.load_conversation = project_chats.load_conversation_meta = lambda cid, project_root=None: (
+chat_convs.load_conversation = chat_convs.load_conversation_meta = lambda cid, project_root=None: (
     SimpleNamespace(parent_conv_id=parents[cid]) if cid in parents else None)
 print(json.dumps(plans.load_plan_view('builder', sys.argv[1])))
 ''', root, json.dumps(parents)], env=env, capture_output=True, text=True, timeout=20, check=True)

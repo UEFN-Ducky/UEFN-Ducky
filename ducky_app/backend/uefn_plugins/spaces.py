@@ -348,7 +348,7 @@ def _asked(account: str, space: str, plugin: str, data: dict[str, Any]) -> None:
     name = str(mine["name"] or unit.split(":", 1)[-1])
     label = plugin_label(plugin) or plugin
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "plugin_lock_asked", "plugin_id": plugin, "unit": unit, "unit_name": name,
                        "holder": who})
@@ -952,7 +952,7 @@ def rebind_project_folders(project_root: str, plugins: list[str] | None = None) 
             except Exception:  # noqa: BLE001 — its next call reloads it through the epoch
                 _log.debug("restart after a project switch failed for %s", plugin, exc_info=True)
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "plugin_scope_changed", "plugins": moved, "switched": True})
     except Exception:  # noqa: BLE001 — panels read the new copy on their next open
@@ -1007,7 +1007,7 @@ def on_account_change(before: str, after: str) -> None:
         from backend.uefn_plugins import team_folders
         from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
         from backend.uefn_plugins.store import get_enabled_plugin_ids
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         for plugin in folders:
             try:
@@ -1074,7 +1074,7 @@ def _changed(plugin: str, *, data: bool = True) -> None:
     """The plugin's bars read their status again; ``data``: its panels re-read too (a
     resolve or restore changed its data; a lock or the mode didn't)."""
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "plugin_scope_changed", "plugins": [plugin], **({} if data else {"status": True})})
     except Exception:  # noqa: BLE001 — the next status read shows it
@@ -1345,7 +1345,7 @@ def save_unsent(plugin: str, action: str = "save") -> dict[str, Any]:
     _changed(plugin)
     if any(s["plugin"] == WORKFLOW_DOCS for s in out.get("saved") or []):
         try:
-            from frontend.ui_web.agent_modes import push_ui_event
+            from frontend.ui_web.agent_turns.push import push_ui_event
 
             push_ui_event({"type": "graphs_changed"})
         except Exception:  # noqa: BLE001 — the Workflows view reads it on its next open

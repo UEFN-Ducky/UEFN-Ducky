@@ -114,7 +114,7 @@ def _start_boot_meters() -> None:
         logging.getLogger(__name__).warning("core-wait meter did not start", exc_info=True)
     try:
         from frontend import boot_report
-        from frontend.ui_web.agent_modes import list_running_agents
+        from frontend.ui_web.agent_turns.state import list_running_agents
 
         boot_report.start_heartbeat(lambda: len(list_running_agents()))
     except Exception:
@@ -753,7 +753,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
             force_window_foreground(w)
         if kind and target_id:
-            from frontend.ui_web.agent_modes import push_ui_event
+            from frontend.ui_web.agent_turns.push import push_ui_event
 
             push_ui_event({"type": "open_target", "kind": kind, "id": target_id})
 

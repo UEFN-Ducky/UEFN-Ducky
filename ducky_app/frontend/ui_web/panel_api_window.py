@@ -36,7 +36,7 @@ class PanelApiWindowMixin:
         self._window = window
         self._hide_callback = on_hide
         self._exit_callback = on_exit
-        from frontend.ui_web.agent_modes import set_panel_push
+        from frontend.ui_web.agent_turns.push import set_panel_push
 
         set_panel_push(self._push)
         from frontend.ui_web.terminal import get_terminal_manager
@@ -522,7 +522,7 @@ class PanelApiWindowMixin:
 
     def save_editor_workspace(self, payload: dict[str, Any]) -> None:
         """Save the tabs, then tell every other page (the PC window, a phone) to reload them."""
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
         from frontend.ui_web.editor_workspace import save_editor_workspace
 
         data = dict(payload or {})

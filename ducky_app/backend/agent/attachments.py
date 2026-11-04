@@ -139,7 +139,7 @@ def attachments_from_message_dict(
     raw_list = message.get("attachments")
     if raw_list and conv_id:
         from frontend.ui_web.conversation_attachments import hydrate_attachment_dicts
-        from frontend.ui_web.project_chats import get_conversations_dir
+        from frontend.ui_web.chats.store import get_conversations_dir
 
         raw_list = hydrate_attachment_dicts(raw_list, conv_id, get_conversations_dir(project_root), project_root)
     return parse_attachment_dicts(raw_list)

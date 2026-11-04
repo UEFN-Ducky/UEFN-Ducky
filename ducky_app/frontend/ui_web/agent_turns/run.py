@@ -35,7 +35,7 @@ from frontend.ui_web.agent_turns.state import (
     _push_agent_stopped,
     _sessions_lock,
 )
-from frontend.ui_web.project_chats import save_conversation
+from frontend.ui_web.chats.saves import save_conversation
 from frontend.ui_web.token_usage import record_api_call, token_usage_report
 
 
@@ -220,7 +220,7 @@ async def _run_agent_loop(
     turn_started = time.time()  # pictures made for this chat from now on show in the reply
     from backend.agent.coding_agents.runner import _TurnCheckpoint
     from backend.agent.toolsets import effective_tool_name
-    from frontend.ui_web.project_chats import upsert_in_flight_assistant
+    from frontend.ui_web.chats.saves import upsert_in_flight_assistant
 
     ckpt = _TurnCheckpoint(conv, "ducky", run_id)
     push = ckpt.wrap(push)
@@ -432,7 +432,7 @@ def _backfill_video_frames(
     ):
         return
     from backend.agent.video.send import backfill_history_frames
-    from frontend.ui_web.project_chats import get_conversations_dir
+    from frontend.ui_web.chats.store import get_conversations_dir
 
     changed = backfill_history_frames(
         conv.messages,

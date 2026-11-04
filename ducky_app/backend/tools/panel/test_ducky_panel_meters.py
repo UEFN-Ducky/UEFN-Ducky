@@ -27,7 +27,8 @@ def test_perf_report_has_the_per_process_blocks(monkeypatch):
 
 
 def test_agent_list_rows_carry_state_since_and_detail(monkeypatch):
-    from frontend.ui_web import agent_modes, agent_state, group_orchestrator
+    from frontend.ui_web import agent_state, group_orchestrator
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     chats = [SimpleNamespace(id=cid, title=title, folder_id="", parent_conv_id="", ducky_name="",
                              coding_agent="claude", messages=[]) for cid, title in
@@ -35,8 +36,8 @@ def test_agent_list_rows_carry_state_since_and_detail(monkeypatch):
     monkeypatch.setattr(ducky_panel, "list_conversations", lambda project_root=None: chats)
     monkeypatch.setattr(ducky_panel, "_project_root", lambda: "")
     monkeypatch.setattr(ducky_panel, "_resolve_sender", lambda s: "")
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: cid == "lead")
-    monkeypatch.setattr(agent_modes, "linked_parent_of", lambda cid: "")
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: cid == "lead")
+    patch_turns(monkeypatch, "linked_parent_of", lambda cid: "")
     monkeypatch.setattr(group_orchestrator, "is_group_conversation", lambda conv: False)
     asked = []
     monkeypatch.setattr(agent_state, "agent_state", lambda cid: asked.append(cid) or

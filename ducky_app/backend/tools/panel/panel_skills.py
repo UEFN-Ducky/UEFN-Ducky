@@ -14,7 +14,7 @@ from backend.server import mcp
 
 def _notify_changed() -> None:
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event({"type": "skills_changed"})
     except Exception:
@@ -175,7 +175,7 @@ def set_pack_scoped(pack_id: str, enabled: bool, *, scope: str = "global", chat_
     cid = (chat_id or "").strip()
     if not cid:
         return {"error": "chat_id required for scope=chat"}
-    from frontend.ui_web.project_chats import load_conversation, set_conversation_disabled_packs
+    from frontend.ui_web.chats.conversations import load_conversation, set_conversation_disabled_packs
 
     conv = load_conversation(cid)
     if not conv:

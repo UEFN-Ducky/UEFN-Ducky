@@ -177,16 +177,16 @@ def test_history_video_over_current_size_limit_still_parses(monkeypatch):
 def test_backfill_is_skipped_for_external_agents(monkeypatch):
     from types import SimpleNamespace
 
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import run as agent_run
 
     def boom(*_a, **_k):
         raise AssertionError("backfill must not run for external agents")
 
     monkeypatch.setattr("backend.agent.video.send.backfill_history_frames", boom)
     conv = SimpleNamespace(messages=[{"role": "user", "attachments": [{"kind": "video", "name": "a.mp4"}]}])
-    agent_modes._backfill_video_frames(conv, "c1", "anthropic", True, lambda _e: None, None)
+    agent_run._backfill_video_frames(conv, "c1", "anthropic", True, lambda _e: None, None)
     with pytest.raises(AssertionError):
-        agent_modes._backfill_video_frames(conv, "c1", "anthropic", False, lambda _e: None, None)
+        agent_run._backfill_video_frames(conv, "c1", "anthropic", False, lambda _e: None, None)
 
 
 def test_transcript_round_trips_through_parse_persist_hydrate(tmp_path):

@@ -191,7 +191,7 @@ def test_show_workflow_with_a_title_is_a_show_me(rpc, monkeypatch):
     from backend.automations.store import delete_workflow
     from backend.tools.panel.panel_automations import show_workflow
 
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", lambda _e: None)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", lambda _e: None)
     wid = _workflow()
     try:
         out = json.loads(show_workflow(wid, node_ids=["w", "nope"], title="The wait", body="Pauses."))

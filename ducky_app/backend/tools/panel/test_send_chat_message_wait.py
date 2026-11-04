@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from backend.agent.coding_agents import plans
 from backend.tools.panel import ducky_panel
-from frontend.ui_web import agent_modes
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 def test_waiting_on_an_agent_never_cancels_it_when_the_wait_runs_out(monkeypatch) -> None:
@@ -19,7 +19,7 @@ def test_waiting_on_an_agent_never_cancels_it_when_the_wait_runs_out(monkeypatch
         seen.append(kwargs)
         return {"status": "timeout", "conv_id": conv_id}
 
-    monkeypatch.setattr(agent_modes, "run_message_and_wait", fake_wait)
+    patch_turns(monkeypatch, "run_message_and_wait", fake_wait)
     json.loads(ducky_panel.ducky_send_chat_message("builder", "status?", timeout_sec=5))
     assert seen and seen[0]["cancel_on_timeout"] is False
 
@@ -28,7 +28,7 @@ def test_messaging_a_busy_agent_without_waiting_queues_instead_of_stopping_it(mo
     monkeypatch.setattr(ducky_panel, "_project_root", lambda: "")
     monkeypatch.setattr(ducky_panel, "load_conversation", lambda cid, project_root=None: SimpleNamespace(id=cid, folder_id=""))
     seen: list[dict] = []
-    monkeypatch.setattr(agent_modes, "run_message", lambda cid, text, mode, model, **kw: seen.append(kw) or "queued")
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: seen.append(kw) or "queued")
     out = json.loads(ducky_panel.ducky_send_chat_message("builder", "next task", wait_for_reply=False))
     assert seen and seen[0]["queue_if_busy"] is True
     assert out["status"] == "queued"
@@ -47,7 +47,7 @@ def test_a_message_from_another_ducky_says_who_sent_it(monkeypatch) -> None:
     monkeypatch.setattr(plans, "team_plan_for", lambda cid, root=None: None)
     monkeypatch.setattr(plans, "load_plan", lambda cid, root=None: {"chat_id": cid, "status": "open"} if cid == "lead" else None)
     sent: list[str] = []
-    monkeypatch.setattr(agent_modes, "run_message", lambda cid, text, mode, model, **kw: sent.append(text) or "running")
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: sent.append(text) or "running")
     ducky_panel.ducky_send_chat_message("builder", "DISCOVERY ONLY.", wait_for_reply=False)
     lines = sent[0].splitlines()
     assert lines[0] == "[ducky:agent-message] from Video Plugin Lead (chat lead) [codex]"
@@ -75,7 +75,7 @@ def test_a_lead_with_no_plan_hands_out_no_work_by_message(monkeypatch) -> None:
     lead_plan: dict = {"doc": None}
     monkeypatch.setattr(plans, "load_plan", lambda cid, root=None: lead_plan["doc"] if cid == "lead" else None)
     sent: list[str] = []
-    monkeypatch.setattr(agent_modes, "run_message", lambda cid, text, mode, model, **kw: sent.append(cid) or "running")
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: sent.append(cid) or "running")
     out = json.loads(ducky_panel.ducky_send_chat_message("builder", "Build the CLI.", wait_for_reply=False))
     assert out["status"] == "not_sent" and "ducky_create_plan" in out["reason"] and sent == []
     lead_plan["doc"] = {"chat_id": "lead", "status": "finished"}  # a finished plan holds no new work
@@ -107,7 +107,7 @@ def test_a_lead_whose_team_has_members_spawns_no_work_before_its_plan(monkeypatc
             return {"ok": True, "member": {"member_conv_id": f"m{len(seated)}", "name": "Verse Coder"}}
 
     monkeypatch.setattr(ducky_panel, "_panel_api", lambda: Api())
-    monkeypatch.setattr(agent_modes, "run_message", lambda *a, **k: "running")
+    patch_turns(monkeypatch, "run_message", lambda *a, **k: "running")
     monkeypatch.setattr("backend.agent.a2a_client.open_thread", lambda *a, **k: "rid")
 
     def spawn(text: str) -> dict:
@@ -157,7 +157,7 @@ def test_the_chat_that_spawns_into_a_leaderless_group_leads_it_and_invite_finds_
             return [chats[group_id].leader_conv_id] if chats[group_id].leader_conv_id else []
 
     monkeypatch.setattr(ducky_panel, "_panel_api", lambda: Api())
-    monkeypatch.setattr(agent_modes, "run_message", lambda *a, **k: "running")
+    patch_turns(monkeypatch, "run_message", lambda *a, **k: "running")
     monkeypatch.setattr("backend.agent.a2a_client.open_thread", lambda *a, **k: "rid")
     ducky_panel.ducky_spawn_chat("Build it.", ducky="Developer", group_id="hub", sender="lead", wait_for_reply=False)
     assert hub.leader_conv_id == "lead"

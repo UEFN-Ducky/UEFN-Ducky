@@ -32,7 +32,7 @@ def _reveal_graph(workflow_id: str, action: str, *, nodes: list[str] | None = No
     if note.strip():
         event["note"] = note.strip()[:_NOTE_MAX]
     try:
-        from frontend.ui_web.agent_modes import push_ui_event
+        from frontend.ui_web.agent_turns.push import push_ui_event
 
         push_ui_event(event)
     except Exception:
@@ -566,7 +566,7 @@ def _agent_maker() -> tuple[str, str, str]:
     call these tools; the person uses the editor."""
     try:
         from backend.tools.panel.panel_ui import _resolve_ask_user_conv_id
-        from frontend.ui_web.project_chats import load_conversation
+        from frontend.ui_web.chats.conversations import load_conversation
 
         cid = str(_resolve_ask_user_conv_id() or "").strip()
         conv = load_conversation(cid) if cid else None

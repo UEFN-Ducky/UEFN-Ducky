@@ -42,7 +42,7 @@ def test_workflow_runner_keeps_mcp_loop_responsive(monkeypatch):
 
 def _events(monkeypatch) -> list[dict]:
     events: list[dict] = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.push_ui_event", events.append)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.push_ui_event", events.append)
     return events
 
 
