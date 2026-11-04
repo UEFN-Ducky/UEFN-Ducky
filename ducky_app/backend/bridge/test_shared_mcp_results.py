@@ -11,7 +11,7 @@ import pytest
 from mcp.types import CallToolRequest, CallToolRequestParams, CallToolResult, TextContent
 
 from backend.bridge import shared_mcp
-from backend.bridge.test_shared_mcp import _hello, _rpc, _serve
+from backend.bridge.test_shared_mcp import _hello, _rpc, serve
 
 
 def _server():
@@ -97,7 +97,7 @@ def test_shared_result_matches_stdio_result(server, name, args):
 
 
 def test_str_tool_result_over_the_daemon_socket(server, monkeypatch, tmp_path):
-    thread = _serve(server, monkeypatch, tmp_path)
+    thread = serve(server, monkeypatch, tmp_path)
     sock = _hello("run-shape")
     try:
         rows = {row["name"]: row for row in _rpc(sock, "tools/list")["tools"]}

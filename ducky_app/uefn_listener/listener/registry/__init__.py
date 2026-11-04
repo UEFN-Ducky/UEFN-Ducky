@@ -25,4 +25,5 @@ from listener.registry import (  # noqa: F401  (side-effect imports: register co
     umg,
     verse,
     worldgen,
+    worldgen_foliage_stats,
 )

@@ -14,7 +14,7 @@ import time
 import pytest
 
 from backend.bridge import shared_mcp
-from backend.bridge.test_shared_mcp import FakeMcp, _hello, _serve
+from backend.bridge.test_shared_mcp import FakeMcp, _hello, serve
 
 
 class WaitingMcp(FakeMcp):
@@ -37,7 +37,7 @@ def daemon(monkeypatch, tmp_path):
     monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
     monkeypatch.setattr(shared_mcp, "_report_stuck", lambda *a, **k: None)
     mcp = WaitingMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         yield mcp
     finally:

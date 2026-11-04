@@ -152,7 +152,6 @@ BASELINE: set[str] = {
     'frontend/ui_web -> frontend.favorite_models._available_api_models',
     'frontend/ui_web -> frontend.window_view._window_box',
     'frontend/usage_stats -> backend.tools.core.uefn_modal._enum_uefn_windows',
-    'frontend/usage_stats -> frontend.duckyos_account._store_collect',
     'frontend/window_view -> backend.bridge.status._project_from_health',
     'frontend/window_view -> backend.tools.core.uefn_modal._enum_uefn_windows',
 }

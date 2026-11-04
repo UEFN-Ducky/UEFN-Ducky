@@ -77,7 +77,8 @@ def _fingerprint(tools: list[dict]) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def _serve(mcp: FakeMcp, monkeypatch, tmp_path: Path) -> threading.Thread:
+def serve(mcp: FakeMcp, monkeypatch, tmp_path: Path) -> threading.Thread:
+    """Run the shared daemon for *mcp* on a thread, its state file in *tmp_path*."""
     monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
     shared_mcp.reset_for_tests()
     t = threading.Thread(target=shared_mcp.serve_daemon, args=(mcp,), daemon=True)
@@ -111,11 +112,12 @@ def _rpc(handle: int, method: str, params: dict | None = None, req_id: int = 1) 
     return reply.get("result") or {}
 
 
-def test_flag_default_off(monkeypatch) -> None:
+def test_flag_default_on(monkeypatch) -> None:
+    # On by default since Nov 4 2026: off, each running agent got its own ~0.6 GB tool server.
     monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
     monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
-    assert shared_mcp.enabled() is False
-    assert shared_mcp.enabled(PanelSettings()) is False
+    assert shared_mcp.enabled(PanelSettings()) is True
+    assert shared_mcp.enabled(PanelSettings(shared_mcp=False)) is False
 
 
 def test_agent_hosts_share_one_server_each(monkeypatch, tmp_path) -> None:
@@ -203,7 +205,7 @@ def test_adapter_relays_to_daemon(monkeypatch, tmp_path) -> None:
     from frontend import shared_mcp_adapter as ad
 
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         state = shared_mcp.wait_ready(8.0)
         sock = ad._try_hello({"host": state["host"], "port": state["port"], "token": state["token"], "key": state["key"]})
@@ -226,7 +228,7 @@ def test_keys_compatible() -> None:
 
 def test_concurrent_run_ids_isolated(monkeypatch, tmp_path) -> None:
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         a = _hello("run-a")
         b = _hello("run-b")
@@ -251,7 +253,7 @@ def test_many_agents_at_once_each_get_their_own_answers(monkeypatch, tmp_path) -
     # A host's agents share one daemon: 8 clients x 20 calls at the same time, every
     # answer back to the client that asked, under its own identity, none lost or swapped.
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     clients, calls = 8, 20
     got: dict[str, list[str]] = {}
     errors: list[BaseException] = []
@@ -290,7 +292,7 @@ def test_many_agents_at_once_each_get_their_own_answers(monkeypatch, tmp_path) -
 
 def test_cancel_does_not_kill_other_client(monkeypatch, tmp_path) -> None:
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         a = _hello("run-a")
         b = _hello("run-b")
@@ -322,7 +324,7 @@ def test_cancel_does_not_kill_other_client(monkeypatch, tmp_path) -> None:
 
 def test_tools_list_fingerprint_stable(monkeypatch, tmp_path) -> None:
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         a = _hello("run-a")
         b = _hello("run-b")
@@ -339,7 +341,7 @@ def test_tools_list_fingerprint_stable(monkeypatch, tmp_path) -> None:
 
 def test_hello_rejects_incompatible_key(monkeypatch, tmp_path) -> None:
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         state = shared_mcp.wait_ready(8.0)
         bad = {**state["key"], "port": "9999"}
@@ -382,7 +384,7 @@ def test_ready_plugins_skip_the_long_wait(monkeypatch) -> None:
 
 def test_tools_list_returns_while_a_call_blocks_the_loop(monkeypatch, tmp_path) -> None:
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         a = _hello("run-a")
         b = _hello("run-b")
@@ -416,7 +418,7 @@ def test_tools_list_returns_while_a_call_blocks_the_loop(monkeypatch, tmp_path) 
 def test_gui_closed_daemon_lists_tools(monkeypatch, tmp_path) -> None:
     """No WebView: adapter can start the daemon and list tools."""
     mcp = FakeMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         h = _hello("headless")
         listed = _rpc(h, "tools/list")
@@ -454,7 +456,7 @@ class WaitingMcp(FakeMcp):
 
 def test_a_sync_tool_waiting_on_another_agent_does_not_deadlock(monkeypatch, tmp_path) -> None:
     mcp = WaitingMcp()
-    thread = _serve(mcp, monkeypatch, tmp_path)
+    thread = serve(mcp, monkeypatch, tmp_path)
     try:
         caller = _hello("run-caller")
         agent = _hello("run-agent")
@@ -493,7 +495,7 @@ def test_tools_keep_their_arguments_over_the_shared_bridge() -> None:
 
 def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.4)
-    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         first = _hello("run-1")
         shared_mcp.write_frame(first, {"op": "bye"})
@@ -519,7 +521,7 @@ def test_a_workflow_run_started_here_keeps_the_server_past_idle(monkeypatch, tmp
 
     monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.3)
     monkeypatch.setitem(runner._ACTIVE, "release", {"run1": threading.Event()})
-    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         sock = _hello("run-1")
         shared_mcp.write_frame(sock, {"op": "bye"})
@@ -544,7 +546,7 @@ def test_reconnects_keep_one_idle_timer(monkeypatch, tmp_path) -> None:
             if isinstance(t, threading.Timer) and t.function is shared_mcp._idle_expired and t.is_alive()
         ]
 
-    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         for n in range(30):
             sock = _hello(f"turn-{n}")
@@ -574,7 +576,7 @@ def test_readiness_hellos_do_not_keep_an_idle_daemon_alive(monkeypatch, tmp_path
     """Nov 4 2026: a host's daemon with 0 agents stayed up for hours at ~700 MB because each
     turn's readiness hello restarted its idle window."""
     monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.6)
-    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         started = time.monotonic()
         while thread.is_alive() and time.monotonic() - started < 3.0:
@@ -593,7 +595,7 @@ def test_readiness_hellos_do_not_keep_an_idle_daemon_alive(monkeypatch, tmp_path
 
 def test_a_daemon_with_a_connected_agent_stays_up(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.3)
-    thread = _serve(FakeMcp(), monkeypatch, tmp_path)
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         agent = _hello("run-1")
         _rpc(agent, "tools/list")

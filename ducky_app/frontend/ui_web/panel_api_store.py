@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import frontend.ui_web.panel_api as _pa
+from frontend.ui_web.reply_etag import encode_reply as _encode_reply
+from frontend.ui_web.reply_etag import reply_etag
 
 PLUGIN_REPLY_BIG_BYTES = 64 * 1024
 
@@ -12,22 +14,6 @@ PLUGIN_REPLY_BIG_BYTES = 64 * 1024
 def plugin_rpc_source(plugin_id: str, method: str) -> str:
     """The perf-trace name of one plugin panel RPC: ``plugin_call:<plugin>.<method>``."""
     return f"plugin_call:{plugin_id or '?'}.{method or '?'}"
-
-
-def _encode_reply(reply: Any) -> str:
-    import json
-
-    try:
-        return json.dumps(reply, ensure_ascii=False, default=str, separators=(",", ":"), sort_keys=True)
-    except Exception:  # noqa: BLE001
-        return ""
-
-
-def reply_etag(encoded: str) -> str:
-    """A short version token for one encoded reply (equal data, equal token)."""
-    import hashlib
-
-    return hashlib.blake2b(encoded.encode("utf-8", "replace"), digest_size=12).hexdigest()
 
 
 def _trace_big_plugin_reply(plugin_id: str, method: str, encoded: str) -> int:

@@ -323,10 +323,20 @@ def test_node_in_a_bash_terminal_finishes_for_the_agent_and_the_person(tmp_path)
 
     session = _bash_session(tmp_path)
     try:
-        time.sleep(3)  # the first prompt has run PROMPT_COMMAND
+        # Ask once the first prompt (and its PROMPT_COMMAND) is up; a loaded PC takes longer
+        # than fixed sleeps to start Git Bash and answer, so wait for the prompt and the line.
+        # Never through run_command here: its own prefix drops the alias this test looks for.
+        deadline = time.time() + 30
+        while "$" not in plain_terminal_text(session.read_output_tail(4000)) and time.time() < deadline:
+            time.sleep(0.5)
+        time.sleep(1)  # the prompt is drawn after PROMPT_COMMAND ran; let the line settle
         session.write("type node\r")
-        time.sleep(2)
-        typed = [line for line in plain_terminal_text(session.read_output_tail(4000)).splitlines() if line.startswith("node is")]
+        typed: list[str] = []
+        deadline = time.time() + 30
+        while not typed and time.time() < deadline:
+            time.sleep(0.5)
+            text = plain_terminal_text(session.read_output_tail(4000))
+            typed = [line for line in text.splitlines() if line.startswith("node is")]
         assert typed and "winpty" not in typed[-1], typed
         started = time.time()
         result = session.run_command('node -e "console.log(6*7)"', timeout_s=60)

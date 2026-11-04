@@ -7,7 +7,7 @@ import json
 import pytest
 
 from backend.bridge import shared_mcp
-from backend.bridge.test_shared_mcp import FakeMcp, _serve
+from backend.bridge.test_shared_mcp import FakeMcp, serve
 from frontend import shared_mcp_adapter as ad
 
 
@@ -39,7 +39,7 @@ def test_a_host_agent_joins_its_own_hosts_daemon(monkeypatch, app_data) -> None:
     decoy = {"host": "127.0.0.1", "port": 1, "token": "t", "key": {"version": "1", "port": "4200", "project": ""}}
     (app_data / "shared_mcp.json").write_text(json.dumps(decoy), encoding="utf-8")
     monkeypatch.setattr(ad, "_spawn_daemon", lambda args: pytest.fail("the host's daemon was up"))
-    thread = _serve(FakeMcp(), monkeypatch, app_data)
+    thread = serve(FakeMcp(), monkeypatch, app_data)
     try:
         assert (app_data / "shared_mcp-h0.json").is_file()
         sock = ad.connect(["--port", "4200"], timeout_s=2.0)

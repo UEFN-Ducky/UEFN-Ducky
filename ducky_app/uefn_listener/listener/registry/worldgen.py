@@ -4,8 +4,8 @@ Composable primitives (probe → generate → scatter → clear):
 
   PROBE   worldgen_capabilities
   TERRAIN terrain_generate, terrain_get_info, terrain_remove_generated
-  FOLIAGE foliage_list_sources, foliage_scatter, foliage_get_stats,
-          foliage_clear_generated
+  FOLIAGE foliage_list_sources, foliage_scatter, foliage_clear_generated
+          (foliage_get_stats lives in worldgen_foliage_stats.py)
 
 Terrain prefers GeometryScript heightfield meshes because UEFN Landscape
 height write surfaces are incomplete/unsafe to create from scratch. Foliage auto/actors places Content Drawer Actor Blueprints (``_C``) the same
@@ -1164,47 +1164,6 @@ def foliage_scatter(
     }
 
 
-def _foliage_label(a) -> str:
-    try:
-        return a.get_actor_label() or ""
-    except Exception:
-        return ""
-
-
-def foliage_get_stats(folder_prefix: str = "", offset: int = 0, limit: Optional[int] = None) -> dict:
-    """Summarize tagged worldgen foliage/HISM actors, a page at a time (instance counts are
-    read for the page's actors only)."""
-    from listener import paging
-
-    folder_prefix = folder_prefix or _DEFAULT_FOLDER
-    paged = paging.page(
-        _find_tagged_actors(folder_prefix=folder_prefix),
-        _foliage_entry,
-        offset=offset,
-        limit=limit,
-        keep=lambda a: any(k in _foliage_label(a) for k in ("HISM", "Foliage", "InstancedFoliage", "WG_")),
-    )
-    return paging.reply("actors", paged, folder_prefix=folder_prefix)
-
-
-def _foliage_entry(a) -> dict:
-    label = _foliage_label(a)
-    entry = {"actor_path": a.get_path_name(), "label": label, "class": a.get_class().get_name()}
-    try:
-        hisms = a.get_components_by_class(unreal.HierarchicalInstancedStaticMeshComponent)
-        entry["hism_components"] = len(hisms or [])
-        total = 0
-        for c in hisms or []:
-            try:
-                total += int(c.get_instance_count())
-            except Exception:
-                pass
-        entry["instance_count"] = total if total > 0 else (1 if "Foliage" in label or "HISM" in label else 0)
-    except Exception:
-        entry["instance_count"] = 1 if "Foliage" in label else 0
-    return entry
-
-
 def foliage_clear_generated(folder_prefix: str = "", foliage_type_paths: Optional[List[str]] = None) -> dict:
     """Clear generated foliage actors (HISM containers + tagged mesh actors).
 
@@ -1718,7 +1677,6 @@ register("terrain_get_info")(terrain_get_info)
 register("terrain_remove_generated")(terrain_remove_generated)
 register("foliage_list_sources")(foliage_list_sources)
 register("foliage_scatter")(foliage_scatter)
-register("foliage_get_stats")(foliage_get_stats)
 register("foliage_clear_generated")(foliage_clear_generated)
 register("landscape_list")(landscape_list)
 register("landscape_get_info")(landscape_get_info)
