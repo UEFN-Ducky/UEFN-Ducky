@@ -209,11 +209,77 @@ def test_a_store_that_is_busy_or_rate_limited_never_drops_the_batch(monkeypatch)
     from frontend import duckyos_account
 
     errors = iter(["try again: store busy (db timeout)"] * 5 + ["too soon: one batch per install every 30 s", ""])
-    monkeypatch.setattr(duckyos_account, "_store_collect", lambda *a, **k: {"error": next(errors)})
+    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: (200, {"payload": {"error": next(errors)}}, ""))
     us.track("feature.open", tab="chat")
     for _ in range(6):
         assert us.flush() is False and us.queued() == 1   # kept every time, never dropped
     assert us.flush() is True and us.queued() == 0
+
+
+def test_a_store_that_answers_404_429_or_5xx_never_drops_the_batch(monkeypatch) -> None:
+    from frontend import duckyos_account
+
+    answers = iter([(404, None, ""), (429, {"error": "slow down"}, ""), (503, None, ""), (200, {"payload": {}}, "")])
+    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: next(answers))
+    us.track("feature.open", tab="chat")
+    for _ in range(3):
+        assert us.flush() is False and us.queued() == 1
+    assert us.flush() is True and us.queued() == 0
+
+
+def _refusal_reports() -> list[dict[str, Any]]:
+    rows, _ = us._take(100)
+    return [r["props"] for r in rows if r["name"] == "error.code" and r["props"].get("code") == "usage_batch_refused"]
+
+
+def test_a_refused_batch_reports_the_stores_one_word_reason(monkeypatch) -> None:
+    from frontend import duckyos_account
+
+    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: (400, {"error": "bad_event"}, ""))
+    us.track("feature.open", tab="chat")
+    for _ in range(us.REFUSED_DROP_AFTER):
+        assert us.flush() is False
+    reports = _refusal_reports()
+    assert len(reports) == 1 and reports[0]["reason"] == "bad_event" and reports[0]["kind"] == "bad_request"
+
+
+def test_reason_token_is_one_short_word_never_the_detail() -> None:
+    assert us.reason_token("bad_event") == "bad_event"
+    assert us.reason_token("Unknown event name: chat.text from C:/Users/x") == "unknown_event_name"
+    assert us.reason_token("schema mismatch in a very very long message", 400) == "schema_mismatch_in_a_ver"
+    assert us.reason_token("", 418) == "http_418"
+    assert us.reason_token("Payload Too Large", 413) == "too_large"
+    assert us.reason_token("") == "unknown"
+    assert ev.SLUG_RE.match(us.reason_token("schema mismatch in a very very long message"))
+
+
+def test_a_batch_refused_as_too_large_is_split_and_both_halves_sent(monkeypatch) -> None:
+    from frontend import duckyos_account
+
+    sent: list[int] = []
+
+    def store(method: str, path: str, body: dict[str, Any], **_: Any) -> tuple[int, Any, str]:
+        sent.append(len(body["events"]))
+        return (413, None, "") if len(sent) == 1 else (200, {"payload": {}}, "")
+
+    monkeypatch.setattr(duckyos_account, "api_request", store)
+    for tab in ("chat", "editor", "plan", "usage"):
+        us.track("feature.open", tab=tab)
+    assert us.flush() is False
+    assert sent == [4, 2, 2], "the whole batch, then each half once"
+    assert us.queued() == 0 and _refusal_reports() == []
+
+
+def test_a_too_large_half_that_is_refused_again_is_dropped_and_reported() -> None:
+    answers = iter(["refused:too_large", "ok", "refused:too_large"])
+    sent: list[int] = []
+    us.send_override = lambda body: sent.append(len(body["events"])) or next(answers)
+    for tab in ("chat", "editor", "plan"):
+        us.track("feature.open", tab=tab)
+    assert us.flush() is False
+    assert sent == [3, 1, 2]
+    reports = _refusal_reports()
+    assert [r["reason"] for r in reports] == ["too_large"]
 
 
 def test_switch_off_means_no_queue_and_no_network() -> None:

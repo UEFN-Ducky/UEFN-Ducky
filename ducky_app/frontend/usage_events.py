@@ -136,7 +136,9 @@ EVENTS: dict[str, dict[str, Any]] = {
                    "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb"),
                    # net_fail only: where the request to the site died (net_access.NET_STAGES) and how the PC routes.
                    "net_stage": ("dns", "connect", "tls", "proxy", "timeout", "http", "other"),
-                   "proxy": ("none", "static", "pac")},
+                   "proxy": ("none", "static", "pac"),
+                   # usage_batch_refused only: the Store's one-word reason (usage_stats.reason_token).
+                   "reason": ("slug",)},
     # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",)},
     "ui.crash": {"code": ("slug",)},

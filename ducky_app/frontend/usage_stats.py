@@ -62,7 +62,8 @@ _opened_at = 0.0
 _boot_total_ms: float | None = None
 _install_fresh = False
 _last_uefn_mode: str | None = None
-# Test seam: the sender; True/"ok" landed, "refused" the Store said no, False/"failed" no answer.
+# Test seam: the sender; True/"ok" landed, "refused" or "refused:<reason>" the Store said no,
+# False/"failed" no answer.
 send_override: Callable[[dict[str, Any]], bool | str] | None = None
 
 # Setup, the web installer and the uninstaller (release/installer/host/Usage.cs) read this
@@ -370,23 +371,73 @@ REFUSED_DROP_AFTER = 3
 _refused_in_a_row = 0
 
 
+_USAGE_ROUTE = "/api/v1/plugins/uefn-ducky-store/collect/usage"
+# Reasons that mean the batch was too big, not bad: it is split in half and each half sent once.
+_TOO_LARGE = frozenset({"too_large", "http_413", "payload_too_large"})
+
+
+def reason_token(error: str, status: int = 0) -> str:
+    """The Store's error as one short word for usage_batch_refused: the text before its first
+    ":" (never the detail after it), as [a-z0-9_] cut to 24 chars, else http_<status>."""
+    if status == 413:
+        return "too_large"
+    head = str(error or "").split(":", 1)[0].strip().lower()
+    word = re.sub(r"[^a-z0-9]+", "_", head).strip("_")[:24].strip("_")
+    return word or (f"http_{status}" if status else "unknown")
+
+
 def _send(body: dict[str, Any]) -> str:
-    """ok | refused (the Store answered no to this batch) | failed (no answer: try again)."""
+    """ok | refused:<reason> (the Store answered no to this batch) | failed (no answer: try again)."""
     if send_override is not None:
         got = send_override(body)
         return got if isinstance(got, str) else "ok" if got else "failed"
     try:
-        from frontend.duckyos_account import _store_collect
+        from frontend.duckyos_account import api_request
 
-        # The Store answers a refused batch with 200 and {"error": ...}.
-        error = str(_store_collect("usage", body, allow_anonymous=True, timeout=20.0).get("error") or "")
+        status, parsed, _raw = api_request(
+            "POST", _USAGE_ROUTE, body, prefer_bearer=True, allow_anonymous=True, timeout=20.0
+        )
+        status = int(status)
     except Exception:
         return "failed"
+    error = ""
+    if isinstance(parsed, dict):
+        payload = parsed.get("payload")
+        error = str((payload.get("error") if isinstance(payload, dict) else None) or parsed.get("error") or "")
+    # 404: the site worker mid-swap; 408/429/5xx: busy. Sent again later.
+    if status in (404, 408, 429) or status >= 500:
+        return "failed"
+    if not 200 <= status < 300:
+        return f"refused:{reason_token(error, status)}"
+    # The Store answers a refused batch with 200 and {"error": ...}.
     if not error:
         return "ok"
     # "too soon" (rate) and "try again:" (the Store's own read/write failed) are sent
     # again later; only a batch the Store can never take counts toward dropping it.
-    return "failed" if ("too soon" in error or "try again" in error) else "refused"
+    if "too soon" in error or "try again" in error:
+        return "failed"
+    return f"refused:{reason_token(error)}"
+
+
+def _report_refused(reason: str, version: str) -> None:
+    track("error.code", code="usage_batch_refused", where="store", kind="bad_request", version=version,
+          reason=reason or "unknown")
+
+
+def _send_halves(body: dict[str, Any], batch: list[Any], version: str) -> None:
+    """A batch refused as too large: each half sent once. Halves that land or are refused are
+    dropped (a refusal is reported); a half with no answer stays queued."""
+    mid = len(batch) // 2
+    refused: list[str] = []
+    for half in (batch[:mid], batch[mid:]):
+        got, _, why = _send({**body, "events": [g[0] for g in half]}).partition(":")
+        if got == "ok":
+            _drop([i for g in half for i in g[1]])
+        elif got == "refused":
+            _drop([i for g in half for i in g[1]])
+            refused.append(why)
+    if refused:
+        _report_refused(refused[0], version)
 
 
 def flush() -> bool:
@@ -405,7 +456,11 @@ def flush() -> bool:
     batch = groups[:BATCH_MAX]
     body = {"installId": install_id(), "appVersion": __version__, "events": [g[0] for g in batch]}
     global _refused_in_a_row
-    sent = _send(body)
+    sent, _, reason = _send(body).partition(":")
+    if sent == "refused" and reason in _TOO_LARGE and len(batch) > 1:
+        _refused_in_a_row = 0
+        _send_halves(body, batch, __version__)
+        return False
     if sent == "refused":
         _refused_in_a_row += 1
         if _refused_in_a_row < REFUSED_DROP_AFTER:
@@ -415,7 +470,7 @@ def flush() -> bool:
     _drop([i for g in batch for i in g[1]])
     if sent == "refused":
         _refused_in_a_row = 0
-        track("error.code", code="usage_batch_refused", where="store", kind="bad_request", version=__version__)
+        _report_refused(reason, __version__)
         return False  # the report itself goes in the next batch
     _refused_in_a_row = 0
     return len(groups) <= BATCH_MAX
