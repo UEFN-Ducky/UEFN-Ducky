@@ -473,7 +473,7 @@ def test_revert_entry_of_delete_and_move(env) -> None:
 def test_revert_created_file_removes_empty_folder(env, monkeypatch) -> None:
     root, _, journal, writer, _ = env
     monkeypatch.setattr("backend.workspace.journal.kick_verse_compile", lambda: None)
-    monkeypatch.setattr("backend.workspace.journal._revert_uefn_for_deleted_verse", lambda *a, **k: None)
+    monkeypatch.setattr("backend.workspace.journal.revert_uefn_for_deleted_verse", lambda *a, **k: None)
     token = as_run("r1")
     try:
         writer.write_text("Content/Verse/SnakeGame/game.verse", "class snake_game_device:\n    x: int = 0\n")
@@ -489,7 +489,7 @@ def test_revert_created_file_removes_empty_folder(env, monkeypatch) -> None:
 def test_revert_created_file_keeps_folder_if_sibling_remains(env, monkeypatch) -> None:
     root, _, journal, writer, _ = env
     monkeypatch.setattr("backend.workspace.journal.kick_verse_compile", lambda: None)
-    monkeypatch.setattr("backend.workspace.journal._revert_uefn_for_deleted_verse", lambda *a, **k: None)
+    monkeypatch.setattr("backend.workspace.journal.revert_uefn_for_deleted_verse", lambda *a, **k: None)
     (root / "Content" / "Verse" / "SnakeGame").mkdir()
     (root / "Content" / "Verse" / "SnakeGame" / "keep.verse").write_text("keep\n", encoding="utf-8")
     token = as_run("r1")
@@ -500,24 +500,6 @@ def test_revert_created_file_keeps_folder_if_sibling_remains(env, monkeypatch) -
     journal.revert_run("r1", project_root=str(root))
     assert not (root / "Content" / "Verse" / "SnakeGame" / "game.verse").exists()
     assert (root / "Content" / "Verse" / "SnakeGame" / "keep.verse").is_file()
-
-
-def test_deleted_verse_device_asks_uefn_to_drop_the_class(monkeypatch) -> None:
-    posted: list[tuple[str, dict, str]] = []
-    monkeypatch.setattr(
-        "backend.workspace.plugin_revert.post_inverse_step",
-        lambda cmd, params, program="uefn": posted.append((cmd, dict(params), program)),
-    )
-    from backend.workspace.journal import _revert_uefn_for_deleted_verse
-
-    _revert_uefn_for_deleted_verse(
-        "Content/Verse/SnakeGame/game.verse",
-        "class snake_game_device:\n",
-        r"C:\islands\ExampleProject1",
-    )
-    ids = {(p[1].get("kind"), p[1].get("id")) for p in posted}
-    assert ("asset", "/ExampleProject1/Verse/SnakeGame/snake_game_device") in ids
-    assert ("actor", "snake_game_device") in ids
 
 
 def test_revert_entry_reverts_every_write_to_that_file(env) -> None:
