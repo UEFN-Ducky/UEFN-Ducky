@@ -1033,6 +1033,12 @@ def _run_coding_agent_message(
                **_account_env(agent_id, conv.id)},
         identity=run_ctx,
     )
+    from backend.agent.coding_agents.stall_notice import StallNotice
+
+    # A quiet stream reads as "Thinking" in the window: name what the turn waits on.
+    stall = StallNotice(conv.id, rid, label=adapter.label)
+    push = stall.wrap(push)
+    stall.start()
 
     try:
         launch_model = _normalize_launch_model(
@@ -1103,6 +1109,7 @@ def _run_coding_agent_message(
         from backend.agent.coding_agents import proc_exec
 
         proc_exec.set_stop_requester(conv.id, None)
+        stall.stop()
         ckpt.close()
         steer.end_run(conv.id)
         file_changes.close("done" if "result" in locals() and getattr(result, "ok", False) else "error")
