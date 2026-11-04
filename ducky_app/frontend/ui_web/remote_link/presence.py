@@ -14,7 +14,8 @@ import time
 from typing import Callable
 
 MISSED_BEATS_OFFLINE = 3
-DEFAULT_LIVE_S = 90.0
+# A site that doesn't say how long it counts a PC online: the old 90 s beat.
+DEFAULT_LIVE_S = 300.0
 MIN_INTERVAL_S = 5.0
 MAX_INTERVAL_S = 100.0
 RETRY_S = (2.0, 5.0, 10.0)

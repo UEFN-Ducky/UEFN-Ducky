@@ -30,6 +30,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from frontend import __version__
+from frontend.ui_web.remote_link import mailbox, presence
 
 DEFAULT_BASE_URL = "https://uefnducky.org"
 DEVICE_SCOPE = "uefn-ducky.app"
@@ -1315,14 +1316,11 @@ def api_request(
         raise DuckyOSAccountError(f"Network error: {exc}", code="network") from exc
 
 
-_PRESENCE_STOP = __import__("threading").Event()
-_PRESENCE_THREAD: Any = None
+# The beat (remote_link.presence) runs on its own thread at under a third of what the
+# site's plugins say still counts as online (``liveSeconds``); a site that doesn't say: 90 s.
+_PRESENCE_BEAT: Any = None
 _PRESENCE_LOCK = __import__("threading").Lock()
 _PRESENCE_INTERVAL_S = 90.0
-# While nothing it reports has changed, a PC reports less often, up to this,
-# and never past what the site's plugins say still counts as online
-# (``liveSeconds``); a site that doesn't say keeps the 90 s beat.
-_PRESENCE_QUIET_MAX_S = 300.0
 _PRESENCE_LIVE_S: dict[str, float] = {}
 _PRESENCE_LAST: dict[str, Any] = {"fingerprint": None, "at": 0.0}
 _RPC_STOP = __import__("threading").Event()
@@ -1511,12 +1509,16 @@ def _note_live_seconds(which: str, answer: Any) -> None:
         _PRESENCE_LIVE_S.pop(which, None)
 
 
-def _presence_quiet_s() -> float:
-    """How long a PC whose report hasn't changed may wait before the next one."""
+def _presence_live_s() -> float | None:
+    """The shorter online window the site's two plugins gave, or None when one doesn't say."""
     if not {"store", "device"} <= _PRESENCE_LIVE_S.keys():
-        return _PRESENCE_INTERVAL_S
-    window = min(_PRESENCE_LIVE_S["store"], _PRESENCE_LIVE_S["device"]) - 30.0
-    return max(_PRESENCE_INTERVAL_S, min(_PRESENCE_QUIET_MAX_S, window))
+        return None
+    return min(_PRESENCE_LIVE_S["store"], _PRESENCE_LIVE_S["device"])
+
+
+def _presence_quiet_s() -> float:
+    """How long a PC whose report hasn't changed may wait: one beat, under a third of the window."""
+    return presence.beat_interval(_presence_live_s())
 
 
 def _presence_fingerprint(body: dict[str, Any]) -> str:
@@ -1556,7 +1558,7 @@ def send_presence_heartbeat(*, only_if_changed: bool = False) -> bool:
     if (
         only_if_changed
         and fingerprint == _PRESENCE_LAST["fingerprint"]
-        and time.monotonic() - _PRESENCE_LAST["at"] < _presence_quiet_s()
+        and time.monotonic() - _PRESENCE_LAST["at"] < _presence_quiet_s() / 2  # early pokes only: every beat reports
     ):
         return True
     try:
@@ -1616,28 +1618,18 @@ def publish_device_presence(*, live: bool | None = None) -> None:
 
 def start_presence_heartbeat() -> None:
     """Daemon thread: while logged in, report this PC's presence about once a minute."""
-    global _PRESENCE_THREAD
+    global _PRESENCE_BEAT
     with _PRESENCE_LOCK:
-        if _PRESENCE_THREAD is not None and _PRESENCE_THREAD.is_alive():
+        if _PRESENCE_BEAT is not None and _PRESENCE_BEAT.running():
             return
         if not (_load_blob().get("device_key") or _load_blob().get("session_value")):
             return
-        _PRESENCE_STOP.clear()
-
-        def _loop() -> None:
-            # A change goes out within 90 s; an unchanged PC reports less often.
-            _PRESENCE_LAST.update(fingerprint=None, at=0.0)
-            while not _PRESENCE_STOP.is_set():
-                try:
-                    send_presence_heartbeat(only_if_changed=True)
-                except Exception:
-                    pass
-                _PRESENCE_STOP.wait(_PRESENCE_INTERVAL_S)
-
-        _PRESENCE_THREAD = __import__("threading").Thread(
-            target=_loop, daemon=True, name="duckyos-presence"
+        # A failed beat retries within seconds, not a whole interval (one blip went offline).
+        _PRESENCE_LAST.update(fingerprint=None, at=0.0)
+        _PRESENCE_BEAT = presence.PresenceBeat(
+            lambda: send_presence_heartbeat(only_if_changed=True), _presence_live_s, name="duckyos-presence"
         )
-        _PRESENCE_THREAD.start()
+        _PRESENCE_BEAT.start()
         start_rpc_waiter()
         # Chats and duckies from your other UEFN Duckies (peer to peer, sealed).
         from frontend import ducky_sync
@@ -1646,7 +1638,8 @@ def start_presence_heartbeat() -> None:
 
 
 def stop_presence_heartbeat() -> None:
-    _PRESENCE_STOP.set()
+    if _PRESENCE_BEAT is not None:
+        _PRESENCE_BEAT.stop()
     stop_rpc_waiter()
     from frontend import ducky_sync
 
@@ -1790,6 +1783,13 @@ def _poll_desktop_rpc_once() -> bool:
     )
     if not pending.get("pending"):
         return False
+    # Answered on the mailbox pool: a slow job (rtc_connect waits for the page) never
+    # holds the next command. A redelivered id that still runs is skipped.
+    mailbox.jobs().submit(str(pending.get("id") or ""), lambda: _answer_desktop_rpc(pending))
+    return True
+
+
+def _answer_desktop_rpc(pending: dict[str, Any]) -> None:
     rid = str(pending.get("id") or "")
     method = str(pending.get("method") or "")
     args = pending.get("args")
@@ -1815,7 +1815,6 @@ def _poll_desktop_rpc_once() -> bool:
         error_code="rpc_result_failed",
         timeout=15.0,
     )
-    return True
 
 
 def wait_desktop_rpc(cursor: int | None) -> tuple[bool, int | None]:
@@ -1852,8 +1851,9 @@ def start_rpc_waiter() -> None:
             # A command sent before this wait began (app start, remote access just
             # turned on, after an error): read the mailbox once without being told.
             told = True
-            # A refused or failed wait backs off to once a minute, never a tight loop.
-            backoff = 5.0
+            # A refused or failed wait backs off, never a tight loop, and never past 10 s:
+            # a phone's command waits on this.
+            backoff = mailbox.BACKOFF_MIN_S
             while not _RPC_STOP.is_set():
                 # The site offers Open only for a Live PC, and a PC is Live only
                 # with remote access on.
@@ -1868,11 +1868,11 @@ def start_rpc_waiter() -> None:
                         while _poll_desktop_rpc_once() and not _RPC_STOP.is_set():
                             pass
                         told = False
-                    backoff = 5.0
+                    backoff = mailbox.BACKOFF_MIN_S
                 except Exception:
                     told = True
                     _rpc_pause(backoff)
-                    backoff = min(backoff * 2, 60.0)
+                    backoff = mailbox.next_backoff(backoff)
 
         _RPC_THREAD = __import__("threading").Thread(
             target=_loop, daemon=True, name="duckyos-rpc-wait"

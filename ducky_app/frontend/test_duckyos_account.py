@@ -348,12 +348,12 @@ def test_unchanged_presence_waits_only_where_the_site_allows() -> None:
         # Older plugins say nothing: every 90 s beat still reports.
         acc.send_presence_heartbeat(only_if_changed=True)
         assert acc._presence_quiet_s() == acc._PRESENCE_INTERVAL_S
-        # The next beat, 90 s on, meets plugins that count a PC online for 330 s;
-        # from then on an unchanged report waits.
+        # The next beat meets plugins that count a PC online for 330 s: an unchanged
+        # report waits one beat, under a third of that (it waited 300 s, past 330 s at the next wake).
         live["value"] = 330
         acc._PRESENCE_LAST["at"] -= 100.0
         acc.send_presence_heartbeat(only_if_changed=True)
-        assert acc._presence_quiet_s() == 300.0
+        assert acc._presence_quiet_s() < 330 / 3
         sent = len(posts)
         assert acc.send_presence_heartbeat(only_if_changed=True) is True
         assert len(posts) == sent, "unchanged and still online: skipped"
@@ -363,6 +363,96 @@ def test_unchanged_presence_waits_only_where_the_site_allows() -> None:
         assert len(posts) == sent + 1
     acc._PRESENCE_LIVE_S.clear()
     acc._PRESENCE_LAST.update(fingerprint=None, at=0.0)
+
+
+def test_ten_minutes_of_beats_with_failures_never_go_past_the_site_window() -> None:
+    """The real report path on a fake clock: 1 in 4 POSTs fail, the site counts 330 s."""
+    import random
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+    from frontend.ui_web.remote_link.presence import PresenceBeat
+
+    clock = {"t": 1000.0}
+    seen: list[float] = []
+    rng = random.Random(11)
+
+    def _request(_method: str, _path: str, _body=None, **_kw):
+        clock["t"] += 0.5
+        if rng.random() < 0.25:
+            raise acc.DuckyOSAccountError("Can't connect right now.", code="x")
+        seen.append(clock["t"])
+        return 200, {"payload": {"liveSeconds": 330}}, b""
+
+    acc._PRESENCE_LIVE_S.clear()
+    acc._PRESENCE_LAST.update(fingerprint=None, at=0.0)
+    with (
+        patch.object(acc.time, "monotonic", side_effect=lambda: clock["t"]),
+        patch.object(acc, "_load_blob", return_value={"device_key": "dk", "device_key_id": "k1", "email": "a@b.c"}),
+        patch.object(acc, "api_request", side_effect=_request),
+        patch.object(acc, "_plugin_collect", return_value={"liveSeconds": 330}),
+        patch.object(acc, "_presence_project_label", return_value="Island"),
+        patch.object(acc, "_presence_uefn_online", return_value=True),
+        patch.object(acc, "_remote_access_on", return_value=True),
+    ):
+        beat = PresenceBeat(lambda: acc.send_presence_heartbeat(only_if_changed=True), acc._presence_live_s,
+                            clock=lambda: clock["t"])
+        while clock["t"] < 1600.0:
+            clock["t"] += beat.beat_once()
+    acc._PRESENCE_LIVE_S.clear()
+    acc._PRESENCE_LAST.update(fingerprint=None, at=0.0)
+    gaps = [b - a for a, b in zip(seen, seen[1:])]
+    assert len(seen) >= 5 and max(gaps) < 330, gaps
+
+
+def test_a_slow_mailbox_job_never_holds_the_next_command() -> None:
+    import threading
+    import time as _time
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    queue = [{"pending": True, "id": "slow1", "method": "rtc_connect"},
+             {"pending": True, "id": "fast1", "method": "list_folders"}]
+    posted: dict[str, float] = {}
+    gate = threading.Event()
+
+    def collect(_plugin: str, action: str, body, **_kw):
+        if action == "desktop-rpc-wait":
+            return queue.pop(0) if queue else {"pending": False}
+        posted[body["id"]] = _time.monotonic()
+        return {}
+
+    def dispatch(method: str, _args):
+        if method == "rtc_connect":
+            gate.wait(5.0)
+        return {"ok": True, "result": method}
+
+    t0 = _time.monotonic()
+    with patch.object(acc, "_plugin_collect", side_effect=collect), patch.object(acc, "dispatch_desktop_rpc", side_effect=dispatch):
+        while acc._poll_desktop_rpc_once():
+            pass
+        for _ in range(100):
+            if "fast1" in posted:
+                break
+            _time.sleep(0.01)
+        assert "fast1" in posted and posted["fast1"] - t0 < 1.0
+        assert "slow1" not in posted
+        gate.set()
+        for _ in range(200):
+            if "slow1" in posted:
+                break
+            _time.sleep(0.01)
+    assert "slow1" in posted
+
+
+def test_mailbox_backoff_never_passes_10_s() -> None:
+    from frontend.ui_web.remote_link import mailbox
+
+    b = mailbox.BACKOFF_MIN_S
+    for _ in range(10):
+        b = mailbox.next_backoff(b)
+    assert b == 10.0
 
 
 def test_rpc_waiter_idle_while_remote_access_off() -> None:
