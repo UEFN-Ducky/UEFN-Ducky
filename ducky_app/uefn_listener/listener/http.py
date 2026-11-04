@@ -14,6 +14,7 @@ from listener.config import HTTP_TIMEOUT_SEC, PROTOCOL_VERSION
 from listener.dispatch import handler_names
 from listener.state import accept_lock, command_queue, response_events, responses, responses_lock
 from listener.traffic import TRAFFIC, client_key
+from listener import limits
 
 _CONN_ERRORS = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
 
@@ -42,7 +43,13 @@ def _is_client_disconnect(exc: BaseException) -> bool:
     return False
 
 
-def _busy_payload() -> bytes:
+def _busy_retry_ms() -> int:
+    since = float(getattr(unreal, "_mcp_in_flight_since", 0.0) or 0.0)
+    age = time.time() - since if since > 0 else 0.0
+    return limits.retry_after_ms(age, command_queue.qsize())
+
+
+def _busy_payload(retry_ms: int | None = None) -> bytes:
     return json.dumps(
         {
             "success": False,
@@ -51,6 +58,8 @@ def _busy_payload() -> bytes:
                 "Wait for the previous MCP tool to finish before calling another wire/spawn/save."
             ),
             "queue_size": command_queue.qsize(),
+            # Clients wait this long before trying again instead of hammering the editor.
+            "retry_after_ms": _busy_retry_ms() if retry_ms is None else retry_ms,
         }
     ).encode()
 
@@ -135,14 +144,35 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
         self._send_json(200, body)
 
     def do_POST(self) -> None:
-        from listener.state import metrics
-
         if not request_trusted(self.headers, post=True):
             self._refuse()
             return
+        # Many agents' retries open a thread each: past the cap, back off at once.
+        if not limits.OPEN_REQUESTS.enter():
+            self._send_json(503, _busy_payload())
+            return
+        try:
+            self._handle_post()
+        finally:
+            limits.OPEN_REQUESTS.leave()
+
+    def _handle_post(self) -> None:
+        from listener.state import metrics
+
         metrics["last_client_ping"] = time.time()
         try:
             content_length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            content_length = 0
+        if limits.body_too_large(content_length):
+            # Never read it: a huge script or params blob would sit in UEFN's memory.
+            self._send_json(413, json.dumps({
+                "success": False,
+                "error": f"Request body is {content_length} bytes; the limit is {limits.MAX_BODY_BYTES}.",
+            }).encode())
+            self.close_connection = True
+            return
+        try:
             raw = self.rfile.read(content_length)
         except _CONN_ERRORS:
             return
@@ -197,7 +227,8 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        self._send_json(200, json.dumps(result).encode())
+        # A reply over UEFN_DUCKY_MAX_REPLY_MB is cut down, with a hint to filter or page.
+        self._send_json(200, limits.encode_reply(result))
 
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
