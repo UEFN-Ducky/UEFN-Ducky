@@ -514,6 +514,58 @@ def install_evaluate_js_release(edge_chrome_cls: Any) -> None:
     edge_chrome_cls._ducky_js_release = True
 
 
+POST_WAIT_S = 0.5
+
+
+def post_js(window: Any, script: str, wait_s: float = POST_WAIT_S) -> bool:
+    """Run a script whose result nobody reads (a bridge reply, a push, a class toggle).
+
+    pywebview's evaluate_js waits until the page has run the script and sent its result
+    back, so a page busy rendering (40 agents) held the window's dispatch worker for up to
+    9.2 s, and every reply behind it waited too. This hands the script to WebView2
+    (``ExecuteScriptAsync`` via ``BeginInvoke``: it runs in call order) and waits at most
+    ``wait_s`` for it: enough that a burst still queues and goes as one batch, never seconds.
+    False when the window has no WebView2 control to post to (the caller uses evaluate_js)."""
+    browser = getattr(getattr(window, "native", None), "browser", None)
+    ctrl = getattr(browser, "webview", None)
+    if browser is None or ctrl is None:
+        return False
+    if getattr(browser, "__dict__", {}).get("_ducky_dead"):
+        return True  # its browser stopped; a rebuild is replacing this control
+    try:
+        Action, _Func, _Object, String, Task = _net_types()
+    except Exception:
+        return False
+    done = threading.Semaphore(0)
+
+    def _finished(_task: Any) -> None:
+        done.release()
+
+    def _run() -> None:
+        try:
+            pending = ctrl.ExecuteScriptAsync(script)
+            scheduler = getattr(browser, "syncContextTaskScheduler", None)
+            if scheduler is not None:
+                pending.ContinueWith(Action[Task[String]](_finished), scheduler)
+            else:
+                pending.ContinueWith(Action[Task[String]](_finished))
+        except Exception:
+            done.release()
+
+    waiters = browser.__dict__.setdefault("_ducky_js_waiters", set())
+    waiters.add(done)
+    try:
+        ctrl.BeginInvoke(Action(_run))
+    except Exception:
+        waiters.discard(done)
+        return False
+    try:
+        done.acquire(timeout=wait_s)
+    finally:
+        waiters.discard(done)
+    return True
+
+
 def nudge_webview_visible(window: Any) -> None:
     """After hide-to-tray, make the WinForms WebView2 paint again.
 

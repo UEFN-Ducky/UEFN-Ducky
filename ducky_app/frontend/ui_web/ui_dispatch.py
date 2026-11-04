@@ -126,7 +126,13 @@ class _Channel:
         self.stall_dumped = False
         self.inflight_since = time.monotonic()
         try:
-            window.evaluate_js(js)
+            # Nobody reads these scripts' results: post them instead of waiting for the page's
+            # answer (a busy page held this worker for 9 s). Windows without a WebView2
+            # control (other platforms, tests) keep evaluate_js.
+            from frontend.ui_web.webview_recover import post_js
+
+            if not post_js(window, js):
+                window.evaluate_js(js)
         finally:
             self.inflight_since = 0.0
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
