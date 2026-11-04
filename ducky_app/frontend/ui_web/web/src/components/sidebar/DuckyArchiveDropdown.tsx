@@ -5,6 +5,7 @@ import { Icons } from "../../icons/Icons";
 import type { AgentProfileDto, FolderItem } from "../../types/panel";
 import { duckyNameMatches } from "../../utils/duckyTreeFilter";
 import { TruncatedText } from "../TruncatedText";
+import { SidebarBusySpinner } from "./SidebarBusySpinner";
 
 type ArchiveChat = FolderItem["chats"][number];
 
@@ -176,7 +177,7 @@ export function DuckyArchiveDropdown({
             className={`sidebar-archive-dropdown-item-icon${hasCompletionAlert && !isRunning ? " chat-completion-alert" : ""}`}
           >
             {isRunning ? (
-              <span className="sidebar-agent-spinner" title="Agent working" />
+              <SidebarBusySpinner title="Agent working" />
             ) : chat.isGroup ? (
               <span className="sidebar-tree-row-icon sidebar-tree-row-icon--group" title="Group">
                 <Icons.Users />

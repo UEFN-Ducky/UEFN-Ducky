@@ -1,5 +1,6 @@
 import type { MouseEvent, PointerEvent, ReactNode } from "react";
 import { useUiTarget } from "../../ui-targets/registry";
+import { SidebarBusySpinner } from "./SidebarBusySpinner";
 
 export function SidebarSectionHeader({
   title,
@@ -48,11 +49,7 @@ export function SidebarSectionHeader({
       {icon ? <span className="sidebar-section-header-icon" aria-hidden="true">{icon}</span> : null}
       <span className="sidebar-section-header-title">{title}</span>
       {busy ? (
-        <span
-          className="sidebar-agent-spinner sidebar-section-header-busy"
-          title={busyTitle}
-          aria-label={busyTitle}
-        />
+        <SidebarBusySpinner className="sidebar-section-header-busy" title={busyTitle} label={busyTitle} />
       ) : null}
       {actions ? <div className="sidebar-section-header-actions">{actions}</div> : null}
     </div>

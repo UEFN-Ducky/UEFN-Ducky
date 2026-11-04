@@ -71,6 +71,7 @@ import {
 } from "../utils/chatNestExpand";
 import { SidebarTreeChildren } from "./sidebar/SidebarTreeChildren";
 import { SidebarTreeRow } from "./sidebar/SidebarTreeRow";
+import { SidebarBusySpinner } from "./sidebar/SidebarBusySpinner";
 import { LiveChatDot } from "../voice/LiveChatMark";
 import { useIsLiveChat } from "../voice/useLiveChatPresence";
 import { ChatTabHoverCard } from "./editor/ChatTabHoverCard";
@@ -358,7 +359,7 @@ const ChatRow = memo(function ChatRow({
               {waiting ? (
                 <WaitingMarker convId={chat.id} name={chat.name} variant="sidebar" />
               ) : isRunning ? (
-                <span className="sidebar-agent-spinner" title="Agent working" />
+                <SidebarBusySpinner title="Agent working" />
               ) : wfRun ? (
                 <span className="sidebar-workflow-spinner" title={wfTitle} aria-label={wfTitle}>
                   <Icons.Workflow />
@@ -689,7 +690,7 @@ function FolderHeader({
             {waitingChatId ? (
               <WaitingMarker convId={waitingChatId} variant="folder" />
             ) : hasRunningInside ? (
-              <span className="sidebar-agent-spinner" title="Ducky working inside" aria-label="Ducky working inside" />
+              <SidebarBusySpinner title="Ducky working inside" label="Ducky working inside" />
             ) : folder.groupHubId ? (
               <span className="sidebar-tree-row-icon sidebar-tree-row-icon--group" title="Group">
                 <Icons.Users />

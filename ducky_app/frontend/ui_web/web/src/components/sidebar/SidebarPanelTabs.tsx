@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { SidebarBusySpinner } from "./SidebarBusySpinner";
 import { classifyDockDropTarget, type DockDropTarget } from "../../utils/dockPanelDrag";
 import type { DockSide } from "../../workspace/workspaceDockStorage";
 
@@ -61,7 +62,7 @@ function SidebarTabButton({
     >
       {icon}
       {busy ? (
-        <span className="sidebar-agent-spinner sidebar-panel-tab-busy" aria-hidden="true" />
+        <SidebarBusySpinner className="sidebar-panel-tab-busy" />
       ) : null}
     </button>
   );
