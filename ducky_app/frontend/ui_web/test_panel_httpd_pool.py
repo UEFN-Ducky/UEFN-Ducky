@@ -70,6 +70,7 @@ def test_pool_kind_routes():
     assert httpd._pool_kind(b"POST /__panel_rpc HTTP/1.1\r\n") == "long"
     assert httpd._pool_kind(b"POST /__panel_api/pick_project_path HTTP/1.1\r\n") == "long"
     assert httpd._pool_kind(b"POST /__panel_api/load_messages HTTP/1.1\r\n") == "normal"
+    assert httpd._pool_kind(b"POST /__panel_api/window_input HTTP/1.1\r\n") == "input"
     assert httpd._pool_kind(b"GET /assets/app.js HTTP/1.1\r\n") == "normal"
     assert httpd._pool_kind(b"") == "normal"
 

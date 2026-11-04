@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from frontend.settings import PANEL_LISTENER_PORT, default_app_data_dir
 from frontend.ui_web.file_kinds import mime_for_path
+from frontend.ui_web.remote_link import routing
+from frontend.ui_web.remote_link.input_lane import input_lane
 
 PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 # Cloudflare (and any reverse proxy) needs HTTP/1.1 + Content-Length.
@@ -73,30 +75,10 @@ def _alert_question(params: dict[str, Any]) -> None:
 
 
 _HTTP_QUEUE_TRACE_S = 2.0
-_PEEK_TIMEOUT_S = 2.0
 _MAX_PARKED = 480
-# Endless and long-wait routes get their own pools so they never hold the normal one.
-_STREAM_ROUTES = frozenset({b"/__window_stream"})
-_LONG_ROUTES = frozenset({b"/__panel_events", b"/__panel_rpc", b"/__panel_run"})
-
-
-def _pool_kind(head: bytes) -> str:
-    """``normal`` / ``streams`` / ``long`` from a request's first line (peeked, not read)."""
-    parts = head.split(b"\r\n", 1)[0].split(b" ")
-    if len(parts) < 2:
-        return "normal"
-    method, target = parts[0], parts[1].split(b"?", 1)[0]
-    if method == b"GET" and target in _STREAM_ROUTES:
-        return "streams"
-    if target in _LONG_ROUTES:
-        return "long"
-    if target.startswith(b"/__panel_api/"):
-        from frontend.ui_web.call_pools import lane_for
-
-        name = unquote(target[len(b"/__panel_api/"):].decode("latin-1")).strip("/")
-        if lane_for(name) == "block":
-            return "long"
-    return "normal"
+# Which pool serves a request (remote_link.routing); old names kept for callers.
+_pool_kind = routing.pool_kind
+_peek_rfile = routing.peek_rfile
 
 
 class _PanelServer(ThreadingHTTPServer):
@@ -122,7 +104,12 @@ class _PanelServer(ThreadingHTTPServer):
     def _dispatch(self, request: Any, client_address: Any, handler: Any) -> None:
         from frontend.ui_web.call_pools import http_pool
 
-        http_pool("normal").submit(self._route, request, client_address, handler, time.monotonic())
+        queued = time.monotonic()
+        if routing.quick_kind(request, handler) == "input":
+            # Remote input skips the normal pool even for routing: with every normal
+            # worker busy it would otherwise wait there before reaching its own lane.
+            return input_lane().submit(self._serve, request, client_address, handler, queued)
+        http_pool("normal").submit(self._route, request, client_address, handler, queued)
 
     def _route(self, request: Any, client_address: Any, handler: Any, queued: float) -> None:
         waited = time.monotonic() - queued
@@ -135,29 +122,23 @@ class _PanelServer(ThreadingHTTPServer):
                 pass
         kind = "normal"
         try:
-            if handler is not None:
-                # Keep-alive: the bytes may already sit in rfile's buffer.
-                head = _peek_rfile(handler)
-            else:
-                old = request.gettimeout()
-                request.settimeout(_PEEK_TIMEOUT_S)
-                try:
-                    head = request.recv(1024, socket.MSG_PEEK)
-                finally:
-                    request.settimeout(old)
-            kind = _pool_kind(head)
+            kind = routing.pool_kind(routing.peek_head(request, handler))
         except Exception:
             pass
         if kind == "normal":
-            self._serve(request, client_address, handler)
+            self._serve(request, client_address, handler, queued)
+        elif kind == "input":
+            input_lane().submit(self._serve, request, client_address, handler, queued)
         else:
             from frontend.ui_web.call_pools import http_pool
 
-            http_pool(kind).submit(self._serve, request, client_address, handler)
+            http_pool(kind).submit(self._serve, request, client_address, handler, queued)
 
-    def _serve(self, request: Any, client_address: Any, handler: Any) -> None:
+    def _serve(self, request: Any, client_address: Any, handler: Any, queued: float | None = None) -> None:
         """One request; then the connection parks or closes (shutdown_request,
         as ThreadingMixIn.process_request_thread does in its finally)."""
+        # A full pool queues, never drops: the reply says how long it waited.
+        _queue_note.ms = round((time.monotonic() - queued) * 1000.0) if queued is not None else 0
         try:
             if handler is None:
                 handler = self.RequestHandlerClass(request, client_address, self)
@@ -173,12 +154,23 @@ class _PanelServer(ThreadingHTTPServer):
         self.shutdown_request(request)
 
 
+# Per worker thread: how long the request being served waited for a worker.
+_queue_note = threading.local()
+_QUEUED_HEADER_MS = 250
+
+
 class _PooledHandler(BaseHTTPRequestHandler):
     """Serves one request per ``serve_next``; a keep-alive connection then parks
     in _PanelServer (no worker held while idle) instead of looping here."""
 
     def handle(self) -> None:
         self.serve_next()
+
+    def end_headers(self) -> None:
+        waited = int(getattr(_queue_note, "ms", 0) or 0)
+        if waited >= _QUEUED_HEADER_MS:
+            self.send_header("X-Ducky-Queued-Ms", str(waited))
+        super().end_headers()
 
     def serve_next(self) -> None:
         self.close_connection = True
@@ -274,28 +266,6 @@ def _close_parked(item: tuple[Any, Any, Any, Any, float]) -> None:
         server.shutdown_request(request)
     except Exception:
         pass
-
-
-def _peek_rfile(handler: Any) -> bytes:
-    """The next request's first bytes from a keep-alive handler's rfile, without
-    blocking: a pipelined request may already sit in its buffer, where neither the
-    selector nor a socket peek can see it. Non-blocking, never a timeout: a
-    timed-out SocketIO refuses every later read."""
-    rfile = getattr(handler, "rfile", None)
-    conn = getattr(handler, "connection", None)
-    if rfile is None or conn is None or not hasattr(rfile, "peek"):
-        return b""
-    old = conn.gettimeout()
-    try:
-        conn.setblocking(False)
-        return bytes(rfile.peek(1024) or b"")[:1024]
-    except Exception:
-        return b""
-    finally:
-        try:
-            conn.settimeout(old)
-        except Exception:
-            pass
 
 
 def _flush_chat_saves() -> None:
@@ -1012,15 +982,14 @@ def start_panel_ui_server(dist_root: Path) -> str:
                     if not method or remote_denied(method, on_this_pc=on_this_pc):
                         self._send_json(403, {"ok": False, "error": "method not allowed"})
                         return
-                    try:
-                        result = call_panel_method(shared_panel_api(), method, args)
-                    except AttributeError:
-                        self._send_json(404, {"ok": False, "error": "method not allowed"})
-                        return
-                    except Exception as exc:
-                        self._send_json(200, {"ok": False, "error": str(exc)})
-                        return
-                    self._send_json(200, {"ok": True, "result": result})
+                    from frontend.ui_web.remote_link.requests import call_once
+
+                    # A resend after a dropped link (same request id) replays the first answer.
+                    status, reply = call_once(
+                        self.headers.get("X-Ducky-Request-Id"), payload,
+                        lambda: call_panel_method(shared_panel_api(), method, args),
+                    )
+                    self._send_json(status, reply)
                     return
                 # The window's page started, or hit an error before it could (boot_report:
                 # a page that never starts is reported as a stuck launch).
