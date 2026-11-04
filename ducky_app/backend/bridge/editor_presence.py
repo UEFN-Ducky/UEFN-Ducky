@@ -12,6 +12,7 @@ is True, so a missing package never hides a running editor.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 
@@ -25,8 +26,64 @@ _cache: dict[str, float | bool] = {}
 _mono = time.monotonic
 
 
+def _toolhelp_names() -> list[str] | None:
+    """Every process's image name from one Toolhelp snapshot (Windows), None when it fails.
+
+    psutil reads a Windows process name by opening the process for its exe path: ~20 ms
+    each, so ~400 processes took 8-12 s (Nov 4 2026). The snapshot lists them all at once.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_wchar * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32FirstW.restype = wintypes.BOOL
+    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+    kernel32.Process32NextW.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)  # TH32CS_SNAPPROCESS
+    if not snapshot or snapshot == wintypes.HANDLE(-1).value:
+        return None
+    names: list[str] = []
+    try:
+        entry = PROCESSENTRY32W()
+        entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while ok:
+            if entry.szExeFile:
+                names.append(entry.szExeFile.lower())
+            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+    finally:
+        kernel32.CloseHandle(snapshot)
+    return names or None
+
+
 def _process_names() -> list[str] | None:
     """Lower-case image names of every running process, or None when they can't be read."""
+    if sys.platform == "win32":
+        try:
+            names = _toolhelp_names()
+        except Exception:
+            names = None
+        if names is not None:
+            return names
     try:
         import psutil
     except ImportError:

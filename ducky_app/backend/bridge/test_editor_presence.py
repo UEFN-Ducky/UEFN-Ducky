@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 import urllib.request
 
 import pytest
@@ -96,6 +97,23 @@ def test_unreadable_process_list_never_hides_an_editor(monkeypatch) -> None:
         assert editor_presence.uefn_running() is True
     finally:
         editor_presence.forget()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Toolhelp snapshot is Windows-only")
+def test_windows_reads_every_name_in_one_snapshot_without_opening_processes(monkeypatch) -> None:
+    # Nov 4 2026: psutil opened each of ~400 processes for its exe path (8-12 s), and a
+    # plugin enable's listener reload waited that long before an uninstall could run.
+    import os
+
+    import psutil
+
+    def _opened(*a, **k):
+        raise AssertionError("opened a process to read its name")
+
+    monkeypatch.setattr(psutil, "process_iter", _opened)
+    names = editor_presence._process_names()
+    assert names and all(n == n.lower() for n in names)
+    assert psutil.Process(os.getpid()).name().lower() in names
 
 
 def test_env_switch_turns_the_check_off(processes, monkeypatch) -> None:
