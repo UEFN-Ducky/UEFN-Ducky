@@ -221,6 +221,96 @@ def test_ask_person_reads_the_card_answer(monkeypatch) -> None:
     assert editor_gateway._ask_person("lead", "restart", "why") is False
 
 
+def test_importing_the_client_starts_no_heartbeat_thread() -> None:
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "import threading\n"
+        "before = set(threading.enumerate())\n"
+        "import backend.bridge.client as c\n"
+        "new = [t.name for t in threading.enumerate() if t not in before]\n"
+        "print(repr(new), hasattr(c, '_heartbeat_loop'))\n"
+    )
+    app_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=app_dir, capture_output=True, text=True, timeout=120
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "[] False"
+
+
+@pytest.fixture
+def uefn_closed(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """Every listener connection is refused; returns the requests that were tried."""
+    import urllib.error
+    import urllib.request
+
+    tried: list[object] = []
+
+    def _urlopen(req, *args, **kwargs):
+        tried.append(req)
+        raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+    bridge._invalidate_cache()  # an earlier test's cached ping would answer without a request
+    monkeypatch.setattr(bridge, "_pinned_port", None)
+    monkeypatch.setattr(bridge, "_discovered_port", None)
+    return tried
+
+
+def test_send_command_with_uefn_closed_is_one_attempt(uefn_closed) -> None:
+    with pytest.raises(ConnectionError, match="UEFN isn't open with an island"):
+        bridge.send_command("spawn_actor", {"x": 1})
+    assert len(uefn_closed) == 1
+    assert uefn_closed[0].get_method() == "POST"
+
+
+def test_post_command_with_uefn_closed_is_one_attempt(uefn_closed) -> None:
+    with pytest.raises(ConnectionError, match="UEFN isn't open with an island"):
+        bridge.post_command_to_listener(4200, "get_log")
+    assert len(uefn_closed) == 1
+
+
+def test_every_listener_request_names_its_client(uefn_closed, monkeypatch) -> None:
+    monkeypatch.setenv("UEFN_DUCKY_PROCESS_ROLE", "app")
+    monkeypatch.delenv("DUCKY_RUN_ID", raising=False)
+    monkeypatch.delenv("DUCKY_CONV_ID", raising=False)
+    with pytest.raises(ConnectionError):
+        bridge.send_command("ping")
+    bridge.listener_get_health(4200)
+    bridge.listener_ping_port(4200)
+    import os
+
+    tags = [req.get_header("X-ducky-client") for req in uefn_closed]
+    assert tags == [f"panel:{os.getpid()}"] * 3
+
+
+@pytest.mark.parametrize(
+    ("role", "argv", "run_id", "tag"),
+    [
+        ("app", ["ducky"], "", "panel"),
+        ("tool_server", ["x", "bridge", "--shared-daemon"], "", "shared-daemon"),
+        ("tool_server", ["x", "bridge", "--port", "4201"], "run-7", "adapter"),
+        ("agent_host", ["x"], "", "agent-host"),
+    ],
+)
+def test_client_tag_roles(role, argv, run_id, tag, monkeypatch) -> None:
+    import os
+    import sys
+
+    monkeypatch.setenv("UEFN_DUCKY_PROCESS_ROLE", role)
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.delenv("DUCKY_CONV_ID", raising=False)
+    if run_id:
+        monkeypatch.setenv("DUCKY_RUN_ID", run_id)
+    else:
+        monkeypatch.delenv("DUCKY_RUN_ID", raising=False)
+    expected = f"{tag}:{os.getpid()}" + (f":{run_id}" if run_id else "")
+    assert bridge.client_tag() == expected
+
+
 def test_panel_tool_reports_a_refused_restart(monkeypatch) -> None:
     from backend.tools.panel import ducky_panel
 

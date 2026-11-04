@@ -1,4 +1,9 @@
-"""HTTP client to the UEFN listener, workspace path helpers, and MCP heartbeat."""
+"""HTTP client to the UEFN listener and workspace path helpers.
+
+Ducky only talks to the listener when a UEFN tool is called: no process polls or
+heartbeats it in the background, and a command is one POST with no health GET first.
+Every request names its sender in ``X-Ducky-Client`` so the listener can count traffic.
+"""
 
 from __future__ import annotations
 
@@ -78,6 +83,49 @@ _BUSY_WAIT_POLL_SEC = 0.1
 # Fail fast instead of silently queueing for the full command timeout (was 30–50s).
 _BUSY_FAIL_FAST_SEC = 10.0
 _SAVE_MODAL_WAIT_SEC = 1.5
+
+
+def client_tag() -> str:
+    """``<role>:<pid>[:<run id>]`` for the ``X-Ducky-Client`` header.
+
+    role: ``panel`` (the Ducky window), ``shared-daemon`` (the one shared tool server),
+    ``agent-host`` (a supervisor child) or ``adapter`` (an agent's own tool server).
+    """
+    import sys
+
+    from backend import process_role
+
+    kind = process_role.role()
+    if kind == "app":
+        tag = "panel"
+    elif kind == "agent_host":
+        tag = "agent-host"
+    elif "--shared-daemon" in sys.argv:
+        tag = "shared-daemon"
+    else:
+        tag = "adapter"
+    run_id = ""
+    try:
+        from backend.workspace import identity
+
+        ctx = identity.current() or identity.from_env()
+        run_id = str(getattr(ctx, "run_id", "") or "")
+    except Exception:
+        pass
+    return f"{tag}:{os.getpid()}" + (f":{run_id}" if run_id else "")
+
+
+def _listener_headers(**extra: str) -> dict[str, str]:
+    return {"X-Ducky-Client": client_tag(), **extra}
+
+
+def _offline_error(port: int) -> ConnectionError:
+    """The short answer for a refused connection: UEFN is closed or has no island open."""
+    return ConnectionError(
+        f"UEFN isn't open with an island (listener offline on port {port}). Do NOT retry until "
+        "it is: skip this step and keep going with the rest. Verse file edits, "
+        "workspace_list_verse_errors, digests, ducky_* and blender_* work without it."
+    )
 
 
 def _is_expected_offline(message: str) -> bool:
@@ -225,26 +273,6 @@ def busy_backoff_sleep(attempt: int) -> float:
     return min(_BUSY_RETRY_SLEEP_MAX_SEC, _BUSY_RETRY_SLEEP_SEC * (2 ** max(0, attempt)))
 
 
-def _wait_listener_idle(port: int, *, deadline: float, command: str) -> None:
-    """Poll GET / until not busy, or raise after ``_BUSY_FAIL_FAST_SEC`` of waiting."""
-    wait_started = time.time()
-    attempt = 0
-    dismissed = False
-    while time.time() < deadline:
-        if not _listener_is_busy(port):
-            return
-        if (
-            not dismissed
-            and time.time() - wait_started >= _SAVE_MODAL_WAIT_SEC
-        ):
-            dismissed = True
-            _auto_dismiss_save_modal(command)
-        if time.time() - wait_started >= _BUSY_FAIL_FAST_SEC:
-            raise RuntimeError(_busy_error_message(port, command))
-        time.sleep(busy_backoff_sleep(attempt))
-        attempt += 1
-
-
 def _post_json_locked(
     port: int,
     command: str,
@@ -254,16 +282,16 @@ def _post_json_locked(
 ) -> dict:
     """POST one command under ``_listener_lock``, waiting out 503 busy replies.
 
-    Caller must already hold ``_listener_lock``. Retries 503 with exponential
-    backoff; after ``_BUSY_FAIL_FAST_SEC`` of busy waiting, fails with a
-    structured "do not re-issue" error instead of silently queueing for 30–50s.
+    Caller must already hold ``_listener_lock``. No health GET first: a busy listener
+    answers 503, which is retried with exponential backoff (pressing a Save prompt
+    after ``_SAVE_MODAL_WAIT_SEC``); after ``_BUSY_FAIL_FAST_SEC`` of busy replies it
+    fails with a structured "do not re-issue" error instead of queueing for 30–50s.
     """
     from backend.tools.core.uefn_modal import save_modal_watchdog
 
     url = f"http://127.0.0.1:{port}"
     payload = json.dumps({"command": command, "params": params or {}}).encode()
     deadline = time.time() + max(timeout, 1.0)
-    _wait_listener_idle(port, deadline=deadline, command=command)
 
     last_http: Optional[urllib.error.HTTPError] = None
     busy_started: Optional[float] = None
@@ -278,7 +306,7 @@ def _post_json_locked(
             url,
             data=payload,
             # The listener refuses a POST without this header (blocks browser drive-bys).
-            headers={"Content-Type": "application/json", "X-Ducky-Listener": "1"},
+            headers=_listener_headers(**{"Content-Type": "application/json", "X-Ducky-Listener": "1"}),
             method="POST",
         )
         try:
@@ -383,7 +411,7 @@ def discover_port() -> int:
 
 def _ping_port(port: int, *, timeout: float = 1.0) -> bool:
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}", method="GET")
+        req = urllib.request.Request(f"http://127.0.0.1:{port}", headers=_listener_headers(), method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = json.loads(resp.read().decode())
             return body.get("status") == "ok"
@@ -410,6 +438,12 @@ def _handle_listener_http_error(e: urllib.error.HTTPError) -> None:
 
 
 _HEALTH_FAIL_FAST_SEC = 0.35
+
+
+def _is_refused(error: BaseException) -> bool:
+    """True when nothing listens on the port (UEFN closed), not a slow or broken reply."""
+    reason = getattr(error, "reason", error)
+    return isinstance(reason, ConnectionRefusedError) or isinstance(error, ConnectionRefusedError)
 
 
 def is_read_command(command: str) -> bool:
@@ -447,13 +481,6 @@ def _post_command_to_listener(
     timeout: float = 8.0,
 ) -> dict:
     global _last_post_ok_at
-    if listener_get_health(port, timeout=_HEALTH_FAIL_FAST_SEC) is None:
-        raise ConnectionError(
-            f"UEFN listener offline on port {port}. "
-            "Do NOT retry until the listener is online. This step needs UEFN open: skip it and "
-            "keep going with the rest — Verse file edits, digests, panel tools (ducky_*), and "
-            "blender_* work without it. Use workspace_* for Verse errors."
-        )
     t_lock0 = time.perf_counter()
     try:
         with _listener_lock:
@@ -464,7 +491,9 @@ def _post_command_to_listener(
         _last_post_ok_at = time.time()
     except TimeoutError:
         raise
-    except urllib.error.URLError as e:
+    except (urllib.error.URLError, ConnectionError) as e:
+        if _is_refused(e):
+            raise _offline_error(port) from e
         raise ConnectionError(f"UEFN listener not reachable on port {port}") from e
     try:
         from frontend.perf_trace import trace
@@ -500,9 +529,9 @@ def seconds_since_last_post_ok() -> float:
 
 
 def listener_get_health(port: int, timeout: float = 1.0) -> Optional[dict]:
-    """GET ``http://127.0.0.1:port/`` JSON (same as MCP bridge heartbeat), or ``None`` if down."""
+    """GET ``http://127.0.0.1:port/`` JSON (the listener's health), or ``None`` if down."""
     try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}", method="GET")
+        req = urllib.request.Request(f"http://127.0.0.1:{port}", headers=_listener_headers(), method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except Exception:
@@ -617,27 +646,11 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
                 for k in stale[:64]:
                     _response_cache.pop(k, None)
 
-    # Always fail-fast when the configured/cached port is down — never sit on
-    # REQUEST_TIMEOUT (30s) discovering or POSTing a dead listener.
-    probe = configured_listener_port()
-    health = listener_get_health(probe, timeout=_HEALTH_FAIL_FAST_SEC)
-    if health is not None:
-        port = probe
-        _discovered_port = probe
-    elif _pinned_port is not None:
-        _record_bridge_error(
-            f"Listener not reachable for '{command}' (GET health failed on port {probe})"
-        )
-        raise _listener_unreachable_error()
-    else:
-        # Short discovery (~3s budget), then fail — never fall through to a 30s POST.
-        _discovered_port = None
-        try:
-            port = discover_port()
-        except ConnectionError:
-            _record_bridge_error(f"Listener not reachable for '{command}' (discovery failed)")
-            raise
-    refused = _island_lock_refusal(command, params, port, health)
+    # One POST to the configured port, no health GET or port scan first: with UEFN
+    # closed that is one refused connection and a short error, never a 30 s wait.
+    port = configured_listener_port()
+    # Asks the listener for its island only for a guarded command with targets.
+    refused = _island_lock_refusal(command, params, port, None)
     if refused:
         _record_editor_change(command, params, {}, ok=False, error=f"refused: {refused}")
         raise RuntimeError(f"UEFN command '{command}' refused: {refused}")
@@ -660,6 +673,8 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
     except urllib.error.URLError as e:
         if _discovered_port is not None and _pinned_port is None:
             _discovered_port = None
+        if _is_refused(e):
+            raise _offline_error(port) from e  # UEFN closed: status, not an Errors-tab failure
         _record_bridge_error(f"Listener not reachable for '{command}': {e}")
         raise ConnectionError(
             "UEFN listener is not running. "
@@ -710,35 +725,6 @@ def check_connection() -> str:
         return "NOT CONNECTED - UEFN listener is not running"
     except Exception as e:
         return f"Connection error: {e}"
-
-
-# ---------------------------------------------------------------------------
-# Heartbeat — periodic ping so the listener knows we're alive
-# ---------------------------------------------------------------------------
-
-_HEARTBEAT_INTERVAL = 10.0
-# With UEFN closed every heartbeat is a full port scan, in every Ducky process.
-# After a few misses look once a minute; a tool call still finds the listener at once.
-_HEARTBEAT_OFFLINE_INTERVAL = 60.0
-_HEARTBEAT_MISSES_BEFORE_BACKOFF = 3
-
-
-def _heartbeat_loop() -> None:
-    time.sleep(3.0)
-    misses = 0
-    while True:
-        try:
-            # discover_port's GET to the listener is the heartbeat; a second GET
-            # right after it told the listener nothing new.
-            discover_port()
-            misses = 0
-        except Exception:
-            misses += 1
-        offline = misses >= _HEARTBEAT_MISSES_BEFORE_BACKOFF
-        time.sleep(_HEARTBEAT_OFFLINE_INTERVAL if offline else _HEARTBEAT_INTERVAL)
-
-
-threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
