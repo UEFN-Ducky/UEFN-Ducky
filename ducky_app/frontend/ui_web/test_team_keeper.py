@@ -8,6 +8,7 @@ from frontend.ui_web import team_keeper as keeper
 
 MIN = 60.0
 _REAL_ENQUEUE, _REAL_WAITING = keeper._enqueue, keeper._waiting
+_REAL_READERS = (keeper._blocked_reason, keeper._reply_mark, keeper._said_committed)
 PLAN = {"chat_id": "coord", "status": "open", "progress": {"pending": 3, "in_progress": 1, "completed": 2}}
 
 
@@ -896,3 +897,35 @@ def test_a_turn_ducky_did_not_start_gives_the_member_fresh_tries(_stopped) -> No
     for minute in range(31, 36):
         _run(minute * MIN, [], woke, plans=[SUB])
     assert len(member()) == 4
+
+
+def test_the_last_reply_is_read_from_the_rows_not_the_whole_chat(monkeypatch) -> None:
+    # Nov 2026: the keeper loaded every idle member's whole chat each minute to read its last
+    # reply, and spent a third of a core opening (DPAPI) rows and parts it never looked at.
+    from backend.store import switch
+    from backend.store.repos import chats as repo
+    from frontend.ui_web import project_chats
+
+    monkeypatch.setattr(switch, "use_db", lambda table: True)
+    monkeypatch.setattr(project_chats, "load_conversation", lambda *a, **k: pytest.fail("loaded the whole chat"))
+    messages = [{"role": "user", "content": "go", "ts": 1.0},
+                *({"role": "assistant", "content": f"step {i}", "ts": 2.0} for i in range(30)),
+                {"role": "assistant", "content": "Committed abc1234.\nBLOCKED: needs the CLI", "ts": 3.0}]
+    repo.conv_save("proj_keeper", {"id": "kmember", "title": "m", "created": 1.0, "updated": 1.0}, messages=messages)
+    assert keeper._last_reply("kmember") == ("Committed abc1234.\nBLOCKED: needs the CLI", 31)
+    blocked_reason, reply_mark, said_committed = _REAL_READERS  # _world stands in for these
+    assert blocked_reason("kmember") == "needs the CLI"
+    assert reply_mark("kmember") == 31
+    assert said_committed("kmember") is True
+
+
+def test_the_last_reply_falls_back_to_the_chat_without_the_row_store(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from backend.store import switch
+    from frontend.ui_web import project_chats
+
+    monkeypatch.setattr(switch, "use_db", lambda table: False)
+    conv = SimpleNamespace(messages=[{"role": "assistant", "content": "done"}, {"role": "assistant", "content": " "}])
+    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, **kw: conv)
+    assert keeper._last_reply("m") == ("done", 2)

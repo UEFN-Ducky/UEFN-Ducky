@@ -607,30 +607,51 @@ def _task_text(plan: dict[str, Any], work: dict[str, Any]) -> str:
                             about=(about + "\n") if about else "", points=_points(work["points"], bodies=True))
 
 
-def _blocked_reason(member: str) -> str:
-    """The "BLOCKED: ..." line of the member's last reply, if it ended its turn blocked."""
-    from backend.agent.a2a_broker import _last_assistant_text
+def _last_reply(member: str) -> tuple[str, int]:
+    """(the member's last non-empty reply, how many replies it has written).
 
-    found = _BLOCKED_RE.search(_last_assistant_text(member) or "")
-    return found.group(1).strip()[:500] if found else ""
+    The row store reads just that: the keeper looks at every idle member each minute, and
+    loading whole chats for it opened every row and part of each (Nov 2026: a third of a core
+    in DPAPI with five agents). Saves still queued are written first, so the count is current."""
+    try:
+        from backend.store.switch import use_db
 
+        if use_db("chats"):
+            from backend.store.repos import chats as chat_rows
+            from frontend.ui_web.chats.saves import flush_chat_saves
 
-def _reply_mark(member: str) -> int:
-    """How many replies the member has written: a BLOCKED in a newer reply is a new block."""
+            flush_chat_saves(member)
+            return chat_rows.last_reply(member)
+    except Exception:
+        pass
     from frontend.ui_web.project_chats import load_conversation
 
     try:
         conv = load_conversation(member)
     except Exception:
-        return 0
-    return sum(1 for m in (conv.messages if conv else []) if m.get("role") == "assistant")
+        return "", 0
+    replies = [m for m in (conv.messages if conv else []) if m.get("role") == "assistant"]
+    for message in reversed(replies):
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content.strip(), len(replies)
+    return "", len(replies)
+
+
+def _blocked_reason(member: str) -> str:
+    """The "BLOCKED: ..." line of the member's last reply, if it ended its turn blocked."""
+    found = _BLOCKED_RE.search(_last_reply(member)[0])
+    return found.group(1).strip()[:500] if found else ""
+
+
+def _reply_mark(member: str) -> int:
+    """How many replies the member has written: a BLOCKED in a newer reply is a new block."""
+    return _last_reply(member)[1]
 
 
 def _said_committed(member: str) -> bool:
     """Its last reply reports a commit (a commit word and a hash)."""
-    from backend.agent.a2a_broker import _last_assistant_text
-
-    return bool(_COMMITTED_RE.search(_last_assistant_text(member) or ""))
+    return bool(_COMMITTED_RE.search(_last_reply(member)[0]))
 
 
 def _tell_lead(plan: dict[str, Any], member: str, work: dict[str, Any], reason: str) -> None:
