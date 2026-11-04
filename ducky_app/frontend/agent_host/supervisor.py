@@ -38,11 +38,53 @@ MAX_HOSTS = _env_int("DUCKY_MAX_AGENT_HOSTS", min(os.cpu_count() or 8, 8))
 IDLE_EXIT_S = 300.0
 CONNECT_S = 60.0
 _REAP_S = 5.0
+RESTART_AGAIN_S = 600.0  # a seat cut off twice within this long is left to its lead
+RESTART_DELAY_S = 2.0  # the cut-off turn ends first, so the seat queue sees the seat idle
+SEATED_ROLES = frozenset({"member", "sub_lead"})
 _DUCKY_APP = str(Path(__file__).resolve().parents[2])
 # ponytail: visible_chats is added here, not in protocol.APP_OPS (another lane); fold it in there later.
 APP_OPS = protocol.APP_OPS | {"visible_chats"}
 
 OnFrame = Callable[["Host", dict[str, Any]], None]
+RestartSeat = Callable[[str, bool], None]
+
+
+def _tell_lead(conv_id: str, text: str) -> None:
+    try:
+        from backend.agent.a2a_client import send_notice
+        from backend.tools.panel.permission_prompt import starter_root
+
+        lead = starter_root(conv_id)
+        if lead and lead != conv_id:
+            send_notice(sender_conv_id=conv_id, receiver_conv_id=lead, body=text)
+    except Exception:  # noqa: BLE001 - no broker (tests): nobody to tell
+        pass
+
+
+def restart_seat_turn(conv_id: str, again: bool) -> None:
+    """Default ``restart_seat``: a team seat whose turn a dead host cut off starts it again once
+    through the seat queue (its cap and waves still apply); cut off again, or no way to restart,
+    its lead hears. Chats outside a team just say to send a message to continue."""
+    try:
+        from backend.agent.a2a_broker import team_role
+
+        if team_role(conv_id) not in SEATED_ROLES:
+            return
+    except Exception:  # noqa: BLE001
+        return
+    if not again:
+        time.sleep(RESTART_DELAY_S)
+        try:
+            from frontend.ui_web import seat_queue
+
+            restart = getattr(seat_queue, "restart", None)
+            if callable(restart) and restart(conv_id) in ("started", "queued"):
+                return
+        except Exception:  # noqa: BLE001 - fall through to the lead
+            pass
+    why = "was cut off again" if again else "could not be started again"
+    _tell_lead(conv_id, f"Seat {conv_id}: its agent host stopped mid-turn and the turn {why}. "
+                        "Restart it, or recycle it with ducky_recycle_member.")
 
 
 def host_argv(slot: int, pipe: str) -> list[str]:
@@ -112,8 +154,11 @@ class Supervisor:
         max_hosts: int = MAX_HOSTS,
         idle_exit_s: float = IDLE_EXIT_S,
         reap_s: float = _REAP_S,
+        restart_seat: RestartSeat | None = None,
     ) -> None:
         self._on_frame = on_frame
+        self._restart_seat = restart_seat or restart_seat_turn
+        self._restarted: dict[str, float] = {}
         self._on_host_closed = on_host_closed
         self._argv_for = argv_for
         base = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir())
@@ -239,6 +284,7 @@ class Supervisor:
             conn, send_ops=APP_OPS, recv_ops=protocol.HOST_OPS,
             on_frame=lambda frame: self._on_frame(host, frame) if self._on_frame else None,
             on_closed=lambda reason: self._closed(host, reason), dead_after_s=protocol.DEAD_AFTER_S,
+            alive=host.launched.alive,
         ).start()
         host.ready.set()
         self._send_visible(host)
@@ -270,14 +316,18 @@ class Supervisor:
             host.dead = True
             convs = self._drop(host)
         threading.Thread(target=host.stop, name=f"agent-host-kill-{host.slot}", daemon=True).start()
+        cut: list[str] = []
         try:
             from frontend.agent_host import turns
 
             mark = getattr(turns, "mark_host_dead", None)
             if callable(mark):
-                mark(host.slot)
+                cut = [str(c) for c in (mark(host.slot) or [])]
         except Exception:  # noqa: BLE001 - a failing hook never stops the restart
             pass
+        if cut and not self._stopped.is_set():
+            threading.Thread(target=self._restart_cut, args=(cut,), name=f"agent-host-resume-{host.slot}",
+                             daemon=True).start()
         if self._on_host_closed:
             try:
                 self._on_host_closed(host, reason)
@@ -290,6 +340,24 @@ class Supervisor:
                         self._start(self._free_slot())
                     except Exception:  # noqa: BLE001 - the next assign tries again
                         pass
+
+    def _restart_cut(self, convs: list[str]) -> None:
+        """Each chat whose running turn the dead host cut off: started again once (``again``
+        False), or, cut off again within ``RESTART_AGAIN_S``, left to its lead (``again`` True)."""
+        now = time.monotonic()
+        plan: list[tuple[str, bool]] = []
+        with self._lock:
+            for conv in dict.fromkeys(convs):
+                last = self._restarted.get(conv)
+                again = last is not None and now - last < RESTART_AGAIN_S
+                if not again:
+                    self._restarted[conv] = now
+                plan.append((conv, again))
+        for conv, again in plan:
+            try:
+                self._restart_seat(conv, again)
+            except Exception:  # noqa: BLE001 - one seat never stops the others
+                pass
 
     def _reap_loop(self) -> None:
         while not self._stopped.wait(self._reap_s):

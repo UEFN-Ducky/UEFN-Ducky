@@ -111,6 +111,78 @@ def test_a_slow_handler_never_looks_like_a_missing_heartbeat():
     host.close()
 
 
+class _StuckConn:
+    """A pipe whose recv waits until close(), then fails the way a cleared handle does."""
+
+    def __init__(self):
+        self.shut = threading.Event()
+
+    def recv_bytes(self, _max):
+        self.shut.wait(5)
+        raise TypeError("PeekNamedPipe() argument 1 must be int, not None")
+
+    def send_bytes(self, _data):
+        pass
+
+    def close(self):
+        self.shut.set()
+
+
+def _bare(**kw) -> protocol.Channel:
+    return protocol.Channel(_StuckConn(), send_ops=protocol.APP_OPS, recv_ops=protocol.HOST_OPS,
+                            on_frame=lambda f: None, **kw)
+
+
+def test_an_app_side_stall_never_closes_the_channel():
+    reasons: list[str] = []
+    ch = _bare(on_closed=reasons.append, dead_after_s=6.0)
+    ch._last_rx = ch._last_tick = 0.0
+    ch._check_silence(8.0)  # the app froze 8 s: the host's beats sit unread in the pipe
+    assert not ch.closed and reasons == []
+    for i in range(1, 50):  # ticks resume; the host's beats arrive
+        ch._last_rx = 8.0 + i * 0.1
+        ch._check_silence(8.0 + i * 0.1)
+    assert not ch.closed
+
+
+def test_a_silent_host_whose_process_runs_gets_the_long_wait():
+    ch = _bare(dead_after_s=6.0, alive=lambda: True, silent_dead_s=30.0)
+    ch._last_rx = ch._last_tick = 0.0
+    t = 0.0
+    while t < 29.0:
+        t += 0.1
+        ch._check_silence(t)
+    assert not ch.closed  # busy, not dead
+    while t < 30.5:
+        t += 0.1
+        ch._check_silence(t)
+    assert ch.closed and ch.close_reason == "heartbeat"
+
+
+def test_a_silent_host_whose_process_is_gone_closes_at_dead_after():
+    ch = _bare(dead_after_s=6.0, alive=lambda: False)
+    ch._last_rx = ch._last_tick = 0.0
+    t = 0.0
+    while t < 6.5:
+        t += 0.1
+        ch._check_silence(t)
+    assert ch.closed and ch.close_reason == "heartbeat"
+
+
+def test_closing_mid_read_ends_the_reader_quietly(monkeypatch):
+    errors: list[BaseException] = []
+    monkeypatch.setattr(threading, "excepthook", lambda args: errors.append(args.exc_value))
+    ch = _bare(on_closed=lambda r: None)
+    reader = threading.Thread(target=ch._read_loop, daemon=True)
+    reader.start()
+    time.sleep(0.05)
+    ch.close("stopped")
+    reader.join(2)
+    assert not reader.is_alive()
+    assert errors == []
+    assert ch.close_reason == "stopped"
+
+
 def test_killed_host_is_seen_within_1s():
     slot = f"t-{uuid.uuid4().hex[:8]}"
     key = os.urandom(16)

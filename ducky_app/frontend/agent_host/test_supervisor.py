@@ -178,6 +178,62 @@ def test_a_host_crash_only_stops_its_own_chats(tmp_path, monkeypatch):
         sup.stop_all()
 
 
+class _Launched:
+    pid = 0
+    proc = None
+
+    def alive(self):
+        return True
+
+    def stop(self, timeout_s=0.0):
+        pass
+
+
+def test_a_dead_hosts_cut_off_turns_start_again_once(tmp_path, monkeypatch):
+    from frontend.agent_host import turns
+
+    monkeypatch.setattr(turns, "mark_host_dead", lambda slot: ["c1", "c2"], raising=False)
+    calls: list[tuple[str, bool]] = []
+    got = threading.Event()
+
+    def restart(conv, again):
+        calls.append((conv, again))
+        if len(calls) in (2, 4):
+            got.set()
+
+    sup = supervisor.Supervisor(log_dir=tmp_path, reap_s=3600, max_hosts=0, restart_seat=restart)
+    try:
+        for slot in (0, 1):
+            host = supervisor.Host(slot, f"p{slot}", b"k", _Launched())
+            host.agents = {"c1", "c2", "idle"}
+            sup._hosts[slot] = host
+            sup._died(host, "heartbeat")
+            if slot == 0:
+                assert got.wait(5)
+                assert sorted(calls) == [("c1", False), ("c2", False)]  # only cut-off turns, once each
+                got.clear()
+            sup._died(host, "eof")  # the same death seen twice restarts nothing more
+        assert got.wait(5)
+        time.sleep(0.1)
+        assert sorted(calls[2:]) == [("c1", True), ("c2", True)]  # cut off again: the lead hears
+        assert len(calls) == 4
+    finally:
+        sup._stopped.set()
+
+
+def test_default_restart_skips_chats_outside_a_team(monkeypatch):
+    from backend.agent import a2a_broker
+
+    told: list[str] = []
+    monkeypatch.setattr(a2a_broker, "team_role", lambda c: "solo")
+    monkeypatch.setattr(supervisor, "_tell_lead", lambda c, t: told.append(c))
+    supervisor.restart_seat_turn("c1", True)
+    assert told == []
+    monkeypatch.setattr(a2a_broker, "team_role", lambda c: "member")
+    supervisor.restart_seat_turn("c1", True)
+    assert told == ["c1"]
+
+
 def test_defaults_seat_sixteen_per_host_and_env_overrides(monkeypatch):
     monkeypatch.delenv("DUCKY_AGENTS_PER_HOST", raising=False)
     assert supervisor._env_int("DUCKY_AGENTS_PER_HOST", 16) == 16

@@ -9,6 +9,10 @@ writer thread sends them, packing whatever is queued into one length-prefixed pi
 The reader thread only reads; a handler thread hands each frame to ``on_frame`` in order (the
 app's handler passes events to the push path), so a slow push never stops reads and never looks
 like a missing heartbeat. A dead host shows as pipe EOF at once, a hung one as a missing heartbeat.
+
+Nov 4 2026 (40 seats, a loaded PC): a 9.2 s app-side freeze looked like a silent host and the
+app closed a busy host mid-turn. So time this side itself was stalled never counts as silence,
+and a host whose process still runs (``alive``) is closed only after ``SILENT_DEAD_S`` of silence.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ HOST_OPS = frozenset({"event", "turn_ended", "saved", "steer_take", "steer_ack",
 
 HEARTBEAT_S = 2.0
 DEAD_AFTER_S = 3 * HEARTBEAT_S
+SILENT_DEAD_S = 30.0  # a host whose process still runs is hung only after this long a silence
 MAX_MESSAGE = 64 * 1024 * 1024
 _TICK_S = 0.1
 _EOF = object()  # the reader's EOF, queued behind the frames read before it
@@ -53,6 +58,8 @@ class Channel:
         on_closed: OnClosed | None = None,
         heartbeat_s: float = 0.0,
         dead_after_s: float = 0.0,
+        alive: Callable[[], bool] | None = None,
+        silent_dead_s: float = SILENT_DEAD_S,
     ) -> None:
         self._conn = conn
         self._send_ops = send_ops
@@ -61,12 +68,14 @@ class Channel:
         self._on_closed = on_closed
         self._heartbeat_s = heartbeat_s
         self._dead_after_s = dead_after_s
+        self._alive = alive
+        self._silent_dead_s = silent_dead_s
         self._out: queue.SimpleQueue[dict[str, Any] | None] = queue.SimpleQueue()
         self._in: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._closed = threading.Event()
         self.close_reason = ""
-        self._last_rx = time.monotonic()
+        self._last_rx = self._last_tick = time.monotonic()
 
     @property
     def closed(self) -> bool:
@@ -75,6 +84,7 @@ class Channel:
     def start(self) -> Channel:
         loops = ((self._read_loop, "reader"), (self._handle_loop, "handler"), (self._write_loop, "writer"),
                  (self._tick_loop, "tick"))
+        self._last_rx = self._last_tick = time.monotonic()
         for target, name in loops:
             threading.Thread(target=target, name=f"agent-host-{name}", daemon=True).start()
         return self
@@ -107,8 +117,10 @@ class Channel:
         while not self._closed.is_set():
             try:
                 raw = self._conn.recv_bytes(MAX_MESSAGE)
-            except (EOFError, OSError):
-                self._in.put(_EOF)
+            except (EOFError, OSError, TypeError, ValueError):
+                # TypeError / ValueError: close() cleared the pipe handle while recv_bytes waited.
+                if not self._closed.is_set():
+                    self._in.put(_EOF)
                 return
             self._last_rx = time.monotonic()
             self._in.put(raw)
@@ -157,8 +169,28 @@ class Channel:
             if self._heartbeat_s and now - last_beat >= self._heartbeat_s:
                 last_beat = now
                 self.send("heartbeat", ts=time.time())
-            if self._dead_after_s and now - self._last_rx > self._dead_after_s:
-                self.close("heartbeat")
+            self._check_silence(now)
+
+    def _check_silence(self, now: float) -> None:
+        """Close on a missing heartbeat, never for time this side itself was stalled."""
+        gap, self._last_tick = now - self._last_tick, now
+        if not self._dead_after_s:
+            return
+        if gap > self._dead_after_s:
+            # This side froze (GIL, a stuck window, a loaded PC): the host's beats wait unread.
+            self._last_rx = now
+            return
+        silent = now - self._last_rx
+        if silent <= self._dead_after_s:
+            return
+        if self._alive is None or silent >= self._silent_dead_s or not self._process_alive():
+            self.close("heartbeat")
+
+    def _process_alive(self) -> bool:
+        try:
+            return bool(self._alive and self._alive())
+        except Exception:  # noqa: BLE001 - can't tell: wait for the long silence
+            return True
 
 
 def listen(slot: int | str, authkey: bytes, app_pid: int | None = None) -> Listener:
