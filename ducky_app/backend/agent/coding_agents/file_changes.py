@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.workspace.identity import RunContext
-from backend.workspace.journal import FileChangeJournal
+from backend.workspace.journal import SOURCE_UNKNOWN, FileChangeJournal
 from backend.workspace.paths import content_hash, line_delta
 from backend.workspace.policy import ALLOW
 from backend.workspace.writer import WriteRecord
@@ -231,6 +231,16 @@ def _folder_worth_snapshotting(path: Path) -> bool:
     return path.is_dir() and path.parent != path and path != home
 
 
+def _ledger_roots() -> list[Path]:
+    """Every Ducky project root (each has its own change ledger)."""
+    try:
+        from backend.workspace.lanes import project_roots
+
+        return [Path(r).resolve() for r in project_roots()]
+    except Exception:  # noqa: BLE001 - no project list: only the repo's own ledger is read
+        return []
+
+
 def _named_paths(value: Any, key: str = ""):
     if isinstance(value, dict):
         for child_key, child in value.items():
@@ -268,6 +278,9 @@ class TurnFileChanges:
         self.files: dict[Path, Snapshot | None] = {}
         self.roots: set[str] = set()
         self.completed: list[dict[str, Any]] = []
+        self.started = time.time()
+        # Per running shell call: digest of each changed repo file when the call started.
+        self._pre_call: dict[str, dict[str, str]] = {}
         self._lock = threading.RLock()
         self.discover({"cwd": str(self.cwd)})
         if not any(self.cwd.is_relative_to(root) for root in self.repos) and _folder_worth_snapshotting(self.cwd):
@@ -355,6 +368,70 @@ class TurnFileChanges:
         return bool(stamp.get("run_id")) and stamp.get("run_id") != self.ctx.run_id \
             and stamp.get("hash", "") == after.digest
 
+    @staticmethod
+    def _is_shell(arguments: Any) -> bool:
+        return isinstance(arguments, dict) and any(
+            isinstance(arguments.get(key), str) and arguments[key].strip() for key in _SHELL_KEYS)
+
+    @staticmethod
+    def _call_key(tool: dict[str, Any]) -> str:
+        return str(tool.get("id") or tool.get("name") or "")
+
+    def _changed_now(self) -> dict[str, str]:
+        """Digest of every changed file in the turn's repos right now."""
+        out: dict[str, str] = {}
+        for root in self.repos:
+            try:
+                names = _dirty(root)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for name in names:
+                snap = _read(root / name)
+                if snap is not None:
+                    out[os.path.normcase(str((root / name).resolve()))] = snap.digest
+        return out
+
+    def _not_this_call(self, root: Path, path: Path, after: Snapshot, pre: dict[str, str]) -> bool:
+        """A shell call saw this change but nothing ties it to this chat.
+
+        Only for a file with no stamp in its own ledger: it was already like this when the
+        call started, or another chat's row for it sits in an enclosing project's ledger
+        (Nov 3 2026: the Guards seat's writes, journaled under Documents/GitHub, were taken
+        by the Chats seat's next ducky_terminal_run in the repo).
+        """
+        stamp = self.journal.index_stamp(path.relative_to(root).as_posix(), project_root=str(root)) or {}
+        if stamp.get("run_id") or stamp.get("conv_id") or (stamp and stamp.get("source") != SOURCE_UNKNOWN):
+            return False
+        if pre.get(os.path.normcase(str(path.resolve()))) == after.digest:
+            return True
+        own = root.resolve()
+        for other in _ledger_roots():
+            if other == own or not path.resolve().is_relative_to(other):
+                continue
+            try:
+                theirs = self.journal.index_stamp(path.resolve().relative_to(other).as_posix(),
+                                                  project_root=str(other)) or {}
+            except Exception:  # noqa: BLE001 - that project has no ledger
+                continue
+            who = str(theirs.get("conv_id") or "")
+            if who and who != self.ctx.conv_id and not theirs.get("deleted") and (
+                    theirs.get("hash") == after.digest or float(theirs.get("ts") or 0) >= self.started):
+                return True
+        return False
+
+    def _record_unknown(self, root: Path, path: Path, before: Snapshot, after: Snapshot, tool: str) -> None:
+        """Move the last-writer stamp to nobody: no chat is credited, nobody is refused."""
+        added, removed = line_delta(before.text, after.text)
+        writer = {"source": SOURCE_UNKNOWN, "run_id": "", "conv_id": "", "ducky_name": "", "tool": tool}
+        self.journal.record(WriteRecord(
+            op="write" if after.exists else "delete", path=path.relative_to(root).as_posix(), from_path="",
+            before=before.text, after=after.text, before_hash=before.digest,
+            after_hash=after.digest, existed_before=before.exists, tool=tool,
+            writer=writer, ctx=None, ts=time.time(),
+            lines_added=added, lines_removed=removed, decision=ALLOW,
+            project_root=str(root), abs_path=str(path),
+        ))
+
     def _record(self, root: Path, path: Path, before: Snapshot, after: Snapshot, tool: str) -> dict[str, Any]:
         relative = path.relative_to(root).as_posix()
         added, removed = line_delta(before.text, after.text)
@@ -389,6 +466,8 @@ class TurnFileChanges:
                 # AI's change (a read names files too, and changes nothing).
                 if str(tool.get("name") or "") in _NATIVE_EDIT_TOOLS:
                     self._note_team_folders(self._absolute(tool.get("arguments") or {}))
+                elif self._is_shell(tool.get("arguments")):
+                    self._pre_call[self._call_key(tool)] = self._changed_now()
                 return
             edits = []
             # Snapshots always advance; only what this call could have written is its edit.
@@ -398,10 +477,17 @@ class TurnFileChanges:
             # that a second chat wrote in the same project meanwhile.
             reach = self._reach(str(tool.get("name") or ""), tool.get("arguments") or {})
             owns = lambda path, root, after: reach(path) and not self._theirs(root, path, after)  # noqa: E731
+            shell = self._is_shell(tool.get("arguments"))
+            pre = self._pre_call.pop(self._call_key(tool), {})
+            name = str(tool.get("name") or "tool")
             for root, repo in self.repos.items():
                 for path, before, after in repo.changes():
-                    if owns(path, root, after):
-                        edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
+                    if not owns(path, root, after):
+                        continue
+                    if shell and self._not_this_call(root, path, after, pre):
+                        self._record_unknown(root, path, before, after, name)
+                        continue
+                    edits.append(self._record(root, path, before, after, name))
             for root, folder in self.folders.items():
                 for path, before, after in folder.changes():
                     if owns(path, root, after):
