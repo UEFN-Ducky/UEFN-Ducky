@@ -1,32 +1,40 @@
-"""The listener-online re-ship fires once per real offline -> online change, app-wide."""
+"""Reading the listener status never ships, revives or contacts UEFN (decision 2026-11-03)."""
+import threading
+
 from frontend import ship_newest
 from frontend.ui_web import panel_api
 
 
-def test_new_panel_api_per_request_does_not_reship_every_poll(monkeypatch):
-    # Oct 10 2026: every HTTP / phone / website request builds a new PanelApi. With the
-    # flag on the instance, each of their status polls re-shipped every skill pack to every
-    # IDE every 5 s, and Ducky kept two cores busy while idle.
-    from frontend.ui_web.lag.listener_flap import OnlineDebouncer
+def test_status_reads_and_refreshes_never_ship_or_revive(monkeypatch):
+    # Oct 10 2026: every status poll that saw the listener come online re-shipped every skill
+    # pack to every IDE. Nov 3 2026: a ship runs only at app start and on Settings -> Apply.
+    from backend.bridge import revive
 
-    shipped = []
-    monkeypatch.setattr(ship_newest, "ship_on_listener_online_async", lambda: shipped.append(1))
-    monkeypatch.setattr(panel_api, "_listener_online", OnlineDebouncer(hold_s=0))
-    online, offline = {"online": True, "wedged": False}, {"online": False}
+    shipped, revived = [], []
+    monkeypatch.setattr(ship_newest, "ship_newest_everywhere", lambda **kw: shipped.append(kw) or [])
+    monkeypatch.setattr(ship_newest, "ship_newest_everywhere_async", lambda **kw: shipped.append(kw))
+    monkeypatch.setattr(revive.AutoRevive, "observe", lambda *a, **k: revived.append(1))
+    api = panel_api.PanelApi.__new__(panel_api.PanelApi)
+    api._listener_status_lock = threading.Lock()
+    flips = iter([{"online": False}, {"online": True, "wedged": False}] * 5)
+    done = threading.Event()
+    fetched = []
 
-    def poll(status):  # what one request's fresh PanelApi does
-        panel_api.PanelApi._maybe_ship_on_listener_online(object(), status)
+    def fetch():
+        fetched.append(1)
+        if len(fetched) == 10:
+            done.set()
+        return dict(next(flips))
 
-    for _ in range(5):
-        poll(online)
-    assert len(shipped) == 1
-    poll(offline)
-    poll(online)
-    assert len(shipped) == 2
-    poll({"online": True, "wedged": True})  # a wedged listener is not online
-    poll(online)
-    assert len(shipped) == 3
-
+    monkeypatch.setattr(api, "_fetch_listener_status", fetch, raising=False)
+    monkeypatch.setattr(api, "_push_panel", lambda event: None, raising=False)
+    monkeypatch.setattr("backend.uefn_plugins.host.attach_plugin_connections", lambda s: s, raising=False)
+    for _ in range(10):  # ten offline/online flips, each from a refresh
+        api.get_listener_status(refresh=True)
+        while api._listener_status_cache()._inflight:
+            threading.Event().wait(0.01)
+    assert done.wait(5)
+    assert shipped == [] and revived == []
 
 def test_switching_or_removing_a_project_forgets_the_last_projects_listener_state(monkeypatch):
     # Oct 10 2026: a switch reset two attributes nothing read, so a listener that reported

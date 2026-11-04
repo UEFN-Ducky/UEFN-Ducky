@@ -725,15 +725,6 @@ from frontend.ui_web.panel_api_plan_progress import PanelApiPlanProgressMixin  #
 from frontend.ui_web.panel_api_swarm import PanelApiSwarmMixin  # noqa: E402
 from backend.voice.panel_mixin import PanelApiVoiceLaneMixin  # noqa: E402
 
-# Whether the UEFN listener was online at the last status check, for the whole app. HTTP,
-# phone and website requests each build a new PanelApi; kept per instance, every one of
-# their status polls looked like "listener just came online" and re-shipped every skill
-# pack to every IDE every 5 s (two cores busy while Ducky sat idle). A busy UEFN also
-# flaps online/offline, so the listener must stay online for 10 s before it counts.
-from frontend.ui_web.lag.listener_flap import OnlineDebouncer  # noqa: E402
-
-_listener_online = OnlineDebouncer()
-
 _shared_api_lock = threading.Lock()
 _shared_api: PanelApi | None = None
 
@@ -830,13 +821,11 @@ class PanelApi(
         self._sidebar_only_layout = False
         self._sidebar_only_saved_bounds: dict[str, int | float] | None = None
         self._tk_root: Any = None
-        from backend.bridge.revive import AutoRevive
         from backend.bridge.status import ListenerStatusState
 
         self._listener_status_state = ListenerStatusState()
         self._last_listener_status: dict[str, Any] | None = None
         self._listener_status_lock = threading.Lock()
-        self._listener_auto_revive = AutoRevive()
         # Folder the sidebar reports an external OS-file drag is over; read by the
         # pywebview drop handler (see file_drop_import.py).
         self._import_drop_target = ""
@@ -1166,9 +1155,14 @@ class PanelApi(
         ui_rpc.mark_active(str(client_id or ""), bool(active))
         return True
 
-    def get_listener_status(self) -> dict[str, Any]:
-        """The last listener status at once; older than 2 s, one background fetch refreshes it."""
-        return self._listener_status_cache().get()
+    def get_listener_status(self, refresh: bool = False) -> dict[str, Any]:
+        """The last known listener status, at once. Ducky never looks for UEFN in the
+        background: only ``refresh`` (the person's refresh, a UEFN tool call that just ran)
+        fetches, and its result reaches the window as a ``listener_status`` push."""
+        cache = self._listener_status_cache()
+        if refresh:
+            cache.refresh()
+        return cache.get()
 
     def _listener_status_cache(self) -> Any:
         cache = getattr(self, "_status_cache", None)
@@ -1178,20 +1172,25 @@ class PanelApi(
             with self._listener_status_lock:
                 cache = getattr(self, "_status_cache", None)
                 if cache is None:
-                    cache = ListenerStatusCache(self._refresh_listener_status, self._checking_listener_status)
+                    cache = ListenerStatusCache(
+                        self._refresh_listener_status,
+                        self._checking_listener_status,
+                        on_result=lambda status: self._push_panel({"type": "listener_status", "status": status}),
+                    )
                     self._status_cache = cache
         return cache
 
     @staticmethod
     def _checking_listener_status() -> dict[str, Any]:
-        # No fetch has finished yet: do not claim Offline.
+        # Nothing checked UEFN yet (no tool call, no refresh): do not claim Offline.
         return {
             "online": False,
             "wedged": False,
             "busy": False,
             "version": __version__,
             "uptime_sec": 0,
-            "status_text": "Checking…",
+            "status_text": "Not checked",
+            "unchecked": True,
             "uefn_project_dir": "",
             "uefn_project_name": "",
             "project_match": True,
@@ -1208,8 +1207,6 @@ class PanelApi(
         except Exception:
             result.setdefault("plugin_connections", [])
         self._last_listener_status = result
-        self._maybe_ship_on_listener_online(result)
-        self._listener_auto_revive.observe(result, PANEL_LISTENER_PORT)
         return result
 
     def restart_listener(self) -> dict[str, Any]:
@@ -1224,17 +1221,6 @@ class PanelApi(
             record_error(error_source("listener_restart", result), str(result.get("message") or "Listener restart failed"))
         self._listener_status_cache().refresh()
         return result
-
-    def _maybe_ship_on_listener_online(self, status: dict[str, Any]) -> None:
-        """The UEFN listener came online and stayed 10 s: re-ship when its code is stale."""
-        online = bool(status.get("online")) and not bool(status.get("wedged"))
-        if _listener_online.observe(online):
-            try:
-                from frontend.ship_newest import ship_on_listener_online_async
-
-                ship_on_listener_online_async()
-            except Exception:
-                pass
 
     def _fetch_listener_status(self) -> dict[str, Any]:
         try:
