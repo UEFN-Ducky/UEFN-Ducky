@@ -1,4 +1,4 @@
-"""Listener gate is opt-in: host tools never probe; editor tools fail fast offline."""
+"""No listener pre-check: every tool just runs; a UEFN tool that can't reach UEFN says so."""
 
 from __future__ import annotations
 
@@ -72,9 +72,12 @@ def test_host_tools_never_probe_listener(monkeypatch) -> None:
     assert health_calls == []
 
 
-def test_editor_tools_fail_fast_offline_without_calling_tool(monkeypatch) -> None:
+def test_editor_tool_with_uefn_closed_returns_its_own_connection_error(monkeypatch) -> None:
+    probes: list[int] = []
     monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
-    monkeypatch.setattr("backend.bridge.listener_get_health", lambda _port, timeout=1.0: None)
+    monkeypatch.setattr(
+        "backend.bridge.listener_get_health", lambda port, timeout=1.0: probes.append(port)
+    )
     monkeypatch.setattr(
         "backend.uefn_plugins.host.is_plugin_host_only_tool",
         lambda _n: False,
@@ -84,23 +87,38 @@ def test_editor_tools_fail_fast_offline_without_calling_tool(monkeypatch) -> Non
 
     async def _fake_call(name: str, args: dict):
         called.append(name)
-        return [SimpleNamespace(text="should not run")]
+        raise ConnectionRefusedError("[WinError 10061] No connection could be made")
 
     _patch_mcp_call(monkeypatch, _fake_call)
 
     result = asyncio.run(tools.execute_tool("spawn_actor", {"asset_path": "/Game/X"}))
     assert not result.ok
-    assert "listener offline" in result.error.lower()
+    assert result.error == (
+        "UEFN isn't open with an island: open it to use spawn_actor; everything else works"
+    )
     assert "Do NOT retry" in (result.hint or "")
-    assert result.duration_ms < 2000
-    assert called == [], "offline editor tools must not enter mcp.call_tool / port discovery"
+    assert called == ["spawn_actor"], "the call itself finds out; no pre-check"
+    assert probes == []
+
+
+def test_editor_tool_text_answer_listener_offline_reads_uefn_closed(monkeypatch) -> None:
+    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+
+    async def _fake_call(name: str, args: dict):
+        return [SimpleNamespace(text="Error: UEFN listener offline on port 4200")]
+
+    _patch_mcp_call(monkeypatch, _fake_call)
+    result = asyncio.run(tools.execute_tool("save_current_level", {}))
+    assert not result.ok
+    assert result.error.startswith("UEFN isn't open with an island: open it to use save_current_level")
 
 
 def test_editor_tools_run_when_listener_healthy(monkeypatch) -> None:
+    probes: list[int] = []
     monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
     monkeypatch.setattr(
         "backend.bridge.listener_get_health",
-        lambda _port, timeout=1.0: {"status": "ok"},
+        lambda port, timeout=1.0: probes.append(port) or {"status": "ok"},
     )
     monkeypatch.setattr(
         "backend.uefn_plugins.host.is_plugin_host_only_tool",
@@ -115,6 +133,7 @@ def test_editor_tools_run_when_listener_healthy(monkeypatch) -> None:
 
     result = asyncio.run(tools.execute_tool("spawn_actor", {"asset_path": "/Game/X"}))
     assert result.ok, result.error
+    assert probes == []
 
 
 def test_desktop_plugin_host_only_tools_skip_listener_gate(monkeypatch) -> None:
@@ -190,23 +209,26 @@ def test_a_tool_whose_plugin_failed_to_reload_says_so_not_listener_offline(monke
     assert host.plugin_tool_unavailable_reason("imk_project_get") == ""  # loaded again
 
 
-def test_listener_offline_names_plugins_that_failed_to_load_for_an_unknown_tool(monkeypatch) -> None:
+def test_uefn_closed_names_plugins_that_failed_to_load_for_an_unknown_tool(monkeypatch) -> None:
     import backend.uefn_plugins.host as host
 
-    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port, timeout=1.0: None)
-    monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
     monkeypatch.setattr(host, "is_plugin_host_only_tool", lambda _n: False)
     monkeypatch.setattr(host, "plugin_load_failures", lambda: {"Island Media Kit": "ValueError: bad registry."})
     mcp = MagicMock()
     mcp._tool_manager._tools = {"spawn_actor": object()}
+
+    async def _refused(name: str, args: dict):
+        raise ConnectionRefusedError("Connection refused")
+
+    mcp.call_tool = _refused
     monkeypatch.setattr(tools, "_ensure_mcp", lambda: mcp)
 
     result = asyncio.run(tools.execute_tool("imk_render_create", {}))
-    assert "listener offline" in result.error
+    assert "UEFN isn't open" in result.error
     assert "Island Media Kit: ValueError: bad registry." in result.error
 
     served = asyncio.run(tools.execute_tool("spawn_actor", {}))
-    assert served.error == "UEFN listener offline on port 4200"
+    assert served.error == "UEFN isn't open with an island: open it to use spawn_actor; everything else works"
 
 
 def test_a_guessed_tool_name_is_unknown_not_listener_offline(monkeypatch) -> None:

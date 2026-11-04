@@ -752,11 +752,42 @@ def _unknown_tool_text(name: str) -> str:
 
 
 _LISTENER_OFFLINE_HINT = (
-    "This tool needs the UEFN editor listener (Deploy + open project). "
-    "Do NOT retry it until the listener is online — it will keep failing. "
-    "Skip only this step and keep going with the rest of the task: Verse file edits, "
-    "digests, panel tools (ducky_*), and blender_* work without it."
+    "Do NOT retry it until UEFN is open; keep going with the rest of the task."
 )
+
+_UNREACHABLE_MARKERS = (
+    "listener offline",
+    "connection refused",
+    "connectionrefused",
+    "connecterror",
+    "failed to establish a new connection",
+    "actively refused",
+    "winerror 10061",
+    "cannot connect to host",
+    "all connection attempts failed",
+)
+
+
+def _uefn_unreachable(name: str, text: str) -> bool:
+    """A UEFN tool whose own call could not reach the editor."""
+    low = (text or "").lower()
+    if not any(m in low for m in _UNREACHABLE_MARKERS):
+        return False
+    return _requires_uefn_listener(name)
+
+
+def uefn_closed_text(name: str) -> str:
+    return f"UEFN isn't open with an island: open it to use {name}; everything else works"
+
+
+def _uefn_closed_result(name: str, ms: int) -> ToolCallResult:
+    return ToolCallResult(
+        ok=False,
+        tool=name,
+        error=uefn_closed_text(name) + _failed_plugins_note(name),
+        hint=_LISTENER_OFFLINE_HINT,
+        duration_ms=ms,
+    )
 
 
 _PYDANTIC_URL = re.compile(r"\s*For further information visit https?://errors\.pydantic\.dev\S*")
@@ -1346,21 +1377,7 @@ async def _dispatch_tool(
             ok=False, tool=name, error=_unknown_tool_text(name), duration_ms=ms
         )
 
-    # Opt-in listener check: only editor tools. Host tools never probe UEFN.
-    if _requires_uefn_listener(name):
-        from backend.bridge import configured_listener_port, listener_get_health
-
-        port = configured_listener_port()
-        if listener_get_health(port, timeout=0.35) is None:  # fail-fast; never wait on REQUEST_TIMEOUT
-            ms = int((time.time() - t0) * 1000)
-            return ToolCallResult(
-                ok=False,
-                tool=name,
-                error=f"UEFN listener offline on port {port}" + _failed_plugins_note(name),
-                hint=_LISTENER_OFFLINE_HINT,
-                duration_ms=ms,
-            )
-
+    # No pre-check: the call itself finds out whether UEFN is there (2026-11-03).
     try:
         mcp = _ensure_mcp()
         raw = await _await_cancellable(
@@ -1391,8 +1408,10 @@ async def _dispatch_tool(
                     hint=_INVENTED_TOOL_HINT,
                     duration_ms=ms,
                 )
-            hint = _hint_for_error(name, text)
             _record_plugin_sidecar(name, args, text, ok=False)
+            if _uefn_unreachable(name, text):
+                return _uefn_closed_result(name, ms)
+            hint = _hint_for_error(name, text)
             return ToolCallResult(ok=False, tool=name, error=_failure_text(text), hint=hint, duration_ms=ms)
         from backend.agent.tool_spills import inline_or_spill
 
@@ -1424,6 +1443,10 @@ async def _dispatch_tool(
                 hint=_INVENTED_TOOL_HINT,
                 duration_ms=ms,
             )
+        if _uefn_unreachable(name, msg) or (
+            isinstance(e, ConnectionError) and _requires_uefn_listener(name)
+        ):
+            return _uefn_closed_result(name, ms)
         return ToolCallResult(
             ok=False,
             tool=name,
