@@ -1,4 +1,4 @@
-"""Store skill updates merge: preserve user-created refs; stamp provenance."""
+"""Skill pack archives: Store updates merge (keep user refs, stamp provenance), exports."""
 
 from __future__ import annotations
 
@@ -9,16 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from backend.skills.store import (
-    ORIGIN_USER,
-    appdata_skill_packs_dir,
-    build_skill_prompt,
-    create_subskill,
-    import_skill_pack_from_bytes,
-    load_pack_manifest,
-    parse_frontmatter,
-    read_subskill_body,
-)
+from unittest.mock import patch
+
+from backend.skills.archive import export_skill_pack_to_zip, import_skill_pack_from_bytes
+from backend.skills.authoring import create_subskill
+from backend.skills.discovery import appdata_skill_packs_dir
+from backend.skills.frontmatter import parse_frontmatter
+from backend.skills.layout import ORIGIN_USER
+from backend.skills.manifest import load_pack_manifest, read_subskill_body
+from backend.skills.skill_index import build_skill_prompt
 
 
 def _pack_zip(
@@ -163,7 +162,7 @@ def test_store_import_skips_when_plugin_owns_skill(
 ) -> None:
     del isolated_appdata
     monkeypatch.setattr(
-        "backend.skills.store.plugin_owner_for_skill",
+        "backend.skills.archive.plugin_owner_for_skill",
         lambda pack_id: "uefn-physics" if pack_id == "physics" else None,
     )
     result = import_skill_pack_from_bytes(
@@ -188,8 +187,14 @@ def test_store_import_skips_when_plugin_owns_skill(
     assert "uefn-physics" in str(blocked.get("error") or "")
 
 
+def test_export_plugin_owned_skill_blocked(tmp_path: Path) -> None:
+    with patch("backend.skills.archive.plugin_owner_for_skill", return_value="materials"):
+        with pytest.raises(PermissionError, match="plugin-owned"):
+            export_skill_pack_to_zip("materials", tmp_path / "out.ducky-skill-pack")
+
+
 def test_appdata_dir_aliases_canonical() -> None:
-    from backend.skills.store import appdata_dir
+    from backend.skills.discovery import appdata_dir
     from frontend.app_paths import resolve_app_data_dir
 
     assert appdata_dir() == resolve_app_data_dir()
