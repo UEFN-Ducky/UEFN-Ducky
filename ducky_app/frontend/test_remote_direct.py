@@ -84,6 +84,25 @@ def test_a_late_answer_is_kept_for_the_retry(monkeypatch) -> None:
     assert len(published) == 1
 
 
+def test_a_new_offer_on_the_same_session_is_a_new_dial(monkeypatch) -> None:
+    """A redial after a network change keeps the session id but brings a new offer: never the old answer."""
+    published: list[dict] = []
+
+    def page(rows):
+        published.extend(rows)
+        sdp = "v=0\r\na=answer-%d\r\n" % len(published)
+        threading.Thread(target=lambda: rd.resolve_answer("s5", {"type": "answer", "sdp": sdp})).start()
+
+    monkeypatch.setattr("frontend.ui_web.panel_httpd.publish_panel_events", page)
+    monkeypatch.setattr(rd, "ANSWER_WAIT_S", 2.0)
+    first = rd.rtc_connect({"session": "s5", "offer": _offer(), "protocol": 1})
+    again = rd.rtc_connect({"session": "s5", "offer": _offer(), "protocol": 1})
+    moved = rd.rtc_connect({"session": "s5", "offer": {"type": "offer", "sdp": "v=0\r\na=new-net\r\n"}, "protocol": 1})
+    assert first["answer"]["sdp"].endswith("answer-1\r\n")
+    assert again["answer"] == first["answer"]  # the same offer resent: replayed
+    assert moved["answer"]["sdp"].endswith("answer-2\r\n") and len(published) == 2
+
+
 def test_resolve_answer_rejects_unknown_or_bad() -> None:
     assert rd.resolve_answer("nope", {"type": "answer", "sdp": "v=0"}) is False
 
