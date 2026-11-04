@@ -1,8 +1,13 @@
 """Start a team member's turn only when the PC has memory for it (decision D2).
 
 Agents kept starting while the PC had 0.1 GB free, and the window process died out of
-memory. A sub-lead's or member's turn now waits in one FIFO line until free memory is at
-least ``START_FREE_GB`` or fewer than ``FLOOR`` member turns run (so a team always moves).
+memory. A sub-lead's or member's turn now waits in one FIFO line until starting it leaves at
+least ``agent_min_free_ram_gb`` (default 6 GB) free, or fewer than ``FLOOR`` member turns run
+(so a team always moves). Starting one costs what an agent measurably uses: the rolling
+average of the live agent processes (claude.exe, node, its bridges) per running agent, not a
+constant. Agents started in the last ``RESERVE_S`` are counted as already using it, since a
+new agent takes a while to load. Running agents are never paused or stopped: only new starts
+wait ("Waiting for memory (N GB free)").
 Never queued: a person's own send, Stop, question answers, the top lead of a group tree and
 chats outside any group. An admitted turn holds its slot until it ends (``release``), also
 while it waits on teammates. The line is re-checked every ``RECHECK_S`` and whenever a turn
@@ -11,13 +16,23 @@ ends; after ``NOTICE_AFTER_S`` a waiting chat is told which processes hold the m
 
 from __future__ import annotations
 
+import os
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-START_FREE_GB = 3.0
+START_FREE_GB = 6.0  # default for the agent_min_free_ram_gb setting
 FLOOR = 2
+# Until agents run to measure: a real coding agent is ~230 MB plus node and two bridges.
+DEFAULT_AGENT_GB = 0.3
+RESERVE_S = 30.0
+COST_EVERY_S = 10.0
+_COST_ALPHA = 0.3
+# Processes a coding agent brings; the first group counts agents.
+_AGENT_HEADS = frozenset({"claude.exe", "codex.exe", "opencode.exe", "cursor-agent.exe"})
+_AGENT_PARTS = _AGENT_HEADS | frozenset({"node.exe", "uefn-ducky-bridge.exe"})
 RECHECK_S = 5.0
 NOTICE_AFTER_S = 300.0
 _ROLE_TTL_S = 10.0
@@ -42,6 +57,9 @@ _running: set[str] = set()  # member / sub-lead turns holding a slot
 _roles: dict[str, tuple[float, str]] = {}
 _thread: threading.Thread | None = None
 _now = time.monotonic
+_admits: deque[float] = deque()  # when recent member turns were let in (not yet loaded)
+_cost: dict[str, float] = {"gb": 0.0, "at": float("-inf")}
+_floor_cache: dict[str, float] = {"gb": START_FREE_GB, "at": float("-inf")}
 
 
 def free_memory_gb() -> float:
@@ -76,6 +94,81 @@ def free_memory_gb() -> float:
 _read_free = free_memory_gb
 
 
+def min_free_gb() -> float:
+    """The ``agent_min_free_ram_gb`` setting (env ``UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB`` wins)."""
+    now = _now()
+    if now - _floor_cache["at"] < COST_EVERY_S:
+        return _floor_cache["gb"]
+    gb = START_FREE_GB
+    raw = os.environ.get("UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB")
+    try:
+        if raw:
+            gb = float(raw)
+        else:
+            from frontend.settings import PanelSettings
+
+            value = getattr(PanelSettings.load(), "agent_min_free_ram_gb", None)
+            if value:
+                gb = float(value)
+    except Exception:
+        pass
+    _floor_cache.update(gb=gb, at=now)
+    return gb
+
+
+def _measure_cost() -> float | None:
+    """GB the live coding agents hold, per agent; None when no agent runs."""
+    from backend.util import proc_table
+
+    heads = 0
+    held = 0
+    for proc in proc_table.table().values():
+        name = (proc.name or "").lower()
+        if name in _AGENT_PARTS:
+            held += int(proc.private)
+            heads += name in _AGENT_HEADS
+    return held / heads / 1024**3 if heads else None
+
+
+def agent_cost_gb() -> float:
+    """What one more agent will use: a rolling average of the measured per-agent memory."""
+    now = _now()
+    if now - _cost["at"] >= COST_EVERY_S:
+        _cost["at"] = now
+        try:
+            sample = _measure_cost()
+        except Exception:
+            sample = None
+        if sample:
+            _cost["gb"] = sample if not _cost["gb"] else _cost["gb"] + _COST_ALPHA * (sample - _cost["gb"])
+    return _cost["gb"] or DEFAULT_AGENT_GB
+
+
+def _loading() -> int:
+    """Member turns let in during the last RESERVE_S (their memory is not in the free count yet)."""
+    floor = _now() - RESERVE_S
+    while _admits and _admits[0] < floor:
+        _admits.popleft()
+    return len(_admits)
+
+
+def has_room(running: int, extra: int = 0) -> bool:
+    """Room for one more member turn: under ``FLOOR``, or the start leaves the memory floor free.
+
+    ``extra``: turns being started now that admission has not counted yet (the seat queue's).
+    """
+    if running < FLOOR:
+        return True
+    cost = agent_cost_gb()
+    return _read_free() - (_loading() + extra + 1) * cost >= min_free_gb()
+
+
+def _admit(conv_id: str) -> None:
+    """Call under ``_lock``."""
+    _running.add(conv_id)
+    _admits.append(_now())
+
+
 def _role(conv_id: str) -> str:
     # ponytail: 10 s cache; the group scan reads every chat's metadata, too slow per turn start.
     hit = _roles.get(conv_id)
@@ -98,7 +191,7 @@ def _queues(conv_id: str, source: str) -> bool:
 
 def _room() -> bool:
     """Call under ``_lock``."""
-    return len(_running) < FLOOR or _read_free() >= START_FREE_GB
+    return has_room(len(_running))
 
 
 def may_start(conv_id: str, source: str, *, start: Callable[[], Any] | None = None,
@@ -111,7 +204,7 @@ def may_start(conv_id: str, source: str, *, start: Callable[[], Any] | None = No
         return True
     with _lock:
         if not _waiting and _room():
-            _running.add(conv_id)
+            _admit(conv_id)
             return True
         if start is None:
             return False
@@ -150,7 +243,7 @@ def drain() -> int:
     with _lock:
         while _waiting and _room():
             w = _waiting.pop(0)
-            _running.add(w.conv_id)
+            _admit(w.conv_id)
             started.append(w)
     for w in started:
         _say(w, "", position=0)
@@ -217,8 +310,11 @@ def _show_positions() -> None:
         moved = [(w, i + 1) for i, w in enumerate(_waiting) if w.shown != i + 1]
         for w, pos in moved:
             w.shown = pos
+    if not moved:
+        return
+    free = _read_free()
     for w, pos in moved:
-        _say(w, f"Waiting for memory — {_ordinal(pos)} in line", position=pos)
+        _say(w, f"Waiting for memory ({free:.1f} GB free) — {_ordinal(pos)} in line", position=pos)
 
 
 def biggest_users(n: int = 5) -> list[dict[str, Any]]:

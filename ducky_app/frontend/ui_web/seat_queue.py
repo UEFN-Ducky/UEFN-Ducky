@@ -152,9 +152,10 @@ def _running() -> set[str]:
 
 
 def _room(running: int) -> bool:
+    """Call under ``_lock``. Seats being started count against memory before admission sees them."""
     if running >= limit():
         return False
-    return running < admission.FLOOR or admission._read_free() >= admission.START_FREE_GB
+    return admission.has_room(running, extra=len(_starting))
 
 
 def is_busy(conv_id: str) -> bool:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections import deque
 
 import pytest
 
@@ -15,6 +16,9 @@ def line(monkeypatch):
     roles: dict[str, str] = {}
     monkeypatch.setattr(adm, "_waiting", [])
     monkeypatch.setattr(adm, "_running", set())
+    monkeypatch.setattr(adm, "_admits", deque())
+    monkeypatch.setattr(adm, "agent_cost_gb", lambda: 0.3)
+    monkeypatch.setattr(adm, "min_free_gb", lambda: 6.0)
     monkeypatch.setattr(adm, "_read_free", lambda: free["gb"])
     monkeypatch.setattr(adm, "_role", lambda cid: roles.get(cid, "member"))
     monkeypatch.setattr(adm, "_ensure_thread", lambda: None)  # tests drive drain() themselves
@@ -46,8 +50,9 @@ def test_low_memory_starts_two_members_and_lines_up_the_rest(line):
     assert not _ask(line, "m4", pushed=pushed)
     assert not _ask(line, "m5", pushed=pushed)
     assert [w.conv_id for w in adm._waiting] == ["m3", "m4", "m5"]
-    assert [e["text"] for e in pushed] == ["Waiting for memory — 1st in line", "Waiting for memory — 2nd in line",
-                                           "Waiting for memory — 3rd in line"]
+    assert [e["text"] for e in pushed] == ["Waiting for memory (2.5 GB free) — 1st in line",
+                                           "Waiting for memory (2.5 GB free) — 2nd in line",
+                                           "Waiting for memory (2.5 GB free) — 3rd in line"]
     adm.release("m1")  # a turn ended: the floor lets exactly the oldest one in
     line["wait"](1)
     assert line["started"] == ["m3"]
@@ -58,7 +63,7 @@ def test_low_memory_starts_two_members_and_lines_up_the_rest(line):
 def test_enough_memory_drains_the_line(line):
     assert _ask(line, "m1") and _ask(line, "m2")
     assert not _ask(line, "m3") and not _ask(line, "m4")
-    line["free"]["gb"] = 4.0
+    line["free"]["gb"] = 12.0  # above the 6 GB floor, room for both
     assert adm.drain() == 2
     line["wait"](2)
     assert sorted(line["started"]) == ["m3", "m4"] and adm._waiting == []
