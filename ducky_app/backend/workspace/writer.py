@@ -550,20 +550,27 @@ class ProjectWriter:
             raise
 
     def _owning_root(self, full: str, active: str) -> str:
-        """The open project, or the person's other Ducky project that holds ``full``."""
-        if active and rel_from_root(full, active):
-            return active
+        """The innermost Ducky project that holds ``full``: the open one, the island beside
+        its Content, or another of the person's projects.
+
+        Innermost, not the open one first: with ``Documents/GitHub`` open, a write in the
+        nested ``GitHub/UEFN-Ducky-Release`` project was journaled in the GitHub ledger,
+        while the git snapshot (file_changes) and commit_guard read the repo's ledger, found
+        no stamp there and credited the file to whichever chat ran a shell call next.
+        """
         island = island_root(active) if active else ""
-        if island and island != os.path.realpath(active) and rel_from_root(full, island):
-            return island  # the island's .ducky beside Content
         try:
             others = list(self._other_roots())
         except Exception:  # noqa: BLE001 - no recent-project list: the open project only
             others = []
-        for other in others:
-            if other and rel_from_root(full, other):
-                return other
-        return active
+        best, best_len = "", -1
+        for candidate in (active, island, *others):
+            if not candidate or not rel_from_root(full, candidate):
+                continue
+            size = len(os.path.realpath(candidate))
+            if size > best_len:  # ties keep the earlier one (the open project first)
+                best, best_len = candidate, size
+        return best or active
 
     def _other_project(self, root: str) -> str:
         """``root`` when it is not the open project, else ""."""
