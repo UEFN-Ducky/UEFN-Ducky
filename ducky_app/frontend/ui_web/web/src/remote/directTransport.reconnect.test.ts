@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DirectTransport, REMOTE_RESYNC } from "./directTransport";
+import { DirectTransport, HEALTH_OUTBOX_KEY, REMOTE_RESYNC, UD_DIRECT_REPORT_ACK } from "./directTransport";
 
 class FakeChannel {
   readyState = "connecting";
@@ -92,8 +92,13 @@ async function liveTransport() {
   const t = transport();
   await t.connect();
   await flush();
-  FakePc.all[FakePc.all.length - 1].up();
+  pcOf(t).up();
   return t;
+}
+
+/** This transport's own peer connection (earlier tests' transports still listen on document). */
+function pcOf(t: DirectTransport): FakePc {
+  return (t as unknown as { pc: FakePc }).pc;
 }
 
 beforeEach(() => {
@@ -216,6 +221,79 @@ describe("a link that drops after it was live (a phone that slept)", () => {
     const caught = stalled.catch((e: Error) => e.message);
     await vi.advanceTimersByTimeAsync(60_000);
     await expect(caught).resolves.toBe("blob timeout");
+  });
+
+  it("redials a link that still says connected when the Android app moves network, same session", async () => {
+    const sessions: string[] = [];
+    const t = transport();
+    (t as unknown as { bridge: { connect: unknown } }).bridge.connect = async (session: string) => {
+      sessions.push(session);
+      return { answer: { type: "answer", sdp: "v=0" }, desktop: { version: "1", protocol: 1 } };
+    };
+    await t.connect();
+    await flush();
+    const old = pcOf(t);
+    old.up();
+    expect(t.status.state).toBe("live");
+    expect(old.connectionState).toBe("connected");
+    document.dispatchEvent(new CustomEvent("ud:net-change", { detail: { kind: "cell" } }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await flush();
+    const next = pcOf(t);
+    expect(next).not.toBe(old);
+    expect(old.signalingState).toBe("closed");
+    expect(sessions).toHaveLength(2);
+    expect(sessions[1]).toBe(sessions[0]);
+    expect(t.session).toBe(sessions[0]);
+    next.up();
+    expect(t.status.state).toBe("live");
+  });
+
+  it("the Android app's resume (ud:app-wake) redials a dropped link at once", async () => {
+    const t = await liveTransport();
+    setHidden(true);
+    const old = pcOf(t);
+    old.drop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((t as unknown as { pc: FakePc | null }).pc).toBeNull();
+    setHidden(false);
+    document.dispatchEvent(new CustomEvent("ud:app-wake", { detail: { why: "resume" } }));
+    await flush();
+    expect(pcOf(t)).not.toBe(old);
+    expect(t.status.state).toBe("reconnecting");
+  });
+
+  it("a live link that is fine ignores ud:app-wake", async () => {
+    const t = await liveTransport();
+    const pc = pcOf(t);
+    document.dispatchEvent(new CustomEvent("ud:app-wake", { detail: { why: "resume" } }));
+    await flush();
+    expect(pcOf(t)).toBe(pc);
+    expect(t.status.state).toBe("live");
+  });
+
+  it("keeps health reports until the site acks them and resends the rest on the next start", async () => {
+    window.localStorage.removeItem(HEALTH_OUTBOX_KEY);
+    const t = transport();
+    const sent: Array<Record<string, unknown>> = [];
+    (t as unknown as { bridge: { report: unknown } }).bridge.report = (p: Record<string, unknown>) => sent.push(p);
+    const health = (t as unknown as { reportHealth: (p: Record<string, unknown>) => void }).reportHealth.bind(t);
+    health({ end: { why: "background" } });
+    health({ load: { first_frame_ms: 900 } });
+    expect(sent).toHaveLength(2);
+    const [acked, lost] = sent.map((p) => String(p.rid));
+    expect(acked).not.toBe(lost);
+    const outbox = () => JSON.parse(window.localStorage.getItem(HEALTH_OUTBOX_KEY) || "[]") as Array<{ rid: string }>;
+    expect(outbox().map((r) => r.rid)).toEqual([acked, lost]);
+    window.dispatchEvent(new MessageEvent("message", { data: { type: UD_DIRECT_REPORT_ACK, rid: acked } }));
+    expect(outbox().map((r) => r.rid)).toEqual([lost]);
+    // The app was killed before the site took the second one: the next page start sends it again, once.
+    const posted: unknown[] = [];
+    const spy = vi.spyOn(window, "postMessage").mockImplementation((m: unknown) => void posted.push(m));
+    new DirectTransport({ bridge: "parent", panelVersion: "1" });
+    spy.mockRestore();
+    expect(posted).toEqual([expect.objectContaining({ type: "ud-direct-report", rid: lost, load: { first_frame_ms: 900 } })]);
+    expect(outbox()).toEqual([]);
   });
 
   it("a link that never went live still fails (wrong PC, PC offline)", async () => {

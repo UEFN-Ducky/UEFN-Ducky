@@ -102,6 +102,32 @@ export function netTag(conn: { type?: string; effectiveType?: string } | undefin
 
 /** The Android app leaves why its last run ended here; read once on start. */
 const LAST_END_KEY = "ud-last-end";
+/** Health reports not yet acked by the site page: sent again on the next start, so a report
+ * made just before Android killed the app is not lost. Each carries a `rid` the site dedupes. */
+export const HEALTH_OUTBOX_KEY = "ud-health-outbox";
+export const UD_DIRECT_REPORT_ACK = "ud-direct-report-ack";
+const HEALTH_OUTBOX_MAX = 20;
+/** Sends per report before it is dropped (a site page that never acks). */
+const HEALTH_OUTBOX_TRIES = 2;
+type OutboxRow = { rid: string; payload: Record<string, unknown>; tries: number };
+
+function readOutbox(): OutboxRow[] {
+  try {
+    const rows = JSON.parse(window.localStorage.getItem(HEALTH_OUTBOX_KEY) || "[]") as OutboxRow[];
+    return Array.isArray(rows) ? rows.filter((r) => r && typeof r.rid === "string" && r.payload) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOutbox(rows: OutboxRow[]): void {
+  try {
+    if (rows.length) window.localStorage.setItem(HEALTH_OUTBOX_KEY, JSON.stringify(rows.slice(-HEALTH_OUTBOX_MAX)));
+    else window.localStorage.removeItem(HEALTH_OUTBOX_KEY);
+  } catch {
+    /* storage blocked */
+  }
+}
 let firstFrameSent = false;
 
 /** One minute of input probes: echoed round trips plus probes that never came back. */
@@ -353,6 +379,13 @@ export class DirectTransport {
   private inputLost = 0;
   /** A session end was reported since the link last went live (one `end` per session). */
   private endSent = false;
+  /** One signaling session id for this page: a redial (network change, wake) keeps it. */
+  private sessionId = "";
+  private healthSeq = 0;
+
+  get session(): string {
+    return this.sessionId;
+  }
 
   private mark(event: string) {
     this.timeline.push({ t: Math.round(performance.now() - this.t0), event });
@@ -376,12 +409,27 @@ export class DirectTransport {
   /** Health reports carry the client and network kind (buckets only, never the UA itself). */
   private reportHealth(payload: Record<string, unknown>) {
     const nav = typeof navigator !== "undefined" ? navigator : undefined;
-    this.bridge.report({
+    const rid = `${Date.now().toString(36)}-${(this.healthSeq += 1)}-${Math.random().toString(36).slice(2, 8)}`;
+    const full = {
       ...payload,
+      rid,
       client: clientTag(nav?.userAgent ?? ""),
       net: netTag((nav as Navigator & { connection?: { type?: string; effectiveType?: string } } | undefined)?.connection),
       viewer_version: this.config.panelVersion,
-    });
+    };
+    // Saved before it is sent: if the app dies before the site acks it, the next start resends it.
+    if (typeof window !== "undefined") writeOutbox([...readOutbox(), { rid, payload: full, tries: 1 }]);
+    this.bridge.report(full);
+  }
+
+  /** Reports a previous run never got acked: send each again (same rid), then forget it. */
+  private flushHealthOutbox() {
+    const keep: OutboxRow[] = [];
+    for (const row of readOutbox()) {
+      this.bridge.report(row.payload);
+      if (row.tries + 1 < HEALTH_OUTBOX_TRIES) keep.push({ ...row, tries: row.tries + 1 });
+    }
+    writeOutbox(keep);
   }
 
   /** Why a session ended: background, network, or the Android app's own reason. */
@@ -400,6 +448,12 @@ export class DirectTransport {
 
   private installEndReports() {
     if (typeof window === "undefined") return;
+    window.addEventListener("message", (ev: MessageEvent) => {
+      const data = ev.data as { type?: string; rid?: string } | null;
+      if (data?.type !== UD_DIRECT_REPORT_ACK || !data.rid) return;
+      writeOutbox(readOutbox().filter((r) => r.rid !== data.rid));
+    });
+    this.flushHealthOutbox();
     try {
       const last = window.localStorage.getItem(LAST_END_KEY);
       window.localStorage.removeItem(LAST_END_KEY);
@@ -427,6 +481,14 @@ export class DirectTransport {
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("online", wake);
     window.addEventListener("pageshow", wake);
+    // The Android app: resumed, or moved to another network (wifi <-> cell). On a network
+    // move the old candidates are dead even while the link still says connected, so it
+    // redials at once instead of stalling until ICE consent fails.
+    document.addEventListener("ud:app-wake", wake);
+    document.addEventListener("ud:net-change", () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      this.redialNow("network changed", true, true);
+    });
     window.addEventListener("message", (ev: MessageEvent) => {
       if (ev.source !== window.parent || window.parent === window) return;
       const data = ev.data as { type?: string } | null;
@@ -434,11 +496,12 @@ export class DirectTransport {
     });
   }
 
-  /** Redial unless the link is fine. `force` also redials a link that never went live. */
-  redialNow(why: string, force = false): void {
+  /** Redial unless the link is fine. `force` also redials a link that never went live;
+   * `evenIfConnected` drops a link that still says connected (its network went away). */
+  redialNow(why: string, force = false, evenIfConnected = false): void {
     const st = this.status.state;
     const pc = this.pc;
-    if (st === "live" && pc && pc.connectionState === "connected") return;
+    if (!evenIfConnected && st === "live" && pc && pc.connectionState === "connected") return;
     if (!this.wasLive && !force) return;
     if (this.dialing && st !== "live") return;
     this.mark(`redial: ${why}`);
@@ -487,7 +550,8 @@ export class DirectTransport {
     const t0 = performance.now();
     this.t0 = t0;
     this.mark(`connect attempt ${this.attempt}`);
-    const session = newSessionId();
+    if (!this.sessionId) this.sessionId = newSessionId();
+    const session = this.sessionId;
     const ice = this.config.ice?.length ? this.config.ice : DEFAULT_ICE;
     const pc = new RTCPeerConnection({ iceServers: ice, bundlePolicy: "max-bundle", rtcpMuxPolicy: "require" });
     this.pc = pc;
