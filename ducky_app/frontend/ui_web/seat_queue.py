@@ -164,6 +164,12 @@ def is_busy(conv_id: str) -> bool:
         return conv_id in _running() or any(s.conv_id == conv_id for s in _line)
 
 
+def is_starting(conv_id: str) -> bool:
+    """True while this queue is running the seat's ``start`` (its turn passes the cap now)."""
+    with _lock:
+        return conv_id in _starting
+
+
 def request(conv_id: str, start: Callable[[], Any]) -> str:
     """Start a member's turn under the cap. ``start`` begins the turn (e.g. run_message).
 

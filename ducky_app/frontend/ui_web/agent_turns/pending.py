@@ -45,14 +45,28 @@ def _with_admission(fn):
         slot = {"held": bool(kwargs.pop("_mem_admitted", False)), "started": False}
         try:
             return _admit(fn, conv_id, user_text, mode, model, kwargs, slot,
-                          lambda: admitted(conv_id, user_text, mode, model, _mem_admitted=True, **kwargs))
+                          lambda: admitted(conv_id, user_text, mode, model, _mem_admitted=True, **kwargs),
+                          lambda: admitted(conv_id, user_text, mode, model, **kwargs))
         finally:
             if slot["held"] and not slot["started"]:
                 admission.release(conv_id)
     return admitted
 
 
-def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_later) -> str:
+_SEATED_ROLES = frozenset({"member", "sub_lead"})
+
+
+def _seat_capped(conv_id: str) -> bool:
+    """A team member's (or sub-lead's) agent-started turn: it takes a seat_queue place."""
+    try:
+        from backend.agent.a2a_broker import team_role
+
+        return team_role(conv_id) in _SEATED_ROLES
+    except Exception:
+        return False
+
+
+def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_later, start_again=None) -> str:
     queue = kwargs.get("queue_if_busy", False) and not kwargs.get("force", False)
     from backend.agent.a2a_broker import automatic_work_blocked, resume_by_user
     from frontend.ui_web import admission
@@ -68,6 +82,17 @@ def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_later) -> st
     if is_agent_running(conv_id):
         # Only Stop (cancel_agent, by_user=True) ends a turn; a send into one waits for it.
         return hold() if queue else _queue_person_send(conv_id, user_text, mode, kwargs)
+    # Agent work for a team seat (an agent_send delivery) goes through the seat cap, as keeper
+    # wakes and plan dispatches do: Nov 4 2026 a lead's agent_send to 299 members started 151
+    # turns in a minute past memory admission alone, and the PC ran out of commit memory.
+    # The seat queue's own start comes back here and goes on (is_starting).
+    if queue and not slot["held"] and start_again is not None and _seat_capped(conv_id):
+        from frontend.ui_web import seat_queue
+
+        if not seat_queue.is_starting(conv_id):
+            if seat_queue.request(conv_id, start_again) == "busy":
+                return hold()
+            return "queued"
     if not slot["held"]:
         # A person's own send (no parent, no starter) never waits for memory; agent work may.
         person = not queue and not kwargs.get("parent") and kwargs.get("started_by") is None
