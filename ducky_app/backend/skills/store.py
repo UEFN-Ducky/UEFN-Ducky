@@ -57,6 +57,29 @@ def pass_memo():
         yield
     finally:
         _PASS_MEMO.reset(token)
+
+
+@contextmanager
+def shared_pass_memo():
+    """Join the open :func:`pass_memo` pass, or open one when none is running."""
+    if _PASS_MEMO.get() is not None:
+        yield
+        return
+    with pass_memo():
+        yield
+
+
+def pass_cached(key: Any, compute):
+    """``compute()`` once per open :func:`pass_memo` pass under ``key``; uncached outside one."""
+    memo = _PASS_MEMO.get()
+    if memo is None:
+        return compute()
+    slot = ("pass_cached", key)
+    if slot not in memo:
+        memo[slot] = compute()
+    return memo[slot]
+
+
 CORE_ID = "core"
 
 # Provenance stamps in SKILL.md / references frontmatter metadata.

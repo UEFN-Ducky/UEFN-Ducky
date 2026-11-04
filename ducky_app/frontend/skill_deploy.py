@@ -22,7 +22,9 @@ Nothing is written into the UEFN project ``Content/`` folder.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -83,13 +85,14 @@ def _deployed_skill_md(pack_id: str) -> str | None:
     except OSError:
         return None
     meta, body = _skill.parse_frontmatter(raw)
+    # load_pack_manifest already looked up the owning plugin: one ownership lookup per pack.
+    manifest = _skill.load_pack_manifest(pack_id) or {}
     md = meta.setdefault("metadata", {})
     if isinstance(md, dict):
         md["managed_by"] = MANAGED_BY
-        owner = _skill.plugin_owner_for_skill(pack_id)
+        owner = str(manifest.get("source_plugin_id") or "").strip()
         if owner:
             md["source_plugin_id"] = owner
-    manifest = _skill.load_pack_manifest(pack_id) or {}
     ref_lines: list[str] = []
     for sub in _skill.list_subskills(manifest):
         sid = str(sub.get("id") or "")
@@ -125,7 +128,7 @@ def _is_managed_skill_dir(path: Path) -> bool:
 def _write_if_changed(path: Path, data: bytes) -> bool:
     """Write only when the bytes differ. Returns True when the file was touched."""
     try:
-        if path.is_file() and path.read_bytes() == data:
+        if path.read_bytes() == data:  # missing file raises: no separate stat
             return False
     except OSError:
         pass
@@ -145,27 +148,36 @@ def _sync_references(src: Path | None, dest: Path) -> bool:
             shutil.rmtree(dest, ignore_errors=True)
             return True
         return False
-    dest.mkdir(parents=True, exist_ok=True)
+    # Every skills root mirrors the same source: walk and read it once per pass.
+    src_dirs, src_files = _skill.pass_cached(("refs_tree", str(src)), lambda: _read_tree(src))
+    have_dirs, have_files = _list_tree(dest)
+    if not have_dirs and not have_files:
+        dest.mkdir(parents=True, exist_ok=True)
     touched = False
-    wanted: set[str] = set()
-    for child in src.rglob("*"):
-        rel = child.relative_to(src)
-        target = dest / rel
-        if child.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-            wanted.add(str(rel))
+    for rel in src_dirs:
+        if rel not in have_dirs:
+            (dest / rel).mkdir(parents=True, exist_ok=True)
+    for rel, data in src_files.items():
+        if data is None:
+            touched = True  # unreadable source file
             continue
-        wanted.add(str(rel))
+        target = dest / rel
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if _write_if_changed(target, child.read_bytes()):
-                touched = True
+            if rel in have_files and target.read_bytes() == data:
+                continue
+        except OSError:
+            pass
+        try:
+            if os.sep in rel and os.path.dirname(rel) not in have_dirs:
+                target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            touched = True
         except OSError:
             touched = True
-    for child in sorted(dest.rglob("*"), reverse=True):
-        rel = str(child.relative_to(dest))
-        if rel in wanted:
-            continue
+    stale = [rel for rel in have_files if rel not in src_files]
+    stale += [rel for rel in have_dirs if rel not in src_dirs]
+    for rel in sorted(stale, reverse=True):
+        child = dest / rel
         try:
             if child.is_dir():
                 shutil.rmtree(child, ignore_errors=True)
@@ -177,24 +189,106 @@ def _sync_references(src: Path | None, dest: Path) -> bool:
     return touched
 
 
-def _read_deploy_ledger(skills_root: Path) -> set[str]:
-    """Pack ids we deployed into this root on a previous run."""
+def _list_tree(root: Path) -> tuple[set[str], set[str]]:
+    """(relative dirs, relative files) under ``root``; one os.walk, no per-file Path work."""
+    dirs: set[str] = set()
+    files: set[str] = set()
+    base = str(root)
+    for cur, subdirs, names in os.walk(base):
+        rel = os.path.relpath(cur, base)
+        prefix = "" if rel == "." else rel + os.sep
+        dirs.update(prefix + d for d in subdirs)
+        files.update(prefix + n for n in names)
+    return dirs, files
+
+
+def _read_tree(root: Path) -> tuple[set[str], dict[str, bytes | None]]:
+    dirs, files = _list_tree(root)
+    out: dict[str, bytes | None] = {}
+    for rel in files:
+        try:
+            out[rel] = (root / rel).read_bytes()
+        except OSError:
+            out[rel] = None
+    return dirs, out
+
+
+def _read_ledger_doc(skills_root: Path) -> dict:
     try:
         data = json.loads((skills_root / DEPLOY_LEDGER).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return set()
-    packs = data.get("packs") if isinstance(data, dict) else None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _ledger_packs(data: dict) -> set[str]:
+    packs = data.get("packs")
     return {str(p) for p in packs} if isinstance(packs, list) else set()
 
 
-def _write_deploy_ledger(skills_root: Path, pack_ids: Iterable[str]) -> None:
+def _ledger_stamps(data: dict) -> dict[str, dict]:
+    stamps = data.get("stamps")
+    return {str(k): v for k, v in stamps.items() if isinstance(v, dict)} if isinstance(stamps, dict) else {}
+
+
+def _read_deploy_ledger(skills_root: Path) -> set[str]:
+    """Pack ids we deployed into this root on a previous run."""
+    return _ledger_packs(_read_ledger_doc(skills_root))
+
+
+def _write_deploy_ledger(
+    skills_root: Path, pack_ids: Iterable[str], stamps: dict[str, dict] | None = None
+) -> None:
+    packs = sorted(set(pack_ids))
+    doc: dict = {"packs": packs}
+    if stamps:
+        doc["stamps"] = {pid: stamps[pid] for pid in packs if pid in stamps}
     try:
-        (skills_root / DEPLOY_LEDGER).write_text(
-            json.dumps({"packs": sorted(set(pack_ids))}, indent=2) + "\n",
-            encoding="utf-8",
+        _write_if_changed(
+            skills_root / DEPLOY_LEDGER, (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8")
         )
     except OSError:
         pass
+
+
+def _dest_state(dest: Path) -> dict[str, list[int]]:
+    """``{rel: [mtime_ns, size]}`` for every file and folder under ``dest`` ({} when missing).
+
+    Read from directory listings only: on Windows ``DirEntry.stat()`` comes with the
+    listing, so an unchanged pack costs no file opens (each open is AV-scanned).
+    """
+    out: dict[str, list[int]] = {}
+    stack = [(str(dest), "")]
+    while stack:
+        folder, prefix = stack.pop()
+        try:
+            entries = list(os.scandir(folder))
+        except OSError:
+            continue
+        for entry in entries:
+            rel = prefix + entry.name
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    out[rel + "/"] = [0, 0]
+                    stack.append((entry.path, rel + "/"))
+                else:
+                    st = entry.stat(follow_symlinks=False)
+                    out[rel] = [st.st_mtime_ns, st.st_size]
+            except OSError:
+                continue
+    return out
+
+
+def _source_key(skill_md: str, refs_src: Path | None) -> str:
+    """Hash of everything a pack deploys: SKILL.md text + its references tree."""
+    digest = hashlib.sha1(skill_md.encode("utf-8"))
+    if refs_src is not None and refs_src.is_dir():
+        dirs, files = _skill.pass_cached(("refs_tree", str(refs_src)), lambda: _read_tree(refs_src))
+        for rel in sorted(dirs):
+            digest.update(b"d\0" + rel.encode("utf-8") + b"\0")
+        for rel in sorted(files):
+            digest.update(b"f\0" + rel.encode("utf-8") + b"\0" + (files[rel] or b"\x00unreadable"))
+    return digest.hexdigest()
 
 
 def _prune_pack_root(dest: Path) -> list[str]:
@@ -235,21 +329,41 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
     ``SKILL.md`` + ``references/`` (folders we own only), ``references/`` is
     mirrored exactly, and a pack that disappears is removed even if its
     SKILL.md no longer parses, via the deploy ledger.
+
+    Runs inside one skills pass (joins the caller's): the plugin ownership map, the
+    bundled folder and per-pack stat passes are read once, not once per pack.
     """
+    with _skill.shared_pass_memo():
+        return _deploy_skill_folders(skills_root)
+
+
+def _deploy_skill_folders(skills_root: Path) -> list[str]:
     logs: list[str] = []
     pack_ids = _skill.list_pack_ids()
     try:
         skills_root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         return [f"Skill deploy skipped ({skills_root}): {e}"]
-    previously_deployed = _read_deploy_ledger(skills_root)
+    ledger = _read_ledger_doc(skills_root)
+    previously_deployed = _ledger_packs(ledger)
+    old_stamps = _ledger_stamps(ledger)
+    stamps: dict[str, dict] = {}
     deployed: list[str] = []
     for pack_id in pack_ids:
-        skill_md = _deployed_skill_md(pack_id)
+        # Same text for every root: built once per pass, not once per root.
+        skill_md = _skill.pass_cached(("deploy_md", pack_id), lambda: _deployed_skill_md(pack_id))
         if skill_md is None:
             continue
         dest = skills_root / pack_id
-        src_dir = _pack_source_dir(pack_id)
+        src_dir = _skill.pass_cached(("deploy_src", pack_id), lambda: _pack_source_dir(pack_id))
+        refs_src = (src_dir / _skill.REFERENCES_DIR) if src_dir else None
+        src_key = _skill.pass_cached(("deploy_key", pack_id), lambda: _source_key(skill_md, refs_src))
+        state = _dest_state(dest)
+        # Unchanged since our last deploy: same source, and nobody touched the folder.
+        if state and old_stamps.get(pack_id) == {"src": src_key, "dest": state}:
+            stamps[pack_id] = old_stamps[pack_id]
+            deployed.append(pack_id)
+            continue
         # Decide ownership BEFORE writing our own SKILL.md, or the check is
         # circular: a folder a user authored must keep its own extra files.
         owned = (
@@ -262,7 +376,6 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
             touched = _write_if_changed(
                 dest / _skill.PACK_FILE, skill_md.encode("utf-8")
             )
-            refs_src = (src_dir / _skill.REFERENCES_DIR) if src_dir else None
             touched |= _sync_references(refs_src, dest / _skill.REFERENCES_DIR)
             if owned:
                 for name in _prune_pack_root(dest):
@@ -271,6 +384,7 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
             if touched:
                 logs.append(f"Skill folder -> {dest}")
             deployed.append(pack_id)
+            stamps[pack_id] = {"src": src_key, "dest": _dest_state(dest)}
         except OSError as e:
             logs.append(f"Skill folder failed ({dest}): {e}")
     try:
@@ -284,7 +398,7 @@ def deploy_skill_folders(skills_root: Path) -> list[str]:
                 logs.append(f"Skill folder pruned -> {child}")
     except OSError:
         pass
-    _write_deploy_ledger(skills_root, deployed)
+    _write_deploy_ledger(skills_root, deployed, stamps)
     return logs
 
 
@@ -351,14 +465,17 @@ def sync_skill(
     # Gateway plugin skills dirs + every IDE config's sibling skills/ folder.
     skills_roots = set(registered_coding_agent_skills_roots())
     configs = list(ide_config_paths or ())
-    combined = _skill.load_skill_text() if configs else ""
-    for cfg in configs:
-        beside = write_skill_beside_config(Path(cfg), combined)
-        if beside:
-            logs.append(f"Skill copy -> {beside}")
-        skills_roots.add(Path(cfg).parent / SKILLS_DIRNAME)
-    for root in sorted(skills_roots):
-        logs.extend(deploy_skill_folders(root))
+    # One pass for every root: before this, each root re-read the plugin ownership map
+    # and re-stat'd every pack (~8 min of 87% CPU after a boot with ship-newest).
+    with _skill.pass_memo():
+        combined = _skill.load_skill_text() if configs else ""
+        for cfg in configs:
+            beside = write_skill_beside_config(Path(cfg), combined)
+            if beside:
+                logs.append(f"Skill copy -> {beside}")
+            skills_roots.add(Path(cfg).parent / SKILLS_DIRNAME)
+        for root in sorted(skills_roots):
+            logs.extend(deploy_skill_folders(root))
 
     return logs
 
