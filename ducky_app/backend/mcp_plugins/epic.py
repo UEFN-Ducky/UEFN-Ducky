@@ -326,6 +326,38 @@ def probe_epic_mcp(*, ttl_sec: float = _PROBE_CACHE_SEC, project_root: str | Non
     return dict(result)
 
 
+# Epic tools that only look: discovery tools, and inner tools named like reads.
+_EPIC_READ_TOOLS = frozenset({"list_toolsets", "describe_toolset"})
+_EPIC_READ_PREFIXES = ("list", "get", "describe", "find", "search", "query", "is", "has", "does")
+
+
+def epic_tool_mutating(tool_name: str, arguments: dict[str, Any] | None = None) -> bool:
+    """False for an Epic call that only reads the editor (``unreal__list_toolsets``, a
+    ``call_tool`` whose ``tool_name`` is a Get/List/Find...), True otherwise."""
+    if tool_name in _EPIC_READ_TOOLS:
+        return False
+    name = tool_name
+    if tool_name == "call_tool":
+        name = str((arguments or {}).get("tool_name") or "")
+    leaf = re.split(r"[.:/]", name)[-1].strip()
+    if not leaf:
+        return True
+    word = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", leaf).lower().split("_", 1)[0]
+    return word not in _EPIC_READ_PREFIXES
+
+
+async def call_epic_tool(tool_name: str, arguments: dict[str, Any] | None, fn: Any) -> Any:
+    """Send one ``unreal__<tool_name>`` call through the editor gateway; ``fn()`` makes it."""
+    from backend.bridge import editor_gateway
+
+    return await editor_gateway.acall(
+        editor_gateway.current_chat_id(),
+        f"{EPIC_MCP_PREFIX}__{tool_name}",
+        epic_tool_mutating(tool_name, arguments),
+        fn,
+    )
+
+
 def invalidate_epic_mcp_probe() -> None:
     _probe_cache["at"] = 0.0
     _probe_cache["result"] = None

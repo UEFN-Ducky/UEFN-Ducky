@@ -412,6 +412,11 @@ def _handle_listener_http_error(e: urllib.error.HTTPError) -> None:
 _HEALTH_FAIL_FAST_SEC = 0.35
 
 
+def is_read_command(command: str) -> bool:
+    """True for a listener command that never changes the editor or the island."""
+    return command in _READ_COMMANDS
+
+
 def post_command_to_listener(
     port: int,
     command: str,
@@ -422,7 +427,25 @@ def post_command_to_listener(
     """POST ``{"command":..., "params":...}`` to a listener on a fixed port (panel / tools).
 
     Returns the command ``result`` dict on success. Raises like :func:`send_command` on failure.
+    Goes through :mod:`backend.bridge.editor_gateway`.
     """
+    from backend.bridge import editor_gateway
+
+    return editor_gateway.call(
+        editor_gateway.current_chat_id(),
+        command,
+        not is_read_command(command),
+        lambda: _post_command_to_listener(port, command, params, timeout=timeout),
+    )
+
+
+def _post_command_to_listener(
+    port: int,
+    command: str,
+    params: Optional[dict] = None,
+    *,
+    timeout: float = 8.0,
+) -> dict:
     global _last_post_ok_at
     if listener_get_health(port, timeout=_HEALTH_FAIL_FAST_SEC) is None:
         raise ConnectionError(
@@ -550,11 +573,24 @@ def _island_lock_refusal(command: str, params: Optional[dict], port: int, health
 def send_command(command: str, params: Optional[dict] = None, timeout: float = REQUEST_TIMEOUT) -> dict:
     """Send a command to the UEFN listener and return the result.
 
+    Goes through :mod:`backend.bridge.editor_gateway`.
+
     Raises:
         ConnectionError: Listener is not running.
         RuntimeError: Command failed on the UEFN side.
         TimeoutError: Command timed out.
     """
+    from backend.bridge import editor_gateway
+
+    return editor_gateway.call(
+        editor_gateway.current_chat_id(),
+        command,
+        not is_read_command(command),
+        lambda: _send_command(command, params, timeout),
+    )
+
+
+def _send_command(command: str, params: Optional[dict] = None, timeout: float = REQUEST_TIMEOUT) -> dict:
     global _discovered_port, _last_post_ok_at
 
     from backend.tools.core.uefn_modal import SAVE_LISTENER_COMMANDS

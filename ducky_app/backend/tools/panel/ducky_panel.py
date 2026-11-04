@@ -523,6 +523,13 @@ def ducky_set_project(path: str = "", name: str = "", pretty: bool = False) -> s
     return tool_json(info, pretty=pretty)
 
 
+def _through_gateway(op: str, fn):
+    """Run an editor-process call (launch / close / restart) through the editor gateway."""
+    from backend.bridge import editor_gateway
+
+    return editor_gateway.call(editor_gateway.current_chat_id(), op, True, fn)
+
+
 @mcp.tool()
 def ducky_launch_uefn(project: str = "", pretty: bool = False) -> str:
     """Start Unreal Editor for Fortnite in a project (not the hub).
@@ -535,7 +542,11 @@ def ducky_launch_uefn(project: str = "", pretty: bool = False) -> str:
     """
     from frontend.window_view import launch_uefn_project
 
-    return tool_json(launch_uefn_project(_island_arg(project)), pretty=pretty)
+    island = _island_arg(project)
+    return tool_json(
+        _through_gateway("ducky_launch_uefn", lambda: launch_uefn_project(island)),
+        pretty=pretty,
+    )
 
 
 @mcp.tool()
@@ -547,7 +558,7 @@ def ducky_close_uefn(pretty: bool = False) -> str:
     """
     from frontend.window_view import close_uefn
 
-    return tool_json(close_uefn(), pretty=pretty)
+    return tool_json(_through_gateway("ducky_close_uefn", close_uefn), pretty=pretty)
 
 
 @mcp.tool()
@@ -561,8 +572,12 @@ def ducky_restart_uefn(project: str = "", timeout: float = 180, pretty: bool = F
     """
     from frontend.window_view import restart_uefn_project
 
+    island = _island_arg(project)
     return tool_json(
-        restart_uefn_project(_island_arg(project), wait=True, timeout=timeout),
+        _through_gateway(
+            "ducky_restart_uefn",
+            lambda: restart_uefn_project(island, wait=True, timeout=timeout),
+        ),
         pretty=pretty,
     )
 
