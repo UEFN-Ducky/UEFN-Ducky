@@ -91,6 +91,65 @@ def test_a_refused_hello_is_not_retried(monkeypatch, app_data) -> None:
     assert tries == [10.0] and spawned == [["--port", "4200"]]
 
 
+def test_progress_from_the_daemon_reaches_the_cli(monkeypatch, app_data) -> None:
+    """Claude Code aborts a call after 1800 s with no response or progress: the daemon's
+    notifications/progress must come out of the adapter on stdout, before the result."""
+    import os
+    import socket
+    import threading
+    from types import SimpleNamespace
+
+    listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listen.bind(("127.0.0.1", 0))
+    listen.listen(1)
+    state = {"host": "127.0.0.1", "port": listen.getsockname()[1], "token": "t", "key": {}}
+    (app_data / "shared_mcp.json").write_text(json.dumps(state), encoding="utf-8")
+
+    def _daemon() -> None:
+        conn, _ = listen.accept()
+        with conn:
+            ad._read_frame(conn)
+            ad._write_frame(conn, {"op": "hello_ok"})
+            msg = ad._read_frame(conn)
+            token = msg["params"]["_meta"]["progressToken"]
+            for n in (1, 2):
+                ad._write_frame(conn, {"op": "mcp", "method": "notifications/progress",
+                                       "params": {"progressToken": token, "progress": n}})
+            ad._write_frame(conn, {"op": "mcp", "id": msg["id"], "result": {"content": []}})
+            try:
+                ad._read_frame(conn)  # the adapter's bye
+            except (OSError, EOFError, ValueError):
+                pass
+
+    threading.Thread(target=_daemon, daemon=True).start()
+    in_r, in_w = os.pipe()
+    out_r, out_w = os.pipe()
+    monkeypatch.setattr(ad.sys, "stdin", SimpleNamespace(buffer=os.fdopen(in_r, "rb", buffering=0)))
+    monkeypatch.setattr(ad.sys, "stdout", SimpleNamespace(buffer=os.fdopen(out_w, "wb", buffering=0)))
+    writer, reader = os.fdopen(in_w, "wb", buffering=0), os.fdopen(out_r, "rb", buffering=0)
+    relay = threading.Thread(target=ad.run, args=(["--port", "4200"],), daemon=True)
+    relay.start()
+    try:
+        writer.write(json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+            "name": "ducky_ask_user", "arguments": {}, "_meta": {"progressToken": "p5"}}}).encode() + b"\n")
+        lines, buf = [], b""
+        while len(lines) < 3:
+            chunk = reader.read(65536)
+            assert chunk, "adapter closed stdout"
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                lines.append(json.loads(line))
+        assert [m.get("method") for m in lines[:2]] == ["notifications/progress"] * 2
+        assert [m["params"]["progress"] for m in lines[:2]] == [1, 2]
+        assert all("id" not in m and m["params"]["progressToken"] == "p5" for m in lines[:2])
+        assert lines[2]["id"] == 5 and lines[2]["result"] == {"content": []}
+    finally:
+        writer.close()
+        relay.join(timeout=5)
+        listen.close()
+
+
 def test_each_dedicated_fallback_is_counted(monkeypatch, app_data) -> None:
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "2")
     monkeypatch.setattr(ad, "connect", lambda args: None)
