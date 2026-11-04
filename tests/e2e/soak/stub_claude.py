@@ -320,9 +320,11 @@ class Turn:
         self.out.line({"type": "user", "session_id": self.session_id, "parent_tool_use_id": None, "message": {
             "role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": content,
                                          "is_error": failed}]}})
-        # seconds: how long Ducky took to answer (the harness reads terminal waits from it).
-        self.log("tool", tool=name, seconds=round(time.monotonic() - called, 3), failed=failed)
         text = "\n".join(str(b.get("text") or "") for b in content if isinstance(b, dict))
+        # seconds: how long Ducky took to answer (the harness reads terminal waits from it).
+        # Terminal replies are kept short in the log, so a slow or early answer can be read.
+        extra = {"reply": text[:400]} if name.startswith("ducky_terminal") else {}
+        self.log("tool", tool=name, seconds=round(time.monotonic() - called, 3), failed=failed, **extra)
         if name == "ducky_ask_user":
             path = "answer"
         elif name == "ducky_terminal_run" and time.monotonic() - called < expect_s - 5:
@@ -382,7 +384,7 @@ class Turn:
             elif kind == "search":
                 self.tool("workspace_search", {"pattern": "stub", "path": str(self.repo), "max_results": 20})
             elif kind == "terminal":
-                self.terminal(f'python -c "import time; time.sleep({terminal_s():g})"', 120)
+                self.terminal(sleep_command(terminal_s()), 120)
             else:
                 self.tool("workspace_write_file", {"path": str(self.repo / "stub_out" / f"{self.session_id[:8]}-{step}.txt"),
                                                    "content": self.step_text()})
@@ -397,7 +399,7 @@ class Turn:
         if not self.stream_text(" ".join(random.choice(_WORDS) for _ in range(1500))):
             return
         self.log("phase", phase="command")
-        self.terminal(f'python -c "import time; time.sleep({seconds})"', seconds + 120, expect_s=seconds)
+        self.terminal(sleep_command(seconds), seconds + 120, expect_s=seconds)
         if self.interrupted.is_set():
             return
         self.log("phase", phase="git")
@@ -463,6 +465,15 @@ class Turn:
             "modelUsage": {self.model: {"inputTokens": self.usage["input_tokens"],
                                         "outputTokens": self.usage["output_tokens"], "contextWindow": 200000}}})
         return 0 if status == "connected" else 1
+
+
+def sleep_command(seconds: float) -> str:
+    """A PowerShell command that sleeps, run by this stub's own Python.
+
+    A bare ``python`` in the app's terminal can be the Microsoft Store shortcut: it exits
+    at once with 9009, or hangs until the command times out."""
+    exe = sys.executable.replace("'", "''")
+    return f"& '{exe}' -c \"import time; time.sleep({seconds:g})\""
 
 
 def terminal_s() -> float:

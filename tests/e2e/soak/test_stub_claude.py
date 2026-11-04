@@ -244,3 +244,16 @@ def test_memory_knob_holds_the_memory(world):
     finally:
         proc.kill()
         proc.wait(10)
+
+
+def test_sleep_command_runs_the_stubs_own_python_in_powershell():
+    spec = importlib.util.spec_from_file_location("_stub_for_sleep", STUB)
+    stub = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stub)
+    command = stub.sleep_command(0.2)
+    assert sys.executable in command and not command.startswith("python")
+    started = time.monotonic()
+    proc = subprocess.run(["powershell", "-NoProfile", "-Command", command], capture_output=True, text=True,
+                          timeout=60)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert time.monotonic() - started >= 0.2
