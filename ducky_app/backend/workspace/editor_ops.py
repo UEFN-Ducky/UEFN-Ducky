@@ -297,7 +297,7 @@ READ_COMMANDS: frozenset[str] = frozenset(
         "list_widget_animations", "list_widget_bindings", "list_widget_blueprints",
         "list_widget_classes", "list_named_slots", "list_bindable_properties", "list_verse_field_types",
         "get_widget_class_info",
-        "measure_distance", "niagara_capabilities", "pcg_get_graph_info",
+        "listener_traffic", "measure_distance", "niagara_capabilities", "pcg_get_graph_info",
         "ping", "revision_conflicts", "revision_status", "revision_targets", "scene_graph_capabilities",
         "search_assets", "search_unreal_api",
         "search_verse_digest", "session_status", "status", "terrain_get_info", "umg_capabilities",
