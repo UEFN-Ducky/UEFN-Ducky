@@ -29,10 +29,19 @@ Rules:
   is UEFN's size at the first guarded call for that UEFN process (pid + start time),
   kept in app data so every agent process shares it, and reset when UEFN restarts.
   Memory is read only here, never polled, and never for other calls.
+* **Deadline** -- every :func:`acall` has a time limit: :data:`READ_TIMEOUT_SEC` for reads,
+  :data:`MUTATING_TIMEOUT_SEC` for mutating calls (``unreal__call_tool`` included) and
+  :data:`SLOW_TIMEOUT_SEC` for calls slow by design (Verse build, a play session, launch /
+  restart, a screenshot). A caller's own ``timeout`` wins; ``UEFN_DUCKY_EDITOR_CALL_TIMEOUT_S``
+  replaces the read / mutating defaults. On a timeout the lease is released and
+  :class:`EditorTimeout` raised; for :data:`HANG_COOLDOWN_SEC` after it, further ``acall``
+  calls fail fast with the same message instead of queuing behind the hung one. A successful
+  read (any :func:`call` or :func:`acall`) ends that early. UEFN is never killed from here.
 """
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import os
@@ -68,6 +77,23 @@ class EditorProcessRefused(RuntimeError):
 
 class EditorMemoryLow(RuntimeError):
     """UEFN grew too much since the island loaded, or the PC is low on free RAM."""
+
+
+class EditorTimeout(TimeoutError):
+    """UEFN did not answer an editor call within its deadline (or one just hung)."""
+
+
+READ_TIMEOUT_SEC = 60.0
+MUTATING_TIMEOUT_SEC = 180.0
+SLOW_TIMEOUT_SEC = 600.0
+HANG_COOLDOWN_SEC = 30.0
+TIMEOUT_ENV = "UEFN_DUCKY_EDITOR_CALL_TIMEOUT_S"
+# Name words of calls that are slow by design (op names are compared in snake_case).
+_SLOW_WORDS = ("compile", "build", "launch", "restart", "screenshot", "play", "session", "import")
+# Per process: the hang is about this process's queue of calls. Monotonic for the cooldown.
+_mono = time.monotonic
+_hang_lock = threading.Lock()
+_hang: dict[str, Any] = {}
 
 
 _GB = 1024 ** 3
@@ -288,7 +314,10 @@ def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T], *, heavy: b
 
     ``heavy`` overrides :func:`is_heavy_op` (a caller that knows the call's arguments)."""
     _check(chat_id, op, mutating, heavy)
-    return fn()
+    result = fn()
+    if not mutating:
+        clear_hang()
+    return result
 
 
 def _ask_person(chat_id: str, verb: str, reason: str) -> bool:
@@ -349,12 +378,82 @@ def call_editor_process(chat_id: str, op: str, reason: str, fn: Callable[[], T])
     return call(chat_id, op, True, fn)
 
 
+def _timeout_message(op: str, seconds: float) -> str:
+    return (
+        f"UEFN didn't answer {op} in {seconds:g}s: a popup may be open (uefn_popups), "
+        "or the editor is busy"
+    )
+
+
+def _env_timeout() -> float | None:
+    try:
+        value = float(os.environ.get(TIMEOUT_ENV, "") or 0)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def call_timeout(op: str, mutating: bool, heavy: bool | None = None, timeout: float | None = None) -> float:
+    """The deadline in seconds for one :func:`acall`."""
+    if timeout is not None and timeout > 0:
+        return float(timeout)
+    name = _snake(op)
+    slow = bool(heavy) or any(word in name for word in _SLOW_WORDS)
+    override = _env_timeout()
+    if slow:
+        return max(SLOW_TIMEOUT_SEC, override or 0.0)
+    if override is not None:
+        return override
+    return MUTATING_TIMEOUT_SEC if mutating or name.endswith("call_tool") else READ_TIMEOUT_SEC
+
+
+def hang_state() -> dict[str, Any]:
+    """The live hang ``{op, seconds, message, until}``, or {} when no call hung recently."""
+    with _hang_lock:
+        if _hang and _mono() < float(_hang.get("until") or 0):
+            return dict(_hang)
+        _hang.clear()
+        return {}
+
+
+def clear_hang() -> None:
+    """End the fail-fast window (an editor call just succeeded)."""
+    with _hang_lock:
+        _hang.clear()
+
+
+def _mark_hang(op: str, seconds: float, message: str) -> None:
+    with _hang_lock:
+        _hang.update({"op": op, "seconds": seconds, "message": message, "until": _mono() + HANG_COOLDOWN_SEC})
+
+
 async def acall(
-    chat_id: str, op: str, mutating: bool, fn: Callable[[], Awaitable[Any]], *, heavy: bool | None = None
+    chat_id: str,
+    op: str,
+    mutating: bool,
+    fn: Callable[[], Awaitable[Any]],
+    *,
+    heavy: bool | None = None,
+    timeout: float | None = None,
 ) -> Any:
-    """:func:`call` for a coroutine: ``fn()`` returns an awaitable, which is awaited."""
+    """:func:`call` for a coroutine: ``fn()`` returns an awaitable, awaited within its deadline
+    (:func:`call_timeout`). Raises :class:`EditorTimeout` when UEFN does not answer in time,
+    and at once while an earlier call's hang is still fresh."""
+    hung = hang_state()
+    if hung:
+        raise EditorTimeout(hung["message"])
     _check(chat_id, op, mutating, heavy)
     result = fn()
     if inspect.isawaitable(result):
-        return await result
+        seconds = call_timeout(op, mutating, heavy, timeout)
+        try:
+            result = await asyncio.wait_for(result, seconds)
+        except asyncio.TimeoutError:
+            message = _timeout_message(op, seconds)
+            _mark_hang(op, seconds, message)
+            if chat_id:
+                release_lease(chat_id)
+            raise EditorTimeout(message) from None
+    if not mutating:
+        clear_hang()
     return result

@@ -169,6 +169,116 @@ def test_acall_is_refused_too(clock) -> None:
         asyncio.run(editor_gateway.acall("trio", "unreal__call_tool", True, _fn))
 
 
+@pytest.fixture(autouse=True)
+def _no_hang(monkeypatch: pytest.MonkeyPatch):
+    """No test inherits another's hang window or the env deadline."""
+    monkeypatch.delenv(editor_gateway.TIMEOUT_ENV, raising=False)
+    editor_gateway.clear_hang()
+    yield
+    editor_gateway.clear_hang()
+
+
+def _sleeper(seconds: float):
+    async def _fn():
+        await asyncio.sleep(seconds)
+        return "late"
+
+    return _fn
+
+
+def test_a_hung_call_times_out_near_its_deadline_and_frees_the_lease(clock) -> None:
+    import time
+
+    start = time.perf_counter()
+    with pytest.raises(editor_gateway.EditorTimeout, match=r"UEFN didn't answer unreal__call_tool in 0\.2s: a popup may be open \(uefn_popups\), or the editor is busy"):
+        asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _sleeper(5), timeout=0.2))
+    elapsed = time.perf_counter() - start
+    assert 0.18 <= elapsed < 1.0
+    assert editor_gateway.lease_holder() == {}
+    assert editor_gateway.call("trio", "spawn_actor", True, lambda: "ok") == "ok"
+
+
+def test_calls_fail_fast_for_30_s_after_a_hang(monkeypatch) -> None:
+    import time
+
+    mono = [500.0]
+    monkeypatch.setattr(editor_gateway, "_mono", lambda: mono[0])
+    with pytest.raises(editor_gateway.EditorTimeout):
+        asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _sleeper(5), timeout=0.05))
+    ran: list[str] = []
+
+    async def _fast():
+        ran.append("x")
+        return "ok"
+
+    start = time.perf_counter()
+    with pytest.raises(editor_gateway.EditorTimeout, match=r"didn't answer unreal__call_tool in 0\.05s"):
+        asyncio.run(editor_gateway.acall("lead", "unreal__list_toolsets", False, _fast))
+    assert time.perf_counter() - start < 0.05
+    assert ran == []
+    mono[0] += 29
+    with pytest.raises(editor_gateway.EditorTimeout):
+        asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _fast))
+    mono[0] += editor_gateway.HANG_COOLDOWN_SEC  # window over
+    assert asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _fast)) == "ok"
+    assert ran == ["x"]
+
+
+def test_a_successful_read_ends_the_hang_early() -> None:
+    with pytest.raises(editor_gateway.EditorTimeout):
+        asyncio.run(editor_gateway.acall("", "unreal__call_tool", True, _sleeper(5), timeout=0.05))
+    assert editor_gateway.hang_state()
+    assert editor_gateway.call("", "ping", False, lambda: "pong") == "pong"
+    assert editor_gateway.hang_state() == {}
+
+    async def _fn():
+        return "sent"
+
+    assert asyncio.run(editor_gateway.acall("", "unreal__call_tool", True, _fn)) == "sent"
+
+
+def test_a_fast_call_is_unaffected_by_the_deadline() -> None:
+    async def _fn():
+        await asyncio.sleep(0.01)
+        return "quick"
+
+    assert asyncio.run(editor_gateway.acall("c", "unreal__call_tool", True, _fn, timeout=1)) == "quick"
+    assert editor_gateway.hang_state() == {}
+
+
+def test_an_explicit_caller_timeout_wins(monkeypatch) -> None:
+    monkeypatch.setenv(editor_gateway.TIMEOUT_ENV, "0.05")
+    # The env deadline alone would cut this read off; the caller's own 1 s lets it finish.
+    assert asyncio.run(editor_gateway.acall("c", "unreal__list_toolsets", False, _sleeper(0.2), timeout=1)) == "late"
+    assert editor_gateway.call_timeout("workspace_compile_verse", True, timeout=900) == 900
+
+
+@pytest.mark.parametrize(
+    ("op", "mutating", "heavy", "seconds"),
+    [
+        ("unreal__list_toolsets", False, False, 60.0),
+        ("unreal__call_tool", False, False, 180.0),
+        ("unreal__call_tool", True, False, 180.0),
+        ("spawn_actor", True, None, 180.0),
+        ("unreal__call_tool", True, True, 600.0),
+        ("ducky_restart_uefn", True, None, 600.0),
+        ("take_high_res_screenshot", False, None, 600.0),
+        ("VerseToolset.BuildVerse", True, None, 600.0),
+    ],
+)
+def test_default_deadlines(op, mutating, heavy, seconds) -> None:
+    assert editor_gateway.call_timeout(op, mutating, heavy) == seconds
+
+
+def test_env_override_replaces_read_and_mutating_defaults(monkeypatch) -> None:
+    monkeypatch.setenv(editor_gateway.TIMEOUT_ENV, "45")
+    assert editor_gateway.call_timeout("unreal__list_toolsets", False) == 45
+    assert editor_gateway.call_timeout("unreal__call_tool", True) == 45
+    assert editor_gateway.call_timeout("ducky_restart_uefn", True) == editor_gateway.SLOW_TIMEOUT_SEC
+    monkeypatch.setenv(editor_gateway.TIMEOUT_ENV, "nonsense")
+    assert editor_gateway.call_timeout("unreal__list_toolsets", False) == 60
+
+
 @pytest.fixture
 def spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str, bool]]:
     calls: list[tuple[str, str, bool]] = []
