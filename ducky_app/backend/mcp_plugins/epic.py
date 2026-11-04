@@ -147,6 +147,21 @@ def tcp_probe_url(url: str, *, timeout: float = _PROBE_TIMEOUT_SEC) -> bool:
         return False
 
 
+def _editor_may_listen(host: str) -> bool:
+    """False when Epic's MCP on ``host`` can't be up: it is this PC and no UEFN or Unreal
+    Editor runs here. Read from the process list, so a closed editor costs no connect."""
+    if host.lower() not in _LOOPBACK_HOSTS:
+        return True
+    from backend.bridge import editor_presence
+
+    return editor_presence.editor_running()
+
+
+def epic_url_reachable(url: str) -> bool:
+    """:func:`tcp_probe_url` for Epic's MCP: no connect at all while no editor runs here."""
+    return _editor_may_listen(_host_port(url)[0]) and tcp_probe_url(url)
+
+
 def editor_of_process(name: str) -> str:
     """``uefn`` / ``unreal`` for an editor's image name, ``other`` for any other program, '' unknown."""
     low = (name or "").strip().lower()
@@ -284,7 +299,7 @@ def probe_epic_mcp(*, ttl_sec: float = _PROBE_CACHE_SEC, project_root: str | Non
     if epic_mcp_enabled():
         for url in candidates:
             host, port = _host_port(url)
-            if not tcp_probe_url(url):
+            if not _editor_may_listen(host) or not tcp_probe_url(url):
                 _owner_cache.pop(port, None)
                 continue
             process = _port_owner(port) if host.lower() in _LOOPBACK_HOSTS else ""

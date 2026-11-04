@@ -3,6 +3,8 @@
 Ducky only talks to the listener when a UEFN tool is called: no process polls or
 heartbeats it in the background, and a command is one POST with no health GET first.
 Every request names its sender in ``X-Ducky-Client`` so the listener can count traffic.
+With no UEFN process running (:mod:`backend.bridge.editor_presence`) nothing connects at
+all: a health GET reads ``None``, a ping ``False`` and a command the offline error.
 """
 
 from __future__ import annotations
@@ -113,6 +115,13 @@ def client_tag() -> str:
     except Exception:
         pass
     return f"{tag}:{os.getpid()}" + (f":{run_id}" if run_id else "")
+
+
+def _uefn_closed() -> bool:
+    """True when no UEFN process runs: the listener can't be up, so nothing connects."""
+    from backend.bridge import editor_presence
+
+    return not editor_presence.uefn_running()
 
 
 def _listener_headers(**extra: str) -> dict[str, str]:
@@ -293,6 +302,9 @@ def _post_json_locked(
     payload = json.dumps({"command": command, "params": params or {}}).encode()
     deadline = time.time() + max(timeout, 1.0)
 
+    if _uefn_closed():
+        # Reads as a refused connection, so callers give their usual offline answer.
+        raise urllib.error.URLError(ConnectionRefusedError(10061, "UEFN is not running"))
     last_http: Optional[urllib.error.HTTPError] = None
     busy_started: Optional[float] = None
     attempt = 0
@@ -410,6 +422,8 @@ def discover_port() -> int:
 
 
 def _ping_port(port: int, *, timeout: float = 1.0) -> bool:
+    if _uefn_closed():
+        return False
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{port}", headers=_listener_headers(), method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -529,7 +543,10 @@ def seconds_since_last_post_ok() -> float:
 
 
 def listener_get_health(port: int, timeout: float = 1.0) -> Optional[dict]:
-    """GET ``http://127.0.0.1:port/`` JSON (the listener's health), or ``None`` if down."""
+    """GET ``http://127.0.0.1:port/`` JSON (the listener's health), or ``None`` if down
+    (and without a connection when UEFN isn't running)."""
+    if _uefn_closed():
+        return None
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{port}", headers=_listener_headers(), method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:

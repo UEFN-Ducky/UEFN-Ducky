@@ -273,10 +273,12 @@ class PluginClientPool:
                 ttype = str(block.get("type") or "")
                 init_timeout = _CONNECT_TIMEOUT_SEC
                 if ttype in ("http", "sse"):
-                    from backend.mcp_plugins.epic import tcp_probe_url
+                    from backend.mcp_plugins.epic import epic_url_reachable, tcp_probe_url
 
                     url = str(block.get("url") or "")
-                    if not await asyncio.to_thread(tcp_probe_url, url):
+                    # Epic's MCP: no connect at all while no editor runs on this PC.
+                    probe = epic_url_reachable if conn.plugin_id == EPIC_MCP_SERVER_ID else tcp_probe_url
+                    if not await asyncio.to_thread(probe, url):
                         self._mark_http_fail(conn.plugin_id)
                         raise ConnectionError(f"MCP HTTP unreachable: {url}")
                     init_timeout = _HTTP_CONNECT_TIMEOUT_SEC

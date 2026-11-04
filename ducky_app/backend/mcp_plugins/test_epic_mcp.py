@@ -13,6 +13,18 @@ from backend.mcp_plugins.client_pool import PluginClientPool
 from backend.mcp_plugins.epic import EPIC_MCP_DEFAULT_URL, EPIC_MCP_SERVER_ID, EPIC_PRUNED_DUCKY_TOOLS
 from backend.mcp_plugins.registry import namespace_tool_name, parse_plugin_tool, rebuild_plugin_prefix_cache
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _an_editor_runs(monkeypatch) -> None:
+    """These tests fake the editor's port; its process "runs" too, so the presence gate
+    (no connect while no editor runs, test_editor_presence) lets the probe through."""
+    from backend.bridge import editor_presence
+
+    monkeypatch.setattr(editor_presence, "editor_running", lambda: True)
+    monkeypatch.setattr(editor_presence, "uefn_running", lambda: True)
+
 
 def test_catalog_plugin_json_is_http_unreal_mcp() -> None:
     path = (

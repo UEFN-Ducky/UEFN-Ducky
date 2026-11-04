@@ -446,10 +446,15 @@ def test_importing_the_client_starts_no_heartbeat_thread() -> None:
 
 @pytest.fixture
 def uefn_closed(monkeypatch: pytest.MonkeyPatch) -> list[object]:
-    """Every listener connection is refused; returns the requests that were tried."""
+    """UEFN's process runs but every listener connection is refused (the listener isn't up);
+    returns the requests that were tried. With no UEFN process nothing is tried at all
+    (test_editor_presence)."""
     import urllib.error
     import urllib.request
 
+    from backend.bridge import editor_presence
+
+    monkeypatch.setattr(editor_presence, "uefn_running", lambda: True)
     tried: list[object] = []
 
     def _urlopen(req, *args, **kwargs):
