@@ -259,7 +259,7 @@ def allow_create_without_model(result: ResolveResult) -> ResolveResult:
     A bad explicit pick still errors.
 
     The chat's first message then takes the Default Model or a gateway's fallback model, else waits for the
-    person to pick a model (agent_modes.run_message).
+    person to pick a model (agent_turns.routing.run_message).
     """
     if isinstance(result, ResolveErr) and (result.code == "model_required" or result.from_default):
         return ResolveOk(

@@ -1,7 +1,7 @@
 """``projects`` table: one row per project (UEFN island or plain folder) Ducky has opened.
 
 Replaces ``recent_projects.json``. ``id`` is the project slug every
-project-scoped store already uses (``project_chats.project_slug``).
+project-scoped store already uses (``chats.store.project_slug``).
 """
 
 from __future__ import annotations

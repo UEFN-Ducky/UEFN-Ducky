@@ -30,7 +30,7 @@ def test_ai_access_permissions_round_trip_without_touching_real_settings(monkeyp
 def test_saved_chat_permission_list_includes_all_rules_and_revokes_only_the_selected_rule(monkeypatch, backend):
     from backend.tools.panel import permission_prompt as permissions
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
 
     monkeypatch.setenv("DUCKY_STORE_BACKEND", backend)
     first = create_conversation(PanelSettings.load(), "", title="First")
@@ -63,7 +63,7 @@ def test_protection_switch_saves_through_the_real_ui_api_without_losing_file_rul
 def test_chat_permissions_popup_api_picks_modes_and_removes_rules(monkeypatch):
     from backend.tools.panel import permission_prompt as permissions
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
 
     chat = create_conversation(PanelSettings.load(), "", title="Builder")
     api = PanelApiChatsMixin()
@@ -94,7 +94,7 @@ def test_chat_permissions_popup_api_picks_modes_and_removes_rules(monkeypatch):
 def test_chat_permissions_popup_api_refuses_a_mode_the_agent_cannot_use(monkeypatch):
     from backend.tools.panel import permission_prompt as permissions
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
-    from frontend.ui_web.project_chats import create_conversation
+    from frontend.ui_web.chats.conversations import create_conversation
 
     monkeypatch.setattr(permissions, "_agent_registration", lambda _aid: {})
     chat = create_conversation(PanelSettings.load(), "", title="Codex chat")

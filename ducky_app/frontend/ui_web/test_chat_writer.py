@@ -10,15 +10,11 @@ import pytest
 from backend.store import db
 from backend.store.repos import chats as repo
 from frontend.settings import PanelSettings
-from frontend.ui_web import chat_writer, project_chats
+from frontend.ui_web import chat_writer
 from frontend.ui_web.chat_writer import ChatWriter
-from frontend.ui_web.project_chats import (
-    create_conversation,
-    flush_chat_saves,
-    load_conversation,
-    load_conversation_meta,
-    save_conversation,
-)
+from frontend.ui_web.chats import saves as chat_saves
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation, load_conversation_meta
+from frontend.ui_web.chats.saves import flush_chat_saves, save_conversation
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +85,7 @@ def test_100_saves_of_10_chats_take_at_most_10_transactions(tmp_path) -> None:
     root = str(tmp_path)
     chats = [_chat(root, f"c{i}") for i in range(10)]
     flush_chat_saves()
-    writer = project_chats._writer()
+    writer = chat_saves._writer()
     before = writer.transactions
     t0 = time.monotonic()
     for i in range(100):
@@ -241,7 +237,7 @@ def test_a_host_owned_chat_saves_metadata_but_never_messages(tmp_path, monkeypat
     conv.messages = _msgs(2)
     save_conversation(conv, root, wait=True)
     _owned_by_host(monkeypatch, conv.id)
-    project_chats._host_refused.discard(conv.id)
+    chat_saves._host_refused.discard(conv.id)
     conv.title = "renamed while running"
     conv.messages = _msgs(5)
     with caplog.at_level("WARNING"):
@@ -335,7 +331,7 @@ def test_a_burst_of_200_checkpoints_is_at_most_2_writes(tmp_path, monkeypatch) -
     real = repo.upsert_run_message
     monkeypatch.setattr(repo, "upsert_run_message", lambda cid, rid, m, **kw: calls.append(m["content"]) or real(cid, rid, m, **kw))
     for i in range(200):
-        project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {i}"}, run_id="r1", project_root=root)
+        chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {i}"}, run_id="r1", project_root=root)
     flush_chat_saves()
     print(f"burst 200 -> {len(calls)} write(s)")
     assert len(calls) <= 2 and calls[-1] == "step 199"
@@ -346,7 +342,7 @@ def test_a_burst_of_200_checkpoints_is_at_most_2_writes(tmp_path, monkeypatch) -
 def test_a_checkpoint_queued_before_a_save_never_overwrites_it(tmp_path) -> None:
     root = str(tmp_path)
     conv = _turn(root)
-    project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "working"}, run_id="r1", project_root=root)
+    chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "working"}, run_id="r1", project_root=root)
     msgs = list(conv.messages)
     msgs[-1] = {**msgs[-1], "content": "done"}
     conv.swap_messages(msgs, len(msgs) - 1)
@@ -400,13 +396,13 @@ def test_checkpoint_enqueue_is_cheap_while_the_writer_is_blocked(tmp_path, monke
 
     monkeypatch.setattr(repo, "upsert_run_message", blocked)
     try:
-        project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "first"}, run_id="r1", project_root=root)
-        project_chats._writer().flush(conv.id, timeout=0.0)  # write it now, so the writer blocks
+        chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "first"}, run_id="r1", project_root=root)
+        chat_saves._writer().flush(conv.id, timeout=0.0)  # write it now, so the writer blocks
         assert started.wait(5)
         ms: list[float] = []
         for i in range(200):
             t0 = time.perf_counter()
-            project_chats.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {i}"}, run_id="r1", project_root=root)
+            chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {i}"}, run_id="r1", project_root=root)
             ms.append((time.perf_counter() - t0) * 1000)
     finally:
         release.set()

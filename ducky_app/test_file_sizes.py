@@ -25,7 +25,6 @@ SPLITTING: dict[str, int] = {
     'backend/uefn_plugins/host.py': 3192,
     'backend/workspace/journal.py': 2080,
     'frontend/duckyos_account.py': 2878,
-    'frontend/ui_web/agent_modes.py': 2281,
     'frontend/ui_web/browser_overlay.py': 1645,
     'frontend/ui_web/group_orchestrator.py': 1895,
     'frontend/ui_web/panel_api_chats.py': 2130,

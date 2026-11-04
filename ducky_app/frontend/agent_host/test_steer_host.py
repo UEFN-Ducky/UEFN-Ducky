@@ -73,11 +73,11 @@ def test_the_tool_server_asks_the_host_and_without_a_pipe_the_app(monkeypatch):
 
 
 def test_the_app_forwards_posts_for_a_host_owned_chat(monkeypatch):
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     host = _Recorder()
     monkeypatch.setattr(turns, "owns", lambda cid: host if cid == "c3" else None)
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     assert steer.post("c3", "s3", "also add a test")
     assert host.sent == [("steer_post", {"conv_id": "c3", "steer_id": "s3", "text": "also add a test"})]
     assert steer._inbox == {} and steer.has_queued("c3")

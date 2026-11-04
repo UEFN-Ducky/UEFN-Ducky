@@ -88,7 +88,7 @@ def test_emit_for_bridge_tool_pushes_when_no_panel(monkeypatch) -> None:
     pushed: list[dict[str, Any]] = []
 
     monkeypatch.setattr(
-        "frontend.ui_web.agent_modes.get_panel_push",
+        "frontend.ui_web.agent_turns.push.get_panel_push",
         lambda: None,
     )
     monkeypatch.setattr(
@@ -123,7 +123,7 @@ def test_emit_for_bridge_tool_pushes_when_no_panel(monkeypatch) -> None:
 def test_emit_for_bridge_tool_noop_when_panel_owns_push(monkeypatch) -> None:
     pushed: list[dict[str, Any]] = []
     monkeypatch.setattr(
-        "frontend.ui_web.agent_modes.get_panel_push",
+        "frontend.ui_web.agent_turns.push.get_panel_push",
         lambda: (lambda _e: None),
     )
     monkeypatch.setattr(

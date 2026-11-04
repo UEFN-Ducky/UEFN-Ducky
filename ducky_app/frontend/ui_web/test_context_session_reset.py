@@ -6,7 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from frontend.ui_web import agent_modes, context_control
+from frontend.ui_web import context_control
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 @pytest.fixture()
@@ -26,9 +27,9 @@ def member(monkeypatch):
     monkeypatch.setattr(context_control, "notify_context_changed", lambda cid: None)
     monkeypatch.setattr(context_control, "_usage_after", lambda *a, **k: {})
     monkeypatch.setattr(context_control, "_project_root", lambda: "")
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
     cancelled: list[str] = []
-    monkeypatch.setattr(agent_modes, "cancel_agent", lambda cid: cancelled.append(cid))
+    patch_turns(monkeypatch, "cancel_agent", lambda cid: cancelled.append(cid))
     import backend.agent.prompt_cache as prompt_cache
 
     monkeypatch.setattr(prompt_cache, "invalidate_conv_cache", lambda c: None)
@@ -45,7 +46,7 @@ def test_a_fresh_session_keeps_every_message(member) -> None:
 
 
 def test_a_working_agent_is_never_stopped_for_a_new_session(member, monkeypatch) -> None:
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     with pytest.raises(ValueError, match="working"):
         context_control.reset_context("builder", ["session"])
     assert member.conv.upstream_session_id == "codex-thread-1"

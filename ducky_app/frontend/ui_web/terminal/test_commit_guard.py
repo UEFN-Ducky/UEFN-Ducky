@@ -61,7 +61,7 @@ def test_own_files_by_name_an_archived_writer_and_the_override_pass(tmp_path):
 
 
 SPRAWL = ["ducky_app/backend/skills/store.py", "ducky_app/backend/uefn_plugins/host.py",
-          "ducky_app/frontend/ui_web/agent_modes.py", "ducky_app/frontend/chat_store.py"]
+          "ducky_app/frontend/ui_web/agent_turns/routing.py", "ducky_app/frontend/chat_store.py"]
 
 
 def test_a_generic_message_is_warned():

@@ -171,7 +171,7 @@ def alert(
 
 
 def _bridge_forwarder() -> Callable[[dict[str, Any]], None] | None:
-    """In the MCP bridge process (agent_modes loaded, no panel): its sender to the panel.
+    """In the MCP bridge process (agent_turns loaded, no panel): its sender to the panel.
     Looked up, never imported: an alert must not pull in the agent stack."""
     modes = sys.modules.get("frontend.ui_web.agent_turns.push")
     try:

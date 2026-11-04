@@ -27,7 +27,7 @@ def test_started_send_returns_run_id(monkeypatch) -> None:
 
 
 def test_held_for_a_model_says_so(monkeypatch) -> None:
-    from frontend.ui_web.agent_modes import HELD_FOR_MODEL
+    from frontend.ui_web.agent_turns.pending import HELD_FOR_MODEL
 
     assert _send(monkeypatch, HELD_FOR_MODEL) == {"run_id": "", "held_for_model": "1"}
 

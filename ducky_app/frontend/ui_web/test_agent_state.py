@@ -6,7 +6,8 @@ import time
 
 import pytest
 
-from frontend.ui_web import agent_modes, agent_state, ui_rpc
+from frontend.ui_web import agent_state, ui_rpc
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 class _Terminals:
@@ -23,9 +24,9 @@ def seed(monkeypatch):
     monkeypatch.setattr(ui_rpc, "pending_question", lambda cid: facts["question"])
     monkeypatch.setattr(ui_rpc, "has_pending_for_conv", lambda cid: facts["question"] is not None)
     monkeypatch.setattr("frontend.ui_web.terminal.get_terminal_manager", lambda: _Terminals(facts["approval"]))
-    monkeypatch.setattr(agent_modes, "running_tool", lambda cid: facts["tool"])
-    monkeypatch.setattr(agent_modes, "last_output_age_s", lambda cid: facts["output_age_s"])
-    monkeypatch.setattr(agent_modes, "list_running_agents", lambda: ["c1"])
+    patch_turns(monkeypatch, "running_tool", lambda cid: facts["tool"])
+    patch_turns(monkeypatch, "last_output_age_s", lambda cid: facts["output_age_s"])
+    patch_turns(monkeypatch, "list_running_agents", lambda: ["c1"])
     return facts
 
 

@@ -3,7 +3,11 @@ import json
 import pytest
 
 from frontend.settings import PanelSettings
-from frontend.ui_web import project_chats as chats, group_orchestrator as groups
+from frontend.ui_web import group_orchestrator as groups
+from frontend.ui_web.chats import conversations as chat_convs
+from frontend.ui_web.chats import folders as chat_folders
+from frontend.ui_web.chats import saves as chat_saves
+from frontend.ui_web.chats import store as chat_store
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 from backend.agent.coding_agents import plans
 
@@ -12,23 +16,23 @@ from backend.agent.coding_agents import plans
 def roster(tmp_path, monkeypatch):
     root = str(tmp_path / "stored")
     settings = PanelSettings.load()
-    group = chats.create_conversation(settings, "", title="Team", project_root=root)
+    group = chat_convs.create_conversation(settings, "", title="Team", project_root=root)
     group.is_group = True
-    members = [chats.create_conversation(settings, "", title=name, project_root=root) for name in ("Builder", "Designer")]
+    members = [chat_convs.create_conversation(settings, "", title=name, project_root=root) for name in ("Builder", "Designer")]
     for member in members:
         member.parent_conv_id = group.id
-        chats.save_conversation(member, root)
+        chat_saves.save_conversation(member, root)
     group.group_members = [{"member_conv_id": m.id, "profile_id": "", "name": m.title} for m in members]
     group.leader_conv_id = members[0].id
-    chats.save_conversation(group, root)
+    chat_saves.save_conversation(group, root)
     # Keep existing roster synchronization outside this read-payload test.
     monkeypatch.setattr(groups, "_rehome_group_roster", lambda group: False)
     monkeypatch.setattr(groups, "sync_group_members_from_folder", lambda group: None)
-    monkeypatch.setattr(chats, "project_root_for_slug", lambda slug: root if slug == chats.project_slug(root) else None)
+    monkeypatch.setattr(chat_store, "project_root_for_slug", lambda slug: root if slug == chat_store.project_slug(root) else None)
     api = PanelApiChatsMixin()
-    monkeypatch.setattr("frontend.ui_web.agent_modes.get_panel_push", lambda: (lambda event: None))
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.get_panel_push", lambda: (lambda event: None))
     monkeypatch.setattr(api, "list_running_agents", lambda: [members[0].id])
-    coordinator = chats.create_conversation(settings, "", title="Coordinator", project_root=root)
+    coordinator = chat_convs.create_conversation(settings, "", title="Coordinator", project_root=root)
     plan = plans.create_plan(coordinator.id, title="Master", nodes=[{
         "id": "original", "content": "Original task", "status": "in_progress", "assignee": group.id,
     }], project_root=root)
@@ -46,7 +50,7 @@ def test_stored_project_assignment_and_runtime(roster, tmp_path):
     for row in rows:
         o = row["observation"]
         # Duckies are one list: the plan is found whatever project is selected.
-        assert o["group_id"] == group.id and o["project_slug"] == chats.ONE_LIST_SLUG
+        assert o["group_id"] == group.id and o["project_slug"] == chat_store.ONE_LIST_SLUG
         assert o["assignment"] == {"plan_id": plan["id"], "chat_id": plan["chat_id"], "node_id": "original", "title": "Original task", "status": "in_progress"}
         assert o["observed_at"] > 0
         assert "body_markdown" not in str(o)
@@ -56,11 +60,11 @@ def test_a_leader_filed_in_its_outer_group_is_still_observed(roster):
     # Oct 24 2026: an as_leader lead stays filed in the outer group, so its row read
     # runtime 'unknown' and no assignment in the group it leads.
     api, group, members, root, plan = roster
-    outer = chats.create_conversation(PanelSettings.load(), "", title="Outer", project_root=root)
+    outer = chat_convs.create_conversation(PanelSettings.load(), "", title="Outer", project_root=root)
     outer.is_group = True
-    chats.save_conversation(outer, root)
+    chat_saves.save_conversation(outer, root)
     members[0].parent_conv_id = outer.id
-    chats.save_conversation(members[0], root)
+    chat_saves.save_conversation(members[0], root)
     rows = api.group_members(group.id)["members"]
     lead = rows[0]["observation"]
     assert lead["role"] == "leader" and lead["runtime"] == "running"
@@ -83,22 +87,22 @@ def test_unknown_observations(roster, monkeypatch, problem):
     if problem == "missing":
         plans.delete_plan(plan["chat_id"], project_root=root)
     elif problem == "ambiguous":
-        other = chats.create_conversation(PanelSettings.load(), "", title="Other", project_root=root)
+        other = chat_convs.create_conversation(PanelSettings.load(), "", title="Other", project_root=root)
         plans.create_plan(other.id, nodes=[{"id": "other", "content": "Conflict", "assignee": group.id}], project_root=root)
     elif problem == "deleted":
         monkeypatch.setattr("frontend.ui_web.panel_api.load_conversation", lambda cid: group if cid == group.id else None)
     elif problem == "unresolved_project":
         # An older Ducky's team, kept under a project Ducky no longer knows.
-        chats.move_chats_to_project([group.id, *[m.id for m in members]], [], "Gone_0123456789abcdef", "")
-        monkeypatch.setattr(chats, "project_root_for_slug", lambda slug: None)
+        chat_folders.move_chats_to_project([group.id, *[m.id for m in members]], [], "Gone_0123456789abcdef", "")
+        monkeypatch.setattr(chat_store, "project_root_for_slug", lambda slug: None)
     elif problem == "wrong_parent":
         for member in members:
             member.parent_conv_id = "another-group"
-            chats.save_conversation(member, root)
+            chat_saves.save_conversation(member, root)
     elif problem == "wrong_project":
-        monkeypatch.setattr(chats, "conversation_project_slug", lambda cid: "group-project" if cid == group.id else "other-project")
+        monkeypatch.setattr(chat_convs, "conversation_project_slug", lambda cid: "group-project" if cid == group.id else "other-project")
     elif problem == "bridge":
-        monkeypatch.setattr("frontend.ui_web.agent_modes.get_panel_push", lambda: None)
+        monkeypatch.setattr("frontend.ui_web.agent_turns.push.get_panel_push", lambda: None)
     else:
         monkeypatch.setattr(api, "list_running_agents", lambda: (_ for _ in ()).throw(RuntimeError("private failure")))
     rows = api.group_members(group.id)["members"]

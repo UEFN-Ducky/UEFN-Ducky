@@ -8,14 +8,15 @@ import pytest
 
 from backend.store.repos import chats as repo
 from frontend.settings import PanelSettings
-from frontend.ui_web import project_chats as pc
+from frontend.ui_web.chats import conversations as chat_convs
+from frontend.ui_web.chats import saves as chat_saves
 from frontend.ui_web.session_files import session_stats_from_messages
 
 
 @pytest.fixture(autouse=True)
 def _flushed():
     yield
-    pc.flush_chat_saves()
+    chat_saves.flush_chat_saves()
 
 
 def _transcript(n: int) -> list[dict]:
@@ -32,11 +33,11 @@ def _transcript(n: int) -> list[dict]:
 
 
 def _chat(root: str, n: int):
-    conv = pc.create_conversation(PanelSettings.load(), "", title="big", project_root=root)
-    conv = pc.load_conversation(conv.id, root)
+    conv = chat_convs.create_conversation(PanelSettings.load(), "", title="big", project_root=root)
+    conv = chat_convs.load_conversation(conv.id, root)
     conv.messages = _transcript(n)
-    pc.save_conversation(conv, root, wait=True)
-    return pc.load_conversation(conv.id, root)
+    chat_saves.save_conversation(conv, root, wait=True)
+    return chat_convs.load_conversation(conv.id, root)
 
 
 def _p95(values: list[float]) -> float:
@@ -46,7 +47,7 @@ def _p95(values: list[float]) -> float:
 def test_append_save_on_a_5000_message_chat_stays_cheap(tmp_path) -> None:
     root = str(tmp_path)
     conv = _chat(root, 5000)
-    pc._save_conversation_rows(conv, root)  # warm: this process has seen the rows once
+    chat_saves._save_conversation_rows(conv, root)  # warm: this process has seen the rows once
     ms: list[float] = []
     for k in range(40):
         conv.messages.append({"role": "assistant", "content": f"reply {k}", "ts": k, "blocks": [
@@ -54,7 +55,7 @@ def test_append_save_on_a_5000_message_chat_stays_cheap(tmp_path) -> None:
              "status": "success", "result": {}}]})
         conv.mark_dirty(len(conv.messages) - 1)
         started = time.perf_counter()
-        assert pc._save_conversation_rows(conv, root, conv)["path"] == "delta"
+        assert chat_saves._save_conversation_rows(conv, root, conv)["path"] == "delta"
         conv._dirty_from = None  # what the chat writer does once the save is written
         ms.append((time.perf_counter() - started) * 1000)
     print(f"conv_save append on 5,000 msgs: p50 {sorted(ms)[20]:.1f} ms, p95 {_p95(ms):.1f} ms")
@@ -63,7 +64,7 @@ def test_append_save_on_a_5000_message_chat_stays_cheap(tmp_path) -> None:
     hashes = _db_hashes(conv.id)
     assert len(hashes) == len(conv.messages)
     started = time.perf_counter()
-    pc._stats_by_hash(conv.id, conv.messages, hashes)
+    chat_saves._stats_by_hash(conv.id, conv.messages, hashes)
     assert (time.perf_counter() - started) * 1000 < 5.0
     stored = repo.conv_get(conv.id, with_messages=False)
     expected = session_stats_from_messages(conv.messages)
@@ -86,20 +87,20 @@ def _written_elsewhere(conv, seq: int, message: dict) -> None:
 def test_a_row_another_writer_changed_is_compared_again(tmp_path) -> None:
     root = str(tmp_path)
     conv = _chat(root, 5000)
-    pc._save_conversation_rows(conv, root)
+    chat_saves._save_conversation_rows(conv, root)
     theirs = {"role": "assistant", "content": "the host's redo", "blocks": [], "ts": 7}
     _written_elsewhere(conv, 7, theirs)
     # This window got the host's row, and adds one: the host's write moved the rev, so
     # the save compares every row with the database and the host's row survives.
     conv.messages[7] = dict(theirs)
     conv.messages.append({"role": "user", "content": "next", "ts": 5000})
-    pc._save_conversation_rows(conv, root)
+    chat_saves._save_conversation_rows(conv, root)
     assert repo.messages_get(conv.id)[7] == theirs
     # Row 3 this window didn't change (it still matches its base hash): the host's
     # newer edit is kept, not written over by this window's old copy.
     host = {"role": "assistant", "content": "host again", "blocks": [], "ts": 3}
     _written_elsewhere(conv, 3, host)
-    pc._save_conversation_rows(conv, root)
+    chat_saves._save_conversation_rows(conv, root)
     stored = repo.messages_get(conv.id)
     assert stored[3] == host and stored[:3] + stored[4:] == conv.messages[:3] + conv.messages[4:]
 
@@ -107,13 +108,13 @@ def test_a_row_another_writer_changed_is_compared_again(tmp_path) -> None:
 def test_counts_follow_rows_another_writer_changed(tmp_path) -> None:
     root = str(tmp_path)
     conv = _chat(root, 20)
-    pc._save_conversation_rows(conv, root)
+    chat_saves._save_conversation_rows(conv, root)
     # Another writer (an agent host) rewrites a row directly; this process's copy loads it.
-    fresh = pc.load_conversation(conv.id, root)
+    fresh = chat_convs.load_conversation(conv.id, root)
     fresh.messages[1] = {"role": "assistant", "content": "redo", "blocks": [], "ts": 1}
     repo.conv_save(repo.conv_project_id(conv.id), fresh.to_dict(), messages=fresh.messages)
-    again = pc.load_conversation(conv.id, root)
-    pc._save_conversation_rows(again, root)
+    again = chat_convs.load_conversation(conv.id, root)
+    chat_saves._save_conversation_rows(again, root)
     stored = repo.conv_get(conv.id, with_messages=False)
     expected = session_stats_from_messages(again.messages)
     assert (stored["tool_call_count"], stored["file_count"]) == (expected["tool_call_count"], expected["file_count"])
@@ -126,7 +127,7 @@ def test_a_waiting_save_does_not_sit_out_the_batch_timer(tmp_path) -> None:
     for k in range(20):
         conv.title = f"renamed {k}"  # a rename waits until it is written (other processes read it)
         started = time.perf_counter()
-        pc.save_conversation(conv, root)
+        chat_saves.save_conversation(conv, root)
         ms.append((time.perf_counter() - started) * 1000)
     print(f"save_conversation rename (wait=True) caller: p95 {_p95(ms):.1f} ms")
     assert _p95(ms) < 50.0  # was p50 124 ms: the 100 ms writer interval plus the commit

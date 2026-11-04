@@ -45,7 +45,9 @@ def harness(monkeypatch, tmp_path):
     from backend.uefn_plugins import host
     from backend.workspace import ai_ignore
     from frontend.settings import PanelSettings
-    from frontend.ui_web import agent_modes, project_chats, workspace_bootstrap
+    from frontend.ui_web import workspace_bootstrap
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
     from backend.agent.coding_agents import mcp_inject, readiness
 
     # Mode propagation tests use fake adapters; the real cold-server gate is
@@ -75,7 +77,7 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "launch_env", lambda **kw: dict(kw["extra"]))
     monkeypatch.setattr(workspace_bootstrap, "build_run_context", lambda *a, **kw: SimpleNamespace(as_writer=lambda: {}))
     monkeypatch.setattr(workspace_bootstrap, "record_external_edits", lambda *a: None)
-    monkeypatch.setattr(agent_modes, "close_changeset_run", lambda *a: None)
+    patch_turns(monkeypatch, "close_changeset_run", lambda *a: None)
 
     def temp_file(name):
         path = tmp_path / name
@@ -84,10 +86,10 @@ def harness(monkeypatch, tmp_path):
 
     monkeypatch.setattr(runner, "write_uefn_mcp_config", lambda **kw: temp_file("mcp.json"))
     monkeypatch.setattr(runner, "write_prompt_file", lambda *a, **kw: temp_file("prompt.txt"))
-    conv = project_chats.create_conversation(settings, "test-model", project_root=str(tmp_path))
+    conv = chat_convs.create_conversation(settings, "test-model", project_root=str(tmp_path))
     conv.coding_agent = "test_adapter"
     conv.messages = [{"role": "user", "content": "Inspect", "text": "Inspect", "ts": 1}]
-    project_chats.save_conversation(conv, str(tmp_path))
+    chat_saves.save_conversation(conv, str(tmp_path))
     adapter = ModeAdapter()
     monkeypatch.setattr(runner, "get_adapter", lambda _: adapter)
     events = []
@@ -103,7 +105,7 @@ def harness(monkeypatch, tmp_path):
 @pytest.mark.parametrize("mode", ["ask", "plan", "agent"])
 @pytest.mark.parametrize("session", ["", "test_adapter:existing"])
 def test_fresh_and_resume_propagate_and_persist(harness, mode, session):
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
 
     harness.conv.upstream_session_id = session
     outcome = harness.run(mode=mode)
@@ -190,28 +192,29 @@ def test_launch_result_serializes_mode_metadata():
 @pytest.mark.parametrize("resume", [False, True])
 @pytest.mark.parametrize("failure", [False, True])
 def test_ui_forwards_mode_to_external_runner(harness, monkeypatch, mode, resume, failure):
-    from frontend.ui_web import agent_modes as am
+    from frontend.ui_web.agent_turns import routing, state
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     calls = []
     monkeypatch.setattr(base, "normalize_coding_agent", lambda _: "test_adapter")
-    monkeypatch.setattr(am, "load_conversation", lambda _: harness.conv)
-    monkeypatch.setattr(am, "save_conversation", lambda *a, **kw: None)
-    monkeypatch.setattr(am, "append_message", lambda conv, msg: conv.messages.append(msg))
-    monkeypatch.setattr(am, "is_agent_running", lambda _: False)
-    monkeypatch.setattr(am, "_note_run_starter", lambda *a: None)
-    monkeypatch.setattr(am, "_make_broker_tap", lambda push, _: push)
-    monkeypatch.setattr(am, "_backfill_video_frames", lambda *a: None)
-    monkeypatch.setattr(am, "get_active_conv_id", lambda: None)
-    monkeypatch.setattr(am, "apply_workspace_env", lambda *_: None)
-    session = am.AgentSession()
-    monkeypatch.setattr(am, "_session", lambda _: session)
+    patch_turns(monkeypatch, "load_conversation", lambda _: harness.conv)
+    patch_turns(monkeypatch, "save_conversation", lambda *a, **kw: None)
+    patch_turns(monkeypatch, "append_message", lambda conv, msg: conv.messages.append(msg))
+    patch_turns(monkeypatch, "is_agent_running", lambda _: False)
+    patch_turns(monkeypatch, "_note_run_starter", lambda *a: None)
+    patch_turns(monkeypatch, "_make_broker_tap", lambda push, _: push)
+    patch_turns(monkeypatch, "_backfill_video_frames", lambda *a: None)
+    patch_turns(monkeypatch, "get_active_conv_id", lambda: None)
+    patch_turns(monkeypatch, "apply_workspace_env", lambda *_: None)
+    session = state.AgentSession()
+    patch_turns(monkeypatch, "_session", lambda _: session)
     monkeypatch.setattr(session, "start", lambda target, _: target())
     def run(*a, **kw):
         calls.append(kw)
         if failure:
             raise RuntimeError("synthetic UI failure")
     monkeypatch.setattr(runner, "run_coding_agent_message", run)
-    rid = am.run_message(harness.conv.id, "Inspect", mode, "test-model", push=harness.events.append, resume=resume, _local=True)
+    rid = routing.run_message(harness.conv.id, "Inspect", mode, "test-model", push=harness.events.append, resume=resume, _local=True)
     assert rid
     assert len(calls) == 1, harness.events
     assert calls[0]["mode"] == mode
@@ -225,7 +228,7 @@ def test_ui_forwards_mode_to_external_runner(harness, monkeypatch, mode, resume,
 
 
 def saved_assistant(harness):
-    from frontend.ui_web.project_chats import load_conversation
+    from frontend.ui_web.chats.conversations import load_conversation
     return load_conversation(harness.conv.id, project_root=str(harness.root)).messages[-1]
 
 

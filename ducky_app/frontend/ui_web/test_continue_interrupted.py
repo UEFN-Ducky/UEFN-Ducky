@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from frontend.ui_web.agent_modes import clear_last_interrupt, last_user_payload
+from frontend.ui_web.agent_turns.run import clear_last_interrupt, last_user_payload
 
 
 def test_clear_keeps_partial_and_ts():

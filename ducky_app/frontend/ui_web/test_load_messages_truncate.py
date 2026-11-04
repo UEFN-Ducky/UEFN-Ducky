@@ -7,7 +7,8 @@ from pathlib import Path
 
 import frontend.ui_web.panel_api  # noqa: F401 - mixins import the package root first
 from frontend.settings import PanelSettings
-from frontend.ui_web import project_chats as pc
+from frontend.ui_web.chats import conversations as chat_convs
+from frontend.ui_web.chats import saves as chat_saves
 from frontend.ui_web.panel_api_chats import TOOL_RESULT_CAP, PanelApiChatsMixin
 
 BIG = "y" * 40_000
@@ -35,10 +36,10 @@ def test_big_tool_results_are_cut_and_fetched_whole(tmp_path: Path) -> None:
     s = PanelSettings.load()
     s.uefn_project_root = project
     s.save()
-    conv = pc.create_conversation(title="Big", project_root=project, skill_snapshot="x")
-    conv = pc.load_conversation(conv.id, project)
+    conv = chat_convs.create_conversation(title="Big", project_root=project, skill_snapshot="x")
+    conv = chat_convs.load_conversation(conv.id, project)
     conv.messages = _transcript(2000)
-    pc.save_conversation(conv, project, wait=True)
+    chat_saves.save_conversation(conv, project, wait=True)
     api = PanelApiChatsMixin()
 
     whole = api.load_messages(conv.id, full_results=True)
@@ -71,10 +72,10 @@ def test_a_750_message_chat_opens_its_first_page_under_a_second(tmp_path: Path) 
     s = PanelSettings.load()
     s.uefn_project_root = project
     s.save()
-    conv = pc.create_conversation(title="Long", project_root=project, skill_snapshot="x")
-    conv = pc.load_conversation(conv.id, project)
+    conv = chat_convs.create_conversation(title="Long", project_root=project, skill_snapshot="x")
+    conv = chat_convs.load_conversation(conv.id, project)
     conv.messages = _transcript(750)
-    pc.save_conversation(conv, project, wait=True)
+    chat_saves.save_conversation(conv, project, wait=True)
     api = PanelApiChatsMixin()
 
     started = time.perf_counter()

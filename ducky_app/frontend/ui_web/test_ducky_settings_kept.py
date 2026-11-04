@@ -8,18 +8,14 @@ from pathlib import Path
 import pytest
 
 from frontend.settings import PanelSettings
-from frontend.ui_web import project_chats
-from frontend.ui_web.project_chats import (
-    apply_ducky_config,
-    create_conversation,
-    load_conversation,
-    save_conversation,
-)
+from frontend.ui_web.chats import store as chat_store
+from frontend.ui_web.chats.conversations import apply_ducky_config, create_conversation, load_conversation
+from frontend.ui_web.chats.saves import save_conversation
 
 
 @pytest.mark.parametrize("use_db", [True, False])
 def test_running_turn_save_keeps_new_voice(monkeypatch, use_db):
-    monkeypatch.setattr(project_chats, "_use_db", lambda: use_db)
+    monkeypatch.setattr(chat_store, "_use_db", lambda: use_db)
     with tempfile.TemporaryDirectory() as tmp:
         root = str(Path(tmp))
         conv = create_conversation(PanelSettings.load(), "", title="Lead", project_root=root)
@@ -49,7 +45,7 @@ def test_running_turn_save_keeps_new_voice(monkeypatch, use_db):
 
 
 def test_a_later_edit_still_wins(monkeypatch):
-    monkeypatch.setattr(project_chats, "_use_db", lambda: True)
+    monkeypatch.setattr(chat_store, "_use_db", lambda: True)
     with tempfile.TemporaryDirectory() as tmp:
         root = str(Path(tmp))
         conv = create_conversation(PanelSettings.load(), "", title="Lead", project_root=root)

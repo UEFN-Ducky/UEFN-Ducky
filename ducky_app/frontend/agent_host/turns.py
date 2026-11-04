@@ -3,7 +3,7 @@
 App side: ``run_in_host(...)`` hands one turn to the chat's host (``supervisor.assign``) as a
 ``start_turn`` frame, passes every ``event`` frame to the turn's push (the same push chain an
 in-app turn uses), forwards Stop as ``cancel`` and returns when ``turn_ended`` arrives.
-Admission, queueing, sessions and the public API stay in ``agent_modes``; only the CLI, its
+Admission, queueing, sessions and the public API stay in ``agent_turns``; only the CLI, its
 reader threads and the adapter's line parsing move to the host.
 
 Host side: ``on_frame(channel, frame)`` (called by ``agent_host.main``) starts

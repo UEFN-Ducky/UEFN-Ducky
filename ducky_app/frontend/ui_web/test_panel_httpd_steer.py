@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from frontend.ui_web import agent_modes, steer
+from frontend.ui_web import steer
+from frontend.ui_web.agent_turns.testing import patch_turns
 from frontend.ui_web import panel_httpd as httpd
 
 
 @pytest.fixture
 def chat(monkeypatch):
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda _cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda _cid: True)
     pushed: list[dict] = []
     steer.bind_run("c1", pushed.append)
     yield pushed
@@ -51,7 +52,7 @@ class _FakeWriter:
 def live_server(tmp_path, monkeypatch):
     import socket
 
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import saves as chat_saves
 
     (tmp_path / "index.html").write_text("<!doctype html>", encoding="utf-8")
     with socket.socket() as s:
@@ -64,7 +65,7 @@ def live_server(tmp_path, monkeypatch):
     monkeypatch.setattr(steer, "has_queued", lambda _cid: order.append("answer") or False)
 
     def use_writer(writer):
-        monkeypatch.setattr(project_chats, "_WRITER", writer)
+        monkeypatch.setattr(chat_saves, "_WRITER", writer)
 
     httpd.start_panel_ui_server(tmp_path)
     yield port, order, use_writer

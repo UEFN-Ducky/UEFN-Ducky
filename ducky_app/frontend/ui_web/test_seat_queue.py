@@ -45,7 +45,7 @@ def q(monkeypatch):
         return go
 
     def end(cid, reason="done", detail=""):
-        adm._running.discard(cid)  # agent_modes releases the memory slot
+        adm._running.discard(cid)  # agent_turns releases the memory slot
         alive.discard(cid)
         sq.on_turn_end(cid, reason, detail)
 

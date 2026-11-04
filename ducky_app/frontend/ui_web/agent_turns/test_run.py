@@ -15,7 +15,7 @@ def test_embedded_error_turn_ends_with_its_error_text(monkeypatch):
     """A failed turn keeps its error text, so a plan limit is not counted as a crash."""
     from backend.agent.coding_agents import runner as coding_runner
     from frontend import usage_stats
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import saves as chat_saves
 
     class FakeRunner:
         def __init__(self, config): pass
@@ -34,7 +34,7 @@ def test_embedded_error_turn_ends_with_its_error_text(monkeypatch):
     ended: list[tuple] = []
     monkeypatch.setattr(run, "AgentRunner", FakeRunner)
     monkeypatch.setattr(coding_runner, "_TurnCheckpoint", FakeCkpt)
-    monkeypatch.setattr(project_chats, "upsert_in_flight_assistant", lambda *a, **kw: None)
+    monkeypatch.setattr(chat_saves, "upsert_in_flight_assistant", lambda *a, **kw: None)
     monkeypatch.setattr(run, "_log_agent_crash", lambda *a, **kw: None)
     monkeypatch.setattr(state, "close_changeset_run", lambda *a: None)
     monkeypatch.setattr(usage_stats, "run_end", lambda rid, reason, detail="": ended.append((reason, detail)))

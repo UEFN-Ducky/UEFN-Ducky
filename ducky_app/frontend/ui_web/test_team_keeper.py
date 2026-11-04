@@ -202,9 +202,9 @@ def test_keeper_respects_broker_cooldown_and_explicit_stop(monkeypatch, stopped)
 
 def test_two_minute_wake_names_work_members_and_reports(monkeypatch):
     from types import SimpleNamespace
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
     from backend.agent.coding_agents import plans
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda _: [SimpleNamespace(id="builder", title="Builder", is_group=False)])
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", lambda _: [SimpleNamespace(id="builder", title="Builder", is_group=False)])
     monkeypatch.setattr(plans, "_chat_and_group_ids", lambda cid, root: [cid, "group-a"])
     plan = {**PLAN, "nodes": [{"id": "section", "content": "Modes", "assignee": "group-a", "children": [
         {"id": "next", "content": "Next adapter", "status": "pending"}]}],
@@ -604,7 +604,7 @@ def test_an_owner_whose_swarm_failed_works_alone_and_is_never_nagged(monkeypatch
     # and "Your team has been working for 47 minutes" with "Working: none · Idle: none".
     from types import SimpleNamespace
 
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     def group(gid, leader, members, folder=""):
         return SimpleNamespace(id=gid, is_group=True, leader_conv_id=leader, folder_id=folder,
@@ -620,7 +620,7 @@ def test_an_owner_whose_swarm_failed_works_alone_and_is_never_nagged(monkeypatch
         SimpleNamespace(id="solo2", is_group=False, folder_id=""),
         SimpleNamespace(id="lead", is_group=False, folder_id=""),
     ]
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda root=None: convs)
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", lambda root=None: convs)
     assert keeper._team_leaders("C:/island") == {"lead"}
     import backend.agent.coding_agents.plans as plans
 
@@ -711,12 +711,12 @@ def test_members_tick_as_they_go_and_are_told_when_they_committed_without_tickin
 
 def test_a_stall_wake_lists_working_and_idle_members_apart(monkeypatch) -> None:
     from types import SimpleNamespace
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
     from backend.agent.coding_agents import plans
 
     names = {"verse": "Verse lead", "ui": "UI Engineer", "test": "Tester",
              "model": "Modeling lead", "game": "Gameplay lead"}
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda _: [
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", lambda _: [
         SimpleNamespace(id=cid, ducky_name=name, is_group=False) for cid, name in names.items()])
     monkeypatch.setattr(plans, "_chat_and_group_ids", lambda cid, root: [cid])
     monkeypatch.setattr(keeper, "_member_chat", lambda owner, root: "")  # no member dispatch here
@@ -734,10 +734,10 @@ def test_a_nested_groups_leader_filed_in_the_outer_group_is_a_member(monkeypatch
     # A workstream lead seated with as_leader stays filed in the outer group: its parent chain
     # never reaches the group that owns the sub plan, so the keeper took a busy team for idle.
     from types import SimpleNamespace
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
     from backend.agent.coding_agents import plans
 
-    monkeypatch.setattr(project_chats, "list_all_conversation_metadata", lambda _: [
+    monkeypatch.setattr(chat_convs, "list_all_conversation_metadata", lambda _: [
         SimpleNamespace(id="root", title="Swarm", is_group=True, leader_conv_id="coord", group_members=[]),
         SimpleNamespace(id="combat", title="Verse: combat", is_group=True, leader_conv_id="verse",
                         group_members=[{"member_conv_id": "verse"}]),
@@ -790,7 +790,9 @@ def test_open_steps_only_the_person_can_do_wake_the_lead_once(monkeypatch) -> No
 
 def test_stopping_a_team_never_stops_its_lead(monkeypatch) -> None:
     from types import SimpleNamespace
-    from frontend.ui_web import agent_modes, group_orchestrator, project_chats
+    from frontend.ui_web import group_orchestrator
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import conversations as chat_convs
 
     convs = {
         "team": SimpleNamespace(id="team", is_group=True, leader_conv_id="coord"),
@@ -798,12 +800,12 @@ def test_stopping_a_team_never_stops_its_lead(monkeypatch) -> None:
     }
     rows = {"team": [{"member_conv_id": "coord"}, {"member_conv_id": "a"}, {"member_conv_id": "sub", "is_group": True}],
             "sub": [{"member_conv_id": "sublead"}, {"member_conv_id": "b"}, {"member_conv_id": "coord"}]}
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, **kw: convs.get(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, **kw: convs.get(cid))
     monkeypatch.setattr(group_orchestrator, "is_group_conversation", lambda conv: conv.is_group)
     monkeypatch.setattr(group_orchestrator, "group_and_nested_ids", lambda gid: [gid, "sub"])
     monkeypatch.setattr(group_orchestrator, "group_members", lambda conv: rows[conv.id])
     monkeypatch.setattr(group_orchestrator, "cancel_group_run", lambda gid: None)
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     cancelled: list[str] = []
     res = keeper.stop_team("team", cancelled.append)
     assert res["ok"] and "coord" not in cancelled  # the lead's turn keeps running
@@ -904,10 +906,10 @@ def test_the_last_reply_is_read_from_the_rows_not_the_whole_chat(monkeypatch) ->
     # reply, and spent a third of a core opening (DPAPI) rows and parts it never looked at.
     from backend.store import switch
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     monkeypatch.setattr(switch, "use_db", lambda table: True)
-    monkeypatch.setattr(project_chats, "load_conversation", lambda *a, **k: pytest.fail("loaded the whole chat"))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda *a, **k: pytest.fail("loaded the whole chat"))
     messages = [{"role": "user", "content": "go", "ts": 1.0},
                 *({"role": "assistant", "content": f"step {i}", "ts": 2.0} for i in range(30)),
                 {"role": "assistant", "content": "Committed abc1234.\nBLOCKED: needs the CLI", "ts": 3.0}]
@@ -923,9 +925,9 @@ def test_the_last_reply_falls_back_to_the_chat_without_the_row_store(monkeypatch
     from types import SimpleNamespace
 
     from backend.store import switch
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     monkeypatch.setattr(switch, "use_db", lambda table: False)
     conv = SimpleNamespace(messages=[{"role": "assistant", "content": "done"}, {"role": "assistant", "content": " "}])
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, **kw: conv)
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, **kw: conv)
     assert keeper._last_reply("m") == ("done", 2)

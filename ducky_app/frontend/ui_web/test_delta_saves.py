@@ -90,10 +90,10 @@ def test_mutation_sites_are_marked() -> None:
 
 def _big_chat(root: str, n: int, tag: str = "m"):
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
-    conv = pc.create_conversation(PanelSettings.load(), "", title="big", project_root=root)
-    conv = pc.load_conversation(conv.id, root)
+    conv = chat_convs.create_conversation(PanelSettings.load(), "", title="big", project_root=root)
+    conv = chat_convs.load_conversation(conv.id, root)
     conv.messages = [
         {"role": "user" if i % 2 == 0 else "assistant", "content": f"{tag}{i}", "ts": i,
          **({} if i % 2 == 0 else {"blocks": [{"type": "tool_call", "id": f"t{i}", "name": "workspace_read_file",
@@ -101,22 +101,22 @@ def _big_chat(root: str, n: int, tag: str = "m"):
                                                "result": {"data": "x" * 400}}]})}
         for i in range(n)
     ]
-    pc.save_conversation(conv, root, wait=True)
-    return pc.load_conversation(conv.id, root)
+    chat_saves.save_conversation(conv, root, wait=True)
+    return chat_convs.load_conversation(conv.id, root)
 
 
 def test_closed_chats_leave_no_message_list_alive(tmp_path) -> None:
     import gc
 
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     for j in range(20):
         conv = _big_chat(root, 2000, tag=f"leak{j}-")
-        pc.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "live"}, run_id="live", project_root=root)
-        pc.save_conversation(conv, root, wait=True, full=True)  # turn end
-        conv = pc.load_conversation(conv.id, root)
-        pc.save_conversation(conv, root, wait=True)
+        chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "live"}, run_id="live", project_root=root)
+        chat_saves.save_conversation(conv, root, wait=True, full=True)  # turn end
+        conv = chat_convs.load_conversation(conv.id, root)
+        chat_saves.save_conversation(conv, root, wait=True)
     del conv  # every chat closed
     gc.collect()
     alive = sum(
@@ -132,10 +132,10 @@ def _record_saves(monkeypatch) -> list[dict]:
     import time
 
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     calls: list[dict] = []
-    real_save, real_rows = repo.conv_save, pc._save_conversation_rows
+    real_save, real_rows = repo.conv_save, chat_saves._save_conversation_rows
 
     def conv_save(project_id, doc, *, messages, **kw):
         result = real_save(project_id, doc, messages=messages, **kw)
@@ -151,13 +151,13 @@ def _record_saves(monkeypatch) -> list[dict]:
             calls[-1]["ms"] = (time.perf_counter() - started) * 1000
 
     monkeypatch.setattr(repo, "conv_save", conv_save)
-    monkeypatch.setattr(pc, "_save_conversation_rows", rows)
+    monkeypatch.setattr(chat_saves, "_save_conversation_rows", rows)
     return calls
 
 
 def test_appends_to_a_5000_message_chat_save_by_delta(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 5000)
@@ -166,7 +166,7 @@ def test_appends_to_a_5000_message_chat_save_by_delta(tmp_path, monkeypatch) -> 
     for k in range(40):
         conv.messages.append({"role": "assistant", "content": f"reply {k}", "ts": 5000 + k})
         conv.mark_dirty(len(conv.messages) - 1)
-        pc.save_conversation(conv, root, touch_updated=False, wait=True)
+        chat_saves.save_conversation(conv, root, touch_updated=False, wait=True)
     assert len(calls) == 40
     assert all(c["path"] == "delta" and c["dirty_from"] >= 4998 for c in calls), calls[:3]
     ms = sorted(c["ms"] for c in calls)
@@ -178,29 +178,29 @@ def test_appends_to_a_5000_message_chat_save_by_delta(tmp_path, monkeypatch) -> 
 
 def test_reply_streamed_in_place_is_saved_without_marking(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 50)
     calls = _record_saves(monkeypatch)
     conv.messages[-1]["content"] = "streamed further"  # the in-flight reply, after the last user
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["path"] == "delta"
     assert repo.messages_get(conv.id)[-1]["content"] == "streamed further"
 
 
 def test_unmarked_old_edit_waits_for_the_turn_end_full_save(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 50)
     calls = _record_saves(monkeypatch)
     conv.messages[10]["content"] = "edited, never marked"
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["path"] == "delta"
     assert repo.messages_get(conv.id)[10]["content"] == "m10"  # skipped: below the delta
-    pc.save_conversation(conv, root, wait=True, full=True)
+    chat_saves.save_conversation(conv, root, wait=True, full=True)
     assert calls[-1]["dirty_from"] == 0
     assert repo.messages_get(conv.id)[10]["content"] == "edited, never marked"
 
@@ -209,14 +209,14 @@ def test_upsert_checkpoints_count_the_prefix_once(tmp_path, monkeypatch) -> None
     import time
 
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
     from frontend.ui_web import session_files
 
     root = str(tmp_path)
     conv = _big_chat(root, 5000)
     conv.messages.append({"role": "user", "content": "go", "ts": 5000})
     conv.mark_dirty(len(conv.messages) - 1)
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     counted: list[int] = []
     real_stats = session_files.message_stats
     monkeypatch.setattr(session_files, "message_stats", lambda m: counted.append(1) or real_stats(m))
@@ -232,7 +232,7 @@ def test_upsert_checkpoints_count_the_prefix_once(tmp_path, monkeypatch) -> None
 
     def upsert(conv_id, run_id, message, *, updated, stats=None):
         msgs = list(conv.messages)
-        idx = pc._run_row_index(msgs, run_id)
+        idx = chat_saves._run_row_index(msgs, run_id)
         if idx >= 0:
             msgs[idx] = message
         else:
@@ -242,7 +242,7 @@ def test_upsert_checkpoints_count_the_prefix_once(tmp_path, monkeypatch) -> None
 
     monkeypatch.setattr(repo, "upsert_run_message", upsert)
     ms: list[float] = []
-    real_cp = pc._checkpoint_stats
+    real_cp = chat_saves._checkpoint_stats
 
     def timed(*a):
         started = time.perf_counter()
@@ -251,15 +251,15 @@ def test_upsert_checkpoints_count_the_prefix_once(tmp_path, monkeypatch) -> None
         finally:
             ms.append((time.perf_counter() - started) * 1000)
 
-    monkeypatch.setattr(pc, "_checkpoint_stats", timed)
+    monkeypatch.setattr(chat_saves, "_checkpoint_stats", timed)
     blocks: list[dict] = []
     for k in range(50):
         blocks.append({"type": "tool_call", "id": f"live{k}", "name": "workspace_write_file", "status": "success",
                        "arguments": {"path": f"Content/f{k % 45}.verse"}, "result": {}})
         before = len(counted)
-        pc.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {k}", "blocks": list(blocks)},
+        chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": f"step {k}", "blocks": list(blocks)},
                                       run_id="live", project_root=root)
-        pc.flush_chat_saves(conv.id)  # the checkpoint is written (and counted) on the writer
+        chat_saves.flush_chat_saves(conv.id)  # the checkpoint is written (and counted) on the writer
         if k:
             assert len(counted) - before == 1  # only the in-flight row; the prefix once, at k == 0
     assert len(counted) < 5000 + 50 + 5
@@ -271,17 +271,17 @@ def test_upsert_checkpoints_count_the_prefix_once(tmp_path, monkeypatch) -> None
 
 def test_another_writer_turns_the_next_save_into_a_merge(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 20)
-    other = pc.load_conversation(conv.id, root)
+    other = chat_convs.load_conversation(conv.id, root)
     other.messages.append({"role": "user", "content": "from elsewhere", "ts": 99})
     other.mark_dirty(len(other.messages) - 1)
-    pc.save_conversation(other, root, wait=True)
+    chat_saves.save_conversation(other, root, wait=True)
     calls = _record_saves(monkeypatch)
     conv.messages[-1]["content"] = "mine"
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     # Its rev is stale: only its own change is written, and the other writer's row survives.
     assert calls[-1]["path"] == "merge"
     stored = repo.messages_get(conv.id)
@@ -291,25 +291,25 @@ def test_another_writer_turns_the_next_save_into_a_merge(tmp_path, monkeypatch) 
 
 def test_checkpoint_after_a_foreign_write_refreshes_only_the_tail(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 5000)  # ends with an assistant at 4999 after the user at 4998
     pid = repo.conv_project_id(conv.id)
     # Another writer rewrites an old row and adds a steer after the last user message.
-    other = pc.load_conversation(conv.id, root)
+    other = chat_convs.load_conversation(conv.id, root)
     other.messages[7] = {"role": "assistant", "content": "the host's redo", "ts": 7}
     other.messages.append({"role": "assistant", "content": "steer reply", "ts": 5000})
     repo.conv_save(pid, other.to_dict(), messages=other.messages)
     loads: list[str] = []
-    monkeypatch.setattr(pc, "load_conversation", lambda cid, root=None: loads.append(cid))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, root=None: loads.append(cid))
     since: list[int] = []
     real_since = repo.messages_since
     monkeypatch.setattr(repo, "messages_since", lambda cid, seq, **kw: since.append(seq) or real_since(cid, seq, **kw))
     # The writer finds the store moved; the next checkpoint takes their tail first.
     for _ in range(2):
-        pc.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "live"}, run_id="live", project_root=root)
-        pc.flush_chat_saves(conv.id)
+        chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": "live"}, run_id="live", project_root=root)
+        chat_saves.flush_chat_saves(conv.id)
     assert loads == []  # no whole-chat reload
     assert since and min(since) >= 4998  # only the tail was read
     stored = repo.messages_get(conv.id)
@@ -318,32 +318,32 @@ def test_checkpoint_after_a_foreign_write_refreshes_only_the_tail(tmp_path, monk
     assert conv._msg_rev == repo.conv_msg_rev(conv.id)
     # The turn end saves by delta from the copy's last user message.
     calls = _record_saves(monkeypatch)
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["path"] == "delta" and calls[-1]["dirty_from"] >= 4998
     assert repo.messages_get(conv.id)[7]["content"] == "the host's redo"
 
 
 def test_another_writers_rewrite_of_an_old_row_survives_full_saves(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 50)
     assert conv._base_hashes is not None and len(conv._base_hashes) == 50
-    other = pc.load_conversation(conv.id, root)
+    other = chat_convs.load_conversation(conv.id, root)
     other.messages[11] = {"role": "assistant", "content": "rewritten elsewhere", "ts": 11}
     repo.conv_save(repo.conv_project_id(conv.id), other.to_dict(), messages=other.messages)
     calls = _record_saves(monkeypatch)
     for k in range(2):  # the second save builds on the base the first left
         conv.messages.append({"role": "user", "content": f"more {k}", "ts": 50 + k})
         conv.mark_dirty(len(conv.messages) - 1)
-        pc.save_conversation(conv, root, wait=True, full=True)
+        chat_saves.save_conversation(conv, root, wait=True, full=True)
         assert calls[-1]["base_hashes"] is not None and calls[-1]["theirs"] == [11], calls[-1]["path"]
         assert repo.messages_get(conv.id)[11]["content"] == "rewritten elsewhere"
     # This copy edits row 11 itself: its edit wins.
     conv.messages[11] = {"role": "assistant", "content": "mine now", "ts": 11}
     conv.mark_dirty(11)
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["theirs"] == []
     assert repo.messages_get(conv.id)[11]["content"] == "mine now"
     assert repo.messages_get(conv.id) == conv.messages
@@ -351,7 +351,7 @@ def test_another_writers_rewrite_of_an_old_row_survives_full_saves(tmp_path, mon
 
 def test_old_row_edit_saves_that_row_and_the_tail(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 5000)
@@ -365,40 +365,40 @@ def test_old_row_edit_saves_that_row_and_the_tail(tmp_path, monkeypatch) -> None
     encoded = [0]
     real_dumps = repo._dumps
     monkeypatch.setattr(repo, "_dumps", lambda v: encoded.__setitem__(0, encoded[0] + (id(v) in mine)) or real_dumps(v))
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["path"] == "delta" and calls[-1]["dirty_rows"] == [11] and calls[-1]["dirty_from"] == 5000
     assert encoded[0] == 2, encoded[0]  # row 11 and the new row, nothing between
     assert (conv._dirty_rows, conv._dirty_from) == (set(), None)
     assert repo.messages_get(conv.id) == conv.messages
     # The written row's hash is the copy's base now: saving again leaves it alone.
-    pc.save_conversation(conv, root, wait=True, full=True)
+    chat_saves.save_conversation(conv, root, wait=True, full=True)
     assert calls[-1]["theirs"] == [] and repo.messages_get(conv.id)[11]["content"] == "edited"
 
 
 def test_replaced_queued_save_merges_its_rows(tmp_path, monkeypatch) -> None:
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 50)
-    queued = pc._from_queue(conv, with_messages=True)
+    queued = chat_saves._from_queue(conv, with_messages=True)
     queued._dirty_rows, queued._dirty_from = {11}, 49
-    monkeypatch.setattr(pc, "_queued", lambda cid: queued)
+    monkeypatch.setattr(chat_saves, "_queued", lambda cid: queued)
     calls = _record_saves(monkeypatch)
     conv.messages[40] = {"role": "assistant", "content": "edited", "ts": 40}
     conv.mark_dirty(40)
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["dirty_rows"] == [11, 40] and calls[-1]["dirty_from"] == 48
 
 
 def test_reassign_sends_a_whole_save(tmp_path, monkeypatch) -> None:
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 50)
     calls = _record_saves(monkeypatch)
     conv.mark_dirty(11)
     conv.messages = list(conv.messages)
-    pc.save_conversation(conv, root, wait=True)
+    chat_saves.save_conversation(conv, root, wait=True)
     assert calls[-1]["dirty_from"] == 0 and calls[-1]["dirty_rows"] == []
 
 
@@ -414,17 +414,17 @@ def test_reassign_clears_the_base_and_to_dict_never_has_it() -> None:
 
 def test_append_message_refreshes_the_tail_not_the_chat(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     root = str(tmp_path)
     conv = _big_chat(root, 2000)
-    other = pc.load_conversation(conv.id, root)
+    other = chat_convs.load_conversation(conv.id, root)
     other.messages.append({"role": "assistant", "content": "late reply", "ts": 2000})
     other.mark_dirty(len(other.messages) - 1)
-    pc.save_conversation(other, root, wait=True)
+    chat_saves.save_conversation(other, root, wait=True)
     loads: list[str] = []
-    monkeypatch.setattr(pc, "load_conversation", lambda cid, root=None: loads.append(cid))
-    pc.append_message(conv, {"role": "user", "content": "next", "ts": 2001}, root)
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, root=None: loads.append(cid))
+    chat_saves.append_message(conv, {"role": "user", "content": "next", "ts": 2001}, root)
     assert loads == []
     stored = [m["content"] for m in repo.messages_get(conv.id)[-3:]]
     assert stored == ["m1999", "late reply", "next"]

@@ -89,7 +89,7 @@ def test_ducky_usage_report(monkeypatch, tmp_path):
     monkeypatch.setattr(pul, "default_app_data_dir", lambda: tmp_path)
     monkeypatch.setattr(pul, "_conv_lookup", lambda: {})
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.list_all_conversation_metadata",
+        "frontend.ui_web.chats.conversations.list_all_conversation_metadata",
         lambda: [
             SimpleNamespace(
                 id="c1",

@@ -11,8 +11,8 @@ from types import SimpleNamespace
 
 @pytest.fixture(autouse=True)
 def _panel_owner(monkeypatch):
-    from frontend.ui_web import agent_modes
-    monkeypatch.setattr(agent_modes, "_in_bridge_process", lambda: False)
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: False)
 
 from frontend.settings import PanelSettings
 from frontend.ui_web.group_orchestrator import (
@@ -33,16 +33,11 @@ from frontend.ui_web.group_orchestrator import (
     sync_group_members_from_folder,
     wants_all_speakers,
 )
-from frontend.ui_web.project_chats import (
-    append_message,
-    apply_sidebar_layout,
-    create_conversation,
-    create_folder,
-    load_conversation,
-    load_folders,
-    save_conversation,
-    save_folders,
-)
+from frontend.ui_web.agent_turns import state as turn_state
+from frontend.ui_web.agent_turns.testing import patch_turns
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+from frontend.ui_web.chats.folders import apply_sidebar_layout, create_folder, load_folders, save_folders
+from frontend.ui_web.chats.saves import append_message, save_conversation
 
 
 MEMBERS = [
@@ -610,8 +605,8 @@ def test_group_turn_keeps_image_attachment(monkeypatch):
     monkeypatch.setattr(go, "is_group_running", lambda _gid: False)
     monkeypatch.setattr(go, "_persist_group_attachments", lambda *_a, **_k: [{"kind": "image", "name": "shot.png", "path": "attachments/shot.png"}])
     monkeypatch.setattr(go.threading, "Thread", _InlineThread)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda _gid: False)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.run_message_and_wait", fake_run)
+    patch_turns(monkeypatch, "is_agent_running", lambda _gid: False)
+    patch_turns(monkeypatch, "run_message_and_wait", fake_run)
     monkeypatch.setattr("frontend.agent_profiles.list_agent_profiles_available", lambda: [])
     monkeypatch.setattr("backend.agent.chat_title.start_auto_title", lambda *a, **k: None)
 
@@ -641,7 +636,7 @@ def test_group_turn_bad_video_does_not_wedge_the_group(monkeypatch):
     monkeypatch.setattr(go, "append_message", lambda conv, message, project_root=None: conv.messages.append(message))
     monkeypatch.setattr(go, "sync_group_members_from_folder", lambda group, project_root=None: go.group_members(group))
     monkeypatch.setattr(go, "_persist_group_attachments", boom)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda _gid: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda _gid: False)
     vid = {"kind": "video", "name": "a.mp4", "mime": "video/mp4"}
 
     assert run_group_turn("hub", "hi", attachments=[vid], push=events.append) == ""
@@ -664,7 +659,7 @@ def test_hub_persist_does_not_cap_images(monkeypatch, tmp_path):
         "frontend.ui_web.conversation_attachments.persist_message_attachments",
         lambda gid, ts, parsed, d, root: seen.setdefault("n", len(parsed)) and [],
     )
-    monkeypatch.setattr("frontend.ui_web.project_chats.get_conversations_dir", lambda root=None: tmp_path)
+    monkeypatch.setattr("frontend.ui_web.chats.store.get_conversations_dir", lambda root=None: tmp_path)
     png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 16).decode()
     raw = [{"kind": "image", "name": f"{i}.png", "mime": "image/png", "data_base64": png} for i in range(30)]
     go._persist_group_attachments("g1", 1.0, raw)
@@ -810,17 +805,16 @@ def test_a_briefing_never_lands_in_a_chat_mid_turn(monkeypatch):
     {"role": "user", "content": ""},
 ])
 def test_actual_stop_never_pairs_old_user_with_synthetic_reply(monkeypatch, reason, synthetic):
-    from frontend.ui_web import agent_modes as am
     go, posted, briefed = _team(monkeypatch, [
         {"role": "user", "content": "Original real question"},
         {"role": "assistant", "content": "Original answer"},
         synthetic,
         {"role": "assistant", "content": "Synthetic answer"},
     ])
-    monkeypatch.setattr(am, "_alert_finished", lambda *args: None)
-    monkeypatch.setattr(am, "close_changeset_run", lambda *args: None)
+    patch_turns(monkeypatch, "_alert_finished", lambda *args: None)
+    patch_turns(monkeypatch, "close_changeset_run", lambda *args: None)
     events = []
-    am._push_agent_stopped(events.append, "m1", "synthetic", reason)
+    turn_state._push_agent_stopped(events.append, "m1", "synthetic", reason)
     assert events[0]["reason"] == reason
     # Only a finished turn posts, and only its own prompt with its own answer.
     assert all("Original" not in note for note in posted)
@@ -829,17 +823,16 @@ def test_actual_stop_never_pairs_old_user_with_synthetic_reply(monkeypatch, reas
 
 
 def test_actual_done_posts_one_hub_note_without_broadcast_under_concurrency(monkeypatch):
-    from frontend.ui_web import agent_modes as am
     go, posted, briefed = _team(monkeypatch, [
         {"role": "user", "content": "A real new question"},
         {"role": "assistant", "content": "A real answer"},
     ])
-    monkeypatch.setattr(am, "_alert_finished", lambda *args: None)
-    monkeypatch.setattr(am, "close_changeset_run", lambda *args: None)
+    patch_turns(monkeypatch, "_alert_finished", lambda *args: None)
+    patch_turns(monkeypatch, "close_changeset_run", lambda *args: None)
     barrier = threading.Barrier(3)
     def stop():
         barrier.wait(timeout=2)
-        am._push_agent_stopped(lambda e: None, "m1", "real", "done")
+        turn_state._push_agent_stopped(lambda e: None, "m1", "real", "done")
     workers = [threading.Thread(target=stop) for _ in range(2)]
     for worker in workers:
         worker.start()
@@ -862,15 +855,14 @@ def test_new_unanswered_user_turn_prevents_old_reply_rebroadcast(monkeypatch):
 
 
 def test_briefing_load_to_append_race_observes_real_admission(monkeypatch):
-    from frontend.ui_web import agent_modes as am
-    monkeypatch.setattr(am, "_admissions", {}, raising=False)
-    monkeypatch.setattr(am, "_sessions", {})
+    patch_turns(monkeypatch, "_admissions", {})
+    patch_turns(monkeypatch, "_sessions", {})
     go, posted, briefed = _team(monkeypatch, [])
     original = go.load_conversation
     def load(cid, project_root=None):
         conv = original(cid, project_root)
         if cid == "m2":
-            am._reserve_admission(cid)
+            turn_state._reserve_admission(cid)
         return conv
     monkeypatch.setattr(go, "load_conversation", load)
     assert go.broadcast_group_briefing("g1", "Briefing", skip_member_ids={"m1"}) == 1
@@ -904,15 +896,15 @@ def _busy_team(monkeypatch, *, busy: bool, agent: str = "codex"):
     monkeypatch.setattr(go, "_persist_group_attachments", lambda *_a, **_k: [])
     monkeypatch.setattr(go, "_hub_chain", lambda gid, root=None: [(gid, [], [])])
     monkeypatch.setattr(go.threading, "Thread", _InlineThread)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: busy and cid == "m1")
-    monkeypatch.setattr("frontend.ui_web.agent_modes.run_message",
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: busy and cid == "m1")
+    monkeypatch.setattr("frontend.ui_web.agent_turns.routing.run_message",
                         lambda cid, text, mode, model, **kw: calls["queued"].append((cid, text, kw)) or "queued")
 
     def wait(cid, text, **kw):
         calls["waited"].append(kw)
         return {"status": "timeout", "conv_id": cid}
 
-    monkeypatch.setattr("frontend.ui_web.agent_modes.run_message_and_wait", wait)
+    patch_turns(monkeypatch, "run_message_and_wait", wait)
     monkeypatch.setattr("frontend.agent_profiles.list_agent_profiles_available", lambda: [])
     monkeypatch.setattr("backend.agent.chat_title.start_auto_title", lambda *a, **k: None)
     return go, hub, member, calls

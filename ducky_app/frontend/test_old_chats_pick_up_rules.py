@@ -26,7 +26,7 @@ def test_maybe_bust_wipes_on_stale_stamp(monkeypatch):
         calls.append(1)
 
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.invalidate_all_projects_conversation_caches",
+        "frontend.ui_web.chats.conversations.invalidate_all_projects_conversation_caches",
         _wipe,
     )
     assert ship_newest.maybe_bust_conversation_caches_for_app_version() is True
@@ -40,7 +40,7 @@ def test_maybe_bust_skips_same_version(monkeypatch):
     monkeypatch.setattr(ship_newest, "_read_ship_stamp", lambda: {"version": "9.9.9"})
     monkeypatch.setattr("frontend.__version__", "9.9.9")
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.invalidate_all_projects_conversation_caches",
+        "frontend.ui_web.chats.conversations.invalidate_all_projects_conversation_caches",
         lambda: calls.append(1),
     )
     assert ship_newest.maybe_bust_conversation_caches_for_app_version() is False

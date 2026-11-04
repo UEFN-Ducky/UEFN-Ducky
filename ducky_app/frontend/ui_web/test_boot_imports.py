@@ -22,7 +22,7 @@ print("RESULT", int(mcp_loaded), int("backend.server" in sys.modules), f"{elapse
 
 def test_panel_api_import_skips_mcp() -> None:
     """Cold import in a child interpreter: purging sys.modules in-process left
-    later tests holding two copies of agent_modes (monkeypatches missed)."""
+    later tests holding two copies of agent_turns modules (monkeypatches missed)."""
     import os
     import subprocess
 

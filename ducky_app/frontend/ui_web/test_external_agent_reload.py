@@ -153,7 +153,7 @@ def test_live_checkpoint_before_queued_user_message(monkeypatch):
 
 
 def test_live_tool_completion_preserves_call_identity():
-    from frontend.ui_web.agent_modes import _push_tool_done
+    from frontend.ui_web.agent_turns.run import _push_tool_done
     pushed = []
     rec = SimpleNamespace(id="call-42", name="exec_command", arguments={"cmd": "pytest"},
                           status="success", duration_ms=1, result={"ok": True, "data": "passed"})

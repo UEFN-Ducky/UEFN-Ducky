@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import frontend.ui_web.project_chats as pc
+import frontend.ui_web.chats.conversations as chat_convs
+import frontend.ui_web.chats.saves as chat_saves
 from backend.skills import discovery, manifest, revision, selection, skill_index
 from backend.skills.layout import PACK_FILE, REFERENCES_DIR
 from frontend.chat_store import Conversation
@@ -85,12 +86,12 @@ def _conv(snapshot: str, rev: str) -> Conversation:
 
 def test_stale_chat_is_rebuilt_and_restamped(tmp_path, monkeypatch):
     saved: list[Conversation] = []
-    monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: saved.append(c))
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, r=None, **k: saved.append(c))
     monkeypatch.setattr(skill_index, "build_skill_prompt", lambda sel: "NEW INDEX with cameras")
     _pin_revision(monkeypatch, "rev2")
 
     conv = _conv("OLD INDEX", "rev1")
-    assert pc.sync_skill_snapshot(conv, _Settings()) is True
+    assert chat_convs.sync_skill_snapshot(conv, _Settings()) is True
     assert conv.skill_snapshot == "NEW INDEX with cameras"
     assert conv.skill_snapshot_rev == "rev2"
     assert conv.prompt_cache_snapshot is None, "prompt cache should be invalidated"
@@ -99,12 +100,12 @@ def test_stale_chat_is_rebuilt_and_restamped(tmp_path, monkeypatch):
 
 def test_current_chat_is_left_alone(tmp_path, monkeypatch):
     saved: list[Conversation] = []
-    monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: saved.append(c))
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, r=None, **k: saved.append(c))
     monkeypatch.setattr(skill_index, "build_skill_prompt", lambda sel: pytest_fail())
     _pin_revision(monkeypatch, "rev1")
 
     conv = _conv("INDEX", "rev1")
-    assert pc.sync_skill_snapshot(conv, _Settings()) is False
+    assert chat_convs.sync_skill_snapshot(conv, _Settings()) is False
     assert not saved, "rewrote a conversation whose skills had not changed"
 
 
@@ -114,19 +115,19 @@ def pytest_fail():  # pragma: no cover - only reached on regression
 
 def test_body_only_change_restamps_without_busting_the_cache(tmp_path, monkeypatch):
     """A fixed subskill body moves the revision but not the index."""
-    monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: None)
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, r=None, **k: None)
     monkeypatch.setattr(skill_index, "build_skill_prompt", lambda sel: "SAME INDEX")
     _pin_revision(monkeypatch, "rev2")
 
     conv = _conv("SAME INDEX", "rev1")
     conv.prompt_cache_snapshot = {"blocks": {"skill": "x"}}
-    assert pc.sync_skill_snapshot(conv, _Settings()) is False
+    assert chat_convs.sync_skill_snapshot(conv, _Settings()) is False
     assert conv.skill_snapshot_rev == "rev2", "must restamp or it rebuilds every send"
     assert conv.prompt_cache_snapshot is not None, "needless cache miss on a body-only fix"
 
 
 def test_per_chat_selection_survives_the_refresh(tmp_path, monkeypatch):
-    monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: None)
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, r=None, **k: None)
     _pin_revision(monkeypatch, "rev2")
     # Pin the pack list: normalize_disabled_packs drops ids not installed on this machine.
     for module in (discovery, manifest, revision, selection):
@@ -141,22 +142,22 @@ def test_per_chat_selection_survives_the_refresh(tmp_path, monkeypatch):
 
     conv = _conv("OLD", "rev1")
     conv.disabled_packs = ["blender"]
-    pc.sync_skill_snapshot(conv, _Settings())
+    chat_convs.sync_skill_snapshot(conv, _Settings())
     assert seen["disabled"] == ["blender"], "per-chat pack selection was lost"
 
 
 def test_chat_without_a_snapshot_is_untouched(tmp_path, monkeypatch):
-    monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: None)
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, r=None, **k: None)
     _pin_revision(monkeypatch, "rev2")
     conv = _conv("", "")
-    assert pc.sync_skill_snapshot(conv, _Settings()) is False
+    assert chat_convs.sync_skill_snapshot(conv, _Settings()) is False
 
 
 def test_blank_rebuild_never_wipes_a_working_snapshot(tmp_path, monkeypatch):
-    monkeypatch.setattr(pc, "save_conversation", lambda c, r=None, **k: None)
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, r=None, **k: None)
     monkeypatch.setattr(skill_index, "build_skill_prompt", lambda sel: "   ")
     _pin_revision(monkeypatch, "rev2")
     conv = _conv("GOOD INDEX", "rev1")
-    assert pc.sync_skill_snapshot(conv, _Settings()) is False
+    assert chat_convs.sync_skill_snapshot(conv, _Settings()) is False
     assert conv.skill_snapshot == "GOOD INDEX"
 

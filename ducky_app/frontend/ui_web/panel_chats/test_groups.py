@@ -35,16 +35,18 @@ def test_a_member_counts_where_it_is_filed(monkeypatch):
 
 def test_group_stop_cancels_the_members_but_not_the_lead(monkeypatch) -> None:
     """Stop team stops the members, never the team's lead."""
-    from frontend.ui_web import agent_modes, group_orchestrator, project_chats
+    from frontend.ui_web import group_orchestrator
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import conversations as chat_convs
 
     team = SimpleNamespace(id="team", is_group=True, leader_conv_id="lead")
     rows = [{"member_conv_id": "lead"}, {"member_conv_id": "a"}, {"member_conv_id": "b"}]
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, **kw: team if cid == "team" else None)
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, **kw: team if cid == "team" else None)
     monkeypatch.setattr(group_orchestrator, "is_group_conversation", lambda conv: conv.is_group)
     monkeypatch.setattr(group_orchestrator, "group_and_nested_ids", lambda gid: [gid])
     monkeypatch.setattr(group_orchestrator, "group_members", lambda conv: rows)
     monkeypatch.setattr(group_orchestrator, "cancel_group_run", lambda gid: None)
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     api = PanelApiChatsMixin()
     cancelled: list[str] = []
     api.cancel_agent = cancelled.append

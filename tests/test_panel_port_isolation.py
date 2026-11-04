@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_all_panel_clients_use_the_isolated_port(monkeypatch):
     from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns import push as agent_push
     from backend.panel import rpc
     from backend.agent import a2a_client
 
@@ -31,18 +31,18 @@ def test_all_panel_clients_use_the_isolated_port(monkeypatch):
         calls.append(request.full_url)
         return io.BytesIO(b'{"ok":true,"result":{"ok":true,"value":{}}}')
 
-    monkeypatch.setattr(agent_modes._urlreq, "urlopen", capture)
-    monkeypatch.setattr(agent_modes, "_panel_push", None)
+    monkeypatch.setattr(agent_push._urlreq, "urlopen", capture)
+    monkeypatch.setattr(agent_push, "_panel_push", None)
     events = queue.Queue()
-    monkeypatch.setattr(agent_modes, "_forward_queue", events)
-    monkeypatch.setattr(agent_modes, "_ensure_forwarder", lambda: None)
-    agent_modes._forward_to_panel({"type": "workflow_run", "name": "guard"})
+    monkeypatch.setattr(agent_push, "_forward_queue", events)
+    monkeypatch.setattr(agent_push, "_ensure_forwarder", lambda: None)
+    agent_push._forward_to_panel({"type": "workflow_run", "name": "guard"})
     # Stop the infinite sender after it has posted exactly one queued batch.
     get = events.get
     monkeypatch.setattr(events, "get", lambda block=True, timeout=None: get(block=False))
     with pytest.raises(queue.Empty):
-        agent_modes._forward_sender()
-    agent_modes._post_panel_run({"conv_id": "guard"}, http_timeout=0.1)
+        agent_push._forward_sender()
+    agent_push._post_panel_run({"conv_id": "guard"}, http_timeout=0.1)
     rpc.panel_rpc("guard", timeout=0.1)
     a2a_client.send(sender="guard", to="fake", message="guard", expect_reply=False)
     base = f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}"

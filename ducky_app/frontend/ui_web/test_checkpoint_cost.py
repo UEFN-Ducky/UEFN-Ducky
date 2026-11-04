@@ -7,13 +7,8 @@ import time
 
 from backend.store.repos import chats as repo
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import (
-    create_conversation,
-    flush_chat_saves,
-    load_conversation,
-    save_conversation,
-    upsert_in_flight_assistant,
-)
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+from frontend.ui_web.chats.saves import flush_chat_saves, save_conversation, upsert_in_flight_assistant
 
 
 def _chat(root: str, n: int):

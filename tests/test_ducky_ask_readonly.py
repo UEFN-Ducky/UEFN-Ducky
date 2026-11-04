@@ -6,7 +6,8 @@ import pytest
 
 from backend.agent import runner, run_context, tools
 from backend.agent.providers.base import StreamEvent as E, StreamEventKind as K, ToolCallRequest as Call
-from frontend.ui_web import agent_modes as am
+from frontend.ui_web.agent_turns import routing, state
+from frontend.ui_web.agent_turns.testing import patch_turns
 from test_ducky_mode_dispatch import dispatch, QUALIFIED_CALLS, ASK_REFUSAL, qualified_call  # noqa: F401  (dispatch: fixture)
 
 
@@ -17,7 +18,7 @@ def tool(name, annotations=None):
 @pytest.fixture
 def public(monkeypatch, tmp_path, unrestricted_tools):
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs
     from backend.uefn_plugins import host
     from backend.skills import seeding, skill_index
     from backend.mcp_plugins import store as mcp_store
@@ -26,21 +27,21 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     settings.uefn_project_root = str(tmp_path)
     settings.memory_auto_compress = False
     monkeypatch.setattr(PanelSettings, "load", lambda **kw: settings)
-    conv = pc.create_conversation(settings, "test-model", project_root=str(tmp_path))
+    conv = chat_convs.create_conversation(settings, "test-model", project_root=str(tmp_path))
     conv.coding_agent = "ducky"
     conv.provider = "anthropic"
     conv.title = conv.ducky_name = "New ducky1"
-    monkeypatch.setattr(am, "load_conversation", lambda _: conv)
-    monkeypatch.setattr(pc, "load_conversation", lambda *a, **kw: conv)
-    monkeypatch.setattr(am, "is_agent_running", lambda _: False)
-    monkeypatch.setattr(am, "_note_run_starter", lambda *a: None)
-    monkeypatch.setattr(am, "_make_broker_tap", lambda push, _: push)
-    monkeypatch.setattr(am, "_backfill_video_frames", lambda *a: None)
-    monkeypatch.setattr(am, "get_active_conv_id", lambda: None)
-    monkeypatch.setattr(am, "apply_workspace_env", lambda *_: None)
-    monkeypatch.setattr(am, "close_changeset_run", lambda *a, **kw: None)
-    monkeypatch.setattr(am, "_push_token_usage", lambda *a, **kw: None)
-    monkeypatch.setattr(am, "_log_agent_crash", lambda *a, **kw: None)
+    patch_turns(monkeypatch, "load_conversation", lambda _: conv)
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda *a, **kw: conv)
+    patch_turns(monkeypatch, "is_agent_running", lambda _: False)
+    patch_turns(monkeypatch, "_note_run_starter", lambda *a: None)
+    patch_turns(monkeypatch, "_make_broker_tap", lambda push, _: push)
+    patch_turns(monkeypatch, "_backfill_video_frames", lambda *a: None)
+    patch_turns(monkeypatch, "get_active_conv_id", lambda: None)
+    patch_turns(monkeypatch, "apply_workspace_env", lambda *_: None)
+    patch_turns(monkeypatch, "close_changeset_run", lambda *a, **kw: None)
+    patch_turns(monkeypatch, "_push_token_usage", lambda *a, **kw: None)
+    patch_turns(monkeypatch, "_log_agent_crash", lambda *a, **kw: None)
     monkeypatch.setattr(host, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr(host, "ensure_plugins_loaded", lambda: None)
     monkeypatch.setattr(seeding, "seed_skill_packs", lambda: None)
@@ -51,8 +52,8 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     monkeypatch.setattr(status, "fetch_listener_status", lambda *a, **kw: {"online": False})
     monkeypatch.setattr(runner, "get_system_prompt_parts", lambda **kw: {"mode_suffix": kw["mode_suffix"]})
     monkeypatch.setattr("backend.agent.prompt.get_system_prompt_parts", lambda **kw: {"mode_suffix": kw["mode_suffix"]})
-    session = am.AgentSession()
-    monkeypatch.setattr(am, "_session", lambda _: session)
+    session = state.AgentSession()
+    patch_turns(monkeypatch, "_session", lambda _: session)
     monkeypatch.setattr(session, "start", lambda target, _: target())
     catalog = [tool(n) for n in ("workspace_read_file", "web_search", "ducky_get_tools", "ducky_call_tool", "workspace_write_file", "ducky_create_plan", "ducky_rename_self")]
     seen, executed, events, thread_modes = [], [], [], []
@@ -88,12 +89,11 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
                     yield E(kind=K.TEXT_DELTA, text="Evidence answer")
                     yield E(kind=K.DONE, stop_reason="end_turn", usage={"input_tokens": 3, "output_tokens": 2})
         monkeypatch.setattr(runner, "make_provider", lambda *a, **kw: Provider())
-        monkeypatch.setattr(am, "make_provider", lambda *a, **kw: Provider(), raising=False)
         def push(event):
             events.append(event)
             if failure == "cancel" and event["type"] == "text_delta":
                 session._cancel.set()
-        rid = am.run_message(conv.id, "Inspect evidence", mode, "test-model", push=push, resume=resume, attachments=attachments, _local=True)
+        rid = routing.run_message(conv.id, "Inspect evidence", mode, "test-model", push=push, resume=resume, attachments=attachments, _local=True)
         assert rid, events
         if not failure:
             assert not [e for e in events if e["type"] == "error"], str(events)
@@ -261,7 +261,7 @@ def test_claude_ask_reads_through_the_shared_tool_server(monkeypatch, mode):
     server = Server(["ducky_permission_prompt", "ducky_get_plan", "ducky_list_plans", "workspace_search",
                      "workspace_write_file", "ducky_terminal_run", "execute_python"])
     conv = NS(messages=[{"role": "assistant", "run_id": "run", "requested_mode": mode}])
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid: conv)
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid: conv)
     ident = shared_mcp.identity_from_payload({"conv_id": "b47c8c50-efa4-4371-a191-f80e323a4a9f", "run_id": "run",
                                               "coding_agent": "claude_code"})
     reads = [("ducky_get_plan", {"chat_id": "b47c8c50-efa4-4371-a191-f80e323a4a9f"}), ("ducky_list_plans", {}),

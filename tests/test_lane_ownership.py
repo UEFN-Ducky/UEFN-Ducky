@@ -20,7 +20,8 @@ def test_canonical_resource_cannot_have_two_lane_owners(alias):
 @pytest.fixture
 def roster(tmp_path, monkeypatch):
     from frontend.chat_store import Conversation
-    from frontend.ui_web import project_chats, panel_api
+    from frontend.ui_web import panel_api
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
     cid = uuid.uuid4().hex
     project = tmp_path / "project"
@@ -29,10 +30,10 @@ def roster(tmp_path, monkeypatch):
                         group_members=[{"member_conv_id": "a", "write_allowed": []},
                                        {"member_conv_id": "b", "write_allowed": []}])
     def load(key):
-        return project_chats.load_conversation(key, str(project))
+        return chat_convs.load_conversation(key, str(project))
 
     def save(row):
-        return project_chats.save_conversation(row, str(project))
+        return chat_saves.save_conversation(row, str(project))
 
     save(conv)
     monkeypatch.setattr(panel_api, "load_conversation", load)

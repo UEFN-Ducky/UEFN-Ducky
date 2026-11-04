@@ -181,21 +181,22 @@ def test_delete_project_rows_and_project_listing(tmp_path: Path) -> None:
     _appdata()
     from frontend.appdata_maintenance import appdata_projects, delete_project_appdata
     from frontend.settings import PanelSettings
-    from frontend.ui_web import project_chats as pc
+    from frontend.ui_web.chats import conversations as chat_convs, folders as chat_folders
+    from frontend.ui_web.chats import saves as chat_saves, store as chat_store
 
     project = str(tmp_path / "Island")
     Path(project).mkdir()
     s = PanelSettings.load()
     s.uefn_project_root = project
     s.save()
-    conv = pc.create_conversation(title="t", project_root=project, skill_snapshot="x")
-    pc.append_message(conv, {"role": "user", "content": "hi", "text": "hi", "ts": time.time()}, project)
-    slug = pc.project_slug(project)
-    pc.move_chats_to_project([conv.id], [], slug, "")  # an older Ducky kept chats per project
+    conv = chat_convs.create_conversation(title="t", project_root=project, skill_snapshot="x")
+    chat_saves.append_message(conv, {"role": "user", "content": "hi", "text": "hi", "ts": time.time()}, project)
+    slug = chat_store.project_slug(project)
+    chat_folders.move_chats_to_project([conv.id], [], slug, "")  # an older Ducky kept chats per project
     listing = appdata_projects()
     mine = next(p for p in listing["projects"] if p["slug"] == slug)
     assert mine["rows"]["conversations"] == 1 and mine["rows"]["messages"] == 1
     removed = store_admin.delete_project_rows(slug)
     assert removed["conversations"] == 1 and removed["messages"] == 1
-    assert pc.load_conversation(conv.id, project) is None
+    assert chat_convs.load_conversation(conv.id, project) is None
     assert delete_project_appdata("never-existed") == 0

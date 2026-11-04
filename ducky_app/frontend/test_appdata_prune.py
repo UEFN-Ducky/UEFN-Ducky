@@ -26,7 +26,7 @@ def test_prune_empty_known_project_stub(tmp_path: Path, monkeypatch) -> None:
         lambda: type("S", (), {"uefn_project_root": str(tmp_path / "Island")})(),
     )
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.project_slug",
+        "frontend.ui_web.chats.store.project_slug",
         lambda _path: "Island_abcd",
     )
     assert prune_empty_project_dirs(root) >= 1

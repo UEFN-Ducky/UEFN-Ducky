@@ -434,7 +434,7 @@ def _push_batch(push: PushFn, conv_id: str, batch: EditorBatch) -> None:
 
 
 def emit_editor_events(push: PushFn, conv_id: str, rec: Any) -> None:
-    """Called from agent_modes after tool_done — must never raise."""
+    """Called from agent_turns.run after tool_done — must never raise."""
     try:
         name = getattr(rec, "name", "") or ""
         args = dict(getattr(rec, "arguments", None) or {})

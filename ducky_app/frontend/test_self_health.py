@@ -205,8 +205,9 @@ def test_a_look_reads_the_process_table_not_each_process(monkeypatch):
 
 def test_tools_ask_the_window_from_an_agents_tool_server(monkeypatch):
     from backend.tools.core import self_care_tools
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
-    monkeypatch.setattr("frontend.ui_web.agent_modes._in_bridge_process", lambda: False)
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: False)
     monkeypatch.setattr(self_health, "snapshot", lambda detail=False: {"ok": True, "detail": detail})
     assert json.loads(self_care_tools.ducky_health(detail=True)) == {"ok": True, "detail": True}
     monkeypatch.setattr(self_health, "self_care", lambda action, target="": {"ok": True, "action": action})

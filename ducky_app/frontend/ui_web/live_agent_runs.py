@@ -1,6 +1,6 @@
 """Live changeset run ids without importing the agent stack.
 
-``list_changesets`` runs on the pywebview UI thread. Importing ``agent_modes``
+``list_changesets`` runs on the pywebview UI thread. Importing ``agent_turns``
 there stalls the panel. This module is a few lines so orphan-close can stay
 synchronous and still skip runs whose agent thread is alive.
 """

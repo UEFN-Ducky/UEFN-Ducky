@@ -31,7 +31,7 @@ def _close_orphans(journal: FileChangeJournal, root: str) -> list[str]:
     """Close dead 'running' rows before the list is returned; the chats it healed.
 
     Live ids come from ``live_agent_runs`` so this stays cheap on the UI thread
-    (importing ``agent_modes`` here used to stall the panel).
+    (importing ``agent_turns`` here used to stall the panel).
     """
     from frontend.ui_web.live_agent_runs import get_live_run_ids
     from frontend.ui_web.chats.saves import heal_killed_coding_turn

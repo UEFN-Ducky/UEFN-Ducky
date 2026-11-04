@@ -7,6 +7,7 @@ import pytest
 from types import SimpleNamespace
 
 import frontend.ui_web.panel_api as pa
+from frontend.ui_web.agent_turns.testing import patch_turns
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 
 _PROFILE = {"id": "verse-coder", "name": "Verse Coder", "ducky_style": "classic"}
@@ -40,8 +41,8 @@ def test_same_name_group_is_reused_after_the_caller_moved(monkeypatch):
     hub = SimpleNamespace(
         id="hub", title="Deploy core to Fly", is_group=True, leader_conv_id="", group_members=[], folder_id="f1"
     )
-    monkeypatch.setattr("frontend.ui_web.project_chats.folder_project_slug", lambda fid: "")
-    monkeypatch.setattr("frontend.ui_web.project_chats.conversation_project_slug", lambda cid: "")
+    monkeypatch.setattr("frontend.ui_web.chats.folders.folder_project_slug", lambda fid: "")
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.conversation_project_slug", lambda cid: "")
     monkeypatch.setattr(pa, "load_folders", lambda *a, **k: folders)
     monkeypatch.setattr(pa, "load_conversation", lambda cid, *a, **k: hub if cid == "hub" else None)
     api = _api()
@@ -62,7 +63,7 @@ def test_idle_member_is_reused(monkeypatch):
     group = SimpleNamespace(id="hub", is_group=True, leader_conv_id="m1", group_members=[member], folder_id="f1")
     monkeypatch.setattr("frontend.agent_profiles.get_agent_profile", lambda pid: _PROFILE)
     monkeypatch.setattr(pa, "load_conversation", lambda cid, *a, **k: group if cid == "hub" else SimpleNamespace(id=cid))
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
     api = _api()
     api.group_invite = lambda *a, **k: (_ for _ in ()).throw(AssertionError("invited a duplicate"))  # type: ignore[method-assign]
 
@@ -82,13 +83,13 @@ def test_a_just_finished_member_is_reused_once_its_thread_ends(monkeypatch):
     busy = {"on": True}
     monkeypatch.setattr("frontend.agent_profiles.get_agent_profile", lambda pid: _PROFILE)
     monkeypatch.setattr(pa, "load_conversation", lambda cid, *a, **k: group if cid == "hub" else SimpleNamespace(id=cid))
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: busy["on"])
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: busy["on"])
 
     def settle(cid, timeout=0):
         busy["on"] = False
         return True
 
-    monkeypatch.setattr("frontend.ui_web.agent_modes.wait_for_idle", settle)
+    patch_turns(monkeypatch, "wait_for_idle", settle)
     api = _api()
     api.group_invite = lambda *a, **k: (_ for _ in ()).throw(AssertionError("invited a duplicate"))  # type: ignore[method-assign]
 
@@ -108,8 +109,8 @@ def test_busy_member_or_caller_gets_a_numbered_copy(monkeypatch, busy, excluded)
     group = SimpleNamespace(id="hub", is_group=True, leader_conv_id="m1", group_members=[member], folder_id="f1")
     monkeypatch.setattr("frontend.agent_profiles.get_agent_profile", lambda pid: _PROFILE)
     monkeypatch.setattr(pa, "load_conversation", lambda cid, *a, **k: group if cid == "hub" else SimpleNamespace(id=cid))
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: busy)
-    monkeypatch.setattr("frontend.ui_web.agent_modes.wait_for_idle", lambda *a: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: busy)
+    patch_turns(monkeypatch, "wait_for_idle", lambda *a: False)
     seated: dict[str, str] = {}
 
     def invite(group_id, profile_id, model="", write_allowed=None, name="", for_agent=False):
@@ -159,7 +160,7 @@ def _seat_env(monkeypatch, members):
     group = SimpleNamespace(id="hub", is_group=True, leader_conv_id="m1", group_members=members, folder_id="f1")
     monkeypatch.setattr("frontend.agent_profiles.get_agent_profile", lambda pid: _PROFILE)
     monkeypatch.setattr(pa, "load_conversation", lambda cid, *a, **k: group if cid == "hub" else SimpleNamespace(id=cid))
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
     return group
 
 
@@ -242,7 +243,7 @@ def test_spawn_from_a_group_member_joins_that_group(monkeypatch):
 
     monkeypatch.setattr(ducky_panel, "_panel_api", lambda: Api())
     monkeypatch.setattr(
-        "frontend.ui_web.agent_modes.run_message_and_wait",
+        "frontend.ui_web.agent_turns.routing.run_message_and_wait",
         lambda *a, **k: {"status": "done", "assistant_text": "ok"},
     )
 

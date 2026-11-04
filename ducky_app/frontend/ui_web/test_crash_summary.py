@@ -1,4 +1,6 @@
-from frontend.ui_web import agent_modes as am
+import threading
+
+from frontend.ui_web.agent_turns import errors as am
 
 
 def test_crashed_turn_with_writes_names_the_files():
@@ -33,7 +35,7 @@ def test_transient_crash_auto_resumes_once(monkeypatch):
         def start(self):
             pass
 
-    monkeypatch.setattr(am.threading, "Timer", T)
+    monkeypatch.setattr(threading, "Timer", T)
     monkeypatch.setattr(am, "_auto_resumed_at", {})
     assert am._is_transient("Ducky AI is busy right now") and not am._is_transient("bad key")
     assert am._schedule_auto_resume("c1", "busy", "agent") is True

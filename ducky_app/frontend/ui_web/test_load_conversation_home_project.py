@@ -7,17 +7,11 @@ import tempfile
 from pathlib import Path
 
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import (
-    ONE_LIST_SLUG,
-    _use_db,
-    adopt_group_project,
-    conversation_path,
-    create_conversation,
-    load_conversation,
-    move_chats_to_project,
-    project_slug,
-    save_conversation,
-)
+from frontend.ui_web.chats.conversations import conversation_path, create_conversation, load_conversation
+from frontend.ui_web.chats.folders import move_chats_to_project
+from frontend.ui_web.chats.groups import adopt_group_project
+from frontend.ui_web.chats.saves import save_conversation
+from frontend.ui_web.chats.store import ONE_LIST_SLUG, _use_db, project_slug
 
 
 def test_load_and_save_keep_the_chat_in_the_one_list():
@@ -40,7 +34,7 @@ def test_load_and_save_keep_the_chat_in_the_one_list():
         assert home_again is not None
         assert home_again.title == "Still away"
         if _use_db():
-            from frontend.ui_web.project_chats import _repo
+            from frontend.ui_web.chats.store import _repo
 
             assert _repo().conv_project_id(conv.id) == ONE_LIST_SLUG
         else:
@@ -60,7 +54,7 @@ def test_adopt_group_project_moves_member_onto_the_group_island():
         move_chats_to_project([group.id], [], project_slug(home), "")  # an older Ducky's group
         member = create_conversation(PanelSettings.load(), "", title="Coder")
         adopt_group_project(member, group.id)
-        from frontend.ui_web.project_chats import _repo
+        from frontend.ui_web.chats.store import _repo
 
         assert _repo().conv_project_id(member.id) == project_slug(home)
 
@@ -69,7 +63,8 @@ def test_sync_rehomes_a_member_invited_from_another_island():
     if not _use_db():
         return
     from frontend.ui_web.group_orchestrator import sync_group_members_from_folder
-    from frontend.ui_web.project_chats import _repo, create_folder, load_folders, save_folders
+    from frontend.ui_web.chats.folders import create_folder, load_folders, save_folders
+    from frontend.ui_web.chats.store import _repo
 
     with tempfile.TemporaryDirectory() as tmp:
         home = str(Path(tmp) / "HomeIsland")

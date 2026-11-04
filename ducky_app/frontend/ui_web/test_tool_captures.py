@@ -66,7 +66,7 @@ def test_save_capture_for_agents_writes_the_chat_folder_only(tmp_path, monkeypat
         staticmethod(lambda: _Settings()),
     )
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats._chats_root",
+        "frontend.ui_web.chats.store._chats_root",
         lambda: tmp_path / "chats" / "projects",
     )
     token = bind(RunContext(conv_id="chat-1"))

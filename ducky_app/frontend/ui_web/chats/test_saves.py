@@ -56,21 +56,3 @@ def test_a_killed_turn_gets_one_interrupted_reply(tmp_path) -> None:
     assert fresh.messages[-1]["error"] == saves.KILLED_TURN_ERROR
     assert fresh.messages[-1]["run_id"] == "run-1"
     assert saves.heal_killed_coding_turn(conv.id, "run-1", project_root=root) is False
-
-
-def test_a_patch_on_the_old_path_reaches_callers_inside_the_package(monkeypatch, tmp_path) -> None:
-    from frontend.ui_web import project_chats
-
-    root = str(tmp_path)
-    conv = create_conversation(PanelSettings.load(), "", title="Patched", project_root=root)
-    rows: list[str] = []
-    real = saves._save_conversation_rows
-    monkeypatch.setattr(project_chats, "_save_conversation_rows", lambda c, *a: rows.append(c.id) or real(c, *a))
-    assert saves._save_conversation_rows is not real
-    conv.title = "Patched again"
-    saves.save_conversation(conv, root, wait=True)
-    assert rows == [conv.id]
-    monkeypatch.undo()
-    assert saves._save_conversation_rows is real
-    assert project_chats.save_conversation is saves.save_conversation
-    assert project_chats._WRITER is saves._WRITER

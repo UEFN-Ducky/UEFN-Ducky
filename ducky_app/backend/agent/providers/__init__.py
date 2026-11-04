@@ -81,7 +81,7 @@ _RETRY_STATUS = "Working…"
 _RETRY_AFTER_RE = re.compile(r"retry(?:_after|[ -]after| in)\D{0,4}(\d+)", re.IGNORECASE)
 _RETRY_DELAYS: tuple[float, ...] = (2.0, 5.0, 12.0)
 # The person's Ducky AI plan limit ("You've used your Ducky AI for now. It's back in 4 h."):
-# never retried here; the chat hands the turn to Claude Code (agent_modes).
+# never retried here; the chat hands the turn to Claude Code (agent_turns.errors).
 _PLAN_LIMIT_RE = re.compile(r"used your Ducky AI", re.IGNORECASE)
 
 

@@ -67,12 +67,12 @@ def test_default_falls_back_to_600k_when_the_window_is_unknown(settings, window)
 
 
 def test_the_chats_limit_is_kept_on_the_chat(monkeypatch):
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     conv = Conversation(id="c")
     saved = []
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: conv)
-    monkeypatch.setattr(project_chats, "save_conversation", lambda c, root=None: saved.append(c.id))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: conv)
+    monkeypatch.setattr(chat_saves, "save_conversation", lambda c, root=None: saved.append(c.id))
     assert cl.set_chat_limit("c", "250k") == 250_000
     assert saved == ["c"]
     assert Conversation.from_dict(conv.to_dict()).context_limit_tokens == 250_000
@@ -93,7 +93,9 @@ def test_tool_argument_is_stored_only_when_given(monkeypatch):
 def chat(monkeypatch, settings, window):
     """A member chat and every call the fresh start makes, in order."""
     from backend.store.repos import kv
-    from frontend.ui_web import agent_modes, context_control, project_chats
+    from frontend.ui_web import context_control
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     docs: dict = {}
     monkeypatch.setattr(kv, "set_doc", lambda table, key, value: docs.__setitem__((table, key), value))
@@ -103,8 +105,8 @@ def chat(monkeypatch, settings, window):
     calls: list[tuple] = []
     world = SimpleNamespace(conv=conv, calls=calls, handoff={"status": "done", "assistant_text": "Built A; next B."},
                             used=612_000, reset_fails=False)
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid, project_root=None: conv if cid == "m1" else None)
-    monkeypatch.setattr(project_chats, "append_message",
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, project_root=None: conv if cid == "m1" else None)
+    monkeypatch.setattr(chat_saves, "append_message",
                         lambda c, msg, project_root=None: calls.append(("line", msg["content"])))
     monkeypatch.setattr(cl, "used_tokens", lambda c: world.used)
 
@@ -117,9 +119,9 @@ def chat(monkeypatch, settings, window):
             raise ValueError("agent is working")
         calls.append(("reset", tuple(segments)))
 
-    monkeypatch.setattr(agent_modes, "run_message_and_wait", wait)
-    monkeypatch.setattr(agent_modes, "run_message", lambda cid, text, mode, model, **kw: calls.append(("run", text)))
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "run_message_and_wait", wait)
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: calls.append(("run", text)))
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
     monkeypatch.setattr(context_control, "reset_context", reset)
     return world
 

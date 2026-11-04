@@ -8,7 +8,8 @@ from pathlib import Path
 import frontend.ui_web.panel_api  # noqa: F401 - mixins import the package root first
 from backend.store.repos import chats as repo
 from frontend.settings import PanelSettings
-from frontend.ui_web import project_chats as pc
+from frontend.ui_web.chats import conversations as chat_convs
+from frontend.ui_web.chats import saves as chat_saves
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 
 
@@ -36,10 +37,10 @@ def test_first_page_of_a_600_message_chat_opens_only_its_tail(tmp_path: Path, mo
     s = PanelSettings.load()
     s.uefn_project_root = project
     s.save()
-    conv = pc.create_conversation(title="Big", project_root=project, skill_snapshot="x")
-    conv = pc.load_conversation(conv.id, project)
+    conv = chat_convs.create_conversation(title="Big", project_root=project, skill_snapshot="x")
+    conv = chat_convs.load_conversation(conv.id, project)
     conv.messages = _transcript(600)
-    pc.save_conversation(conv, project, wait=True)
+    chat_saves.save_conversation(conv, project, wait=True)
     api = PanelApiChatsMixin()
     whole = api.load_messages(conv.id)
 

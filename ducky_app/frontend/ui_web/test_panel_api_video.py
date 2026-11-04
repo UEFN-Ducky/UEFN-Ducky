@@ -32,7 +32,7 @@ def test_stage_gemini_conv_skips_ffmpeg(monkeypatch):
     from types import SimpleNamespace
 
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.load_conversation",
+        "frontend.ui_web.chats.conversations.load_conversation",
         lambda cid, project_root=None: SimpleNamespace(is_group=False, coding_agent="ducky", provider="gemini"),
     )
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.start_install", lambda: (_ for _ in ()).throw(AssertionError))
@@ -64,7 +64,7 @@ def test_auto_limits_follow_the_conversation(monkeypatch):
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.status", lambda: {"state": "missing"})
     monkeypatch.setattr("backend.agent.model_fetch.get_model_info", lambda p, m: None)
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.load_conversation",
+        "frontend.ui_web.chats.conversations.load_conversation",
         lambda cid, project_root=None: SimpleNamespace(is_group=False, provider="anthropic", model="claude-x"),
     )
     api = PanelApi()
@@ -86,7 +86,7 @@ def test_file_limit_follows_the_picked_model(monkeypatch):
     monkeypatch.setattr("backend.agent.model_fetch.get_model_info", info)
     monkeypatch.setattr("backend.agent.model_capabilities.get_model_info", info)
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.load_conversation",
+        "frontend.ui_web.chats.conversations.load_conversation",
         lambda cid, project_root=None: SimpleNamespace(is_group=False, provider="anthropic", model="claude-x"),
     )
     api = PanelApi()
@@ -118,7 +118,7 @@ def test_stage_prep_uses_model_frames(monkeypatch):
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.start_install", lambda: {"state": "ready"})
     monkeypatch.setattr("backend.agent.model_fetch.get_model_info", lambda p, m: None)
     monkeypatch.setattr(
-        "frontend.ui_web.project_chats.load_conversation",
+        "frontend.ui_web.chats.conversations.load_conversation",
         lambda cid, project_root=None: SimpleNamespace(
             is_group=False, coding_agent="ducky", provider="mistral", model="m"
         ),

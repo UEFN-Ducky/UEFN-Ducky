@@ -8,7 +8,8 @@ from backend.workspace import identity, runtime
 from backend.workspace.identity import RunContext
 from backend.workspace.journal import FileChangeJournal
 from backend.workspace.writer import ProjectWriter
-from frontend.ui_web import agent_modes
+from frontend.ui_web.agent_turns import state
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 def test_close_changeset_run_maps_reason_to_status(tmp_path: Path, monkeypatch) -> None:
@@ -23,10 +24,10 @@ def test_close_changeset_run_maps_reason_to_status(tmp_path: Path, monkeypatch) 
             runtime.get_writer().write_text("Content/a.txt", "x")
         finally:
             identity.reset(token)
-        agent_modes.close_changeset_run("r1", "stopped")
+        state.close_changeset_run("r1", "stopped")
         assert journal.get_run("r1", project_root=str(root))["status"] == "cancelled"
-        agent_modes.close_changeset_run("missing", "done")  # no ledger: silent
-        agent_modes.close_changeset_run("", "done")
+        state.close_changeset_run("missing", "done")  # no ledger: silent
+        state.close_changeset_run("", "done")
     finally:
         runtime.reset_for_tests(None)
 
@@ -43,7 +44,7 @@ def test_close_changeset_run_uses_writer_root_not_first_workspace(tmp_path: Path
             runtime.get_writer().write_text("Content/a.txt", "x")
         finally:
             identity.reset(token)
-        agent_modes.close_changeset_run("r1", "done")
+        state.close_changeset_run("r1", "done")
         assert journal.get_run("r1", project_root=str(root))["status"] == "done"
     finally:
         runtime.reset_for_tests(None)
@@ -64,14 +65,14 @@ def test_revert_refuses_while_agent_is_live(tmp_path: Path, monkeypatch) -> None
             runtime.get_writer().write_text("Content/a.txt", "x")
         finally:
             identity.reset(token)
-        monkeypatch.setattr(agent_modes, "live_changeset_run_ids", lambda: frozenset({"r-live"}))
-        monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: cid == "c-live")
+        patch_turns(monkeypatch, "live_changeset_run_ids", lambda: frozenset({"r-live"}))
+        patch_turns(monkeypatch, "is_agent_running", lambda cid: cid == "c-live")
         blocked = changesets_api.revert_run("r-live")
         assert blocked["ok"] is False
         assert "Stop the agent first" in blocked["errors"][0]
         assert blocked["reverted"] == []
-        monkeypatch.setattr(agent_modes, "live_changeset_run_ids", lambda: frozenset())
-        monkeypatch.setattr(agent_modes, "is_agent_running", lambda _cid: False)
+        patch_turns(monkeypatch, "live_changeset_run_ids", lambda: frozenset())
+        patch_turns(monkeypatch, "is_agent_running", lambda _cid: False)
         ok = changesets_api.revert_run("r-live")
         assert ok.get("ok") is True or ok.get("reverted") is not None
     finally:

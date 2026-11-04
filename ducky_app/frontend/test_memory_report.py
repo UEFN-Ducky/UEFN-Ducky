@@ -45,8 +45,8 @@ def test_tracemalloc_diff_shows_what_grew_between_two_calls() -> None:
 
 def test_the_tool_answers_in_the_app_process(monkeypatch) -> None:
     from backend.tools.panel import ducky_panel
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
-    monkeypatch.setattr(agent_modes, "_in_bridge_process", lambda: False)
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: False)
     got = json.loads(ducky_panel.ducky_memory_report(collect=False, top=5))
     assert {"process", "gc", "containers"} <= set(got)

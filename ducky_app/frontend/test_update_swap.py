@@ -10,6 +10,7 @@ import pytest
 
 from backend.automations import scheduler
 from frontend import app_versions, update_swap as us
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 _real_due_within = scheduler.due_within
 
@@ -17,7 +18,7 @@ _real_due_within = scheduler.due_within
 @pytest.fixture(autouse=True)
 def _quiet(monkeypatch):
     """Nothing running unless a test says so; one main window, idle for an hour."""
-    monkeypatch.setattr("frontend.ui_web.agent_modes.list_running_agents", lambda: [])
+    patch_turns(monkeypatch, "list_running_agents", lambda: [])
     monkeypatch.setattr("backend.automations.live_runs.runs", lambda workflow_id="": [])
     monkeypatch.setattr("backend.automations.scheduler.due_within", lambda seconds, now=None: [])
 
@@ -44,8 +45,8 @@ def test_idle_when_nothing_runs_and_nobody_used_ducky_for_a_while() -> None:
 
 def test_each_kind_of_work_holds_the_switch(monkeypatch, _quiet) -> None:
     # A plain chat carries over (the switch stops it, the new version continues it); a team chat can't.
-    monkeypatch.setattr("frontend.ui_web.agent_modes.list_running_agents", lambda: ["a", "team"])
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation_meta", lambda cid, root=None: SimpleNamespace(is_group=cid == "team"))
+    patch_turns(monkeypatch, "list_running_agents", lambda: ["a", "team"])
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation_meta", lambda cid, root=None: SimpleNamespace(is_group=cid == "team"))
     monkeypatch.setattr("backend.automations.live_runs.runs", lambda workflow_id="": [{"state": "started"}])
     monkeypatch.setattr("backend.automations.scheduler.due_within", lambda seconds, now=None: ["Daily island check"])
     _quiet.sessions = [{"id": "t1"}]
@@ -120,7 +121,7 @@ def test_update_now_refuses_while_work_would_be_cut_off(monkeypatch, _quiet) -> 
     assert got["ok"] is False and got["waiting_for"] == ["1 terminal open"]
     # A running chat (it carries over) and someone at the keyboard are fine: they asked for it.
     _quiet.sessions = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.list_running_agents", lambda: ["a"])
+    patch_turns(monkeypatch, "list_running_agents", lambda: ["a"])
     us.report_ui({"window": "main", "visible": True, "idle_s": 1})
     called = []
     monkeypatch.setattr(us, "switch", lambda version: called.append(version) or {"ok": True})
@@ -143,10 +144,10 @@ def test_switch_starts_the_new_version_and_leaves_without_stopping_bridges(monke
     monkeypatch.setattr("frontend.ui_web.shutdown.hard_exit", lambda api=None, keep_others=False: exits.append(keep_others))
     monkeypatch.setattr("frontend.usage_stats.app_closing", lambda: None)
     # A chat mid-turn is stopped (not by the user) and handed to the new version.
-    monkeypatch.setattr("frontend.ui_web.agent_modes.list_running_agents", lambda: ["c1"])
-    monkeypatch.setattr("frontend.ui_web.agent_modes.running_turn_settings", lambda cid: {"mode": "agent", "model": "ducky-ai"})
-    monkeypatch.setattr("frontend.ui_web.agent_modes.cancel_agent", lambda cid, by_user=True: stopped.append((cid, by_user)))
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: False)
+    patch_turns(monkeypatch, "list_running_agents", lambda: ["c1"])
+    patch_turns(monkeypatch, "running_turn_settings", lambda cid: {"mode": "agent", "model": "ducky-ai"})
+    patch_turns(monkeypatch, "cancel_agent", lambda cid, by_user=True: stopped.append((cid, by_user)))
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: False)
 
     assert us.switch("1.2.412") == {"ok": True}
     exe, args, env = started[0]
@@ -162,9 +163,9 @@ def test_switch_starts_the_new_version_and_leaves_without_stopping_bridges(monke
 
 def test_the_new_version_continues_the_chats_the_switch_stopped(monkeypatch) -> None:
     ran = []
-    monkeypatch.setattr("frontend.ui_web.agent_modes.get_panel_push", lambda: print)
+    patch_turns(monkeypatch, "get_panel_push", lambda: print)
     monkeypatch.setattr(
-        "frontend.ui_web.agent_modes.run_message",
+        "frontend.ui_web.agent_turns.routing.run_message",
         lambda cid, text, mode, model, resume=False: ran.append((cid, text, mode, model, resume)) or "run-1",
     )
     monkeypatch.setattr(us.threading, "Thread", lambda target, name, daemon: SimpleNamespace(start=target))

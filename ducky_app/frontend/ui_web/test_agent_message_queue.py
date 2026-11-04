@@ -5,37 +5,38 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from frontend.ui_web import agent_modes as am
+from frontend.ui_web.agent_turns import pending, routing, state
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 def test_a_busy_chat_holds_agent_messages_and_runs_them_after_its_turn(monkeypatch) -> None:
     cancels: list[object] = []
-    monkeypatch.setattr(am, "load_conversation", lambda cid, **kw: SimpleNamespace(id=cid))
-    monkeypatch.setattr(am, "is_agent_running", lambda cid: True)
-    monkeypatch.setattr(am, "cancel_agent", lambda cid=None, **kw: cancels.append(cid))
-    monkeypatch.setattr(am, "_pending_agent_messages", {})
+    patch_turns(monkeypatch, "load_conversation", lambda cid, **kw: SimpleNamespace(id=cid))
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "cancel_agent", lambda cid=None, **kw: cancels.append(cid))
+    patch_turns(monkeypatch, "_pending_agent_messages", {})
 
-    assert am.run_message("c1", "report 1", "agent", "", queue_if_busy=True, _local=True) == "queued"
-    assert am.run_message("c1", "report 2", "agent", "", queue_if_busy=True, _local=True) == "queued"
+    assert routing.run_message("c1", "report 1", "agent", "", queue_if_busy=True, _local=True) == "queued"
+    assert routing.run_message("c1", "report 2", "agent", "", queue_if_busy=True, _local=True) == "queued"
     assert cancels == []  # the coordinator's turn keeps running
-    assert am._pending_agent_messages["c1"] == ["report 1", "report 2"]
+    assert state._pending_agent_messages["c1"] == ["report 1", "report 2"]
 
     started: list[tuple[str, str, dict]] = []
-    monkeypatch.setattr(am, "wait_for_idle", lambda cid, timeout=None: True)
-    monkeypatch.setattr(am, "run_message", lambda cid, text, mode, model, **kw: started.append((cid, text, kw)) or "run")
-    am._deliver_pending_agent_messages("c1")
+    patch_turns(monkeypatch, "wait_for_idle", lambda cid, timeout=None: True)
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: started.append((cid, text, kw)) or "run")
+    pending._deliver_pending_agent_messages("c1")
     deadline = time.time() + 5
     while not started and time.time() < deadline:
         time.sleep(0.02)
     assert started and started[0][:2] == ("c1", "report 1\n\nreport 2")
     assert started[0][2].get("queue_if_busy") is True
-    assert "c1" not in am._pending_agent_messages
+    assert "c1" not in state._pending_agent_messages
 
 
 def test_a_person_pressing_stop_drops_held_agent_messages(monkeypatch) -> None:
-    monkeypatch.setattr(am, "_pending_agent_messages", {"c2": ["held"]})
-    am.cancel_agent("c2")
-    assert "c2" not in am._pending_agent_messages
+    patch_turns(monkeypatch, "_pending_agent_messages", {"c2": ["held"]})
+    state.cancel_agent("c2")
+    assert "c2" not in state._pending_agent_messages
 
 
 def test_a_turn_that_replaces_a_running_one_is_not_a_stop(monkeypatch) -> None:
@@ -44,10 +45,10 @@ def test_a_turn_that_replaces_a_running_one_is_not_a_stop(monkeypatch) -> None:
     from backend.agent import a2a_broker as broker
     stops: list[str] = []
     monkeypatch.setattr(broker, "on_agent_cancelled_by_user", stops.append)
-    monkeypatch.setattr(am, "_pending_agent_messages", {})
-    am.cancel_agent("c3", by_user=False)
+    patch_turns(monkeypatch, "_pending_agent_messages", {})
+    state.cancel_agent("c3", by_user=False)
     assert stops == []
-    am.cancel_agent("c3")  # the person's Stop
+    state.cancel_agent("c3")  # the person's Stop
     assert stops == ["c3"]
 
 
@@ -57,22 +58,22 @@ def test_terminal_quota_tap_retains_pending_until_cooldown(monkeypatch):
     monkeypatch.setattr(broker, "_stopped", set(), raising=False)
     monkeypatch.setattr(broker, "_uncertain_chats", set(), raising=False)
     monkeypatch.setattr(broker, "_retry_queue_later", lambda cid: None)
-    monkeypatch.setattr(am, "_pending_agent_messages", {"limited": ["queued work"]})
+    patch_turns(monkeypatch, "_pending_agent_messages", {"limited": ["queued work"]})
     calls = []
-    monkeypatch.setattr(am, "_deliver_pending_agent_messages", lambda cid: calls.append(cid))
-    tap = am._make_broker_tap(lambda event: None, "limited")
+    patch_turns(monkeypatch, "_deliver_pending_agent_messages", lambda cid: calls.append(cid))
+    tap = pending._make_broker_tap(lambda event: None, "limited")
     event = {"type": "agent_stopped", "conv_id": "limited", "reason": "error",
              "detail": '{"error":{"code":"insufficient_quota"}}'}
     tap(event)
     tap(event)
     assert calls == []
-    assert am._pending_agent_messages == {"limited": ["queued work"]}
+    assert state._pending_agent_messages == {"limited": ["queued work"]}
 
 
 def test_held_messages_are_handed_over_once(monkeypatch) -> None:
-    monkeypatch.setattr(am, "_pending_agent_messages", {"c3": ["one", "two"]})
-    assert am.take_pending_agent_messages("c3") == ["one", "two"]
-    assert am.take_pending_agent_messages("c3") == []
+    patch_turns(monkeypatch, "_pending_agent_messages", {"c3": ["one", "two"]})
+    assert pending.take_pending_agent_messages("c3") == ["one", "two"]
+    assert pending.take_pending_agent_messages("c3") == []
 
 
 def test_a_person_send_the_turn_took_as_a_steer_does_not_run_again(monkeypatch) -> None:
@@ -81,39 +82,39 @@ def test_a_person_send_the_turn_took_as_a_steer_does_not_run_again(monkeypatch) 
 
     monkeypatch.setattr(broker, "_retry_queue_later", lambda cid: None)
     monkeypatch.setattr(steer, "_inbox", {})
-    monkeypatch.setattr(am, "is_agent_running", lambda cid: True)
-    monkeypatch.setattr(am, "cancel_agent", lambda cid=None, **kw: _never_cancel())
-    monkeypatch.setattr(am, "_pending_agent_messages", {})
-    monkeypatch.setattr(am, "_pending_steered", {})
-    assert am.run_message("p1", "taken", "agent", "", _local=True) == "queued"
-    assert am.run_message("p1", "also taken", "agent", "", _local=True) == "queued"
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "cancel_agent", lambda cid=None, **kw: _never_cancel())
+    patch_turns(monkeypatch, "_pending_agent_messages", {})
+    patch_turns(monkeypatch, "_pending_steered", {})
+    assert routing.run_message("p1", "taken", "agent", "", _local=True) == "queued"
+    assert routing.run_message("p1", "also taken", "agent", "", _local=True) == "queued"
     lease = steer.take("p1")
     steer.ack("p1", lease["lease_id"])  # the turn took both ...
     steer.post("p1", "late", "later")  # ... and this one arrived after
-    am._pending_agent_messages["p1"].append("agent report")
-    am._pending_steered["p1"]["late"] = "later"
-    am._pending_agent_messages["p1"].append("later")
-    am._drop_steered_pending("p1")
-    assert am._pending_agent_messages["p1"] == ["agent report", "later"]
+    state._pending_agent_messages["p1"].append("agent report")
+    state._pending_steered["p1"]["late"] = "later"
+    state._pending_agent_messages["p1"].append("later")
+    pending._drop_steered_pending("p1")
+    assert state._pending_agent_messages["p1"] == ["agent report", "later"]
 
 
 def test_a_person_send_with_attachments_waits_as_its_own_turn(monkeypatch) -> None:
     from backend.agent import a2a_broker as broker
 
     monkeypatch.setattr(broker, "_retry_queue_later", lambda cid: None)
-    monkeypatch.setattr(am, "is_agent_running", lambda cid: True)
-    monkeypatch.setattr(am, "_pending_agent_messages", {})
-    monkeypatch.setattr(am, "_pending_person_sends", {})
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "_pending_agent_messages", {})
+    patch_turns(monkeypatch, "_pending_person_sends", {})
     att = [{"name": "shot.png", "path": "x"}]
-    assert am.run_message("p2", "look", "ask", "", attachments=att, _local=True) == "queued"
-    assert am._pending_person_sends["p2"] == [{"text": "look", "mode": "ask", "attachments": att}]
-    assert "p2" not in am._pending_agent_messages
+    assert routing.run_message("p2", "look", "ask", "", attachments=att, _local=True) == "queued"
+    assert state._pending_person_sends["p2"] == [{"text": "look", "mode": "ask", "attachments": att}]
+    assert "p2" not in state._pending_agent_messages
 
     started: list[tuple[str, dict]] = []
-    monkeypatch.setattr(am, "wait_for_idle", lambda cid, timeout=None: True)
+    patch_turns(monkeypatch, "wait_for_idle", lambda cid, timeout=None: True)
     monkeypatch.setattr(broker, "automatic_work_blocked", lambda cid, queued=False: False)
-    monkeypatch.setattr(am, "run_message", lambda cid, text, mode, model, **kw: started.append((text, kw)) or "run")
-    am._deliver_pending_agent_messages("p2")
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: started.append((text, kw)) or "run")
+    pending._deliver_pending_agent_messages("p2")
     deadline = time.time() + 5
     while not started and time.time() < deadline:
         time.sleep(0.02)
@@ -126,11 +127,11 @@ def _never_cancel() -> None:
 
 def test_an_agent_waiting_on_a_busy_chat_queues_instead_of_replacing_its_turn(monkeypatch) -> None:
     # Oct 21 2026: a lead's sends cancelled its busy member's turn four times in a row.
-    monkeypatch.setattr(am, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     sent: list[dict] = []
-    monkeypatch.setattr(am, "run_message", lambda cid, text, mode, model, **kw: sent.append(kw) or "queued")
-    out = am.run_message_and_wait("member", "next task", queue_if_busy=True, _local=True)
-    assert out["status"] == "queued" and out["error"] == am.BUSY_QUEUED
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: sent.append(kw) or "queued")
+    out = routing.run_message_and_wait("member", "next task", queue_if_busy=True, _local=True)
+    assert out["status"] == "queued" and out["error"] == pending.BUSY_QUEUED
     assert sent[0]["queue_if_busy"] is True and not sent[0].get("force")
 
 
@@ -153,17 +154,17 @@ def test_the_bridge_asks_the_panel_which_chats_run_and_stops_them_there(monkeypa
         asked.append(cancel)
         return {"running": [] if cancel else ["member"], "parents": {"member": "lead"}}
 
-    monkeypatch.setattr(am, "run_state", panel_state)
-    monkeypatch.setattr(am, "_panel_runs_cache", (float("-inf"), None))
+    patch_turns(monkeypatch, "run_state", panel_state)
+    patch_turns(monkeypatch, "_panel_runs_cache", (float("-inf"), None))
     try:
-        assert not am.is_agent_running("member")  # not the bridge: this process's own runs
+        assert not state.is_agent_running("member")  # not the bridge: this process's own runs
         assert asked == []
         monkeypatch.setenv("UEFN_DUCKY_MCP_BRIDGE", "1")
-        assert am.is_agent_running("member") and am.list_running_agents() == ["member"]
-        assert am.linked_children_of("lead") == ["member"] and am.linked_parent_of("member") == "lead"
+        assert state.is_agent_running("member") and state.list_running_agents() == ["member"]
+        assert state.linked_children_of("lead") == ["member"] and state.linked_parent_of("member") == "lead"
         assert asked == [""]  # one question, kept for a second
-        am.cancel_agent("member")
-        assert asked == ["", "member"] and not am.is_agent_running("member")
+        state.cancel_agent("member")
+        assert asked == ["", "member"] and not state.is_agent_running("member")
     finally:
         server.shutdown()
         server.server_close()

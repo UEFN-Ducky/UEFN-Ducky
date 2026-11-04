@@ -6,7 +6,8 @@ import tempfile
 from pathlib import Path
 
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import create_conversation, load_conversation, save_conversation
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+from frontend.ui_web.chats.saves import save_conversation
 
 
 def test_save_conversation_does_not_blank_existing_messages():
@@ -28,13 +29,9 @@ def test_save_conversation_does_not_blank_existing_messages():
 
 
 def test_a_running_turn_keeps_a_move_and_rename_made_while_it_works():
-    from frontend.ui_web.project_chats import (
-        append_message,
-        create_folder,
-        move_conversation,
-        rename_conversation,
-        upsert_in_flight_assistant,
-    )
+    from frontend.ui_web.chats.conversations import move_conversation, rename_conversation
+    from frontend.ui_web.chats.folders import create_folder
+    from frontend.ui_web.chats.saves import append_message, upsert_in_flight_assistant
 
     with tempfile.TemporaryDirectory() as tmp:
         root = str(Path(tmp))

@@ -7,18 +7,16 @@ from pathlib import Path
 
 from frontend.archive_folder import ARCHIVE_FOLDER_ID
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import (
+from frontend.ui_web.agent_turns.testing import patch_turns
+from frontend.ui_web.chats.conversations import (
     create_conversation,
-    create_folder,
     delete_conversation,
-    delete_folder,
-    ensure_group_folder_hubs,
     load_conversation,
-    load_folders,
     move_conversation,
-    save_conversation,
-    save_folders,
 )
+from frontend.ui_web.chats.folders import create_folder, delete_folder, load_folders, save_folders
+from frontend.ui_web.chats.groups import ensure_group_folder_hubs
+from frontend.ui_web.chats.saves import save_conversation
 
 
 def _make_group(settings, name: str, parent_id: str, root: str):
@@ -498,12 +496,11 @@ def test_a_seat_gets_the_model_it_was_invited_with(monkeypatch, tmp_path):
 
 def test_mute_is_stored_on_chats_and_groups_and_never_stops_an_agent(monkeypatch, tmp_path):
     import frontend.ui_web.panel_api as pa
-    from frontend.ui_web import agent_modes
 
     api, settings, root, team, _new = _two_teams(monkeypatch, tmp_path)
     member = create_conversation(settings, team["folder_id"], title="Modeler", parent_conv_id=team["id"], project_root=root)
     api.group_add_member(team["id"], member.id)
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     monkeypatch.setattr(pa, "cancel_agent", lambda *a: (_ for _ in ()).throw(AssertionError("stopped")))
 
     for cid in (member.id, team["id"]):
@@ -526,7 +523,6 @@ def test_mute_is_stored_on_chats_and_groups_and_never_stops_an_agent(monkeypatch
 
 def test_stopping_a_group_stops_its_nested_groups_too(monkeypatch, tmp_path):
     import frontend.ui_web.panel_api as pa
-    from frontend.ui_web import agent_modes
 
     api, settings, root, outer, _new = _two_teams(monkeypatch, tmp_path)
     inner = api.group_create("Modeling", outer["folder_id"], False)
@@ -537,7 +533,7 @@ def test_stopping_a_group_stops_its_nested_groups_too(monkeypatch, tmp_path):
         api.group_add_member(gid, seats[name])
     running = {seats["A"], seats["B"], seats["C"]}
     stopped = []
-    monkeypatch.setattr(agent_modes, "is_agent_running", lambda cid: cid in running)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: cid in running)
     monkeypatch.setattr(pa, "cancel_agent", lambda cid=None: stopped.append(cid))
 
     lead = load_conversation(outer["id"], project_root=root).leader_conv_id

@@ -7,10 +7,11 @@ import time
 from backend.agent.coding_agents.runner import merge_steered_blocks
 from backend.server import _with_steer
 from frontend.ui_web import steer
+from frontend.ui_web.agent_turns.testing import patch_turns
 
 
 def test_post_take_and_end(monkeypatch):
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: cid == "busy")
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: cid == "busy")
     events = []
     steer.bind_run("busy", events.append)
     try:
@@ -35,7 +36,7 @@ def test_post_take_and_end(monkeypatch):
 def _clock(monkeypatch):
     now = [100.0]
     monkeypatch.setattr(steer, "_now", lambda: now[0])
-    monkeypatch.setattr("frontend.ui_web.agent_modes.is_agent_running", lambda cid: True)
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: True)
     return now
 
 

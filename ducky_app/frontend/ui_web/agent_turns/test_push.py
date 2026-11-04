@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from frontend.ui_web import agent_modes
 from frontend.ui_web.agent_turns import push
 
 
@@ -34,13 +33,3 @@ def test_the_active_chat_is_per_thread():
     assert push.get_active_conv_id() == "c9"
     push._set_active_conv_id(None)
     assert push.get_active_conv_id() is None
-
-
-def test_the_old_path_reads_and_patches_the_moved_code(monkeypatch):
-    assert agent_modes.notify_chats_changed is push.notify_chats_changed
-    monkeypatch.setattr(agent_modes, "_panel_push", print)  # a name rebound in push itself
-    assert push._panel_push is print and agent_modes._panel_push is print
-    monkeypatch.setattr(agent_modes, "_resolve_push", lambda _p: None)
-    assert push._resolve_push(None) is None
-    monkeypatch.undo()
-    assert push._resolve_push is agent_modes._resolve_push and push._panel_push is not print

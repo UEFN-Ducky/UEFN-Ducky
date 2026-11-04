@@ -10,7 +10,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.agent import a2a_broker
-from frontend.ui_web import agent_modes, steer
+from frontend.ui_web import steer
+from frontend.ui_web.agent_turns import routing, state
+from frontend.ui_web.agent_turns.testing import turns_patched
 
 
 def test_run_message_queues_follow_up_instead_of_cancelling_live_run():
@@ -19,19 +21,19 @@ def test_run_message_queues_follow_up_instead_of_cancelling_live_run():
                            coding_agent="ducky", folder_id=None, file_path="")
 
     with (
-        patch.object(agent_modes, "_in_bridge_process", return_value=False),
-        patch.object(agent_modes, "is_agent_running", return_value=True),
-        patch.object(agent_modes, "cancel_agent") as cancel,
-        patch.object(agent_modes, "wait_for_idle") as wait,
-        patch.object(agent_modes, "load_conversation", return_value=conv) as load,
-        patch.object(agent_modes, "_pending_agent_messages", {}),
-        patch.object(agent_modes, "_pending_steered", {}),
+        turns_patched("_in_bridge_process", return_value=False),
+        turns_patched("is_agent_running", return_value=True),
+        turns_patched("cancel_agent") as cancel,
+        turns_patched("wait_for_idle") as wait,
+        turns_patched("load_conversation", return_value=conv) as load,
+        turns_patched("_pending_agent_messages", {}),
+        turns_patched("_pending_steered", {}),
         patch.object(a2a_broker, "_retry_queue_later", lambda cid: None),
     ):
         try:
-            out = agent_modes.run_message("chat-1", "fix spacing", "agent", "gpt-test", push=pushes.append)
+            out = routing.run_message("chat-1", "fix spacing", "agent", "gpt-test", push=pushes.append)
             assert out == "queued"
-            assert agent_modes._pending_agent_messages["chat-1"] == ["fix spacing"]
+            assert state._pending_agent_messages["chat-1"] == ["fix spacing"]
             assert [m["text"] for m in steer._inbox.get("chat-1", [])] == ["fix spacing"]
         finally:
             steer.end_run("chat-1")

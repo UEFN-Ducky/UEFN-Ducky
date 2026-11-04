@@ -9,7 +9,7 @@ AND external coding agents — Claude Code / Codex / Cursor conversations):
   - Delivery: an idle receiver is woken with a formatted turn (embedded ducky =
     normal run; external agent = session resume). A busy receiver keeps the
     envelope queued; the queue drains when its turn ends.
-  - ``on_agent_stopped()`` (wired into agent_modes) drains queues and fires
+  - ``on_agent_stopped()`` (wired into agent_turns) drains queues and fires
     inactivity notices to senders whose threads the stopped agent still owes.
 
 Everything is RAM-only, mirroring Traycer's broker; chats persist their own

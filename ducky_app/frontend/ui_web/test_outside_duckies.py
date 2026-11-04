@@ -45,7 +45,7 @@ def test_the_list_is_the_one_list_on_any_project(monkeypatch):
         return [_conv("helper")]
 
     monkeypatch.setattr(pa, "list_all_conversation_metadata", fake_list)
-    monkeypatch.setattr("frontend.ui_web.project_chats.merge_into_one_list", lambda: merged.append(True) or 0)
+    monkeypatch.setattr("frontend.ui_web.chats.folders.merge_into_one_list", lambda: merged.append(True) or 0)
     monkeypatch.setattr(pa.PanelSettings, "load", staticmethod(lambda: types.SimpleNamespace(uefn_project_root="C:/island")))
     monkeypatch.setattr(pa.PanelApi, "_sidebar_context_tokens", staticmethod(lambda _c: 0))
 
@@ -57,14 +57,14 @@ def test_the_list_is_the_one_list_on_any_project(monkeypatch):
 
 
 def test_global_agents_create_has_no_island(monkeypatch):
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import store as chat_store
 
-    monkeypatch.setattr(project_chats, "project_root_for_slug", lambda slug: None)
+    monkeypatch.setattr(chat_store, "project_root_for_slug", lambda slug: None)
     island = r"C:\island"
-    assert project_chats.create_project_root("_no_project", island) == ""
-    assert project_chats.create_project_root(project_chats.project_slug(island), island) is None
+    assert chat_store.create_project_root("_no_project", island) == ""
+    assert chat_store.create_project_root(chat_store.project_slug(island), island) is None
     try:
-        project_chats.create_project_root("missing", island)
+        chat_store.create_project_root("missing", island)
     except ValueError as exc:
         assert "Unknown project" in str(exc)
     else:

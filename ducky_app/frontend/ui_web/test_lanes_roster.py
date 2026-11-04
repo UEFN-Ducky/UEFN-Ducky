@@ -63,7 +63,7 @@ def test_roster_provider_resolves_member_lane(monkeypatch) -> None:
 
 
 def test_a_members_lane_means_the_teams_project_whichever_is_selected(monkeypatch) -> None:
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs, store as chat_store
 
     repo, limo = "C:/Repos/Ducky", "C:/Islands/LimoRide"
     lane_engine.set_project_roots_source(lambda: [limo, repo])  # LimoRide is selected now
@@ -73,11 +73,11 @@ def test_a_members_lane_means_the_teams_project_whichever_is_selected(monkeypatc
     assert roster_lanes.lane_for_member("hacker") == (f"{repo}/Content/Verse/Shop/**",)
     # A lane set before lane_root existed means the project the team's hub chat lives in.
     del hub.group_members[1]["lane_root"]
-    monkeypatch.setattr(project_chats, "conversation_project_slug",
-                        lambda cid, project_root=None: project_chats.project_slug(repo) if cid == "hub" else None)
+    monkeypatch.setattr(chat_convs, "conversation_project_slug",
+                        lambda cid, project_root=None: chat_store.project_slug(repo) if cid == "hub" else None)
     assert roster_lanes.lane_for_member("hacker") == (f"{repo}/Content/Verse/Shop/**",)
     # A projectless hub: the lane keeps its old meaning (never widened).
-    monkeypatch.setattr(project_chats, "conversation_project_slug", lambda cid, project_root=None: "_no_project")
+    monkeypatch.setattr(chat_convs, "conversation_project_slug", lambda cid, project_root=None: "_no_project")
     assert roster_lanes.lane_for_member("hacker") == ("Content/Verse/Shop/**",)
     assert normalize_member({"member_conv_id": "c", "lane_root": f" {repo} "})["lane_root"] == repo
 
@@ -158,13 +158,13 @@ def store(monkeypatch):
     copy of the hub and saving it is how teammates' lanes got lost (Oct 24 2026)."""
     import copy
 
-    from frontend.ui_web import project_chats
+    from frontend.ui_web.chats import conversations as chat_convs
 
     hub, _ = _world()
     docs = {"hub": copy.deepcopy(hub)}
     load = lambda cid, *a, **k: copy.deepcopy(docs.get(cid))  # noqa: E731
     monkeypatch.setattr(_pa, "load_conversation", load)
-    monkeypatch.setattr(project_chats, "load_conversation_meta", load)
+    monkeypatch.setattr(chat_convs, "load_conversation_meta", load)
     monkeypatch.setattr(_pa, "save_conversation", lambda conv, *a, **k: docs.__setitem__(conv.id, copy.deepcopy(conv)))
     monkeypatch.setattr(_pa, "notify_chats_changed", lambda *a, **k: None)
 

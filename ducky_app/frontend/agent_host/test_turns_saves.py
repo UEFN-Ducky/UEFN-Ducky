@@ -14,18 +14,19 @@ from frontend.agent_host import protocol, turns
 def test_checkpoints_save_in_the_host_and_tell_the_app(monkeypatch):
     from backend.agent.coding_agents import runner
     from frontend import settings
-    from frontend.ui_web import agent_modes, project_chats
+    from frontend.ui_web.agent_turns.testing import patch_turns
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
     monkeypatch.setattr(runner, "on_saved", None)
     from frontend.agent_host import steer_host
 
     monkeypatch.setattr(steer_host, "_in_host", False)
     saves: list[tuple[int, str]] = []
-    monkeypatch.setattr(project_chats, "upsert_in_flight_assistant",
+    monkeypatch.setattr(chat_saves, "upsert_in_flight_assistant",
                         lambda conv, msg, **kw: saves.append((threading.get_ident(), msg["run_id"])))
     monkeypatch.setattr(settings, "PanelSettings", SimpleNamespace(load=lambda: SimpleNamespace(uefn_project_root="")))
     monkeypatch.setattr(settings, "apply_workspace_env", lambda root: None)
-    monkeypatch.setattr(project_chats, "load_conversation", lambda cid: SimpleNamespace(id=cid, messages=[]))
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid: SimpleNamespace(id=cid, messages=[]))
 
     def stub(conv, text, *, push, run_id, **kw):
         runner.checkpoint_coding_turn(conv, agent_id="claude", run_id=run_id, blocks=[])
@@ -34,7 +35,7 @@ def test_checkpoints_save_in_the_host_and_tell_the_app(monkeypatch):
 
     monkeypatch.setattr(runner, "run_coding_agent_message", stub)
     reloads: list[str] = []
-    monkeypatch.setattr(agent_modes, "notify_context_changed", lambda cid, **kw: reloads.append(cid))
+    patch_turns(monkeypatch, "notify_context_changed", lambda cid, **kw: reloads.append(cid))
     monkeypatch.setattr(turns, "_sender", lambda ch: lambda ev: ch.send("event", conv_id=ev["conv_id"], events=[ev]))
 
     tag = f"t-{uuid.uuid4().hex[:8]}"
@@ -73,10 +74,10 @@ def test_checkpoints_save_in_the_host_and_tell_the_app(monkeypatch):
 
 
 def test_saved_reloads_only_chats_on_screen(monkeypatch):
-    from frontend.ui_web import agent_modes
+    from frontend.ui_web.agent_turns.testing import patch_turns
 
     reloads: list[str] = []
-    monkeypatch.setattr(agent_modes, "notify_context_changed", lambda cid, **kw: reloads.append(cid))
+    patch_turns(monkeypatch, "notify_context_changed", lambda cid, **kw: reloads.append(cid))
     panel = SimpleNamespace(_visible_by_viewer={"main": {"shown"}}, _visible_union=lambda: {"shown"})
     monkeypatch.setitem(sys.modules, "frontend.ui_web.panel_api", panel)
     for conv_id in ("shown", "hidden"):

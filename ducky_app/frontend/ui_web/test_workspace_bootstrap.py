@@ -117,7 +117,7 @@ def test_changesets_storage_climbs_from_content_to_project_root(tmp_path: Path, 
     root = tmp_path / "Island"
     (root / "Content").mkdir(parents=True)
     (root / "Island.uefnproject").write_text("{}", encoding="utf-8")
-    from frontend.ui_web.project_chats import project_slug
+    from frontend.ui_web.chats.store import project_slug
 
     # Pre-fix orphan ledger keyed by the Content folder; must fold into the project ledger.
     orphan = tmp_path / "appdata" / "changesets" / project_slug(str(root / "Content"))
@@ -135,7 +135,7 @@ def test_changesets_storage_climbs_from_content_to_project_root(tmp_path: Path, 
 
 def test_build_run_context_resolves_group_and_leader(monkeypatch) -> None:
     hub = SimpleNamespace(id="hub", is_group=True, leader_conv_id="lead")
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation", lambda cid: hub if cid == "hub" else None)
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid: hub if cid == "hub" else None)
     monkeypatch.setattr("frontend.ui_web.group_orchestrator.is_group_conversation", lambda c: bool(getattr(c, "is_group", False)))
     member = SimpleNamespace(
         id="lead", parent_conv_id="hub", profile_id="architect", ducky_name="Architect", title="t",
@@ -201,7 +201,8 @@ def test_a_lead_sees_what_members_of_its_nested_groups_wrote(folder_project: Pat
     from frontend.settings import PanelSettings
     from frontend.ui_web import changesets_api
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
-    from frontend.ui_web.project_chats import create_conversation, load_conversation, save_conversation
+    from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     repo = folder_project
     settings = PanelSettings.load()
@@ -249,7 +250,8 @@ def test_a_lead_reverts_its_nested_groups_runs_and_a_sub_group_leader_stays_in_i
     from backend.tools.core.system import workspace_write_file
     from frontend.settings import PanelSettings
     from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
-    from frontend.ui_web.project_chats import create_conversation, load_conversation, save_conversation
+    from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+    from frontend.ui_web.chats.saves import save_conversation
 
     repo = folder_project
     settings = PanelSettings.load()

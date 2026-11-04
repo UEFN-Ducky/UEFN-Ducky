@@ -167,7 +167,7 @@ def test_a_members_card_also_shows_in_its_leads_chat(monkeypatch, chat_rules) ->
     from types import SimpleNamespace
 
     monkeypatch.setattr(permission_prompt, "starter_root", lambda cid: "lead" if cid == "member" else "")
-    monkeypatch.setattr("frontend.ui_web.project_chats.load_conversation",
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation",
                         lambda cid, **_k: SimpleNamespace(ducky_name="Verse Coder", title="Verse Coder"))
     alerts: list[tuple] = []
     monkeypatch.setattr("frontend.ui_web.terminal.manager._alert_command", lambda *a: alerts.append(a))

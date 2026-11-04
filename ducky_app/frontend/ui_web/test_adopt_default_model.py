@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import frontend.favorite_models as fm
-import frontend.ui_web.agent_modes as am
+from frontend.ui_web.agent_turns.testing import patch_turns
 import frontend.ui_web.panel_api as pa
 from frontend.favorite_models import FavoriteSelection, ResolveErr, ResolveOk
 from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
@@ -31,7 +31,7 @@ def chat(monkeypatch):
     monkeypatch.setattr(fm, "_first_api_model", lambda: ResolveOk(
         coding_agent="ducky", model="claude-opus-5-5", provider="anthropic",
         selection=FavoriteSelection(backend="anthropic", model_id="claude-opus-5-5")))
-    monkeypatch.setattr(am, "release_held_for_model", lambda cid: released.append(cid) or 0)
+    patch_turns(monkeypatch, "release_held_for_model", lambda cid: released.append(cid) or 0)
     conv.saved, conv.released = saved, released
     return conv
 
@@ -101,7 +101,7 @@ def test_a_branded_chat_without_a_fallback_takes_the_first_api_model(monkeypatch
 def test_with_no_model_at_all_the_person_picks_one(monkeypatch, chat):
     _no_default(monkeypatch, code="model_unavailable", requested="codex:gpt-6-astra")
     monkeypatch.setattr(fm, "fallback_selection", lambda: None)
-    monkeypatch.setattr(am, "held_for_model", lambda _cid: 2)
+    patch_turns(monkeypatch, "held_for_model", lambda _cid: 2)
     out = _api().adopt_default_model("c1")
     assert out["ok"] is False and out["held"] == 2
     assert out["error"] == ("Your Default Model codex:gpt-6-astra isn't available. "

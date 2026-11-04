@@ -10,12 +10,11 @@ import time
 from backend.agent.coding_agents import runner
 from backend.agent.coding_agents.runner import _CHECKPOINT_EVERY_S, _TurnCheckpoint, checkpoint_coding_turn
 from frontend.settings import PanelSettings
-from frontend.ui_web.project_chats import (
+from frontend.ui_web.chats.conversations import create_conversation, load_conversation
+from frontend.ui_web.chats.saves import (
     KILLED_TURN_ERROR,
-    create_conversation,
     heal_killed_coding_turn,
     heal_usage_orphaned_turn,
-    load_conversation,
     upsert_in_flight_assistant,
 )
 
@@ -25,7 +24,7 @@ def test_checkpoint_then_upsert_replaces_same_run():
         root = str(Path(tmp))
         conv = create_conversation(PanelSettings.load(), "", title="Snake", project_root=root)
         conv.messages = [{"role": "user", "text": "make snake", "content": "make snake", "ts": 1}]
-        from frontend.ui_web.project_chats import save_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         save_conversation(conv, root)
 
@@ -66,7 +65,7 @@ def test_turn_checkpoint_flushes_on_tool_done():
         root = str(Path(tmp))
         conv = create_conversation(PanelSettings.load(), "", title="Snake", project_root=root)
         conv.messages = [{"role": "user", "text": "go", "content": "go", "ts": 1}]
-        from frontend.ui_web.project_chats import save_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         save_conversation(conv, root)
         events: list[dict] = []
@@ -167,7 +166,7 @@ def test_turn_checkpoint_does_not_flush_on_text_delta():
         root = str(Path(tmp))
         conv = create_conversation(PanelSettings.load(), "", title="Ollama", project_root=root)
         conv.messages = [{"role": "user", "text": "go", "content": "go", "ts": 1}]
-        from frontend.ui_web.project_chats import save_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         save_conversation(conv, root)
         ckpt = _TurnCheckpoint(conv, "ducky", "run-slow", project_root=root)
@@ -195,7 +194,7 @@ def test_heal_killed_turn_adds_stub_when_only_user_left():
         root = str(Path(tmp))
         conv = create_conversation(PanelSettings.load(), "", title="Gone", project_root=root)
         conv.messages = [{"role": "user", "text": "hello", "content": "hello", "ts": 1}]
-        from frontend.ui_web.project_chats import save_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         save_conversation(conv, root)
         assert heal_killed_coding_turn(conv.id, "dead-run", project_root=root) is True
@@ -213,7 +212,7 @@ def test_heal_usage_orphaned_turn_when_calls_outran_transcript():
         conv = create_conversation(PanelSettings.load(), "", title="Ollama", project_root=root)
         conv.messages = [{"role": "user", "text": "city", "content": "city", "ts": 10}]
         conv.token_usage = {"calls": [{"ts": 20, "step": 1, "input_tokens": 100, "output_tokens": 8}]}
-        from frontend.ui_web.project_chats import save_conversation
+        from frontend.ui_web.chats.saves import save_conversation
 
         save_conversation(conv, root)
         loaded = load_conversation(conv.id, project_root=root)
@@ -234,7 +233,7 @@ def test_boot_heal_leaves_a_turn_sent_since_launch_alone():
         conv = create_conversation(PanelSettings.load(), "", title="Live", project_root=root)
         conv.messages = [{"role": "user", "text": "build it", "content": "build it", "ts": 110}]
         conv.token_usage = {"calls": [{"ts": 120, "step": 1, "input_tokens": 100, "output_tokens": 8}]}
-        from frontend.ui_web.project_chats import heal_usage_orphaned_turns_for_project, save_conversation
+        from frontend.ui_web.chats.saves import heal_usage_orphaned_turns_for_project, save_conversation
 
         save_conversation(conv, root)
         assert heal_usage_orphaned_turns_for_project(root, sent_before=100) == []
