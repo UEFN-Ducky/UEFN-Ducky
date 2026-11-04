@@ -172,6 +172,11 @@ def _pool(key: str, name: str, size: int) -> _Pool:
 
 
 def lane_for(method: str) -> str:
+    from frontend.ui_web.remote_link.input_lane import is_input_method
+
+    # Remote pointer/key frames: their own two workers (remote_link.input_lane), never bg.
+    if is_input_method(method):
+        return "input"
     if method in URGENT:
         return "urgent"
     if method in BLOCKING:
@@ -198,6 +203,11 @@ def submit(method: str, fn: Callable[..., Any], *args: Any) -> None:
             _trace("ui_lane_wait", method, waited * 1000.0, lane=name, method=method, wait_ms=round(waited * 1000.0))
         fn(*args)
 
+    if name == "input":
+        from frontend.ui_web.remote_link.input_lane import input_lane
+
+        input_lane().submit(run)
+        return
     lane(name).submit(run)
 
 

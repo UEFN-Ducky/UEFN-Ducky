@@ -64,6 +64,26 @@ def test_lane_for():
     assert call_pools.lane_for("send_message") == "urgent"
     assert call_pools.lane_for("voice_transcribe_audio") == "block"
     assert call_pools.lane_for("group_members") == "bg"
+    assert call_pools.lane_for("window_input") == "input"
+
+
+def test_remote_input_starts_at_once_behind_300_slow_bg_calls(monkeypatch):
+    """The phone's pointer/key frames reach window_input through the bridge: never behind bg."""
+    from frontend.ui_web.remote_link import input_lane
+
+    monkeypatch.setattr(input_lane, "_lane", None)
+    release = threading.Event()
+    for _ in range(300):
+        call_pools.submit("list_project_file_paths", release.wait, 10)
+    got = threading.Event()
+    t0 = time.monotonic()
+    call_pools.submit("window_input", got.set)
+    try:
+        assert got.wait(2)
+        assert time.monotonic() - t0 < 0.1
+        assert _bridge_threads() <= 14
+    finally:
+        release.set()
 
 
 # Looked at and fast: return at once (jobs run elsewhere) or a short poll.
