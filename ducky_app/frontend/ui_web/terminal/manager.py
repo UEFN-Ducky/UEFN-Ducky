@@ -12,6 +12,7 @@ import uuid
 from typing import Any, Callable
 
 from frontend.settings import PanelSettings
+from frontend.ui_web.lag.output_pacer import OutputPacer
 from frontend.ui_web.terminal import commit_guard, repo_lock, resource_guard, run_durations
 from frontend.ui_web.terminal.bridge import TerminalBridge
 from frontend.ui_web.terminal.session import (
@@ -98,6 +99,9 @@ class TerminalManager:
         self._push: Callable[[dict[str, Any]], None] | None = None
         # session id -> {"value", "sent", "at", "timer"}: coalesced terminal_busy pushes.
         self._busy_push: dict[str, dict[str, Any]] = {}
+        # Terminals each window shows (set_visible_terminals). Until one reports, every
+        # terminal is treated as shown; the rest get one status frame a second.
+        self._visible_terms: dict[str, set[str]] = {}
 
     def set_push(self, push: Callable[[dict[str, Any]], None] | None) -> None:
         self._push = push
@@ -166,21 +170,29 @@ class TerminalManager:
                 env_extra=extra,
                 agent=bool(conv_id or from_agent),
             )  # type: ignore[arg-type]
+            pacer = OutputPacer(
+                lambda data: bridge.push_output(data),
+                lambda status: bridge.push_status(status),
+                replay=lambda s=session: s.read_output_tail(_OUTPUT_RING_CHARS),
+            )
             bridge = TerminalBridge(
                 on_input=lambda data, s=session: self._user_write(s.id, data),
                 on_resize=lambda c, r, s=session: s.resize(c, r),
                 # A tab shown again gets its whole kept history back, not just the last screen.
                 get_replay=lambda s=session: s.read_output_tail(_OUTPUT_RING_CHARS),
+                on_attach=pacer.drop_pending,
                 get_status=lambda s=session: self._session_status(s),
             )
             bridge.start()
             session.port = bridge.port
             session.ws_url = bridge.ws_url
+            pacer.set_visible(self._is_shown(session.id))
 
-            def on_output(text: str, b=bridge) -> None:
-                b.push_output(text)
+            def on_output(text: str, p=pacer) -> None:
+                p.push(text)
 
-            def on_exit(code: int, b=bridge) -> None:
+            def on_exit(code: int, b=bridge, p=pacer) -> None:
+                p.flush()
                 b.push_exit(code)
 
             session._on_output = on_output  # type: ignore[attr-defined]
@@ -206,7 +218,7 @@ class TerminalManager:
                     bridge.stop()
                     return {"ok": False, "error": str(exc)}
             session.owner = _chat_title(conv_id)
-            entry = _SessionEntry(session=session, bridge=bridge, reuse_key=reuse_key, chat=conv_id)
+            entry = _SessionEntry(session=session, bridge=bridge, reuse_key=reuse_key, chat=conv_id, pacer=pacer)
             entry.run_owned = bool(from_agent and not conv_id)
             self._sessions[session.id] = entry
 
@@ -433,6 +445,22 @@ class TerminalManager:
         if push_close:
             self._emit({"type": "terminal_close", "session_id": session_id})
         return {"ok": True, "session_id": session_id}
+
+    def _is_shown(self, session_id: str) -> bool:
+        """Caller may hold self._lock (reads only)."""
+        if not self._visible_terms:
+            return True
+        return any(session_id in shown for shown in self._visible_terms.values())
+
+    def set_visible_terminals(self, session_ids: list[str] | None, viewer_id: str = "main") -> None:
+        """The terminals a window shows now; output to the others is held until shown."""
+        with self._lock:
+            self._visible_terms[viewer_id or "main"] = {str(s) for s in (session_ids or []) if s}
+            entries = [(sid, e.pacer) for sid, e in self._sessions.items()]
+            shown = {sid: self._is_shown(sid) for sid, _ in entries}
+        for sid, pacer in entries:
+            if pacer is not None:
+                pacer.set_visible(shown[sid])
 
     def list_sessions(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -988,7 +1016,7 @@ def _pending_dict(pending: PendingCommand, source: str) -> dict[str, Any]:
 
 
 class _SessionEntry:
-    __slots__ = ("session", "bridge", "reuse_key", "chat", "run_owned")
+    __slots__ = ("session", "bridge", "reuse_key", "chat", "run_owned", "pacer")
 
     def __init__(
         self,
@@ -997,9 +1025,12 @@ class _SessionEntry:
         bridge: TerminalBridge,
         reuse_key: tuple[str, ...] | None = None,
         chat: str = "",
+        pacer: OutputPacer | None = None,
     ) -> None:
         self.session = session
         self.bridge = bridge
+        # Paces output to the window (frontend.ui_web.lag.output_pacer).
+        self.pacer = pacer
         # (chat, shell asked for, folder): an agent opening the same again gets this one.
         self.reuse_key = reuse_key
         # The chat whose agent opened it; "" for a terminal a person opened.
