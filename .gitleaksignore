@@ -1,0 +1,6 @@
+# Fingerprints of reviewed false positives that stay in git history.
+# Each line: <commit>:<file>:<rule>:<line>, with a comment saying why it is not a secret.
+
+# test_web_lookup.py test token: URL-safe base64 of a public microsoft.com URL (no credential);
+# the test now builds it at run time.
+0dff88e33dd11f16067c19ec9cb1ce0939a7099c:ducky_app/backend/tools/core/test_web_lookup.py:generic-api-key:506

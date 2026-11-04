@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import socket
 
@@ -501,7 +502,9 @@ def test_bing_fallback_when_duckduckgo_fails():
 
 
 def test_bing_url_safe_base64_link_unwraps():
-    # A real Bing token: "_" sits where the standard alphabet has "/".
-    target = "https://www.microsoft.com/en-us/?msockid=0bf4b445647265341bccac42654c643a"
-    token = "aHR0cHM6Ly93d3cubWljcm9zb2Z0LmNvbS9lbi11cy8_bXNvY2tpZD0wYmY0YjQ0NTY0NzI2NTM0MWJjY2FjNDI2NTRjNjQzYQ"
+    # Bing's /ck/a links carry the target as unpadded URL-safe base64, so "_" sits
+    # where the standard alphabet has "/". Built here, so no literal looks like a key.
+    target = "https://www.microsoft.com/en-us/?msockid=0000000000000000ffffffffffffffff"
+    token = base64.urlsafe_b64encode(target.encode()).decode().rstrip("=")
+    assert "_" in token and "/" in base64.b64encode(target.encode()).decode()
     assert web.unwrap_bing_href(f"https://www.bing.com/ck/a?!&&p=1&u=a1{token}&ntb=1") == target
