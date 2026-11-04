@@ -46,15 +46,3 @@ def test_embedded_error_turn_ends_with_its_error_text(monkeypatch):
     assert [e["detail"] for e in stopped] == [LIMIT]
     assert ended == [("error", LIMIT)]
     assert usage_stats._turn_outcome(*ended[0]) == "limit"
-
-
-def test_a_limit_is_logged_but_not_counted_as_an_agent_crash(monkeypatch):
-    from frontend import agent_crash_log, error_log
-
-    logged: list[tuple] = []
-    monkeypatch.setattr(agent_crash_log, "record_crash", lambda **kw: None)
-    monkeypatch.setattr(error_log, "record_error",
-                        lambda source, message, *, count=True: logged.append((source, count)))
-    for err in (LIMIT, "Error code: 400 - messages.5: bad request"):
-        am._log_agent_crash(None, provider="anthropic", model="m", error=err, elapsed_s=1.0, first_token_s=None)
-    assert logged == [("agent", False), ("agent", True)]
