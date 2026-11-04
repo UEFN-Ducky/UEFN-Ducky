@@ -70,6 +70,7 @@ import type { StoreItemHandlers } from "./store/StoreActions";
 import { deriveHeroSlides, deriveSections, patchItemFromLocalPlugin } from "./store/storeData";
 import {
   clearStoreCatalogCache,
+  fetchStoreCatalog,
   peekStoreCatalogCache,
   rememberStoreCatalog,
 } from "../../hooks/storeCatalogCache";
@@ -186,7 +187,9 @@ export function StoreTab() {
     }
     if (!peekStoreCatalogCache()?.items?.length) setCatalogLoading(true);
     try {
-      const next = await api.duckyos_store_catalog();
+      // A fresh read (maxAgeMs 0), but shared with one already on the way, and with the held
+      // copy's etag: an unchanged catalog comes back as that copy, not 230 KB again.
+      const next = (await fetchStoreCatalog(api, { maxAgeMs: 0 })) ?? { ok: false, error: "Store unavailable", items: [] };
       // Never wipe a good catalog with a failed empty refresh (e.g. transient "forbidden"),
       // unless it belongs to another account: remember() is keyed and drops that copy.
       if (next.ok === false && !(next.items || []).length) {

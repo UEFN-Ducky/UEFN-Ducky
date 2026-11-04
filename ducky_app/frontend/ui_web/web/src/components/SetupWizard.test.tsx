@@ -30,7 +30,13 @@ const fake = vi.hoisted(() => {
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => fake.api }));
 vi.mock("../hooks/bridgeJobAsync", () => ({ runBridgeJob: fake.runBridgeJob }));
 vi.mock("../hooks/usePanelPushBus", () => ({ installPanelPushBus: () => {}, subscribePanelPush: () => () => {} }));
-vi.mock("../hooks/storeCatalogCache", () => ({ peekStoreCatalogCache: () => null, rememberStoreCatalog: () => {} }));
+vi.mock("../hooks/storeCatalogCache", () => ({
+  peekStoreCatalogCache: () => null,
+  rememberStoreCatalog: () => {},
+  // No shared cache in these tests: every read goes to the fake API.
+  fetchStoreCatalog: (api: { duckyos_store_catalog?: () => Promise<unknown> }) =>
+    Promise.resolve(api?.duckyos_store_catalog?.() ?? null),
+}));
 vi.mock("../hooks/usePluginContributions", () => ({
   usePluginContributions: () => ({ llm_providers: fake.providers, llm_coding_agents: [], ready: true }),
 }));

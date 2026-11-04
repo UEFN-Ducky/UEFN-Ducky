@@ -1802,6 +1802,10 @@ export interface DuckyOSStoreCatalog {
   ok?: boolean;
   error?: string;
   code?: string;
+  /** Version token of this catalog; pass it back to get `unchanged` instead of the whole catalog. */
+  etag?: string;
+  /** The copy whose etag was passed is still current (no items in this reply). */
+  unchanged?: boolean;
   /** Account this catalog was fetched as ("" signed out) — caches are keyed by it. */
   account?: string;
   /** The account has private audiences (the Shared category shows); missing = false. */
@@ -3617,7 +3621,7 @@ export interface PanelApi {
   remote_status?(): Promise<RemoteAccessStatus>;
   remote_set_enabled?(enabled: boolean): Promise<RemoteAccessStatus>;
   remote_sign_out_all?(): Promise<RemoteAccessStatus>;
-  duckyos_store_catalog?(): Promise<DuckyOSStoreCatalog>;
+  duckyos_store_catalog?(etag?: string): Promise<DuckyOSStoreCatalog>;
   duckyos_store_versions?(slug: string, latestVersion?: string): Promise<DuckyOSStoreVersions>;
   duckyos_store_download?(
     slug: string,

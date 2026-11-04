@@ -46,7 +46,12 @@ vi.mock("../hooks/storeInstallJobs", () => ({
   endStoreInstall: () => {},
   patchStoreJob: () => {},
 }));
-vi.mock("../hooks/storeCatalogCache", () => ({ peekStoreCatalogCache: () => null, rememberStoreCatalog: () => {} }));
+vi.mock("../hooks/storeCatalogCache", () => ({
+  peekStoreCatalogCache: () => null,
+  rememberStoreCatalog: () => {},
+  fetchStoreCatalog: (api: { duckyos_store_catalog?: () => Promise<unknown> }) =>
+    Promise.resolve(api?.duckyos_store_catalog?.() ?? null),
+}));
 vi.mock("../hooks/modelsCatalogCache", () => ({
   refreshModelsCatalog: vi.fn(),
   getCachedModels: () => [],

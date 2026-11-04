@@ -1,6 +1,7 @@
 import { runBridgeJob } from "../../hooks/bridgeJobAsync";
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { getApi } from "../../hooks/usePanelApi";
+import { fetchStoreCatalog } from "../../hooks/storeCatalogCache";
 import { savePermissionSettings } from "../../hooks/permissionSettings";
 import { onApiReady } from "../../hooks/onApiReady";
 import { Icons } from "../../icons/Icons";
@@ -171,8 +172,8 @@ function DefaultModelSection() {
     const api = getApi();
     if (!api?.duckyos_store_catalog) return;
     try {
-      const catalog = await api.duckyos_store_catalog();
-      setGatewayIcons(unsetDefaultGatewayIcons(catalog.items || []));
+      const catalog = await fetchStoreCatalog(api);
+      setGatewayIcons(unsetDefaultGatewayIcons(catalog?.items || []));
     } catch {
       /* catalog can be offline — the picker still works */
     }

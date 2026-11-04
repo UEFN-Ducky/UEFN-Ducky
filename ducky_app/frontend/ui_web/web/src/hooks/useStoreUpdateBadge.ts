@@ -3,7 +3,7 @@ import { setVisibleInterval } from "../utils/visibleInterval";
 import { onApiReady } from "./onApiReady";
 import { getApi } from "./usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "./usePanelPushBus";
-import { clearStoreCatalogCache, rememberStoreCatalog } from "./storeCatalogCache";
+import { clearStoreCatalogCache, fetchStoreCatalog } from "./storeCatalogCache";
 
 /** Shared Store-catalog update badge (Header + Settings + StoreTab). */
 
@@ -45,11 +45,9 @@ async function fetchUpdateCount(): Promise<void> {
   if (inFlight || typeof api?.duckyos_store_catalog !== "function") return;
   inFlight = true;
   try {
-    const next = await api.duckyos_store_catalog();
-    if (next?.ok !== false) {
-      rememberStoreCatalog(next);
-      setUpdateCount(countUpdates(next?.items));
-    }
+    // Shared with the Setup wizard and Settings: one read at boot, then only what changed.
+    const next = await fetchStoreCatalog(api);
+    if (next && next.ok !== false) setUpdateCount(countUpdates(next.items));
   } catch {
     /* keep last known count */
   } finally {

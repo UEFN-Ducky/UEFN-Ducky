@@ -420,7 +420,10 @@ class PanelApiStoreMixin:
         kick_all_remote()
         return self.remote_status()
 
-    def duckyos_store_catalog(self) -> dict[str, Any]:
+    def duckyos_store_catalog(self, etag: str = "") -> dict[str, Any]:
+        """The Store catalog with its ``etag``. A caller that passes the etag of the copy it
+        holds gets ``{"ok": true, "unchanged": true, "etag": ...}`` while nothing changed: the
+        catalog carries every icon (~230 KB), and the badge re-read it every 10 minutes."""
         # Store is core — never gated by the Account plugin.
         from frontend.duckyos_account import DuckyOSAccountError, account_key, store_catalog
 
@@ -435,7 +438,13 @@ class PanelApiStoreMixin:
             # Signed in/out mid-fetch: this copy belongs to the previous account.
             account = account_key()
             result = {"ok": False, "error": "Account changed", "code": "account_changed", "items": []}
-        return _cache_store_catalog(result, account)
+        result = _cache_store_catalog(result, account)
+        if not isinstance(result, dict) or result.get("ok") is False:
+            return result
+        tag = reply_etag(_encode_reply({**result, "etag": None}))
+        if etag and etag == tag:
+            return {"ok": True, "unchanged": True, "etag": tag, "account": result.get("account")}
+        return {**result, "etag": tag}
 
     def duckyos_store_versions(self, slug: str, latest_version: str = "") -> dict[str, Any]:
         from frontend.duckyos_account import DuckyOSAccountError, store_item_versions

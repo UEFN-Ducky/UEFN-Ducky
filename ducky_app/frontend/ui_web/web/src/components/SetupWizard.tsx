@@ -9,7 +9,7 @@ import { createPortal } from "react-dom";
 import { getApi } from "../hooks/usePanelApi";
 import { usePluginContributions, type PluginLlmProvider } from "../hooks/usePluginContributions";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
-import { peekStoreCatalogCache, rememberStoreCatalog } from "../hooks/storeCatalogCache";
+import { fetchStoreCatalog, peekStoreCatalogCache } from "../hooks/storeCatalogCache";
 import { refreshModelsCatalog } from "../hooks/modelsCatalogCache";
 import { usageTrack } from "../hooks/usageTrack";
 import { Icons } from "../icons/Icons";
@@ -113,14 +113,13 @@ function useStoreItems(): Record<string, DuckyOSStoreItemDto> {
     let timer = 0;
     const api = getApi();
     if (!api || typeof api.duckyos_store_catalog !== "function") return;
-    const fetchCatalog = api.duckyos_store_catalog.bind(api);
     // The catalog carries every icon: a slow link can time it out, so try again a few times.
+    // fetchStoreCatalog shares the read with the Store badge (one 230 KB read at boot, not two).
     const load = (attempt: number): void => {
-      void Promise.resolve(fetchCatalog())
+      void fetchStoreCatalog(api)
         .then((next) => {
           if (!alive) return;
           if (!next || next.ok === false || !next.items?.length) throw new Error("no catalog");
-          rememberStoreCatalog(next);
           setItems(index(next.items));
         })
         .catch(() => {
