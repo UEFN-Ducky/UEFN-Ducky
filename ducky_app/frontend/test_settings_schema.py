@@ -69,3 +69,13 @@ def test_reply_length_validates_to_short():
     s.voice_reply_length = "rambling"
     s.validate()
     assert s.voice_reply_length == "short"
+
+
+def test_fresh_install_shares_one_tool_server(monkeypatch):
+    # Off, each running agent got its own ~0.6 GB tool server (Nov 4 2026, 300 seats: PC commit full).
+    from backend.bridge import shared_mcp
+
+    monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
+    monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
+    assert PanelSettings().shared_mcp is True
+    assert shared_mcp.enabled(PanelSettings())

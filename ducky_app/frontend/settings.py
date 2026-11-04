@@ -412,8 +412,10 @@ class PanelSettings:
     """First-run setup: "" never needed, "open" a fresh install's setup until Finish (it
     reopens after a restart), "done" finished."""
 
-    shared_mcp: bool = False
-    """Prototype: one FastMCP daemon for multiple IDE adapters. Off by default; env UEFN_DUCKY_SHARED_MCP wins."""
+    shared_mcp: bool = True
+    """One FastMCP daemon for every IDE adapter; env UEFN_DUCKY_SHARED_MCP wins. On by default: Nov 4 2026
+    a fresh install with it off gave each running agent its own tool server (~0.6 GB commit each), and a
+    300-seat burst took the PC to 103.5 of 104.2 GB commit."""
 
     follow_code_enabled: bool = False
     """Play the agent's file walkthrough in the editor (content sync always happens). Off unless the user turns it on."""
@@ -621,7 +623,7 @@ class PanelSettings:
             or self.starter_llm_gateways_seeded
             or self.welcome_ducky_offered
             or self.first_run_setup
-            or self.shared_mcp
+            or not self.shared_mcp
             or self.follow_code_enabled
             or self.follow_code_off_migrated
             or self.follow_code_speed != "normal"

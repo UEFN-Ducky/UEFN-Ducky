@@ -387,7 +387,7 @@ FIELD_META: dict[str, FieldMeta] = {
         "Shared MCP backend",
         "internal",
         settable=True,
-        description="Prototype one FastMCP daemon for IDE adapters. Off by default. UEFN_DUCKY_SHARED_MCP overrides.",
+        description="One FastMCP daemon for every IDE adapter. On by default. UEFN_DUCKY_SHARED_MCP overrides.",
     ),
 }
 
