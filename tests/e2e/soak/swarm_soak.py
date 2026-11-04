@@ -993,6 +993,27 @@ def stop_tree(pid: int) -> None:
 # ----------------------------------------------------------------------------- the run
 
 
+AGENT_READY_S = 120.0
+
+
+def create_chat(panel: Panel, config: dict[str, Any], ready_s: float = AGENT_READY_S,
+                pause: float = 2.0, **args: Any) -> dict[str, Any]:
+    """create_conversation, retried while the coding agent's plugin is still loading.
+
+    The app checks the chat's model when it is created; until the anthropic plugin has
+    registered ``claude_code`` that check says the model is missing."""
+    deadline = time.monotonic() + ready_s
+    while True:
+        try:
+            return panel.call("create_conversation", config=config, **args)
+        except RuntimeError as exc:
+            if "missing or ambiguous" not in str(exc) and "unavailable" not in str(exc):
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(pause)
+
+
 def seed(panel: Panel, box: Path, launcher: Path | None, agents: int) -> list[dict[str, str]]:
     """First-run done, stub CLI set, one group (lead + members). Returns [{id, name}], lead first."""
     panel.call("finish_first_run_setup")
@@ -1006,9 +1027,9 @@ def seed(panel: Panel, box: Path, launcher: Path | None, agents: int) -> list[di
         name = "Soak lead" if i == 0 else f"Soak member {i}"
         # The chat's own model, as a profile-spawned member has: a turn the broker starts
         # (agent_send) passes no model, and a chat without one waits for the person to pick.
-        conv = panel.call("create_conversation", folder_id=group["folder_id"],
-                          config={"title": name, "favorite_models": [f"claude_code:{MODEL}"],
-                                  "coding_agent": "claude_code"})
+        conv = create_chat(panel, folder_id=group["folder_id"],
+                           config={"title": name, "favorite_models": [f"claude_code:{MODEL}"],
+                                   "coding_agent": "claude_code"})
         panel.call("group_add_member", group_id=group["id"], conv_id=conv["id"], as_leader=i == 0)
         panel.call("set_agent_allow_everything", conv_id=conv["id"], on=True)
         chats.append({"id": conv["id"], "name": name})
@@ -1278,7 +1299,9 @@ def main() -> int:
         print("pip install psutil", file=sys.stderr)
         return 2
 
-    exe, box, out = Path(args.exe).resolve(), Path(args.box), Path(args.out)
+    # Absolute: the app runs with the box as its working folder, so a relative box would
+    # put its AppData in box/box while the plugin and stub CLI sit in box.
+    exe, box, out = Path(args.exe).resolve(), Path(args.box).resolve(), Path(args.out).resolve()
     if args.scenario == "interrupt":
         args.agents = 3
     if args.scenario == "memory" and not args.memory_mb:

@@ -412,3 +412,33 @@ def test_remove_tree_clears_read_only_files(tmp_path):
     os.chmod(obj, stat.S_IREAD)
     soak.remove_tree(tmp_path / "box")
     assert not (tmp_path / "box").exists()
+
+
+class _LoadingPanel:
+    """create_conversation says the model is missing until the plugin 'loads'."""
+
+    def __init__(self, fails, error="create_conversation: Saved model 'claude_code:x' is missing or ambiguous."):
+        self.fails, self.error, self.calls = fails, error, []
+
+    def call(self, method, **args):
+        self.calls.append((method, args))
+        if len(self.calls) <= self.fails:
+            raise RuntimeError(self.error)
+        return {"id": "c1"}
+
+
+def test_create_chat_waits_for_the_coding_agent_plugin():
+    panel = _LoadingPanel(fails=2)
+    assert soak.create_chat(panel, config={"title": "t"}, pause=0, folder_id="f") == {"id": "c1"}
+    assert len(panel.calls) == 3
+    assert panel.calls[-1] == ("create_conversation", {"config": {"title": "t"}, "folder_id": "f"})
+
+
+def test_create_chat_gives_up_and_never_retries_other_errors():
+    import pytest
+    with pytest.raises(RuntimeError, match="missing"):
+        soak.create_chat(_LoadingPanel(fails=99), config={}, ready_s=0, pause=0)
+    other = _LoadingPanel(fails=1, error="create_conversation: folder not found")
+    with pytest.raises(RuntimeError, match="folder not found"):
+        soak.create_chat(other, config={}, pause=0)
+    assert len(other.calls) == 1
