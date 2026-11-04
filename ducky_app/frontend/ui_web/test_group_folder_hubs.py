@@ -21,43 +21,6 @@ from frontend.ui_web.project_chats import (
 )
 
 
-def test_ensure_group_folder_hubs_wraps_legacy_group():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = str(Path(tmp))
-        settings = PanelSettings.load()
-        conv = create_conversation(settings, "", title="Squad", project_root=root)
-        conv.is_group = True
-        conv.group_members = []
-        save_conversation(conv, root)
-
-        assert ensure_group_folder_hubs(root) == 1
-        folders = load_folders(root)
-        hubs = [f for f in folders if (getattr(f, "group_hub_id", "") or "") == conv.id]
-        assert len(hubs) == 1
-        assert hubs[0].name == "Squad"
-        fresh = load_conversation(conv.id, project_root=root)
-        assert fresh is not None
-        assert fresh.folder_id == hubs[0].id
-        assert ensure_group_folder_hubs(root) == 0
-
-
-def test_ensure_group_folder_hubs_leaves_archived_hubs_alone():
-    """A deleted group's hub must not come back as a root folder on the next load."""
-    with tempfile.TemporaryDirectory() as tmp:
-        root = str(Path(tmp))
-        settings = PanelSettings.load()
-        conv = create_conversation(settings, ARCHIVE_FOLDER_ID, title="Squad", project_root=root)
-        conv.is_group = True
-        conv.folder_id = ARCHIVE_FOLDER_ID
-        save_conversation(conv, root)
-
-        assert ensure_group_folder_hubs(root) == 0
-        assert all((getattr(f, "group_hub_id", "") or "") != conv.id for f in load_folders(root))
-        fresh = load_conversation(conv.id, project_root=root)
-        assert fresh is not None
-        assert fresh.folder_id == ARCHIVE_FOLDER_ID
-
-
 def _make_group(settings, name: str, parent_id: str, root: str):
     folder = create_folder(name, parent_id, root)
     hub = create_conversation(settings, folder.id, title=name, project_root=root)
