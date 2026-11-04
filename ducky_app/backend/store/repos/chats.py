@@ -339,44 +339,98 @@ def _write_parts(
         )
 
 
-def _part_reader(packed: dict[str, bytes], account: str) -> Callable[[str], str | None]:
-    inflated: dict[str, str] = {}
+# Opened part text, process-wide: every load of a chat opened (DPAPI) each of its parts
+# again, and the team keeper's passes spent a third of a core on it. A part is named by
+# its content (a digest keyed per account), so an entry never goes stale; the account is
+# in the key too, so one account's text is never handed to another. Memory only.
+_PARTS_MAX_CHARS = 32 * 1024 * 1024
+_parts_lock = threading.Lock()
+_parts_open: OrderedDict[tuple[str, str], str] = OrderedDict()
+_parts_chars = 0
+
+
+def _part_cached(account: str, digest: str) -> str | None:
+    with _parts_lock:
+        text = _parts_open.get((account, digest))
+        if text is not None:
+            _parts_open.move_to_end((account, digest))
+        return text
+
+
+def _part_keep(account: str, digest: str, text: str) -> None:
+    global _parts_chars
+    if len(text) > _PARTS_MAX_CHARS:
+        return
+    with _parts_lock:
+        key = (account, digest)
+        if key in _parts_open:
+            return
+        _parts_open[key] = text
+        _parts_chars += len(text)
+        while _parts_chars > _PARTS_MAX_CHARS:
+            _, dropped = _parts_open.popitem(last=False)
+            _parts_chars -= len(dropped)
+
+
+def forget_parts() -> None:
+    """Drop every opened part (a sign-out)."""
+    global _parts_chars
+    with _parts_lock:
+        _parts_open.clear()
+        _parts_chars = 0
+
+
+def _part_reader(packed: Callable[[], dict[str, bytes]], account: str) -> Callable[[str], str | None]:
+    """Part text by digest: from the opened-part cache, else read (*packed*, once) and opened."""
+    loaded: list[dict[str, bytes]] = []
 
     def part_text(digest: str) -> str | None:
-        text = inflated.get(digest)
-        if text is None and digest in packed:
-            try:
-                raw = account_rows.open_blob(packed[digest], account)
-                text = inflated[digest] = zlib.decompress(raw).decode("utf-8")
-            except (zlib.error, UnicodeDecodeError):
-                return None
+        text = _part_cached(account, digest)
+        if text is not None:
+            return text
+        if not loaded:
+            loaded.append(packed())
+        blob = loaded[0].get(digest)
+        if blob is None:
+            return None
+        try:
+            text = zlib.decompress(account_rows.open_blob(blob, account)).decode("utf-8")
+        except (zlib.error, UnicodeDecodeError):
+            return None
+        _part_keep(account, digest, text)
         return text
 
     return part_text
 
 
 def _conv_parts(conn, conv_id: str, account: str) -> Callable[[str], str | None]:
-    """Part JSON by hash for one chat, read in one query and opened on first use."""
-    packed = {
-        str(h): bytes(data)
-        for h, data in conn.execute(
-            "SELECT hash, data FROM message_parts WHERE hash IN (SELECT r.hash FROM message_part_refs r "
-            "JOIN messages m ON m.id = r.message_id WHERE m.conv_id=?)",
-            (conv_id,),
-        )
-    }
+    """Part JSON by hash for one chat: cached ones need no read; the rest are read in one
+    query on the first miss and opened on first use."""
+
+    def packed() -> dict[str, bytes]:
+        return {
+            str(h): bytes(data)
+            for h, data in conn.execute(
+                "SELECT hash, data FROM message_parts WHERE hash IN (SELECT r.hash FROM message_part_refs r "
+                "JOIN messages m ON m.id = r.message_id WHERE m.conv_id=?)",
+                (conv_id,),
+            )
+        }
+
     return _part_reader(packed, account)
 
 
 def _message_parts(conn, message_id: int, account: str) -> Callable[[str], str | None]:
-    packed = {
-        str(h): bytes(data)
-        for h, data in conn.execute(
-            "SELECT p.hash, p.data FROM message_parts p JOIN message_part_refs r ON r.hash = p.hash "
-            "WHERE r.message_id=?",
-            (message_id,),
-        )
-    }
+    def packed() -> dict[str, bytes]:
+        return {
+            str(h): bytes(data)
+            for h, data in conn.execute(
+                "SELECT p.hash, p.data FROM message_parts p JOIN message_part_refs r ON r.hash = p.hash "
+                "WHERE r.message_id=?",
+                (message_id,),
+            )
+        }
+
     return _part_reader(packed, account)
 
 
@@ -1178,6 +1232,34 @@ def messages_get(conv_id: str) -> list[dict[str, Any]]:
     if not _owned(conn, conv_id, account):
         return []
     return _messages(conn, conv_id, account)
+
+
+def last_reply(conv_id: str) -> tuple[str, int]:
+    """(the newest non-empty assistant ``content``, stripped; how many assistant rows), opening
+    only the rows from the end back to that reply. The team keeper looks at every member each
+    minute: loading whole chats for this opened every row and part of each."""
+    account = account_rows.current()
+    conn = db.connect()
+    if not _owned(conn, conv_id, account):
+        return "", 0
+    count = int(conn.execute(
+        "SELECT count(*) FROM messages WHERE conv_id=? AND role='assistant'", (conv_id,)
+    ).fetchone()[0])
+    rows = conn.execute(
+        "SELECT id, seq, hash, body, fmt FROM messages WHERE conv_id=? AND role='assistant' ORDER BY seq DESC",
+        (conv_id,),
+    )
+    for row_id, seq, h, body, fmt in rows:
+        message = _opened_get(conv_id, int(seq), str(h))
+        if message is None:
+            try:
+                message = _message(str(body), int(fmt), account, lambda: _message_parts(conn, int(row_id), account))
+            except ValueError:
+                continue
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str) and content.strip():
+            return content.strip(), count
+    return "", count
 
 
 def conv_msg_rev(conv_id: str) -> int | None:
