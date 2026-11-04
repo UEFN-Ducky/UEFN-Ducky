@@ -50,6 +50,11 @@ def actors(monkeypatch):
     lookup = types.ModuleType("listener.lookup")
     lookup.invalidate = lambda: None
     listener.lookup = lookup
+    paging_spec = importlib.util.spec_from_file_location("listener.paging", _HERE / "paging.py")
+    paging = importlib.util.module_from_spec(paging_spec)
+    paging_spec.loader.exec_module(paging)
+    listener.paging = paging
+    monkeypatch.setitem(sys.modules, "listener.paging", paging)
     device_editor = types.ModuleType("listener.device_editor")
     device_editor._device_kind = lambda a: ""
     device_scale = types.ModuleType("listener.device_scale")

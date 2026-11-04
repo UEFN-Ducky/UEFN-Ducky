@@ -1164,33 +1164,45 @@ def foliage_scatter(
     }
 
 
-def foliage_get_stats(folder_prefix: str = "") -> dict:
-    """Summarize tagged worldgen foliage/HISM actors."""
+def _foliage_label(a) -> str:
+    try:
+        return a.get_actor_label() or ""
+    except Exception:
+        return ""
+
+
+def foliage_get_stats(folder_prefix: str = "", offset: int = 0, limit: Optional[int] = None) -> dict:
+    """Summarize tagged worldgen foliage/HISM actors, a page at a time (instance counts are
+    read for the page's actors only)."""
+    from listener import paging
+
     folder_prefix = folder_prefix or _DEFAULT_FOLDER
-    actors = []
-    for a in _find_tagged_actors(folder_prefix=folder_prefix):
-        label = ""
-        try:
-            label = a.get_actor_label() or ""
-        except Exception:
-            continue
-        if not any(k in label for k in ("HISM", "Foliage", "InstancedFoliage", "WG_")):
-            continue
-        entry = {"actor_path": a.get_path_name(), "label": label, "class": a.get_class().get_name()}
-        try:
-            hisms = a.get_components_by_class(unreal.HierarchicalInstancedStaticMeshComponent)
-            entry["hism_components"] = len(hisms or [])
-            total = 0
-            for c in hisms or []:
-                try:
-                    total += int(c.get_instance_count())
-                except Exception:
-                    pass
-            entry["instance_count"] = total if total > 0 else (1 if "Foliage" in label or "HISM" in label else 0)
-        except Exception:
-            entry["instance_count"] = 1 if "Foliage" in label else 0
-        actors.append(entry)
-    return {"actors": actors, "count": len(actors), "folder_prefix": folder_prefix}
+    paged = paging.page(
+        _find_tagged_actors(folder_prefix=folder_prefix),
+        _foliage_entry,
+        offset=offset,
+        limit=limit,
+        keep=lambda a: any(k in _foliage_label(a) for k in ("HISM", "Foliage", "InstancedFoliage", "WG_")),
+    )
+    return paging.reply("actors", paged, folder_prefix=folder_prefix)
+
+
+def _foliage_entry(a) -> dict:
+    label = _foliage_label(a)
+    entry = {"actor_path": a.get_path_name(), "label": label, "class": a.get_class().get_name()}
+    try:
+        hisms = a.get_components_by_class(unreal.HierarchicalInstancedStaticMeshComponent)
+        entry["hism_components"] = len(hisms or [])
+        total = 0
+        for c in hisms or []:
+            try:
+                total += int(c.get_instance_count())
+            except Exception:
+                pass
+        entry["instance_count"] = total if total > 0 else (1 if "Foliage" in label or "HISM" in label else 0)
+    except Exception:
+        entry["instance_count"] = 1 if "Foliage" in label else 0
+    return entry
 
 
 def foliage_clear_generated(folder_prefix: str = "", foliage_type_paths: Optional[List[str]] = None) -> dict:

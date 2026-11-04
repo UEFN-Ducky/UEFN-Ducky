@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from listener import lookup
+from listener import lookup, paging
 from listener.dispatch import register
 from listener.serialize import ALL_ACTOR_FIELDS, serialize, serialize_actor
 
@@ -15,21 +15,17 @@ def list_fort_actors(
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
 ) -> dict:
-    """List level actors whose class starts with Fort (devices, props, etc.)."""
+    """List level actors whose class starts with Fort (devices, props, etc.), a page at a time."""
     # lookup.actor_list() already filters invalid/pending-kill actors, so get_class() is safe.
-    actors = [a for a in lookup.actor_list() if a.get_class().get_name().startswith(class_prefix)]
-    total = len(actors)
-    if offset > 0:
-        actors = actors[offset:]
-    if limit is not None and limit >= 0:
-        actors = actors[:limit]
     field_list = [f for f in (fields or []) if f in ALL_ACTOR_FIELDS] or None
-    return {
-        "actors": [serialize_actor(a, field_list) for a in actors],
-        "count": len(actors),
-        "total": total,
-        "class_prefix": class_prefix,
-    }
+    paged = paging.page(
+        lookup.actor_list(),
+        lambda a: serialize_actor(a, field_list),
+        offset=offset,
+        limit=limit,
+        keep=lambda a: a.get_class().get_name().startswith(class_prefix),
+    )
+    return paging.reply("actors", paged, class_prefix=class_prefix)
 
 
 def get_fort_actor_info(actor_path: str, properties: Optional[List[str]] = None) -> dict:

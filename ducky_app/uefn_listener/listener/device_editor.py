@@ -243,26 +243,30 @@ def list_creative_devices(
     class_filter: str = "",
     label_filter: str = "",
     limit: int = 200,
+    offset: int = 0,
 ) -> dict:
-    devices = []
-    for actor in lookup.actor_list():
+    """A page of Creative devices: the filters read class and label only; the options
+    component (the costly part of a row) is read for the page's rows alone."""
+    from listener import paging
+
+    needle = (label_filter or "").lower()
+
+    def _keep(actor) -> bool:
         if not is_creative_device(actor):
-            continue
-        cls = actor.get_class().get_name()
-        label = actor.get_actor_label()
-        if class_filter and class_filter not in cls:
-            continue
-        if label_filter and label_filter.lower() not in label.lower():
-            continue
+            return False
+        if class_filter and class_filter not in actor.get_class().get_name():
+            return False
+        return not needle or needle in (actor.get_actor_label() or "").lower()
+
+    def _row(actor) -> dict:
         kind = _device_kind(actor)
         comp = _get_toy_options(actor)
-        option_count = len(_overrides_map(comp)) if comp else 0
         row = {
-            "label": label,
-            "class": cls,
+            "label": actor.get_actor_label(),
+            "class": actor.get_class().get_name(),
             "path": actor.get_path_name(),
             "kind": kind,
-            "option_count": option_count,
+            "option_count": len(_overrides_map(comp)) if comp else 0,
         }
         if kind == "verse_script":
             try:
@@ -271,10 +275,10 @@ def list_creative_devices(
                     row["script_class"] = script.get_class().get_name()
             except Exception:
                 pass
-        devices.append(row)
-        if len(devices) >= limit:
-            break
-    return {"devices": devices, "count": len(devices)}
+        return row
+
+    paged = paging.page(lookup.actor_list(), _row, offset=offset, limit=limit, keep=_keep, default=200)
+    return paging.reply("devices", paged)
 
 
 def get_device_settings(

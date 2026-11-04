@@ -16,8 +16,9 @@ def cmd_list_creative_devices(
     class_filter: str = "",
     label_filter: str = "",
     limit: int = 200,
+    offset: int = 0,
 ) -> dict:
-    return list_creative_devices(class_filter=class_filter, label_filter=label_filter, limit=limit)
+    return list_creative_devices(class_filter=class_filter, label_filter=label_filter, limit=limit, offset=offset)
 
 
 @register("get_device_settings")

@@ -5,6 +5,7 @@ from typing import Any, List, Optional
 import unreal
 
 from listener.asset_resolve import resolve_asset_class
+from listener import paging
 from listener.dispatch import register
 from listener.project_paths import pin_project_asset_path
 from listener.serialize import serialize
@@ -68,28 +69,18 @@ def cmd_list_assets(
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
 ) -> dict:
+    """A page of assets (default :data:`paging.DEFAULT_LIMIT`); rows are built for the page only."""
     found = _registry_assets(directory, recursive, class_filter)
-    truncated = len(found) > _SEARCH_SCAN_CAP
-    found = found[:_SEARCH_SCAN_CAP]
-    total = len(found)
-    if offset > 0:
-        found = found[offset:]
-    if limit is not None and limit >= 0:
-        found = found[:limit]
-    if fields:
-        serialized = [
-            _serialize_from_data(ad, _asset_path_from_data(ad), fields) for ad in found
-        ]
-    else:
-        serialized = [_asset_path_from_data(ad) for ad in found]
-    return {
-        "assets": serialized,
-        "count": len(found),
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-        "truncated": truncated,
-    }
+    scan_capped = len(found) > _SEARCH_SCAN_CAP
+
+    def _row(ad: Any) -> Any:
+        path_str = _asset_path_from_data(ad)
+        return _serialize_from_data(ad, path_str, fields) if fields else path_str
+
+    paged = paging.page(found[:_SEARCH_SCAN_CAP], _row, offset=offset, limit=limit)
+    out = paging.reply("assets", paged)
+    out["truncated"] = bool(out["truncated"] or scan_capped)
+    return out
 
 
 @register("get_asset_info")
@@ -110,12 +101,9 @@ def cmd_get_asset_info(asset_path: str) -> dict:
 
 
 @register("get_selected_assets")
-def cmd_get_selected_assets() -> dict:
-    selected = unreal.EditorUtilityLibrary.get_selected_assets()
-    return {
-        "assets": [serialize(a) for a in selected],
-        "count": len(selected),
-    }
+def cmd_get_selected_assets(offset: int = 0, limit: Optional[int] = None) -> dict:
+    selected = unreal.EditorUtilityLibrary.get_selected_assets() or []
+    return paging.reply("assets", paging.page(selected, serialize, offset=offset, limit=limit))
 
 
 @register("rename_asset")
@@ -209,38 +197,26 @@ def cmd_search_assets(
     """
     found = _registry_assets(directory, recursive, class_name)
     needle = (search or "").strip().lower()
-    want = (offset + limit) if (limit is not None and limit >= 0) else _SEARCH_RESULT_CAP
-    results = []
-    scanned = 0
-    truncated = False
-    for ad in found:
-        if scanned >= _SEARCH_SCAN_CAP:
-            truncated = True
-            break
-        scanned += 1
+    scan = found[:_SEARCH_SCAN_CAP]
+
+    def _match(ad: Any) -> bool:
+        if not needle:
+            return True
         path_str = _asset_path_from_data(ad)
-        if needle:
-            asset_name = str(getattr(ad, "asset_name", "") or "")
-            if needle not in path_str.lower() and needle not in asset_name.lower():
-                continue
+        asset_name = str(getattr(ad, "asset_name", "") or "")
+        return needle in path_str.lower() or needle in asset_name.lower()
+
+    def _row(ad: Any) -> Any:
         if fields:
-            results.append(_serialize_from_data(ad, path_str, fields))
-        else:
-            results.append(serialize(ad))
-        if len(results) >= want:
-            truncated = truncated or scanned < len(found)
-            break
-    total = len(results)
-    if offset > 0:
-        results = results[offset:]
-    if limit is not None and limit >= 0:
-        results = results[:limit]
-    return {
-        "assets": results,
-        "count": len(results),
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-        "truncated": truncated,
-        "scanned": scanned,
-    }
+            return _serialize_from_data(ad, _asset_path_from_data(ad), fields)
+        return serialize(ad)
+
+    # Rows before ``offset`` are skipped unbuilt; the walk stops once the page is full.
+    paged = paging.page(
+        scan, _row, offset=offset, limit=limit, keep=_match, default=_SEARCH_RESULT_CAP, count_all=False
+    )
+    out = paging.reply("assets", paged)
+    out.pop("total_exact", None)
+    out["truncated"] = bool(out["truncated"] or len(found) > _SEARCH_SCAN_CAP)
+    out["scanned"] = min(len(found), _SEARCH_SCAN_CAP)
+    return out

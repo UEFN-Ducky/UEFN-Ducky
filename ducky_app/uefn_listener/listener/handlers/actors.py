@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import unreal
 
-from listener import lookup
+from listener import lookup, paging
 from listener.device_editor import _device_kind
 from listener.device_scale import refuse_if_creative_device_scale
 from listener.dispatch import register
@@ -20,41 +20,37 @@ def cmd_get_all_actors(
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
 ) -> dict:
-    actors = lookup.actor_list()
-    if class_filter:
-        actors = [a for a in actors if a.get_class().get_name() == class_filter]
-    if class_prefix:
-        actors = [a for a in actors if a.get_class().get_name().startswith(class_prefix)]
-    if label_filter:
-        needle = label_filter.lower()
-        actors = [
-            a
-            for a in actors
-            if needle in (a.get_actor_label() or "").lower()
-            or needle in (a.get_name() or "").lower()
-        ]
-    total = len(actors)
-    if offset > 0:
-        actors = actors[offset:]
-    if limit is not None and limit >= 0:
-        actors = actors[:limit]
-    field_list = None
-    if fields:
-        field_list = [f for f in fields if f in ALL_ACTOR_FIELDS]
-    return {
-        "actors": [serialize_actor(a, field_list) for a in actors],
-        "count": len(actors),
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-    }
+    """A page of level actors (default :data:`paging.DEFAULT_LIMIT`): filters read only the
+    class name / label of each actor, and only the page's rows are serialized."""
+    needle = (label_filter or "").lower()
+
+    def _keep(a) -> bool:
+        if class_filter or class_prefix:
+            cls = a.get_class().get_name()
+            if class_filter and cls != class_filter:
+                return False
+            if class_prefix and not cls.startswith(class_prefix):
+                return False
+        if needle:
+            return needle in (a.get_actor_label() or "").lower() or needle in (a.get_name() or "").lower()
+        return True
+
+    field_list = [f for f in fields if f in ALL_ACTOR_FIELDS] if fields else None
+    paged = paging.page(
+        lookup.actor_list(),
+        lambda a: serialize_actor(a, field_list),
+        offset=offset,
+        limit=limit,
+        keep=_keep if (class_filter or class_prefix or needle) else None,
+    )
+    return paging.reply("actors", paged)
 
 
 @register("get_selected_actors")
-def cmd_get_selected_actors() -> dict:
+def cmd_get_selected_actors(offset: int = 0, limit: Optional[int] = None) -> dict:
     actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    actors = actor_sub.get_selected_level_actors()
-    return {"actors": [serialize_actor(a) for a in actors], "count": len(actors)}
+    actors = actor_sub.get_selected_level_actors() or []
+    return paging.reply("actors", paging.page(actors, serialize_actor, offset=offset, limit=limit))
 
 
 def _load_placeable(asset_path: str):

@@ -80,21 +80,35 @@ def set_actor_tags(actor_path: str, tags: List[str]) -> dict:
     return {"actor_path": actor.get_path_name(), "tags": tags}
 
 
-def get_actors_in_radius(center: List[float], radius: float, class_filter: str = "") -> dict:
-    """List actors within ``radius`` of a world-space ``center`` point."""
+def get_actors_in_radius(
+    center: List[float],
+    radius: float,
+    class_filter: str = "",
+    offset: int = 0,
+    limit: Optional[int] = None,
+) -> dict:
+    """List actors within ``radius`` of a world-space ``center`` point, a page at a time."""
+    from listener import paging
+
     if not center or len(center) < 3:
         raise ValueError("center must be [x, y, z]")
     cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
     r2 = float(radius) * float(radius)
-    out = []
-    for a in lookup.actor_list():
+
+    def _inside(a) -> bool:
         if class_filter and a.get_class().get_name() != class_filter:
-            continue
+            return False
         loc = a.get_actor_location()
-        d2 = (loc.x - cx) ** 2 + (loc.y - cy) ** 2 + (loc.z - cz) ** 2
-        if d2 <= r2:
-            out.append(serialize_actor(a, ["label", "class", "path", "location"]))
-    return {"center": {"x": cx, "y": cy, "z": cz}, "radius": float(radius), "actors": out, "count": len(out)}
+        return (loc.x - cx) ** 2 + (loc.y - cy) ** 2 + (loc.z - cz) ** 2 <= r2
+
+    paged = paging.page(
+        lookup.actor_list(),
+        lambda a: serialize_actor(a, ["label", "class", "path", "location"]),
+        offset=offset,
+        limit=limit,
+        keep=_inside,
+    )
+    return paging.reply("actors", paged, center={"x": cx, "y": cy, "z": cz}, radius=float(radius))
 
 
 def _parent_socket_names(parent, cap: int = 40) -> list:
