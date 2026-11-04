@@ -80,6 +80,7 @@ if (WINDOW_ID !== "main") {
 export function releaseAllTabs(): void {
   if (reportTimer !== null) window.clearTimeout(reportTimer);
   reportTimer = null;
+  reportGen += 1; // a report still waiting for idle must not re-claim the tabs
   lastReported = new Set();
   localOpenTabIds = new Set();
   log("releasing all tabs (window closing)");
@@ -94,6 +95,8 @@ export function reportOpenTabsNow(tabIds: string[]): void {
   const ids = registryTabIds(tabIds);
   if (reportTimer !== null) window.clearTimeout(reportTimer);
   reportTimer = null;
+  reportGen += 1;
+  firstReport = false;
   if (sameIds(ids)) return;
   sendReport(ids);
   lastReported = new Set(ids);
@@ -106,7 +109,9 @@ export function reportOpenTabs(tabIds: string[]): void {
   localOpenTabIds = new Set(tabIds);
   const ids = registryTabIds(tabIds);
   if (reportTimer !== null) window.clearTimeout(reportTimer);
-  reportTimer = window.setTimeout(() => {
+  const mine = ++reportGen;
+  const send = () => {
+    if (mine !== reportGen) return; // a newer report replaced this one
     reportTimer = null;
     // Same tabs as last sent: nothing to report and nothing new to claim.
     if (sameIds(ids)) return;
@@ -115,7 +120,28 @@ export function reportOpenTabs(tabIds: string[]): void {
       if (!lastReported.has(id)) claim(id);
     }
     lastReported = new Set(ids);
-  }, 300);
+  };
+  if (firstReport) {
+    // The restored tabs at boot: report once the page is idle, not in the middle of startup
+    // (its reply waited 2.1 s on the busy page there). The 30 s window expiry has room.
+    firstReport = false;
+    reportTimer = window.setTimeout(() => whenIdle(send), BOOT_REPORT_DELAY_MS);
+    return;
+  }
+  reportTimer = window.setTimeout(send, 300);
+}
+
+let firstReport = true;
+let reportGen = 0;
+/** The first report waits at least this long, then for an idle moment (at most `BOOT_IDLE_MAX_MS`). */
+export const BOOT_REPORT_DELAY_MS = 1000;
+const BOOT_IDLE_MAX_MS = 2000;
+
+function whenIdle(fn: () => void): void {
+  const idle = (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number })
+    .requestIdleCallback;
+  if (typeof idle === "function") idle.call(window, fn, { timeout: BOOT_IDLE_MAX_MS });
+  else fn();
 }
 
 /** VS Code single-tab rule: if another window owns the tab, raise it there;
