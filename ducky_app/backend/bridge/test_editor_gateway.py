@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -15,6 +16,14 @@ def _own_lease(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Each test gets its own lease file and a stub title lookup."""
     monkeypatch.setattr(editor_gateway, "_lease_path", lambda: tmp_path / "editor_lease.json")
     monkeypatch.setattr(editor_gateway, "_chat_title", lambda chat_id: {"lead": "Lead: Limo Ride"}.get(chat_id, chat_id))
+
+
+@pytest.fixture(autouse=True)
+def crash_watch(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Lines the gateway appends to the project's crash-watch memory."""
+    lines: list[str] = []
+    monkeypatch.setattr(editor_gateway, "_log_crash_watch", lines.append)
+    return lines
 
 
 @pytest.fixture
@@ -152,6 +161,7 @@ def test_editor_process_tools_go_through_gateway(spy, monkeypatch: pytest.Monkey
     import frontend.window_view as window_view
     from backend.tools.panel import ducky_panel
 
+    monkeypatch.setattr(editor_gateway, "_ask_person", lambda chat_id, verb, reason: True)
     monkeypatch.setattr(ducky_panel, "_island_arg", lambda project: None)
     monkeypatch.setattr(window_view, "launch_uefn_project", lambda root: {"launched": True})
     monkeypatch.setattr(window_view, "close_uefn", lambda: {"closed": True})
@@ -165,3 +175,58 @@ def test_editor_process_tools_go_through_gateway(spy, monkeypatch: pytest.Monkey
         ("chat-1", "ducky_close_uefn", True),
         ("chat-1", "ducky_restart_uefn", True),
     ]
+
+
+def test_agent_restart_refused_without_the_persons_yes(clock, crash_watch, monkeypatch) -> None:
+    asked: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(editor_gateway, "_ask_person", lambda *a: asked.append(a) or False)
+    ran: list[str] = []
+    with pytest.raises(editor_gateway.EditorProcessRefused, match="did not allow"):
+        editor_gateway.call_editor_process(
+            "c4c94232-aaaa", "ducky_restart_uefn", "UEFN closed during build", lambda: ran.append("x")
+        )
+    assert ran == []
+    assert asked == [("c4c94232-aaaa", "restart", "UEFN closed during build")]
+    assert crash_watch[0].endswith("restart asked by c4c94232: 'UEFN closed during build' -> person said no (or did not answer)")
+
+
+def test_agent_restart_runs_after_yes_and_is_logged(clock, crash_watch, monkeypatch) -> None:
+    monkeypatch.setattr(editor_gateway, "_ask_person", lambda *a: True)
+    out = editor_gateway.call_editor_process(
+        "c4c94232-aaaa", "ducky_restart_uefn", "UEFN closed during build", lambda: "restarted"
+    )
+    assert out == "restarted"
+    stamp, rest = crash_watch[0].split(" ", 1)
+    assert len(stamp) == 5 and stamp[2] == ":"
+    assert rest == "restart asked by c4c94232: 'UEFN closed during build' -> person said yes"
+
+
+def test_the_persons_own_restart_is_not_asked_but_logged(crash_watch, monkeypatch) -> None:
+    monkeypatch.setattr(editor_gateway, "_ask_person", lambda *a: pytest.fail("must not ask the person"))
+    assert editor_gateway.call_editor_process("", "ducky_close_uefn", "", lambda: "closed") == "closed"
+    assert crash_watch[0].endswith("close asked by the person -> by the person")
+
+
+def test_ask_person_reads_the_card_answer(monkeypatch) -> None:
+    from backend.tools.panel import panel_ui
+
+    replies = iter([
+        {"ok": True, "answers": {"editor_process": {"selected": ["yes"]}}},
+        {"ok": True, "answers": {"editor_process": {"selected": ["no"]}}},
+        {"error": "timed out waiting for the person"},
+    ])
+    monkeypatch.setattr(panel_ui, "ducky_ask_user", lambda questions, title="": json.dumps(next(replies)))
+    assert editor_gateway._ask_person("lead", "restart", "why") is True
+    assert editor_gateway._ask_person("lead", "restart", "why") is False
+    assert editor_gateway._ask_person("lead", "restart", "why") is False
+
+
+def test_panel_tool_reports_a_refused_restart(monkeypatch) -> None:
+    from backend.tools.panel import ducky_panel
+
+    monkeypatch.setenv("DUCKY_CONV_ID", "chat-9")
+    monkeypatch.setattr(editor_gateway, "_ask_person", lambda *a: False)
+    monkeypatch.setattr(ducky_panel, "_island_arg", lambda project: None)
+    out = json.loads(ducky_panel.ducky_restart_uefn(timeout=1, reason="test"))
+    assert out["ok"] is False and out["cancelled"] is True
+    assert "did not allow" in out["error"]

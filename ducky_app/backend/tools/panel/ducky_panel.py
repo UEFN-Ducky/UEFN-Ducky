@@ -523,15 +523,21 @@ def ducky_set_project(path: str = "", name: str = "", pretty: bool = False) -> s
     return tool_json(info, pretty=pretty)
 
 
-def _through_gateway(op: str, fn):
-    """Run an editor-process call (launch / close / restart) through the editor gateway."""
+def _through_gateway(op: str, fn, reason: str = ""):
+    """Run an editor-process call (launch / close / restart) through the editor gateway.
+
+    An agent's call waits for the person's yes; a no, a timeout or another chat's lease
+    comes back as ``{ok: false, cancelled: true, error}`` instead of an exception."""
     from backend.bridge import editor_gateway
 
-    return editor_gateway.call(editor_gateway.current_chat_id(), op, True, fn)
+    try:
+        return editor_gateway.call_editor_process(editor_gateway.current_chat_id(), op, reason, fn)
+    except (editor_gateway.EditorProcessRefused, editor_gateway.EditorBusy) as e:
+        return {"ok": False, "cancelled": True, "error": str(e)}
 
 
 @mcp.tool()
-def ducky_launch_uefn(project: str = "", pretty: bool = False) -> str:
+def ducky_launch_uefn(project: str = "", reason: str = "", pretty: bool = False) -> str:
     """Start Unreal Editor for Fortnite in a project (not the hub).
 
     Host-side Windows launch. Passes ``-ValkyrieProject=<path>`` — a bare
@@ -539,36 +545,42 @@ def ducky_launch_uefn(project: str = "", pretty: bool = False) -> str:
     ``project`` is a folder, ``.uefnproject`` or a project name from ducky_list_projects;
     empty uses the selected island. The selected project does not change.
     Use when UEFN is closed. Does not restart a running editor.
+    An agent's launch asks the person first; ``reason`` (one line) goes on that card
+    and in the project's ``crash-watch`` memory.
     """
     from frontend.window_view import launch_uefn_project
 
     island = _island_arg(project)
     return tool_json(
-        _through_gateway("ducky_launch_uefn", lambda: launch_uefn_project(island)),
+        _through_gateway("ducky_launch_uefn", lambda: launch_uefn_project(island), reason),
         pretty=pretty,
     )
 
 
 @mcp.tool()
-def ducky_close_uefn(pretty: bool = False) -> str:
+def ducky_close_uefn(reason: str = "", pretty: bool = False) -> str:
     """Close Unreal Editor for Fortnite.
 
     Posts WM_CLOSE and presses Save if that modal appears. taskkill /F only if
     the process is still up after about 30 seconds.
+    An agent's close asks the person first; ``reason`` (one line) goes on that card
+    and in the project's ``crash-watch`` memory.
     """
     from frontend.window_view import close_uefn
 
-    return tool_json(_through_gateway("ducky_close_uefn", close_uefn), pretty=pretty)
+    return tool_json(_through_gateway("ducky_close_uefn", close_uefn, reason), pretty=pretty)
 
 
 @mcp.tool()
-def ducky_restart_uefn(project: str = "", timeout: float = 180, pretty: bool = False) -> str:
+def ducky_restart_uefn(project: str = "", timeout: float = 180, reason: str = "", pretty: bool = False) -> str:
     """Close UEFN, reopen it in the project, and wait until the listener matches.
 
     ``project`` is a folder, ``.uefnproject`` or a project name from ducky_list_projects;
     empty uses the selected island. Opening another island leaves the selected project
     as it is. ``timeout`` caps the wait (max 300s). Requires the island to have been
     connected before — the listener boots from the project's init_unreal.py.
+    An agent's restart asks the person first (a no or no answer cancels it); ``reason``
+    (one line) goes on that card and in the project's ``crash-watch`` memory.
     """
     from frontend.window_view import restart_uefn_project
 
@@ -577,6 +589,7 @@ def ducky_restart_uefn(project: str = "", timeout: float = 180, pretty: bool = F
         _through_gateway(
             "ducky_restart_uefn",
             lambda: restart_uefn_project(island, wait=True, timeout=timeout),
+            reason,
         ),
         pretty=pretty,
     )

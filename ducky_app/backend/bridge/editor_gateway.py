@@ -16,6 +16,10 @@ Rules:
   Another chat's mutating call is refused with :class:`EditorBusy`. Reads always pass,
   and so do calls with no chat (the person, the panel). The lease lives in a file in
   Ducky's app data because every agent can run in its own process.
+* **Editor process** -- an agent's launch / close / restart of UEFN asks the person first
+  (:func:`call_editor_process`); a no or a timeout cancels it. Each one, the person's
+  own included, appends ``time, chat id, reason`` to the open project's memory entry
+  :data:`CRASH_WATCH_ENTRY`, so a reopened editor is never mistaken for a crash.
 """
 
 from __future__ import annotations
@@ -37,8 +41,20 @@ _lease_lock = threading.Lock()
 _now = time.time
 
 
+CRASH_WATCH_ENTRY = "crash-watch"
+_PROCESS_VERBS = {
+    "ducky_restart_uefn": "restart",
+    "ducky_launch_uefn": "launch",
+    "ducky_close_uefn": "close",
+}
+
+
 class EditorBusy(RuntimeError):
     """Another chat holds the editor lease."""
+
+
+class EditorProcessRefused(RuntimeError):
+    """The person said no to (or never answered) an agent's UEFN launch / close / restart."""
 
 
 def current_chat_id() -> str:
@@ -131,6 +147,64 @@ def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T]) -> T:
     """Run one editor call ``fn`` for ``chat_id`` once the gateway's rules let it through."""
     _check(chat_id, op, mutating)
     return fn()
+
+
+def _ask_person(chat_id: str, verb: str, reason: str) -> bool:
+    """The person's yes on the agent's ask-user card. A no, a skip or a timeout is False."""
+    from backend.tools.panel.panel_ui import ducky_ask_user
+
+    why = f": {reason}" if reason else " (no reason given)"
+    question = {
+        "id": "editor_process",
+        "prompt": f"{_chat_title(chat_id)} wants to {verb} UEFN{why}. Allow it?",
+        "options": [
+            {"id": "yes", "label": f"Yes, {verb} UEFN"},
+            {"id": "no", "label": "No, leave UEFN as it is"},
+        ],
+        "allow_multiple": False,
+        "allow_free_text": False,
+        "required": True,
+    }
+    try:
+        out = json.loads(ducky_ask_user([question], title=f"{verb.capitalize()} UEFN?"))
+    except Exception:
+        return False
+    answer = ((out or {}).get("answers") or {}).get("editor_process") or {}
+    return not out.get("error") and "yes" in (answer.get("selected") or [])
+
+
+def _log_crash_watch(line: str) -> None:
+    """One line in the open project's ``crash-watch`` memory entry. Never raises."""
+    try:
+        from backend.memory.project import append_entry
+
+        append_entry(CRASH_WATCH_ENTRY, line, author="editor gateway", project_root="")
+    except Exception:
+        pass
+
+
+def call_editor_process(chat_id: str, op: str, reason: str, fn: Callable[[], T]) -> T:
+    """Launch / close / restart UEFN through the gateway.
+
+    An agent's call (``chat_id`` set) needs the person's yes first and the editor lease;
+    the person's own call (no chat) runs at once. Each one is logged to ``crash-watch``.
+    """
+    verb = _PROCESS_VERBS.get(op, op)
+    who = chat_id[:8] if chat_id else "the person"
+    stamp = time.strftime("%H:%M", time.localtime(_now()))
+    head = f"{stamp} {verb} asked by {who}: {reason!r}" if reason else f"{stamp} {verb} asked by {who}"
+    if chat_id:
+        take_lease(chat_id, op)
+        if not _ask_person(chat_id, verb, reason):
+            _log_crash_watch(f"{head} -> person said no (or did not answer)")
+            raise EditorProcessRefused(
+                f"`{op}` cancelled: the person did not allow it. UEFN was left as it is. "
+                "Do not ask again for the same reason; carry on with work that does not need it."
+            )
+        _log_crash_watch(f"{head} -> person said yes")
+    else:
+        _log_crash_watch(f"{head} -> by the person")
+    return call(chat_id, op, True, fn)
 
 
 async def acall(chat_id: str, op: str, mutating: bool, fn: Callable[[], Awaitable[Any]]) -> Any:
