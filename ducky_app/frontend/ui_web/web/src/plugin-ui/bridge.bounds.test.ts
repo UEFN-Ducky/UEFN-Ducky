@@ -7,6 +7,8 @@ vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => fals
 import { beginBrowserPaneMount, pushBrowserPaneBounds } from "./bridge";
 
 const TAB = "plugin:browser:main";
+/** The long fake-timer loops below get room to finish on a busy PC (their checks are counts). */
+const LOOP_TIMEOUT_MS = 60_000;
 let rect = { x: 10, y: 20, width: 800, height: 600 };
 
 function frame(): HTMLIFrameElement {
@@ -38,7 +40,9 @@ it("an idle pane re-pinned every frame for 10 minutes sends almost nothing", asy
     await vi.advanceTimersByTimeAsync(250);
   }
   expect(api.browser_pane_set_bounds.mock.calls.length).toBeLessThan(15);
-});
+  // 2,400 fake-timer steps: a loaded PC can pass vitest's 5 s default, and a timed-out loop keeps
+  // calling the shared mock into the next test. The budget is a call count, not a time.
+}, LOOP_TIMEOUT_MS);
 
 it("a plugin tab with no browser pane does not resend every frame", async () => {
   api.browser_pane_set_bounds.mockImplementation(async () => ({ ok: false, error: "pane not open" }) as never);
@@ -51,7 +55,7 @@ it("a plugin tab with no browser pane does not resend every frame", async () => 
   }
   api.browser_pane_set_bounds.mockImplementation(async () => ({ ok: true }));
   expect(api.browser_pane_set_bounds.mock.calls.length).toBeLessThan(3);
-});
+}, LOOP_TIMEOUT_MS);
 
 it("a sub-pixel jitter sends nothing; a moved pane sends once", async () => {
   const el = frame();

@@ -15,5 +15,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    // vitest's 5 s per-test default is a wall clock, not a check: a release run on a busy PC
+    // (UEFN open, ~14 s to start each file) timed out tests that pass. Budgets stay in each test.
+    testTimeout: 30_000,
   },
 });
