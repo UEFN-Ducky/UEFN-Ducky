@@ -101,7 +101,8 @@ def record(kind: str, plugin_id: str, message: str, **detail: Any) -> None:
 def record_tool_error(tool_name: str, exc: BaseException) -> None:
     """An MCP tool raised: attribute it to the plugin that registered the tool."""
     try:
-        from backend.uefn_plugins.host import is_plugin_enabled, plugin_for_tool
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_for_tool
 
         pid = plugin_for_tool(tool_name)
         if pid == "ducky" or not is_plugin_enabled(pid):
@@ -368,7 +369,7 @@ def _returned_error(result: Any) -> str:
 
 
 def _check_tools(pid: str, checks: list[dict[str, Any]], stragglers: list[threading.Thread]) -> None:
-    from backend.uefn_plugins.host import get_contributions
+    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
     meta = (get_contributions().get("agent_tools") or {}).get(pid) or {}
     names = sorted(str(n) for n in meta.get("tools") or [])
@@ -501,7 +502,8 @@ def test_plugin(plugin_id: str, repo: str = "") -> dict[str, Any]:
     nodes, panels and UI files."""
     from backend.tools.panel.panel_ai_plugins import _draft_root, install_ai_plugin
     from backend.uefn_plugins import scopes
-    from backend.uefn_plugins.host import is_plugin_enabled, set_active_uefn_agent_plugin_ids, wait_plugin_toggles
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled, wait_plugin_toggles
+    from backend.uefn_plugins.plugin_host.tool_registry import set_active_uefn_agent_plugin_ids
     from backend.uefn_plugins.plugin_lint import check_ui
     from backend.uefn_plugins.store import normalize_plugin_id
 

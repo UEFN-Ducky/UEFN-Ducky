@@ -224,7 +224,7 @@ def run_bridge() -> None:
 
     def _bridge_warmup() -> None:
         try:
-            from backend.uefn_plugins.host import ensure_plugins_loaded
+            from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
 
             ensure_plugins_loaded()
         except Exception:

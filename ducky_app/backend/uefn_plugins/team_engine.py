@@ -355,9 +355,9 @@ def engine_arrived() -> None:
             except Exception:  # noqa: BLE001 — one plugin's listener never stops the others
                 _log.warning("live listener of %s couldn't be added", pid, exc_info=True)
     try:
-        from backend.uefn_plugins import host
+        from backend.uefn_plugins.plugin_host.folders import bind_folders_after_engine
 
-        host.bind_folders_after_engine()
+        bind_folders_after_engine()
     except Exception:  # noqa: BLE001 — each plugin binds again on its next load
         _log.debug("binding folders after the engine came failed", exc_info=True)
     if _WANTED["start"]:

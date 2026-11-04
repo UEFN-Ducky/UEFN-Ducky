@@ -442,7 +442,7 @@ def tool_leaf_name(name: str) -> str:
 def _plugin_declared_plan_tools() -> frozenset[str]:
     out: set[str] = set()
     try:
-        from backend.uefn_plugins.host import plugin_plan_tools
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_plan_tools
 
         out.update(plugin_plan_tools())
     except Exception:

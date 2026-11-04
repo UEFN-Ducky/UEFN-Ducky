@@ -587,7 +587,8 @@ def set_uefn_plugin_enabled(
     settings.save()
     # Single-plugin apply — never full reload_plugins() (that re-registers every
     # enabled plugin, e.g. Blender addon deploy, and makes Store toggles crawl).
-    from backend.uefn_plugins.host import apply_plugin_enabled_change, clear_plugin_crash
+    from backend.uefn_plugins.plugin_host.crash_guard import clear_plugin_crash
+    from backend.uefn_plugins.plugin_host.lifecycle import apply_plugin_enabled_change
 
     if enabled:
         clear_plugin_crash(pid)  # turning it on again means: try loading it again
@@ -953,11 +954,8 @@ def _uninstall_uefn_plugin(plugin_id: str, *, erase_data: bool, wait: bool) -> d
     set_uefn_plugin_enabled(pid, False)
     # Drop imported modules (bounded unload) *before* rmtree — Windows locks .py files
     # while the module is still in sys.modules.
-    from backend.uefn_plugins.host import (
-        invalidate_plugin_runtime,
-        release_locked_compiled_backends,
-        reload_single_plugin,
-    )
+    from backend.uefn_plugins.plugin_host.backends import release_locked_compiled_backends
+    from backend.uefn_plugins.plugin_host.lifecycle import invalidate_plugin_runtime, reload_single_plugin
 
     try:
         invalidate_plugin_runtime(pid)
@@ -1380,7 +1378,7 @@ def _import_plugin_from_bytes(
     # which would block moving the installed folder aside. Move any locked .pyd out
     # first; the new version installs under its own name and loads fresh.
     try:
-        from backend.uefn_plugins.host import release_locked_compiled_backends
+        from backend.uefn_plugins.plugin_host.backends import release_locked_compiled_backends
 
         stuck = release_locked_compiled_backends(pid)
     except Exception:
@@ -1398,7 +1396,7 @@ def _import_plugin_from_bytes(
         }
     # Drop stale register() bindings / imported modules before overwrite.
     try:
-        from backend.uefn_plugins.host import invalidate_plugin_runtime
+        from backend.uefn_plugins.plugin_host.lifecycle import invalidate_plugin_runtime
 
         invalidate_plugin_runtime(pid)
     except Exception:
@@ -1456,7 +1454,7 @@ def _import_plugin_from_bytes(
     else:
         # Update / reinstall: reload ONLY this plugin. Full reload_plugins() during
         # Update All races into duplicate header/settings icons and freezes the UI.
-        from backend.uefn_plugins.host import reload_single_plugin
+        from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
 
         reload_single_plugin(pid)
         enabled_now = pid in get_enabled_plugin_ids()

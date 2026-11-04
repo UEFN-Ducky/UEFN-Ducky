@@ -165,7 +165,7 @@ def deployed_skill_packs(agent_id: str) -> tuple[str, list[str]]:
         return "", []
     root_raw = ""
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(agent_id) or {}
         skills = reg.get("skills_dir")

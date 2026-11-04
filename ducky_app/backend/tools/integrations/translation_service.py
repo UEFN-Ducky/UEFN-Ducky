@@ -95,7 +95,7 @@ def run_translate_ui_batch(
 
     Returns ``{ok, language, map, missing, provider?, model?, error?}``.
     """
-    from backend.uefn_plugins.host import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from frontend.ui_web import plugin_host_api as pha
     from frontend.ui_web.plugin_llm import _complete_text, _resolve_api_model
 

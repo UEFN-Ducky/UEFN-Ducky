@@ -104,7 +104,7 @@ def _listener_line() -> str:
 def _key_line() -> str:
     try:
         from backend.agent.secrets import has_key
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         rows = get_contributions().get("llm_providers") or []
         parts: list[str] = []

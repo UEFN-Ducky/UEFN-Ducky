@@ -544,13 +544,12 @@ class PanelApiStoreMixin:
             "enabled_ids": [],
         }
         try:
-            from backend.uefn_plugins.host import (
+            from backend.uefn_plugins.plugin_host.boot import (
                 ensure_plugins_loaded_async,
-                get_contributions,
-                get_ui_contributions,
                 plugins_ready,
                 plugins_ui_ready,
             )
+            from backend.uefn_plugins.plugin_host.ui_registry import get_contributions, get_ui_contributions
 
             # Never sync-wait here — that re-blocks the UI for ~20s after paint.
             # UI contribs (plugin.json) land before slow register(); expose them early.
@@ -870,7 +869,7 @@ class PanelApiStoreMixin:
 
     def get_uefn_plugin_allowed_models(self, plugin_id: str) -> dict[str, Any]:
         """The models whose chats may use this plugin's sensitive tools (Settings picker)."""
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
         from backend.uefn_plugins.model_gate import allowed_models
         from backend.uefn_plugins.store import normalize_plugin_id
 
@@ -904,7 +903,7 @@ class PanelApiStoreMixin:
         self, plugin_id: str, key: str, value: str = ""
     ) -> dict[str, Any]:
         """Hit the vendor API with a draft or saved plugin secret (Settings → Test)."""
-        from backend.uefn_plugins.host import run_secret_test
+        from backend.uefn_plugins.plugin_host.services import run_secret_test
 
         return run_secret_test(str(plugin_id or ""), str(key or ""), str(value or ""))
 
@@ -1284,7 +1283,7 @@ class PanelApiStoreMixin:
             # Backend state (caches, threads, loaded docs) belongs to the old copy:
             # unload and register again, never a full plugin reload.
             try:
-                from backend.uefn_plugins.host import reload_single_plugin
+                from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
 
                 reload_single_plugin(pid)
             except Exception:
@@ -1365,7 +1364,7 @@ class PanelApiStoreMixin:
             linked = sorted(p for p, s in repo.links(account_id()).items() if s == space)
             for pid in linked:
                 try:
-                    from backend.uefn_plugins.host import reload_single_plugin
+                    from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
 
                     reload_single_plugin(pid)
                 except Exception:
@@ -1557,7 +1556,7 @@ class PanelApiStoreMixin:
     def reload_uefn_plugin(self, plugin_id: str) -> dict[str, Any]:
         """The agents' tool server installed a new copy of a plugin: load it here too,
         so the plugin's panels call the new code."""
-        from backend.uefn_plugins.host import reload_single_plugin
+        from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
 
         try:
             reload_single_plugin(str(plugin_id or ""))
@@ -1577,7 +1576,7 @@ class PanelApiStoreMixin:
         ``params`` ("" on its first call): the reply then carries ``etag``, and a repeat
         call with the same token gets ``{ok, unchanged, etag}`` instead of the data again.
         ``_etag`` never reaches the plugin."""
-        from backend.uefn_plugins.host import call_panel_rpc
+        from backend.uefn_plugins.plugin_host.panel_rpc import call_panel_rpc
 
         kwargs = dict(params or {}) if isinstance(params, dict) else {}
         wants_etag = "_etag" in kwargs
@@ -1884,11 +1883,8 @@ class PanelApiStoreMixin:
         """MCP/tool catalog for Settings — never sync-wait on plugin register()."""
         from backend.agent.builtin_toolsets import builtin_group_rows
         from backend.mcp_plugins.store import list_mcp_servers, seed_mcp_plugins
-        from backend.uefn_plugins.host import (
-            ensure_plugins_loaded_async,
-            plugins_ready,
-            uefn_plugin_tool_group_rows,
-        )
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
+        from backend.uefn_plugins.plugin_host.tool_registry import uefn_plugin_tool_group_rows
         seed_mcp_plugins()
         servers = list_mcp_servers()
         builtins = builtin_group_rows()
@@ -1913,7 +1909,7 @@ class PanelApiStoreMixin:
         from frontend.ui_web.project_chats import invalidate_all_conversation_caches
         from backend.agent.builtin_toolsets import is_builtin_group, set_builtin_group_enabled
         from backend.mcp_plugins.store import set_mcp_server_enabled
-        from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
+        from backend.uefn_plugins.plugin_host.tool_registry import is_uefn_agent_tool_plugin
         from backend.uefn_plugins.store import set_uefn_plugin_enabled
 
         pid = server_id.strip().lower()
@@ -1994,7 +1990,7 @@ class PanelApiStoreMixin:
     def test_mcp_server(self, server_id: str) -> dict[str, Any]:
         from backend.agent.builtin_toolsets import count_builtin_group_tools, is_builtin_group
         from backend.mcp_plugins.client_pool import get_plugin_pool
-        from backend.uefn_plugins.host import count_uefn_plugin_tools, is_uefn_agent_tool_plugin
+        from backend.uefn_plugins.plugin_host.tool_registry import count_uefn_plugin_tools, is_uefn_agent_tool_plugin
 
         pid = server_id.strip().lower()
         if is_builtin_group(pid):
@@ -2107,11 +2103,8 @@ class PanelApiStoreMixin:
         """
         from backend.agent.builtin_toolsets import builtin_group_rows, get_enabled_builtin_group_ids
         from backend.mcp_plugins.store import get_enabled_plugin_ids, list_mcp_plugins
-        from backend.uefn_plugins.host import (
-            ensure_plugins_loaded_async,
-            plugins_ready,
-            uefn_agent_tool_rows,
-        )
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
+        from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows
         conv = _pa.load_conversation(conv_id)
         if not conv:
             return {"ok": False, "error": "Conversation not found"}
@@ -2157,7 +2150,7 @@ class PanelApiStoreMixin:
         from backend.agent.builtin_toolsets import is_builtin_group
         from backend.mcp_plugins.store import load_plugin_manifest as load_mcp_manifest
         from backend.mcp_plugins.store import normalize_plugin_id
-        from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
+        from backend.uefn_plugins.plugin_host.tool_registry import is_uefn_agent_tool_plugin
 
         conv = _pa.load_conversation(conv_id)
         if not conv:

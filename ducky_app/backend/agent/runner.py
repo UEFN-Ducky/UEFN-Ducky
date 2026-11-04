@@ -581,7 +581,7 @@ class AgentRunner:
     def _provider_tools(self, provider: str, tools: list) -> list[dict[str, Any]]:
         schema = ""
         try:
-            from backend.uefn_plugins.host import get_llm_provider_registration
+            from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
             schema = str(
                 (get_llm_provider_registration(provider) or {}).get("tool_schema") or ""
@@ -786,7 +786,7 @@ class AgentRunner:
             bridge = _CancelBridge(self._cancel, thread_cancel)
         conv_id = str(getattr(self.config.conv, "id", "") or "")
         try:
-            from backend.uefn_plugins.host import resolve_gateway_credential
+            from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
             api_key = resolve_gateway_credential(self.config.provider, conv_id=conv_id)
         except Exception:

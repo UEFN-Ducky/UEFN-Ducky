@@ -13,7 +13,8 @@ from backend.tools.integrations.translation_service import PLUGIN_ID, run_transl
 
 
 def _require_plugin() -> None:
-    from backend.uefn_plugins.host import is_plugin_enabled, uefn_agent_tools_allowed
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tools_allowed
 
     if not is_plugin_enabled(PLUGIN_ID):
         raise ValueError("Translation plugin is disabled — enable it in Settings → Store")

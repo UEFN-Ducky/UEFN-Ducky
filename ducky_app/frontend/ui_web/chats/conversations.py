@@ -385,7 +385,8 @@ def all_available_tool_ids() -> list[str]:
     """Globally available tool-group ids (builtins + MCP plugins + UEFN agent plugins)."""
     from backend.agent.builtin_toolsets import get_enabled_builtin_group_ids
     from backend.mcp_plugins.store import get_enabled_plugin_ids
-    from backend.uefn_plugins.host import ensure_plugins_loaded, uefn_agent_tool_rows
+    from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+    from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows
 
     ensure_plugins_loaded()
     ids = list(get_enabled_builtin_group_ids()) + list(get_enabled_plugin_ids())
@@ -486,7 +487,7 @@ def _apply_tool_ids_to_conv(conv: Conversation, tool_ids: list[str]) -> None:
     from backend.agent.builtin_toolsets import is_builtin_group
     from backend.mcp_plugins.store import load_plugin_manifest as load_mcp_manifest
     from backend.mcp_plugins.store import normalize_plugin_id
-    from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
+    from backend.uefn_plugins.plugin_host.tool_registry import is_uefn_agent_tool_plugin
 
     builtin_sel: list[str] = []
     plugin_sel: list[str] = []
@@ -510,7 +511,7 @@ def _apply_tool_ids_to_conv(conv: Conversation, tool_ids: list[str]) -> None:
 
 def _apply_disabled_tool_ids_to_conv(conv: Conversation, disabled_tool_ids: list[str]) -> None:
     """Write effective tool groups = all globally available minus the deny-list."""
-    from backend.uefn_plugins.host import uefn_agent_tool_rows
+    from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows
 
     denied = {str(x).strip() for x in disabled_tool_ids if str(x).strip()}
     effective = [tid for tid in all_available_tool_ids() if tid not in denied]

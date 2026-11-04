@@ -400,7 +400,7 @@ def llm_start(
     model: str = "",
 ) -> dict[str, Any]:
     """Kick off an LLM completion on a worker thread; returns immediately with job_id."""
-    from backend.uefn_plugins.host import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from frontend.ui_web.bridge_jobs import job_start
 
     pid = _safe_plugin_id(plugin_id)
@@ -457,7 +457,7 @@ def translate_batch_start(
 ) -> dict[str, Any]:
     """Start a UI translate batch on a worker (same path as MCP ``translate_ui_batch``)."""
     from backend.tools.integrations.translation_service import PLUGIN_ID, run_translate_ui_batch
-    from backend.uefn_plugins.host import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from frontend.ui_web.bridge_jobs import job_start
 
     pid = _safe_plugin_id(plugin_id)
@@ -490,7 +490,8 @@ def translate_batch_poll(job_id: str) -> dict[str, Any]:
 
 
 def _tts_work(plugin_id: str, text: str, voice_id: str) -> dict[str, Any]:
-    from backend.uefn_plugins.host import get_tts_synthesizer, is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.services import get_tts_synthesizer
 
     pid = _safe_plugin_id(plugin_id)
     if not is_plugin_enabled(pid):
@@ -530,7 +531,8 @@ def tts_poll(job_id: str) -> dict[str, Any]:
 
 
 def _tts_voices_work(plugin_id: str) -> dict[str, Any]:
-    from backend.uefn_plugins.host import get_tts_voices_lister, is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.services import get_tts_voices_lister
 
     pid = _safe_plugin_id(plugin_id)
     if not is_plugin_enabled(pid):

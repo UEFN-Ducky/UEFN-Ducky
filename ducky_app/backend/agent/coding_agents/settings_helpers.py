@@ -12,10 +12,8 @@ def _registered_defaults() -> dict[str, dict[str, Any]]:
     """Merge contribution ids + optional settings_defaults from register()."""
     out: dict[str, dict[str, Any]] = {}
     try:
-        from backend.uefn_plugins.host import (
-            get_coding_agent_registration,
-            get_contributions,
-        )
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         for row in get_contributions().get("llm_coding_agents") or []:
             if not isinstance(row, dict):

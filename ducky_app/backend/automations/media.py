@@ -239,7 +239,7 @@ _IMAGE_FIELDS = ("prompt", "image", "input_image")
 
 def _gateway_node_spec(node: str) -> dict[str, Any]:
     try:
-        from backend.uefn_plugins.host import get_ui_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_ui_contributions
 
         return next((row for row in get_ui_contributions().get("automations_nodes", []) if row.get("id") == node), {})
     except Exception:
@@ -280,7 +280,7 @@ def gateway_image_nodes() -> list[tuple[str, str]]:
 def plugin_image_generators() -> list[dict[str, Any]]:
     """What the plugins turned on here declare under contributes.automations.image_generators."""
     try:
-        from backend.uefn_plugins.host import image_generators
+        from backend.uefn_plugins.plugin_host.ui_registry import image_generators
 
         return image_generators()
     except Exception:
@@ -320,7 +320,7 @@ def _declared(row: dict[str, Any]) -> dict[str, Any]:
 def plugin_media_backends(ntype: str) -> list[dict[str, Any]]:
     """What the plugins turned on here add to this node (contributes.automations.media_backends)."""
     try:
-        from backend.uefn_plugins.host import media_backends
+        from backend.uefn_plugins.plugin_host.ui_registry import media_backends
 
         return media_backends(ntype)
     except Exception:
@@ -528,7 +528,7 @@ def _missing(row: dict[str, Any]) -> str:
     """What stops this backend: "install", "enable", "key", or "" when nothing known."""
     pid = str(row.get("plugin_id") or "")
     try:
-        from backend.uefn_plugins.host import is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
         from backend.uefn_plugins.store import is_plugin_installed
 
         if pid and not is_plugin_installed(pid):

@@ -45,7 +45,7 @@ def _active_ide_kinds() -> tuple[IdeKind, ...]:
     hookup list (plugins still loading) must not skip Apply.
     """
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         kinds: list[IdeKind] = []
         for row in get_contributions().get("ide_hookups") or []:

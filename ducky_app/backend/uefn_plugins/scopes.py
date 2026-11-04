@@ -370,13 +370,13 @@ def shareable(plugin: str) -> bool:
     workflows). A plugin that keeps its own files without declaring them gets False, and
     ``"data_sharing": false`` always wins."""
     from backend.store.repos import plugin_data as repo
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import state as host_state
     from backend.uefn_plugins.team_folders import plugin_folders
 
     flag = _data_sharing(plugin)
     if flag is False:
         return False
-    if flag is True or plugin.startswith("ducky.") or plugin in host._DATA_PLUGINS:
+    if flag is True or plugin.startswith("ducky.") or plugin in host_state._DATA_PLUGINS:
         return True
     if plugin_folders(plugin):
         return True
@@ -912,7 +912,7 @@ def caller(default: str = "user") -> tuple[str, str]:
     if ctx is not None:
         return "agent", str(ctx.ducky_name or "")
     try:
-        from backend.uefn_plugins.host import _ACTIVE_UEFN_AGENT_IDS
+        from backend.uefn_plugins.plugin_host.state import _ACTIVE_UEFN_AGENT_IDS
 
         if _ACTIVE_UEFN_AGENT_IDS.get() is not None:
             return "agent", ""

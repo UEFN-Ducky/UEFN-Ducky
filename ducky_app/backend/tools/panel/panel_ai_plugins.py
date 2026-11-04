@@ -62,7 +62,7 @@ def plugin_api_markdown() -> str:
     falls behind: signature and the first paragraph of each docstring."""
     import inspect
 
-    from backend.uefn_plugins.host import _PluginApi
+    from backend.uefn_plugins.plugin_host.api import _PluginApi
 
     rows = ["## The `api` object (live list of everything `register(api)` gets)", ""]
     for name in sorted(n for n in dir(_PluginApi) if not n.startswith("_")):
@@ -707,7 +707,7 @@ def install_ai_plugin(plugin_id: str) -> dict[str, Any]:
         _notify_plugins()
     elif dropped:
         # Nothing was replaced: the plugin that is still installed gets its tools back.
-        from backend.uefn_plugins.host import is_plugin_enabled, reload_single_plugin
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled, reload_single_plugin
 
         if is_plugin_enabled(pid):
             reload_single_plugin(pid)
@@ -718,7 +718,8 @@ def _drop_mcp_tools(pid: str) -> list[str]:
     """Take ``pid``'s tools off the MCP server before a reinstall. ``api.tool`` keeps a
     name that is already on the server across a reload (and with it the old code), so
     without this a reinstalled draft would go on running its previous tools."""
-    from backend.uefn_plugins.host import get_contributions, plugin_for_tool
+    from backend.uefn_plugins.plugin_host.tool_registry import plugin_for_tool
+    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
     tools = getattr(getattr(mcp, "_tool_manager", None), "_tools", None)
     if not isinstance(tools, dict):

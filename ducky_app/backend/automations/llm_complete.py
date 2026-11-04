@@ -40,7 +40,8 @@ def _one_shot_for(provider: str) -> Any:
     """A coding-agent gateway's single-answer call (Cursor): its chat provider can't
     stream outside the agent, so a workflow asks it this way. None for API gateways."""
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration, is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
 
         reg = get_coding_agent_registration(provider) or {}
         fn = reg.get("complete_one_shot")
@@ -71,7 +72,7 @@ def complete_prompt(provider: str, prompt: str, model: str = "", *, system: str 
     from backend.agent.providers import make_provider
 
     try:
-        from backend.uefn_plugins.host import resolve_gateway_credential
+        from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
         key = resolve_gateway_credential(provider)
     except Exception:

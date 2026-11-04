@@ -14,7 +14,7 @@ PROFILE_PREFIX = "__plugin__:"
 
 
 def _declared(plugin_id: str, kind: str, local_id: str) -> bool:
-    from backend.uefn_plugins.host import get_ui_contributions
+    from backend.uefn_plugins.plugin_host.ui_registry import get_ui_contributions
 
     rows = get_ui_contributions().get(kind) or []
     return any(isinstance(r, dict) and r.get("plugin_id") == plugin_id and str(r.get("id") or "") == local_id for r in rows)

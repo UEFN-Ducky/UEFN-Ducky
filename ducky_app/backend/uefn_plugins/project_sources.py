@@ -42,7 +42,8 @@ def _row(item: Any, source_id: str) -> dict[str, Any] | None:
 def list_plugin_projects() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """``(tabs, rows)`` from every enabled plugin's project sources. A plugin that fails
     keeps its tab with no rows: one broken plugin never empties the window."""
-    from backend.uefn_plugins.host import call_panel_rpc, get_project_sources
+    from backend.uefn_plugins.plugin_host.panel_rpc import call_panel_rpc
+    from backend.uefn_plugins.plugin_host.ui_registry import get_project_sources
 
     tabs: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []

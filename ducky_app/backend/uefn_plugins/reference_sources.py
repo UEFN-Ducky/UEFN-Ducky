@@ -53,7 +53,7 @@ def _row(item: Any, source: dict[str, Any]) -> dict[str, Any] | None:
 
 def refresh_events() -> list[str]:
     """Push event types after which the menu asks the plugins again."""
-    from backend.uefn_plugins.host import get_reference_sources
+    from backend.uefn_plugins.plugin_host.ui_registry import get_reference_sources
 
     out: set[str] = set()
     for source in get_reference_sources():
@@ -66,7 +66,8 @@ def refresh_events() -> list[str]:
 
 def list_plugin_references() -> list[dict[str, Any]]:
     """Every enabled plugin's live rows. A plugin that fails adds nothing; the rest still list."""
-    from backend.uefn_plugins.host import call_panel_rpc, get_reference_sources
+    from backend.uefn_plugins.plugin_host.panel_rpc import call_panel_rpc
+    from backend.uefn_plugins.plugin_host.ui_registry import get_reference_sources
 
     rows: list[dict[str, Any]] = []
     for source in get_reference_sources():

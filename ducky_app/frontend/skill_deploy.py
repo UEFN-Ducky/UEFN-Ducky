@@ -412,7 +412,7 @@ def registered_coding_agent_skills_roots() -> set[Path]:
     """Skills dirs declared by enabled gateway plugins (register_coding_agent)."""
     roots: set[Path] = set()
     try:
-        from backend.uefn_plugins.host import (
+        from backend.uefn_plugins.plugin_host.gateways import (
             get_coding_agent_registration,
             registered_coding_agent_ids,
         )
@@ -436,7 +436,7 @@ def registered_coding_agent_skills_roots() -> set[Path]:
 def ide_config_paths(antigravity_override: str = "") -> list[Path]:
     """Default MCP config paths for registered IDE hookups."""
     from frontend.ide_paths import IdeKind, path_for_ide
-    from backend.uefn_plugins.host import registered_ide_hookup_kinds
+    from backend.uefn_plugins.plugin_host.gateways import registered_ide_hookup_kinds
 
     kinds = []
     for key in registered_ide_hookup_kinds():

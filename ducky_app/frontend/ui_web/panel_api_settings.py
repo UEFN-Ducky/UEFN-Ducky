@@ -304,12 +304,8 @@ class PanelApiSettingsMixin:
         """
         from backend.agent.providers import builtin_providers
         from backend.agent.secrets import has_key
-        from backend.uefn_plugins.host import (
-            ensure_plugins_loaded_async,
-            get_contributions,
-            get_ui_contributions,
-            plugins_ready,
-        )
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions, get_ui_contributions
 
         # Built-in providers always available (no plugin wait). Gateways come from the one
         # contributions snapshot below: all_providers() built (and sync-loaded) another.
@@ -341,7 +337,7 @@ class PanelApiSettingsMixin:
 
         # Include every enabled gateway secret_key (and provider id) so saved keys
         # still show after a Store Update even if factory registration races.
-        from backend.uefn_plugins.host import resolve_gateway_credential
+        from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
         # One snapshot for every row: each get_contributions() rebuilds every plugin's
         # contributions, and resolving a keyless gateway without its row did that again.
@@ -382,7 +378,7 @@ class PanelApiSettingsMixin:
     # uefn-plugin-discord via api.register_panel_rpc. Removed once UI is Phase-2 HTML.
 
     def _discord_plugin_call(self, method: str, **params: Any) -> dict[str, Any]:
-        from backend.uefn_plugins.host import is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
 
         if not is_plugin_enabled("discord"):
             return {
@@ -431,7 +427,7 @@ class PanelApiSettingsMixin:
                 init_py = root / "backend" / "__init__.py"
                 if not init_py.is_file():
                     raise FileNotFoundError("Discord plugin package not installed")
-                from backend.uefn_plugins.host import _import_backend
+                from backend.uefn_plugins.plugin_host.backends import _import_backend
 
                 mod = _import_backend("discord", root, "backend")
                 if mod is None:
@@ -699,7 +695,7 @@ class PanelApiSettingsMixin:
             or any(str(k) in ("discord", "discord_guild") for k in (keys if isinstance(keys, dict) else {}))
         ):
             try:
-                from backend.uefn_plugins.host import is_plugin_enabled
+                from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
 
                 if is_plugin_enabled("discord"):
                     tok = ""
@@ -835,7 +831,8 @@ class PanelApiSettingsMixin:
             invalidate_detect_cache,
             normalize_coding_agent,
         )
-        from backend.uefn_plugins.host import ensure_plugins_loaded, reload_single_plugin, wait_plugin_toggles
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+        from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin, wait_plugin_toggles
 
         aid = normalize_coding_agent(agent_id)
         if aid == "ducky":
@@ -884,7 +881,8 @@ class PanelApiSettingsMixin:
         """Start the gateway's CLI login from Settings (modal + listed terminal tab)."""
         from backend.agent.coding_agents.base import invalidate_detect_cache, normalize_coding_agent
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
-        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
         from frontend.ui_web.agent_modes import get_panel_push
 
         aid = normalize_coding_agent(agent_id)
@@ -913,7 +911,8 @@ class PanelApiSettingsMixin:
             normalize_coding_agent,
         )
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
-        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         aid = normalize_coding_agent(agent_id)
         if not ensure_plugins_loaded(timeout=5.0):
@@ -945,7 +944,8 @@ class PanelApiSettingsMixin:
             normalize_coding_agent,
         )
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
-        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         aid = normalize_coding_agent(agent_id)
         if not ensure_plugins_loaded(timeout=5.0):
@@ -993,7 +993,8 @@ class PanelApiSettingsMixin:
     def coding_agent_login_cancel(self, agent_id: str) -> dict[str, Any]:
         """Destroy the login terminal tab when the Settings modal is cancelled."""
         from backend.agent.coding_agents.base import normalize_coding_agent
-        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         aid = normalize_coding_agent(agent_id)
         if not ensure_plugins_loaded(timeout=5.0):
@@ -1011,7 +1012,8 @@ class PanelApiSettingsMixin:
         """Sign the gateway's CLI out from Settings so the user can re-test login."""
         from backend.agent.coding_agents.base import invalidate_detect_cache, normalize_coding_agent
         from backend.agent.coding_agents.settings_helpers import coding_agent_cfg
-        from backend.uefn_plugins.host import ensure_plugins_loaded, get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         aid = normalize_coding_agent(agent_id)
         if not ensure_plugins_loaded(timeout=5.0):
@@ -1702,11 +1704,8 @@ class PanelApiSettingsMixin:
         from backend.agent.model_fetch import clear_model_cache, fetch_models
         from backend.agent.providers import gateway_providers, make_provider
         from backend.agent.secrets import get_key, set_key
-        from backend.uefn_plugins.host import (
-            get_coding_agent_registration,
-            get_contributions,
-            get_llm_provider_registration,
-        )
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration, get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         prov = (provider or "").strip().lower()
         draft = (key or "").strip()
@@ -1756,7 +1755,7 @@ class PanelApiSettingsMixin:
             # Just-installed gateway: register() is on a daemon. Wait for it —
             # never tell the user to restart Ducky.
             if contrib is not None:
-                from backend.uefn_plugins.host import wait_plugin_toggles
+                from backend.uefn_plugins.plugin_host.lifecycle import wait_plugin_toggles
 
                 wait_plugin_toggles(timeout=8.0)
                 prov_reg = get_llm_provider_registration(prov)
@@ -1813,7 +1812,7 @@ class PanelApiSettingsMixin:
         else:
             api_key = draft if draft and draft != "••••••••" else ""
             try:
-                from backend.uefn_plugins.host import resolve_gateway_credential
+                from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
                 api_key = resolve_gateway_credential(prov, api_key)
             except Exception:

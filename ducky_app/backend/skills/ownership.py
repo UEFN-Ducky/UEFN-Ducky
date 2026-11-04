@@ -31,7 +31,7 @@ def invalidate() -> None:
 
 def _build() -> OwnedMap:
     from backend.skills.layout import PACK_FILE
-    from backend.uefn_plugins.host import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from backend.uefn_plugins.store import (
         appdata_uefn_plugins_dir,
         get_enabled_plugin_ids,

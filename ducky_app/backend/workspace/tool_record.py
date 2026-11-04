@@ -94,7 +94,7 @@ def _already_journaled(name: str) -> bool:
 
 def _plugin_for_tool(name: str) -> str:
     try:
-        from backend.uefn_plugins.host import plugin_for_tool
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_for_tool
 
         return plugin_for_tool(name) or "ducky"
     except Exception:

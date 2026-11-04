@@ -35,7 +35,7 @@ def is_destructive(tool_name: str) -> bool:
     if tool_name in plugin_destructive_tool_names():
         return True
     try:
-        from backend.uefn_plugins.host import plugin_destructive_desktop_tools
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_destructive_desktop_tools
 
         return tool_name in plugin_destructive_desktop_tools()
     except Exception:

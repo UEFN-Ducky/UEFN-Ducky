@@ -20,7 +20,7 @@ _HOST_CODING_AGENT_ALIASES = {
 def _plugin_coding_agent_aliases() -> dict[str, str]:
     out: dict[str, str] = {}
     try:
-        from backend.uefn_plugins.host import (
+        from backend.uefn_plugins.plugin_host.gateways import (
             get_coding_agent_registration,
             registered_coding_agent_ids,
         )
@@ -39,7 +39,7 @@ def _plugin_coding_agent_aliases() -> dict[str, str]:
 def _contributed_agent_row(aid: str) -> dict[str, Any]:
     """The gateway plugin's contribution row for a coding agent ({} when none)."""
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         for row in get_contributions().get("llm_coding_agents") or []:
             if isinstance(row, dict) and str(row.get("id") or "").strip().lower().replace("-", "_") == aid:
@@ -73,12 +73,9 @@ CODING_AGENT_LABELS: dict[str, str] = {"ducky": "Ducky"}
 def contributed_coding_agents() -> tuple[str, ...]:
     """Enabled gateway coding-agent ids that also have a registered factory."""
     try:
-        from backend.uefn_plugins.host import (
-            ensure_plugins_loaded_async,
-            get_coding_agent_registration,
-            get_contributions,
-            plugins_ready,
-        )
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         # Never block PanelSettings.save / Store enable on sync register repair.
         # ensure_plugins_loaded() → unity-mcp nested MCP sync hung Discord toggles
@@ -113,7 +110,7 @@ def normalize_coding_agent(value: str | None) -> str:
     if key == "ducky":
         return "ducky"
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         if get_coding_agent_registration(key) is not None:
             return key
@@ -195,7 +192,7 @@ class CodingAgentInfo:
         can_login = False
         can_logout = False
         try:
-            from backend.uefn_plugins.host import get_coding_agent_registration
+            from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
             reg = get_coding_agent_registration(self.id) or {}
             install_help = str(reg.get("install_help") or "")
@@ -324,7 +321,7 @@ def get_adapter(agent_id: str) -> CodingAgentAdapter | None:
     if aid == "ducky":
         return None
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(aid)
         if reg is None:

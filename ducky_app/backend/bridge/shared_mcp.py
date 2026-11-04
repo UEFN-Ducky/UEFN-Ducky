@@ -403,7 +403,7 @@ def _call_result(raw: Any) -> dict[str, Any]:
 
 def _plugins_ready() -> bool:
     try:
-        from backend.uefn_plugins.host import plugins_ready
+        from backend.uefn_plugins.plugin_host.boot import plugins_ready
 
         return bool(plugins_ready())
     except Exception:

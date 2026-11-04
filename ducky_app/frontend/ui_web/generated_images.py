@@ -168,7 +168,7 @@ def attachment_from_path(path: str | Path) -> dict[str, Any] | None:
 def image_tool_names() -> set[str]:
     names = set(_IMAGE_TOOLS)
     try:
-        from backend.uefn_plugins.host import image_generator_tools
+        from backend.uefn_plugins.plugin_host.ui_registry import image_generator_tools
 
         names |= image_generator_tools()
     except Exception:

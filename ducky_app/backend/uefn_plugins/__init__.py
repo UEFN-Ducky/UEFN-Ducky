@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from backend.uefn_plugins.host import (
-    ensure_plugins_loaded,
-    get_contributions,
-    is_plugin_enabled,
-    reload_plugins,
-)
+from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded, reload_plugins
+from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 from backend.uefn_plugins.store import (
     import_plugin_from_bytes,
     list_uefn_plugins,

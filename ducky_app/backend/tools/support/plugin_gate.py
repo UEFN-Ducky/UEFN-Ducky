@@ -32,7 +32,7 @@ _CORE_STORE_HEAL = frozenset({"uefn"})
 
 def heal_enable_store_plugin(plugin_id: str) -> bool:
     """Turn on an installed Store/bundled core plugin. Never asks the user to click Store."""
-    from backend.uefn_plugins.host import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from backend.uefn_plugins.store import load_plugin_manifest, set_uefn_plugin_enabled
 
     pid = (plugin_id or "").strip().lower()
@@ -54,7 +54,8 @@ def heal_enable_store_plugin(plugin_id: str) -> bool:
 
 
 def require_plugin(plugin_id: str) -> None:
-    from backend.uefn_plugins.host import is_plugin_enabled, uefn_agent_tools_allowed
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tools_allowed
 
     pid = (plugin_id or "").strip().lower()
     if not pid:

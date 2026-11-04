@@ -133,7 +133,7 @@ def _provider_label(provider: str) -> str:
     """A gateway's name as Settings → LLMs shows it (OpenAI, not openai)."""
     pid = (provider or "").strip().lower()
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         for row in get_contributions().get("llm_providers") or []:
             if str(row.get("id") or "").strip().lower() == pid:

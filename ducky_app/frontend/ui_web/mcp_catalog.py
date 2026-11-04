@@ -93,7 +93,8 @@ def _diagnostic_observations() -> dict[str, Any]:
     from backend.agent.builtin_toolsets import builtin_group_rows, builtin_group_for_tool
     from backend.mcp_plugins import client_pool
     from backend.mcp_plugins.store import list_mcp_servers
-    from backend.uefn_plugins.host import plugins_ready, uefn_plugin_tool_group_rows
+    from backend.uefn_plugins.plugin_host.boot import plugins_ready
+    from backend.uefn_plugins.plugin_host.tool_registry import uefn_plugin_tool_group_rows
 
     servers = [*builtin_group_rows(), *list_mcp_servers()]
     complete = plugins_ready()
@@ -208,7 +209,7 @@ def build_server_catalog(server_id: str) -> dict[str, Any]:
     the app's own tool groups list the app's tools with no nested connects."""
     from backend.agent.builtin_toolsets import filter_builtin_tools, is_builtin_group
     from backend.agent.tools import _ensure_mcp
-    from backend.uefn_plugins.host import filter_uefn_plugin_tools, is_uefn_agent_tool_plugin
+    from backend.uefn_plugins.plugin_host.tool_registry import filter_uefn_plugin_tools, is_uefn_agent_tool_plugin
 
     sid = (server_id or "").strip()
     if is_builtin_group(sid.lower()) or is_uefn_agent_tool_plugin(sid.lower()):
@@ -237,7 +238,7 @@ def _catalog_from_tools(tools: list[Any], *, query: str = "", offset: int = 0,
     plugin_destructive = plugin_destructive_tool_names()
     uefn_owner: dict[str, str] = {}
     try:
-        from backend.uefn_plugins.host import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
+        from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
 
         for row in list(uefn_agent_tool_rows()) + list(uefn_plugin_tool_group_rows()):
             pid = str(row.get("id") or "").strip()
@@ -336,7 +337,7 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
     import inspect
 
     from backend.agent.tools import _ensure_mcp
-    from backend.uefn_plugins.host import plugins_ready
+    from backend.uefn_plugins.plugin_host.boot import plugins_ready
 
     mcp = _ensure_mcp()
     tools = list(mcp._tool_manager.list_tools())
@@ -351,7 +352,7 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
     if ready:
         # Already loaded → these return without blocking on plugin register().
         try:
-            from backend.uefn_plugins.host import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
+            from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
 
             for row in list(uefn_agent_tool_rows()) + list(uefn_plugin_tool_group_rows()):
                 label = str(row.get("label") or row.get("id") or "").strip()
@@ -410,7 +411,7 @@ def build_workflow_tool_catalog() -> dict[str, Any]:
 def _merge_installed_plugin_tools(full: dict[str, Any]) -> None:
     """Include Store-installed plugin tools even when the local toggle is off."""
     try:
-        from backend.uefn_plugins.host import uefn_plugin_tool_group_rows
+        from backend.uefn_plugins.plugin_host.tool_registry import uefn_plugin_tool_group_rows
         from backend.agent.toolsets.destructive import DESTRUCTIVE_TOOLS
 
         rows = uefn_plugin_tool_group_rows()

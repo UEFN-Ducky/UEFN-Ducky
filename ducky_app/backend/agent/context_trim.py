@@ -113,7 +113,7 @@ def should_force_clear(provider: str, last_message_ts: float) -> bool:
     mode = ""
     ttl_s: int | None = None
     try:
-        from backend.uefn_plugins.host import get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
         reg = get_llm_provider_registration(provider) or {}
         mode = str(reg.get("cache_mode") or "").strip().lower()

@@ -566,7 +566,7 @@ def list_templates() -> list[dict[str, Any]]:
     then user custom. Each says its category and the plugins it needs."""
     out: list[dict[str, Any]] = []
     try:
-        from backend.uefn_plugins.host import get_ui_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_ui_contributions
         from backend.uefn_plugins.store import get_enabled_plugin_ids
 
         enabled = set(get_enabled_plugin_ids())

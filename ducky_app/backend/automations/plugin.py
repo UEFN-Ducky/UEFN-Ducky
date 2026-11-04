@@ -32,7 +32,7 @@ def get_handler(node_type: str) -> Callable[..., Any] | None:
         return None
     pid, fn = row
     try:
-        from backend.uefn_plugins.host import is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
 
         if not is_plugin_enabled(pid):
             return None

@@ -260,7 +260,7 @@ def _provider_family(provider_id: str) -> set[str]:
         return set()
     key_agent = key.replace("-", "_")
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         contrib = get_contributions() or {}
     except Exception:

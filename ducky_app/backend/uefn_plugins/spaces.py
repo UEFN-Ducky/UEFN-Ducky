@@ -944,7 +944,7 @@ def rebind_project_folders(project_root: str, plugins: list[str] | None = None) 
     from backend.process_role import is_app
 
     if is_app():  # tool servers and agent hosts reload on the plugin's next call (epoch)
-        from backend.uefn_plugins.host import reload_single_plugin
+        from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
 
         for plugin in moved:
             try:
@@ -1005,7 +1005,7 @@ def on_account_change(before: str, after: str) -> None:
 
     def _work() -> None:
         from backend.uefn_plugins import team_folders
-        from backend.uefn_plugins.host import reload_single_plugin
+        from backend.uefn_plugins.plugin_host.lifecycle import reload_single_plugin
         from backend.uefn_plugins.store import get_enabled_plugin_ids
         from frontend.ui_web.agent_modes import push_ui_event
 

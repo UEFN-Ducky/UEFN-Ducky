@@ -26,7 +26,7 @@ def _plugin_owns_cache_markers(plugin_id: str) -> bool:
     if not pid:
         return False
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         for section in get_contributions().get("settings_sections") or []:
             if not isinstance(section, dict):
@@ -52,7 +52,7 @@ def provider_cache_markers_enabled(provider: str, *, fallback: bool = True) -> b
 def anthropic_extended_cache_ttl_enabled(*, fallback: bool = False) -> bool:
     # Pref lives on whichever gateway contributes extendedCacheTtl (Anthropic today).
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         for section in get_contributions().get("settings_sections") or []:
             if not isinstance(section, dict):

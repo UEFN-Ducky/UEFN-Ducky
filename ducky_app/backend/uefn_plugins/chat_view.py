@@ -33,7 +33,8 @@ def bare_tool_name(name: str) -> str:
 def tool_owner(tool_name: str) -> dict[str, Any]:
     """``{plugin_id, label, panel_id, panel_title}`` for a Store plugin's tool, ``{}`` for
     Ducky's own tools. ``panel_id`` is empty when the plugin has no panel to open."""
-    from backend.uefn_plugins.host import get_ui_contributions, plugin_for_tool
+    from backend.uefn_plugins.plugin_host.tool_registry import plugin_for_tool
+    from backend.uefn_plugins.plugin_host.ui_registry import get_ui_contributions
 
     pid = plugin_for_tool(bare_tool_name(tool_name))
     if not pid or pid == "ducky":

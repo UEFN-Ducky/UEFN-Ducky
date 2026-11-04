@@ -52,7 +52,7 @@ def _live_status_for(plugin_id: str) -> str:
 def enabled_desktop_plugins_prompt_block() -> str:
     """Inject into agent system prompt so duckies see MCP/plugin truth."""
     try:
-        from backend.uefn_plugins.host import uefn_agent_tool_rows
+        from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows
     except Exception:
         return ""
 

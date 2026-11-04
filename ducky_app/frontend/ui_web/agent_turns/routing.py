@@ -344,7 +344,7 @@ def run_message(
     # is Ducky's own agent, never a coding agent's CLI with that gateway's model id. A model
     # id the gateway renamed (``model_aliases``) moves to the current one.
     from backend.agent.model_pricing import infer_provider
-    from backend.uefn_plugins.host import current_model_id, provider_option
+    from backend.uefn_plugins.plugin_host.gateways import current_model_id, provider_option
 
     recorded_provider = (getattr(conv, "provider", None) or "").strip().lower()
     remote = next(
@@ -379,7 +379,7 @@ def run_message(
             except Exception:
                 pass
         try:
-            from backend.uefn_plugins.host import resolve_gateway_credential
+            from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
             connected = bool(resolve_gateway_credential(provider_name))
         except Exception:
@@ -667,7 +667,7 @@ def run_message(
         from backend.agent.builtin_toolsets import set_active_builtin_groups
         from backend.mcp_plugins.store import set_active_plugin_ids
         from backend.skills.selection import set_active_disabled_packs, set_active_enabled_subskills
-        from backend.uefn_plugins.host import set_active_uefn_agent_plugin_ids
+        from backend.uefn_plugins.plugin_host.tool_registry import set_active_uefn_agent_plugin_ids
 
         try:
             from frontend.duckyos_account import fetch_agent_caps
@@ -706,7 +706,7 @@ def run_message(
             from backend.skills.selection import resolve_conversation_selection
             from backend.skills.skill_index import build_skill_prompt
             from backend.mcp_plugins.store import seed_mcp_plugins
-            from backend.uefn_plugins.host import ensure_plugins_loaded
+            from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded
 
             seed_skill_packs()
             seed_mcp_plugins()

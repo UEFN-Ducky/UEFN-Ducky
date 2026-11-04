@@ -188,7 +188,7 @@ def _models_fingerprint() -> str:
 
 def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any]]:
     """JS-facing model rows from an in-memory cache. Never hits provider APIs."""
-    from backend.uefn_plugins.host import provider_visible
+    from backend.uefn_plugins.plugin_host.gateways import provider_visible
     from frontend.agent_models import provider_label
 
     prov = (provider or "").strip().lower()
@@ -197,7 +197,7 @@ def serialize_model_rows(provider: str, models: list[Any]) -> list[dict[str, Any
     label = provider_label(prov) or PROVIDER_LABELS.get(prov, prov.title())
     rows: list[dict[str, Any]] = []
     from backend.agent.thinking_effort import ensure_thinking_menu
-    from backend.uefn_plugins.host import provider_option
+    from backend.uefn_plugins.plugin_host.gateways import provider_option
 
     # Old ids the gateway renamed (model_aliases), so a chat saved with one still shows the name.
     renamed = dict(provider_option(prov, "model_aliases") or {})
@@ -306,7 +306,7 @@ def _models_boot_once() -> bool:
 def _seed_empty_model_caches_from_disk() -> None:
     """Fill empty gateway lists from a plugin disk cache. No Node, no network."""
     from backend.agent.model_fetch import _cache_provider_models
-    from backend.uefn_plugins.host import get_llm_provider_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
     try:
         providers = _catalog_keep_providers()
@@ -405,7 +405,7 @@ def _load_model_cache_from_disk() -> None:
 def _contributed_provider_ids() -> set[str]:
     """Installed gateway ids from plugin.json — available before register() finishes."""
     try:
-        from backend.uefn_plugins.host import get_contributions, get_ui_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions, get_ui_contributions
 
         out: set[str] = set()
         for src in (get_ui_contributions, get_contributions):
@@ -530,11 +530,8 @@ def _log(msg: str) -> None:
 
 def _warm_model_cache() -> None:
     from backend.agent.model_fetch import fetch_models
-    from backend.uefn_plugins.host import (
-        get_contributions,
-        get_llm_provider_registration,
-        resolve_gateway_credential,
-    )
+    from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration, resolve_gateway_credential
+    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
     before = _models_fingerprint()
     changed = False
@@ -890,7 +887,7 @@ class PanelApi(
         ever settling.
         """
         try:
-            from backend.uefn_plugins.host import ensure_plugins_loaded_async, plugins_ready
+            from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
 
             if plugins_ready():
                 return
@@ -1201,7 +1198,7 @@ class PanelApi(
         """One fetch, run on the status cache's thread (never on a window call)."""
         result = self._fetch_listener_status()
         try:
-            from backend.uefn_plugins.host import attach_plugin_connections
+            from backend.uefn_plugins.plugin_host.services import attach_plugin_connections
 
             result = attach_plugin_connections(result)
         except Exception:

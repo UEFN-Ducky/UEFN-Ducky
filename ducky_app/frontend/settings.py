@@ -485,7 +485,7 @@ class PanelSettings:
         # Only clamp against a complete catalog. A plugin register() that saves
         # settings mid-load would otherwise persist a silent reset to "ducky"
         # just because the gateway owning the choice had not registered yet.
-        from backend.uefn_plugins.host import plugins_ready
+        from backend.uefn_plugins.plugin_host.boot import plugins_ready
 
         raw_agent = str(self.default_coding_agent or "ducky").strip()
         if plugins_ready():

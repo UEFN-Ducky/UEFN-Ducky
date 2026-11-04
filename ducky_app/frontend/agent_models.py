@@ -9,7 +9,7 @@ def provider_label(provider: str) -> str:
     if not prov:
         return ""
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         for row in get_contributions().get("llm_providers") or []:
             if not isinstance(row, dict):
@@ -62,7 +62,7 @@ def default_provider_with_key(has_key_fn) -> str | None:
     ids = [p for p in all_providers() if p]
     # A plugin gateway that offers a fallback model (its plugin's hosted model) comes first.
     try:
-        from backend.uefn_plugins.host import provider_option, provider_visible
+        from backend.uefn_plugins.plugin_host.gateways import provider_option, provider_visible
 
         for p in ids:
             if provider_option(p, "fallback_model") and provider_visible(p) and has_key_fn(p):

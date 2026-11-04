@@ -159,7 +159,7 @@ def apply_cloud_tool_deny(tools: list[Tool]) -> list[Tool]:
 
 async def list_mcp_tools(*, apply_filters: bool = True) -> list[Tool]:
     from backend.agent.builtin_toolsets import filter_builtin_tools
-    from backend.uefn_plugins.host import filter_uefn_plugin_tools
+    from backend.uefn_plugins.plugin_host.tool_registry import filter_uefn_plugin_tools
 
     mcp = _ensure_mcp()
     core = await mcp.list_tools()
@@ -662,7 +662,7 @@ def _requires_uefn_listener(name: str) -> bool:
     except Exception:
         pass
     try:
-        from backend.uefn_plugins.host import is_plugin_host_only_tool
+        from backend.uefn_plugins.plugin_host.tool_registry import is_plugin_host_only_tool
 
         if is_plugin_host_only_tool(name):
             return False
@@ -679,7 +679,7 @@ _PLUGIN_GONE_HINT = (
 
 def _plugin_tool_gone(name: str) -> str:
     try:
-        from backend.uefn_plugins.host import plugin_tool_unavailable_reason
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_tool_unavailable_reason
 
         return plugin_tool_unavailable_reason(name)
     except Exception:
@@ -689,7 +689,7 @@ def _plugin_tool_gone(name: str) -> str:
 def _failed_plugins_note(name: str) -> str:
     """A tool no server serves may belong to a plugin that never loaded in this process."""
     try:
-        from backend.uefn_plugins.host import plugin_load_failures
+        from backend.uefn_plugins.plugin_host.errors import plugin_load_failures
 
         failures = plugin_load_failures()
         if not failures or _served_by_mcp(name):

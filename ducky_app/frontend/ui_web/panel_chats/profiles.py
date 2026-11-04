@@ -110,11 +110,8 @@ def get_agent_profile_editor_catalog(self) -> dict[str, Any]:
     from backend.skills.manifest import list_skill_packs
     from backend.skills.seeding import seed_skill_packs
     from backend.skills.selection import default_selection_from_settings
-    from backend.uefn_plugins.host import (
-        ensure_plugins_loaded_async,
-        plugins_ready,
-        uefn_agent_tool_rows,
-    )
+    from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
+    from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows
     from frontend.ui_web.project_chats import all_available_tool_ids
 
     seed_skill_packs()

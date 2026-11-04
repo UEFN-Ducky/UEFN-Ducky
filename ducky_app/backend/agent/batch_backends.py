@@ -16,7 +16,7 @@ def supports_batch_complete(provider_name: str) -> bool:
     except Exception:
         pass
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(name) or {}
         # Explicit opt-in only — complete_one_shot alone is not enough (CLI agents).

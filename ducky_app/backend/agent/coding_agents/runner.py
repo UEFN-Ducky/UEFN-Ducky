@@ -113,7 +113,7 @@ def _thinking_env(agent_id: str, thinking_effort: str) -> dict[str, str]:
         "DUCKY_THINKING_EFFORT": normalize_thinking_effort(thinking_effort),
     }
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         fn = (get_coding_agent_registration(agent_id) or {}).get("thinking_env")
         if callable(fn):
@@ -138,7 +138,7 @@ def _account_env(agent_id: str, conv_id: str = "") -> dict[str, str]:
 def _normalize_launch_model(agent_id: str, model: str) -> str:
     mid = (model or "").strip()
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         fn = (get_coding_agent_registration(agent_id) or {}).get("normalize_model")
         if callable(fn):
@@ -909,7 +909,7 @@ def _run_coding_agent_message(
     cwd = project_root or "."
     cli_path = str(cfg.get("cli_path") or "")
 
-    from backend.uefn_plugins.host import get_coding_agent_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
     reg = get_coding_agent_registration(agent_id) or {}
 

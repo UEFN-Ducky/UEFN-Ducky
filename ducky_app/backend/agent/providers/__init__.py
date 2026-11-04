@@ -34,12 +34,9 @@ def builtin_providers() -> tuple[str, ...]:
 def gateway_providers() -> tuple[str, ...]:
     """Enabled ``llm.providers`` ids that have a registered factory."""
     try:
-        from backend.uefn_plugins.host import (
-            ensure_plugins_loaded_async,
-            get_contributions,
-            get_llm_provider_registration,
-            plugins_ready,
-        )
+        from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         # Never block Store enable/disable on sync register repair (unity-mcp etc.).
         if not plugins_ready():
@@ -305,7 +302,7 @@ def make_provider(
     if not model:
         raise ValueError("Model is required — load models from your API key in Settings")
 
-    from backend.uefn_plugins.host import get_llm_provider_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
     reg = get_llm_provider_registration(name)
     if reg is None:

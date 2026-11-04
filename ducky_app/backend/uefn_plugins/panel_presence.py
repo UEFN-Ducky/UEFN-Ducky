@@ -86,7 +86,7 @@ def panel_state(plugin_id: str) -> dict[str, Any]:
 
 def _has_panels(plugin_id: str) -> list[str]:
     try:
-        from backend.uefn_plugins.host import get_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         rows = get_contributions().get("ui_panels") or []
     except Exception:

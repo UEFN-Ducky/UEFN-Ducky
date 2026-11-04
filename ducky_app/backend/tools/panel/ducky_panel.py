@@ -173,8 +173,8 @@ def _discovery_cached_connections() -> dict[str, Any]:
             reason = observed.get("epic_mcp_reason")
             known = ("", "disabled", "unreachable", "other_editor", "port_taken")
             status["epic_mcp_reason"] = reason if reason in known else "unknown"
-    host = sys.modules.get("backend.uefn_plugins.host")
-    cache = getattr(host, "_CONNECTION_CACHE", {})
+    host_state = sys.modules.get("backend.uefn_plugins.plugin_host.state")
+    cache = getattr(host_state, "_CONNECTION_CACHE", {})
     # Bound the snapshot and never wait for a provider lock. A concurrent cache
     # change can invalidate iteration; the caller reports unknown in that case.
     rows = []
@@ -221,7 +221,7 @@ _seen_lock = threading.Lock()
 def _catalog_scope() -> tuple[Any, ...]:
     from backend.agent.builtin_toolsets import _ACTIVE_BUILTIN_GROUPS
     from backend.mcp_plugins.store import _ACTIVE_PLUGIN_IDS
-    from backend.uefn_plugins.host import _ACTIVE_UEFN_AGENT_IDS
+    from backend.uefn_plugins.plugin_host.state import _ACTIVE_UEFN_AGENT_IDS
 
     return (_ACTIVE_BUILTIN_GROUPS.get(), _ACTIVE_PLUGIN_IDS.get(), _ACTIVE_UEFN_AGENT_IDS.get())
 
@@ -464,7 +464,7 @@ def ducky_get_status(pretty: bool = False) -> str:
         selected_project_root=settings.uefn_project_root,
     )
     try:
-        from backend.uefn_plugins.host import attach_plugin_connections
+        from backend.uefn_plugins.plugin_host.services import attach_plugin_connections
 
         result = attach_plugin_connections(result)
     except Exception:

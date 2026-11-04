@@ -668,7 +668,7 @@ def _chat_agent(conv_id: str) -> str:
 
 def _agent_registration(agent_id: str) -> dict[str, Any]:
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(agent_id)
         if reg is None:
@@ -728,7 +728,7 @@ def _agents_that_ask() -> list[str]:
 
     labels = [coding_agent_label("ducky")]
     try:
-        from backend.uefn_plugins.host import registered_coding_agent_ids
+        from backend.uefn_plugins.plugin_host.gateways import registered_coding_agent_ids
 
         for aid in registered_coding_agent_ids():
             if aid != "ducky" and MODE_ASK in _agent_modes(aid):

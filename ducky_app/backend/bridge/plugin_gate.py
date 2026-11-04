@@ -21,7 +21,7 @@ _installed = False
 
 def wait_until_plugins_loaded(timeout: float = _DEFAULT_TIMEOUT_S) -> bool:
     """Block until the first Store plugin load finishes (or timeout)."""
-    from backend.uefn_plugins.host import wait_plugins_loaded
+    from backend.uefn_plugins.plugin_host.boot import wait_plugins_loaded
 
     return wait_plugins_loaded(timeout=timeout)
 
@@ -49,7 +49,7 @@ def lean_tool_list(tools: list[Any]) -> list[Any]:
     """
     try:
         from backend.tools.support.plugin_gate import HOST_DISK_TOOLS
-        from backend.uefn_plugins.host import store_plugin_tool_names
+        from backend.uefn_plugins.plugin_host.tool_registry import store_plugin_tool_names
 
         hidden = store_plugin_tool_names() - HOST_DISK_TOOLS
     except Exception:
@@ -138,7 +138,7 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
         return
 
     async def list_tools_after_plugins(req: Any) -> Any:
-        from backend.uefn_plugins.host import plugins_ready
+        from backend.uefn_plugins.plugin_host.boot import plugins_ready
 
         if not plugins_ready():
             await asyncio.to_thread(wait_until_plugins_loaded, timeout)

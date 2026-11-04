@@ -37,7 +37,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.uefn_plugins.host import backend_module_name
+from backend.uefn_plugins.plugin_host.loader import backend_module_name
 from backend.uefn_plugins.plugin_version import plugin_version_rank
 from backend.uefn_plugins.signing import (
     SigningKeyError,

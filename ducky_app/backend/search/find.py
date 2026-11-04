@@ -80,7 +80,7 @@ def _copies(account: str) -> list[dict[str, Any]]:
 
 def _tools_of(plugin_id: str) -> list[str]:
     try:
-        from backend.uefn_plugins.host import _PLUGIN_TOOL_OWNER
+        from backend.uefn_plugins.plugin_host.state import _PLUGIN_TOOL_OWNER
 
         return sorted(t for t, p in dict(_PLUGIN_TOOL_OWNER).items() if p == plugin_id)
     except Exception:  # noqa: BLE001
@@ -161,7 +161,8 @@ def _record_hits(pid: str, label: str, query: str, limit: int) -> list[dict[str,
 
 
 def find(query: str, *, plugin: str = "", limit: int = 10) -> dict[str, Any]:
-    from backend.uefn_plugins.host import _plugin_label, is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.errors import _plugin_label
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from backend.uefn_plugins.scopes import account_id, active_scope
 
     query = " ".join((query or "").split())

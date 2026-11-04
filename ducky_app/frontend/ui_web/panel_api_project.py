@@ -460,7 +460,7 @@ class PanelApiProjectMixin:
     def _require_tester_plugin(self) -> dict[str, Any] | None:
         """Tester dock + bridge require the Store UEFN plugin (it holds testing) to be enabled."""
         try:
-            from backend.uefn_plugins.host import is_plugin_enabled
+            from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
 
             if is_plugin_enabled("uefn"):
                 return None

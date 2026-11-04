@@ -126,7 +126,7 @@ def _owner_rows(tools: list[Any]) -> list[dict[str, Any]]:
 
     plugin_of: dict[str, tuple[str, str]] = {}
     try:
-        from backend.uefn_plugins.host import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
+        from backend.uefn_plugins.plugin_host.tool_registry import uefn_agent_tool_rows, uefn_plugin_tool_group_rows
 
         for row in list(uefn_agent_tool_rows()) + list(uefn_plugin_tool_group_rows()):
             pid = str(row.get("id") or "").strip()
@@ -180,7 +180,7 @@ def live_tool_rows() -> tuple[list[dict[str, Any]], str] | None:
     except Exception:  # noqa: BLE001
         pass
     try:
-        from backend.uefn_plugins.host import plugins_ready
+        from backend.uefn_plugins.plugin_host.boot import plugins_ready
 
         if not plugins_ready():
             return None
@@ -311,7 +311,7 @@ def _tried_and_not_loaded() -> set[str]:
     """Enabled plugins that failed to load or are paused here: not "still registering",
     so their old tool rows go (process-local state; another process keeps serving its own)."""
     try:
-        from backend.uefn_plugins.host import tried_and_not_loaded
+        from backend.uefn_plugins.plugin_host.errors import tried_and_not_loaded
 
         return tried_and_not_loaded()
     except Exception:  # noqa: BLE001

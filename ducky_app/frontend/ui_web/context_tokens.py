@@ -184,7 +184,7 @@ def _last_user_message(messages: list[dict[str, Any]]) -> str:
 def _provider_tool_schemas(provider: str, tools: list) -> list[dict[str, Any]]:
     schema = ""
     try:
-        from backend.uefn_plugins.host import get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
         schema = str(
             (get_llm_provider_registration(provider) or {}).get("tool_schema") or ""
@@ -565,7 +565,7 @@ def _cache_mode_for_provider(provider: str, settings: PanelSettings) -> str | No
     p = (provider or "").strip().lower()
     mode = ""
     try:
-        from backend.uefn_plugins.host import get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
         reg = get_llm_provider_registration(p) or {}
         mode = str(reg.get("cache_mode") or "").strip().lower()
@@ -623,7 +623,7 @@ def _breakdown_used_tokens(item: dict[str, Any]) -> int:
 def _external_agent_token_provider(agent_id: str) -> str:
     """Provider id used for tiktoken / tool-schema estimates for a coding agent."""
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(agent_id) or {}
         tp = str(reg.get("token_provider") or "").strip().lower()
@@ -829,7 +829,7 @@ def _external_agent_report(
         "has_run": bool(stats),
     }
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(agent_id) or {}
         defaults = reg.get("settings_defaults") or {}

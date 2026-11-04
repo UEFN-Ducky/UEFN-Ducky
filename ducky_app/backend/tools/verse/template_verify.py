@@ -36,7 +36,7 @@ def _project_verse_root() -> Path:
 
 
 def _templates(template_ids: set[str]) -> list[dict[str, Any]]:
-    from backend.uefn_plugins.host import get_contributions
+    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
     rows = [r for r in (get_contributions().get("verse_templates") or []) if isinstance(r, dict)]
     if template_ids:

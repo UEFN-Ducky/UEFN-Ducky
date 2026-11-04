@@ -34,7 +34,7 @@ def infer_provider(model: str) -> str:
     m = raw.lower()
     # A plugin gateway's own model ids (its model_ids / model_aliases), bare or qualified.
     try:
-        from backend.uefn_plugins.host import provider_for_model, registered_providers
+        from backend.uefn_plugins.plugin_host.gateways import provider_for_model, registered_providers
 
         # A leftover "claude_code:<its id>" still belongs to that gateway.
         owner = provider_for_model(m.rsplit(":", 1)[-1] if ":" in m else m)
@@ -164,7 +164,7 @@ def estimate_cost_usd(
     # Default: input tokens already exclude cache hits (OpenAI-style).
     cost_mode = ""
     try:
-        from backend.uefn_plugins.host import get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
         cost_mode = str(
             (get_llm_provider_registration(provider) or {}).get("cost_mode") or ""

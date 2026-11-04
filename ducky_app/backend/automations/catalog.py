@@ -540,7 +540,7 @@ BUILTIN_NODES: list[dict[str, Any]] = [
 
 def _contributions() -> tuple[dict[str, Any], set[str]]:
     try:
-        from backend.uefn_plugins.host import get_ui_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_ui_contributions
         from backend.uefn_plugins.store import get_enabled_plugin_ids
 
         return get_ui_contributions(), set(get_enabled_plugin_ids())

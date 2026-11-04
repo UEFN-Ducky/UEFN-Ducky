@@ -2504,7 +2504,7 @@ def _plugin_contributes_summary(plug: dict[str, Any]) -> list[str]:
                     break
         pid = str(plug.get("id") or "").strip()
         if pid and "tools" not in out:
-            from backend.uefn_plugins.host import is_uefn_agent_tool_plugin
+            from backend.uefn_plugins.plugin_host.tool_registry import is_uefn_agent_tool_plugin
 
             if is_uefn_agent_tool_plugin(pid):
                 out.append("tools")

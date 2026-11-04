@@ -80,7 +80,7 @@ def _navigate(route: str, item_id: str = "") -> dict[str, Any]:
 
 def _plugin_panel(item_id: str) -> dict[str, Any]:
     """``<plugin_id>`` or ``<plugin_id>:<panel_id>`` → ``{plugin_id, panel_id, title}`` or an error."""
-    from backend.uefn_plugins.host import get_contributions
+    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
     plugin_id, _, panel_id = (item_id or "").partition(":")
     plugin_id = plugin_id.strip().lower()

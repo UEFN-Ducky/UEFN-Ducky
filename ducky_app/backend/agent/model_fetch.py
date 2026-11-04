@@ -83,7 +83,7 @@ def clear_model_cache(provider: str | None = None) -> None:
         _CAPABILITY_CACHE.clear()
     # Best-effort: ask registered gateways to drop their private caches.
     try:
-        from backend.uefn_plugins.host import (
+        from backend.uefn_plugins.plugin_host.gateways import (
             get_llm_provider_registration,
             registered_llm_provider_ids,
         )
@@ -110,7 +110,7 @@ def fetch_models(provider: str, api_key: str, *, verify_openai: bool = False) ->
     key = (api_key or "").strip()
     models: list[ModelInfo] = []
     try:
-        from backend.uefn_plugins.host import get_llm_provider_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
 
         reg = get_llm_provider_registration(name) or {}
         norm = reg.get("normalize_secret")
@@ -245,7 +245,7 @@ def normalize_usage_windows(raw: Any) -> dict[str, Any]:
 
 def _usage_registration(provider: str) -> tuple[str, dict[str, Any]]:
     """LLM provider row, or coding-agent `token_provider` fallback."""
-    from backend.uefn_plugins.host import (
+    from backend.uefn_plugins.plugin_host.gateways import (
         get_coding_agent_registration,
         get_llm_provider_registration,
     )
@@ -270,7 +270,7 @@ def fetch_usage(provider: str, api_key: str, *, model: str = "", force: bool = F
     asked = (provider or "").strip().lower()
     acc_provider, rows = _accounts_of(asked, name) if asked != name else _accounts_of(name)
     account = next((r["id"] for r in rows if r.get("active")), "")
-    from backend.uefn_plugins.host import get_coding_agent_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
     if account and account != "default" and callable((get_coding_agent_registration(acc_provider) or {}).get("account_usage")):
         out = fetch_account_usage(acc_provider, account, force=force)  # its own login folder, not the CLI's
@@ -288,7 +288,7 @@ def fetch_account_usage(provider: str, account_id: str, *, force: bool = False) 
     A coding agent's ``account_usage(config_dir)`` hook first; else the gateway's
     ``fetch_usage`` with that account's key. Raises KeyError for an unknown account."""
     from backend.agent import accounts
-    from backend.uefn_plugins.host import get_coding_agent_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
     asked = (provider or "").strip().lower()
     if not any(a["id"] == account_id for a in accounts.list_accounts(asked)):

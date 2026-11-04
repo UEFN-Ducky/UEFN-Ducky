@@ -45,7 +45,7 @@ def _coding_agent_backends() -> frozenset[str]:
 def _route_coding_agent(backend: str, model_id: str) -> tuple[str, str]:
     """Map a coding-agent pick to a completion backend (api provider or agent id)."""
     from backend.agent.coding_agents.base import contributed_coding_agents
-    from backend.uefn_plugins.host import get_coding_agent_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
     mid = (model_id or "").strip()
     backend = (backend or "").strip().lower().replace("-", "_")
@@ -134,7 +134,7 @@ async def _complete_text(
 
     from backend.agent.coding_agents.base import contributed_coding_agents
     from backend.agent.providers import gateway_providers
-    from backend.uefn_plugins.host import get_coding_agent_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
     from frontend.ui_web.provider_usage_log import (
         bind_usage_context,
         log_gateway_usage,
@@ -185,7 +185,7 @@ async def _complete_text(
             )
 
         try:
-            from backend.uefn_plugins.host import resolve_gateway_credential
+            from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
             api_key = resolve_gateway_credential(pname)
         except Exception:

@@ -48,7 +48,7 @@ def program_offline_reason(program: str) -> str:
             return "UEFN listener is offline — open UEFN before undoing editor changes"
         return ""
     try:
-        from backend.uefn_plugins.host import plugin_connection_for_program
+        from backend.uefn_plugins.plugin_host.services import plugin_connection_for_program
 
         row = plugin_connection_for_program(prog)
     except Exception:

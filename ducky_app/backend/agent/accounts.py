@@ -324,7 +324,7 @@ _RUNNING = threading.local()
 
 
 def _agent_reg(agent_id: str) -> dict:
-    from backend.uefn_plugins.host import get_coding_agent_registration
+    from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
     return get_coding_agent_registration(agent_id) or {}
 

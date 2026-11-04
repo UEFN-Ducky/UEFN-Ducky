@@ -99,7 +99,7 @@ def merge_ui_panels(
 
 def resolve_plugin_ui_file(plugin_id: str, rel_path: str) -> Path | None:
     """Resolve a path under an enabled plugin's AppData dir, or None."""
-    from backend.uefn_plugins.host import is_plugin_enabled
+    from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     from backend.uefn_plugins.store import appdata_uefn_plugins_dir, normalize_plugin_id
 
     try:

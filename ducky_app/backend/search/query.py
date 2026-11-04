@@ -90,7 +90,7 @@ def chat_context(*, allowed_tools: set[str] | None = None) -> Context:
     from backend.skills.selection import active_disabled_packs, active_enabled_subskills
 
     try:
-        from backend.uefn_plugins.host import is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
     except Exception:  # noqa: BLE001
         is_plugin_enabled = None  # type: ignore[assignment]
     return Context(

@@ -99,7 +99,7 @@ def _parse_draft(text: str) -> dict[str, Any]:
 
 async def _complete_text(*, provider_name: str, model: str, system: str, user: str) -> str:
     try:
-        from backend.uefn_plugins.host import resolve_gateway_credential
+        from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
         api_key = resolve_gateway_credential(provider_name)
     except Exception:

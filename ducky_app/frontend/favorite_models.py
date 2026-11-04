@@ -28,7 +28,7 @@ def coding_agent_backends() -> frozenset[str]:
 def _contributed_api_backends() -> set[str]:
     """plugin.json gateway ids — known before register() finishes a factory."""
     try:
-        from backend.uefn_plugins.host import get_contributions, get_ui_contributions
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions, get_ui_contributions
     except Exception:
         return set()
     out: set[str] = set()
@@ -132,7 +132,7 @@ def parse_selection(raw: str) -> FavoriteSelection | None:
         return None
     # Plugin normalize_model (e.g. Cursor default→auto). Bare "default" otherwise invalid.
     try:
-        from backend.uefn_plugins.host import get_coding_agent_registration
+        from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
         reg = get_coding_agent_registration(backend) or {}
         norm = reg.get("normalize_model")
@@ -282,7 +282,7 @@ def billing_kind(coding_agent: str, provider: str, model: str = "") -> str:
     if not prov:
         return ""
     try:
-        from backend.uefn_plugins.host import provider_option
+        from backend.uefn_plugins.plugin_host.gateways import provider_option
 
         billing = str(provider_option(prov, "billing") or "")
     except Exception:
@@ -441,7 +441,7 @@ def fallback_selection() -> ResolveOk | None:
     """The model a plugin's gateway offers for a chat with no usable model (its
     ``fallback_model`` option), while visible."""
     try:
-        from backend.uefn_plugins.host import provider_option, provider_visible, registered_providers
+        from backend.uefn_plugins.plugin_host.gateways import provider_option, provider_visible, registered_providers
     except Exception:
         return None
     backends = api_backends()

@@ -114,7 +114,7 @@ def apply_user_verse_template(
 
 def _store_template_hint(template_id: str) -> str:
     """Name the Store plugin that owns ``plugin:<pid>:<id>`` (or that it is off)."""
-    from backend.uefn_plugins.host import get_contributions
+    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
     parts = template_id.split(":", 2)
     pid, bare = (parts[1], parts[2]) if len(parts) == 3 and parts[0] == "plugin" else ("", template_id)
