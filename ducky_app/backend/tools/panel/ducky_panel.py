@@ -32,6 +32,7 @@ _SUBAGENT_HANDOFF_PROMPT = (
     "Be exhaustive and concrete. Do not start new work — only the handoff."
 )
 from backend.util.json_util import tool_json
+from backend.tools.panel.archive_tree import archive_tree
 from backend.bridge.status import ListenerStatusState, fetch_listener_status
 from backend.server import mcp
 
@@ -903,30 +904,6 @@ def ducky_list_chats(folder_id: str | None = None, project: str = "", pretty: bo
         for c in convs
     ]
     return tool_json({"folders": folders, "conversations": conversations}, pretty=pretty)
-
-
-def archive_tree(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Archived chats as a tree: each group with what was archived with it under ``inside``."""
-    ids = {r["id"] for r in rows}
-    kids: dict[str, list[dict[str, Any]]] = {}
-    for r in rows:
-        parent = r.get("parent_conv_id") or ""
-        if parent and parent != r["id"] and parent in ids:
-            kids.setdefault(parent, []).append(r)
-    seen: set[str] = set()
-
-    def node(r: dict[str, Any]) -> dict[str, Any]:
-        seen.add(r["id"])
-        inside = [node(k) for k in kids.get(r["id"], []) if k["id"] not in seen]
-        count = sum(1 + n["inside_count"] for n in inside)
-        return {**r, "inside_count": count, "inside": inside}
-
-    child_ids = {k["id"] for v in kids.values() for k in v}
-    out = [node(r) for r in rows if r["id"] not in child_ids]
-    # A parent loop (a group archived inside its own ducky) has no root: list it anyway,
-    # or the badge counts chats the Archive never shows.
-    out += [node(r) for r in rows if r["id"] not in seen]
-    return out
 
 
 @mcp.tool()

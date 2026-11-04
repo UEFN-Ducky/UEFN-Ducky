@@ -1,8 +1,8 @@
-"""ducky_list_archive: a group lists what was archived with it, nested groups included."""
+"""archive_tree: a group lists what was archived with it, nested groups included."""
 
 from __future__ import annotations
 
-from backend.tools.panel.ducky_panel import archive_tree
+from backend.tools.panel.archive_tree import archive_tree
 
 
 def _row(cid: str, parent: str = "", group: bool = False) -> dict:
