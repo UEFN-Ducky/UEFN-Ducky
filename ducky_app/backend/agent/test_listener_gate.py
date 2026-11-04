@@ -10,6 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import backend.agent.tools as tools
+from backend.uefn_plugins.plugin_host import state, tool_registry
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
@@ -23,8 +25,9 @@ def _no_island_watch_thread(monkeypatch):
 
 
 def test_host_vs_editor_classification(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.is_plugin_host_only_tool",
+    patch_host(
+        monkeypatch,
+        "is_plugin_host_only_tool",
         lambda _n: False,
     )
     assert tools.is_host_only_tool("workspace_write_file")
@@ -63,8 +66,9 @@ def test_host_tools_never_probe_listener(monkeypatch) -> None:
 
     monkeypatch.setattr("backend.bridge.listener_get_health", _boom_health)
     monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.is_plugin_host_only_tool",
+    patch_host(
+        monkeypatch,
+        "is_plugin_host_only_tool",
         lambda _n: False,
     )
 
@@ -86,8 +90,9 @@ def test_editor_tool_with_uefn_closed_returns_its_own_connection_error(monkeypat
     monkeypatch.setattr(
         "backend.bridge.listener_get_health", lambda port, timeout=1.0: probes.append(port)
     )
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.is_plugin_host_only_tool",
+    patch_host(
+        monkeypatch,
+        "is_plugin_host_only_tool",
         lambda _n: False,
     )
 
@@ -110,7 +115,7 @@ def test_editor_tool_with_uefn_closed_returns_its_own_connection_error(monkeypat
 
 
 def test_editor_tool_text_answer_listener_offline_reads_uefn_closed(monkeypatch) -> None:
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
 
     async def _fake_call(name: str, args: dict):
         return [SimpleNamespace(text="Error: UEFN listener offline on port 4200")]
@@ -128,8 +133,9 @@ def test_editor_tools_run_when_listener_healthy(monkeypatch) -> None:
         "backend.bridge.listener_get_health",
         lambda port, timeout=1.0: probes.append(port) or {"status": "ok"},
     )
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.is_plugin_host_only_tool",
+    patch_host(
+        monkeypatch,
+        "is_plugin_host_only_tool",
         lambda _n: False,
     )
 
@@ -152,8 +158,9 @@ def test_desktop_plugin_host_only_tools_skip_listener_gate(monkeypatch) -> None:
         lambda port, timeout=1.0: health_calls.append(port) or None,
     )
     monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.is_plugin_host_only_tool",
+    patch_host(
+        monkeypatch,
+        "is_plugin_host_only_tool",
         lambda n: n == "ducktactoe_move",
     )
 
@@ -170,17 +177,15 @@ def test_desktop_plugin_host_only_tools_skip_listener_gate(monkeypatch) -> None:
 
 def test_plugin_tools_need_uefn_only_when_they_say_so(monkeypatch) -> None:
     # A plugin author who never thought about UEFN gets a tool that runs with UEFN closed.
-    import backend.uefn_plugins.host as host
-
-    monkeypatch.setattr(host, "ensure_plugins_loaded", lambda *a, **k: None)
+    patch_host(monkeypatch, "ensure_plugins_loaded", lambda *a, **k: None)
     for name, fresh in (("_API_TOOL_REGISTRY", {}), ("_PLUGIN_TOOL_NAMES", set()), ("_PLUGIN_TOOL_OWNER", {}),
                         ("_TOOL_LAST_OWNER", {}), ("_PLUGIN_HOST_ONLY_TOOLS", set()),
-                        ("_PLUGIN_INTENT_ROWS", []), ("_CONTRIBUTIONS", {**host._CONTRIBUTIONS, "agent_tools": {}})):
-        monkeypatch.setattr(host, name, fresh)
-    host._record_plugin_api_tool("demo", "demo_list")
-    host._record_plugin_api_tool("demo", "demo_place", listener=True)
-    assert host.is_plugin_host_only_tool("demo_list")
-    assert not host.is_plugin_host_only_tool("demo_place")
+                        ("_PLUGIN_INTENT_ROWS", []), ("_CONTRIBUTIONS", {**state._CONTRIBUTIONS, "agent_tools": {}})):
+        patch_host(monkeypatch, name, fresh)
+    tool_registry._record_plugin_api_tool("demo", "demo_list")
+    tool_registry._record_plugin_api_tool("demo", "demo_place", listener=True)
+    assert tool_registry.is_plugin_host_only_tool("demo_list")
+    assert not tool_registry.is_plugin_host_only_tool("demo_place")
 
 
 def test_offline_hint_says_keep_going() -> None:
@@ -190,15 +195,13 @@ def test_offline_hint_says_keep_going() -> None:
 def test_a_tool_whose_plugin_failed_to_reload_says_so_not_listener_offline(monkeypatch) -> None:
     # Oct 11 2026: a team's plugin failed to reload mid-edit; its tools fell through to the
     # editor gate, read "UEFN listener offline", and six agents chased the listener.
-    import backend.uefn_plugins.host as host
-
     probes: list[int] = []
     monkeypatch.setattr("backend.bridge.listener_get_health", lambda port, timeout=1.0: probes.append(port))
     monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
-    monkeypatch.setattr(host, "_plugin_label", lambda pid: "Island Media Kit")
-    monkeypatch.setitem(host._TOOL_LAST_OWNER, "imk_project_get", "island-media-kit")
-    monkeypatch.setitem(host._LOAD_FAILURES, "island-media-kit", "ValueError: Action registry differs.")
-    monkeypatch.delitem(host._PLUGIN_TOOL_OWNER, "imk_project_get", raising=False)
+    patch_host(monkeypatch, "_plugin_label", lambda pid: "Island Media Kit")
+    monkeypatch.setitem(state._TOOL_LAST_OWNER, "imk_project_get", "island-media-kit")
+    monkeypatch.setitem(state._LOAD_FAILURES, "island-media-kit", "ValueError: Action registry differs.")
+    monkeypatch.delitem(state._PLUGIN_TOOL_OWNER, "imk_project_get", raising=False)
     called: list[str] = []
 
     async def _fake_call(name: str, args: dict):
@@ -213,15 +216,13 @@ def test_a_tool_whose_plugin_failed_to_reload_says_so_not_listener_offline(monke
     assert "listener offline" not in result.error
     assert probes == [] and called == []
 
-    monkeypatch.setitem(host._PLUGIN_TOOL_OWNER, "imk_project_get", "island-media-kit")
-    assert host.plugin_tool_unavailable_reason("imk_project_get") == ""  # loaded again
+    monkeypatch.setitem(state._PLUGIN_TOOL_OWNER, "imk_project_get", "island-media-kit")
+    assert tool_registry.plugin_tool_unavailable_reason("imk_project_get") == ""  # loaded again
 
 
 def test_uefn_closed_names_plugins_that_failed_to_load_for_an_unknown_tool(monkeypatch) -> None:
-    import backend.uefn_plugins.host as host
-
-    monkeypatch.setattr(host, "is_plugin_host_only_tool", lambda _n: False)
-    monkeypatch.setattr(host, "plugin_load_failures", lambda: {"Island Media Kit": "ValueError: bad registry."})
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "plugin_load_failures", lambda: {"Island Media Kit": "ValueError: bad registry."})
     mcp = MagicMock()
     mcp._tool_manager._tools = {"spawn_actor": object()}
 
@@ -242,11 +243,9 @@ def test_uefn_closed_names_plugins_that_failed_to_load_for_an_unknown_tool(monke
 def test_a_guessed_tool_name_is_unknown_not_listener_offline(monkeypatch) -> None:
     # Oct 26 2026: imk_media_search (no such tool) read "UEFN listener offline", and the
     # agent told the person Island Media Kit needed UEFN.
-    import backend.uefn_plugins.host as host
-
     probes: list[int] = []
     monkeypatch.setattr("backend.bridge.listener_get_health", lambda port, timeout=1.0: probes.append(port))
-    monkeypatch.setattr(host, "plugin_load_failures", lambda: {})
+    patch_host(monkeypatch, "plugin_load_failures", lambda: {})
     mcp = MagicMock()
     mcp._tool_manager._tools = {"imk_project_list": object(), "imk_media_list": object()}
     monkeypatch.setattr(tools, "_ensure_mcp", lambda: mcp)

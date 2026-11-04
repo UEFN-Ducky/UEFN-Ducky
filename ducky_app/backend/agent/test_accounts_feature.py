@@ -21,7 +21,8 @@ from backend.agent import accounts, providers
 from backend.agent.coding_agents import runner
 from backend.agent.model_fetch import fetch_usage, reset_usage_cache
 from backend.agent.providers.base import StreamEvent, StreamEventKind
-from backend.uefn_plugins import host
+from backend.uefn_plugins.plugin_host import gateways
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web.panel_api import PanelApi
 
 QUOTA = "Error code: 429 - insufficient_quota"
@@ -64,8 +65,8 @@ def ducky(tmp_path, monkeypatch):
         "account_env": lambda d: {"CODEX_HOME": str(d)},
         "account_shared": {"dirs": ["skills"], "files": [], "primary": lambda: codex_home},
     }
-    monkeypatch.setattr(host, "get_llm_provider_registration", lambda n: openai if n == "openai" else None)
-    monkeypatch.setattr(host, "get_coding_agent_registration", lambda n: codex if n == "codex" else None)
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda n: openai if n == "openai" else None)
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda n: codex if n == "codex" else None)
     monkeypatch.setattr(providers, "gateway_providers", lambda: ("openai",))
     monkeypatch.setattr("frontend.ui_web.provider_usage_log.log_gateway_usage", lambda **_k: None)
     world.codex_home = codex_home
@@ -84,7 +85,7 @@ def chat_turn(conv_id: str = "") -> str:
     """One chat turn on OpenAI with the key Ducky would use now; returns the reply text."""
 
     async def go():
-        key = host.resolve_gateway_credential("openai", conv_id=conv_id)
+        key = gateways.resolve_gateway_credential("openai", conv_id=conv_id)
         provider = providers.make_provider("openai", key, "gpt", conv_id=conv_id)
         return "".join([e.text async for e in provider.stream_turn(messages=[], system="") if e.text])
 
@@ -103,7 +104,7 @@ def picker_selected() -> str:
 def test_1_existing_setup_keeps_working_with_one_account(ducky):
     (only,) = ducky.settings.list_gateway_accounts("openai")["accounts"]
     assert only["id"] == "default"
-    assert host.resolve_gateway_credential("openai") == "sk-default"
+    assert gateways.resolve_gateway_credential("openai") == "sk-default"
     assert chat_turn() == "reply from sk-default"
     assert picker_buttons() == []  # one account: no switch under the bars
     assert runner._account_env("codex") == {}  # a CLI keeps its own login

@@ -361,7 +361,7 @@ def test_schedules_run_in_the_background_and_never_twice_at_once(monkeypatch):
 def _daily_template() -> dict[str, Any]:
     if not PLUGIN_JSON.is_file():
         pytest.skip("the uefn-plugins checkout isn't next to this repo")
-    from backend.uefn_plugins.host import _automation_template_row
+    from backend.uefn_plugins.plugin_host.contributions import _automation_template_row
 
     doc = json.loads(PLUGIN_JSON.read_text(encoding="utf-8"))
     rows = (doc["contributes"].get("automations") or {}).get("templates") or []

@@ -13,18 +13,18 @@ def discovery(monkeypatch):
     from backend.agent import tools
     from backend.tools.panel import ducky_panel
     from backend.mcp_plugins import epic
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     monkeypatch.setattr(tools, "list_mcp_tools", AsyncMock(return_value=[]))
     monkeypatch.setattr(epic, "_probe_cache", {})
-    monkeypatch.setattr(host, "_CONNECTION_CACHE", {})
+    patch_host(monkeypatch, "_CONNECTION_CACHE", {})
     return ducky_panel, tools
 
 
 @pytest.mark.parametrize("query", [{"name": "unreal__missing"}, {"pattern": "missing"}])
 def test_ducky_discovery_guidance_offline_provider(discovery, monkeypatch, query):
     panel, _ = discovery
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.mcp_plugins import epic
 
     # Existing cached offline observations, without opening sockets.
@@ -33,13 +33,13 @@ def test_ducky_discovery_guidance_offline_provider(discovery, monkeypatch, query
         "epic_mcp_online": False,
         "epic_mcp_reason": "unreachable",
     })
-    monkeypatch.setattr(host, "plugin_connection_rows", lambda: [
+    patch_host(monkeypatch, "plugin_connection_rows", lambda: [
         {"id": "sample-provider", "online": False, "detail": "Offline"},
     ])
     monkeypatch.setattr(epic, "_probe_cache", {"at": time.time(), "result": {
         "epic_mcp_online": False, "epic_mcp_reason": "unreachable",
     }})
-    monkeypatch.setattr(host, "_CONNECTION_CACHE", {
+    patch_host(monkeypatch, "_CONNECTION_CACHE", {
         "sample-provider": (time.monotonic(), {"online": False, "detail": "Offline"}),
     })
     for _ in range(2):
@@ -111,13 +111,13 @@ def test_ducky_discovery_guidance_found_tools_do_not_probe(discovery, monkeypatc
 
 def test_provider_detail_does_not_leak(discovery, monkeypatch):
     panel, _ = discovery
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     monkeypatch.setattr(panel, "fetch_listener_status", lambda *a, **kw: {})
-    monkeypatch.setattr(host, "plugin_connection_rows", lambda: [
+    patch_host(monkeypatch, "plugin_connection_rows", lambda: [
         {"id": "sample", "online": False, "detail": "SYNTHETIC_PRIVATE_EXCEPTION"},
     ])
-    monkeypatch.setattr(host, "_CONNECTION_CACHE", {
+    patch_host(monkeypatch, "_CONNECTION_CACHE", {
         "SYNTHETIC_PRIVATE_EXCEPTION": (time.monotonic(), {
             "id": "SYNTHETIC_PRIVATE_EXCEPTION", "label": "SYNTHETIC_PRIVATE_EXCEPTION",
             "online": False, "detail": "SYNTHETIC_PRIVATE_EXCEPTION",
@@ -163,12 +163,12 @@ def test_miss_does_not_block_event_loop(discovery, monkeypatch):
 def test_cached_evidence_is_bounded_sanitized_and_expires(discovery, monkeypatch):
     panel, _ = discovery
     from backend.mcp_plugins import epic
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     monkeypatch.setattr(epic, "_probe_cache", {"at": time.time(), "result": {
         "epic_mcp_online": False, "epic_mcp_reason": "SYNTHETIC_PRIVATE_EXCEPTION",
     }})
-    monkeypatch.setattr(host, "_CONNECTION_CACHE", {
+    patch_host(monkeypatch, "_CONNECTION_CACHE", {
         str(i): (time.monotonic(), {"online": False}) for i in range(100)
     })
     result = json.loads(asyncio.run(panel.ducky_get_tools(name="missing")))
@@ -177,7 +177,7 @@ def test_cached_evidence_is_bounded_sanitized_and_expires(discovery, monkeypatch
     monkeypatch.setattr(epic, "_probe_cache", {"at": time.time() - 60, "result": {
         "epic_mcp_online": False, "epic_mcp_reason": "unreachable",
     }})
-    monkeypatch.setattr(host, "_CONNECTION_CACHE", {
+    patch_host(monkeypatch, "_CONNECTION_CACHE", {
         "sample": (time.monotonic() - 60, {"online": False}),
     })
     result = json.loads(asyncio.run(panel.ducky_get_tools(pattern="missing")))

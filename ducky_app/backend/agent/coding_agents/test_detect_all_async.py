@@ -139,11 +139,11 @@ def test_opening_chats_and_settings_does_not_reprobe_every_cli(monkeypatch):
 
 def test_a_checking_agent_already_names_its_gateway(monkeypatch) -> None:
     """While its CLI probe runs, an agent shows under its gateway (setup, Settings → LLMs)."""
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     monkeypatch.setattr(base, "listed_external_coding_agents", lambda: ["claude_code"])
-    monkeypatch.setattr(
-        host,
+    patch_host(
+        monkeypatch,
         "get_contributions",
         lambda: {"llm_coding_agents": [{"id": "claude_code", "label": "Claude Code", "plugin_id": "Anthropic"}]},
     )

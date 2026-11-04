@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from backend.uefn_plugins import host, store
+from backend.uefn_plugins import store
+from backend.uefn_plugins.plugin_host import panel_rpc, state
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 def test_a_failed_plugin_is_retried_on_the_backoff_and_says_why(monkeypatch, tmp_path: Path) -> None:
@@ -16,23 +18,23 @@ def test_a_failed_plugin_is_retried_on_the_backoff_and_says_why(monkeypatch, tmp
 
     def failing_load(pid, root, manifest):
         loads.append(pid)
-        host._LOAD_FAILURES[pid] = "LicenseError: This copy isn't licensed for this PC"
+        state._LOAD_FAILURES[pid] = "LicenseError: This copy isn't licensed for this PC"
 
-    monkeypatch.setattr(host, "is_plugin_enabled", lambda pid: True)
-    monkeypatch.setattr(host, "wait_plugin_toggles", lambda timeout=0: None)
-    monkeypatch.setattr(host, "_load_enabled_plugin", failing_load)
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: True)
+    patch_host(monkeypatch, "wait_plugin_toggles", lambda timeout=0: None)
+    patch_host(monkeypatch, "_load_enabled_plugin", failing_load)
     monkeypatch.setattr(store, "load_plugin_manifest", lambda pid: {"id": pid})
     monkeypatch.setattr(store, "plugin_dir", lambda pid: tmp_path)
-    monkeypatch.setattr(host, "_PANEL_RPC", {})
-    monkeypatch.setattr(host, "_LOAD_FAILURES", {})
-    monkeypatch.setattr(host, "_REPAIR_ATTEMPTS", {})
+    patch_host(monkeypatch, "_PANEL_RPC", {})
+    patch_host(monkeypatch, "_LOAD_FAILURES", {})
+    patch_host(monkeypatch, "_REPAIR_ATTEMPTS", {})
 
     for _ in range(3):
         with pytest.raises(ValueError, match="didn't load: LicenseError"):
-            host.call_panel_rpc("account", "status")
+            panel_rpc.call_panel_rpc("account", "status")
     assert loads == ["account"]
 
-    host._REPAIR_ATTEMPTS["account"] -= host._REPAIR_BACKOFF_S
+    state._REPAIR_ATTEMPTS["account"] -= state._REPAIR_BACKOFF_S
     with pytest.raises(ValueError):
-        host.call_panel_rpc("account", "status")
+        panel_rpc.call_panel_rpc("account", "status")
     assert loads == ["account", "account"]

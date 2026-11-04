@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
+
 
 @pytest.mark.parametrize("backend", ["db", "files"])
 def test_opt_in_uefn_plugin_all_chats(tmp_path: Path, monkeypatch, backend: str) -> None:
@@ -50,14 +52,16 @@ def test_disabled_tool_ids_leave_uefn_unscoped(monkeypatch) -> None:
     from frontend.ui_web.chats import conversations as chat_convs
 
     monkeypatch.setattr(chat_convs, "all_available_tool_ids", lambda: ["uefn", "materials"])
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.uefn_agent_tool_rows",
+    patch_host(
+        monkeypatch,
+        "uefn_agent_tool_rows",
         lambda: [{"id": "materials"}],
     )
     # Only "materials" is an installed desktop plugin in this scenario — don't let
     # the host consult the real machine's plugin state.
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.is_uefn_agent_tool_plugin",
+    patch_host(
+        monkeypatch,
+        "is_uefn_agent_tool_plugin",
         lambda pid: pid == "materials",
     )
     conv = Conversation(id="x")

@@ -80,10 +80,10 @@ def test_select_tools_plan_is_plan_floor():
 
 
 def test_plan_tools_declared_override(monkeypatch):
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    monkeypatch.setattr(host, "plugin_plan_tools", lambda: frozenset({"custom_weird_read"}))
-    monkeypatch.setattr(host, "plugin_destructive_desktop_tools", lambda: frozenset())
+    patch_host(monkeypatch, "plugin_plan_tools", lambda: frozenset({"custom_weird_read"}))
+    patch_host(monkeypatch, "plugin_destructive_desktop_tools", lambda: frozenset())
     monkeypatch.setattr(
         "backend.agent.toolsets.mcp_plugins.nested_mcp_plan_tool_names",
         lambda: frozenset(),

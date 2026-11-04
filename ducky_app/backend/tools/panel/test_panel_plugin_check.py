@@ -45,7 +45,7 @@ def test_short_timeouts_only_touch_numeric_timeout_fields() -> None:
 
 
 def test_a_waiting_tool_gets_a_short_timeout_and_a_hang_still_fails(quick, monkeypatch: pytest.MonkeyPatch) -> None:
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     def wait(pattern: str, timeout_sec: float = 180.0) -> dict[str, Any]:
         return _waiter(timeout_sec)
@@ -61,7 +61,7 @@ def test_a_waiting_tool_gets_a_short_timeout_and_a_hang_still_fails(quick, monke
         "demo_wait": SimpleNamespace(fn=wait, parameters=schema(timeout_sec={"type": "number", "default": 180})),
         "demo_hang": SimpleNamespace(fn=hang, parameters=schema()),
     }
-    monkeypatch.setattr(host, "get_contributions", lambda: {"agent_tools": {"demo": {"tools": list(tools)}}})
+    patch_host(monkeypatch, "get_contributions", lambda: {"agent_tools": {"demo": {"tools": list(tools)}}})
     monkeypatch.setattr(check.mcp._tool_manager, "get_tool", lambda name: tools.get(name))
 
     checks: list[dict[str, Any]] = []

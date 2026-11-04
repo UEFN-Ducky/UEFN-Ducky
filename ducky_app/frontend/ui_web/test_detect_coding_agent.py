@@ -4,15 +4,16 @@
 from __future__ import annotations
 
 import frontend.ui_web.panel_api  # noqa: F401 - loads the mixins in the app's order
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
 
 
 def _api(monkeypatch, plugin_of: dict[str, str]):
     calls: list[str] = []
-    monkeypatch.setattr("backend.uefn_plugins.host.ensure_plugins_loaded", lambda timeout=0: True)
-    monkeypatch.setattr("backend.uefn_plugins.host.reload_plugins", lambda: calls.append("FULL"))
-    monkeypatch.setattr("backend.uefn_plugins.host.reload_single_plugin", lambda pid: calls.append(pid))
-    monkeypatch.setattr("backend.uefn_plugins.host.wait_plugin_toggles", lambda timeout=0: None)
+    patch_host(monkeypatch, "ensure_plugins_loaded", lambda timeout=0: True)
+    patch_host(monkeypatch, "reload_plugins", lambda: calls.append("FULL"))
+    patch_host(monkeypatch, "reload_single_plugin", lambda pid: calls.append(pid))
+    patch_host(monkeypatch, "wait_plugin_toggles", lambda timeout=0: None)
     monkeypatch.setattr("backend.agent.coding_agents.base.normalize_coding_agent", lambda aid: aid)
     monkeypatch.setattr("backend.agent.coding_agents.base.get_adapter", lambda aid: None)
     monkeypatch.setattr("backend.agent.coding_agents.base.invalidate_detect_cache", lambda: None)

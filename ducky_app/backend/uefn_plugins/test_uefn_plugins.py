@@ -7,6 +7,9 @@ import json
 import zipfile
 from pathlib import Path
 
+from backend.uefn_plugins.plugin_host import backends, boot, crash_guard, lifecycle, loader, state
+from backend.uefn_plugins.plugin_host.testing import patch_host
+
 
 def _zip_plugin(plugin_id: str = "demo", version: int = 1) -> bytes:
     manifest = {
@@ -310,7 +313,9 @@ def main() -> None:
             set_uefn_plugin_enabled,
             uninstall_uefn_plugin,
         )
-        from backend.uefn_plugins.host import get_contributions, is_plugin_enabled, reload_plugins
+        from backend.uefn_plugins.plugin_host.boot import reload_plugins
+        from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
+        from backend.uefn_plugins.plugin_host.ui_registry import get_contributions
 
         raw = _zip_plugin("demo", 1)
         result = import_plugin_from_bytes(raw, source="local", replace=True)
@@ -450,7 +455,7 @@ def main() -> None:
         assert plugin_ui_csp("application/javascript") is None
         assert plugin_ui_csp("text/css") is None
 
-        from backend.uefn_plugins.host import (
+        from backend.uefn_plugins.plugin_host.tool_registry import (
             filter_uefn_plugin_tools,
             plugin_intent_rows,
             set_active_uefn_agent_plugin_ids,
@@ -624,8 +629,8 @@ def main() -> None:
 
         # api.tool() hook: register without listing tool names in the manifest.
         from backend.server import mcp as shared_mcp
-        from backend.uefn_plugins.host import (
-            _PluginApi,
+        from backend.uefn_plugins.plugin_host.api import _PluginApi
+        from backend.uefn_plugins.plugin_host.tool_registry import (
             count_uefn_plugin_tools,
             plugin_tool_names,
             set_active_uefn_agent_plugin_ids,
@@ -634,14 +639,14 @@ def main() -> None:
         )
 
         # api.register_secret_test → Settings Test button backend.
-        from backend.uefn_plugins.host import run_secret_test
+        from backend.uefn_plugins.plugin_host.services import run_secret_test
 
         class _FakeSecretApi:
             def __init__(self) -> None:
                 self.plugin_id = "wipe-me"
 
             def register_secret_test(self, secret_key: str, test_fn) -> None:
-                from backend.uefn_plugins.host import register_secret_tester
+                from backend.uefn_plugins.plugin_host.services import register_secret_tester
 
                 register_secret_tester(self.plugin_id, secret_key, test_fn)
 
@@ -758,7 +763,7 @@ def main() -> None:
         assert plugin_owner_for_skill("demo-tips") is None
 
         # --- Plugin TTS: static voices + synthesizer + dynamic voice lister ---
-        from backend.uefn_plugins.host import get_tts_synthesizer, get_tts_voices_lister
+        from backend.uefn_plugins.plugin_host.services import get_tts_synthesizer, get_tts_voices_lister
         from frontend.ui_web.plugin_host_api import _tts_voices_work, _tts_work
 
         tts_install = import_plugin_from_bytes(_zip_tts_plugin("voxy"), source="local", replace=True)
@@ -830,7 +835,7 @@ def main() -> None:
         assert reloaded.enabled_uefn_plugins == [], reloaded.enabled_uefn_plugins
 
         # Colored plugin icons: assets/* → data URL for Settings left rail / header.
-        from backend.uefn_plugins.host import _resolve_contrib_icon
+        from backend.uefn_plugins.plugin_host.contributions import _resolve_contrib_icon
         from backend.uefn_plugins.store import plugin_dir
 
         demo_root = plugin_dir("demo")
@@ -957,22 +962,20 @@ def _flaky_replace(monkeypatch, name: str, *, fail_times: int) -> dict[str, int]
 
 def test_compiled_update_retries_a_briefly_locked_pyd(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
     from backend.uefn_plugins.store import import_plugin_from_bytes, plugin_dir
 
     assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
     pyd = plugin_dir("demo") / "uefn_plugin_demo.v1.cp313-win_amd64.pyd"
     pyd.write_bytes(b"MZ")
     calls = _flaky_replace(monkeypatch, pyd.name, fail_times=2)
-    monkeypatch.setattr(host.time, "sleep", lambda _s: None)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
 
-    assert host.release_locked_compiled_backends("demo") == []
+    assert backends.release_locked_compiled_backends("demo") == []
     assert calls["n"] == 2 and not pyd.exists()
 
 
 def test_compiled_update_keeps_the_old_install_when_the_pyd_stays_locked(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
     from backend.uefn_plugins.store import import_plugin_from_bytes, plugin_dir
 
     assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
@@ -980,7 +983,7 @@ def test_compiled_update_keeps_the_old_install_when_the_pyd_stays_locked(monkeyp
     pyd = root / "uefn_plugin_demo.v1.cp313-win_amd64.pyd"
     pyd.write_bytes(b"MZ")
     _flaky_replace(monkeypatch, pyd.name, fail_times=10_000)
-    monkeypatch.setattr(host.time, "sleep", lambda _s: None)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
 
     result = import_plugin_from_bytes(_zip_plugin("demo", 2), source="local", replace=True)
 
@@ -995,8 +998,12 @@ def test_uninstalling_a_loaded_compiled_plugin_leaves_no_pyd_behind(monkeypatch,
     _isolated_appdata(monkeypatch, tmp_path)
     import os
 
-    from backend.uefn_plugins import host
-    from backend.uefn_plugins.store import import_plugin_from_bytes, plugin_dir, uninstall_uefn_plugin
+    from backend.uefn_plugins.store import (
+        appdata_uefn_plugins_dir,
+        import_plugin_from_bytes,
+        plugin_dir,
+        uninstall_uefn_plugin,
+    )
 
     assert import_plugin_from_bytes(_zip_plugin("demo", 1), source="local", replace=True)["ok"]
     root = plugin_dir("demo")
@@ -1011,12 +1018,12 @@ def test_uninstalling_a_loaded_compiled_plugin_leaves_no_pyd_behind(monkeypatch,
         return real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "unlink", unlink)
-    monkeypatch.setattr(host.time, "sleep", lambda _s: None)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
 
     uninstall_uefn_plugin("demo")
 
     assert not root.exists()
-    parked = list((host.appdata_uefn_plugins_dir() / ".compiled_quarantine" / "demo").glob("*.pyd.bin"))
+    parked = list((appdata_uefn_plugins_dir() / ".compiled_quarantine" / "demo").glob("*.pyd.bin"))
     assert len(parked) == 1
 
 
@@ -1025,9 +1032,9 @@ def test_startup_clears_folders_left_holding_only_an_old_pyd(monkeypatch, tmp_pa
     import os
     import time
 
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.store import appdata_uefn_plugins_dir
 
-    plugins = host.appdata_uefn_plugins_dir()
+    plugins = appdata_uefn_plugins_dir()
     old = time.time() - 3600
 
     def folder(name: str, files: dict[str, bytes], *, mtime: float = old) -> Path:
@@ -1043,14 +1050,14 @@ def test_startup_clears_folders_left_holding_only_an_old_pyd(monkeypatch, tmp_pa
     unpacking = folder("fresh", {"uefn_plugin_fresh.v1.cp313-win_amd64.pyd": b"MZ"}, mtime=time.time())
     other = folder("mixed", {"uefn_plugin_mixed.v1.cp313-win_amd64.pyd": b"MZ", "notes.txt": b"x"})
 
-    host.sweep_orphan_compiled_folders()
+    backends.sweep_orphan_compiled_folders()
 
     assert not orphan.exists()
     assert installed.is_dir() and unpacking.is_dir() and other.is_dir()
 
 
-def _crash_marker(host, plugin: str, version: str, process: int) -> Path:
-    folder = host._markers_dir()
+def _crash_marker(plugin: str, version: str, process: int) -> Path:
+    folder = crash_guard._markers_dir()
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{plugin}.{process}.json"
     path.write_text(json.dumps({"plugin": plugin, "version": version, "process": process}), encoding="utf-8")
@@ -1059,26 +1066,24 @@ def _crash_marker(host, plugin: str, version: str, process: int) -> Path:
 
 def test_a_plugin_that_crashed_ducky_is_skipped_until_it_changes_or_is_turned_on(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: False)
+    marker = _crash_marker("demo", "3", 4242)
 
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
-    marker = _crash_marker(host, "demo", "3", 4242)
-
-    assert host.plugin_crashed_ducky("demo", "3")
-    assert not host.plugin_crashed_ducky("demo", "4")  # an update gets a fresh try
+    assert crash_guard.plugin_crashed_ducky("demo", "3")
+    assert not crash_guard.plugin_crashed_ducky("demo", "4")  # an update gets a fresh try
     assert not marker.exists()
 
     errors: list[str] = []
-    monkeypatch.setattr(host, "_record_plugin_load_error", lambda pid, exc: errors.append(str(exc)))
+    patch_host(monkeypatch, "_record_plugin_load_error", lambda pid, exc: errors.append(str(exc)))
     imported: list[str] = []
-    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: imported.append(pid))
-    host._load_one("demo", tmp_path, {"id": "demo", "version": "3", "label": "Demo"})
-    assert imported == [] and "demo" not in host._REGISTERED
+    patch_host(monkeypatch, "_import_backend", lambda pid, root, entry: imported.append(pid))
+    loader._load_one("demo", tmp_path, {"id": "demo", "version": "3", "label": "Demo"})
+    assert imported == [] and "demo" not in state._REGISTERED
     assert errors and "closed while loading Demo 3" in errors[0]
 
-    host.clear_plugin_crash("demo")
-    assert not host.plugin_crashed_ducky("demo", "3")
+    crash_guard.clear_plugin_crash("demo")
+    assert not crash_guard.plugin_crashed_ducky("demo", "3")
 
 
 def test_a_registered_plugins_nodes_survive_a_refresh_of_its_rows(monkeypatch, tmp_path) -> None:
@@ -1087,34 +1092,32 @@ def test_a_registered_plugins_nodes_survive_a_refresh_of_its_rows(monkeypatch, t
     import types
 
     from backend.automations import plugin as nodes
-    from backend.uefn_plugins import host
-
     manifest = {"id": "nodes", "version": "1", "label": "Nodes"}
 
     def register(api) -> None:
         api.register_pipeline_node("demo.step", lambda ctx: {"ok": True})
         # A second loader (the boot load racing the Store's enable worker) refreshes the
         # rows while this register() is still running: a compiled import is slow.
-        host._load_one("nodes", tmp_path, manifest, register=False)
+        loader._load_one("nodes", tmp_path, manifest, register=False)
 
-    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: types.SimpleNamespace(register=register))
+    patch_host(monkeypatch, "_import_backend", lambda pid, root, entry: types.SimpleNamespace(register=register))
     try:
-        host._load_one("nodes", tmp_path, manifest)
+        loader._load_one("nodes", tmp_path, manifest)
         assert nodes.handler_plugin_id("demo.step") == "nodes"
-        host._load_one("nodes", tmp_path, manifest)  # already registered: rows refreshed, register skipped
+        loader._load_one("nodes", tmp_path, manifest)  # already registered: rows refreshed, register skipped
         assert nodes.handler_plugin_id("demo.step") == "nodes"
-        host.invalidate_plugin_runtime("nodes")
+        lifecycle.invalidate_plugin_runtime("nodes")
         assert nodes.handler_plugin_id("demo.step") == ""
         # A register() that fails leaves no half-registered nodes behind.
-        monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: types.SimpleNamespace(
+        patch_host(monkeypatch, "_import_backend", lambda pid, root, entry: types.SimpleNamespace(
             register=lambda api: (api.register_pipeline_node("demo.step", lambda ctx: {}), 1 / 0)))
         try:
-            host._load_one("nodes", tmp_path, manifest)
+            loader._load_one("nodes", tmp_path, manifest)
         except ZeroDivisionError:
             pass
-        assert nodes.handler_plugin_id("demo.step") == "" and "nodes" not in host._REGISTERED
+        assert nodes.handler_plugin_id("demo.step") == "" and "nodes" not in state._REGISTERED
     finally:
-        host._REGISTERED.discard("nodes")
+        state._REGISTERED.discard("nodes")
         nodes.clear_for_plugin("nodes")
 
 
@@ -1145,60 +1148,52 @@ def _fake_store(monkeypatch, latest: dict[str, str]) -> list[str]:
 
 def test_a_plugin_that_crashed_ducky_updates_itself_when_the_store_has_a_fix(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
-
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
-    monkeypatch.setattr(host, "_notify_uefn_plugins_changed", lambda: None)
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: False)
+    patch_host(monkeypatch, "_notify_uefn_plugins_changed", lambda: None)
     _installed("account", "1.0.50")
-    _crash_marker(host, "account", "1.0.50", 4242)
-    assert host.plugin_crashed_ducky("account", "1.0.50")
+    _crash_marker("account", "1.0.50", 4242)
+    assert crash_guard.plugin_crashed_ducky("account", "1.0.50")
     installs = _fake_store(monkeypatch, {"account": "1.0.51"})
 
-    assert host.heal_crashed_plugins() == ["account"]
+    assert crash_guard.heal_crashed_plugins() == ["account"]
     assert installs == ["account"]
-    assert host._read_crashed() == {}
+    assert crash_guard._read_crashed() == {}
 
 
 def test_a_crashed_plugin_with_no_newer_version_stays_skipped(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
-
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: False)
     _installed("account", "1.0.50")
-    _crash_marker(host, "account", "1.0.50", 4242)
-    host.plugin_crashed_ducky("account", "1.0.50")
+    _crash_marker("account", "1.0.50", 4242)
+    crash_guard.plugin_crashed_ducky("account", "1.0.50")
     installs = _fake_store(monkeypatch, {"account": "1.0.50"})
 
-    assert host.heal_crashed_plugins() == []
-    assert installs == [] and host.plugin_crashed_ducky("account", "1.0.50")
+    assert crash_guard.heal_crashed_plugins() == []
+    assert installs == [] and crash_guard.plugin_crashed_ducky("account", "1.0.50")
 
 
 def test_a_crash_record_for_a_plugin_already_updated_is_dropped_without_a_download(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
-
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: False)
     _installed("account", "1.0.51")
-    _crash_marker(host, "account", "1.0.50", 4242)
-    host.plugin_crashed_ducky("account", "1.0.50")
+    _crash_marker("account", "1.0.50", 4242)
+    crash_guard.plugin_crashed_ducky("account", "1.0.50")
     installs = _fake_store(monkeypatch, {"account": "1.0.52"})
 
-    assert host.heal_crashed_plugins() == []
-    assert installs == [] and host._read_crashed() == {}
+    assert crash_guard.heal_crashed_plugins() == []
+    assert installs == [] and crash_guard._read_crashed() == {}
 
 
 def test_a_load_running_in_another_live_ducky_process_is_not_a_crash(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: True)
+    marker = _crash_marker("demo", "3", 4242)
 
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: True)
-    marker = _crash_marker(host, "demo", "3", 4242)
-
-    assert not host.plugin_crashed_ducky("demo", "3")
+    assert not crash_guard.plugin_crashed_ducky("demo", "3")
     assert marker.exists()
 
 
@@ -1206,90 +1201,83 @@ def test_a_normal_load_leaves_no_marker(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
     from types import SimpleNamespace
 
-    from backend.uefn_plugins import host
-
-    monkeypatch.setattr(host, "_crash_checked", False)
+    patch_host(monkeypatch, "_crash_checked", False)
     seen: list[str] = []
 
     def fake_import(pid, root, entry):
-        assert list(host._markers_dir().glob(f"{pid}.*.json")), "marker missing while loading"
+        assert list(crash_guard._markers_dir().glob(f"{pid}.*.json")), "marker missing while loading"
         return SimpleNamespace(register=lambda api: seen.append(pid))
 
-    monkeypatch.setattr(host, "_import_backend", fake_import)
-    host._REGISTERED.discard("guarded")
+    patch_host(monkeypatch, "_import_backend", fake_import)
+    state._REGISTERED.discard("guarded")
     try:
-        host._load_one("guarded", tmp_path, {"id": "guarded", "version": "1"})
-        assert seen == ["guarded"] and "guarded" in host._REGISTERED
-        assert not list(host._markers_dir().glob("guarded.*.json"))
+        loader._load_one("guarded", tmp_path, {"id": "guarded", "version": "1"})
+        assert seen == ["guarded"] and "guarded" in state._REGISTERED
+        assert not list(crash_guard._markers_dir().glob("guarded.*.json"))
     finally:
-        host._REGISTERED.discard("guarded")
+        state._REGISTERED.discard("guarded")
 
 
 def test_pre_import_leaves_compiled_backends_to_the_guarded_load(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
-
-    monkeypatch.setattr(host, "_crash_checked", True)
+    patch_host(monkeypatch, "_crash_checked", True)
     compiled: list[str] = []
-    monkeypatch.setattr(host, "_import_compiled_backend", lambda pid, root, manifest: compiled.append(pid))
-    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: None)
+    patch_host(monkeypatch, "_import_compiled_backend", lambda pid, root, manifest: compiled.append(pid))
+    patch_host(monkeypatch, "_import_backend", lambda pid, root, entry: None)
 
-    host._warm_plugin_backend("native", tmp_path, {"id": "native", "version": "1", "python_abi": host.PY_ABI})
+    loader._warm_plugin_backend("native", tmp_path, {"id": "native", "version": "1", "python_abi": state.PY_ABI})
 
     assert compiled == []
 
 
 def test_pre_import_is_guarded_and_skips_a_plugin_that_crashed_ducky(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
-
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
-    _crash_marker(host, "broken", "3", 4242)
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: False)
+    _crash_marker("broken", "3", 4242)
     imported: list[str] = []
 
     def fake_import(pid, root, entry):
-        assert list(host._markers_dir().glob(f"{pid}.*.json")), "marker missing while pre-importing"
+        assert list(crash_guard._markers_dir().glob(f"{pid}.*.json")), "marker missing while pre-importing"
         imported.append(pid)
 
-    monkeypatch.setattr(host, "_import_backend", fake_import)
+    patch_host(monkeypatch, "_import_backend", fake_import)
 
-    host._warm_plugin_backend("broken", tmp_path, {"id": "broken", "version": "3"})
-    host._warm_plugin_backend("fine", tmp_path, {"id": "fine", "version": "1"})
+    loader._warm_plugin_backend("broken", tmp_path, {"id": "broken", "version": "3"})
+    loader._warm_plugin_backend("fine", tmp_path, {"id": "fine", "version": "1"})
 
     assert imported == ["fine"]
-    assert not list(host._markers_dir().glob("fine.*.json"))
+    assert not list(crash_guard._markers_dir().glob("fine.*.json"))
 
 
 def test_first_load_reads_crash_markers_before_any_parallel_import(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
-    from backend.uefn_plugins import host
     from backend.uefn_plugins.store import appdata_uefn_plugins_dir
 
     for pid in ("one", "two"):
         folder = appdata_uefn_plugins_dir() / pid
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "plugin.json").write_text(json.dumps({"id": pid, "version": "1"}), encoding="utf-8")
-    monkeypatch.setattr(host, "get_enabled_plugin_ids", lambda: ["one", "two"])
-    monkeypatch.setattr(host, "_crash_checked", False)
-    monkeypatch.setattr(host, "_process_alive", lambda pid: False)
-    monkeypatch.setattr(host, "_LOADED", False)
-    monkeypatch.setattr(host, "_UI_READY", False)
-    monkeypatch.setattr(host, "_load_one", lambda *a, **k: None)
-    monkeypatch.setattr(host, "_register_plugin_guarded", lambda *a: True)
-    monkeypatch.setattr(host, "_notify_uefn_plugins_changed", lambda: None)
-    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: None)
+    patch_host(monkeypatch, "get_enabled_plugin_ids", lambda: ["one", "two"])
+    patch_host(monkeypatch, "_crash_checked", False)
+    patch_host(monkeypatch, "_process_alive", lambda pid: False)
+    patch_host(monkeypatch, "_LOADED", False)
+    patch_host(monkeypatch, "_UI_READY", False)
+    patch_host(monkeypatch, "_load_one", lambda *a, **k: None)
+    patch_host(monkeypatch, "_register_plugin_guarded", lambda *a: True)
+    patch_host(monkeypatch, "_notify_uefn_plugins_changed", lambda: None)
+    patch_host(monkeypatch, "_import_backend", lambda pid, root, entry: None)
     order: list[str] = []
-    real_promote = host._promote_dead_markers
-    monkeypatch.setattr(host, "_promote_dead_markers", lambda: (order.append("promote"), real_promote())[1])
-    real_begin = host._load_marker_begin
-    monkeypatch.setattr(host, "_load_marker_begin", lambda pid, version: (order.append(pid), real_begin(pid, version))[1])
+    real_promote = crash_guard._promote_dead_markers
+    patch_host(monkeypatch, "_promote_dead_markers", lambda: (order.append("promote"), real_promote())[1])
+    real_begin = crash_guard._load_marker_begin
+    patch_host(monkeypatch, "_load_marker_begin", lambda pid, version: (order.append(pid), real_begin(pid, version))[1])
 
-    host._run_first_plugin_load()
+    boot._run_first_plugin_load()
 
     assert order and order[0] == "promote"
     assert sorted(order[1:]).count("one") == 1 and "two" in order
-    assert not host.plugin_crashed_ducky("one", "1") and not host.plugin_crashed_ducky("two", "1")
+    assert not crash_guard.plugin_crashed_ducky("one", "1") and not crash_guard.plugin_crashed_ducky("two", "1")
 
 
 def _with_manifest(data: bytes, **fields) -> bytes:
@@ -1312,7 +1300,6 @@ def _with_manifest(data: bytes, **fields) -> bytes:
 def test_a_plugin_that_needs_a_newer_ducky_is_never_installed_or_loaded(monkeypatch, tmp_path) -> None:
     _isolated_appdata(monkeypatch, tmp_path)
     import frontend
-    from backend.uefn_plugins import host
     from backend.uefn_plugins.store import app_too_old_for, import_plugin_from_bytes, plugin_dir
 
     monkeypatch.setattr(frontend, "__version__", "1.2.300")
@@ -1326,11 +1313,11 @@ def test_a_plugin_that_needs_a_newer_ducky_is_never_installed_or_loaded(monkeypa
     assert json.loads((plugin_dir("demo") / "plugin.json").read_text(encoding="utf-8"))["version"] == 1
 
     errors: list[str] = []
-    monkeypatch.setattr(host, "_record_plugin_load_error", lambda pid, exc: errors.append(str(exc)))
+    patch_host(monkeypatch, "_record_plugin_load_error", lambda pid, exc: errors.append(str(exc)))
     imported: list[str] = []
-    monkeypatch.setattr(host, "_import_backend", lambda pid, root, entry: imported.append(pid))
-    host._REGISTERED.discard("newer")
-    host._load_one("newer", tmp_path, {"id": "newer", "label": "Newer", "version": "3", "min_app_version": "9.0.0"})
+    patch_host(monkeypatch, "_import_backend", lambda pid, root, entry: imported.append(pid))
+    state._REGISTERED.discard("newer")
+    loader._load_one("newer", tmp_path, {"id": "newer", "label": "Newer", "version": "3", "min_app_version": "9.0.0"})
     assert imported == [] and errors and "needs UEFN Ducky 9.0.0 or newer" in errors[0]
 
 
@@ -1338,7 +1325,7 @@ def test_plugin_api_crypto_seals_and_opens_with_aes_gcm() -> None:
     """api.crypto: plugins seal with the app's cryptography, whatever else the EXE bundles."""
     from cryptography.exceptions import InvalidTag
 
-    from backend.uefn_plugins.host import _PluginApi
+    from backend.uefn_plugins.plugin_host.api import _PluginApi
 
     crypto = _PluginApi("cryptoprobe").crypto
     key, nonce, aad = bytes(range(32)), bytes(range(12)), b"team|doc|card.pip"

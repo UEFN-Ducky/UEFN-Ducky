@@ -102,13 +102,14 @@ def test_boot_ship_still_applies_for_the_users_own_app(monkeypatch):
 
 
 def test_gateway_hookup_auto_apply_skips_when_sandboxed(monkeypatch):
-    from backend.uefn_plugins import host as h
+    from backend.uefn_plugins.plugin_host import api as api_mod, lifecycle
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     queued: list[str] = []
     logs: list[str] = []
     monkeypatch.delenv("UEFN_DUCKY_MCP_BRIDGE", raising=False)
-    monkeypatch.setattr(h, "_queue_ide_auto_apply", lambda kind, _log: queued.append(kind))
-    api = h._PluginApi("cursor")  # type: ignore[attr-defined]
+    patch_host(monkeypatch, "_queue_ide_auto_apply", lambda kind, _log: queued.append(kind))
+    api = api_mod._PluginApi("cursor")  # type: ignore[attr-defined]
     monkeypatch.setattr(api, "log", logs.append)
     try:
         monkeypatch.setattr(ide_apply, "auto_apply_skip_reason", lambda: "LOCALAPPDATA is elsewhere")
@@ -120,7 +121,7 @@ def test_gateway_hookup_auto_apply_skips_when_sandboxed(monkeypatch):
         api.register_ide_hookup("cursor", label="Cursor", auto_apply=True)
         assert queued == ["cursor"]
     finally:
-        h.invalidate_plugin_runtime("cursor")
+        lifecycle.invalidate_plugin_runtime("cursor")
 
 
 def test_manual_apply_is_not_guarded(monkeypatch):

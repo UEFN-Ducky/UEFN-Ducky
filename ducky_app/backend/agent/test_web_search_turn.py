@@ -12,6 +12,7 @@ from backend.agent.runner import (
     with_user_request,
 )
 from backend.agent.tools import ToolCallResult
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 SENTENCE = "can you do a online seach? and show me pictuers of brainrot tukut"
@@ -61,9 +62,7 @@ def test_step_one_searches_before_any_model_call(monkeypatch) -> None:
         payload.dynamic_system = "Listener: offline on port 4200"
         return payload
 
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider, **_k: "test-key"
-    )
+    patch_host(monkeypatch, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr("backend.agent.runner.make_provider", lambda *a, **k: Provider())
     monkeypatch.setattr("backend.agent.runner.list_mcp_tools", tools)
     monkeypatch.setattr("backend.agent.runner.select_tools", lambda *a, **k: [tool])

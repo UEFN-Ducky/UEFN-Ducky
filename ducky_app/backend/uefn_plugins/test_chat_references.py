@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from backend.uefn_plugins.host import normalize_chat_reference
+from backend.uefn_plugins.plugin_host.ui_registry import normalize_chat_reference
 
 
 def test_bad_chat_reference_href_is_dropped() -> None:

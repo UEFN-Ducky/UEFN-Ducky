@@ -50,7 +50,7 @@ def test_chats_with_different_tool_filters_do_not_look_like_a_catalog_change(mon
     # Two chats in one process see differently filtered catalogs; alternating between
     # them used to start a full tool re-list on every call.
     from backend.search import indexer
-    from backend.uefn_plugins.host import _ACTIVE_UEFN_AGENT_IDS
+    from backend.uefn_plugins.plugin_host.state import _ACTIVE_UEFN_AGENT_IDS
 
     calls: list[str] = []
     monkeypatch.setattr(indexer, "request_refresh", lambda reason="": calls.append(reason))

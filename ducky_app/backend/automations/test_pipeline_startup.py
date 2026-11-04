@@ -93,10 +93,11 @@ def test_uefn_project_fields_use_saved_project_selector():
 
 def test_plugin_icons_are_forwarded_once_per_plugin(monkeypatch):
     from backend.automations.catalog import list_nodes
-    from backend.uefn_plugins import host, store
+    from backend.uefn_plugins import store
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: ["example"])
-    monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [
+    patch_host(monkeypatch, "get_ui_contributions", lambda: {"automations_nodes": [
         {"id": "example.a", "plugin_id": "example"}, {"id": "example.b", "plugin_id": "example"}]})
     calls = []
     monkeypatch.setattr(store, "plugin_icon_data_url", lambda pid: calls.append(pid) or "data:image/png;base64,icon")

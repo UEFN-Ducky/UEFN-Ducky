@@ -8,8 +8,8 @@ import pytest
 
 from backend.skills import ownership
 from backend.skills.passes import pass_memo
-from backend.uefn_plugins import host as plugin_host
 from backend.uefn_plugins import store as plugin_store
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 def _skill(root: Path, plugin_id: str, pack_id: str) -> dict[str, str]:
@@ -36,7 +36,7 @@ def plugins(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(plugin_store, "appdata_uefn_plugins_dir", lambda: tmp_path)
     monkeypatch.setattr(plugin_store, "plugin_tree_fingerprint", lambda root: state["fingerprint"])
     monkeypatch.setattr(plugin_store, "get_enabled_plugin_ids", lambda: sorted(state["enabled"]))
-    monkeypatch.setattr(plugin_host, "is_plugin_enabled", lambda pid: pid in state["enabled"])
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid in state["enabled"])
     ownership.invalidate()
     yield state
     ownership.invalidate()

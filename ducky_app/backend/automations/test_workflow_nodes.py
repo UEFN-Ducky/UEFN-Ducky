@@ -323,17 +323,17 @@ def test_backends_say_who_makes_them_and_what_is_missing(tools, gateway):
 
 
 def test_setup_names_the_store_page_when_the_plugin_is_missing_or_off(monkeypatch):
-    import backend.uefn_plugins.host as host
     import backend.uefn_plugins.store as store
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     row = {"id": "cards_art", "label": "Card art", "plugin": "Cards", "plugin_id": "cards", "tool": "cards_art", "credits": 1}
     monkeypatch.setattr(store, "is_plugin_installed", lambda _pid: False)
     assert media.setup_for(row) == {"kind": "install", "route": "settings.store", "item": "cards", "label": "Get Cards"}
     monkeypatch.setattr(store, "is_plugin_installed", lambda _pid: True)
-    monkeypatch.setattr(host, "is_plugin_enabled", lambda _pid: False)
+    patch_host(monkeypatch, "is_plugin_enabled", lambda _pid: False)
     assert media.setup_for(row) == {"kind": "enable", "route": "settings.store", "item": "cards", "label": "Turn on Cards"}
     assert media.why_not(row) == "Turn on the Cards plugin in Plugins."
-    monkeypatch.setattr(host, "is_plugin_enabled", lambda _pid: True)
+    patch_host(monkeypatch, "is_plugin_enabled", lambda _pid: True)
     assert media.setup_for(row) is None  # nothing known to fix (a tool row needs no key)
     # A gateway that's installed and on but has no key: its key in Settings > LLMs.
     monkeypatch.setattr(media, "_has_key", lambda _provider: False)
@@ -371,30 +371,31 @@ def test_a_picture_template_names_its_plugin_while_that_plugin_is_off(monkeypatc
 
 
 def test_a_plugin_declares_its_image_generators(monkeypatch):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import contributions, state, ui_registry
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    parsed = host._image_generator_row({"id": "nb", "label": "Nano Banana", "tool": "x_image", "credits": "5",
+    parsed = contributions._image_generator_row({"id": "nb", "label": "Nano Banana", "tool": "x_image", "credits": "5",
                                         "args": {"ai_model": "nano-banana"}, "prompt_arg": "text"}, "x")
     assert parsed == {"id": "nb", "label": "Nano Banana", "tool": "x_image", "credits": 5, "args": {"ai_model": "nano-banana"},
                       "prompt_arg": "text", "plugin_id": "x"}
-    assert host._image_generator_row({"id": "nb"}, "x") is None  # no tool, nothing to run
+    assert contributions._image_generator_row({"id": "nb"}, "x") is None  # no tool, nothing to run
     assert media._declared(parsed)["args"]({"prompt": "a duck"}, {}) == {"ai_model": "nano-banana", "text": "a duck"}
-    monkeypatch.setitem(host._CONTRIBUTIONS, "automations_image_generators", [parsed, {**parsed, "plugin_id": "off"}])
-    monkeypatch.setattr(host, "get_enabled_plugin_ids", lambda: ["x"])
-    assert [row["plugin_id"] for row in host.image_generators()] == ["x"]  # a plugin turned off lists nothing
+    monkeypatch.setitem(state._CONTRIBUTIONS, "automations_image_generators", [parsed, {**parsed, "plugin_id": "off"}])
+    patch_host(monkeypatch, "get_enabled_plugin_ids", lambda: ["x"])
+    assert [row["plugin_id"] for row in ui_registry.image_generators()] == ["x"]  # a plugin turned off lists nothing
 
 
 def test_a_plugin_adds_backends_to_the_3d_nodes(tools, monkeypatch, media_backends):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import contributions
 
     def declare(**row: Any) -> dict[str, Any]:
-        parsed = host._media_backend_row(row, "tripo")
+        parsed = contributions._media_backend_row(row, "tripo")
         assert parsed is not None
         media_backends.append(parsed)
         return parsed
 
-    assert host._media_backend_row({"node": "image.generate", "id": "x", "tool": "t"}, "tripo") is None  # Text to Image has its own list
-    assert host._media_backend_row({"id": "x", "tool": "t"}, "tripo") is None  # no node
+    assert contributions._media_backend_row({"node": "image.generate", "id": "x", "tool": "t"}, "tripo") is None  # Text to Image has its own list
+    assert contributions._media_backend_row({"id": "x", "tool": "t"}, "tripo") is None  # no node
     declare(node="mesh.generate", id="tripo_text_to_3d", label="Tripo v3.1", tool="tripo_text_to_3d", credits=20,
             args={"model_version": "v3.1-20260211"}, pins={"prompt": "prompt"},
             config_fields=[{"id": "texture", "label": "Texture", "type": "string"}])
@@ -441,11 +442,11 @@ def test_a_plugin_adds_backends_to_the_3d_nodes(tools, monkeypatch, media_backen
 
 
 def test_an_account_image_generator_says_its_cost_gates_spend_and_passes_its_settings(tools, monkeypatch, image_generators):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import contributions
 
     monkeypatch.setattr(media, "gateway_image_nodes", lambda: [])
     sizes = [{"id": "1024x1024", "label": "Square"}, {"id": "1024x1536", "label": "Tall"}]
-    parsed = host._image_generator_row({
+    parsed = contributions._image_generator_row({
         "id": "ducky_ai_image", "label": "Ducky AI · Image", "tool": "ducky_ai_image", "credits": 0, "cost": "Ducky AI credit", "paid": True,
         "args": {"model": "gpt-image-1"},
         "config_fields": [{"id": "size", "label": "Size", "type": "select", "options": sizes},
@@ -480,11 +481,12 @@ def test_an_account_image_generator_says_its_cost_gates_spend_and_passes_its_set
 
 def test_ask_a_model_on_a_coding_agent_gateway_uses_its_one_shot(monkeypatch):
     from backend.automations import llm_complete
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import gateways, state
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(host, "is_plugin_enabled", lambda pid: pid == "cursor")
-    host.register_coding_agent_factory("cursor", "test_one_shot_agent", lambda: None,
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid == "cursor")
+    gateways.register_coding_agent_factory("cursor", "test_one_shot_agent", lambda: None,
                                        complete_one_shot=lambda **kw: calls.append(kw) or "a story")
     try:
         out = llm_complete.complete_prompt("test_one_shot_agent", "write", "auto", system="be kind")
@@ -493,7 +495,7 @@ def test_ask_a_model_on_a_coding_agent_gateway_uses_its_one_shot(monkeypatch):
         assert "can't look at pictures" in llm_complete.complete_prompt("test_one_shot_agent", "look", "auto", images=["x.png"])["error"]
         assert llm_complete._one_shot_for("openai") is None
     finally:
-        host._CODING_AGENT_FACTORIES.pop("test_one_shot_agent", None)
+        state._CODING_AGENT_FACTORIES.pop("test_one_shot_agent", None)
 
 
 def test_the_tools_own_error_comes_through(tools):
@@ -1066,15 +1068,15 @@ def test_a_plugin_nodes_backend_field_lists_the_same_backends(tools, monkeypatch
 
 
 def test_image_fields_never_use_the_generic_chat_model_picker(monkeypatch):
-    from backend.uefn_plugins import host
-    monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "test.image", "config_fields": [{"id": "model", "type": "model", "provider": "test"}]}]})
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+    patch_host(monkeypatch, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "test.image", "config_fields": [{"id": "model", "type": "model", "provider": "test"}]}]})
     assert media.gateway_image_fields("test.image")[0]["type"] == "text"
 
 
 def test_image_gateway_uses_its_own_model_and_settings(tools, gateway, monkeypatch):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     fields = [{"id": "prompt", "type": "textarea"}, {"id": "model", "type": "select", "options": [{"id": "image-test", "label": "Image test"}]}, {"id": "size", "type": "text"}]
-    monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "openai.image", "config_fields": fields}]})
+    patch_host(monkeypatch, "get_ui_contributions", lambda: {"automations_nodes": [{"id": "openai.image", "config_fields": fields}]})
     row = next(row for row in media.backends_for("image.generate") if row["id"] == "openai_image")
     assert row["config_fields"] == fields[1:]
     step = run("image.generate", {"backend": "openai_image", "spend": True, "gateway_config": {"openai_image": {"model": "image-test", "size": "1024x1536", "prompt": "wrong"}, "google_imagen": {"model": "wrong"}}}, {"prompt": "a duck"})
@@ -1306,11 +1308,11 @@ def test_open_project_asks_which_island_when_the_pin_is_empty(islands, asked):
 
 
 def test_rig_auto_sends_humanoids_to_meshy_and_animals_to_tripo(tools, monkeypatch, media_backends):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import contributions
 
-    media_backends.append(host._media_backend_row({"node": "mesh.rig", "id": "tripo_rig", "label": "Tripo", "tool": "tripo_rig",
+    media_backends.append(contributions._media_backend_row({"node": "mesh.rig", "id": "tripo_rig", "label": "Tripo", "tool": "tripo_rig",
                                                     "credits": 25, "pins": {"mesh": "source"}, "stage": "rig"}, "tripo"))
-    media_backends.append(host._media_backend_row({"node": "mesh.animate", "id": "tripo_animate", "label": "Tripo", "tool": "tripo_animate",
+    media_backends.append(contributions._media_backend_row({"node": "mesh.animate", "id": "tripo_animate", "label": "Tripo", "tool": "tripo_animate",
                                                     "credits": 10, "pins": {"mesh": "rig_task_id", "actions": "animations"},
                                                     "task_args": {"mesh": "rig_task_id"}}, "tripo"))
     listed = media.backends_for("mesh.rig")

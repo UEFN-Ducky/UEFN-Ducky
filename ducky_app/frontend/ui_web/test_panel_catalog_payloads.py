@@ -21,10 +21,11 @@ def _node(pid: str, n: int) -> dict:
 
 
 def test_node_catalog_sends_each_plugin_icon_once(monkeypatch) -> None:
-    from backend.uefn_plugins import host, store
+    from backend.uefn_plugins import store
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: list(PLUGINS))
-    monkeypatch.setattr(host, "get_ui_contributions", lambda: {"automations_nodes": [_node(p, n) for p in PLUGINS for n in range(30)]})
+    patch_host(monkeypatch, "get_ui_contributions", lambda: {"automations_nodes": [_node(p, n) for p in PLUGINS for n in range(30)]})
     monkeypatch.setattr(store, "plugin_icon_data_url", lambda pid: ICON)
     res = PanelApiAutomationsMixin().list_workflow_nodes()
     size = len(json.dumps(res))

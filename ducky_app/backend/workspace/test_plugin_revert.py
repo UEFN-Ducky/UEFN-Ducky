@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from backend.workspace import plugin_revert as pr
 
 
@@ -36,16 +37,18 @@ def test_uefn_offline_when_listener_health_is_down(monkeypatch) -> None:
 
 
 def test_blender_offline_uses_connection_hook(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.plugin_connection_for_program",
+    patch_host(
+        monkeypatch,
+        "plugin_connection_for_program",
         lambda prog: {"online": False, "detail": "Offline · open Blender"} if prog == "blender" else None,
     )
     assert "open Blender" in pr.program_offline_reason("blender")
 
 
 def test_blender_offline_when_status_says_disconnected(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.plugin_connection_for_program",
+    patch_host(
+        monkeypatch,
+        "plugin_connection_for_program",
         lambda prog: None,
     )
     monkeypatch.setattr(

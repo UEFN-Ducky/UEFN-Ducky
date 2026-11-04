@@ -7,6 +7,7 @@ import pytest
 from backend.agent import accounts
 from backend.agent import providers
 from backend.agent.providers.base import StreamEvent, StreamEventKind as K
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 class Fake:
@@ -39,7 +40,7 @@ def env(tmp_path, monkeypatch):
     plan: dict = {}
     calls: list = []
     reg = {"factory": lambda key, model: Fake(key, plan, calls)}
-    monkeypatch.setattr("backend.uefn_plugins.host.get_llm_provider_registration", lambda _n: reg)
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda _n: reg)
     monkeypatch.setattr(providers, "gateway_providers", lambda: ("kimi",))
     monkeypatch.setattr("frontend.ui_web.provider_usage_log.log_gateway_usage", lambda **_k: None)
     keys["kimi"] = "sk-a"

@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import frontend.ui_web.panel_api as pa
 from backend.agent.model_fetch import _CAPABILITY_CACHE, ModelInfo, get_model_info
+from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
 
 
 def test_model_cache_disk_round_trip(tmp_path, monkeypatch):
@@ -200,8 +201,9 @@ def test_catalog_seeds_disk_cache_without_fetch(monkeypatch):
     def _read():
         return [info]
 
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_llm_provider_registration",
+    patch_host(
+        monkeypatch,
+        "get_llm_provider_registration",
         lambda prov: {"read_cached_models": _read} if prov == "cursor" else {},
     )
 
@@ -226,13 +228,15 @@ def test_custom_test_key_kicks_refresh(monkeypatch):
             saved.append(str(event.get("type")))
 
     monkeypatch.setattr(pa, "kick_model_refresh", lambda: kicks.append("models"))
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_contributions",
+    patch_host(
+        monkeypatch,
+        "get_contributions",
         lambda: {"llm_providers": [{"id": "cursor"}]},
     )
-    monkeypatch.setattr("backend.uefn_plugins.host.get_llm_provider_registration", lambda _p: None)
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_coding_agent_registration",
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda _p: None)
+    patch_host(
+        monkeypatch,
+        "get_coding_agent_registration",
         lambda _p: {"test_key": lambda _key: {"ok": True, "detail": "OK"}},
     )
     monkeypatch.setattr("backend.agent.secrets.get_key", lambda _p: "")
@@ -326,8 +330,8 @@ def test_unchanged_warm_does_not_rewrite_the_catalog(monkeypatch):
     with (
         patch("frontend.ui_web.panel_api.all_providers", return_value=()),
         patch("backend.agent.providers.all_providers", return_value=()),
-        patch("backend.uefn_plugins.host.get_contributions", return_value={"llm_providers": [{"id": "openai"}]}),
-        patch("backend.uefn_plugins.host.resolve_gateway_credential", return_value="sk-test"),
+        host_patched("get_contributions", return_value={"llm_providers": [{"id": "openai"}]}),
+        host_patched("resolve_gateway_credential", return_value="sk-test"),
         patch("backend.agent.model_fetch.fetch_models", lambda _p, _c: list(models)),
     ):
         for _ in range(3):

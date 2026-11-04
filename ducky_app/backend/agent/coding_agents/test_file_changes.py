@@ -245,7 +245,7 @@ def test_runner_launch_wires_snapshots_live_and_into_final_blocks(env, monkeypat
     from backend.agent.coding_agents.base import CodingAgentLaunchResult
     from frontend.ui_web import workspace_bootstrap, live_agent_runs
     from backend.bridge import status
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     root, ledger, ctx = env
     seen = []
@@ -275,7 +275,7 @@ def test_runner_launch_wires_snapshots_live_and_into_final_blocks(env, monkeypat
     monkeypatch.setattr(runner, "checkpoint_coding_turn", lambda *a, **kw: None)
     monkeypatch.setattr(runner, "_emit_assistant", lambda *a, **kw: kw)
     monkeypatch.setattr(status, "fetch_listener_status", lambda *a, **kw: {})
-    monkeypatch.setattr(host, "get_coding_agent_registration", lambda *a: {})
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda *a: {})
     monkeypatch.setattr(mcp_inject, "deployed_skill_packs", lambda *a: ("", []))
     monkeypatch.setattr(workspace_bootstrap, "build_run_context", lambda *a, **kw: ctx)
     monkeypatch.setattr(workspace_bootstrap, "build_journal", lambda: ledger)

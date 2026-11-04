@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
+
 _PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc``\x00\x00\x00\x04\x00\x01"
@@ -21,7 +23,7 @@ def gi(tmp_path, monkeypatch):
     store = tmp_path / "generated"
     store.mkdir()
     monkeypatch.setattr(gi, "generated_images_dir", lambda for_write=False: store)
-    monkeypatch.setattr("backend.uefn_plugins.host.image_generator_tools", lambda: {"ducky_ai_image", "studio3d_image_gemini3pro"})
+    patch_host(monkeypatch, "image_generator_tools", lambda: {"ducky_ai_image", "studio3d_image_gemini3pro"})
     return gi
 
 

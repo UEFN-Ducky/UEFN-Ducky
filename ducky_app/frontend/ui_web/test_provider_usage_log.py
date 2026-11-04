@@ -7,14 +7,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web import provider_usage_log as pul
 
 
 @pytest.fixture(autouse=True)
 def _isolate_plugin_host(monkeypatch):
     # usage_report looks up plugin families; don't boot the Store host in unit tests.
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_contributions",
+    patch_host(
+        monkeypatch,
+        "get_contributions",
         lambda: {"llm_providers": [], "llm_coding_agents": []},
     )
 
@@ -185,8 +187,9 @@ def test_record_coding_agent_usage_empty_still_logs(monkeypatch, tmp_path):
 
 def test_usage_report_includes_plugin_coding_agent(monkeypatch, tmp_path):
     monkeypatch.setattr(pul, "default_app_data_dir", lambda: tmp_path)
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_contributions",
+    patch_host(
+        monkeypatch,
+        "get_contributions",
         lambda: {
             "llm_providers": [{"id": "anthropic", "plugin_id": "anthropic"}],
             "llm_coding_agents": [{"id": "claude_code", "plugin_id": "anthropic"}],
@@ -241,8 +244,9 @@ def test_make_provider_wrapper_logs_stream_usage(monkeypatch, tmp_path):
         "backend.agent.providers.gateway_providers",
         lambda: ("openai",),
     )
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_llm_provider_registration",
+    patch_host(
+        monkeypatch,
+        "get_llm_provider_registration",
         lambda _name: {"factory": lambda *_a, **_k: _Fake()},
     )
 
@@ -279,8 +283,9 @@ def test_make_provider_wrapper_logs_when_stream_raises(monkeypatch, tmp_path):
         "backend.agent.providers.gateway_providers",
         lambda: ("openai",),
     )
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_llm_provider_registration",
+    patch_host(
+        monkeypatch,
+        "get_llm_provider_registration",
         lambda _name: {"factory": lambda *_a, **_k: _Fake()},
     )
 

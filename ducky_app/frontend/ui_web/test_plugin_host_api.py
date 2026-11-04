@@ -80,9 +80,9 @@ def main() -> None:
 
         # llm_start returns immediately; llm_poll finishes without holding bridge .result().
         import time
-        from backend.uefn_plugins import host as uefn_host
+        from backend.uefn_plugins.plugin_host.testing import host_patched
 
-        with patch.object(uefn_host, "is_plugin_enabled", return_value=True), patch.object(
+        with host_patched("is_plugin_enabled", return_value=True), patch.object(
             pha, "_llm_work", return_value={"ok": True, "text": '{"Hi":"Hola"}'}
         ):
             started = pha.llm_start("translation", system="s", user="u", model="openai:gpt-4o-mini")

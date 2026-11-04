@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web.context_tokens import (
     _cache_mode_for_provider,
     _coding_agent_context_limit,
@@ -32,12 +33,8 @@ def _soft_gateway_regs(monkeypatch):
             return {"token_provider": "cursor"}
         return None
 
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_llm_provider_registration", _llm_reg
-    )
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_coding_agent_registration", _agent_reg
-    )
+    patch_host(monkeypatch, "get_llm_provider_registration", _llm_reg)
+    patch_host(monkeypatch, "get_coding_agent_registration", _agent_reg)
     # Host gates markers on plugin-owned promptCaching; unit tests have no plugins.
     monkeypatch.setattr(
         "backend.agent.providers.cache_utils.provider_cache_markers_enabled",

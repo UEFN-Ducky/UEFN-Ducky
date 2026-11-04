@@ -6,7 +6,7 @@ import pytest
 
 from backend.agent import accounts
 from backend.agent.coding_agents import runner
-from backend.uefn_plugins import host
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web.panel_api import PanelApi
 
 
@@ -35,7 +35,7 @@ def reg(tmp_path, monkeypatch):
         "account_logout": lambda d: calls.append(("logout", d)),
         "account_shared": {"dirs": ["skills"], "files": [], "primary": lambda: primary},
     }
-    monkeypatch.setattr(host, "get_coding_agent_registration", lambda aid: row if aid == "codex" else None)
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda aid: row if aid == "codex" else None)
     return SimpleNamespace(keys=keys, calls=calls, primary=primary, tmp=tmp_path)
 
 
@@ -118,7 +118,7 @@ def test_usage_per_account_calls_the_right_hook(reg, monkeypatch):
     seen: list = []
     gw = {"fetch_usage": lambda key, **kw: seen.append((key, kw.get("account"))) or {
         "windows": [{"id": "rpm", "label": "Requests", "used": 1, "limit": 10}]}}
-    monkeypatch.setattr(host, "get_llm_provider_registration", lambda n: gw if n == "openai" else None)
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda n: gw if n == "openai" else None)
     team = api.add_gateway_account("openai", "Team", "key")["id"]
     api.set_gateway_account_key("openai", team, "sk-team")
     assert api.gateway_account_usage("openai", team)["windows"][0]["label"] == "Requests"

@@ -814,7 +814,7 @@ def test_a_gateway_its_plugin_hides_is_hidden_everywhere() -> None:
 
     from backend.agent import model_fetch
     from backend.agent.model_fetch import ModelInfo
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import gateways, state, ui_registry
     from frontend.ui_web.panel_api import serialize_model_rows
 
     gateway = {"id": "hosted", "label": "Hosted", "kind": "secret", "plugin_id": "account"}
@@ -827,18 +827,18 @@ def test_a_gateway_its_plugin_hides_is_hidden_everywhere() -> None:
     def surfaces() -> tuple:
         model_fetch.reset_usage_cache()
         rows = serialize_model_rows("hosted", [ModelInfo(id="hosted-1", display_name="Hosted AI")])
-        listed = host.get_ui_contributions()["llm_providers"]
+        listed = ui_registry.get_ui_contributions()["llm_providers"]
         return (
             sorted(r["id"] for r in listed),
-            host.get_llm_provider_registration("hosted") is not None,
+            gateways.get_llm_provider_registration("hosted") is not None,
             [r["id"] for r in rows],
             model_fetch.fetch_usage("hosted", ""),
             [r.get("billing") for r in listed if r["id"] == "hosted"],
         )
 
     with (
-        patch.dict(host._CONTRIBUTIONS, {"llm_providers": [gateway, other]}),
-        patch.dict(host._LLM_PROVIDER_FACTORIES, {"hosted": reg}),
+        patch.dict(state._CONTRIBUTIONS, {"llm_providers": [gateway, other]}),
+        patch.dict(state._LLM_PROVIDER_FACTORIES, {"hosted": reg}),
         patch("frontend.agent_models.provider_label", return_value="Hosted"),
     ):
         assert surfaces() == (["openai"], False, [], {"windows": []}, [])

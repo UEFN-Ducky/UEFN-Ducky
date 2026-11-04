@@ -13,16 +13,18 @@ from unittest.mock import patch
 
 from mcp.types import CallToolRequest, CallToolRequestParams, ListToolsRequest
 
+from backend.uefn_plugins.plugin_host.testing import host_patched
+
 
 def test_wait_plugins_loaded_timeout_false() -> None:
-    from backend.uefn_plugins import host as plugins_host
+    from backend.uefn_plugins.plugin_host import boot, state
 
     with (
-        patch.object(plugins_host, "_LOADED", False),
-        patch.object(plugins_host, "ensure_plugins_loaded_async", lambda: None),
-        patch.object(plugins_host._LOAD_DONE, "wait", return_value=False),
+        host_patched("_LOADED", False),
+        host_patched("ensure_plugins_loaded_async", lambda: None),
+        patch.object(state._LOAD_DONE, "wait", return_value=False),
     ):
-        assert plugins_host.wait_plugins_loaded(timeout=0.01) is False
+        assert boot.wait_plugins_loaded(timeout=0.01) is False
 
 
 def test_install_gate_waits_before_list_tools() -> None:
@@ -55,7 +57,7 @@ def test_install_gate_waits_before_list_tools() -> None:
     try:
         with (
             patch.object(bridge_plugin_gate, "wait_until_plugins_loaded", _wait),
-            patch("backend.uefn_plugins.host.plugins_ready", return_value=False),
+            host_patched("plugins_ready", return_value=False),
         ):
             bridge_plugin_gate.install_bridge_plugin_gate(mcp, timeout=12.0)
             handler = server.request_handlers[LT]
@@ -105,7 +107,7 @@ def test_list_tools_skips_wait_when_plugins_ready() -> None:
         with (
             patch.object(bridge_plugin_gate, "wait_until_plugins_loaded", _wait),
             patch.object(bridge_plugin_gate, "clear_mcp_tool_cache", _clear),
-            patch("backend.uefn_plugins.host.plugins_ready", return_value=True),
+            host_patched("plugins_ready", return_value=True),
         ):
             bridge_plugin_gate.install_bridge_plugin_gate(mcp, timeout=12.0)
             handler = server.request_handlers[LT]
@@ -145,8 +147,8 @@ def test_tools_list_sends_core_tools_only() -> None:
     owned = frozenset({"discord_send_message", "skill_read_subskill"})
     try:
         with (
-            patch("backend.uefn_plugins.host.store_plugin_tool_names", return_value=owned),
-            patch("backend.uefn_plugins.host.plugins_ready", return_value=True),
+            host_patched("store_plugin_tool_names", return_value=owned),
+            host_patched("plugins_ready", return_value=True),
         ):
             bridge_plugin_gate.install_bridge_plugin_gate(mcp)
             result = asyncio.run(server.request_handlers[LT](ListToolsRequest()))
@@ -224,7 +226,6 @@ def test_run_bridge_still_reaches_mcp_run_fast() -> None:
     """Gate must not put ensure_plugins_loaded on the mcp.run critical path."""
     import frontend.launcher as launcher
     import backend.server as server
-    import backend.uefn_plugins.host as host
 
     ran: list[str] = []
 
@@ -238,7 +239,7 @@ def test_run_bridge_still_reaches_mcp_run_fast() -> None:
     with (
         patch.object(launcher, "_ensure_repo_on_path", return_value="."),
         patch.object(server.mcp, "run", _fake_run),
-        patch.object(host, "ensure_plugins_loaded", _slow_ensure),
+        host_patched("ensure_plugins_loaded", _slow_ensure),
         patch("frontend.ship_newest.ship_newest_everywhere", lambda **_k: []),
         patch("frontend.appdata_maintenance.start_appdata_maintenance_async", lambda: None),
         patch("backend.bridge.dynamic_tools.register_dynamic_listener_tools", lambda: None),

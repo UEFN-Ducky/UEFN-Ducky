@@ -242,10 +242,11 @@ def test_one_catalog_for_every_workflow():
 
 def test_catalog_keeps_select_options(monkeypatch):
     from backend.automations import catalog
-    from backend.uefn_plugins import host, store as pstore
+    from backend.uefn_plugins import store as pstore
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    monkeypatch.setattr(
-        host,
+    patch_host(
+        monkeypatch,
         "get_ui_contributions",
         lambda: {
             "automations_nodes": [
@@ -276,10 +277,11 @@ def test_catalog_keeps_select_options(monkeypatch):
 
 def test_plugin_node_systems_are_ignored(monkeypatch):
     from backend.automations import catalog
-    from backend.uefn_plugins import host, store as pstore
+    from backend.uefn_plugins import store as pstore
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    monkeypatch.setattr(
-        host,
+    patch_host(
+        monkeypatch,
         "get_ui_contributions",
         lambda: {
             "automations_nodes": [
@@ -694,10 +696,11 @@ def test_flow_branch_agent_mode(monkeypatch):
 
 def test_list_templates_stamps_missing_plugins(monkeypatch):
     from backend.automations import templates
-    from backend.uefn_plugins import host, store as pstore
+    from backend.uefn_plugins import store as pstore
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    monkeypatch.setattr(
-        host,
+    patch_host(
+        monkeypatch,
         "get_ui_contributions",
         lambda: {
             "automations_templates": [
@@ -774,7 +777,9 @@ def test_foreach_keeps_going_past_a_failed_item_when_asked(monkeypatch):
         done.append(card)
         return {"ok": True}
 
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_enabled", lambda pid: pid == "testplug")
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid == "testplug")
     plugin.register_node("testplug", "test.one_card", handler)
 
     def graph(keep_going):
@@ -1153,7 +1158,9 @@ def test_agent_step_archive_moves_its_group_else_its_chat(monkeypatch) -> None:
 def test_select_options_from_plugin_handler(monkeypatch) -> None:
     from backend.automations import catalog, plugin
 
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_enabled", lambda pid: pid == "testplug")
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid == "testplug")
     plugin.register_node("testplug", "test.bots", lambda _ctx: [{"id": "bob", "label": "Bob"}])
     try:
         rows = catalog._fields([

@@ -148,26 +148,24 @@ def test_under_trigger_does_not_mutate() -> None:
 
 
 def test_should_force_clear_from_registration(monkeypatch) -> None:
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    monkeypatch.setattr(host, "get_llm_provider_registration", lambda _p: None)
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda _p: None)
     assert should_force_clear("ollama", 1.0) is True
 
-    monkeypatch.setattr(
-        host, "get_llm_provider_registration", lambda _p: {"cache_mode": "cached"}
-    )
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda _p: {"cache_mode": "cached"})
     assert should_force_clear("anthropic", 1.0) is False
 
-    monkeypatch.setattr(
-        host,
+    patch_host(
+        monkeypatch,
         "get_llm_provider_registration",
         lambda _p: {"cache_mode": "cached", "cache_ttl_s": 60},
     )
     assert should_force_clear("anthropic", 0) is False
     import time
 
-    monkeypatch.setattr(
-        host,
+    patch_host(
+        monkeypatch,
         "get_llm_provider_registration",
         lambda _p: {"cache_mode": "cached", "cache_ttl_s": 60},
     )

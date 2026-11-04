@@ -7,7 +7,8 @@ from __future__ import annotations
 import pytest
 
 from backend.store import db
-from backend.uefn_plugins import host, store
+from backend.uefn_plugins import store
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from backend.workspace import identity
 
 
@@ -18,8 +19,8 @@ def ai_draft(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(store, "appdata_dir", lambda: tmp_path / "app")
     monkeypatch.setattr(store, "load_plugin_manifest", lambda pid: {"id": pid, "source": "ai"})
     monkeypatch.setattr(store, "_defer_chat_enable_side_effects", lambda pid, enabled: None)
-    monkeypatch.setattr(host, "apply_plugin_enabled_change", lambda pid, enabled: None)
-    monkeypatch.setattr(host, "clear_plugin_crash", lambda pid: None)
+    patch_host(monkeypatch, "apply_plugin_enabled_change", lambda pid, enabled: None)
+    patch_host(monkeypatch, "clear_plugin_crash", lambda pid: None)
     db.reset_for_tests()
     yield
     db.reset_for_tests()

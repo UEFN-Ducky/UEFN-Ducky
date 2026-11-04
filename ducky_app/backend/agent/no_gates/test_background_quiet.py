@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web.verse_editor.urc import island_watch as iw
 
 TEN_MIN = 600.0
@@ -71,7 +72,7 @@ def test_a_working_uefn_tool_call_starts_the_watch(monkeypatch) -> None:
 
     started: list[str] = []
     monkeypatch.setattr(iw, "on_uefn_call_ok", lambda: started.append("watch"))
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
 
     async def _ok(name: str, args: dict):
         return [SimpleNamespace(text='{"ok": true}')]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from backend.agent.model_fetch import fetch_usage, normalize_usage_windows, reset_usage_cache
+from backend.uefn_plugins.plugin_host.testing import host_patched
 
 
 def test_normalize_empty_and_three_windows() -> None:
@@ -51,12 +52,12 @@ def test_fetch_usage_without_key_still_calls_plugin() -> None:
         }
 
     with (
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={"fetch_usage": _fn},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_coding_agent_registration",
+        host_patched(
+            "get_coding_agent_registration",
             return_value={},
         ),
     ):
@@ -103,12 +104,12 @@ def test_normalize_keeps_a_valid_account_switch() -> None:
 def test_fetch_usage_missing_hook() -> None:
     reset_usage_cache()
     with (
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_coding_agent_registration",
+        host_patched(
+            "get_coding_agent_registration",
             return_value={},
         ),
     ):
@@ -129,12 +130,12 @@ def test_fetch_usage_plugin_windows() -> None:
         }
 
     with (
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={"fetch_usage": _fn},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_coding_agent_registration",
+        host_patched(
+            "get_coding_agent_registration",
             return_value={},
         ),
     ):
@@ -152,12 +153,12 @@ def test_fetch_usage_caches_until_force() -> None:
         return {"windows": [{"id": "hourly", "label": "Hourly", "used": n["calls"], "limit": 10}]}
 
     with (
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={"fetch_usage": _fn},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_coding_agent_registration",
+        host_patched(
+            "get_coding_agent_registration",
             return_value={},
         ),
     ):
@@ -192,8 +193,8 @@ def test_fetch_usage_adds_core_account_switch(tmp_path) -> None:
     reg = {"fetch_usage": _fn}
     with (
         patch.object(accounts, "_data_root", lambda: tmp_path),
-        patch("backend.uefn_plugins.host.get_llm_provider_registration", side_effect=lambda _p: reg),
-        patch("backend.uefn_plugins.host.get_coding_agent_registration", return_value={}),
+        host_patched("get_llm_provider_registration", side_effect=lambda _p: reg),
+        host_patched("get_coding_agent_registration", return_value={}),
     ):
         assert "switch" not in fetch_usage("openai", "sk")  # 1 account: no toggle
         assert seen == [""]
@@ -231,8 +232,8 @@ def test_fetch_usage_second_login_uses_its_account_hook(tmp_path) -> None:
     agent = {"account_usage": lambda d: seen.append(d) or [{"id": "w", "label": "Weekly", "used": 5, "limit": 100}]}
     with (
         patch.object(accounts, "_data_root", lambda: tmp_path),
-        patch("backend.uefn_plugins.host.get_llm_provider_registration", return_value={}),
-        patch("backend.uefn_plugins.host.get_coding_agent_registration", return_value=agent),
+        host_patched("get_llm_provider_registration", return_value={}),
+        host_patched("get_coding_agent_registration", return_value=agent),
     ):
         two = accounts.add_account("claude_code", "Account 2", "login")
         accounts.set_active_account("claude_code", two)
@@ -255,12 +256,12 @@ def test_fetch_usage_keeps_windows_on_empty_retry() -> None:
         }
 
     with (
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={"fetch_usage": _fn},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_coding_agent_registration",
+        host_patched(
+            "get_coding_agent_registration",
             return_value={},
         ),
     ):

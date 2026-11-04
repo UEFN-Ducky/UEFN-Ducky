@@ -42,7 +42,7 @@ class LegacyAdapter(ModeAdapter):
 def harness(monkeypatch, tmp_path):
     from backend import bridge
     from backend.bridge import shared_mcp, status
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.workspace import ai_ignore
     from frontend.settings import PanelSettings
     from frontend.ui_web import workspace_bootstrap
@@ -70,7 +70,7 @@ def harness(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "record_coding_agent_usage", lambda *a, **kw: None)
     monkeypatch.setattr(bridge, "set_port_override", lambda *_: None)
     monkeypatch.setattr(status, "fetch_listener_status", lambda *a, **kw: {"online": False})
-    monkeypatch.setattr(host, "get_coding_agent_registration", lambda *_: {})
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda *_: {})
     monkeypatch.setattr(mcp_inject, "deployed_skill_packs", lambda *_: ("", []))
     monkeypatch.setattr(runner, "bootstrap_system_prompt", lambda **kw: "Test rules")
     monkeypatch.setattr(runner, "collect_image_paths", lambda *_: [])
@@ -252,12 +252,12 @@ def test_agent_only_empty_mode_compatibility(harness, mode, session, reported):
 @pytest.mark.parametrize("hook", ["before_launch", "on_needs_login"])
 @pytest.mark.parametrize("spoof", ["", "agent"])
 def test_hook_metadata_bound_to_core(harness, monkeypatch, hook, spoof):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     def emit(**kw):
         return kw["emit_assistant"](kw["conv"], agent_id=kw["agent_id"],
             reply="Login required", push=kw["push"], run_id=kw["run_id"],
             ok=False, status="needs_login", requested_mode=spoof, effective_mode="agent")
-    monkeypatch.setattr(host, "get_coding_agent_registration", lambda _: {hook: emit})
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda _: {hook: emit})
     if hook == "on_needs_login":
         def launch(*, mode="agent", **kw):
             return base.CodingAgentLaunchResult(ok=False, status="needs_login")

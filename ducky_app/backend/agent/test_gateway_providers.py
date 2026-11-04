@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from backend.uefn_plugins.plugin_host.testing import host_patched
+
 
 def test_no_builtin_cloud_providers():
     from backend.agent.providers import builtin_providers, gateway_providers
 
     assert builtin_providers() == ()
-    with patch(
-        "backend.uefn_plugins.host.get_contributions",
+    with host_patched(
+        "get_contributions",
         return_value={"llm_providers": []},
     ):
         assert gateway_providers() == ()
@@ -55,12 +57,12 @@ def test_gemini_gateway_when_contributed_and_registered():
 
     fake = [{"id": "gemini", "label": "Google", "plugin_id": "google"}]
     with (
-        patch(
-            "backend.uefn_plugins.host.get_contributions",
+        host_patched(
+            "get_contributions",
             return_value={"llm_providers": fake},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={"factory": lambda *a, **k: None},
         ),
     ):
@@ -76,12 +78,12 @@ def test_chat_false_provider_stays_out_of_the_picker():
         {"id": "openai", "label": "OpenAI", "plugin_id": "openai"},
     ]
     with (
-        patch(
-            "backend.uefn_plugins.host.get_contributions",
+        host_patched(
+            "get_contributions",
             return_value={"llm_providers": fake},
         ),
-        patch(
-            "backend.uefn_plugins.host.get_llm_provider_registration",
+        host_patched(
+            "get_llm_provider_registration",
             return_value={"factory": lambda *a, **k: None},
         ),
     ):
@@ -91,8 +93,8 @@ def test_chat_false_provider_stays_out_of_the_picker():
 def test_make_provider_gemini_requires_gateway():
     from backend.agent.providers import make_provider
 
-    with patch(
-        "backend.uefn_plugins.host.get_llm_provider_registration",
+    with host_patched(
+        "get_llm_provider_registration",
         return_value=None,
     ):
         try:
@@ -106,8 +108,8 @@ def test_registry_unregistered_adapter_is_none():
     """Self-check: no factory → get_adapter returns None (boundary)."""
     from backend.agent.coding_agents.base import get_adapter
 
-    with patch(
-        "backend.uefn_plugins.host.get_coding_agent_registration",
+    with host_patched(
+        "get_coding_agent_registration",
         return_value=None,
     ):
         assert get_adapter("cursor") is None

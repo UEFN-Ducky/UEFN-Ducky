@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from backend.agent.prompt_cache import build_cache_payload
 from backend.agent.providers.base import StreamEvent, StreamEventKind
 from backend.agent.runner import AgentRunner, RunConfig
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 HINT = 'Relevant skills for this request (read before acting): npc/ranged > Archer — skill_read_subskill("npc", "ranged")'
 
@@ -29,7 +30,7 @@ def _drive(monkeypatch, texts: list[str]) -> list[dict]:
         payload.dynamic_system = "Listener: offline"
         return payload
 
-    monkeypatch.setattr("backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider, **_k: "test-key")
+    patch_host(monkeypatch, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr("backend.agent.runner.make_provider", lambda *a, **k: Provider())
     monkeypatch.setattr("backend.agent.runner.list_mcp_tools", tools)
     monkeypatch.setattr("backend.agent.runner.select_tools", lambda *a, **k: [tool])

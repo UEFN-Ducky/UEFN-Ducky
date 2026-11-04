@@ -1,6 +1,7 @@
 from types import SimpleNamespace as NS
 
 import pytest
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web import mcp_catalog as catalog
 
 
@@ -8,7 +9,7 @@ from frontend.ui_web import mcp_catalog as catalog
 def host(monkeypatch):
     rows = [NS(name="sample", description="old", parameters={"type": "object", "properties": {"x": {"type": "string"}}}, is_async=False)]
     monkeypatch.setattr("backend.agent.tools._ensure_mcp", lambda: NS(_tool_manager=NS(list_tools=lambda: rows)))
-    monkeypatch.setattr("backend.uefn_plugins.host.plugins_ready", lambda: False)
+    patch_host(monkeypatch, "plugins_ready", lambda: False)
     catalog._WORKFLOW_CACHE.clear()
     return rows
 
@@ -47,8 +48,8 @@ def test_settings_catalog_preserves_schema_state_and_ranked_paging(monkeypatch):
     monkeypatch.setattr(catalog, "is_plugin_tool", lambda n: "__" in n)
     monkeypatch.setattr(catalog, "_tool_in_plan", lambda n: False)
     monkeypatch.setattr(catalog, "is_host_only_tool", lambda n: False)
-    monkeypatch.setattr("backend.uefn_plugins.host.uefn_agent_tool_rows", lambda: [])
-    monkeypatch.setattr("backend.uefn_plugins.host.uefn_plugin_tool_group_rows", lambda: [])
+    patch_host(monkeypatch, "uefn_agent_tool_rows", lambda: [])
+    patch_host(monkeypatch, "uefn_plugin_tool_group_rows", lambda: [])
     schema = {"type": "object", "oneOf": [{"required": ["path"]}], "additionalProperties": False}
     rows = [NS(name="docs__read_page", description="Read a page", inputSchema=schema,
                annotations={"readOnlyHint": True}, connection_state="unavailable", reason="disconnected"),

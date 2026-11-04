@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 
 from backend.uefn_plugins import chat_view
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 def test_bare_tool_names() -> None:
@@ -29,10 +30,10 @@ def test_links_only_for_media_files_that_exist(tmp_path) -> None:
 
 
 def test_owner_names_the_plugin_and_its_panel(monkeypatch) -> None:
-    monkeypatch.setattr("backend.uefn_plugins.host.plugin_for_tool",
-                        lambda name: "island-media-kit" if name.startswith("imk_") else "ducky")
-    monkeypatch.setattr("backend.uefn_plugins.host.get_ui_contributions",
-                        lambda: {"ui_panels": [{"plugin_id": "island-media-kit", "id": "main", "title": "Media Kit"}]})
+    patch_host(monkeypatch, "plugin_for_tool",
+               lambda name: "island-media-kit" if name.startswith("imk_") else "ducky")
+    patch_host(monkeypatch, "get_ui_contributions",
+               lambda: {"ui_panels": [{"plugin_id": "island-media-kit", "id": "main", "title": "Media Kit"}]})
     monkeypatch.setattr("backend.uefn_plugins.store.load_plugin_manifest",
                         lambda pid: {"label": "Island Media Kit"})
     out = chat_view.chat_tool_view(["mcp__uefn__imk_render_get", "workspace_read_file"], [])
@@ -47,8 +48,8 @@ def test_navigate_leaves_an_open_button_and_moves_nothing(monkeypatch) -> None:
 
     calls = []
     monkeypatch.setattr(panel_ui, "panel_rpc", lambda method, params, **kw: calls.append(method) or {"ok": True})
-    monkeypatch.setattr("backend.uefn_plugins.host.get_contributions",
-                        lambda: {"ui_panels": [{"plugin_id": "imk", "id": "main", "title": "Island Media Kit"}]})
+    patch_host(monkeypatch, "get_contributions",
+               lambda: {"ui_panels": [{"plugin_id": "imk", "id": "main", "title": "Island Media Kit"}]})
     out = json.loads(panel_ui.ducky_ui_navigate("plugin_panel", "imk"))
     assert out["in_chat"] is True and out["item_id"] == "imk:main" and out["title"] == "Island Media Kit"
     out = json.loads(panel_ui.ducky_ui_navigate("workflows"))

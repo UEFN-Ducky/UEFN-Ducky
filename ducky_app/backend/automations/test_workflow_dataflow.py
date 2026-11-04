@@ -171,7 +171,9 @@ def test_wired_values_reach_a_plugin_node(monkeypatch):
             "inputs": [{"id": "card", "label": "Card", "type": "json"}, {"id": "note", "label": "Note", "type": "text"}],
             "outputs": [{"id": "name", "label": "Name", "type": "text"}]}
     monkeypatch.setattr(catalog, "node_specs", lambda: {**specs, "test.card_step": spec})
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_enabled", lambda pid: pid == "testplug")
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid == "testplug")
     plugin.register_node("testplug", "test.card_step", handler)
     try:
         wid = save(

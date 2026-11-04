@@ -10,6 +10,7 @@ import pytest
 
 import backend.agent.tools as tools
 from backend.agent.coding_agents import plans
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
@@ -36,7 +37,7 @@ def _fake_mcp(monkeypatch, ran: list[str]) -> None:
 
 def test_write_and_terminal_run_with_no_in_progress_step(monkeypatch) -> None:
     monkeypatch.setattr(plans, "load_active_plan", lambda: _PENDING_PLAN)
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
     ran: list[str] = []
     _fake_mcp(monkeypatch, ran)
 

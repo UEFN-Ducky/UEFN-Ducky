@@ -187,13 +187,13 @@ def test_a_model_on_a_gateway_that_isnt_connected_says_which_and_offers_connect(
     # Oct 20 2026: the chat said "Interrupted: No API key configured", which meant nothing to
     # someone who doesn't know what an API key is, and offered no way to fix it.
     from backend.agent import model_pricing
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     external_turns.conv("chat", model="gpt-6-luna")
     external_turns.chats["chat"].coding_agent = "ducky"
     monkeypatch.setattr(model_pricing, "resolve_provider_for_model", lambda model, provider: "openai")
-    monkeypatch.setattr(host, "resolve_gateway_credential", lambda provider, **_k: None)
-    monkeypatch.setattr(host, "get_contributions", lambda: {"llm_providers": [{"id": "openai", "label": "OpenAI"}]})
+    patch_host(monkeypatch, "resolve_gateway_credential", lambda provider, **_k: None)
+    patch_host(monkeypatch, "get_contributions", lambda: {"llm_providers": [{"id": "openai", "label": "OpenAI"}]})
     patch_turns(monkeypatch, "save_conversation", lambda c, **kw: None)
     pushed: list[dict] = []
     assert routing.run_message("chat", "hey", "agent", "", push=pushed.append) == ""

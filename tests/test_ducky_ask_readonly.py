@@ -19,7 +19,7 @@ def tool(name, annotations=None):
 def public(monkeypatch, tmp_path, unrestricted_tools):
     from frontend.settings import PanelSettings
     from frontend.ui_web.chats import conversations as chat_convs
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.skills import seeding, skill_index
     from backend.mcp_plugins import store as mcp_store
     from backend.bridge import status
@@ -42,8 +42,8 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     patch_turns(monkeypatch, "close_changeset_run", lambda *a, **kw: None)
     patch_turns(monkeypatch, "_push_token_usage", lambda *a, **kw: None)
     patch_turns(monkeypatch, "_log_agent_crash", lambda *a, **kw: None)
-    monkeypatch.setattr(host, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
-    monkeypatch.setattr(host, "ensure_plugins_loaded", lambda: None)
+    patch_host(monkeypatch, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
+    patch_host(monkeypatch, "ensure_plugins_loaded", lambda: None)
     monkeypatch.setattr(seeding, "seed_skill_packs", lambda: None)
     monkeypatch.setattr(skill_index, "seed_skill_packs", lambda: None)
     monkeypatch.setattr(skill_index, "build_skill_prompt", lambda *a: "")

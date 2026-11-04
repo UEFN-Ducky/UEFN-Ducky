@@ -32,7 +32,8 @@ def _zip_plugin(plugin_id: str = "wedge", version: int = 1) -> bytes:
 
 
 def test_invalidate_plugin_runtime_bounds_hanging_unload() -> None:
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+    from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
 
     mod = ModuleType("uefn_plugin_hangunload")
     started = threading.Event()
@@ -45,7 +46,7 @@ def test_invalidate_plugin_runtime_bounds_hanging_unload() -> None:
     sys.modules["uefn_plugin_hangunload"] = mod
     try:
         t0 = time.perf_counter()
-        host.invalidate_plugin_runtime("hangunload", unload_timeout=0.25)
+        lifecycle.invalidate_plugin_runtime("hangunload", unload_timeout=0.25)
         elapsed = time.perf_counter() - t0
         assert started.wait(1.0), "unload() never started"
         assert elapsed < 2.0, f"invalidate blocked on unload: {elapsed:.2f}s"
@@ -54,33 +55,34 @@ def test_invalidate_plugin_runtime_bounds_hanging_unload() -> None:
 
 
 def test_ensure_plugins_loaded_timeout_returns_false() -> None:
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+    from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
 
-    with host._LOAD_START_LOCK:
-        was_loaded = host._LOADED
-        was_thread = host._LOAD_THREAD
-        host._LOADED = False
-        host._LOAD_DONE.clear()
-        host._LOAD_THREAD = threading.Thread(
+    with state._LOAD_START_LOCK:
+        was_loaded = boot._LOADED
+        was_thread = boot._LOAD_THREAD
+        boot._LOADED = False
+        state._LOAD_DONE.clear()
+        boot._LOAD_THREAD = threading.Thread(
             target=lambda: time.sleep(60),
             daemon=True,
             name="uefn-plugins-load-fake",
         )
-        host._LOAD_THREAD.start()
+        boot._LOAD_THREAD.start()
 
     try:
-        with patch.object(host, "ensure_plugins_loaded_async", lambda **_k: None):
+        with host_patched("ensure_plugins_loaded_async", lambda **_k: None):
             t0 = time.perf_counter()
-            ready = host.ensure_plugins_loaded(timeout=0.2)
+            ready = boot.ensure_plugins_loaded(timeout=0.2)
             elapsed = time.perf_counter() - t0
         assert ready is False
         assert elapsed < 1.5, f"ensure_plugins_loaded ignored timeout: {elapsed:.2f}s"
     finally:
-        with host._LOAD_START_LOCK:
-            host._LOADED = was_loaded
-            host._LOAD_THREAD = was_thread
+        with state._LOAD_START_LOCK:
+            boot._LOADED = was_loaded
+            boot._LOAD_THREAD = was_thread
             if was_loaded:
-                host._LOAD_DONE.set()
+                state._LOAD_DONE.set()
 
 
 def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
@@ -98,13 +100,14 @@ def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
             set_uefn_plugin_enabled,
             uninstall_uefn_plugin,
         )
-        import backend.uefn_plugins.host as host
+        from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+        from backend.uefn_plugins.plugin_host.testing import host_patched
 
         result = import_plugin_from_bytes(_zip_plugin("wedge", 1), source="local", replace=True)
         assert result.get("ok"), result
         assert set_uefn_plugin_enabled("wedge", True, trust_local=True).get("ok")
         # Let enable bg finish so modules are importable, then uninstall.
-        host.wait_plugin_toggles(timeout=5.0)
+        lifecycle.wait_plugin_toggles(timeout=5.0)
         dest = plugin_dir("wedge")
         assert dest.is_dir()
 
@@ -113,7 +116,7 @@ def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
         def _hanging_reload(plugin_id: str) -> None:
             hang.wait(60)
 
-        with patch.object(host, "reload_single_plugin", _hanging_reload):
+        with host_patched("reload_single_plugin", _hanging_reload):
             t0 = time.perf_counter()
             out = uninstall_uefn_plugin("wedge", erase_data=False)
             elapsed = time.perf_counter() - t0
@@ -126,7 +129,8 @@ def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
 
 
 def test_reload_single_plugin_bounds_boot_wait() -> None:
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+    from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
 
     calls: list[float] = []
 
@@ -139,13 +143,13 @@ def test_reload_single_plugin_bounds_boot_wait() -> None:
         return False
 
     with (
-        patch.object(host, "wait_plugin_toggles", _slow_wait),
-        patch.object(host, "ensure_plugins_loaded", _ensure),
-        patch.object(host, "invalidate_plugin_runtime", lambda *_a, **_k: None),
-        patch.object(host, "get_enabled_plugin_ids", lambda: []),
+        host_patched("wait_plugin_toggles", _slow_wait),
+        host_patched("ensure_plugins_loaded", _ensure),
+        host_patched("invalidate_plugin_runtime", lambda *_a, **_k: None),
+        host_patched("get_enabled_plugin_ids", lambda: []),
     ):
         t0 = time.perf_counter()
-        host.reload_single_plugin("missing-plugin-xyz")
+        lifecycle.reload_single_plugin("missing-plugin-xyz")
         elapsed = time.perf_counter() - t0
 
     assert calls == [5.0, 10.0], calls
@@ -187,7 +191,8 @@ def test_hung_register_does_not_wedge_store_toggles(monkeypatch) -> None:
             import_plugin_from_bytes,
             set_uefn_plugin_enabled,
         )
-        import backend.uefn_plugins.host as host
+        from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+        from backend.uefn_plugins.plugin_host.testing import host_patched
 
         # Quiet sibling that must still be unloadable while hangreg is stuck in register().
         other = import_plugin_from_bytes(_zip_plugin("other", 1), source="local", replace=True)
@@ -208,31 +213,31 @@ def test_hung_register_does_not_wedge_store_toggles(monkeypatch) -> None:
         )
         settings.save()
 
-        with host._LOCK:
-            host._REGISTERED.discard("hangreg")
-            host._REGISTERED.discard("other")
-        host._LOADED = True
-        host._UI_READY = True
-        host._LOAD_DONE.set()
-        host._REPAIR_ATTEMPTS.clear()
-        with host._REPAIR_THREAD_LOCK:
-            host._REPAIR_THREAD = None
+        with state._LOCK:
+            state._REGISTERED.discard("hangreg")
+            state._REGISTERED.discard("other")
+        boot._LOADED = True
+        boot._UI_READY = True
+        state._LOAD_DONE.set()
+        state._REPAIR_ATTEMPTS.clear()
+        with state._REPAIR_THREAD_LOCK:
+            boot._REPAIR_THREAD = None
 
         t0 = time.perf_counter()
-        assert host.ensure_plugins_loaded() is True
+        assert boot.ensure_plugins_loaded() is True
         assert time.perf_counter() - t0 < 1.0, "ensure_plugins_loaded blocked on repair"
 
         # Give the repair daemon a moment to enter the hung register().
         deadline = time.monotonic() + 15.0
-        while "hangreg" not in host._REPAIR_ATTEMPTS and time.monotonic() < deadline:
+        while "hangreg" not in state._REPAIR_ATTEMPTS and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert "hangreg" in host._REPAIR_ATTEMPTS
+        assert "hangreg" in state._REPAIR_ATTEMPTS
 
         # Second ensure within backoff must not re-kick hangreg.
-        first_attempt = host._REPAIR_ATTEMPTS["hangreg"]
-        assert host.ensure_plugins_loaded() is True
+        first_attempt = state._REPAIR_ATTEMPTS["hangreg"]
+        assert boot.ensure_plugins_loaded() is True
         time.sleep(0.05)
-        assert host._REPAIR_ATTEMPTS.get("hangreg") == first_attempt
+        assert state._REPAIR_ATTEMPTS.get("hangreg") == first_attempt
 
         t1 = time.perf_counter()
         disabled = set_uefn_plugin_enabled("hangreg", False)
@@ -240,13 +245,14 @@ def test_hung_register_does_not_wedge_store_toggles(monkeypatch) -> None:
         assert time.perf_counter() - t1 < 2.0, "disable blocked while register hung"
 
         t2 = time.perf_counter()
-        host.invalidate_plugin_runtime("other", unload_timeout=0.5)
+        lifecycle.invalidate_plugin_runtime("other", unload_timeout=0.5)
         assert time.perf_counter() - t2 < 2.0, "invalidate blocked while register hung"
 
 
 def test_reload_single_plugin_register_is_async() -> None:
     """Install-path reload must return before a hung register() finishes."""
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+    from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
 
     started = threading.Event()
 
@@ -259,9 +265,9 @@ def test_reload_single_plugin_register_is_async() -> None:
     manifest = {"id": "reloadhang", "kind": "plugin", "version": 1, "label": "Reload Hang"}
 
     with (
-        patch.object(host, "wait_plugin_toggles", lambda timeout=30.0: None),
-        patch.object(host, "ensure_plugins_loaded", lambda timeout=None: True),
-        patch.object(host, "invalidate_plugin_runtime", lambda *_a, **_k: None),
+        host_patched("wait_plugin_toggles", lambda timeout=30.0: None),
+        host_patched("ensure_plugins_loaded", lambda timeout=None: True),
+        host_patched("invalidate_plugin_runtime", lambda *_a, **_k: None),
         patch(
             "backend.uefn_plugins.store.load_plugin_manifest",
             lambda _pid: dict(manifest),
@@ -270,15 +276,15 @@ def test_reload_single_plugin_register_is_async() -> None:
             "backend.uefn_plugins.store.plugin_dir",
             lambda _pid: fake_root,
         ),
-        patch.object(host, "get_enabled_plugin_ids", lambda: ["reloadhang"]),
-        patch.object(host, "is_plugin_enabled", lambda _pid: True),
-        patch.object(host, "_load_enabled_plugin", _hanging_load),
-        patch.object(host, "_load_one", lambda *_a, **_k: None),
-        patch.object(host, "_notify_uefn_plugins_changed", lambda: None),
-        patch.object(host, "_strip_contributions_for", lambda _pid: None),
+        host_patched("get_enabled_plugin_ids", lambda: ["reloadhang"]),
+        host_patched("is_plugin_enabled", lambda _pid: True),
+        host_patched("_load_enabled_plugin", _hanging_load),
+        host_patched("_load_one", lambda *_a, **_k: None),
+        host_patched("_notify_uefn_plugins_changed", lambda: None),
+        host_patched("_strip_contributions_for", lambda _pid: None),
     ):
         t0 = time.perf_counter()
-        host.reload_single_plugin("reloadhang")
+        lifecycle.reload_single_plugin("reloadhang")
         elapsed = time.perf_counter() - t0
 
     assert elapsed < 2.0, f"reload_single_plugin blocked on register: {elapsed:.2f}s"
@@ -361,41 +367,42 @@ def test_repair_thread_starts_only_when_a_repair_is_due(monkeypatch, tmp_path) -
     was registered, ~1.3 threads a second while Ducky sat idle."""
     import types
 
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host import boot, lifecycle, state
+    from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
 
     clock = [1000.0]
     fake_time = types.SimpleNamespace(**{n: getattr(time, n) for n in dir(time) if not n.startswith("_")})
     fake_time.monotonic = lambda: clock[0]
     runs: list[int] = []
-    real_worker = host._repair_missing_backends_worker
+    real_worker = boot._repair_missing_backends_worker
 
     def _counting_worker() -> None:
         runs.append(1)
         real_worker()
 
-    monkeypatch.setattr(host, "time", fake_time)
-    monkeypatch.setattr(host, "_repair_missing_backends_worker", _counting_worker)
-    monkeypatch.setattr(host, "get_enabled_plugin_ids", lambda: ["alpha", "beta"])
-    monkeypatch.setattr(host, "appdata_uefn_plugins_dir", lambda: tmp_path)  # no plugin folders
-    monkeypatch.setattr(host, "_REGISTERED", {"alpha", "beta"})
-    monkeypatch.setattr(host, "_REPAIR_ATTEMPTS", {})
-    monkeypatch.setattr(host, "_REPAIR_THREAD", None)
-    monkeypatch.setattr(host, "_LOADED", True)
+    patch_host(monkeypatch, "time", fake_time)
+    patch_host(monkeypatch, "_repair_missing_backends_worker", _counting_worker)
+    patch_host(monkeypatch, "get_enabled_plugin_ids", lambda: ["alpha", "beta"])
+    patch_host(monkeypatch, "appdata_uefn_plugins_dir", lambda: tmp_path)  # no plugin folders
+    patch_host(monkeypatch, "_REGISTERED", {"alpha", "beta"})
+    patch_host(monkeypatch, "_REPAIR_ATTEMPTS", {})
+    patch_host(monkeypatch, "_REPAIR_THREAD", None)
+    patch_host(monkeypatch, "_LOADED", True)
 
     def _ensure(times: int) -> None:
         for _ in range(times):
-            assert host.ensure_plugins_loaded() is True
-            thread = host._REPAIR_THREAD
+            assert boot.ensure_plugins_loaded() is True
+            thread = boot._REPAIR_THREAD
             if thread is not None:
                 thread.join(5)
 
     _ensure(100)
     assert runs == []
 
-    host._REGISTERED.discard("beta")  # its register() never finished
+    state._REGISTERED.discard("beta")  # its register() never finished
     _ensure(100)
     assert runs == [1]
-    clock[0] += host._REPAIR_BACKOFF_S
+    clock[0] += state._REPAIR_BACKOFF_S
     _ensure(100)
     assert runs == [1, 1]
 

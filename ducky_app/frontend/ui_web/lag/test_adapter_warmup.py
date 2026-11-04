@@ -8,12 +8,11 @@ from frontend import launcher
 
 @pytest.fixture
 def counted(monkeypatch):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from frontend import appdata_maintenance, ship_newest
 
     calls = []
-    # raising=False: the plugin-host split may move it; the import in launcher still finds this.
-    monkeypatch.setattr(host, "ensure_plugins_loaded", lambda *a, **k: calls.append("plugins"), raising=False)
+    patch_host(monkeypatch, "ensure_plugins_loaded", lambda *a, **k: calls.append("plugins"))
     monkeypatch.setattr(ship_newest, "ship_newest_everywhere", lambda *a, **k: calls.append("ship") or [])
     monkeypatch.setattr(appdata_maintenance, "start_appdata_maintenance_async",
                         lambda *a, **k: calls.append("maintenance"))

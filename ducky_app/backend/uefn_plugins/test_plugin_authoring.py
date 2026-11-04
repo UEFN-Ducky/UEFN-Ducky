@@ -6,7 +6,7 @@ import inspect
 
 from backend.tools.panel.panel_ai_plugins import ducky_plugin_reference, plugin_api_markdown
 from backend.uefn_plugins.compile import COMPILED_MIN_APP, _at_least
-from backend.uefn_plugins.host import _PluginApi
+from backend.uefn_plugins.plugin_host.api import _PluginApi
 
 
 def test_every_api_call_a_plugin_gets_is_documented_in_the_reference() -> None:

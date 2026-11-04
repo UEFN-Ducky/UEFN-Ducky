@@ -502,7 +502,8 @@ def test_signing_in_or_out_restarts_and_reloads_plugins_that_show_a_space(who: _
                                                                           monkeypatch: pytest.MonkeyPatch) -> None:
     import threading
 
-    from backend.uefn_plugins import host, store
+    from backend.uefn_plugins import store
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from frontend.ui_web.agent_turns.testing import patch_turns
 
     ana = open_space(fake_spaces, who, "ana@x.org", "spaceT", "Alpha Studio")
@@ -511,7 +512,7 @@ def test_signing_in_or_out_restarts_and_reloads_plugins_that_show_a_space(who: _
     pushed: list[dict[str, Any]] = []
     done = threading.Event()
     monkeypatch.setattr(store, "get_enabled_plugin_ids", lambda: ["brainrot-tcg", "tester"])
-    monkeypatch.setattr(host, "reload_single_plugin", restarted.append)
+    patch_host(monkeypatch, "reload_single_plugin", restarted.append)
     patch_turns(monkeypatch, "push_ui_event", lambda e: (pushed.append(e), done.set()))
 
     # Signing out: both plugins that showed space T move to Local; only the enabled one restarts.
@@ -969,7 +970,7 @@ def test_only_plugins_on_the_host_data_service_are_offered_a_space(who: _Who, fa
                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.uefn_plugins.store import PLUGIN_MANIFEST, plugin_dir
 
     def manifest(pid: str, **fields: Any) -> None:
@@ -990,7 +991,7 @@ def test_only_plugins_on_the_host_data_service_are_offered_a_space(who: _Who, fa
     assert scopes.shareable("ducky.automations")
     manifest("declares", data_sharing=True)
     assert scopes.shareable("declares")
-    monkeypatch.setattr(host, "_DATA_PLUGINS", {"api-user"})
+    patch_host(monkeypatch, "_DATA_PLUGINS", {"api-user"})
     assert scopes.shareable("api-user")
     manifest("never", data_sharing=False)
     PluginData("never").put("tab.home", {"v": 1})

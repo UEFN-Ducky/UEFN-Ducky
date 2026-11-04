@@ -7,6 +7,7 @@ import json
 import pytest
 
 from backend.tools.panel import permission_prompt as pp
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 class _Conv:
@@ -405,7 +406,7 @@ def agents(monkeypatch):
     manifests = {"anthropic": {"label": "Anthropic", "version": "1.0.54", "source": "store"}}
     monkeypatch.setattr(pp, "_agent_registration", lambda aid: regs.get(aid, {}))
     monkeypatch.setattr("backend.agent.coding_agents.base.coding_agent_label", lambda aid: _LABELS.get(aid, aid))
-    monkeypatch.setattr("backend.uefn_plugins.host.registered_coding_agent_ids", lambda: tuple(sorted(regs)))
+    patch_host(monkeypatch, "registered_coding_agent_ids", lambda: tuple(sorted(regs)))
     monkeypatch.setattr("backend.uefn_plugins.store.load_plugin_manifest", lambda pid: manifests.get(pid))
     return regs, manifests
 

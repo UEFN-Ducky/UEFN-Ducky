@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.ui_web.context_tokens import _external_agent_report, compute_context_usage
 
 
@@ -27,8 +28,9 @@ def test_external_report_uses_real_session_and_usage(monkeypatch):
         "backend.agent.coding_agents.base.CODING_AGENT_LABELS",
         {"claude_code": "Claude Code"},
     )
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_coding_agent_registration",
+    patch_host(
+        monkeypatch,
+        "get_coding_agent_registration",
         lambda agent_id: {"settings_defaults": {"permission_mode": "acceptEdits"}},
     )
 
@@ -106,8 +108,9 @@ def test_external_report_shows_the_chats_approval_mode(monkeypatch):
     from backend.tools.panel import permission_prompt as permissions
     from frontend.ui_web import context_tokens as ct
 
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_coding_agent_registration",
+    patch_host(
+        monkeypatch,
+        "get_coding_agent_registration",
         lambda agent_id: {"chat_permission_modes": ["ask", "edits", "all"],
                           "settings_defaults": {"permission_mode": "acceptEdits"}},
     )

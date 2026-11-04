@@ -12,7 +12,8 @@ pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="DPAPI")
 
 from backend.search import find
 from backend.store.repos import plugin_data as repo
-from backend.uefn_plugins import host, scopes
+from backend.uefn_plugins import scopes
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from backend.uefn_plugins.scopes import PluginData
 from backend.uefn_plugins.test_scopes import FakeSpaces, _Who, account_keys, fake_spaces, open_space, who  # noqa: F401
 
@@ -22,9 +23,9 @@ IMK = "island-media-kit"
 @pytest.fixture
 def plugins(monkeypatch):
     on = {IMK, "forge"}
-    monkeypatch.setattr(host, "is_plugin_enabled", lambda pid: pid in on)
-    monkeypatch.setattr(host, "_plugin_label", lambda pid: {IMK: "Island Media Kit", "forge": "Ducky Forge"}.get(pid, pid))
-    monkeypatch.setattr(host, "_PLUGIN_TOOL_OWNER", {"imk_project_get": IMK, "imk_project_list": IMK, "imk_media_list": IMK})
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid in on)
+    patch_host(monkeypatch, "_plugin_label", lambda pid: {IMK: "Island Media Kit", "forge": "Ducky Forge"}.get(pid, pid))
+    patch_host(monkeypatch, "_PLUGIN_TOOL_OWNER", {"imk_project_get": IMK, "imk_project_list": IMK, "imk_media_list": IMK})
     return on
 
 

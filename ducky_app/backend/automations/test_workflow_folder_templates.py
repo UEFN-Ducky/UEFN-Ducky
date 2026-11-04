@@ -25,10 +25,11 @@ def files_store(monkeypatch, tmp_path):
 
     monkeypatch.setattr(templates, "_dir", _dir)
     monkeypatch.setattr(templates, "_announce_templates_changed", lambda: None)
-    from backend.uefn_plugins import host, store as pstore
+    from backend.uefn_plugins import store as pstore
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     contrib: dict = {"automations_templates": []}
-    monkeypatch.setattr(host, "get_ui_contributions", lambda: contrib)
+    patch_host(monkeypatch, "get_ui_contributions", lambda: contrib)
     monkeypatch.setattr(pstore, "get_enabled_plugin_ids", lambda: ["brainrot-tcg"])
     return contrib
 
@@ -130,15 +131,15 @@ BRAINROT_ROW = {
 
 
 def test_plugin_bundle_template_with_at_key_calls(files_store):
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import contributions
 
-    parsed = host._automation_template_row(BRAINROT_ROW, "brainrot-tcg")
-    nested = host._automation_template_row({"id": "nested", "label": "Nested", "bundle": {
+    parsed = contributions._automation_template_row(BRAINROT_ROW, "brainrot-tcg")
+    nested = contributions._automation_template_row({"id": "nested", "label": "Nested", "bundle": {
         "root": "Kit", "workflows": BRAINROT_ROW["workflows"]}}, "brainrot-tcg")
-    single = host._automation_template_row({"id": "single", "label": "Single", "graph": graph()}, "brainrot-tcg")
+    single = contributions._automation_template_row({"id": "single", "label": "Single", "graph": graph()}, "brainrot-tcg")
     assert "bundle" not in single and single["icon"] == "⚡"
     files_store["automations_templates"] = [parsed, nested, single,
-                                            {**host._automation_template_row({**BRAINROT_ROW, "id": "off"}, "other"), "plugin_id": "other"}]
+                                            {**contributions._automation_template_row({**BRAINROT_ROW, "id": "off"}, "other"), "plugin_id": "other"}]
     rows = {t["id"]: t for t in templates.list_templates() if t.get("kind") == "plugin"}
     assert set(rows) == {"plugin:brainrot-tcg:brainrot-card-art", "plugin:brainrot-tcg:nested", "plugin:brainrot-tcg:single"}
     row = rows["plugin:brainrot-tcg:brainrot-card-art"]
@@ -156,16 +157,17 @@ def test_plugin_bundle_template_with_at_key_calls(files_store):
 
 
 def test_bundle_template_needing_a_plugin_is_refused(files_store, monkeypatch):
-    from backend.uefn_plugins import host, store as pstore
+    from backend.uefn_plugins import store as pstore
+    from backend.uefn_plugins.plugin_host import contributions
 
-    files_store["automations_templates"] = [host._automation_template_row({**BRAINROT_ROW, "requires_plugins": ["meshy"]}, "brainrot-tcg")]
+    files_store["automations_templates"] = [contributions._automation_template_row({**BRAINROT_ROW, "requires_plugins": ["meshy"]}, "brainrot-tcg")]
     monkeypatch.setattr(pstore, "get_enabled_plugin_ids", lambda: ["brainrot-tcg"])
     row = listed("plugin:brainrot-tcg:brainrot-card-art")
     assert row["ready"] is False and row["missing_plugins"] == ["meshy"]
     with pytest.raises(ValueError, match="meshy"):
         templates.use_template(row["id"], "local")
     assert store.list_workflows() == []
-    bad = host._automation_template_row({"id": "bad", "kind": "bundle", "workflows": [{"key": "a"}, {"key": "a"}]}, "brainrot-tcg")
+    bad = contributions._automation_template_row({"id": "bad", "kind": "bundle", "workflows": [{"key": "a"}, {"key": "a"}]}, "brainrot-tcg")
     files_store["automations_templates"] = [bad]
     assert not any(t["id"] == "plugin:brainrot-tcg:bad" for t in templates.list_templates())
 

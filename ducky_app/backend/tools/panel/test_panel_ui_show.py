@@ -135,7 +135,7 @@ def test_show_me_on_a_window(rpc, monkeypatch):
 
 
 def test_plugin_spotlight_uses_the_same_show(monkeypatch):
-    from backend.uefn_plugins.host import _PluginApi
+    from backend.uefn_plugins.plugin_host.api import _PluginApi
 
     seen: dict[str, Any] = {}
 

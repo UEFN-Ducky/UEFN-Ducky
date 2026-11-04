@@ -1,6 +1,7 @@
 """Reading the listener status never ships, revives or contacts UEFN (decision 2026-11-03)."""
 import threading
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend import ship_newest
 from frontend.ui_web import panel_api
 
@@ -28,7 +29,7 @@ def test_status_reads_and_refreshes_never_ship_or_revive(monkeypatch):
 
     monkeypatch.setattr(api, "_fetch_listener_status", fetch, raising=False)
     monkeypatch.setattr(api, "_push_panel", lambda event: None, raising=False)
-    monkeypatch.setattr("backend.uefn_plugins.host.attach_plugin_connections", lambda s: s, raising=False)
+    patch_host(monkeypatch, "attach_plugin_connections", lambda s: s, raising=False)
     for _ in range(10):  # ten offline/online flips, each from a refresh
         api.get_listener_status(refresh=True)
         while api._listener_status_cache()._inflight:

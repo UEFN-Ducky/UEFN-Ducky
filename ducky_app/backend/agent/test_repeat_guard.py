@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from backend.agent.runner import (
     _MAX_IDENTICAL_RESULT_CALLS,
     _call_signature,
@@ -98,7 +99,7 @@ def test_a_model_that_only_repeats_blocked_calls_is_stopped(monkeypatch):
         ran.append(name)
         return ToolCallResult(ok=False, tool=name, error="No memory entry named 'x'")
 
-    monkeypatch.setattr("backend.uefn_plugins.host.resolve_gateway_credential", lambda _provider, **_k: "test-key")
+    patch_host(monkeypatch, "resolve_gateway_credential", lambda _provider, **_k: "test-key")
     monkeypatch.setattr("backend.agent.runner.make_provider", lambda *a, **k: Provider())
     monkeypatch.setattr("backend.agent.runner.list_mcp_tools", tools)
     monkeypatch.setattr("backend.agent.runner.select_tools", lambda *a, **k: [tool])

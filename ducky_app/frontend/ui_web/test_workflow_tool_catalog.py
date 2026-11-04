@@ -6,6 +6,8 @@ import time
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
+
 
 def test_workflow_tool_catalog_is_host_only_and_cached(monkeypatch):
     from frontend.ui_web import mcp_catalog
@@ -15,11 +17,12 @@ def test_workflow_tool_catalog_is_host_only_and_cached(monkeypatch):
 
     monkeypatch.setattr("backend.mcp_plugins.client_pool.get_plugin_pool", _no_pool)
     # Never block on desktop plugin register() from the tool picker.
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.ensure_plugins_loaded",
+    patch_host(
+        monkeypatch,
+        "ensure_plugins_loaded",
         lambda *a, **k: pytest.fail("sync-waited on plugins"),
     )
-    monkeypatch.setattr("backend.uefn_plugins.host.plugins_ready", lambda: False)
+    patch_host(monkeypatch, "plugins_ready", lambda: False)
     mcp_catalog._WORKFLOW_CACHE.clear()
 
     first = mcp_catalog.build_workflow_tool_catalog()
@@ -42,7 +45,7 @@ def test_workflow_tool_catalog_is_host_only_and_cached(monkeypatch):
 def test_workflow_tool_catalog_skips_async_tools(monkeypatch):
     from frontend.ui_web import mcp_catalog
 
-    monkeypatch.setattr("backend.uefn_plugins.host.plugins_ready", lambda: False)
+    patch_host(monkeypatch, "plugins_ready", lambda: False)
     mcp_catalog._WORKFLOW_CACHE.clear()
     from backend.agent.tools import _ensure_mcp
 

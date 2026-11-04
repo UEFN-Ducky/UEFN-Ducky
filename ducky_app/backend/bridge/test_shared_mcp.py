@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.bridge import shared_mcp
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend import mcp_block
 from frontend.settings import PanelSettings
 
@@ -358,7 +359,7 @@ def test_ready_plugins_skip_the_long_wait(monkeypatch) -> None:
         waited.append(float(timeout))
         return True
 
-    monkeypatch.setattr("backend.uefn_plugins.host.plugins_ready", lambda: True)
+    patch_host(monkeypatch, "plugins_ready", lambda: True)
     monkeypatch.setattr("backend.bridge.plugin_gate.wait_until_plugins_loaded", _wait)
     monkeypatch.setattr(
         "backend.mcp_plugins.bridge_proxy.wait_until_nested_proxies_synced", _wait

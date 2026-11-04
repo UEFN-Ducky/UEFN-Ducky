@@ -14,7 +14,7 @@ from unittest.mock import patch
 def main() -> None:
     import frontend.launcher as launcher
     import backend.server as server
-    import backend.uefn_plugins.host as host
+    from backend.uefn_plugins.plugin_host.testing import host_patched
 
     import threading
 
@@ -32,7 +32,7 @@ def main() -> None:
     with (
         patch.object(launcher, "_ensure_repo_on_path", return_value="."),
         patch.object(server.mcp, "run", _fake_run),
-        patch.object(host, "ensure_plugins_loaded", _slow_ensure),
+        host_patched("ensure_plugins_loaded", _slow_ensure),
         patch("frontend.ship_newest.ship_newest_everywhere", lambda **_k: []),
         patch("frontend.appdata_maintenance.start_appdata_maintenance_async", lambda: None),
         patch("backend.bridge.dynamic_tools.register_dynamic_listener_tools", lambda: None),

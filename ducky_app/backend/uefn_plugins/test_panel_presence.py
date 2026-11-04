@@ -74,13 +74,13 @@ def test_no_note_for_people_or_plugins_without_panels(docs, monkeypatch) -> None
 
 
 def test_tool_results_carry_the_note(monkeypatch) -> None:
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import panel_rpc
 
     monkeypatch.setattr(pp, "panel_note_once", lambda pid: "The panel is off screen.")
-    assert host._with_panel_note("imk", {"ok": True}) == {"ok": True, "panel_note": "The panel is off screen."}
-    assert host._with_panel_note("imk", "done").endswith("\n\nThe panel is off screen.")
+    assert panel_rpc._with_panel_note("imk", {"ok": True}) == {"ok": True, "panel_note": "The panel is off screen."}
+    assert panel_rpc._with_panel_note("imk", "done").endswith("\n\nThe panel is off screen.")
     monkeypatch.setattr(pp, "panel_note_once", lambda pid: "")
-    assert host._with_panel_note("imk", {"ok": True}) == {"ok": True}
+    assert panel_rpc._with_panel_note("imk", {"ok": True}) == {"ok": True}
 
 
 def test_agents_can_open_a_plugin_panel(monkeypatch) -> None:
@@ -88,15 +88,17 @@ def test_agents_can_open_a_plugin_panel(monkeypatch) -> None:
 
     calls = []
     monkeypatch.setattr(panel_ui, "panel_rpc", lambda method, params, **kw: calls.append((method, params)) or {"ok": True, "tab": "plugin:imk:main"})
-    monkeypatch.setattr("backend.uefn_plugins.host.get_contributions",
-                        lambda: {"ui_panels": [{"plugin_id": "imk", "id": "main", "title": "Island Media Kit"}]})
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+
+    patch_host(monkeypatch, "get_contributions",
+               lambda: {"ui_panels": [{"plugin_id": "imk", "id": "main", "title": "Island Media Kit"}]})
     assert panel_ui._navigate("plugin_panel", "imk") == {"ok": True, "route": "plugin_panel", "tab": "plugin:imk:main"}
     assert calls == [("open_plugin_panel", {"plugin_id": "imk", "panel_id": "main", "title": "Island Media Kit"})]
     assert "error" in panel_ui._navigate("plugin_panel", "nothing")
 
 
 def test_plugins_get_a_seekable_link_for_local_media(tmp_path) -> None:
-    from backend.uefn_plugins.host import _PluginApi
+    from backend.uefn_plugins.plugin_host.api import _PluginApi
 
     proxy = tmp_path / "proxy_720p.mp4"
     proxy.write_bytes(b"\x00")

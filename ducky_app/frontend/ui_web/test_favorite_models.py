@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from backend.uefn_plugins.plugin_host.testing import patch_host
 from frontend.favorite_models import (
     ResolveErr,
     ResolveOk,
@@ -40,9 +41,7 @@ def _soft_backends(monkeypatch):
             return {"normalize_model": _norm_cursor}
         return None
 
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.get_coding_agent_registration", _fake_reg
-    )
+    patch_host(monkeypatch, "get_coding_agent_registration", _fake_reg)
 
 
 def test_qualify_and_parse_round_trip():
@@ -418,9 +417,9 @@ def test_agents_never_start_chats_on_an_api_key_the_person_did_not_open(monkeypa
     assert billing_kind("ducky", "openai", "gpt-6.1-sol") == "api_key"
     from unittest.mock import patch
 
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import state
 
-    with patch.dict(host._LLM_PROVIDER_FACTORIES, {"hosted": {"factory": object, "billing": "account"}}):
+    with patch.dict(state._LLM_PROVIDER_FACTORIES, {"hosted": {"factory": object, "billing": "account"}}):
         assert billing_kind("ducky", "hosted", "hosted-ai") == "account"
 
 
@@ -444,13 +443,13 @@ def test_a_gateway_s_fallback_model_is_offered_only_while_its_plugin_shows_it(mo
     from unittest.mock import patch
 
     import frontend.favorite_models as fm
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import state
 
     allowed = {"on": True}
     reg = {"factory": object, "fallback_model": "hosted-ai", "visible": lambda: allowed["on"]}
     monkeypatch.setattr("frontend.favorite_models.api_backends", lambda: _TEST_APIS | {"hosted"})
     monkeypatch.setattr("frontend.favorite_models._available_api_models", lambda: {"hosted": {"hosted-ai"}})
-    with patch.dict(host._LLM_PROVIDER_FACTORIES, {"hosted": reg}):
+    with patch.dict(state._LLM_PROVIDER_FACTORIES, {"hosted": reg}):
         pick = fm.fallback_selection()
         assert (pick.coding_agent, pick.model, pick.provider) == ("ducky", "hosted-ai", "hosted")
         allowed["on"] = False

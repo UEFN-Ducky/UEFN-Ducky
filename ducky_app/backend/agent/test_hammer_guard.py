@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import backend.agent.hammer_guard as hg
 import backend.agent.tools as tools
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
@@ -74,7 +75,7 @@ def test_streaks_are_per_conversation():
 def _patch_dispatch(monkeypatch, fake_call, *, stats_seen=None):
     monkeypatch.setattr("backend.bridge.configured_listener_port", lambda: 4200)
     monkeypatch.setattr("backend.bridge.listener_get_health", lambda _p, timeout=1.0: {"ok": True})
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
     mcp = MagicMock()
     mcp.call_tool = fake_call
     fake_tool = SimpleNamespace(

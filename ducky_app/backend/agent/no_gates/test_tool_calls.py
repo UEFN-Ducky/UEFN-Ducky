@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import backend.agent.tools as tools
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 pytestmark = pytest.mark.usefixtures("unrestricted_tools")
 
@@ -44,7 +45,7 @@ def test_twenty_non_uefn_calls_make_zero_listener_requests(monkeypatch) -> None:
         return real_connect(address, *a, **k)
 
     monkeypatch.setattr(socket, "create_connection", _counting_connect)
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
 
     ran: list[str] = []
 
@@ -67,7 +68,7 @@ def test_twenty_non_uefn_calls_make_zero_listener_requests(monkeypatch) -> None:
 
 
 def test_no_tool_says_listener_offline_before_it_runs(monkeypatch) -> None:
-    monkeypatch.setattr("backend.uefn_plugins.host.is_plugin_host_only_tool", lambda _n: False)
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
     ran: list[str] = []
 
     async def _fake_call(name: str, args: dict):

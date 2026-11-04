@@ -15,8 +15,8 @@ import pytest
 import frontend.skill_deploy as sd
 from backend.skills import discovery, ownership, seeding, skill_index
 from backend.skills.layout import PACK_FILE, REFERENCES_DIR
-from backend.uefn_plugins import host as plugin_host
 from backend.uefn_plugins import store as plugin_store
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 PACKS = 50
 ROOTS = 3
@@ -64,7 +64,7 @@ def boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(plugin_store, "appdata_uefn_plugins_dir", lambda: plugins_dir)
     monkeypatch.setattr(plugin_store, "plugin_tree_fingerprint", lambda root: ("v1",))
     monkeypatch.setattr(plugin_store, "get_enabled_plugin_ids", lambda: ["kit"])
-    monkeypatch.setattr(plugin_host, "is_plugin_enabled", lambda pid: pid == "kit")
+    patch_host(monkeypatch, "is_plugin_enabled", lambda pid: pid == "kit")
     monkeypatch.setattr(discovery, "bundled_skill_packs_dir", lambda: None)
     monkeypatch.setattr(seeding, "seed_skill_packs", lambda force=False: [])
     monkeypatch.setattr(skill_index, "seed_skill_packs", lambda force=False: [])

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from backend.agent.toolsets import desktop_plugins as dp
+from backend.uefn_plugins.plugin_host.testing import patch_host
 
 
 def test_desktop_plugins_block_ready(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.uefn_agent_tool_rows",
+    patch_host(
+        monkeypatch,
+        "uefn_agent_tool_rows",
         lambda: [
             {
                 "id": "blender",
@@ -32,8 +34,9 @@ def test_desktop_plugins_block_ready(monkeypatch) -> None:
 
 
 def test_desktop_plugins_block_not_ready(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "backend.uefn_plugins.host.uefn_agent_tool_rows",
+    patch_host(
+        monkeypatch,
+        "uefn_agent_tool_rows",
         lambda: [{"id": "blender", "label": "Blender", "tool_names": ["blender_status"]}],
     )
     monkeypatch.setattr(dp, "_tcp_open", lambda host, port, timeout=0.35: False)
@@ -44,5 +47,5 @@ def test_desktop_plugins_block_not_ready(monkeypatch) -> None:
 
 
 def test_desktop_plugins_block_empty(monkeypatch) -> None:
-    monkeypatch.setattr("backend.uefn_plugins.host.uefn_agent_tool_rows", lambda: [])
+    patch_host(monkeypatch, "uefn_agent_tool_rows", lambda: [])
     assert dp.enabled_desktop_plugins_prompt_block() == ""

@@ -49,10 +49,10 @@ def test_panel_api_import_skips_mcp() -> None:
 def test_panel_api_init_does_not_await_plugins() -> None:
     """PanelApi() must return without waiting for ensure_plugins_loaded()."""
     import frontend.ui_web.panel_api as panel_api
-    from backend.uefn_plugins import host as plugins_host
+    from backend.uefn_plugins.plugin_host import boot
+    from backend.uefn_plugins.plugin_host.testing import host_patched
 
     async_calls: list[object] = []
-    original_async = plugins_host.ensure_plugins_loaded_async
 
     def _fake_async(on_done=None):  # type: ignore[no-untyped-def]
         async_calls.append(on_done)
@@ -61,15 +61,16 @@ def test_panel_api_init_does_not_await_plugins() -> None:
     def _fake_warm() -> None:
         return
 
-    plugins_host.ensure_plugins_loaded_async = _fake_async  # type: ignore[assignment]
+    async_patch = host_patched("ensure_plugins_loaded_async", _fake_async)
+    async_patch.__enter__()
     original_warm = panel_api._warm_model_cache
     panel_api._warm_model_cache = _fake_warm  # type: ignore[attr-defined]
     try:
         # Force "not ready" so a regress that sync-waits would hang or take forever.
-        was_loaded = plugins_host._LOADED
-        was_ui_ready = plugins_host._UI_READY
-        plugins_host._LOADED = False
-        plugins_host._UI_READY = False
+        was_loaded = boot._LOADED
+        was_ui_ready = boot._UI_READY
+        boot._LOADED = False
+        boot._UI_READY = False
         t0 = time.perf_counter()
         api = panel_api.PanelApi()
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -80,10 +81,10 @@ def test_panel_api_init_does_not_await_plugins() -> None:
         assert contrib.get("error") == "plugins_loading"
         print(f"ok PanelApi() {elapsed_ms:.0f}ms without awaiting plugins")
     finally:
-        plugins_host.ensure_plugins_loaded_async = original_async  # type: ignore[assignment]
+        async_patch.__exit__(None, None, None)
         panel_api._warm_model_cache = original_warm  # type: ignore[attr-defined]
-        plugins_host._LOADED = was_loaded
-        plugins_host._UI_READY = was_ui_ready
+        boot._LOADED = was_loaded
+        boot._UI_READY = was_ui_ready
 
 
 def main() -> None:

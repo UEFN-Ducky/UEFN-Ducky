@@ -701,14 +701,14 @@ def test_team_screen_api_result_keys(monkeypatch) -> None:
 
 
 def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> None:
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from frontend import perf_trace
 
     rows: list[tuple] = []
     monkeypatch.setattr(perf_trace, 'trace', lambda kind, name='', ms=0.0, **meta: rows.append((kind, name, meta)))
     api = PanelApi.__new__(PanelApi)
 
-    monkeypatch.setattr(host, 'call_panel_rpc', lambda p, m, a: {'ok': True, 'rows': ['x' * 1000] * 100})
+    patch_host(monkeypatch, 'call_panel_rpc', lambda p, m, a: {'ok': True, 'rows': ['x' * 1000] * 100})
     assert api.plugin_call('account', 'list_models', {})['ok']
     assert len(rows) == 1
     kind, name, meta = rows[0]
@@ -717,7 +717,7 @@ def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> Non
     assert meta['js_bytes'] > 64 * 1024
 
     rows.clear()
-    monkeypatch.setattr(host, 'call_panel_rpc', lambda p, m, a: {'ok': True})
+    patch_host(monkeypatch, 'call_panel_rpc', lambda p, m, a: {'ok': True})
     api.plugin_call('account', 'ping', {})
     assert rows == []  # small replies trace nothing
 
@@ -725,7 +725,7 @@ def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> Non
 def test_plugin_call_etag_skips_unchanged_big_reply(monkeypatch) -> None:
     import json
 
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
     seen: list[dict] = []
     data = {'ok': True, 'models': [{'id': f'm{i}', 'blob': 'x' * 900} for i in range(2000)]}
@@ -734,7 +734,7 @@ def test_plugin_call_etag_skips_unchanged_big_reply(monkeypatch) -> None:
         seen.append(a)
         return data
 
-    monkeypatch.setattr(host, 'call_panel_rpc', rpc)
+    patch_host(monkeypatch, 'call_panel_rpc', rpc)
     api = PanelApi.__new__(PanelApi)
 
     first = api.plugin_call('account', 'list_models', {'_etag': ''})

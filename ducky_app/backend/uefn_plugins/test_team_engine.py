@@ -208,9 +208,9 @@ def test_live_listeners_added_before_the_engine_reach_it_when_it_comes(monkeypat
             return {"ok": True, "room": room}
 
     eng = types.SimpleNamespace(live=types.SimpleNamespace(LiveApi=Real, forget=lambda *a, **k: None))
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
 
-    monkeypatch.setattr(host, "bind_folders_after_engine", lambda: None)
+    patch_host(monkeypatch, "bind_folders_after_engine", lambda: None)
     spaces.install_for_tests(_Engine(eng))
     team_engine.engine_arrived()
     assert got == [("early", "on", "topic"), ("early", "on_shared")]

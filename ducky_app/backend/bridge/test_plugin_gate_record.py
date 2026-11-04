@@ -112,9 +112,9 @@ def test_record_tool_result_skips_reads(env) -> None:
 
 def test_plugin_tool_without_sidecar_uses_owner(env) -> None:
     root, journal = env
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host import state
 
-    host._PLUGIN_TOOL_OWNER["discord_send_message"] = "discord"
+    state._PLUGIN_TOOL_OWNER["discord_send_message"] = "discord"
     try:
         plugin_gate._record_bridge_tool(
             "discord_send_message",
@@ -128,7 +128,7 @@ def test_plugin_tool_without_sidecar_uses_owner(env) -> None:
         assert entry["editor"]["revertable"] == "none"
         assert entry["editor"]["kind"] == "tool"
     finally:
-        host._PLUGIN_TOOL_OWNER.pop("discord_send_message", None)
+        state._PLUGIN_TOOL_OWNER.pop("discord_send_message", None)
 
 
 def test_plan_update_is_journaled_as_ducky(env) -> None:

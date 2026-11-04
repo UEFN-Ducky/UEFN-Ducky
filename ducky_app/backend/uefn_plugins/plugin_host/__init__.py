@@ -15,6 +15,7 @@
 - ``folders``: plugins that keep declared folders, and reloads when those move.
 - ``errors``: why a plugin didn't load.
 - ``api``: the ``register(api)`` surface a plugin receives.
+- ``testing``: for tests, swapping a name in every module that holds it.
 
-``backend.uefn_plugins.host`` still re-exports every name (see ``compat``).
+Import each name from the module that owns it.
 """

@@ -118,13 +118,13 @@ def test_agent_and_settings_report_parity_without_discovery_connect(observations
 
 def test_actual_collector_does_not_create_pool_or_load_plugins(monkeypatch):
     from backend.mcp_plugins import client_pool, store
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.agent import builtin_toolsets, tools
     monkeypatch.setattr(client_pool, "_pool", None)
     monkeypatch.setattr(client_pool, "get_plugin_pool", lambda: pytest.fail("must not create pool"))
     monkeypatch.setattr(tools, "_ensure_mcp", lambda: pytest.fail("must not register tools"))
-    monkeypatch.setattr(host, "plugins_ready", lambda: False)
-    monkeypatch.setattr(host, "uefn_plugin_tool_group_rows", lambda: pytest.fail("must not load plugins"))
+    patch_host(monkeypatch, "plugins_ready", lambda: False)
+    patch_host(monkeypatch, "uefn_plugin_tool_group_rows", lambda: pytest.fail("must not load plugins"))
     monkeypatch.setattr(store, "list_mcp_servers", lambda: [{"id": "docs", "enabled": True}])
     monkeypatch.setattr(builtin_toolsets, "builtin_group_rows", lambda: [])
     row = catalog.build_mcp_diagnostics("docs")["servers"][0]
@@ -133,12 +133,12 @@ def test_actual_collector_does_not_create_pool_or_load_plugins(monkeypatch):
 
 def test_actual_collector_uses_existing_failed_inventory_without_mutation(monkeypatch):
     from backend.mcp_plugins import client_pool, store
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.agent import builtin_toolsets
     cached = [Tool(name="docs__read", inputSchema={})]
     pool = NS(_inventories={"docs": cached}, _inventory_failures={"docs": 2})
     monkeypatch.setattr(client_pool, "_pool", pool)
-    monkeypatch.setattr(host, "plugins_ready", lambda: False)
+    patch_host(monkeypatch, "plugins_ready", lambda: False)
     monkeypatch.setattr(store, "list_mcp_servers", lambda: [{"id": "docs", "enabled": True}])
     monkeypatch.setattr(builtin_toolsets, "builtin_group_rows", lambda: [])
     row = catalog.build_mcp_diagnostics("docs")["servers"][0]
@@ -148,13 +148,13 @@ def test_actual_collector_uses_existing_failed_inventory_without_mutation(monkey
 
 def test_actual_session_health_and_http_failure_expiry(monkeypatch):
     from backend.mcp_plugins import client_pool, store
-    from backend.uefn_plugins import host
+    from backend.uefn_plugins.plugin_host.testing import patch_host
     from backend.agent import builtin_toolsets
     conn = NS(retired=False, session=object(), owner=NS(alive=True))
     pool = NS(_connections={"docs": conn}, _failed_until={"docs": 105})
     monkeypatch.setattr(client_pool, "_pool", pool)
     monkeypatch.setattr(catalog.time, "time", lambda: 100)
-    monkeypatch.setattr(host, "plugins_ready", lambda: False)
+    patch_host(monkeypatch, "plugins_ready", lambda: False)
     monkeypatch.setattr(store, "list_mcp_servers", lambda: [{"id": "docs", "enabled": True}])
     monkeypatch.setattr(builtin_toolsets, "builtin_group_rows", lambda: [])
     row = catalog.build_mcp_diagnostics("docs")["servers"][0]
