@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.uefn_plugins.plugin_host import boot, lifecycle, loader
+from backend.uefn_plugins.plugin_host import boot, lifecycle, loader, state
 
 
 def _write_plugin(root: Path, pid: str, backend_src: str) -> None:
@@ -31,8 +31,8 @@ def _write_plugin(root: Path, pid: str, backend_src: str) -> None:
 def test_reentrant_register_does_not_deadlock_first_load() -> None:
     src = (
         "def register(api):\n"
-        "    from backend.uefn_plugins.host import get_contributions\n"
         "    from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded\n"
+        "    from backend.uefn_plugins.plugin_host.ui_registry import get_contributions\n"
         "    ensure_plugins_loaded()\n"
         "    get_contributions()\n"
     )
@@ -49,9 +49,14 @@ def test_reentrant_register_does_not_deadlock_first_load() -> None:
             patch.object(boot, "_LOAD_DONE", threading.Event()),
             patch.object(boot, "_LOAD_THREAD", None),
             patch.object(loader, "_REGISTER_TIMEOUT_SEC", 5.0),
+            # A real load records the plugin: put the registries back for later tests.
+            patch.dict(state._LOADED_SIGNATURE),
         ):
-            assert boot.ensure_plugins_loaded(timeout=20.0) is True
-            assert boot.plugins_ready() is True
+            try:
+                assert boot.ensure_plugins_loaded(timeout=20.0) is True
+                assert boot.plugins_ready() is True
+            finally:
+                state._REGISTERED.discard("reenter")
 
 
 def test_ensure_plugins_loaded_returns_immediately_inside_load_thread() -> None:

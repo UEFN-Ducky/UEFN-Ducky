@@ -456,7 +456,28 @@ def ensure_plugins_loaded(timeout: float | None = None) -> bool:
 
 # Names from the rest of the host, bound after every definition above so the host
 # modules can import each other in any order.
-from backend.uefn_plugins.host import (  # noqa: E402
+from backend.uefn_plugins.plugin_host.backends import (  # noqa: E402
+    sweep_compiled_quarantine,
+    sweep_orphan_compiled_folders,
+)
+from backend.uefn_plugins.plugin_host.crash_guard import _promote_dead_markers, _start_crash_heal  # noqa: E402
+from backend.uefn_plugins.plugin_host.errors import _record_plugin_load_error  # noqa: E402
+from backend.uefn_plugins.plugin_host.lifecycle import (  # noqa: E402
+    _start_files_watch,
+    invalidate_plugin_runtime,
+    is_plugin_enabled,
+    reevaluate_private_plugins,
+    wait_plugin_toggles,
+)
+from backend.uefn_plugins.plugin_host.loader import (  # noqa: E402
+    _load_enabled_plugin_locked,
+    _load_one,
+    _plugin_load_lock,
+    _read_manifest,
+    _register_plugin_guarded,
+    _warm_plugin_backend,
+)
+from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _CONTRIBUTIONS,
     _LOAD_CALLBACKS,
     _LOAD_CALLBACKS_LOCK,
@@ -474,24 +495,4 @@ from backend.uefn_plugins.host import (  # noqa: E402
     _REPAIR_STATE,
     _REPAIR_THREAD_LOCK,
     _log,
-    _promote_dead_markers,
-    _record_plugin_load_error,
-    _start_crash_heal,
-    sweep_compiled_quarantine,
-    sweep_orphan_compiled_folders,
-)
-from backend.uefn_plugins.plugin_host.lifecycle import (  # noqa: E402
-    _start_files_watch,
-    invalidate_plugin_runtime,
-    is_plugin_enabled,
-    reevaluate_private_plugins,
-    wait_plugin_toggles,
-)
-from backend.uefn_plugins.plugin_host.loader import (  # noqa: E402
-    _load_enabled_plugin_locked,
-    _load_one,
-    _plugin_load_lock,
-    _read_manifest,
-    _register_plugin_guarded,
-    _warm_plugin_backend,
 )

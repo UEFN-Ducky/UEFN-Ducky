@@ -714,7 +714,34 @@ def _backend_load_lock(pid: str) -> threading.RLock:
 
 # Names from the rest of the host, bound after every definition above so the host
 # modules can import each other in any order.
-from backend.uefn_plugins.host import (  # noqa: E402
+from backend.uefn_plugins.plugin_host.api import _PluginApi  # noqa: E402
+from backend.uefn_plugins.plugin_host.backends import (  # noqa: E402
+    _import_backend,
+    _import_compiled_backend,
+    _manifest_is_compiled,
+)
+from backend.uefn_plugins.plugin_host.boot import _notify_uefn_plugins_changed  # noqa: E402
+from backend.uefn_plugins.plugin_host.contributions import (  # noqa: E402
+    _automation_contrib_row,
+    _automation_template_row,
+    _clear_node_handlers,
+    _image_generator_row,
+    _media_backend_row,
+    _resolve_contrib_icon,
+    _strip_contributions_for,
+)
+from backend.uefn_plugins.plugin_host.crash_guard import (  # noqa: E402
+    _load_marker_begin,
+    _load_marker_end,
+    plugin_crashed_ducky,
+)
+from backend.uefn_plugins.plugin_host.errors import _record_plugin_load_error  # noqa: E402
+from backend.uefn_plugins.plugin_host.folders import _bind_folders  # noqa: E402
+from backend.uefn_plugins.plugin_host.lifecycle import (  # noqa: E402
+    _manifest_signature,
+    invalidate_plugin_runtime,
+)
+from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _API_TOOL_REGISTRY,
     _CONTRIBUTIONS,
     _FOLDER_EPOCH,
@@ -732,29 +759,10 @@ from backend.uefn_plugins.host import (  # noqa: E402
     _TOOL_CONCURRENCY,
     _TOOL_LAST_OWNER,
     _TOOL_SLOTS,
-    _automation_contrib_row,
-    _automation_template_row,
-    _bind_folders,
-    _clear_node_handlers,
-    _image_generator_row,
-    _import_backend,
-    _import_compiled_backend,
-    _load_marker_begin,
-    _load_marker_end,
     _log,
-    _manifest_is_compiled,
-    _media_backend_row,
-    _PluginApi,
+)
+from backend.uefn_plugins.plugin_host.tool_registry import (  # noqa: E402
     _rebuild_intent_row,
-    _record_plugin_load_error,
-    _resolve_contrib_icon,
-    _strip_contributions_for,
     manifest_tool_concurrency,
-    normalize_chat_reference,
-    plugin_crashed_ducky,
 )
-from backend.uefn_plugins.plugin_host.boot import _notify_uefn_plugins_changed  # noqa: E402
-from backend.uefn_plugins.plugin_host.lifecycle import (  # noqa: E402
-    _manifest_signature,
-    invalidate_plugin_runtime,
-)
+from backend.uefn_plugins.plugin_host.ui_registry import normalize_chat_reference  # noqa: E402

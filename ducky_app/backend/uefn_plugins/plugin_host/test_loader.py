@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.uefn_plugins.plugin_host import loader
+from backend.uefn_plugins.plugin_host import loader, state
 
 
 def _write_plugin(root: Path, pid: str, backend_src: str) -> None:
@@ -87,7 +87,8 @@ def test_two_loaders_of_one_plugin_register_it_once() -> None:
             start.wait()
             loader._load_one("twice", root / "twice", manifest)
 
-        with patch.object(loader, "_REGISTERED", set()):
+        # A real load records the plugin's files: put the registry back for later tests.
+        with patch.object(loader, "_REGISTERED", set()), patch.dict(state._LOADED_SIGNATURE):
             sys.modules.pop("uefn_plugin_twice", None)
             threads = [threading.Thread(target=load) for _ in range(2)]
             for t in threads:

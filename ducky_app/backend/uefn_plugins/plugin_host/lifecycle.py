@@ -471,7 +471,26 @@ def is_private_plugin_paused(plugin_id: str) -> bool:
 
 # Names from the rest of the host, bound after every definition above so the host
 # modules can import each other in any order.
-from backend.uefn_plugins.host import (  # noqa: E402
+from backend.uefn_plugins.plugin_host.boot import (  # noqa: E402
+    _notify_uefn_plugins_changed,
+    ensure_plugins_loaded,
+    ensure_plugins_loaded_async,
+    plugins_ready,
+    plugins_ui_ready,
+)
+from backend.uefn_plugins.plugin_host.contributions import (  # noqa: E402
+    _clear_node_handlers,
+    _strip_contributions_for,
+)
+from backend.uefn_plugins.plugin_host.errors import _record_plugin_load_error  # noqa: E402
+from backend.uefn_plugins.plugin_host.loader import (  # noqa: E402
+    _backend_load_lock,
+    _load_enabled_plugin,
+    _load_one,
+    _plugin_load_lock,
+    backend_module_name,
+)
+from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _API_INTENT_PATTERNS,
     _API_TOOL_REGISTRY,
     _CODING_AGENT_FACTORIES,
@@ -501,23 +520,6 @@ from backend.uefn_plugins.host import (  # noqa: E402
     _TTS_SYNTHESIZERS,
     _TTS_VOICE_LISTERS,
     PLUGIN_FILES_POLL_S,
-    _clear_node_handlers,
     _log,
-    _record_plugin_load_error,
-    _strip_contributions_for,
-    _unregister_plugin_mcp_tools,
 )
-from backend.uefn_plugins.plugin_host.boot import (  # noqa: E402
-    _notify_uefn_plugins_changed,
-    ensure_plugins_loaded,
-    ensure_plugins_loaded_async,
-    plugins_ready,
-    plugins_ui_ready,
-)
-from backend.uefn_plugins.plugin_host.loader import (  # noqa: E402
-    _backend_load_lock,
-    _load_enabled_plugin,
-    _load_one,
-    _plugin_load_lock,
-    backend_module_name,
-)
+from backend.uefn_plugins.plugin_host.tool_registry import _unregister_plugin_mcp_tools  # noqa: E402

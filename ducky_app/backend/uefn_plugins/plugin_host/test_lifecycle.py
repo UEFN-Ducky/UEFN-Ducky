@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.uefn_plugins.plugin_host import lifecycle, loader
+from backend.uefn_plugins.plugin_host import lifecycle, loader, state
 
 
 def _write_plugin(root: Path, pid: str, backend_src: str) -> None:
@@ -48,7 +48,11 @@ def test_unloading_a_plugin_waits_for_its_load_to_finish() -> None:
             except BaseException as exc:  # noqa: BLE001
                 errors.append(exc)
 
-        with patch.object(loader, "_REGISTERED", registered), patch.object(lifecycle, "_REGISTERED", registered):
+        with (
+            patch.object(loader, "_REGISTERED", registered),
+            patch.object(lifecycle, "_REGISTERED", registered),
+            patch.dict(state._LOADED_SIGNATURE),
+        ):
             sys.modules.pop("uefn_plugin_racy", None)
             worker = threading.Thread(target=load)
             worker.start()
