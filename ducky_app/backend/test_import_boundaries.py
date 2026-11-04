@@ -132,7 +132,6 @@ BASELINE: set[str] = {
     'frontend/test_project_kind -> backend.bridge.status._project_from_health',
     'frontend/test_starter_llm_gateways -> frontend.ui_web.panel_api._messages_to_ui',
     'frontend/test_update_recovery -> frontend.ui_web.webview_app._web_root',
-    'frontend/ui_web -> backend.agent.a2a_broker._last_assistant_text',
     'frontend/ui_web -> backend.agent.a2a_broker._retry_queue_later',
     'frontend/ui_web -> backend.agent.coding_agents.plans._chat_and_group_ids',
     'frontend/ui_web -> backend.agent.coding_agents.plans._flatten_nodes',
