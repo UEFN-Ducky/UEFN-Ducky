@@ -7,7 +7,8 @@ import uuid
 from typing import Any
 
 import frontend.ui_web.panel_api as _pa
-from frontend.ui_web.panel_chats import conversations, folders, groups, permissions, profiles
+from frontend.ui_web.panel_chats import conversations, folders, groups, messages, permissions, profiles
+from frontend.ui_web.panel_chats.messages import _NOT_LOADED, TOOL_RESULT_CAP, _cap_tool_results, _page_rows  # noqa: F401
 from frontend.ui_web.panel_chats.groups import _copy_name, _leader_agent_ok  # noqa: F401
 from frontend.ui_web.panel_chats.conversations import _conversation_row  # noqa: F401
 from frontend.ui_web.panel_chats.folders import _FOLDER_WRITE_LOCK, GLOBAL_SLUG  # noqa: F401
@@ -49,58 +50,6 @@ def _sync_composer_selection(conv_id: str, model: str, coding_agent: str = "") -
             changed = True
     if changed:
         _pa.save_conversation(conv)
-
-
-# A tool card's preview; past it the card asks load_tool_result for the rest.
-TOOL_RESULT_CAP = 8_000
-
-
-def _cap_tool_results(rows: list[dict[str, Any]]) -> None:
-    for row in rows:
-        tool = row.get("tool")
-        result = tool.get("result") if isinstance(tool, dict) else None
-        if isinstance(result, str) and len(result) > TOOL_RESULT_CAP:
-            row["tool"] = {**tool, "result": result[:TOOL_RESULT_CAP], "resultTruncated": True,
-                           "resultBytes": len(result.encode("utf-8"))}
-
-
-# The stand-in for a message a page doesn't show: _messages_to_ui walks from the end and
-# stops once it has enough rows, so it is never converted (a page that reaches it widens).
-_NOT_LOADED: dict[str, Any] = {"role": "user", "text": ""}
-
-
-def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dict[str, Any]] | None:
-    """The ``limit`` rows before ``before_id`` (the newest without it), opening only the
-    messages they come from. ``load_conversation`` opened every message of the chat, one
-    DPAPI call each: a 735-message chat out of the opened-row cache took 0.45 s for its
-    first page on an idle PC (Nov 1 2026), and the cache keeps 8 chats. None: use the
-    whole load (file store, or a save of this chat still queued for the writer)."""
-    from frontend.ui_web import project_chats as pc
-    from frontend.ui_web.chat_rows import ROW_ID_STEP
-
-    writer = pc._WRITER
-    if not pc._use_db() or pc._queued(conv_id) is not None or (writer is not None and writer.checkpoint_waits(conv_id)):
-        return None
-    conv = pc.load_conversation_meta(conv_id)
-    if conv is None:
-        return []
-    repo = pc._repo()
-    stop = None if before_id is None else int(before_id) // ROW_ID_STEP + 1
-    want = max(16, limit // 4)  # assistant turns give many rows each
-    while True:
-        _, count = repo.messages_range(conv_id, 0, 0)
-        end = count if stop is None else min(stop, count)
-        start = max(0, end - want)
-        got, count = repo.messages_range(conv_id, start, end)
-        messages: list[Any] = [_NOT_LOADED] * count
-        for seq, message in got:
-            if seq < count:
-                messages[seq] = message
-        conv.messages = messages
-        rows = _pa._messages_to_ui(conv, live=live, before_id=None if before_id is None else int(before_id), limit=limit)
-        if start == 0 or (rows and rows[0]["id"] >= start * ROW_ID_STEP):
-            return rows
-        want *= 4
 
 
 class PanelApiChatsMixin:
@@ -193,56 +142,13 @@ class PanelApiChatsMixin:
     list_saved_agent_permissions = permissions.list_saved_agent_permissions
     revoke_saved_agent_permission = permissions.revoke_saved_agent_permission
 
-    def load_messages(
-        self, conv_id: str, before_id: int | None = None, limit: int | None = None, full_results: bool = False
-    ) -> list[dict[str, Any]]:
-        """The one message-load path: conversation as flat UI rows.
-
-        `_messages_to_ui` is the single source of truth for how a stored
-        conversation becomes rows; row ids are message index * 1000 + row index,
-        so a page (``limit`` newest rows, or the ``limit`` rows before
-        ``before_id``) converts only the messages it shows, newest first.
-        Without arguments the whole conversation comes back, as before.
-
-        A tool result over ``TOOL_RESULT_CAP`` chars is cut, with ``resultTruncated``
-        and ``resultBytes`` on the row (``load_tool_result`` has it whole): 40 rows over
-        32 KB were 22% of a 7 MB chat. ``full_results`` keeps them whole (account mirror).
-        """
-        started = _pa.time.monotonic()
-        try:
-            live = conv_id in self.list_running_agents()
-            rows = None if limit is None else _page_rows(conv_id, before_id, int(limit), live)
-            if rows is None:
-                conv = _pa.load_conversation(conv_id)
-                if not conv:
-                    return []
-                rows = _pa._messages_to_ui(
-                    conv,
-                    live=live,
-                    before_id=None if before_id is None else int(before_id),
-                    limit=None if limit is None else int(limit),
-                )
-        except Exception as exc:
-            # A chat that can't be read must leave a trace, not just a spinner.
-            _pa.record_error("chat", f"Chat {str(conv_id)[:8]} couldn't be loaded: {type(exc).__name__}: {exc}")
-            raise
-        if not full_results:
-            _cap_tool_results(rows)
-        took = _pa.time.monotonic() - started
-        if took > 5.0:
-            _pa.record_activity("chat", f"Chat {str(conv_id)[:8]} took {took:.1f}s to load ({len(rows)} rows)")
-        return rows
-
-    def load_tool_result(self, conv_id: str, row_id: int) -> dict[str, Any]:
-        """The whole result of one tool row that ``load_messages`` cut."""
-        conv = _pa.load_conversation(conv_id)
-        if not conv:
-            return {"ok": False, "error": "Chat not found"}
-        rows = _pa._messages_to_ui(conv, before_id=int(row_id) + 1, limit=1)
-        tool = rows[-1].get("tool") if rows and rows[-1].get("id") == int(row_id) else None
-        if not isinstance(tool, dict):
-            return {"ok": False, "error": "No tool result in that row"}
-        return {"ok": True, "result": str(tool.get("result") or "")}
+    # -- messages and context (panel_chats/messages.py) -------------------------
+    load_messages = messages.load_messages
+    load_tool_result = messages.load_tool_result
+    get_context_usage = messages.get_context_usage
+    reset_context = messages.reset_context
+    restore_context = messages.restore_context
+    get_session_files = messages.get_session_files
 
     def send_message(
         self,
@@ -402,52 +308,6 @@ class PanelApiChatsMixin:
             pass
         _pa.save_conversation(conv)
         return {"ok": True, "kept": index}
-
-    def get_context_usage(
-        self,
-        conv_id: str,
-        model: str,
-        mode: str = "agent",
-        draft: str = "",
-        include_content: bool = False,
-    ) -> dict[str, Any]:
-        from frontend.ui_web.context_tokens import compute_context_usage
-
-        try:
-            return compute_context_usage(
-                conv_id, model, mode=mode, draft_text=draft, include_content=include_content
-            )
-        except Exception as exc:
-
-            _pa.logging.getLogger(__name__).exception("get_context_usage failed for %s: %s", conv_id, exc)
-            from frontend.ui_web.context_tokens import context_limit_for_model
-
-            limit = context_limit_for_model(model) or 0
-            return {
-                "used_tokens": 0,
-                "context_limit": limit,
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-                "breakdown": [],
-                "omitted": [],
-                "error": str(exc),
-            }
-
-    def reset_context(self, conv_id: str, segments: list[str], mode: str = "agent", model: str = "") -> dict[str, Any]:
-        from frontend.ui_web.context_control import reset_context
-
-        return reset_context(conv_id, segments, model=model, mode=mode)
-
-    def restore_context(self, conv_id: str, segments: list[str], mode: str = "agent", model: str = "") -> dict[str, Any]:
-        from frontend.ui_web.context_control import restore_context
-
-        return restore_context(conv_id, segments, model=model, mode=mode)
-
-    def get_session_files(self, conv_id: str) -> list[dict[str, Any]]:
-        from frontend.ui_web.session_files import compute_session_files
-
-        return compute_session_files(conv_id)
 
     def cancel_agent(self, conv_id: str = "") -> bool:
         from frontend.ui_web.group_orchestrator import cancel_group_run, list_group_running_ids
