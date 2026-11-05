@@ -56,7 +56,6 @@ BASELINE: set[str] = {
     'backend/sandbox -> backend.tools.core.web_lookup._blocked_ip',
     'backend/sandbox -> backend.tools.panel.permission_prompt._chat_exists',
     'backend/sandbox -> backend.workspace.writer._in_own_sandbox',
-    'backend/sandbox -> frontend.ui_web.terminal.manager._chat_title',
     'backend/search -> backend.automations.runner._LIVE',
     'backend/search -> backend.skills.manifest._manifest_from_skill_dir',
     'backend/search -> backend.skills.manifest._pack_stamp',

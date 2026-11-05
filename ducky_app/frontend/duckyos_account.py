@@ -1479,18 +1479,9 @@ def _presence_project_label() -> str:
 
 
 def _presence_uefn_online() -> bool:
-    """UEFN running and the last fetched listener status online. Never asks the listener:
-    Nov 5 2026, a health GET on every presence beat kept an idle UEFN busy."""
-    try:
-        from backend.bridge.editor_presence import uefn_running
-        from frontend.ui_web.lag.listener_status_cache import last_status
+    from frontend.ui_web.lag.listener_status_cache import uefn_online
 
-        if not uefn_running():
-            return False
-        status = last_status()
-        return bool(status and status.get("online"))
-    except Exception:
-        return False
+    return uefn_online()
 
 
 def _remote_direct_report() -> dict[str, Any]:

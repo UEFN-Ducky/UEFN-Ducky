@@ -23,6 +23,20 @@ def last_status() -> dict[str, Any] | None:
     return dict(value) if value is not None else None
 
 
+def uefn_online() -> bool:
+    """UEFN running and the last fetched listener status online. Never asks the listener:
+    Nov 5 2026, a health GET on every presence beat kept an idle UEFN busy."""
+    try:
+        from backend.bridge.editor_presence import uefn_running
+
+        if not uefn_running():
+            return False
+        status = last_status()
+        return bool(status and status.get("online"))
+    except Exception:
+        return False
+
+
 class ListenerStatusCache:
     def __init__(
         self,

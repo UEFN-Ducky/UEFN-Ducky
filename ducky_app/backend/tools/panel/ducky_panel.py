@@ -21,7 +21,7 @@ from frontend.ui_web.chats.conversations import (  # delete_conversation: test_s
     load_conversation, move_conversation, rename_conversation,
 )
 from frontend.ui_web.chats.folders import load_folders
-from frontend.ui_web.chats.saves import append_message, save_conversation
+from frontend.ui_web.chats.saves import append_message, flush_chat_saves, save_conversation
 from frontend.ui_web.chats.store import project_slug, project_slug_display_name
 
 _SUBAGENT_HANDOFF_PROMPT = (
@@ -1908,8 +1908,6 @@ def _resolve_group_hub_id(group_id: str = "", folder_id: str = "") -> str:
     root = _project_root()
     gid = (group_id or "").strip()
     if gid:
-        from frontend.ui_web.chats.saves import flush_chat_saves
-
         flush_chat_saves(gid, timeout=10.0)  # a group made a moment ago may still be queued
         hub = load_conversation(gid, project_root=root)
         if hub is not None and getattr(hub, "is_group", False):
@@ -1924,9 +1922,7 @@ def _resolve_group_hub_id(group_id: str = "", folder_id: str = "") -> str:
                 return _resolve_group_hub_id(folder_id=gid)  # a group's folder id
             except ValueError:
                 pass
-        raise ValueError(
-            f"{gid!r} is not a group hub. Pass the group hub id from ducky_group_create."
-        )
+        raise ValueError(f"{gid!r} is not a group hub. Pass the group hub id from ducky_group_create.")
     fid = (folder_id or "").strip()
     if fid and fid != "default":
         for folder in load_folders(root):
