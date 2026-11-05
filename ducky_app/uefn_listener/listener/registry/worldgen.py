@@ -1525,6 +1525,25 @@ def _paint_stamps_on_canvas(canvas, size, stamps):
             )
 
 
+#: add/set are refused (verified no-op that holds VRAM); tests flip this to reach them.
+_SCULPT_MODES_ENABLED = False
+
+
+def _release_render_targets(*targets) -> None:
+    for rt in targets:
+        if rt is None:
+            continue
+        try:
+            unreal.RenderingLibrary.release_render_target2d(rt)
+        except Exception as exc:
+            try:
+                from listener.logutil import log_msg
+
+                log_msg(f"landscape_sculpt: release_render_target2d failed: {exc}", "warn")
+            except Exception:
+                pass
+
+
 def landscape_sculpt(
     label: str = "",
     actor_path: str = "",
@@ -1544,6 +1563,9 @@ def landscape_sculpt(
     perfectly flat and proxy bounds Z unchanged. So this tool CANNOT actually reshape a
     UEFN Landscape. For AI-driven sculpted terrain, use ``terrain_generate`` (mesh heightfield).
 
+    Only ``verify`` runs; ``add``/``set`` are refused (no visible effect, and each call
+    held up to ~0.5 GB of float render targets). Both targets are released on every path.
+
     Modes (kept for parity / future engine fixes):
       * ``verify`` — export → re-import unchanged (NOTE: indistinguishable from a no-op).
       * ``add``    — export real height, composite soft stamps, re-import.
@@ -1555,6 +1577,21 @@ def landscape_sculpt(
     """
     if mode not in ("verify", "add", "set"):
         raise ValueError("mode must be one of: verify, add, set")
+    if mode != "verify" and not _SCULPT_MODES_ENABLED:
+        # Each call holds up to ~0.5 GB of float render targets, and the result is
+        # invisible, so agents retried it: refuse before anything is allocated.
+        return {
+            "ok": False,
+            "refused": True,
+            "mode": mode,
+            "error": (
+                "landscape_sculpt is a VERIFIED no-op on visible terrain in UEFN: the import "
+                "writes a heightmap buffer that export can read back, but the Landscape "
+                "geometry stays flat. Do not retry. Use terrain_generate (mesh heightfield) "
+                "for AI-sculpted terrain; mode='verify' still runs the round-trip check."
+            ),
+            "use_instead": "terrain_generate",
+        }
     if not confirm_overwrite:
         raise ValueError(
             "landscape_sculpt writes the Landscape heightmap. Pass confirm_overwrite=True "
@@ -1599,6 +1636,10 @@ def landscape_sculpt(
     world = unreal.EditorLevelLibrary.get_editor_world()
     fmt = unreal.TextureRenderTargetFormat.RTF_RGBA32F
 
+    # 16 bytes a pixel at native size (~260 MB at 4033^2): release both targets on
+    # every path instead of waiting for a garbage collection to find them.
+    rt_src = None
+    work = None
     try:
         rt_src = unreal.RenderingLibrary.create_render_target2d(world, res_x, res_y, fmt)
         # Height is internally stored as R & G; export into a single R channel (needs float RT).
@@ -1648,6 +1689,17 @@ def landscape_sculpt(
         ok = bool(land.landscape_import_heightmap_from_render_target(target_rt, False, 0))
     except Exception as e:
         return {"ok": False, "error": str(e), "path": info["path"]}
+    finally:
+        target_rt = None
+        _release_render_targets(work, rt_src)
+        work = None
+        rt_src = None
+        try:
+            from listener import render_trim
+
+            render_trim.request_trim()  # the canvas draw went through the RT pool
+        except Exception:
+            pass
 
     return {
         "ok": ok,
