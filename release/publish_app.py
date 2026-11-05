@@ -941,8 +941,30 @@ def run_regression_tests() -> None:
     uefn = uefn_open()
     workers = pytest_workers(uefn)
     print(f"tests use {workers} workers ({os.cpu_count()} cores{', UEFN is open' if uefn else ''})")
-    print("=== vitest (panel) ===")
+    import retry_scope
+
+    retry = retry_scope.retry_targets(ROOT)
     vitest_workers = "2" if uefn else workers
+    if retry is not None:
+        # A fix on top of a failed full run: never the whole suite again (see retry_scope).
+        print(f"=== retry after {retry.since[:9]}: {len(retry.targets)} test targets, not the full suite ===")
+        for target in retry.targets:
+            print(f"  {target}")
+        if retry.web_changed:
+            print("=== vitest (panel): the fix changed the web panel ===")
+            subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
+        again = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
+             "--timeout", "300", "--timeout-method", "thread", *retry.targets],
+            cwd=str(ROOT),
+        )
+        if again.returncode != 0:
+            retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or retry.targets)
+            raise SystemExit(f"retry tests failed (exit {again.returncode})")
+        retry_scope.clear(ROOT)
+        print("regression tests ok (retry)")
+        return
+    print("=== vitest (panel) ===")
     subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
     # Half the cores, each test file on one worker (module state stays together): about 3
     # minutes instead of 11 to 19 on one core. A test stuck for 5 minutes fails with its
@@ -957,13 +979,22 @@ def run_regression_tests() -> None:
         # Release runs used to fail one different test that passes alone (timing, Windows
         # file locks, threads left by an earlier test, real windows opened side by side). The
         # failed tests run once more, one at a time; a real failure fails again and stops it.
-        print("=== pytest: running only the failed tests again ===")
-        subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--tb=short", "--last-failed", "--last-failed-no-failures", "none"],
-            check=True,
+        failed = retry_scope.last_failed(ROOT)
+        if not failed:
+            # Nothing to re-run (pytest's exit 5 used to read as a test failure): the run
+            # failed outside any test, e.g. the AppData guard (exit 3) or a crashed worker.
+            raise SystemExit(f"pytest failed (exit {full.returncode}) with no failed test to re-run; see above")
+        print(f"=== pytest: running only the {len(failed)} failed tests again ===")
+        alone = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--tb=short", *failed],
             cwd=str(ROOT),
         )
+        if alone.returncode != 0:
+            # The fixer's commit is tested against just these (and what it touches) next time.
+            retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or failed)
+            raise SystemExit(f"{len(failed)} failed tests failed again on their own (exit {alone.returncode})")
         print("The failed tests passed on their own: they only fail inside the full suite (see above).")
+    retry_scope.clear(ROOT)
     print("regression tests ok")
 
 
