@@ -417,7 +417,12 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     cmd = [sys.executable, str(ROOT / "build" / "build_exes.py")]
     if not bump:
         cmd.append("--no-bump")
-    subprocess.run(cmd, check=True, cwd=str(ROOT))
+    flags = 0
+    if uefn_open():
+        # Idle priority (inherited by what it starts): UEFN keeps the CPU while it builds.
+        print("UEFN is open: the EXE build runs at idle priority")
+        flags = _IDLE_PRIORITY_CLASS
+    subprocess.run(cmd, check=True, cwd=str(ROOT), creationflags=flags)
     version = read_version()
     # UEFN Ducky's own uninstaller (the Setup host under its uninstall name) goes into the
     # one-dir build, so Setup installs it and the update pack carries it. Signed builds
@@ -876,6 +881,38 @@ def run_security_gate() -> None:
         )
 
 
+_IDLE_PRIORITY_CLASS = 0x00000040 if os.name == "nt" else 0
+_UEFN_EXE_PREFIX = "unrealeditorfortnite"
+
+
+def _process_names() -> list[str]:
+    """Every running program's exe name ([] off Windows or when tasklist fails)."""
+    if os.name != "nt":
+        return []
+    import csv
+
+    try:
+        out = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True, timeout=30,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [row[0] for row in csv.reader(out.splitlines()) if row]
+
+
+def uefn_open(names: list[str] | None = None) -> bool:
+    """UEFN (UnrealEditorFortnite*.exe) is running on this PC."""
+    return any(n.lower().startswith(_UEFN_EXE_PREFIX) for n in (_process_names() if names is None else names))
+
+
+def pytest_workers(uefn: bool, cores: int | None = None) -> str:
+    """pytest's -n: every core, or a quarter of them (at least 2) while UEFN is open.
+    Nov 5 2026: UEFN ran out of memory beside pytest on 16 workers, vitest and the EXE build.
+    The release never waits for UEFN to close; it only runs smaller."""
+    if not uefn:
+        return "auto"
+    return str(max(2, int(cores or os.cpu_count() or 4) // 4))
+
+
 def run_regression_tests() -> None:
     """Refuse to bump/upload unless pytest + panel vitest are green.
 
@@ -901,14 +938,18 @@ def run_regression_tests() -> None:
     # fresh checkout or worktree failed 34 test files on a missing import before this ran.
     print("=== generated web sources (predev) ===")
     subprocess.run([npm, "run", "-s", "predev"], check=True, cwd=str(web))
+    uefn = uefn_open()
+    workers = pytest_workers(uefn)
+    if uefn:
+        print(f"UEFN is open: tests use {workers} workers ({os.cpu_count()} cores)")
     print("=== vitest (panel) ===")
-    subprocess.run([npm, "test"], check=True, cwd=str(web))
+    subprocess.run([npm, "test", *(["--", "--maxWorkers=2"] if uefn else [])], check=True, cwd=str(web))
     # Every core, each test file on one worker (module state stays together): about 3
     # minutes instead of 11 to 19 on one core. A test stuck for 5 minutes fails with its
     # stack instead of holding the release forever (a lock deadlock once hung it 45 minutes).
     print("=== pytest (required before Store publish) ===")
     full = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", "auto", "--dist", "loadfile",
+        [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
          "--timeout", "300", "--timeout-method", "thread"],
         cwd=str(ROOT),
     )

@@ -1,0 +1,51 @@
+"""The release runs fewer test workers while UEFN is open, and never waits for it to close."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+RELEASE = Path(__file__).resolve().parent
+
+
+def _load():
+    spec = importlib.util.spec_from_file_location("publish_app_workers_test", RELEASE / "publish_app.py")
+    mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_uefn_in_the_process_list_means_fewer_workers() -> None:
+    pa = _load()
+    with_uefn = ["System", "explorer.exe", "UnrealEditorFortnite-Win64-Shipping.exe", "python.exe"]
+    assert pa.uefn_open(with_uefn)
+    assert pa.pytest_workers(pa.uefn_open(with_uefn), cores=16) == "4"
+    assert pa.pytest_workers(True, cores=4) == "2"  # never below 2
+
+
+def test_without_uefn_every_core() -> None:
+    pa = _load()
+    assert not pa.uefn_open(["System", "explorer.exe", "UEFN-Ducky.exe"])
+    assert pa.pytest_workers(pa.uefn_open([]), cores=16) == "auto"
+
+
+def test_the_suite_and_build_use_the_scaled_settings(monkeypatch) -> None:
+    pa = _load()
+    calls: list[tuple[list[str], dict]] = []
+
+    class _Done:
+        returncode = 0
+
+    def fake_run(cmd, **kw):
+        calls.append(([str(c) for c in cmd], kw))
+        return _Done()
+
+    monkeypatch.setattr(pa, "uefn_open", lambda names=None: True)
+    monkeypatch.setattr(pa.shutil, "which", lambda name: "npm")
+    monkeypatch.setattr(pa.subprocess, "run", fake_run)
+    monkeypatch.setattr(pa.os, "cpu_count", lambda: 16)
+    pa.run_regression_tests()
+    pytest_cmd = next(cmd for cmd, _kw in calls if "pytest" in cmd and "-n" in cmd)
+    assert pytest_cmd[pytest_cmd.index("-n") + 1] == "4"
+    assert any(cmd[:2] == ["npm", "test"] and "--maxWorkers=2" in cmd for cmd, _kw in calls)
