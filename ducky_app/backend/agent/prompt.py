@@ -8,7 +8,77 @@ _skill_cache: str | None = None
 
 # Only the memory INDEX goes into prompts (skills-style); entry bodies are
 # pulled on demand via project_memory_get. Cap can be overridden via settings.
-_MEMORY_INDEX_PROMPT_CHARS = 2_500
+_MEMORY_INDEX_PROMPT_CHARS = 8_000
+# The old settings default; a saved 2,500 means "never changed", so it gets the new budget.
+_LEGACY_MEMORY_INDEX_CHARS = 2_500
+
+
+def memory_index_budget() -> int:
+    """Chars for the memory index in a prompt: the setting, or 8,000 when it is unset/legacy."""
+    try:
+        from frontend.settings import PanelSettings
+
+        raw = int(PanelSettings.load().memory_index_max_chars or 0)
+    except Exception:
+        raw = 0
+    if raw <= 0 or raw == _LEGACY_MEMORY_INDEX_CHARS:
+        return _MEMORY_INDEX_PROMPT_CHARS
+    return max(200, raw)
+
+
+def _chat_plan(conv_id: str, project_root: str) -> dict[str, Any] | None:
+    if not conv_id:
+        return None
+    try:
+        from backend.agent.coding_agents import plans
+
+        root = project_root or None
+        return plans.load_plan(conv_id, root) or plans.team_plan_for(conv_id, root)
+    except Exception:
+        return None
+
+
+def _memory_task(conv_id: str, project_root: str, plan: dict[str, Any] | None) -> str:
+    """What this chat works on, for ranking the index: the plan title, the chat's title and
+    its last user message when the meta carries one. Never loads the full history."""
+    bits: list[str] = []
+    if plan:
+        bits.append(str(plan.get("title") or ""))
+    if conv_id:
+        try:
+            from frontend.ui_web.chats.conversations import load_conversation_meta
+
+            conv = load_conversation_meta(conv_id, project_root or None)
+            if conv is not None:
+                bits.append(str(getattr(conv, "title", "") or ""))
+                for m in reversed(list(getattr(conv, "messages", None) or [])):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        content = m.get("content")
+                        bits.append(content if isinstance(content, str) else "")
+                        break
+        except Exception:
+            pass
+    return " ".join(b.strip() for b in bits if b and b.strip())[:2000]
+
+
+def shared_memory_index(conv_id: str, project_root: str, *, max_chars: int, task: str = "",
+                        private_author: str = "", plan: dict[str, Any] | None = None) -> tuple[str, str]:
+    """(memory root, index markdown): every author's entries from the repo this work is in,
+    core rules first, then the ones matching ``task``."""
+    from backend.memory.project import index_markdown
+
+    root = project_root
+    try:
+        from backend.memory.scope import memory_root
+
+        root = memory_root(conv_id, project_root, plan=plan) or project_root
+    except (ImportError, TypeError):
+        root = project_root
+    try:
+        text = index_markdown(root, max_chars=max_chars, task=task, private_author=private_author)
+    except TypeError:
+        text = index_markdown(root, max_chars=max_chars)
+    return root, (text or "").strip()
 
 # Shared with coding-agent bootstrap (mcp_inject). In-panel chats paint this
 # markdown as colored blocks. Keep the syntax in sync with promoteMarkdownBlocks.ts.
@@ -224,27 +294,26 @@ def get_system_prompt_parts(
 
     # Always present (even on an empty project) so the capture + cross-project
     # guidance is in every ducky's context — the tools that back it are CORE.
-    # Index is filtered to shared (no author) + this ducky's authored entries.
+    # Every author's entries from the repo this work is in, ranked for the task.
     memory_block = ""
     try:
-        from backend.memory.project import index_markdown
-        from frontend.settings import PanelSettings
-
-        max_chars = _MEMORY_INDEX_PROMPT_CHARS
-        try:
-            max_chars = max(200, int(PanelSettings.load().memory_index_max_chars or _MEMORY_INDEX_PROMPT_CHARS))
-        except Exception:
-            pass
-        mem_index = index_markdown(
+        plan = _chat_plan((conv_id or "").strip(), project_root)
+        root, mem_index = shared_memory_index(
+            (conv_id or "").strip(),
             project_root,
-            max_chars=max_chars,
-            author_filter=(ducky_name or "").strip(),
-        ).strip()
+            max_chars=memory_index_budget(),
+            task=_memory_task((conv_id or "").strip(), project_root, plan),
+            private_author=(ducky_name or "").strip(),
+            plan=plan,
+        )
         who = (ducky_name or "").strip() or "this ducky"
+        where = ""
+        if root and root.replace("\\", "/").rstrip("/").lower() != (project_root or "").replace("\\", "/").rstrip("/").lower():
+            where = f" Memory from {root} (the repo this work is in)."
         guidance = (
             "## Project memory (skills-style: index here, bodies pulled on demand)\n"
-            f"- **Index scope:** shared project notes + entries authored by **{who}**. "
-            "Other duckies' private notes are omitted — pull them only if you deliberately list by author.\n"
+            "- **Index scope:** All of this project's lessons, core rules first. "
+            f"Pull every entry that matches your task before you start.{where}\n"
             "- **Capture as you work — don't wait to be asked:** when you learn a durable fact, fix a hard bug, or settle "
             f"a convention/standard, save it with `project_memory_save(name, content, description, author=\"{who}\")`. "
             "The `description` is what appears in the index — write it to say WHEN to pull the entry. Split a big topic "
@@ -258,7 +327,7 @@ def get_system_prompt_parts(
             memory_block = f"\n\n{guidance}\n### Index (names + descriptions only)\n{mem_index}\n"
         else:
             memory_block = (
-                f"\n\n{guidance}\n_No shared or {who}-authored memory yet — save your first durable fact._\n"
+                f"\n\n{guidance}\n_No project memory yet — save your first durable fact._\n"
             )
     except Exception:
         pass
