@@ -86,8 +86,8 @@ def env(monkeypatch):
     for name, mod in stubs.items():
         monkeypatch.setitem(sys.modules, name, mod)
 
-    path = Path(__file__).resolve().parent / "registry" / "worldgen.py"
-    spec = importlib.util.spec_from_file_location("worldgen_under_test", path)
+    path = Path(__file__).resolve().parent / "registry" / "landscape_heightmap.py"
+    spec = importlib.util.spec_from_file_location("landscape_heightmap_under_test", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
@@ -97,7 +97,7 @@ def env(monkeypatch):
     )
     monkeypatch.setattr(mod, "_iter_landscape_roots", lambda: [land])
     monkeypatch.setattr(mod, "_landscape_heightmap_resolution", lambda _l: {"res_x": 8, "res_y": 8})
-    monkeypatch.setattr(mod, "_load_white_texture", lambda: object(), raising=False)
+    monkeypatch.setattr(mod, "_load_white_texture", lambda: object())
     return mod, rendering, land, trims
 
 
