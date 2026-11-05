@@ -1431,6 +1431,32 @@ def _live_plan(plan: dict[str, Any] | None) -> bool:
     return isinstance(plan, dict) and str(plan.get("status") or "open") not in ("archived", "finished", "completed")
 
 
+def _plan_belongs_to_group(plan: dict[str, Any], lead_conv: Any, ids: list[str],
+                           project_root: str | None) -> bool:
+    """A group leader's plan is this chat's team plan only when it is that team's.
+
+    It is when a step is assigned (or planned) to this chat or a group above it, or the
+    lead itself sits in one of those groups or in this chat's folder. Nov 5 2026: a chat in
+    its own folder was refused a plan because a stray group named another team's lead.
+    """
+    from frontend.ui_web.chats.conversations import load_conversation_meta
+
+    wanted = set(ids)
+    for node in _flatten_nodes(plan.get("nodes")):
+        if str(node.get("assignee") or "") in wanted or str(node.get("planned_assignee") or "") in wanted:
+            return True
+    if str(getattr(lead_conv, "parent_conv_id", "") or "").strip() in wanted:
+        return True
+    lead_folder = str(getattr(lead_conv, "folder_id", "") or "").strip()
+    if not lead_folder:
+        return False
+    try:
+        me = load_conversation_meta(ids[0], project_root=project_root)
+    except Exception:
+        me = None
+    return lead_folder == str(getattr(me, "folder_id", "") or "").strip()
+
+
 def team_plan_for(chat_id: str, project_root: str | None = None) -> dict[str, Any] | None:
     """The live plan of this chat's team when another chat owns it, else None.
 
@@ -1453,11 +1479,11 @@ def team_plan_for(chat_id: str, project_root: str | None = None) -> dict[str, An
         if not lead or lead == ids[0]:
             continue
         try:
-            alive = load_conversation_meta(lead, project_root=project_root) is not None
+            lead_conv = load_conversation_meta(lead, project_root=project_root)
         except Exception:
-            alive = False
-        plan = load_plan(lead, project_root) if alive else None
-        if _live_plan(plan):
+            lead_conv = None
+        plan = load_plan(lead, project_root) if lead_conv is not None else None
+        if _live_plan(plan) and _plan_belongs_to_group(plan, lead_conv, ids, project_root):
             return plan
     try:
         view = assigned_plan_view(chat_id, project_root)
