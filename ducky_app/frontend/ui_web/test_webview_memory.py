@@ -216,6 +216,20 @@ def test_soft_level_needs_a_gb_and_idle():
     assert memory.soft_level({"webview_gb": 1.2}, active=False, idle_s=999, now=10.0, low_at=0.0) == ""
 
 
+@pytest.mark.parametrize("source", ["form", "control"])
+def test_activation_or_focus_sets_normal_at_once_without_a_heartbeat(window, source):
+    form, control = window.native, window.native.Controls[0]
+    form.Activated, control.GotFocus = Event(), Event()
+    memory.install(window)
+    window.events.shown.fire()
+    assert memory.trim_now(window, "test")
+    assert control.CoreWebView2.MemoryUsageTargetLevel == Level.Low
+    (form.Activated if source == "form" else control.GotFocus).fire(None, None)
+    assert control.CoreWebView2.MemoryUsageTargetLevel == Level.Normal and memory._soft["at"] == 0.0
+    window.events.closed.fire()
+    assert not form.Activated.handlers and not control.GotFocus.handlers
+
+
 def test_trim_now_sets_low_without_hiding_the_page(window):
     control = window.native.Controls[0]
     control.CoreWebView2Controller = SimpleNamespace(IsVisible=True)

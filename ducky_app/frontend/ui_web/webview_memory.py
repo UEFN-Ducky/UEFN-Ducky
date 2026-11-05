@@ -242,6 +242,22 @@ def install(window: Any) -> None:
     native = None
     closed = False
     last_active = None
+    hooked: list[tuple[Any, str]] = []  # (form or control, event name) carrying ``used``
+
+    def used(_sender: Any, _event: Any) -> None:
+        # The person came back (window activated, page focused): Normal now, not on the next
+        # heartbeat. The heartbeat in trim_if_bloated stays as the fallback.
+        if not closed and native is not None and _soft["at"]:
+            update_form(native)
+
+    def hook(target: Any, name: str) -> None:
+        try:
+            event = getattr(target, name)
+            event += used
+            setattr(target, name, event)
+            hooked.append((target, name))
+        except Exception:
+            pass  # this control has no such event
 
     def changed(_sender: Any, _event: Any) -> None:
         nonlocal last_active
@@ -262,6 +278,10 @@ def install(window: Any) -> None:
             native = form
             form.VisibleChanged += changed
             form.Resize += changed
+            hook(form, "Activated")
+        for control in form.Controls:
+            if not any(target is control for target, _ in hooked):
+                hook(control, "GotFocus")
         update_form(form)
 
     def schedule() -> None:
@@ -287,6 +307,14 @@ def install(window: Any) -> None:
                 native.Resize -= changed
             except Exception:
                 pass
+        for target, name in hooked:
+            try:
+                event = getattr(target, name)
+                event -= used
+                setattr(target, name, event)
+            except Exception:
+                pass
+        hooked.clear()
         window.events.shown -= schedule
         window.events.loaded -= schedule
         window.events.closed -= detach
