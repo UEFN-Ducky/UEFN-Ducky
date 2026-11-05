@@ -34,6 +34,8 @@ _PROGRESS_SEQ_RE = re.compile(r"\x1b\]9;4;[0-9;]*(?:\x07|\x1b\\)")
 # finished the next command, with the old command's output and exit code. Windows exit codes
 # can be negative.
 _DONE_RE = re.compile(r"__DUCKY_DONE_([0-9a-f]+)__(-?\d+)__")
+# Printed when a PowerShell background run ends (it runs in the shell, with no process to see).
+_BG_DONE_RE = re.compile(r"__DUCKY_BGDONE_([0-9a-f]+)__")
 # Printed just before an agent command runs. The typed line only spells it as a format
 # string, so the shell's echo of the command (PSReadLine redraws it several times) never
 # matches; what lies between this and the done marker is the command's own output.
@@ -412,6 +414,11 @@ class TerminalSession:
         # unless a background command it started still runs (background_alive).
         self.last_activity = time.time()
         self.ran_background = False
+        # Tags of PowerShell background runs whose end mark has not shown up yet. PowerShell
+        # runs a "background" command in the shell itself, so a cmdlet (Start-Sleep, a long
+        # Invoke-WebRequest) starts no process to see: Nov 2026, the idle reaper closed such a
+        # terminal at 60 s, just before the 61 s command printed.
+        self._ps_bg_tags: set[str] = set()
         # Processes under the shell before its first background command: any other one alive
         # later is that command's (a dev server). Oct 24 2026: ran_background alone kept six
         # finished duckies' shells open for good.
@@ -520,6 +527,8 @@ class TerminalSession:
                 except Exception:
                     pass
             scan = self._done_scan + text
+            if self._ps_bg_tags:
+                self._ps_bg_tags -= {m.group(1) for m in _BG_DONE_RE.finditer(scan)}
             match = next((m for m in _DONE_RE.finditer(scan) if m.group(1) == self.run_tag), None)
             self._done_scan = "" if match else scan[-64:]
             if match and self._pending_done is not None:
@@ -574,6 +583,8 @@ class TerminalSession:
             pty.write(data)
         self.last_activity = time.time()
         if "\x03" in data:
+            # Ctrl+C drops the rest of the line, a background run's end mark included.
+            self._ps_bg_tags.clear()
             self._interrupted()
 
     def _interrupted(self) -> None:
@@ -693,7 +704,13 @@ class TerminalSession:
             # As one quoted string, a trailing "# comment" can't eat the done marker; it runs
             # in this scope, so a `cd` or a variable it sets stays.
             if background:
-                return f"{_PS_SET_AGENT_ENV}Invoke-Expression {_ps_literal(cmd)}; {_PS_RESTORE_ENV}\r"
+                # The end mark is spelled as a format string, so the shell's echo never matches.
+                bg_tag = uuid.uuid4().hex[:8]
+                self._ps_bg_tags.add(bg_tag)
+                return (
+                    f"{_PS_SET_AGENT_ENV}Invoke-Expression {_ps_literal(cmd)}; {_PS_RESTORE_ENV}"
+                    f'Write-Output ("__DUCKY_{{0}}__" -f "BGDONE_{bg_tag}"); \r'
+                )
             # $? after Invoke-Expression misses a failed cmdlet inside it: the command's own $?
             # is taken on the next line of the same text (which also ends a trailing comment).
             # A parse error never gets there and stays a failure. No try/catch: inside one, a
@@ -726,6 +743,8 @@ class TerminalSession:
         counts as idle again."""
         if not self.ran_background or not self.is_alive():
             return False
+        if self._ps_bg_tags:
+            return True
         if any(pid not in self._bg_before for pid in self._descendants(snapshot)):
             return True
         self.ran_background = False

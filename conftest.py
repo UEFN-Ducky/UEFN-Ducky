@@ -113,6 +113,8 @@ _LIVE_PANEL_DIRS = {
     "chats", "crash", "locks", "logs", "sandboxes", "terminals", "agent_hosts", "webview", "verify-evidence",
     # Live workflow runs' records: the release workflow rewrites its own while its test phase runs.
     "workflow-runs",
+    # The in-app browser's private profile: the open panel's WebView2 writes it on its own.
+    "webview2_browser_private",
 }
 _LIVE_PANEL_FILES = {"ducky.db", "run_durations.json", "editor_lease.json"}
 

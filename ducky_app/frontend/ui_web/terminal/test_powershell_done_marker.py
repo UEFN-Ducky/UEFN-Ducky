@@ -67,6 +67,31 @@ def test_the_typed_line_itself_never_looks_done():
     assert _DONE_RE.search(_wrapped("echo hello")) is None
 
 
+def test_a_powershell_background_run_counts_as_running_until_its_end_mark(monkeypatch):
+    # Nov 2026: a background Start-Sleep runs in the shell with no process to see, and the
+    # idle reaper closed the terminal at 60 s, just before the 61 s command printed.
+    from frontend.ui_web.terminal.session import _BG_DONE_RE
+
+    session = TerminalSession(shell="powershell", cwd=".")
+    monkeypatch.setattr(session, "is_alive", lambda: True)
+    monkeypatch.setattr(session, "_descendants", lambda snapshot=None: {})
+    wrapped = session._wrap_agent_command("Start-Sleep 61", background=True)
+    (tag,) = session._ps_bg_tags
+    session.ran_background = True
+    assert _BG_DONE_RE.search(wrapped) is None and f'"BGDONE_{tag}"' in wrapped
+    assert session.background_alive()
+    session._ps_bg_tags -= {m.group(1) for m in _BG_DONE_RE.finditer(f"__DUCKY_BGDONE_{tag}__\r\n")}
+    assert not session.background_alive()
+
+
+@needs_powershell
+def test_a_powershell_background_end_mark_prints_after_the_command():
+    session = TerminalSession(shell="powershell", cwd=".")
+    out = _run(session._wrap_agent_command("Write-Output first", background=True).rstrip("\r"))
+    (tag,) = session._ps_bg_tags
+    assert out.index("first") < out.index(f"__DUCKY_BGDONE_{tag}__"), out
+
+
 @needs_powershell
 def test_a_cmdlet_that_succeeds_reports_0():
     assert _reported_code(_wrapped("echo hello").rstrip("\r")) == 0
