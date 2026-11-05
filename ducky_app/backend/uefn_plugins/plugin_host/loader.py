@@ -73,6 +73,8 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
     """
     if pid in _REGISTERED or _manifest_is_compiled(manifest):
         return
+    if lazy_backends_enabled() and lazy_tool_schemas(pid, root, manifest) is not None:
+        return  # a helper process imports it on its first tool call
     version = str(manifest.get("version") or "")
     if plugin_crashed_ducky(pid, version):
         return
@@ -632,6 +634,10 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
 
     if not register or pid in _REGISTERED:
         return
+    # Agent hosts and tool servers list its tools from the cached schemas; the backend
+    # loads on the first call (tool_registry.load_lazy_backend).
+    if defer_plugin_register(pid, root, manifest):
+        return
     # One import + register() per plugin at a time. The Store's enable worker and the
     # repair pass can reach here together; a compiled backend initialised twice at once
     # aborts the whole app (Python source only ran twice). The second loader waits, then
@@ -678,10 +684,12 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             if mod is None:
                 return
             register_fn = getattr(mod, register_name, None)
+            api = None
             if callable(register_fn):
                 _clear_node_handlers(pid)  # register() names them all again
+                api = recording_plugin_api(pid)
                 try:
-                    register_fn(_PluginApi(pid))
+                    register_fn(api)
                 except BaseException:
                     _clear_node_handlers(pid)
                     raise
@@ -690,6 +698,8 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             # leaves the marker for the next launch to find.
             _load_marker_end(marker)
         _REGISTERED.add(pid)
+        if api is not None:
+            write_tool_schemas(pid, root, manifest, set(api._api_calls))
         _LOADED_SIGNATURE[pid] = signature
         _LOAD_FAILURES.pop(pid, None)
         pending = _RESTART_PENDING.pop(pid, None)
@@ -763,6 +773,11 @@ from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
 )
 from backend.uefn_plugins.plugin_host.tool_registry import (  # noqa: E402
     _rebuild_intent_row,
+    defer_plugin_register,
+    lazy_backends_enabled,
+    lazy_tool_schemas,
     manifest_tool_concurrency,
+    recording_plugin_api,
+    write_tool_schemas,
 )
 from backend.uefn_plugins.plugin_host.ui_registry import normalize_chat_reference  # noqa: E402

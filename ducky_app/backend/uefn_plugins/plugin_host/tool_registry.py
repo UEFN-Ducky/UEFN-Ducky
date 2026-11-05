@@ -491,11 +491,299 @@ def plugin_tool_slot(pid: str) -> Iterator[None]:
         slots.release()
 
 
+# ── Lazy plugin backends in helper processes ────────────────────────────────────────────
+# Agent hosts and tool servers serve a plugin's tools from a schema file the last full load
+# wrote; the plugin's backend is imported and its register(api) runs on the first call to one
+# of its tools, in that process only. The app window keeps loading every backend at boot.
+# Nov 5 2026: Forge's worker ran in all four Ducky processes, each importing every plugin.
+
+_SCHEMA_DIR = "plugin_tool_schemas"
+_SCHEMA_FORMAT = 1
+# api members a register() may touch and still load lazily: they add tools or only read.
+# Anything else (providers, coding agents, nodes, hooks, panels RPC, connections) needs the
+# backend in every process, so that plugin keeps loading at boot.
+_LAZY_SAFE_API = frozenset(
+    {
+        "plugin_id",
+        "is_app",
+        "log",
+        "is_enabled",
+        "tool",
+        "local_dir",
+        "media_url",
+        "crypto",
+        "changeset",
+        "panel_state",
+        "encode_image",
+        "resolve_image",
+        "asset_pack_path",
+        "asset_packs",
+    }
+)
+_LAZY_PENDING: dict[str, tuple[Any, dict[str, Any]]] = {}
+_LAZY_FORCED: set[str] = set()
+_LAZY_GUARD = threading.Lock()
+_LAZY_CLASSES: dict[str, Any] = {}
+
+
+def lazy_backends_enabled() -> bool:
+    """True in helper processes (agent host, tool server): backends load on first call."""
+    from backend.process_role import is_app
+
+    return not is_app()
+
+
+def lazy_pending(pid: str) -> bool:
+    """True while ``pid`` serves stub tools here and its backend has not loaded yet."""
+    with _LAZY_GUARD:
+        return pid in _LAZY_PENDING
+
+
+def _schema_path(pid: str, manifest: dict[str, Any]) -> Any:
+    from backend.uefn_plugins.store import appdata_uefn_plugins_dir
+
+    version = re.sub(r"[^A-Za-z0-9._-]", "_", str(manifest.get("version") or "0"))
+    return appdata_uefn_plugins_dir().parent / _SCHEMA_DIR / f"{pid}-{version}.json"
+
+
+def lazy_tool_schemas(pid: str, root: Any, manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """The cached tool schemas of this plugin copy when it may load lazily, else None."""
+    import json
+
+    try:
+        data = json.loads(_schema_path(pid, manifest).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or data.get("format") != _SCHEMA_FORMAT:
+        return None
+    if data.get("signature") != _manifest_signature(root):
+        return None  # reinstalled since: the next full load writes it again
+    if data.get("lazy") is not True or not isinstance(data.get("tools"), list):
+        return None
+    return data
+
+
+def recording_plugin_api(pid: str) -> Any:
+    """A ``_PluginApi`` that notes which public members register() touched (``_api_calls``)."""
+    cls = _LAZY_CLASSES.get("api")
+    if cls is None:
+        from backend.uefn_plugins.plugin_host.api import _PluginApi
+
+        class _RecordingPluginApi(_PluginApi):
+            def __getattribute__(self, name: str) -> Any:
+                if not name.startswith("_"):
+                    calls = object.__getattribute__(self, "__dict__").get("_api_calls")
+                    if calls is not None:
+                        calls.add(name)
+                return object.__getattribute__(self, name)
+
+        cls = _LAZY_CLASSES.setdefault("api", _RecordingPluginApi)
+    api = cls(pid)
+    api._api_calls = set()
+    return api
+
+
+def write_tool_schemas(pid: str, root: Any, manifest: dict[str, Any], api_calls: set[str]) -> None:
+    """After a full register(): save this plugin's tool schemas for later helper processes."""
+    import json
+    import os
+
+    try:
+        from backend.server import mcp
+
+        manager = mcp._tool_manager
+        stub_cls = _lazy_tool_class()
+        with _LOCK:
+            names = sorted(_API_TOOL_REGISTRY.get(pid) or ())
+            host_only = set(_PLUGIN_HOST_ONLY_TOOLS)
+            intent = _API_INTENT_PATTERNS.get(pid, "")
+        rows: list[dict[str, Any]] = []
+        for name in names:
+            tool = manager.get_tool(name)
+            if tool is None or isinstance(tool, stub_cls):
+                continue
+            annotations = tool.annotations.model_dump(exclude_none=True) if tool.annotations else None
+            rows.append(
+                {
+                    "name": name,
+                    "title": tool.title,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                    "annotations": annotations,
+                    "meta": tool.meta,
+                    "listener": name not in host_only,
+                }
+            )
+        unsafe = sorted(c for c in api_calls if c not in _LAZY_SAFE_API)
+        data = {
+            "format": _SCHEMA_FORMAT,
+            "plugin": pid,
+            "version": str(manifest.get("version") or ""),
+            "signature": _manifest_signature(root),
+            "lazy": not unsafe,
+            "unsafe_api": unsafe,
+            "intent": intent,
+            "tools": rows,
+        }
+        path = _schema_path(pid, manifest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, default=str), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 — a missing cache only means the next helper loads eagerly
+        _log.debug("could not save tool schemas of %s", pid, exc_info=True)
+
+
+def _lazy_tool_class() -> Any:
+    cls = _LAZY_CLASSES.get("tool")
+    if cls is None:
+        from mcp.server.fastmcp.exceptions import ToolError
+        from mcp.server.fastmcp.tools.base import Tool
+
+        class LazyPluginTool(Tool):
+            """A plugin tool listed from its cached schema; the first call loads the plugin."""
+
+            plugin_id: str = ""
+
+            async def run(self, arguments: dict[str, Any], context: Any = None, convert_result: bool = False) -> Any:
+                import anyio
+
+                try:
+                    real = await anyio.to_thread.run_sync(load_lazy_plugin_tool, self.plugin_id, self.name)
+                except ValueError as exc:
+                    raise ToolError(str(exc)) from exc
+                return await real.run(arguments, context=context, convert_result=convert_result)
+
+        cls = _LAZY_CLASSES.setdefault("tool", LazyPluginTool)
+    return cls
+
+
+def _lazy_no_args() -> Any:
+    return None
+
+
+def _lazy_direct_call(pid: str, name: str) -> Any:
+    def call(**kwargs: Any) -> Any:  # callers that reach tool.fn directly
+        return load_lazy_plugin_tool(pid, name).fn(**kwargs)
+
+    call.__name__ = name
+    return call
+
+
+def defer_plugin_register(pid: str, root: Any, manifest: dict[str, Any]) -> bool:
+    """Helper process: serve ``pid``'s tools as stubs instead of running register() now.
+
+    False (load it now) in the app, when its cache is missing or stale, when its register()
+    needs more than tools, or when the first call is loading it.
+    """
+    if not lazy_backends_enabled():
+        return False
+    with _LAZY_GUARD:
+        if pid in _LAZY_FORCED:
+            return False
+    data = lazy_tool_schemas(pid, root, manifest)
+    if data is None:
+        return False
+    try:
+        _install_lazy_tools(pid, root, manifest, data)
+    except Exception:  # noqa: BLE001 — fall back to the eager load
+        _log.warning("Plugin %s: lazy tools failed; loading it now", pid, exc_info=True)
+        with _LAZY_GUARD:
+            _LAZY_PENDING.pop(pid, None)
+        return False
+    return True
+
+
+def _install_lazy_tools(pid: str, root: Any, manifest: dict[str, Any], data: dict[str, Any]) -> None:
+    from mcp.server.fastmcp.utilities.func_metadata import func_metadata
+    from mcp.types import ToolAnnotations
+
+    from backend.server import mcp
+
+    stub_cls = _lazy_tool_class()
+    manager = mcp._tool_manager
+    fn_meta = func_metadata(_lazy_no_args)
+    intent = str(data.get("intent") or "") or None
+    with _LAZY_GUARD:
+        _LAZY_PENDING[pid] = (root, manifest)
+    for row in data.get("tools") or []:
+        name = str((row or {}).get("name") or "").strip() if isinstance(row, dict) else ""
+        if not name:
+            continue
+        existing = manager.get_tool(name)
+        if existing is not None and not isinstance(existing, stub_cls):
+            continue  # a real tool (this plugin loaded before, or another plugin owns the name)
+        raw_ann = row.get("annotations")
+        stub = stub_cls(
+            fn=_lazy_direct_call(pid, name),
+            name=name,
+            title=row.get("title"),
+            description=str(row.get("description") or ""),
+            parameters=row.get("parameters") if isinstance(row.get("parameters"), dict) else {"type": "object", "properties": {}},
+            fn_metadata=fn_meta,
+            is_async=False,
+            context_kwarg=None,
+            annotations=ToolAnnotations(**raw_ann) if isinstance(raw_ann, dict) else None,
+            meta=row.get("meta") if isinstance(row.get("meta"), dict) else None,
+            plugin_id=pid,
+        )
+        manager._tools[name] = stub
+        _record_plugin_api_tool(pid, name, intent=intent, listener=bool(row.get("listener")))
+
+
+def _drop_lazy_stubs(pid: str) -> None:
+    from backend.server import mcp
+
+    stub_cls = _lazy_tool_class()
+    tools = mcp._tool_manager._tools
+    with _LOCK:
+        for name, tool in list(tools.items()):
+            if isinstance(tool, stub_cls) and tool.plugin_id == pid:
+                tools.pop(name, None)
+
+
+def load_lazy_backend(pid: str) -> None:
+    """Import ``pid``'s backend and run its register() now (no-op when it is not pending)."""
+    from backend.uefn_plugins.plugin_host.loader import _load_enabled_plugin_locked, _plugin_load_lock
+
+    with _plugin_load_lock(pid):
+        with _LAZY_GUARD:
+            src = _LAZY_PENDING.get(pid)
+            if src is None:
+                return
+            _LAZY_FORCED.add(pid)
+        root, manifest = src
+        try:
+            _drop_lazy_stubs(pid)
+            _log.info("Plugin %s: loading its backend for its first tool call", pid)
+            _load_enabled_plugin_locked(pid, root, manifest)
+        finally:
+            with _LAZY_GUARD:
+                _LAZY_FORCED.discard(pid)
+                _LAZY_PENDING.pop(pid, None)
+
+
+def load_lazy_plugin_tool(pid: str, name: str) -> Any:
+    """The real FastMCP tool behind a stub, loading its plugin first. ValueError when it can't."""
+    if not uefn_agent_tools_allowed(pid):
+        raise ValueError(f"Plugin '{pid}' tools are disabled — enable it in Settings → Store")
+    load_lazy_backend(pid)
+    from backend.server import mcp
+
+    tool = mcp._tool_manager.get_tool(name)
+    if tool is None or isinstance(tool, _lazy_tool_class()):
+        with _LOCK:
+            failure = _LOAD_FAILURES.get(pid, "")
+        detail = f" It failed to load: {failure}" if failure else ""
+        raise ValueError(f"{name} belongs to the {_plugin_label(pid)} plugin, which did not register it.{detail}")
+    return tool
+
+
 # Names from the rest of the host, bound after every definition above so the host
 # modules can import each other in any order.
 from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded  # noqa: E402
 from backend.uefn_plugins.plugin_host.errors import _plugin_label  # noqa: E402
-from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled  # noqa: E402
+from backend.uefn_plugins.plugin_host.lifecycle import _manifest_signature, is_plugin_enabled  # noqa: E402
 from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _ACTIVE_UEFN_AGENT_IDS,
     _API_INTENT_PATTERNS,

@@ -136,7 +136,7 @@ def _repair_due() -> bool:
     """True when an enabled plugin has not finished register() and its retry backoff passed."""
     now = time.monotonic()
     for pid in get_enabled_plugin_ids():
-        if pid in _REGISTERED:
+        if pid in _REGISTERED or lazy_pending(pid):  # lazy: loads on its first tool call
             continue
         if now - float(_REPAIR_ATTEMPTS.get(pid) or 0.0) >= _REPAIR_BACKOFF_S:
             return True
@@ -183,7 +183,7 @@ def _repair_missing_backends_once() -> None:
     root = appdata_uefn_plugins_dir()
     now = time.monotonic()
     for pid in sorted(enabled):
-        if pid in _REGISTERED:
+        if pid in _REGISTERED or lazy_pending(pid):
             _REPAIR_ATTEMPTS.pop(pid, None)
             continue
         last = float(_REPAIR_ATTEMPTS.get(pid) or 0.0)
@@ -477,6 +477,7 @@ from backend.uefn_plugins.plugin_host.loader import (  # noqa: E402
     _register_plugin_guarded,
     _warm_plugin_backend,
 )
+from backend.uefn_plugins.plugin_host.tool_registry import lazy_pending  # noqa: E402
 from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _CONTRIBUTIONS,
     _LOAD_CALLBACKS,
