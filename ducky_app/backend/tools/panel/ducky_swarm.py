@@ -496,6 +496,70 @@ def swarm_create(goal: str, jobs: list[dict[str, Any]] | None, agents: Any = "",
     return {"status": "done", "goal": goal, "agents": preview["agents"], **built}
 
 
+# ---- the reply an agent reads -------------------------------------------------------------
+
+# Nov 5 2026: a 12-section from_plan reply echoed every step body (65-130k chars), more than
+# the lead could read. A reply over this is cut to the seat list; a smaller one keeps the card.
+REPLY_MAX_CHARS = 8_000
+MAX_OVERLAPS_SHOWN = 30
+
+
+def _seat_row(s: dict[str, Any]) -> dict[str, Any]:
+    model = str(s.get("model") or "")
+    agent, _, name = model.partition(":") if ":" in model else ("", "", model)
+    row: dict[str, Any] = {"name": s["name"]}
+    if s.get("conv_id"):
+        row["conv_id"] = s["conv_id"]
+    sp = s.get("sub_plan") or {}
+    row.update(profile=s.get("profile") or "", model=name, coding_agent=agent,
+               lane_count=len(s.get("paths") or s.get("files_hint") or []),
+               steps=int(sp.get("total") or len(sp.get("steps") or [])))
+    if s.get("status"):
+        row["status"] = s["status"]
+    return row
+
+
+def _capped(overlaps: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(overlaps) <= MAX_OVERLAPS_SHOWN:
+        return {"overlaps": overlaps}
+    return {"overlaps": overlaps[:MAX_OVERLAPS_SHOWN], "overlaps_total": len(overlaps)}
+
+
+def compact_reply(out: dict[str, Any]) -> dict[str, Any]:
+    """*out* without the tree: ``{status, goal, agents, root_group_id, seats: [{name, conv_id?,
+    profile, model, coding_agent, lane_count, steps}], overlaps?, questions?, ...}``. An error
+    puts ``error`` first and keeps only what says what went wrong."""
+    preview = out.get("preview") or {}
+    overlaps = out.get("overlaps") or preview.get("overlaps") or []
+    if out.get("status") == "error" or out.get("error"):
+        reply = {"error": str(out.get("error") or "error"), "status": "error"}
+        reply.update({k: out[k] for k in ("goal", "created", "failed") if out.get(k)})
+        return {**reply, **(_capped(overlaps) if overlaps else {})}
+    seats = [_seat_row(s) for s in walk_seats(out.get("tree") or preview.get("tree") or [])]
+    reply = {"status": out.get("status"), "goal": out.get("goal") or preview.get("goal"),
+             "agents": out.get("agents") or preview.get("agents") or len(seats)}
+    if out.get("root_group_id"):
+        reply["root_group_id"] = out["root_group_id"]
+    reply["seats"] = seats
+    if overlaps:
+        reply.update(_capped(overlaps))
+    warnings = out.get("warnings") or preview.get("warnings")
+    if warnings:
+        reply["warnings"] = warnings
+    reply.update({k: out[k] for k in ("questions", "swarm_id", "failed", "waiting", "next") if out.get(k)})
+    return reply
+
+
+def reply_for(out: dict[str, Any], full: bool = False) -> dict[str, Any]:
+    """What the tool returns: *out* as it is when *full* or when it is small (the Swarm builder
+    card renders from it), else ``compact_reply``. An error is always compact."""
+    if out.get("status") == "error" and not full:
+        return compact_reply(out)
+    if full or len(json.dumps(out, default=str)) <= REPLY_MAX_CHARS:
+        return out
+    return compact_reply(out)
+
+
 @mcp.tool()
 def ducky_swarm_create(
     goal: str = "",
@@ -507,6 +571,7 @@ def ducky_swarm_create(
     confirm: bool = False,
     detail: int = 0,
     from_plan: bool = False,
+    full_reply: bool = False,
     pretty: bool = False,
 ) -> str:
     """Make a swarm: write every job from the request ({name, purpose, task, steps[], paths[]}), call
@@ -517,10 +582,14 @@ def ducky_swarm_create(
     and its model the section's Model: line, else yours. from_plan edits change the plan itself:
     {seat, profile?, paths?, model?} (seat = section title or id; paths = its Files/lane),
     {seat, rename_step|drop_step, to?}, {seat, to_group}, {rename, to}, {mute|unmute: group}.
-    Any other edit is refused with that list.
+    Any other edit is refused with that list. A from_plan preview lists Files overlaps between
+    sections ({a, b, path}); confirm refuses them. A reply over 8k chars is the seat list only
+    ({status, goal, agents, root_group_id, seats, overlaps?, questions?}); full_reply=true (or
+    detail=true with from_plan) returns the whole tree with every step body.
     """
-    return tool_json(swarm_create(goal, jobs, agents, max_agents, per_group, edits, confirm, detail=detail,
-                                  from_plan=from_plan), pretty=pretty)
+    out = swarm_create(goal, jobs, agents, max_agents, per_group, edits, confirm,
+                       detail=0 if from_plan else detail, from_plan=from_plan)
+    return tool_json(reply_for(out, full=bool(full_reply or (from_plan and detail))), pretty=pretty)
 
 
 # ---- suggest a swarm for a big plan -------------------------------------------------------
