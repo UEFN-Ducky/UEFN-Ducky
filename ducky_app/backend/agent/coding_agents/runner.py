@@ -964,6 +964,7 @@ def _run_coding_agent_message(
 
     from backend.agent.coding_agents.session_refresh import take_rewound
 
+    memory_task = prompt_text[:2000]  # the person's message, before any history prefix
     # Restart from here dropped the session: the new one starts from the kept messages.
     if not adapter.capabilities.resume or (not session_id and take_rewound(conv.id)):
         history_prefix = build_history_prefix(conv)
@@ -981,6 +982,7 @@ def _run_coding_agent_message(
         skills_dir=skills_dir,
         skill_names=skill_names,
         native_skills=bool(reg.get("native_skills")),
+        task=memory_task,
     )
     from frontend import __version__
 

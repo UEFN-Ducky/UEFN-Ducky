@@ -268,6 +268,7 @@ def bootstrap_system_prompt(
     skills_dir: str = "",
     skill_names: list[str] | None = None,
     native_skills: bool = False,
+    task: str = "",
 ) -> str:
     root = (project_root or "").strip() or "(no project selected)"
     folder_note = _folder_project_note(project_root)
@@ -416,6 +417,30 @@ def bootstrap_system_prompt(
         "`project_memory_list/get(project=…)`, and save a fact about another project there with "
         "`project_memory_save(..., project=…)`. Read "
         "another ducky's context with `ducky_read_chat(conv_id, project=…)`.\n"
+        f"{_memory_index_section(project_root, conv_id, task)}"
+    )
+
+
+def _memory_index_section(project_root: str, conv_id: str, task: str) -> str:
+    """The project's memory index for a coding agent, which never lists memory on its own.
+    Empty when memory is empty or anything fails: the bootstrap never breaks on it."""
+    try:
+        from backend.agent.prompt import memory_index_budget, shared_memory_index
+
+        mem_root, index = shared_memory_index(
+            (conv_id or "").strip(), (project_root or "").strip(),
+            max_chars=memory_index_budget(), task=(task or "")[:2000],
+        )
+    except Exception:
+        return ""
+    if not index:
+        return ""
+    where = ""
+    if mem_root and mem_root.replace("\\", "/").rstrip("/").lower() != (project_root or "").replace("\\", "/").rstrip("/").lower():
+        where = f"Memory from {mem_root} (the repo this work is in).\n"
+    return (
+        "\n### Index (all of this project's lessons; pull the ones that match your task before you start)\n"
+        f"{where}{index}\n"
     )
 
 
