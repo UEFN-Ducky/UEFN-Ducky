@@ -1,5 +1,8 @@
 """Actor and selection commands."""
 
+import json
+import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import unreal
@@ -148,6 +151,23 @@ def cmd_spawn_actor(
         raise RuntimeError("Failed to spawn actor")
 
     # Same-tick organize-as-you-place (avoids 2–3 extra heavy commands).
+    _organize(actor, label, folder, tags)
+
+    # The level changed; drop the per-tick index so later lookups see this actor.
+    lookup.invalidate()
+    # Only on request: selecting would replace whatever the person had selected.
+    if select:
+        try:
+            actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+            actor_sub.set_selected_level_actors([actor])
+        except Exception:
+            pass
+    # Include the guid: change tracking uses it to identify what this run created.
+    return {"actor": serialize_actor(actor, ALL_ACTOR_FIELDS)}
+
+
+def _organize(actor, label: str = "", folder: str = "", tags: Optional[List[str]] = None) -> None:
+    """Label, Outliner folder and tags on a freshly placed actor; each one is best effort."""
     if label:
         try:
             actor.set_actor_label(str(label))
@@ -164,17 +184,131 @@ def cmd_spawn_actor(
         except Exception:
             pass
 
-    # The level changed; drop the per-tick index so later lookups see this actor.
+
+# One spawn_layout call stops after this long so the reply beats the listener's 30 s
+# HTTP timeout; the caller passes next_offset back to go on.
+_LAYOUT_BUDGET_SEC = 20.0
+_LAYOUT_CHUNK = 200
+
+
+def _layout_entries(path: str) -> List[dict]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(data, dict):
+        data = data.get("placements", data.get("entries"))
+    if not isinstance(data, list):
+        raise ValueError("layout must be a list of {cls, loc, rot, scale, label, folder, tags} or {placements: [...]}")
+    return data
+
+
+def _layout_class(cls: str, cache: Dict[str, Any]):
+    """The placeable for one layout ``cls``, loaded once per call."""
+    if cls not in cache:
+        cache[cls] = _load_placeable(cls) if "/" in cls else _resolve_actor_class(cls)
+    return cache[cls]
+
+
+def _actor_tags(actor) -> List[str]:
+    try:
+        return [str(t) for t in (actor.get_editor_property("tags") or [])]
+    except Exception:
+        return []
+
+
+@register("spawn_layout")
+def cmd_spawn_layout(
+    path: str,
+    undo_tag: str = "",
+    offset: int = 0,
+    chunk: int = _LAYOUT_CHUNK,
+    budget_sec: float = _LAYOUT_BUDGET_SEC,
+) -> dict:
+    """Place a JSON layout ``[{cls, loc, rot, scale, label, folder, tags}]`` in one call.
+
+    ``cls`` is a Content Drawer ``_C`` path (or a native ``unreal`` class name). Entries go in
+    chunks of ``chunk``, one editor transaction each, through the same spawn path as
+    ``spawn_actor``. Every placed actor gets ``undo_tag`` (default ``layout:<file stem>``) so
+    ``remove_layout`` takes the whole layout back out. When ``budget_sec`` runs out the reply
+    has ``done: false`` and ``next_offset``: call again with ``offset=next_offset``.
+    """
+    if not path:
+        raise ValueError("path is required (a layout JSON file)")
+    entries = _layout_entries(path)
+    tag = undo_tag or f"layout:{Path(path).stem}"
+    chunk = max(1, int(chunk or _LAYOUT_CHUNK))
+    start = time.monotonic()
+    cache: Dict[str, Any] = {}
+    placed = 0
+    errors: List[dict] = []
+    i = max(0, int(offset or 0))
+    total = len(entries)
+    while i < total:
+        end = min(i + chunk, total)
+        with unreal.ScopedEditorTransaction(f"Ducky spawn layout {tag}"):
+            for idx in range(i, end):
+                row = entries[idx] if isinstance(entries[idx], dict) else {}
+                try:
+                    cls = str(row.get("cls") or "").strip()
+                    if not cls:
+                        raise ValueError("cls is missing")
+                    obj = _layout_class(cls, cache)
+                    if obj is None:
+                        raise ValueError(f"class not found: {cls}")
+                    loc = unreal.Vector(*(row.get("loc") or (0, 0, 0)))
+                    rot = rotator_pyr(*(row.get("rot") or (0, 0, 0)))
+                    actor = _spawn_any(obj, loc, rot)
+                    if actor is None:
+                        raise RuntimeError("spawn returned nothing")
+                    scale = row.get("scale")
+                    if scale is not None and list(scale) != [1, 1, 1]:
+                        try:
+                            refuse_if_creative_device_scale(_device_kind(actor), list(scale))
+                            actor.set_actor_scale3d(unreal.Vector(*scale))
+                        except Exception as e:
+                            errors.append({"index": idx, "error": f"scale skipped: {e}"})
+                    tags = [str(t) for t in (row.get("tags") or [])]
+                    if tag not in tags:
+                        tags.append(tag)
+                    _organize(actor, row.get("label") or "", row.get("folder") or "", tags)
+                    placed += 1
+                except Exception as e:
+                    errors.append({"index": idx, "error": str(e)})
+        i = end
+        if i < total and time.monotonic() - start >= budget_sec:
+            break
     lookup.invalidate()
-    # Only on request: selecting would replace whatever the person had selected.
-    if select:
-        try:
-            actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-            actor_sub.set_selected_level_actors([actor])
-        except Exception:
-            pass
-    # Include the guid: change tracking uses it to identify what this run created.
-    return {"actor": serialize_actor(actor, ALL_ACTOR_FIELDS)}
+    failed = len({e["index"] for e in errors if not e["error"].startswith("scale skipped")})
+    return {
+        "placed": placed,
+        "failed": failed,
+        "errors": errors[:20],
+        "undo_tag": tag,
+        "total": total,
+        "next_offset": i,
+        "done": i >= total,
+        "seconds": round(time.monotonic() - start, 2),
+    }
+
+
+@register("remove_layout")
+def cmd_remove_layout(undo_tag: str, budget_sec: float = _LAYOUT_BUDGET_SEC) -> dict:
+    """Delete every level actor carrying ``undo_tag`` (what ``spawn_layout`` placed).
+
+    ``done: false`` means the time budget ran out first: call again for the rest.
+    """
+    if not undo_tag:
+        raise ValueError("undo_tag is required")
+    start = time.monotonic()
+    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+    targets = [a for a in lookup.actor_list() if is_live(a) and undo_tag in _actor_tags(a)]
+    removed = 0
+    with unreal.ScopedEditorTransaction(f"Ducky remove layout {undo_tag}"):
+        for actor in targets:
+            if time.monotonic() - start >= budget_sec:
+                break
+            actor_sub.destroy_actor(actor)
+            removed += 1
+    lookup.invalidate()
+    return {"removed": removed, "remaining": len(targets) - removed, "done": removed == len(targets), "undo_tag": undo_tag}
 
 
 @register("delete_actors")
