@@ -50,8 +50,13 @@ def checks(monkeypatch, tmp_path):
 
     @server.tool(name="ducky_plan_update_node")
     def tick(chat_id: str) -> str:
-        return plans._apply_status_gate(
-            {"id": "verify", "content": "Verify"}, "completed", chat_id)
+        # The gate never refuses: a tick without evidence is noted on the step. Raise on that
+        # note here, so each case below still shows whether the check counted.
+        node = {"id": "verify", "content": "Verify"}
+        status = plans._apply_status_gate(node, "completed", chat_id)
+        if plans._NO_CHECK_NOTE in str(node.get("body_markdown") or ""):
+            raise ValueError("ticked with no check tool this turn")
+        return status
 
     return server
 
@@ -158,7 +163,8 @@ from backend.agent.coding_agents import plans
 if sys.argv[1] == 'check':
     ve.record_result('changeset_list', {}, [{'type': 'text', 'text': '{"ok":true}'}])
 else:
-    print(plans._apply_status_gate({'id': 'verify'}, 'completed', 'cross-process'))
+    node = {'id': 'verify'}
+    print(plans._apply_status_gate(node, 'completed', 'cross-process'), node.get('body_markdown', ''))
 """
     env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
     env.update(identity.RunContext(conv_id="cross-process", run_id="process-run").to_env())
@@ -166,12 +172,12 @@ else:
         out = subprocess.run([sys.executable, "-c", script, action], env=env,
                              capture_output=True, text=True, timeout=20)
         assert out.returncode == 0, out.stderr
-    assert "completed" in out.stdout
+    assert "completed" in out.stdout and "no check tool" not in out.stdout
     env.update(identity.RunContext(conv_id="cross-process", run_id="next-run").to_env())
     out = subprocess.run([sys.executable, "-c", script, "tick"], env=env,
                          capture_output=True, text=True, timeout=20)
-    assert out.returncode != 0
-    assert "check tool" in out.stderr
+    assert out.returncode == 0, out.stderr
+    assert "no check tool ran this turn" in out.stdout  # ticked, and noted
 
 
 def test_embedded_turn_reset_and_persisted_receipt(checks):
@@ -197,10 +203,12 @@ def test_actual_plan_update_rejects_foreign_chat(checks, tmp_path):
     call(checks, "changeset_list", {"result": {"ok": True}})
     token = identity.bind(identity.RunContext(conv_id="same-name-a", run_id="run-a"))
     try:
-        assert plans.update_node("same-name-a", "verify", status="completed",
-                                 project_root=str(tmp_path))["nodes"][0]["status"] == "completed"
-        with pytest.raises(ValueError, match="check tool"):
-            plans.update_node("same-name-b", "verify", status="completed", project_root=str(tmp_path))
+        mine = plans.update_node("same-name-a", "verify", status="completed", project_root=str(tmp_path))
+        assert mine["nodes"][0]["status"] == "completed"
+        assert plans._NO_CHECK_NOTE not in (mine["nodes"][0].get("body_markdown") or "")
+        # Another chat's check is not this one's: the tick lands, noted as unchecked.
+        other = plans.update_node("same-name-b", "verify", status="completed", project_root=str(tmp_path))
+        assert plans._NO_CHECK_NOTE in other["nodes"][0]["body_markdown"]
     finally:
         identity.reset(token)
 
@@ -285,5 +293,5 @@ def test_offline_verse_scan_ticks_verify_only_while_uefn_is_closed(checks, monke
     if ticks:
         assert "completed" in text(call(checks, "ducky_plan_update_node", {"chat_id": "same-name-a"}))
     else:
-        with pytest.raises(Exception, match="workspace_list_verse_errors"):
+        with pytest.raises(Exception, match="check tool"):
             call(checks, "ducky_plan_update_node", {"chat_id": "same-name-a"})
