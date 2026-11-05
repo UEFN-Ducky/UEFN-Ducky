@@ -986,3 +986,86 @@ def plan_repo(plan: dict[str, Any] | None, roots: list[str] | None = None) -> st
                     if p.lower() == r.lower() or p.lower().startswith(r.lower() + "/"):
                         return r + p[len(r):]
     return ""
+
+
+# ---- lanes from the exact Files lines -----------------------------------------------------
+
+# A Files entry that reads as a path or glob (a slash, a '*', or a file extension).
+_PATH_LIKE = re.compile(r"[/\\*]|\.[A-Za-z][A-Za-z0-9]{0,4}$")
+
+
+def _norm(path: str) -> str:
+    return path.strip().strip("`").replace("\\", "/").removeprefix("./")
+
+
+def resolve_path(path: str, repo_files: list[str] | None) -> tuple[str, str]:
+    """(*path* as the repo names it, warning). A short path (``terminal/x.py``, ``agent_host/**``)
+    becomes the one repo path ending with it; several or none keep it as written, with a
+    warning. Full paths, and every path when *repo_files* is None, stay as they are.
+    Nov 5 2026: auto lanes dropped the ``ducky_app/`` prefix from short test paths."""
+    p = _norm(path)
+    if repo_files is None or not p or re.match(r"^(?:[A-Za-z]:)?/", p):
+        return p, ""
+    head, star, _ = p.partition("*")
+    literal = head if star else p
+    if star and not literal.endswith("/"):
+        literal = literal.rsplit("/", 1)[0] + "/" if "/" in literal else ""
+    literal = literal.rstrip("/")
+    if not literal:
+        return p, ""
+    rest = p[len(literal):]
+    if literal in repo_files or any(f.startswith(literal + "/") for f in repo_files):
+        return p, ""
+    cands: set[str] = set()
+    for f in repo_files:
+        if f.endswith("/" + literal):
+            cands.add(f)
+        i = f.find("/" + literal + "/")
+        while i != -1:
+            cands.add(f[:i + 1 + len(literal)])
+            i = f.find("/" + literal + "/", i + 1)
+    if len(cands) == 1:
+        return cands.pop() + rest, ""
+    why = "no repo file ends with it" if not cands else f"{len(cands)} repo paths end with it"
+    return p, f"{p}: {why}; kept as written"
+
+
+def section_files(body: str, step_bodies: list[str]) -> list[str]:
+    """A section's Files line plus every path on its steps' Files lines, in order, once each."""
+    out: list[str] = []
+    for text in [body, *step_bodies]:
+        for raw in files_in(text):
+            p = _norm(raw)
+            if p and _PATH_LIKE.search(p) and p not in out:
+                out.append(p)
+    return out
+
+
+def seat_lanes(plan: dict[str, Any] | None, repo_files: list[str] | None = None) -> list[dict[str, Any]]:
+    """[{name, id, lane, warnings}] per seat of *plan*: ``section_files`` resolved against
+    *repo_files* (the plan repo's ``git ls-files``)."""
+    seats, _ = plan_seats(plan)
+    out = []
+    for s in seats:
+        lane: list[str] = []
+        warnings: list[str] = []
+        for p in section_files(s["body"], [st["body"] for st in s["steps"]]):
+            q, w = resolve_path(p, repo_files)
+            if q not in lane:
+                lane.append(q)
+            if w:
+                warnings.append(w)
+        out.append({"name": s["name"], "id": s["id"], "lane": lane, "warnings": warnings})
+    return out
+
+
+def plan_overlaps(plan: dict[str, Any] | None, repo_files: list[str] | None = None) -> list[dict[str, str]]:
+    """[{a, b, path}] for every path two sections' lanes (``seat_lanes``) both hold, unless it is
+    a declared hand-over. ``path`` is the narrower of the two entries. Nov 5 2026: the I/I2
+    overlap on ``agent_host/**`` was only found when seating was refused."""
+    seats, expand = plan_seats(plan)
+    lanes = {x["id"]: x["lane"] for x in seat_lanes(plan, repo_files)}
+    for s in seats:
+        s["lane"] = lanes.get(s["id"], s["lane"])
+    deps = step_deps(seats, expand)
+    return [{"a": c["seats"][0], "b": c["seats"][1], "path": c["file"]} for c in owner_conflicts(seats, deps)]

@@ -169,9 +169,10 @@ def _flat_seats(nodes: list[dict[str, Any]], group: str = "") -> list[dict[str, 
             out += _flat_seats(node["seats"], node["group"]) + _flat_seats(node["groups"], node["group"])
         else:
             granted = [k for k, v in (node.get("permissions") or {}).items() if v]
+            lane = node["paths"] or node.get("files_hint") or []  # a worktree seat: its Files as a hint
             out.append({"name": node["name"], "group": group, "profile": node["profile"], "model": node["model"],
-                        "lane": node["paths"], "steps": node["sub_plan"]["total"],
-                        "flags": ([] if node["paths"] else ["no_lane"]) + granted})
+                        "lane": lane, "steps": node["sub_plan"]["total"],
+                        "flags": ([] if lane else ["no_lane"]) + granted})
     return out
 
 
@@ -367,6 +368,26 @@ def apply_plan_edits(chat_id: str, plan: dict[str, Any], edits: list[dict[str, A
     return warnings
 
 
+def _plan_lanes(plan: dict[str, Any], api: Any, preview: dict[str, Any]) -> tuple[list[str] | None, list[dict[str, str]], list[str]]:
+    """(repo files, Files overlaps, path warnings) for a from-plan preview, whose seats get the
+    worktree lanes the build gives them: unrestricted plus ``files_hint`` (the section's Files
+    and its steps' Files, resolved against the plan's repo)."""
+    from backend.tools.panel.swarm_build import repo_file_list, worktree_lanes
+
+    try:
+        root = str(api.project_root() or "")
+    except Exception:  # noqa: BLE001 - a fake or offline api: no open project
+        root = ""
+    try:
+        repo = _sp.plan_repo(plan) or root
+    except Exception:  # noqa: BLE001 - no project list: the open project
+        repo = root
+    files = repo_file_list(repo)
+    warnings = worktree_lanes(preview["tree"], plan, files)
+    preview["lanes"] = {s["name"]: s.get("files_hint") or [] for s in walk_seats(preview["tree"])}
+    return files, _sp.plan_overlaps(plan, files), warnings
+
+
 def _swarm_from_plan(confirm: bool, api: Any, edits: list[dict[str, Any]] | None = None,
                      store: Any = None) -> dict[str, Any]:
     api = api or PanelSwarmApi()
@@ -405,16 +426,26 @@ def _swarm_from_plan(confirm: bool, api: Any, edits: list[dict[str, Any]] | None
             return {"status": "error", "error": str(exc)}
     preview = plan_preview(plan)
     _show_seat_models(preview, api, lead)
-    if warnings:
-        preview["warnings"] = warnings
     if not preview["agents"]:
         return {"status": "error", "goal": preview["goal"], "error": "Nothing to seat: no section has steps."}
+    files, overlaps, lane_warnings = _plan_lanes(plan, api, preview)
+    warnings += lane_warnings
+    if warnings:
+        preview["warnings"] = warnings
+    if overlaps:
+        preview["overlaps"] = overlaps
     if not confirm:
         return {**card("needs_confirm", preview),
                 "next": ("Show the person this preview of the plan's sections as seats. Build: same call with "
-                         "confirm=true. Change: same call with only the NEW edits; they change the plan itself.")}
+                         "confirm=true. Change: same call with only the NEW edits; they change the plan itself."
+                         + (" Fix the Files overlaps first (one owner per file, or a Hands over: line): "
+                            "confirm refuses them." if overlaps else ""))}
+    if overlaps:
+        return {"error": (f"{len(overlaps)} Files overlap{'s' if len(overlaps) != 1 else ''} between sections: "
+                          "give each file one owner (or a Hands over: line), then confirm again."),
+                "status": "error", "goal": preview["goal"], "overlaps": overlaps}
     try:
-        built = build_swarm(api=api, from_plan=plan)
+        built = build_swarm(api=api, from_plan=plan, worktree=True, repo_files=files)
     except Exception as exc:  # SwarmBuildError archives what it made; say so on the card
         return {"status": "error", "goal": preview["goal"], "error": str(exc), "tree": preview["tree"]}
     return {"status": "done", "goal": preview["goal"], "agents": preview["agents"], **built}

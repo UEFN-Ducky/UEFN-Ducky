@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -351,6 +352,37 @@ def seats_from_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return [node(sec) for sec in (plan.get("nodes") or []) if isinstance(sec, dict) and _kids(sec)]
 
 
+def repo_file_list(repo: str) -> list[str] | None:
+    """*repo*'s ``git ls-files`` (forward slashes); None when it is no git checkout."""
+    if not repo or not os.path.isdir(repo):
+        return None
+    try:
+        out = subprocess.run(["git", "-C", repo, "ls-files"], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode:
+        return None
+    return [line.strip() for line in out.stdout.splitlines() if line.strip()]
+
+
+def worktree_lanes(tree: list[dict[str, Any]], plan: dict[str, Any], repo_files: list[str] | None) -> list[str]:
+    """Seats that work in their own sandbox worktree: an unrestricted lane (``paths`` = []) and
+    ``files_hint`` = the section's Files plus its steps' Files, resolved against the repo
+    (``swarm_preview.seat_lanes``). Returns the path warnings, each named by its seat."""
+    from backend.tools.panel.swarm_preview import seat_lanes
+
+    by_id = {x["id"]: x for x in seat_lanes(plan, repo_files)}
+    warnings: list[str] = []
+    for s in walk_seats(tree):
+        hit = by_id.get(str((s.get("sub_plan") or {}).get("id") or ""))
+        if hit is None:
+            continue
+        s["files_hint"], s["paths"] = hit["lane"], []
+        warnings += [f"{s['name']}: {w}" for w in hit["warnings"]]
+    return warnings
+
+
 # ---- validate -----------------------------------------------------------------------------
 
 def _relative_lane(path: str, root: str) -> str:
@@ -439,8 +471,11 @@ def _slug(i: int, name: str) -> str:
 
 
 def _ping_text(swarm_id: str, seat: dict[str, Any]) -> str:
+    hint = seat.get("files_hint") or []
+    files = (f" Your files (work in your own sandbox worktree): {', '.join(hint[:20])}"
+             f"{f' and {len(hint) - 20} more' if len(hint) > 20 else ''}.") if hint else ""
     return (f"Seat check for the swarm: reply with one word, ok. Your sub plan comes next. Put every "
-            f"deliverable in {seat['outputs']}/ (it outlives your sandbox and this chat).")
+            f"deliverable in {seat['outputs']}/ (it outlives your sandbox and this chat).{files}")
 
 
 def _answer(out: dict[str, Any]) -> dict[str, Any]:
@@ -543,10 +578,13 @@ def _save(record: dict[str, Any], api: Any) -> None:
 
 
 def build_swarm(preview: dict[str, Any] | None = None, api: Any = None,
-                from_plan: dict[str, Any] | None = None) -> dict[str, Any]:
+                from_plan: dict[str, Any] | None = None, worktree: bool = False,
+                repo_files: list[str] | None = None) -> dict[str, Any]:
     """Build *preview* (sub plans added to the lead's plan) or *from_plan* (the lead's plan as
-    it is: its sections are assigned, nothing is added). Validates first; any create that
-    fails archives what was made and raises SwarmBuildError."""
+    it is: its sections are assigned, nothing is added). ``worktree``: from-plan seats work in
+    their own sandbox worktree, so each gets an unrestricted lane and ``files_hint``
+    (``worktree_lanes``; *repo_files* = the repo's ls-files, read when None). Validates first;
+    any create that fails archives what was made and raises SwarmBuildError."""
     api = _Api(api or PanelSwarmApi())
     lead = api.caller()
     if not lead:
@@ -555,8 +593,12 @@ def build_swarm(preview: dict[str, Any] | None = None, api: Any = None,
         from backend.tools.panel.swarm_preview import plan_repo
 
         tree = seats_from_plan(from_plan)
+        repo = plan_repo(from_plan)
+        if worktree:
+            files = repo_files if repo_files is not None else repo_file_list(repo or api.project_root())
+            worktree_lanes(tree, from_plan, files)
         return _build(str(from_plan.get("title") or "").strip() or "Swarm", tree, str(from_plan.get("id") or ""),
-                      lead, api, repo=plan_repo(from_plan))
+                      lead, api, repo=repo)
     return _build(preview["goal"], preview["tree"], "", lead, api, preview=preview)
 
 
