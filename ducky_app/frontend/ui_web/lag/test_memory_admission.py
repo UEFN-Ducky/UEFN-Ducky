@@ -23,6 +23,10 @@ def pc(monkeypatch):
     rows = {1: proc_table.Proc(1, 0, "UnrealEditorFortnite.exe", 0, 12 * GB, 1, 1, 0.0, 0.0),
             2: proc_table.Proc(2, 0, "claude.exe", 0, 1 * GB, 1, 1, 0.0, 0.0)}
     monkeypatch.setattr(proc_table, "table", lambda: rows)
+    monkeypatch.setattr(adm, "_total_gb", lambda: 32.0)
+    state["growth"] = None
+    monkeypatch.setattr("frontend.low_memory._uefn_growth", lambda: state["growth"])
+    state["rows"] = rows
     pushed: list[dict] = []
 
     def ask(cid):
@@ -47,7 +51,26 @@ def test_ten_members_on_3_gb_free_all_run_and_one_warning_is_posted(pc):
     assert len(pc["pushed"]) == 1
     text = pc["pushed"][0]["text"]
     assert "Waiting for memory" not in text
-    assert "UnrealEditorFortnite.exe 12 GB" in text
+    assert text.startswith("Low RAM: 3.0 GB of 32 GB free. Biggest users: UnrealEditorFortnite 12 GB, claude 1 GB.")
+    assert "restart UEFN" not in text  # a fresh UEFN
+
+
+def test_duckys_process_tree_is_one_row_and_a_grown_uefn_says_restart(pc):
+    import os
+
+    me = os.getpid()
+    pc["rows"].update({
+        me: proc_table.Proc(me, 1, "UEFN Ducky.exe", 0, 1 * GB, 1, 1, 0.0, 0.0),
+        7: proc_table.Proc(7, me, "msedgewebview2.exe", 0, 1 * GB, 1, 1, 0.0, 1.0),
+        8: proc_table.Proc(8, me, "claude.exe", 0, 2 * GB, 1, 1, 0.0, 1.0),
+    })
+    pc["growth"] = {"grown_gb": 6.2, "limit_gb": 4.0}
+    pc["base"] = 3.0
+    pc["ask"]("m1")
+    warning = pc["pushed"][0]
+    assert warning["top"] == [{"name": "UnrealEditorFortnite", "gb": 12.0}, {"name": "UEFN Ducky + agents", "gb": 4.0},
+                              {"name": "claude", "gb": 1.0}]
+    assert "UEFN grew 6.2 GB since the island loaded: save and restart UEFN to get it back." in warning["text"]
 
 
 def test_300_requested_at_25_gb_all_start_at_once(pc):

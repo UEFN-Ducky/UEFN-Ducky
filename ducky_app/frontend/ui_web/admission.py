@@ -153,15 +153,17 @@ def snapshot() -> dict[str, Any]:
 
 
 def biggest_users(n: int = 5) -> list[dict[str, Any]]:
-    """The ``n`` process names holding the most private memory, summed over their processes."""
-    from backend.util import proc_table
+    """The ``n`` programs holding the most private memory (``[{name, gb}]``): Ducky's whole
+    process tree is one "UEFN Ducky + agents" row, other programs drop ".exe"."""
+    from frontend.low_memory import biggest
 
-    by_name: dict[str, int] = {}
-    for proc in proc_table.table().values():
-        if proc.name:
-            by_name[proc.name] = by_name.get(proc.name, 0) + int(proc.private)
-    top = sorted(by_name.items(), key=lambda kv: kv[1], reverse=True)[:n]
-    return [{"name": name, "gb": round(size / 1024**3, 1)} for name, size in top]
+    return biggest(n)
+
+
+def _total_gb() -> float:
+    from frontend.ui_web.seat_queue import total_memory_gb
+
+    return float(total_memory_gb())
 
 
 def _warn_if_low(conv_id: str, push: PushFn | None) -> None:
@@ -184,11 +186,13 @@ def _warn_if_low(conv_id: str, push: PushFn | None) -> None:
         top = biggest_users()
     except Exception:
         top = []
-    names = ", ".join(f"{t['name']} {t['gb']:g} GB" for t in top)
-    text = (f"Low memory: {free:.1f} GB free (under {floor:g} GB). Agent turns still start."
-            + (f" Biggest memory users: {names}" if names else ""))
-    if push is None:
-        return
+    from frontend.low_memory import describe
+
+    try:
+        total = _total_gb()
+    except Exception:
+        total = 0.0
+    text = f"{describe(free, total, rows=top)} Agent turns still start (warning line {floor:g} GB)."
     try:
         push({"type": "low_memory_warning", "conv_id": conv_id, "text": text, "free_gb": round(free, 2),
               "top": top})

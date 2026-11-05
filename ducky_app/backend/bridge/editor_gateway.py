@@ -248,6 +248,23 @@ def _pc_free_bytes() -> int | None:
         return None
 
 
+def _pc_total_bytes() -> int | None:
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().total)
+    except Exception:
+        return None
+
+
+def _ram_text(free_gb: float | None) -> str:
+    """'RAM 0.3 GB of 16 GB free' (the total left out when it can't be read)."""
+    if free_gb is None:
+        return "RAM free unknown"
+    total = _pc_total_bytes()
+    return f"RAM {free_gb:.1f} GB of {total / _GB:.0f} GB free" if total else f"RAM {free_gb:.1f} GB free"
+
+
 def _growth_limit_gb() -> float:
     try:
         from frontend.settings import PanelSettings
@@ -283,6 +300,20 @@ def _baseline_for(pid: int, started: float, private: int) -> int:
     return private
 
 
+def uefn_growth() -> dict[str, float] | None:
+    """How much the running UEFN grew since its island loaded (first guarded):
+    ``{grown_gb, limit_gb}``, or None when UEFN isn't running or can't be read."""
+    try:
+        uefn = _uefn_memory()
+        if uefn is None:
+            return None
+        pid, started, private = uefn
+        grown = (private - _baseline_for(pid, started, private)) / _GB
+        return {"grown_gb": round(grown, 1), "limit_gb": _growth_limit_gb()}
+    except Exception:
+        return None
+
+
 def check_memory(op: str) -> None:
     """Raise :class:`EditorMemoryLow` when a heavy ``op`` would push UEFN or the PC too far."""
     uefn = _uefn_memory()
@@ -294,9 +325,8 @@ def check_memory(op: str) -> None:
     free_gb = free / _GB if free is not None else None
     limit = _growth_limit_gb()
     if growth > limit or (free_gb is not None and free_gb < MIN_FREE_RAM_GB):
-        free_text = f"{free_gb:.1f} GB" if free_gb is not None else "unknown"
         raise EditorMemoryLow(
-            f"UEFN grew {growth:.1f} GB since the island loaded (limit {limit:g} GB, PC free {free_text}): save and "
+            f"UEFN grew {growth:.1f} GB since the island loaded (limit {limit:g} GB, {_ram_text(free_gb)}): save and "
             f"restart UEFN first (ask the person). `{op}` not sent; the limits are "
             f"{limit:g} GB of growth and {MIN_FREE_RAM_GB:g} GB free RAM."
         )

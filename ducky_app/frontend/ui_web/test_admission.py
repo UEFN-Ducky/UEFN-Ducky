@@ -16,8 +16,10 @@ def pc(monkeypatch):
     monkeypatch.setattr(adm, "min_free_gb", lambda: 6.0)
     monkeypatch.setattr(adm, "_read_free", lambda: free["gb"])
     monkeypatch.setattr(adm, "_role", lambda cid: roles.get(cid, "member"))
-    monkeypatch.setattr(adm, "biggest_users", lambda n=5: [{"name": "UnrealEditorFortnite.exe", "gb": 12.0},
-                                                           {"name": "claude.exe", "gb": 3.0}])
+    monkeypatch.setattr(adm, "biggest_users", lambda n=5: [{"name": "UnrealEditorFortnite", "gb": 12.0},
+                                                           {"name": "UEFN Ducky + agents", "gb": 3.0}])
+    monkeypatch.setattr(adm, "_total_gb", lambda: 16.0)
+    monkeypatch.setattr("frontend.low_memory._uefn_growth", lambda: None)
     return {"free": free, "roles": roles}
 
 
@@ -29,8 +31,9 @@ def test_ten_members_under_the_floor_all_start_and_one_warning_is_posted(pc):
     warning = pushed[0]
     assert warning["type"] == "low_memory_warning"
     assert "Waiting" not in warning["text"]
-    assert "3.0 GB free" in warning["text"]
-    assert "UnrealEditorFortnite.exe 12 GB" in warning["text"] and "claude.exe 3 GB" in warning["text"]
+    assert warning["text"].startswith("Low RAM: 3.0 GB of 16 GB free. Biggest users: "
+                                      "UnrealEditorFortnite 12 GB, UEFN Ducky + agents 3 GB.")
+    assert warning["top"] == [{"name": "UnrealEditorFortnite", "gb": 12.0}, {"name": "UEFN Ducky + agents", "gb": 3.0}]
     assert adm.snapshot()["waiting"] == []
 
 

@@ -38,6 +38,7 @@ def memory(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
     monkeypatch.setattr(editor_gateway, "_pc_free_bytes", _free)
     monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
     monkeypatch.setattr(editor_gateway, "_growth_limit_gb", lambda: 4.0)
+    monkeypatch.setattr(editor_gateway, "_pc_total_bytes", lambda: 64 * GB)
     return state
 
 
@@ -53,7 +54,7 @@ def test_growth_of_4_5_gb_since_load_refuses(memory) -> None:
     editor_gateway.call("", "import_asset", True, lambda: None)
     memory["uefn"] = (100, 5.0, int(25.5 * GB))
     ran: list[str] = []
-    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"UEFN grew 4\.5 GB since the island loaded \(limit 4 GB, PC free 32\.0 GB\): save and restart UEFN first \(ask the person\)"):
+    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"UEFN grew 4\.5 GB since the island loaded \(limit 4 GB, RAM 32\.0 GB of 64 GB free\): save and restart UEFN first \(ask the person\)"):
         editor_gateway.call("", "unreal__VerseToolset.Build", True, lambda: ran.append("x"))
     assert ran == []
 
@@ -61,7 +62,7 @@ def test_growth_of_4_5_gb_since_load_refuses(memory) -> None:
 def test_low_pc_free_ram_refuses(memory) -> None:
     memory["uefn"] = (100, 5.0, 21 * GB)
     memory["free"] = 3 * GB
-    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"PC free 3\.0 GB"):
+    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"RAM 3\.0 GB of 64 GB free"):
         editor_gateway.call("", "play_in_editor", True, lambda: None)
 
 

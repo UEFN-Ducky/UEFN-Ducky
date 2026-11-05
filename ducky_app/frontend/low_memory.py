@@ -53,10 +53,10 @@ def _gb(size: int) -> float:
     return round(size / 1024**3, 1)
 
 
-def biggest_programs(n: int = 3) -> str:
-    """'chrome 6.2 GB, UEFN Ducky + agents 1.9 GB, …', or '' when the process list can't be read.
-
-    Ducky and everything it started (WebView2, agent CLIs, the bridge) count as one program."""
+def biggest(n: int = 3) -> list[dict[str, Any]]:
+    """The ``n`` programs holding the most private memory: ``[{name, gb}]``, [] when the process
+    list can't be read. Ducky and everything it started (WebView2, agent CLIs, the bridge) are
+    one "UEFN Ducky + agents" row; other programs are summed by name without ".exe"."""
     try:
         from backend.util import proc_table
 
@@ -73,9 +73,63 @@ def biggest_programs(n: int = 3) -> str:
         if ducky:
             by_name[DUCKY_LABEL] = by_name.get(DUCKY_LABEL, 0) + ducky
     except Exception:
-        return ""
+        return []
     rows = sorted(by_name.items(), key=lambda kv: kv[1], reverse=True)[:n]
-    return ", ".join(f"{name} {_gb(size):g} GB" for name, size in rows)
+    return [{"name": name, "gb": _gb(size)} for name, size in rows]
+
+
+def _names(rows: list[dict[str, Any]]) -> str:
+    return ", ".join(f"{r['name']} {float(r['gb']):g} GB" for r in rows)
+
+
+def biggest_programs(n: int = 3) -> str:
+    """'chrome 6.2 GB, UEFN Ducky + agents 1.9 GB, …', or '' when the process list can't be read."""
+    return _names(biggest(n))
+
+
+def _uefn_growth() -> dict[str, float] | None:
+    try:
+        from backend.bridge.editor_gateway import uefn_growth
+
+        return uefn_growth()
+    except Exception:
+        return None
+
+
+def uefn_growth_line(rows: list[dict[str, Any]]) -> str:
+    """When UEFN is the biggest user and grew past ``uefn_memory_growth_limit_gb`` since its
+    island loaded: the sentence saying so and the fix; '' otherwise."""
+    if not rows or not str(rows[0].get("name") or "").lower().startswith("unrealeditor"):
+        return ""
+    growth = _uefn_growth() or {}
+    grown, limit = float(growth.get("grown_gb") or 0), float(growth.get("limit_gb") or 0)
+    if not limit or grown <= limit:
+        return ""
+    return f"UEFN grew {grown:.1f} GB since the island loaded: save and restart UEFN to get it back."
+
+
+def ram_text(free: float, total: Any) -> str:
+    """'Low RAM: 0.3 GB of 16 GB free' (the total left out when unknown)."""
+    try:
+        total_gb = float(total)
+    except (TypeError, ValueError):
+        total_gb = 0.0
+    return f"Low RAM: {free:.1f} GB of {total_gb:.0f} GB free" if total_gb > 0 else f"Low RAM: {free:.1f} GB free"
+
+
+def describe(free: float, total: Any, *, freed: dict[str, Any] | None = None, falling: bool = False,
+             rows: list[dict[str, Any]] | None = None) -> str:
+    """The real cause in one paragraph: 'Low RAM: 0.6 GB of 16 GB free. Ducky already freed 1.4 GB
+    (…). Biggest users: UnrealEditorFortnite 10.8 GB, … UEFN grew 6.2 GB since the island loaded:
+    save and restart UEFN to get it back.'"""
+    rows = biggest() if rows is None else rows
+    parts = [ram_text(free, total) + (" and falling fast." if falling else ".")]
+    if freed:
+        parts.append(_freed_text(freed).strip())
+    if rows:
+        parts.append(f"Biggest users: {_names(rows)}.")
+    parts.append(uefn_growth_line(rows))
+    return " ".join(p for p in parts if p)
 
 def _message_box(free_gb: float, names: str) -> str:
     import ctypes
@@ -167,13 +221,13 @@ def _free_own_leftovers(beat: dict[str, Any], now: float) -> dict[str, Any]:
 
 
 def _freed_text(freed: dict[str, Any]) -> str:
-    """'Ducky freed 1.4 GB (2 leftover bridges, 3 idle terminals). ', or '' when it freed nothing."""
+    """'Ducky already freed 1.4 GB (2 leftover bridges, 3 idle terminals). ', or '' when it freed nothing."""
     did = [str(d) for d in freed.get("did") or []]
     mb = float(freed.get("freed_mb") or 0)
     if not did and mb < 50:
         return ""
     amount = f" {mb / 1024:.1f} GB" if mb >= 50 else ""
-    return f"Ducky freed{amount}" + (f" ({', '.join(did)})" if did else "") + ". "
+    return f"Ducky already freed{amount}" + (f" ({', '.join(did)})" if did else "") + ". "
 
 
 def on_heartbeat(beat: dict[str, Any]) -> None:
@@ -213,22 +267,19 @@ def on_heartbeat(beat: dict[str, Any]) -> None:
     _last_warn = now
     if critical:
         _last_alert = now
-    names = biggest_programs()
-    using = f" {_freed_text(freed).strip()}" if _freed_text(freed) else ""
-    using += f" Using the most: {names}." if names else ""
+    cause = describe(float(free), beat.get("total_gb"), freed=freed, falling=dropped and not critical)
     from frontend import notifications
 
     if critical:
         notifications.alert(
-            "UEFN Ducky", "Your PC is almost out of memory.", level="error",
-            detail=(f"{free:.1f} GB free.{using} Save your work in UEFN now, and close a program you "
+            "UEFN Ducky", "Your PC is almost out of RAM.", level="error",
+            detail=(f"{cause} Save your work in UEFN now, and close a program you "
                     "don't need, or Ducky may close by itself."),
         )
     else:
-        why = " and falling fast" if dropped else ""
         notifications.alert(
-            "UEFN Ducky", "Your PC is running low on memory.", level="error",
-            detail=(f"{free:.1f} GB free{why}.{using} Save your work in UEFN, and close a program you "
-                    "don't need before memory runs out."),
+            "UEFN Ducky", "Your PC is running low on RAM.", level="error",
+            detail=(f"{cause} Save your work in UEFN, and close a program you "
+                    "don't need before RAM runs out."),
         )
     _count_warning(float(free))

@@ -18,6 +18,7 @@ def uefn(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
     state = {"proc": (100, 5.0, 21 * GB)}
     monkeypatch.setattr(editor_gateway, "_uefn_memory", lambda: state["proc"])
     monkeypatch.setattr(editor_gateway, "_pc_free_bytes", lambda: 32 * GB)
+    monkeypatch.setattr(editor_gateway, "_pc_total_bytes", lambda: 64 * GB)
     monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
     monkeypatch.setattr(editor_gateway, "_lease_path", lambda: tmp_path / "editor_lease.json")
     import frontend.duckyos_account as account
@@ -58,10 +59,11 @@ def test_lowering_the_limit_refuses_the_next_heavy_call(uefn, monkeypatch, backe
     ran: list[str] = []
     with pytest.raises(
         editor_gateway.EditorMemoryLow,
-        match=r"UEFN grew 0\.3 GB since the island loaded \(limit 0\.1 GB, PC free 32\.0 GB\): save and restart UEFN",
+        match=r"UEFN grew 0\.3 GB since the island loaded \(limit 0\.1 GB, RAM 32\.0 GB of 64 GB free\): save and restart UEFN",
     ):
         editor_gateway.call("", "compile_verse", True, lambda: ran.append("x"))
     assert ran == []
+    assert editor_gateway.uefn_growth() == {"grown_gb": 0.3, "limit_gb": 0.1}
 
     assert "error" not in _set({"uefn_memory_growth_limit_gb": 8})
     assert editor_gateway.call("", "compile_verse", True, lambda: "built") == "built"

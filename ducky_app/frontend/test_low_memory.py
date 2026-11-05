@@ -44,6 +44,8 @@ def pc(monkeypatch):
     monkeypatch.setattr(low_memory, "_last_warn", 0.0)
     monkeypatch.setattr(low_memory, "_last_freed", 0.0)
     monkeypatch.setattr(low_memory, "_freed_this_spell", False)
+    state["growth"] = None
+    monkeypatch.setattr(low_memory, "_uefn_growth", lambda: state["growth"])
     monkeypatch.setattr("frontend.self_health.free_ducky_memory",
                         lambda beat=None: state["freed"].append(beat) or dict(state["frees"]))
     monkeypatch.setattr(low_memory, "_recent", low_memory.deque())
@@ -101,7 +103,8 @@ def test_1_1_gb_free_on_16_gb_warns_and_says_to_save_in_uefn(pc) -> None:
     _beat(pc, 1.1)
     assert len(pc["alerts"]) == 1
     (title, status), extra = pc["alerts"][0]
-    assert status == "Your PC is running low on memory."
+    assert status == "Your PC is running low on RAM."
+    assert extra["detail"].startswith("Low RAM: 1.1 GB of 16 GB free. Biggest users: " + NAMES + ".")
     assert NAMES in extra["detail"] and "Save your work in UEFN" in extra["detail"]
     assert pc["events"] == [("low_memory.warned", {"free": "under_1_5gb"})]
 
@@ -140,7 +143,7 @@ def test_critical_still_fires_inside_the_ten_minutes(pc) -> None:
     _beat(pc, 0.5, after_s=60)
     assert len(pc["alerts"]) == 2
     (_, status), extra = pc["alerts"][1]
-    assert status == "Your PC is almost out of memory." and "Save your work in UEFN now" in extra["detail"]
+    assert status == "Your PC is almost out of RAM." and "Save your work in UEFN now" in extra["detail"]
     assert pc["events"][-1] == ("low_memory.warned", {"free": "under_1gb"})
 
 
@@ -150,7 +153,7 @@ def test_a_running_ducky_raises_one_critical_alert_per_half_hour_while_the_pc_is
     _beat(pc, 0.3, after_s=60)
     assert len(pc["alerts"]) == 1
     (title, status), extra = pc["alerts"][0]
-    assert status == "Your PC is almost out of memory." and "chrome 6.2 GB" in extra["detail"]
+    assert status == "Your PC is almost out of RAM." and "chrome 6.2 GB" in extra["detail"]
     _beat(pc, 0.3, after_s=low_memory.RUN_EVERY_S)
     assert len(pc["alerts"]) == 2
 
@@ -180,7 +183,23 @@ def test_the_alert_says_what_ducky_already_freed(pc) -> None:
     pc["free"] = [1.1]
     _beat(pc, 0.4)
     assert len(pc["alerts"]) == 1
-    assert "Ducky freed 1.4 GB (2 leftover bridges, 3 idle terminals)." in pc["alerts"][0][1]["detail"]
+    assert pc["alerts"][0][1]["detail"].startswith(
+        "Low RAM: 1.1 GB of 16 GB free. Ducky already freed 1.4 GB (2 leftover bridges, 3 idle terminals). "
+        "Biggest users: ")
+
+
+def test_a_grown_uefn_on_top_adds_the_restart_line_and_a_fresh_one_does_not(pc) -> None:
+    top = [{"name": "UnrealEditorFortnite", "gb": 10.8}, {"name": "chrome", "gb": 3.2},
+           {"name": low_memory.DUCKY_LABEL, "gb": 0.9}]
+    pc["growth"] = {"grown_gb": 6.2, "limit_gb": 4.0}
+    text = low_memory.describe(0.6, 16, rows=top, freed={"freed_mb": 1434.0, "did": []})
+    assert text == ("Low RAM: 0.6 GB of 16 GB free. Ducky already freed 1.4 GB. Biggest users: "
+                    "UnrealEditorFortnite 10.8 GB, chrome 3.2 GB, UEFN Ducky + agents 0.9 GB. "
+                    "UEFN grew 6.2 GB since the island loaded: save and restart UEFN to get it back.")
+    pc["growth"] = {"grown_gb": 0.4, "limit_gb": 4.0}  # a fresh UEFN
+    assert "restart UEFN" not in low_memory.describe(0.6, 16, rows=top)
+    pc["growth"] = {"grown_gb": 6.2, "limit_gb": 4.0}  # grown, but chrome is the biggest user
+    assert "restart UEFN" not in low_memory.describe(0.6, 16, rows=top[1:])
 
 
 def test_the_usage_event_carries_only_the_free_memory_bucket() -> None:
