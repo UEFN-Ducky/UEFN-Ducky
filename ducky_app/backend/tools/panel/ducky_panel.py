@@ -2584,9 +2584,12 @@ def ducky_update_plan(
     merge: bool = True,
     status: str = "",
     chat_id: str = "",
+    reason: str = "",
     pretty: bool = False,
 ) -> str:
     """Update the active chat Plan outline/body.
+
+    Closing a plan (status="finished") X's its open steps; pass reason= to say why.
 
     Field roles: ``overview`` = short summary only; ``body_markdown`` = description;
     ``nodes`` = JSON array tree (never stringify nodes into overview).
@@ -2604,18 +2607,23 @@ def ducky_update_plan(
     cid = _resolve_plan_chat_id(chat_id)
     if not cid:
         return tool_json({"ok": False, "error": "chat_id required (no active conversation)"}, pretty=pretty)
+    fields: dict[str, Any] = dict(
+        title=title if title else None,
+        overview=overview if overview else None,
+        body_markdown=body_markdown if body_markdown else None,
+        nodes=nodes,
+        todos=todos,
+        merge=merge,
+        status=status if status else None,
+        project_root=_project_root(),
+    )
     try:
-        plan = update_plan(
-            cid,
-            title=title if title else None,
-            overview=overview if overview else None,
-            body_markdown=body_markdown if body_markdown else None,
-            nodes=nodes,
-            todos=todos,
-            merge=merge,
-            status=status if status else None,
-            project_root=_project_root(),
-        )
+        try:
+            plan = update_plan(cid, **fields, **({"reason": reason.strip()} if reason.strip() else {}))
+        except TypeError as exc:  # a plans module without reason= closes the plan without one
+            if "reason" not in str(exc):
+                raise
+            plan = update_plan(cid, **fields)
     except ValueError as exc:
         return tool_json({"ok": False, "error": str(exc)}, pretty=pretty)
     push_plan_updated(plan)
