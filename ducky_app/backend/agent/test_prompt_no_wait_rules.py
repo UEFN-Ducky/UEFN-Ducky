@@ -49,6 +49,29 @@ def test_chat_prompt_team_rules_never_wait() -> None:
     assert "final test phase" in body
 
 
+def _bootstrap() -> str:
+    from backend.agent.coding_agents.mcp_inject import bootstrap_system_prompt
+
+    return bootstrap_system_prompt(project_root="", conv_id="chat-under-test")
+
+
+def test_coding_agent_bootstrap_never_waits() -> None:
+    # Claude Code / Codex members read the bootstrap prompt, not prompt.py.
+    text = _bootstrap()
+    assert "Never wait on another agent: each member works in its own `sandbox_worktree` of main." in text
+    assert "No branches: push to main" in text
+    assert "`git push origin HEAD:main`" in text
+    assert "Build points run no test suites, builds or live panels" in text
+    assert "final test phase" in text
+
+
+def test_coding_agent_bootstrap_has_no_turn_taking_text() -> None:
+    lowered = _bootstrap().lower()
+    # "waiting for the UEFN listener" (desktop plugins) is about the editor, not agents.
+    for phrase in (p for p in OLD_PHRASES if p != "Waiting for"):
+        assert phrase.lower() not in lowered, phrase
+
+
 @pytest.mark.parametrize("local_slim", [False, True])
 def test_no_turn_taking_text_left(local_slim: bool) -> None:
     text = _rules_body(18765, local_slim=local_slim) + AGENT_HARD_RULES

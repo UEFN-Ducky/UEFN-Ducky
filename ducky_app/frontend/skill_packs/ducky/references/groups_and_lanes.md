@@ -58,7 +58,11 @@ related jobs nest into `<Area>: <purpose>` sub-groups (Modeling + Texture → `A
 at most 3 levels deep. Tester and Reviewer stay directly under the lead. Seats are named by
 role (`Verse lead`, `Tester`). Every sub-group starts muted; the person can unmute any.
 
-Each point's Done when ends with: the change and its tests pass; commit your files and push.
+Each build point's Done when ends with: the change and its tests are written; commit your
+files in your own `sandbox_worktree` of `main` and push to main (no branches:
+`git pull --rebase origin main`, then `git push origin HEAD:main`). Build points run no
+test suites, builds or live panels and never wait on another agent; the plan's last section
+is a test phase whose `after` lists every build step, and it runs everything once.
 
 A new plan with 3+ sections or 10+ steps whose Files don't overlap comes back with a
 `swarm_suggestion`: offer it with one `ducky_ask_user` ("Run this as a swarm of N?") instead

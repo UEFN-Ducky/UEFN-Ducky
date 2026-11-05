@@ -132,8 +132,12 @@ a profile) and writes ONE main plan with one sub plan per member: a section
 assigned to that member's chat (or group) id, its points inside. Assigning a sub plan starts its member: Ducky sends it the
 whole sub plan as one task, and starts it again when its turn ends with points
 left (twice, then it waits for the plan to move). Members work alone, on the
-code, and send no messages (Ducky refuses them). A point is done when its change
-is made and its tests pass; checks the member's tools can't do (change-ledger
+code, and send no messages (Ducky refuses them). Never wait on another agent:
+each member works in its own `sandbox_worktree` of `main`. No branches: push to
+main (`git pull --rebase origin main`, then `git push origin HEAD:main`). Build
+points run no test suites, builds or live panels; one final test phase, whose
+`after` lists every build step, runs everything once. A build point is done when
+its change and its tests are written, committed and pushed; checks the member's tools can't do (change-ledger
 read-backs, live panel captures, the person's own files) go in the point's notes
 and the point is ticked anyway. Only when the code itself can't go on does a
 member end its turn with one line `BLOCKED: <what it needs>`; the lead is told
