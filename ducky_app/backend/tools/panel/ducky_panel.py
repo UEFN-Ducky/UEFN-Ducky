@@ -2513,10 +2513,10 @@ def ducky_create_plan(
     Finish every assignment: completed, or cancelled with the reason; set notes
     (body_markdown) and status in one call, preserving original notes. A section
     completes itself when its last step does, so put your result in that step's
-    notes; never tick or annotate the finished section. Notes,
-    status and owner are bookkeeping allowed while playing; finished steps stay
-    frozen. Content, moving and deleting steps require a pause; adding a step does
-    not. Assigning a sub plan starts its member: Ducky sends it the task, starts it again
+    notes; never tick or annotate the finished section. The lead can edit, move,
+    delete, X or reopen any step, or the whole plan, at any time. A member can do the
+    same for the steps in its own sub plan. X a step with status="cancelled" and a
+    reason; X'd steps leave the total. Assigning a sub plan starts its member: Ducky sends it the task, starts it again
     when a turn ends with points left, and tells the lead when the sub plan is finished
     (with its notes) or the member ends with "BLOCKED: ...". Nobody dispatches by message.
     A team works in ONE plan, its lead's: members never create their own. Members tick
