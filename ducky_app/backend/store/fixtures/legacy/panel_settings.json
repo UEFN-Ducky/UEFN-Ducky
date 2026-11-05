@@ -40,7 +40,7 @@
  "memory_keep_last_messages": 20,
  "memory_compress_messages": 40,
  "memory_compress_tokens": 80000,
- "memory_index_max_chars": 2500,
+ "memory_index_max_chars": 8000,
  "memory_summary_model": "",
  "chat_auto_title": true,
  "chat_title_model": "",

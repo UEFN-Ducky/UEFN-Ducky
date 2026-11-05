@@ -135,6 +135,17 @@ def test_memory_settings_round_trip(isolated_appdata):
     assert loaded.memory_summary_model == "openai:gpt-4o-mini"
 
 
+def test_memory_index_old_default_moves_to_new_default(isolated_appdata):
+    from frontend.settings import MEMORY_INDEX_DEFAULT_CHARS, PanelSettings
+
+    assert MEMORY_INDEX_DEFAULT_CHARS == 8_000
+    assert PanelSettings().memory_index_max_chars == 8_000  # fresh install
+    s = PanelSettings.load()
+    s.memory_index_max_chars = 2_500  # the old default, saved by an older build
+    s.save()
+    assert PanelSettings.load().memory_index_max_chars == 8_000
+
+
 def test_epoch_hysteresis_and_append_only_head(isolated_appdata, tmp_path, monkeypatch):
     from backend.agent.context_memory import (
         CONTEXT_MEMORY_PREFIX,

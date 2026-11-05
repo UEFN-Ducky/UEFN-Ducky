@@ -97,6 +97,9 @@ def _settings_use_db() -> bool:
 # raises StoreError for refusals; sqlite3 errors surface as OSError subclasses.
 _StoreUnavailable = (OSError, RuntimeError)
 
+MEMORY_INDEX_DEFAULT_CHARS = 8_000
+_OLD_MEMORY_INDEX_DEFAULT_CHARS = 2_500
+
 
 @dataclass
 class PanelSettings:
@@ -253,7 +256,7 @@ class PanelSettings:
     """Past this many context tokens an agent starts a fresh session between turns
     (handoff, then a new session in the same chat). 0 = 60% of the model's window."""
 
-    memory_index_max_chars: int = 2_500
+    memory_index_max_chars: int = MEMORY_INDEX_DEFAULT_CHARS
     """Max chars for the filtered project-memory index in the system prompt."""
 
     memory_summary_model: str = ""
@@ -600,7 +603,7 @@ class PanelSettings:
             or self.memory_keep_last_messages != 20
             or self.memory_compress_messages != 40
             or self.memory_compress_tokens != 80_000
-            or self.memory_index_max_chars != 2_500
+            or self.memory_index_max_chars != MEMORY_INDEX_DEFAULT_CHARS
             or self.video_max_mb != 100
             or self.video_frames_per_video != 0
             or self.max_images_per_message != 0
@@ -716,6 +719,12 @@ class PanelSettings:
             disabled_builtin_toolsets=disabled,
             hidden_bundled_agent_profile_ids=hidden,
             follow_code_enabled=False if off else raw.follow_code_enabled,
+            # The old default (2,500) held about 6 entries: a saved 2,500 counts as unset.
+            memory_index_max_chars=(
+                MEMORY_INDEX_DEFAULT_CHARS
+                if raw.memory_index_max_chars == _OLD_MEMORY_INDEX_DEFAULT_CHARS
+                else raw.memory_index_max_chars
+            ),
             # The migrated flag rides along on the next real save(). Saving here made
             # load() a writer: a background thread loading a stale file could then
             # overwrite a newer save from another thread (lost update; seen with

@@ -24,7 +24,7 @@ const DEFAULT_MEM_SETTINGS: MemorySettingsDto = {
   memory_keep_last_messages: 20,
   memory_compress_messages: 40,
   memory_compress_tokens: 80_000,
-  memory_index_max_chars: 2_500,
+  memory_index_max_chars: 8_000,
   memory_summary_model: "",
   index_est_tokens: 0,
 };
@@ -327,7 +327,7 @@ export function MemoryTab({ sectionTab = "entries" }: MemoryTabProps) {
                   onChange={(e) =>
                     setMemSettings((prev) => ({
                       ...prev,
-                      memory_index_max_chars: Number(e.target.value) || 2500,
+                      memory_index_max_chars: Number(e.target.value) || 8000,
                     }))
                   }
                   onBlur={() =>

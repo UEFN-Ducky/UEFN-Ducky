@@ -69,7 +69,7 @@ class PanelApiSettingsMixin:
             "memory_keep_last_messages": int(s.memory_keep_last_messages or 20),
             "memory_compress_messages": int(s.memory_compress_messages or 40),
             "memory_compress_tokens": int(s.memory_compress_tokens or 80_000),
-            "memory_index_max_chars": int(s.memory_index_max_chars or 2_500),
+            "memory_index_max_chars": int(s.memory_index_max_chars or 8_000),
             "memory_summary_model": s.memory_summary_model or "",
             "chat_auto_title": bool(getattr(s, "chat_auto_title", True)),
             "chat_mentions_enabled": bool(getattr(s, "chat_mentions_enabled", True)),
@@ -629,7 +629,7 @@ class PanelApiSettingsMixin:
             try:
                 s.memory_index_max_chars = max(200, min(20_000, int(patch.get("memory_index_max_chars"))))
             except (TypeError, ValueError):
-                s.memory_index_max_chars = 2_500
+                s.memory_index_max_chars = 8_000
         if "memory_summary_model" in patch:
             s.memory_summary_model = str(patch.get("memory_summary_model") or "").strip()
         if "chat_auto_title" in patch:
@@ -1538,7 +1538,7 @@ class PanelApiSettingsMixin:
         from backend.memory.project import index_markdown
 
         s = _pa.PanelSettings.load()
-        index = index_markdown(s.uefn_project_root, max_chars=int(s.memory_index_max_chars or 2_500))
+        index = index_markdown(s.uefn_project_root, max_chars=int(s.memory_index_max_chars or 8_000))
         return {
             "ok": True,
             "memory_auto_compress": bool(s.memory_auto_compress),
@@ -1546,7 +1546,7 @@ class PanelApiSettingsMixin:
             "memory_keep_last_messages": int(s.memory_keep_last_messages or 20),
             "memory_compress_messages": int(s.memory_compress_messages or 40),
             "memory_compress_tokens": int(s.memory_compress_tokens or 80_000),
-            "memory_index_max_chars": int(s.memory_index_max_chars or 2_500),
+            "memory_index_max_chars": int(s.memory_index_max_chars or 8_000),
             "memory_summary_model": s.memory_summary_model or "",
             "index_est_tokens": estimate_tokens(index),
             "index_chars": len(index),
