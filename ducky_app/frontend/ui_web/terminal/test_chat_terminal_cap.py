@@ -285,6 +285,22 @@ def test_close_chat_terminals_kills_a_hung_child_and_keeps_the_rest(mgr, tmp_pat
     assert mgr.close_chat_terminals([]) == []
 
 
+def test_an_archived_chats_terminals_all_close_even_a_running_one(mgr, tmp_path):
+    # Nov 5 2026: an archived seat's sandbox kept a 5-minute port probe running.
+    probe = _open(mgr, tmp_path, "archived-seat")["session_id"]
+    server = _open(mgr, tmp_path, "archived-seat")["session_id"]
+    asking = _open(mgr, tmp_path, "archived-seat")["session_id"]
+    mgr.running[mgr.get_session(probe)._pty.pid] = [9999]  # still printing
+    shell = mgr.get_session(server)
+    shell.ran_background = True
+    mgr.running[shell._pty.pid] = [9998]
+    mgr.request_command(asking, "npm test", conv_id="archived-seat")
+    now = mgr.get_session(probe).last_activity + 1
+    assert mgr.close_chat_terminals(["archived-seat"], now=now) == []
+    assert sorted(mgr.close_chat_terminals(["archived-seat"], now=now, force=True)) == sorted([probe, server])
+    assert asking in mgr._sessions  # an Allow card still waits on the person
+
+
 def test_a_sandbox_reuses_its_own_shell_and_never_a_plain_one(mgr, tmp_path):
     # Oct 23 2026: shells opened with their own environment were never reused, so each
     # sandbox_run started a new PowerShell (5 of them, 555 MB, after one live test).

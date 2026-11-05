@@ -931,3 +931,39 @@ def test_the_last_reply_falls_back_to_the_chat_without_the_row_store(monkeypatch
     conv = SimpleNamespace(messages=[{"role": "assistant", "content": "done"}, {"role": "assistant", "content": " "}])
     monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, **kw: conv)
     assert keeper._last_reply("m") == ("done", 2)
+
+
+_REAL_MEMBER_CHAT = keeper._member_chat  # taken at import, before _world stands in for it
+
+
+def _archive_world(monkeypatch, archived: set[str]):
+    from types import SimpleNamespace
+
+    from frontend.ui_web.chats import conversations as chat_convs
+
+    convs = {
+        "builder": SimpleNamespace(id="builder", folder_id="archive" if "builder" in archived else ""),
+        "team": SimpleNamespace(id="team", is_group=True, leader_conv_id="builder", folder_id=""),
+    }
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, **kw: convs.get(cid))
+    monkeypatch.setattr(keeper, "_member_chat", _REAL_MEMBER_CHAT)
+
+
+def test_an_archived_member_or_groups_archived_leader_is_never_woken(monkeypatch) -> None:
+    # Nov 5 2026: the person archived a seat and the keeper kept starting it on its open points.
+    _archive_world(monkeypatch, {"builder"})
+    assert keeper._member_chat("builder", None) == ""
+    assert keeper._member_chat("team", None) == ""
+    monkeypatch.setattr(keeper, "_team_context", lambda plan, **_: ({"builder", "builder2"}, ""))
+    monkeypatch.setattr("backend.agent.a2a_broker.automatic_work_blocked", lambda cid, **kw: False)
+    woke: list[tuple[str, str]] = []
+    for minute in range(0, 10):
+        _run(minute * MIN, [], woke, plans=[SUB])
+    assert "builder" not in [cid for cid, _ in woke]
+
+
+def test_a_live_member_is_still_woken(monkeypatch) -> None:
+    _archive_world(monkeypatch, set())
+    assert keeper._member_chat("builder", None) == "builder"
+    assert keeper._member_chat("team", None) == "builder"
+    assert not keeper._archived("builder", None)

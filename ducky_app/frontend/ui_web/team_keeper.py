@@ -138,7 +138,22 @@ def _person_only(plan: dict[str, Any]) -> bool:
     lead = str(plan.get("chat_id") or "")
     blocked = {st.get("owner") for st in _members.values() if st.get("lead") == lead and st.get("blocked")}
     owners = [owner for _, owner, _ in _open_leaves(plan)]
-    return bool(owners) and all(owner.lower() in _PERSON or owner in blocked for owner in owners)
+    root = plan.get("project_root")
+    # An archived owner works nothing: its points wait on the person too.
+    return bool(owners) and all(owner.lower() in _PERSON or owner in blocked or _archived(owner, root)
+                                for owner in owners)
+
+
+def _archived(owner: str, project_root: str | None) -> bool:
+    """The owner's chat or group is in Archive (a missing one is not: it may still be loading)."""
+    from frontend.archive_folder import is_archive_folder_id
+    from frontend.ui_web.chats.conversations import load_conversation
+
+    try:
+        conv = load_conversation(owner, project_root=project_root) if owner else None
+    except Exception:
+        return False
+    return conv is not None and is_archive_folder_id(str(getattr(conv, "folder_id", "") or ""))
 
 
 def _moves(plan: dict[str, Any]) -> str:
@@ -549,17 +564,27 @@ def _open_leaves_by_member(plan: dict[str, Any]) -> dict[str, list[dict[str, Any
 
 
 def _member_chat(owner: str, project_root: str | None) -> str:
-    """The chat that works an owner's sub plan: the member, or the lead of an owning group."""
+    """The chat that works an owner's sub plan: the member, or the lead of an owning group.
+    "" when nobody does: an archived chat or group is not woken (Nov 5 2026: the keeper kept
+    starting an archived seat on its open load-test points)."""
+    from frontend.archive_folder import is_archive_folder_id
     from frontend.ui_web.chats.conversations import load_conversation
 
     try:
         conv = load_conversation(owner, project_root=project_root)
     except Exception:
         conv = None
-    if conv is None:
+    if conv is None or is_archive_folder_id(str(getattr(conv, "folder_id", "") or "")):
         return ""
     if getattr(conv, "is_group", False):
-        return str(getattr(conv, "leader_conv_id", "") or "").strip()
+        leader = str(getattr(conv, "leader_conv_id", "") or "").strip()
+        try:
+            lead_conv = load_conversation(leader, project_root=project_root) if leader else None
+        except Exception:
+            lead_conv = None
+        if lead_conv is not None and is_archive_folder_id(str(getattr(lead_conv, "folder_id", "") or "")):
+            return ""
+        return leader
     return owner
 
 

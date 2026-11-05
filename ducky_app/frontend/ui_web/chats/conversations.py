@@ -916,3 +916,7 @@ def move_conversation(conv_id: str, folder_id: str, project_root: str | None = N
             continue
         target.folder_id = target_folder
         _saves.save_conversation(target, project_root)
+    if archiving:
+        from frontend.ui_web.chats.archive_stop import stop_archived
+
+        stop_archived(ids)

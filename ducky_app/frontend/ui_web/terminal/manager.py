@@ -311,12 +311,13 @@ class TerminalManager:
                 closed.append(session.id)
         return closed
 
-    def close_chat_terminals(self, chat_ids: list[str] | set[str], *, now: float | None = None) -> list[str]:
+    def close_chat_terminals(self, chat_ids: list[str] | set[str], *, now: float | None = None,
+                             force: bool = False) -> list[str]:
         """Close every terminal these chats opened (team stop, archive, plan done), stuck
         children and all (the shell's tree is killed). Kept: one waiting on an Allow card, one
         whose background command still runs, and one whose command printed in the last
         ``_AGENT_IDLE_CLOSE_S`` (the idle reaper closes it once it is quiet). Each close sends
-        terminal_close."""
+        terminal_close. ``force`` (the chats were archived): only an Allow card keeps one."""
         ids = {str(c) for c in chat_ids or [] if c}
         if not ids:
             return []
@@ -327,11 +328,14 @@ class TerminalManager:
         snapshot = functools.cache(_process_snapshot)
         closed: list[str] = []
         for session in mine:
-            if session.id in asked or session.background_alive(snapshot):
+            if session.id in asked:
                 continue
-            recent = now - float(getattr(session, "last_activity", now)) < _AGENT_IDLE_CLOSE_S
-            if recent and session.has_running_command(snapshot):
-                continue
+            if not force:
+                if session.background_alive(snapshot):
+                    continue
+                recent = now - float(getattr(session, "last_activity", now)) < _AGENT_IDLE_CLOSE_S
+                if recent and session.has_running_command(snapshot):
+                    continue
             if self.kill(session.id).get("ok"):
                 closed.append(session.id)
         return closed

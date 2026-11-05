@@ -171,6 +171,9 @@ def _remove_folder(
             conv.folder_id = ARCHIVE_FOLDER_ID
             conv.parent_conv_id = outer_hub_of.get(conv.id, "")
             save_conversation(conv, project_root)
+    from frontend.ui_web.chats.archive_stop import stop_archived
+
+    stop_archived([*hub_ids, *(conv.id for conv in members)])
     return sorted(hub_ids)
 
 
