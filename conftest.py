@@ -111,6 +111,8 @@ _APP_NOISE_FILES = {
 # test that leaks still lands in the stores above (memory, settings, plugins, ...).
 _LIVE_PANEL_DIRS = {
     "chats", "crash", "locks", "logs", "sandboxes", "terminals", "agent_hosts", "webview", "verify-evidence",
+    # Live workflow runs' records: the release workflow rewrites its own while its test phase runs.
+    "workflow-runs",
 }
 _LIVE_PANEL_FILES = {"ducky.db", "run_durations.json", "editor_lease.json"}
 
