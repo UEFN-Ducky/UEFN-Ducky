@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-import frontend.ui_web.panel_api as _pa
-
 
 def _accounts_call(fn: Callable[[str], Any], provider: str) -> dict[str, Any]:
     """Run one accounts RPC: ``{ok: True, **result}`` or ``{ok: False, error}``."""
@@ -2183,3 +2181,5 @@ class PanelApiSettingsMixin:
             return
         except Exception as e:
             _pa.record_error("panel", f"Pull editor log failed: {e}")
+
+import frontend.ui_web.panel_api as _pa  # noqa: E402  last: panel_api imports this mixin (import cycle)
