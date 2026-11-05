@@ -8,6 +8,13 @@ import pytest
 from frontend.ui_web import panel_assets as pa
 
 
+@pytest.fixture(autouse=True)
+def stamp(tmp_path, monkeypatch):
+    path = tmp_path / "cache" / "panel-dist.stamp.json"
+    monkeypatch.setattr(pa, "_stamp_path", lambda: path)
+    return path
+
+
 @pytest.fixture
 def panel(tmp_path):
     root = tmp_path / "ui_web" / "web" / "dist"
@@ -91,6 +98,54 @@ def test_installer_check_never_accepts_missing_asset(panel, tmp_path, monkeypatc
     (destination / "web" / "dist" / "assets" / "lazy.js").unlink()
     assert pa.check_installed_panel(str(output)) == 1
     assert not json.loads(output.read_text())["ok"]
+
+
+def test_second_boot_skips_the_crc_when_nothing_changed(panel, stamp, monkeypatch):
+    root, archive = panel
+    assert pa.ensure_panel_dist(root) == root.resolve()
+    assert stamp.is_file()
+    monkeypatch.setattr(pa, "_matches", lambda *_a: pytest.fail("full CRC ran on an unchanged install"))
+    assert pa.ensure_panel_dist(root) == root.resolve()
+
+
+def test_rewritten_file_after_the_stamp_gets_the_full_check_and_recovers(panel, stamp):
+    root, archive = panel
+    assert pa.ensure_panel_dist(root) == root.resolve()
+    path = root / "assets" / "main.js"
+    expected = path.read_bytes()
+    path.write_bytes(b"x" * len(expected))  # same size, new mtime
+    recovered = pa.ensure_panel_dist(root)
+    assert recovered != root.resolve()
+    assert (recovered / "assets" / "main.js").read_bytes() == expected
+
+
+def test_missing_file_after_the_stamp_recovers(panel, stamp):
+    root, archive = panel
+    assert pa.ensure_panel_dist(root) == root.resolve()
+    (root / "assets" / "lazy.js").unlink()
+    recovered = pa.ensure_panel_dist(root)
+    assert (recovered / "assets" / "lazy.js").is_file()
+
+
+def test_new_archive_invalidates_the_stamp(panel, stamp, monkeypatch):
+    root, archive = panel
+    assert pa.ensure_panel_dist(root) == root.resolve()
+    pa.create_panel_archive(root, archive)  # an update ships a new archive
+    calls = []
+    original = pa._matches
+    monkeypatch.setattr(pa, "_matches", lambda *a: calls.append(1) or original(*a))
+    assert pa.ensure_panel_dist(root) == root.resolve()
+    assert calls == [1]
+
+
+def test_release_gate_always_runs_the_full_crc(panel, stamp, monkeypatch):
+    root, archive = panel
+    assert pa.ensure_panel_dist(root) == root.resolve()
+    calls = []
+    original = pa._matches
+    monkeypatch.setattr(pa, "_matches", lambda *a: calls.append(1) or original(*a))
+    pa.verify_bundled_panel(root, archive)
+    assert calls == [1]
 
 
 def test_corrupt_archive_is_not_used_for_recovery(panel):

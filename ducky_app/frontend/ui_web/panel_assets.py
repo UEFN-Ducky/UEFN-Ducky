@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import hashlib
 import json
 import logging
 import shutil
@@ -61,6 +62,56 @@ def _matches(root: Path, entries: list[zipfile.ZipInfo]) -> bool:
     return True
 
 
+def _stamp_path() -> Path | None:
+    try:
+        from frontend.settings import default_app_data_dir
+
+        return default_app_data_dir() / "cache" / "panel-dist.stamp.json"
+    except Exception:
+        return None
+
+
+def _stamp_key(root: Path, archive: Path, entries: list[zipfile.ZipInfo]) -> dict[str, object] | None:
+    """What the last full CRC check saw: the archive, plus every installed file's size and mtime.
+
+    Any file rewritten, removed or resized since then changes the digest, so the next boot
+    falls back to the full CRC check (and recovery). Never raises: None means no stamp.
+    """
+    try:
+        st = archive.stat()
+        files = hashlib.sha1()
+        for entry in entries:
+            fs = (root / entry.filename).stat()
+            files.update(f"{entry.filename}\0{fs.st_size}\0{fs.st_mtime_ns}\0{entry.CRC}\n".encode())
+        return {"root": str(root), "archive": str(archive.resolve()), "size": st.st_size,
+                "mtime_ns": st.st_mtime_ns, "entries": len(entries), "files": files.hexdigest()}
+    except OSError:
+        return None
+
+
+def _stamp_matches(key: dict[str, object] | None) -> bool:
+    path = _stamp_path()
+    if key is None or path is None:
+        return False
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) == key
+    except (OSError, ValueError):
+        return False
+
+
+def _write_stamp(key: dict[str, object] | None) -> None:
+    path = _stamp_path()
+    if key is None or path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(key), encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
+
+
 def verify_bundled_panel(root: Path, archive: Path) -> None:
     """Release gate: every installed file must match the recovery archive."""
     from frontend.ui_web.panel_httpd import verify_panel_dist
@@ -105,8 +156,15 @@ def ensure_panel_dist(root: Path, archive: Path | None = None) -> Path:
             return Path(_recovered[root].name)
         with zipfile.ZipFile(archive) as bundle:
             entries = _entries(bundle)
+            # Boot path: the full CRC of ~20 MB cost ~0.16 s every start. Skip it when nothing
+            # installed changed since the last full check (verify_bundled_panel keeps the CRC).
+            key = _stamp_key(root, archive, entries)
+            if _stamp_matches(key):
+                verify_panel_dist(root)
+                return root
             if _matches(root, entries):
                 verify_panel_dist(root)
+                _write_stamp(key)
                 return root
             recovery = tempfile.TemporaryDirectory(prefix="uefn-ducky-panel-recovery-")
             recovered_root = Path(recovery.name)

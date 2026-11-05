@@ -333,7 +333,34 @@ def run() -> None:
         )
 
 
+# pywebview's WinForms/WebView2 backend loads pythonnet and the .NET WinForms and WebView2
+# assemblies at import (~0.4 s). Importing only defines classes (the window itself runs on
+# pywebview's own STA thread), so it can overlap the panel's own imports on a worker.
+_WEBVIEW_WARMUP_MODULES = ("webview", "webview.platforms.winforms")
+
+
+def _start_import_warmup(modules: tuple[str, ...] = _WEBVIEW_WARMUP_MODULES) -> threading.Thread:
+    """Import ``modules`` on a daemon thread; the caller joins it before using them.
+
+    A failed import is left for the main thread's own import to raise as before.
+    """
+    import importlib
+
+    def _warm() -> None:
+        for name in modules:
+            try:
+                importlib.import_module(name)
+            except BaseException:
+                logging.getLogger(__name__).debug("warm-up import of %s failed", name, exc_info=True)
+                return
+
+    thread = threading.Thread(target=_warm, daemon=True, name="webview-import-warmup")
+    thread.start()
+    return thread
+
+
 def _run_panel(api_holder: dict[str, object]) -> None:
+    webview_warmup = _start_import_warmup() if sys.platform == "win32" else None
     from backend.workspace.diff_workers import enable as enable_diff_workers
 
     enable_diff_workers()
@@ -356,14 +383,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         ship_newest_everywhere_async(apply_ides=True, force_skills=False)
         start_appdata_maintenance_async()
         try:
-            # UEFN's Verse-error popups on project open get answered (Skip Rebuild → Continue),
-            # so an agent or workflow waiting for UEFN never sits behind them.
-            from backend.tools.core.uefn_popups import start_popup_guard
-
-            start_popup_guard()
-        except Exception:
-            pass
-        try:
             from frontend.perf_trace import ensure_started
 
             ensure_started()
@@ -371,6 +390,16 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             pass
 
         def _startup_bg() -> None:
+            try:
+                # UEFN's Verse-error popups on project open get answered (Skip Rebuild → Continue),
+                # so an agent or workflow waiting for UEFN never sits behind them. Off the main
+                # thread: importing backend.tools.core registers every MCP tool (~0.6 s before
+                # the window could open).
+                from backend.tools.core.uefn_popups import start_popup_guard
+
+                start_popup_guard()
+            except Exception:
+                pass
             try:
                 from frontend.settings import PanelSettings, apply_workspace_env
                 from frontend.ui_web.project_files import purge_undo_trash
@@ -447,6 +476,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     _allow_screencast_without_gesture()
 
     t_webview = time.perf_counter()
+    if webview_warmup is not None:
+        webview_warmup.join(timeout=30)
     import tkinter as tk
     import webview
 
