@@ -581,7 +581,8 @@ def files_in(body: str) -> list[str]:
         return []
     text = re.sub(r"\([^)]*\)", "", m.group(1))
     ticks = re.findall(r"`([^`]+)`", text)
-    items = [t.strip() for t in ticks] if ticks else [p.strip(" .*") for p in re.split(r",|;|\band\b", text)]
+    # Globs keep their stars: stripping '*' turned 'plugin-meshy/**' into 'plugin-meshy/'.
+    items = [t.strip() for t in ticks] if ticks else [p.strip(" .") for p in re.split(r",|;|\band\b", text)]
     return [p for p in items if p]
 
 

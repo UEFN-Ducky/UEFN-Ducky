@@ -300,6 +300,8 @@ def _fake_build(pub, tmp_path, monkeypatch):
         return Done()
 
     monkeypatch.setattr(pub.subprocess, "run", run)
+    # build_setup asks tasklist whether UEFN is open; the fake run above has no stdout.
+    monkeypatch.setattr(pub, "uefn_open", lambda names=None: False)
     return calls
 
 

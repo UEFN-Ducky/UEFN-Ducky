@@ -31,14 +31,14 @@ def test_notes_and_tick_while_playing_freeze_finished_nodes(team, notices, statu
         assert "Builder" in notices[0]["body"] and notes in notices[0]["body"]
     plans.save_plan(doc, project_root=team)
     assert len(notices) == told
-    for kwargs in ({"body_markdown": "overwrite"}, {"status": "pending"}, {"assignee": "builder"}):
-        with pytest.raises(ValueError):
-            plans.update_node("coord", "a1", project_root=team, **kwargs)
+    # Nov 5 2026: finished steps are no longer frozen; the member rewrites and reopens its own.
+    doc = plans.update_node("coord", "a1", body_markdown="overwrite", project_root=team)
+    assert plans._walk_find(doc["nodes"], "a1")[2]["body_markdown"] == "overwrite"
+    doc = plans.update_node("coord", "a1", status="pending", project_root=team)
+    assert plans._walk_find(doc["nodes"], "a1")[2]["status"] == "pending"
     # An unstarted step is reworded while the plan plays.
     doc = plans.update_node("coord", "a2", content="structural change", project_root=team)
     assert plans._walk_find(doc["nodes"], "a2")[2]["content"] == "structural change"
-    with pytest.raises(ValueError):
-        plans.add_node("coord", content="under a finished step", parent_id="a1", project_root=team)
     plans.add_node("coord", content="new step", project_root=team)  # adding needs no pause
 
 
@@ -216,9 +216,10 @@ def test_report_retries_stop_once_the_members_steps_are_finished(team, notices, 
     assert a2a_broker._plan_work_done("coord", "outsider") is False  # owns nothing in this plan
 
 
-def test_the_last_tick_says_the_section_closed_itself_and_its_note_is_refused_clearly(team, notices, monkeypatch):
+def test_the_last_tick_says_the_section_closed_itself_and_its_note_still_lands(team, notices, monkeypatch):
     # Oct 10 2026: writers finished their step, then tried to annotate the section that had
-    # already closed itself and got a bare refusal: one wasted call each.
+    # already closed itself and got a bare refusal: one wasted call each. Nov 5 2026: nothing
+    # is frozen any more, so that note is kept.
     import json as _json
 
     from backend.tools.panel import ducky_panel
@@ -230,8 +231,9 @@ def test_the_last_tick_says_the_section_closed_itself_and_its_note_is_refused_cl
     last = _json.loads(ducky_panel.ducky_plan_update_node(node_id="a2", status="completed", chat_id="coord"))
     assert last["sections_completed"] == ["a"]
     assert "completed itself with this step" in last["note"]
-    refused = _json.loads(ducky_panel.ducky_plan_update_node(node_id="a", body_markdown="Done.", chat_id="coord"))
-    assert refused["ok"] is False and "completed itself when its last step did" in refused["error"]
+    noted = _json.loads(ducky_panel.ducky_plan_update_node(node_id="a", body_markdown="Done.", chat_id="coord"))
+    assert noted["ok"] is not False
+    assert plans._walk_find(plans.load_plan("coord", project_root=team)["nodes"], "a")[2]["body_markdown"] == "Done."
 
 
 def test_a_lead_changes_the_plan_instead_of_messaging_a_working_member(monkeypatch):

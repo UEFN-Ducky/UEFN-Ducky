@@ -36,7 +36,7 @@ _MAIN_FILE = "MEMORY.md"
 _PRIVATE_AUTHOR_PREFIX = "private:"
 
 
-def _is_true(value: Any) -> bool:
+def is_true(value: Any) -> bool:
     return str(value or "").strip().lower() in ("true", "yes", "1")
 
 
@@ -186,7 +186,7 @@ def _read_meta(path: Path, fallback_name: str) -> dict[str, Any] | None:
         "name": meta.get("name") or fallback_name,
         "description": meta.get("description") or _default_description(body),
         "author": meta.get("author") or "",
-        "private": _is_true(meta.get("private")),
+        "private": is_true(meta.get("private")),
         "updated": meta.get("updated") or "",
         "chars": len(body),
     }
@@ -295,7 +295,7 @@ def read_entry(name: str, project_root: str = "") -> dict[str, Any] | None:
             "name": f"{entry}/{sub}",
             "description": meta.get("description") or _default_description(body),
             "author": meta.get("author") or "",
-            "private": _is_true(meta.get("private")),
+            "private": is_true(meta.get("private")),
             "updated": meta.get("updated") or "",
             "content": body,
             "path": str(path),
@@ -308,7 +308,7 @@ def read_entry(name: str, project_root: str = "") -> dict[str, Any] | None:
         "name": entry,
         "description": meta.get("description") or _default_description(body),
         "author": meta.get("author") or "",
-        "private": _is_true(meta.get("private")),
+        "private": is_true(meta.get("private")),
         "updated": meta.get("updated") or "",
         "content": body,
         "subs": [

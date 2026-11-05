@@ -578,7 +578,9 @@ def test_from_plan_seat_edits_set_profile_and_lane_and_unknown_edits_are_refused
         {"seat": "api", "profile": "tester"}])  # by section id
     seats = {s["name"]: s for s in sw.walk_seats(out["preview"]["tree"])}
     assert out["status"] == "needs_confirm" and "warnings" not in out["preview"]
-    assert seats["Widget"]["profile"] == "reviewer" and seats["Widget"]["paths"] == [meshy]
+    # A from-plan seat works in its own worktree: unrestricted lane, its Files as files_hint.
+    assert seats["Widget"]["profile"] == "reviewer" and seats["Widget"]["paths"] == []
+    assert seats["Widget"]["files_hint"] == [meshy]
     assert seats["API"]["profile"] == "tester"
     assert f"Files: `{meshy}`" in api.plan["nodes"][1]["body_markdown"]
     # Sent straight with confirm=true they still land before the build.

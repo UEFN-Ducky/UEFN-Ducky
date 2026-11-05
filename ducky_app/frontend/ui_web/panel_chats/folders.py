@@ -264,9 +264,9 @@ def move_conversation(self, conv_id: str, folder_id: str) -> None:
                 _pa.cancel_agent(target_id)
     _pa.move_conversation(conv_id, folder_id or "", root)
     if not archiving:
-        from frontend.ui_web.panel_chats.groups import _sync_moves
+        from frontend.ui_web.panel_chats.groups import sync_moves
 
-        _sync_moves([conv_id], root=root)
+        sync_moves([conv_id], root=root)
     # Archived chats leave every open window's tree at once; a restore reloads them.
     _pa.notify_chats_changed(open_tab=False, removed_conv_ids=leaving)
 

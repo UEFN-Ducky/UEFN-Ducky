@@ -284,7 +284,7 @@ READ_COMMANDS: frozenset[str] = frozenset(
         "get_data_table_info", "get_data_table_rows", "get_dependencies", "get_device_settings",
         "get_editor_log", "get_editor_stats", "get_entity_component_property", "get_entity_info",
         "get_fort_actor_info", "get_ground_z", "get_level_bounds", "get_level_info", "get_log",
-        "get_material_expression_info", "get_material_info", "get_niagara_component_info",
+        "get_material_expression_info", "get_material_info", "get_memory_ledger", "get_niagara_component_info",
         "get_niagara_system_info", "get_project_info", "get_referencers", "get_selected_actors",
         "get_selected_assets", "get_selected_entities", "get_static_mesh_info", "get_verse_api",
         "get_verse_editables", "get_viewport_camera", "get_widget_blueprint_info",
