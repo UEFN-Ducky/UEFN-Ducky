@@ -174,7 +174,9 @@ def test_push_retries_a_check_in_that_fails_right_after_saving(root) -> None:
         ]
         out = json.loads(level_viewport.revision_push("moved the cube"))
     assert send.call_args.args == ("revision_check_in", {"files": ["/I/A"], "description": "moved the cube"})
-    assert sleep.call_count == 1
+    # time.sleep is patched process-wide, so count only the retry's own wait.
+    retry = [c for c in sleep.call_args_list if c.args == (level_viewport._CHECK_IN_RETRY_WAIT_S,)]
+    assert len(retry) == 1
     assert out["ok"] is True and out["checked_in"] == 1 and out["saved"] == 1
 
 
@@ -185,7 +187,8 @@ def test_push_does_not_retry_when_nothing_was_saved(root) -> None:
             patch.object(level_viewport, "send_command") as send:
         send.return_value = {"ok": False, "targets": ["/I/A"], "checked_in": [], "saved": [], "error": "remote said no"}
         out = json.loads(level_viewport.revision_push("d"))
-    assert send.call_count == 1 and sleep.call_count == 0
+    retry = [c for c in sleep.call_args_list if c.args == (level_viewport._CHECK_IN_RETRY_WAIT_S,)]
+    assert send.call_count == 1 and len(retry) == 0
     assert out["ok"] is False and out["error"] == "remote said no"
 
 
