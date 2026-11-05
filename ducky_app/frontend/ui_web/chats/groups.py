@@ -282,7 +282,9 @@ def _member_id(row: object) -> str:
     return str(row.get("member_conv_id") or "").strip() if isinstance(row, dict) else ""
 
 
-def sync_membership(root: str | None, conv_ids: list[str], *, keep_hub: str = "") -> dict[str, dict]:
+def sync_membership(
+    root: str | None, conv_ids: list[str], *, keep_hub: str = "", notify: bool = True
+) -> dict[str, dict]:
     """After a re-nest (folder drag, move, add member, set leader, unarchive), make each moved
     chat's team rows, leader and parent match where it is filed now.
 
@@ -296,7 +298,7 @@ def sync_membership(root: str | None, conv_ids: list[str], *, keep_hub: str = ""
     Returns ``{conv_id: {left, joined, leader_changed, old_leader, new_leader}}`` for each chat
     whose team or leader changed (``left`` / ``joined`` are group ids, '' for none).
     ``keep_hub``: the group the caller just added these chats to or made them lead; their
-    place there stays as asked.
+    place there stays as asked. ``notify``: tell each agent whose team changed (nesting_notice).
     """
     from frontend.ui_web import group_orchestrator as _go
 
@@ -454,13 +456,20 @@ def sync_membership(root: str | None, conv_ids: list[str], *, keep_hub: str = ""
         after = {h: leader(h) for h in before}
         changed = any(after[h] != before[h] for h in before)
         if left or joined or changed:
-            out[cid] = {"left": left, "joined": joined, "leader_changed": changed,
+            out[cid] = {"left": left, "joined": joined, "leader_changed": changed, "team": new,
                         "old_leader": before.get(left, "") if left else "",
                         "new_leader": after.get(new, leader(new)) if new else ""}
     for hub in dirty:
         conv = loaded.get(hub)
         if conv is not None:
             _go.save_group_roster(conv, list(conv.group_members or []), root)
+    if out and notify:
+        from frontend.ui_web.chats import nesting_notice
+
+        try:
+            nesting_notice.tell_moves(out, root)
+        except Exception:  # noqa: BLE001 - the move stands; the agent sees its team next turn
+            pass
     return out
 
 

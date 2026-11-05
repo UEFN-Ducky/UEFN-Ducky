@@ -49,6 +49,7 @@ def island(monkeypatch):
     monkeypatch.setattr(_saves, "flush_chat_saves", lambda *a, **kw: True)
     monkeypatch.setattr(group_orchestrator, "save_group_roster",
                         lambda conv, rows, root=None, **kw: s.convs.__setitem__(conv.id, conv))
+    monkeypatch.setattr("frontend.ui_web.chats.nesting_notice.tell_moves", lambda *a, **kw: [])
     return s
 
 
