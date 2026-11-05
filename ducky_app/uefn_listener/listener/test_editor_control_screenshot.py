@@ -11,8 +11,12 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
+import struct
 import sys
+import tempfile
 import types
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +102,8 @@ def _load(monkeypatch, tmp_path, *, registry: FakeRegistry | None) -> tuple[Any,
     package = types.ModuleType("listener")
     package.__path__ = [str(MODULE.parent.parent)]
 
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "temp"))
+    (tmp_path / "temp").mkdir(exist_ok=True)
     monkeypatch.setitem(sys.modules, "unreal", unreal)
     monkeypatch.setitem(sys.modules, "listener", package)
     monkeypatch.setitem(sys.modules, "listener.dispatch", dispatch)
@@ -110,17 +116,80 @@ def _load(monkeypatch, tmp_path, *, registry: FakeRegistry | None) -> tuple[Any,
     return module, console
 
 
-def test_viewport_capture_returns_png_bytes_and_writes_no_file(monkeypatch, tmp_path):
+def test_viewport_capture_writes_the_png_and_replies_with_its_path(monkeypatch, tmp_path):
     registry = FakeRegistry(image_b64=base64.b64encode(PNG_BYTES).decode("ascii"))
     module, console = _load(monkeypatch, tmp_path, registry=registry)
 
     out = module.take_high_res_screenshot(width=1280, height=720, filename="corner.png")
 
-    assert base64.b64decode(str(out.get("png_base64") or "")) == PNG_BYTES
-    assert not out.get("path")
+    assert out["ok"] is True
+    assert "png_base64" not in out
+    assert Path(out["path"]).read_bytes() == PNG_BYTES
+    assert Path(out["path"]).parent == tmp_path / "temp" / "ducky_captures"
+    assert (out["width"], out["height"]) == (1, 1)  # the PNG's real size
+    assert (out["requested_width"], out["requested_height"]) == (1280, 720)
     assert not out.get("error")
     assert not out.get("await_path")
-    assert list(tmp_path.rglob("*.png")) == []
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_capture_goes_into_the_chat_attachments_folder_the_host_passes(monkeypatch, tmp_path):
+    registry = FakeRegistry(image_b64=base64.b64encode(PNG_BYTES).decode("ascii"))
+    module, _ = _load(monkeypatch, tmp_path, registry=registry)
+    attachments = tmp_path / "conversations" / "chat1" / "attachments"
+
+    out = module.take_high_res_screenshot(save_dir=str(attachments))
+
+    assert Path(out["path"]).parent == attachments
+    assert Path(out["path"]).read_bytes() == PNG_BYTES
+
+
+def _big_png(width: int, height: int, size: int) -> bytes:
+    """A PNG header (signature + IHDR for ``width`` x ``height``) padded to ``size`` bytes."""
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    chunk = struct.pack(">I", len(ihdr)) + b"IHDR" + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr))
+    head = b"\x89PNG\r\n\x1a\n" + chunk
+    return head + os.urandom(size - len(head))
+
+
+def _limits(monkeypatch):
+    monkeypatch.delenv("UEFN_DUCKY_MAX_REPLY_MB", raising=False)
+    spec = importlib.util.spec_from_file_location("limits_under_test", MODULE.parent.parent / "limits.py")
+    limits = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(limits)
+    return limits
+
+
+def test_a_capture_over_2mb_comes_back_ok_with_its_image_not_truncated(monkeypatch, tmp_path):
+    raw = _big_png(1280, 720, int(2.4 * 1024 * 1024))
+    registry = FakeRegistry(image_b64=base64.b64encode(raw).decode("ascii"))
+    module, _ = _load(monkeypatch, tmp_path, registry=registry)
+    limits = _limits(monkeypatch)
+
+    out = module.take_high_res_screenshot(width=1280, height=720)
+    reply = json.loads(limits.encode_reply({"success": True, "result": out}))["result"]
+
+    assert len(base64.b64encode(raw)) > limits.max_reply_bytes()  # inline would have been cut
+    assert not reply.get("truncated")
+    assert reply["ok"] is True
+    assert (reply["width"], reply["height"]) == (1280, 720)
+    assert Path(reply["path"]).read_bytes() == raw
+    assert reply["bytes"] == len(raw)
+
+
+def test_a_census_over_2mb_is_still_truncated(monkeypatch, tmp_path):
+    limits = _limits(monkeypatch)
+    actors = [{"label": f"Actor_{i}", "path": "/Game/" + "x" * 800} for i in range(4000)]
+    response = {"success": True, "result": {"actors": actors, "count": len(actors)}}
+    assert len(json.dumps(response)) > 2 * 1024 * 1024
+
+    raw = limits.encode_reply(response)
+    out = json.loads(raw)["result"]
+
+    assert len(raw) <= limits.max_reply_bytes()
+    assert out["truncated"] is True and out["total"] == 4000
+    assert 0 < out["returned"] == len(out["actors"]) < 4000
 
 
 def test_viewport_capture_never_falls_back_to_the_shot_console_command(monkeypatch, tmp_path):
@@ -142,7 +211,7 @@ def test_capture_never_writes_into_the_uefn_project_folder(monkeypatch, tmp_path
 
     out = module.take_high_res_screenshot()
 
-    assert not out.get("path")
+    assert Path(out["path"]).is_file()
     assert not list((tmp_path / "project").rglob("*.png"))
 
 

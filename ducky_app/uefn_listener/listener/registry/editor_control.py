@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import struct
+import tempfile
+import time
+from pathlib import Path
 from typing import Any
 
 import unreal
@@ -50,6 +55,39 @@ def _capture_viewport_png() -> bytes:
     return base64.b64decode(data)
 
 
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _png_size(raw: bytes) -> tuple[int, int] | None:
+    """(width, height) from the PNG's IHDR chunk, or None when it is not a PNG."""
+    if len(raw) < 24 or not raw.startswith(_PNG_SIGNATURE) or raw[12:16] != b"IHDR":
+        return None
+    width, height = struct.unpack(">II", raw[16:24])
+    return int(width), int(height)
+
+
+def _capture_dir(save_dir: str) -> Path:
+    """Where the PNG goes: the chat's attachments folder when the host passes one,
+    else ``%TEMP%/ducky_captures`` (the host copies it into the chat and deletes it).
+    Never the UEFN project."""
+    if str(save_dir or "").strip():
+        folder = Path(save_dir)
+    else:
+        folder = Path(tempfile.gettempdir()) / "ducky_captures"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _write_capture(raw: bytes, save_dir: str) -> Path:
+    folder = _capture_dir(save_dir)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    path = folder / f"uefn_viewport_{stamp}_{os.getpid()}_{time.time_ns() % 1_000_000:06d}.png"
+    part = path.with_name(path.name + ".part")
+    part.write_bytes(raw)
+    os.replace(part, path)  # the host never reads a half-written PNG
+    return path
+
+
 def exec_console_command(command: str) -> dict:
     """Run an editor console command (e.g. 'stat fps', 'r.ScreenPercentage 100')."""
     if not command.strip():
@@ -67,7 +105,9 @@ def save_all_dirty(content: bool = True, maps: bool = True) -> dict:
     return {"saved": bool(ok), "content": content, "maps": maps}
 
 
-def take_high_res_screenshot(width: int = 1280, height: int = 720, filename: str = "") -> dict:
+def take_high_res_screenshot(
+    width: int = 1280, height: int = 720, filename: str = "", save_dir: str = ""
+) -> dict:
     """Capture the active viewport without freezing the editor.
 
     **Never** uses ``AutomationLibrary`` / ``HighResShot`` — those do a
@@ -77,22 +117,31 @@ def take_high_res_screenshot(width: int = 1280, height: int = 720, filename: str
     the editor, which is how captures used to "start" and never produce a PNG.
 
     Goes through Epic's ``EditorAppToolset.CaptureViewport``, which reads the
-    viewport back on the calling frame and returns the PNG inline. This process
-    does not write a file — the host saves the bytes in the active chat folder.
-    ``width``/``height`` are recorded as the requested size only — the PNG
-    matches the viewport. ``filename`` is unused (kept so older callers still match).
+    viewport back on the calling frame. The PNG is written to a file (``save_dir``,
+    the chat's attachments folder, when the host passes it) and the reply carries
+    only ``path``, ``width`` and ``height``; the host builds the image block from
+    the file. Inline base64 is never sent: a 1280x720 PNG is ~2.2 MB as base64,
+    over the 2 MB reply cap (``listener.limits``), which cut the reply down to
+    ``truncated: true`` with no image. ``width``/``height`` are the PNG's real
+    size; the asked-for size is ``requested_width``/``requested_height``.
+    ``filename`` is unused (kept so older callers still match).
     """
     del filename  # host names the chat-folder file
     raw = _capture_viewport_png()
+    path = _write_capture(raw, save_dir)
+    size = _png_size(raw) or (int(width), int(height))
     # The capture's render targets stay pinned until the viewport draws again
     # (editor viewports are not realtime): ~700 MB per capture, see render_trim.
     from listener import render_trim
 
     render_trim.request_trim()
     return {
-        "width": int(width),
-        "height": int(height),
-        "png_base64": base64.b64encode(raw).decode("ascii"),
+        "ok": True,
+        "path": str(path),
+        "width": size[0],
+        "height": size[1],
+        "requested_width": int(width),
+        "requested_height": int(height),
         "bytes": len(raw),
         "method": _CAPTURE_TOOL,
         "viewport_capture": True,
