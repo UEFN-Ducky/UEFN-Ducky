@@ -1,12 +1,9 @@
-"""A finished plan takes no new steps: new work goes in a new plan.
+"""Whether the plan an add would land in is finished.
 
-Nov 5 2026: steps for unrelated work were added to a finished release plan, which reopened it,
-and its keeper started waking the lead again.
+Its lead may still add to a finished plan (that reopens it); this only tells the two apart.
 """
 
 from __future__ import annotations
-
-FINISHED_PLAN_ERROR = "This plan is finished: create a new plan for new work"
 
 
 def _has_step(plan: dict, step_id: str) -> bool:

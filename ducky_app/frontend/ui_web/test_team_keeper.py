@@ -25,6 +25,11 @@ def _fresh(monkeypatch):
     monkeypatch.setattr(keeper, "_load_parked", lambda cid: saved.get(cid))
     monkeypatch.setattr(keeper, "_save_parked",
                         lambda cid, moves: saved.pop(cid, None) if moves is None else saved.__setitem__(cid, moves))
+    # Task texts never read the real project memory (it adds a "Before you build" line).
+    from backend.memory import project as memory
+
+    monkeypatch.setattr(memory, "list_entries", lambda project_root="": [])
+    monkeypatch.setattr(memory, "suggest_entries", lambda text, project_root="", *, limit=3: [])
     yield saved
     keeper.reset_for_tests()
 

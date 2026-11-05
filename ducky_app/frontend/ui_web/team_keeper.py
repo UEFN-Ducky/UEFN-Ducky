@@ -681,11 +681,30 @@ def _member_chat(owner: str, project_root: str | None) -> str:
     return owner
 
 
-def _points(nodes: list[dict[str, Any]], *, bodies: bool) -> str:
+_FULL_NOTES_RE = re.compile(r"…full notes: (\.ducky/plans/[\w-]+/notes/[\w-]+\.md)\s*$")
+_TASK_BYTES = 14_000  # past this the lead's spec gives way to a pointer; a point is never cut
+
+
+def _full_body(node: dict[str, Any], project_root: str | None) -> str:
+    """A step's whole notes: the plan keeps ~2 KB and links the rest (plans._cap_notes). Nov 5
+    2026: four seats' task texts ended at "…full notes", without their Do, Tests and Done when."""
+    body = str(node.get("body_markdown") or "").strip()
+    m = _FULL_NOTES_RE.search(body)
+    if not m or not project_root:
+        return body
+    try:
+        from pathlib import Path
+
+        return (Path(project_root) / m.group(1)).read_text(encoding="utf-8").strip() or body
+    except OSError:
+        return body
+
+
+def _points(nodes: list[dict[str, Any]], *, bodies: bool, project_root: str | None = None) -> str:
     rows = []
     for node in nodes:
         rows.append(f"- `{node.get('id')}` {node.get('content')} ({node.get('status')})")
-        body = str(node.get("body_markdown") or "").strip()
+        body = _full_body(node, project_root) if bodies else ""
         if bodies and body:
             rows.append("  " + body.replace("\n", "\n  "))
     return "\n".join(rows)
@@ -765,11 +784,18 @@ def _read_first(plan: dict[str, Any], work: dict[str, Any]) -> str:
 
 
 def _task_text(plan: dict[str, Any], work: dict[str, Any]) -> str:
+    """A member's first message. Its points stay whole (their Do, Tests and Done when); when the
+    text runs long, the lead's spec gives way to a pointer first."""
     section = work.get("section") or {}
     about = str(section.get("body_markdown") or "").strip() if section.get("children") else ""
-    return TASK_TEXT.format(section=_section_title(work), plan=plan.get("title") or "Plan", spec=_spec(plan),
+    points = _points(work["points"], bodies=True, project_root=plan.get("project_root"))
+    spec = _spec(plan)
+    if spec and len((spec + about + points).encode("utf-8")) > _TASK_BYTES:
+        spec = (f"Spec from your lead: read it with ducky_get_plan(chat_id=\"{plan.get('chat_id') or ''}\") "
+                "(left out so your points stay whole).\n")
+    return TASK_TEXT.format(section=_section_title(work), plan=plan.get("title") or "Plan", spec=spec,
                             read_first=_read_first(plan, work),
-                            about=(about + "\n") if about else "", points=_points(work["points"], bodies=True))
+                            about=(about + "\n") if about else "", points=points)
 
 
 def _last_reply(member: str) -> tuple[str, int]:

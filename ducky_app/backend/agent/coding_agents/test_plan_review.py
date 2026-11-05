@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+import pytest
+
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL, plan_review, with_plan_review
+
+
+@pytest.fixture(autouse=True)
+def _no_project_memory(monkeypatch):
+    """Review never reads the real project memory here (it would add a Read first: issue)."""
+    from backend.memory import project as memory
+
+    monkeypatch.setattr(memory, "list_entries", lambda project_root="": [])
+    monkeypatch.setattr(memory, "suggest_entries", lambda text, project_root="", *, limit=3: [])
 
 
 def _plan(*nodes: dict) -> dict:
