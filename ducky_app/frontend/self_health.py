@@ -273,12 +273,28 @@ PLUGIN_IDLE_MIN = 10
 MAX_CONHOSTS = 6
 
 
-def _plugin_of(cmd: list[str]) -> str:
-    """The plugin a worker belongs to, from its command line ('forge' from '…uefn-plugin-forge…')."""
+def _plugin_home(cmd: list[str]) -> str:
+    """The plugin whose folder a command line runs in ('forge' from '…\\uefn_plugins\\forge\\…' or
+    '…\\forge-engine\\…'), or '' when it runs in no plugin folder."""
     import re
 
     text = " ".join(cmd).replace("\\", "/")
-    hit = re.search(r"uefn-plugin-([\w-]+)", text, re.I) or re.search(r"/plugins/([^/\s]+)/", text, re.I)
+    hit = (re.search(r"/uefn_plugins/+([^/\s\"]+)/", text, re.I) or re.search(r"uefn-plugin-([\w-]+)", text, re.I)
+           or re.search(r"/([\w]+)-engine/", text, re.I))
+    if not hit:
+        return ""
+    return re.sub(r"(?i)^uefn-plugin-", "", hit.group(1))
+
+
+def _plugin_of(cmd: list[str]) -> str:
+    """The plugin a worker belongs to, from its command line ('forge' from '…uefn-plugin-forge…')."""
+    home = _plugin_home(cmd)
+    if home:
+        return home
+    text = " ".join(cmd).replace("\\", "/")
+    import re
+
+    hit = re.search(r"/plugins/([^/\s]+)/", text, re.I)
     if hit:
         return hit.group(1)
     script = next((a for a in reversed(cmd) if a.lower().endswith(".py")), "")
@@ -331,9 +347,9 @@ def ducky_footprint(procs: dict[int, Any], me_pid: int, known: dict[int, tuple[s
             part = "webview2"
         elif name == "conhost.exe":
             part, conhosts = "conhosts", conhosts + 1
-        elif name.startswith(("python", "pythonw")) and any("worker" in a.lower() for a in _cmdline(pid)[0]):
+        elif name.startswith(("python", "pythonw")) and (cmd := _cmdline(pid)[0]) is not None and (
+                any("worker" in a.lower() for a in cmd) or _plugin_home(cmd)):
             part = "plugin_workers"
-            cmd = _cmdline(pid)[0]
             plugin = _plugin_of(cmd)
             joined = " ".join(cmd).lower()
             used = max((t for k, t in last.items() if k.lower() in joined or plugin.lower() in k.lower()), default=0.0)
@@ -399,7 +415,7 @@ def _footprint_findings(dt: dict[str, Any], pc: dict[str, Any]) -> list[dict[str
                     "what": f"{plugin} plugin workers: {len(rows)} processes hold {_gb_text(sum(float(r['mb']) for r in rows))}, "
                             f"unused {max(int(r['idle_min']) for r in rows)} min.",
                     "why": f"The plugin had no call in {PLUGIN_IDLE_MIN} minutes but its workers stay loaded.",
-                    "fix": f"Close the {plugin} panel or restart Ducky to stop them; {free_fix} frees the rest."})
+                    "fix": f"{free_fix} stops idle plugin workers (the plugin starts them again on its next call)."})
     if int(dt.get("conhosts") or 0) > MAX_CONHOSTS:
         out.append({"severity": "high", "what": f"{dt['conhosts']} console hosts (conhost.exe) run under Ducky.",
                     "why": "Each console a terminal or tool opened and never closed keeps one alive.",
@@ -765,6 +781,98 @@ def _running_chats() -> set[str] | None:
         return None
 
 
+_AGENT_CLIS = ("claude", "codex", "cursor-agent", "gemini")
+WORKER_BUSY_CPU = 0.5  # % of a core over the sample: a worker this busy is in a call
+
+
+def _last_call(last: dict[str, float], plugin: str) -> float:
+    p = plugin.lower()
+    return max((t for k, t in last.items() if k.lower() == p or p in k.lower()), default=0.0)
+
+
+def idle_plugin_workers(procs: dict[int, Any], cpu: dict[int, float], *, now: float | None = None,
+                        last_used: dict[str, float] | None = None) -> list[dict[str, Any]]:
+    """Plugin worker processes Ducky may stop: descendants of a Ducky process (the app, an agent
+    host, a tool server) whose command line runs in a plugin folder (``uefn_plugins\\<id>\\``, a
+    ``<name>-engine`` folder), never an agent CLI, terminal, console host or WebView2. Idle means
+    its plugin had no tool call in PLUGIN_IDLE_MIN (or, with no call on record, the worker is that
+    old) and its whole tree used no CPU over the ``cpu`` sample, so one in a call is never picked.
+    ``[{pid, plugin, mb, tree}]``, one row per top-most worker with its tree's memory."""
+    from backend.util import proc_table
+
+    now = time.time() if now is None else now
+    last = _plugin_last_used() if last_used is None else last_used
+    roots = [pid for pid, p in procs.items() if pid == os.getpid() or _ducky_named(p)]
+    under: set[int] = set()
+    for root in roots:
+        under.update(proc_table.tree(procs, root)[1:])
+    workers: dict[int, dict[str, Any]] = {}
+    for pid in sorted(under):
+        proc = procs[pid]
+        name = proc.name.lower()
+        if (_ducky_named(proc) or name in _SHELLS or name == "conhost.exe" or "webview2" in name
+                or name.removesuffix(".exe").startswith(_AGENT_CLIS)):
+            continue
+        plugin = _plugin_home(_cmdline(pid)[0])
+        if plugin:
+            workers[pid] = {"pid": pid, "plugin": plugin, "started": proc.started}
+    out = []
+    for pid, w in workers.items():
+        if procs[pid].ppid in workers:  # stopped with its parent worker
+            continue
+        tree = proc_table.tree(procs, pid)
+        if any(float(cpu.get(p, 0.0)) > WORKER_BUSY_CPU for p in tree):
+            continue
+        called = _last_call(last, w["plugin"])
+        quiet_since = max(called, float(w["started"] or now))  # a worker younger than its last call counts from its start
+        if now - quiet_since < PLUGIN_IDLE_MIN * 60:
+            continue
+        out.append({"pid": pid, "plugin": w["plugin"], "tree": tree,
+                    "mb": round(sum(_mb(procs[p].private) for p in tree), 1)})
+    return out
+
+
+def _terminate_tree(pid: int, name: str) -> bool:
+    """Stop a worker and everything it started (children first); False when the pid now
+    belongs to another program."""
+    import psutil
+
+    try:
+        p = psutil.Process(pid)
+        if p.name().lower() != name.lower():
+            return False
+        for child in reversed(p.children(recursive=True)):
+            try:
+                child.terminate()
+            except psutil.Error:
+                pass
+        p.terminate()
+        return True
+    except psutil.Error:
+        return False
+
+
+def _stop_idle_plugin_workers() -> list[dict[str, Any]]:
+    """Stop idle plugin workers (``idle_plugin_workers`` over a 1 s CPU sample)."""
+    from backend.util import proc_table
+
+    procs, cpu = proc_table.sample(1.0)
+    stopped = []
+    for w in idle_plugin_workers(procs, cpu):
+        if _terminate_tree(w["pid"], procs[w["pid"]].name):
+            stopped.append(w)
+    return stopped
+
+
+def _workers_text(rows: list[dict[str, Any]]) -> list[str]:
+    """['4 idle Forge workers'] per plugin."""
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[str(r["plugin"])] = counts.get(str(r["plugin"]), 0) + 1
+    return [_plural(n, f"idle {p.replace('-', ' ').title()} worker", f"idle {p.replace('-', ' ').title()} workers")
+            for p, n in counts.items()]
+
+
 def _stop_abandoned_sandboxes(running: set[str] | None) -> list[dict[str, Any]]:
     """Stop sandbox programs whose chat has no running turn: ``[{conv_id, name, mb}]``."""
     if running is None:
@@ -854,6 +962,7 @@ def free_ducky_memory(beat: dict[str, Any] | None = None) -> dict[str, Any]:
         ("bridges", lambda: _stop_orphan_bridges()),
         ("terminals", lambda: _close_idle_terminals(running)),
         ("sandboxes", lambda: _stop_abandoned_sandboxes(running)),
+        ("plugin_workers", _stop_idle_plugin_workers),
     )
     for kind, step in steps:
         try:
@@ -866,6 +975,8 @@ def free_ducky_memory(beat: dict[str, Any] | None = None) -> dict[str, Any]:
             did.append(_plural(len(rows), "leftover bridge", "leftover bridges"))
         elif kind == "terminals":
             did.append(_plural(len(rows), "idle terminal", "idle terminals"))
+        elif kind == "plugin_workers":
+            did.extend(_workers_text(rows))
         else:
             did.append(_plural(len(rows), "abandoned sandbox program", "abandoned sandbox programs"))
         freed += sum(float(r.get("mb") or 0) for r in rows if isinstance(r, dict))

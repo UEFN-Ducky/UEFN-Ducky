@@ -200,6 +200,7 @@ def test_free_ducky_memory_stops_leftovers_and_spares_live_work(monkeypatch):
     monkeypatch.setattr(self_health, "_running_chats", lambda: {"busy-chat"})
     monkeypatch.setattr(self_health, "_trim_caches", lambda: 0.0)
     monkeypatch.setattr(self_health, "_trim_webview", lambda beat: "")
+    monkeypatch.setattr(self_health, "_stop_idle_plugin_workers", lambda: [])
 
     class _Terms:
         def close_idle_agent_terminals(self, now=None, running=None):
@@ -218,6 +219,55 @@ def test_free_ducky_memory_stops_leftovers_and_spares_live_work(monkeypatch):
     assert out["did"] == ["1 leftover bridge", "2 idle terminals", "1 abandoned sandbox program"]
     assert out["freed_mb"] >= 1400
     assert self_health.self_care("format_disk")["ok"] is False and "free_ducky_memory" in self_health.ACTIONS
+
+
+def test_idle_plugin_workers_are_stopped_and_busy_or_foreign_ones_are_not(monkeypatch):
+    import os
+
+    from backend.util import proc_table
+
+    me, now = os.getpid(), 100_000.0
+
+    def proc(pid, name, ppid, size_mb, started=now - 3600):
+        return proc_table.Proc(pid, ppid, name, size_mb << 20, size_mb << 20, 1, 1, 0.0,
+                               1.0 if pid == me else started)
+
+    forge = "C:/Users/x/AppData/Local/UEFN-Ducky/uefn_plugins/forge/forge-engine/worker.py"
+    procs = {p.pid: p for p in (
+        proc(me, "UEFN-Ducky.exe", 1, 400),
+        proc(11, "python.exe", me, 725), proc(12, "python.exe", me, 725),  # idle Forge workers
+        proc(13, "blender.exe", 11, 300),  # a worker's own child: stopped with it
+        proc(14, "python.exe", me, 725),  # busy: in a call
+        proc(15, "python.exe", me, 200),  # a child that runs no plugin
+        proc(16, "claude.exe", me, 300),  # an agent CLI whose arguments name the plugin folder
+        proc(17, "python.exe", 999, 725),  # a plugin worker that isn't Ducky's
+        proc(18, "python.exe", me, 725, started=now - 120),  # young and never called: kept
+    )}
+    cmds = {11: ["python.exe", forge], 12: ["python.exe", forge], 13: ["blender.exe", "-b"], 14: ["python.exe", forge],
+            15: ["python.exe", "C:/tools/script.py"], 16: ["claude.exe", "--add-dir", forge],
+            17: ["python.exe", forge], 18: ["python.exe", forge]}
+    monkeypatch.setattr(self_health, "_cmdline", lambda pid: (cmds.get(pid, []), ""))
+    cpu = {14: 37.0}
+    rows = self_health.idle_plugin_workers(procs, cpu, now=now, last_used={})
+    assert [(r["pid"], r["plugin"]) for r in rows] == [(11, "forge"), (12, "forge")]
+    assert rows[0]["tree"] == [11, 13] and rows[0]["mb"] == 1025
+    # A call 2 minutes ago keeps them; 40 minutes ago doesn't.
+    assert self_health.idle_plugin_workers(procs, cpu, now=now, last_used={"forge": now - 120}) == []
+    assert len(self_health.idle_plugin_workers(procs, cpu, now=now, last_used={"forge": now - 2400})) == 2
+
+    stopped = []
+    monkeypatch.setattr(proc_table, "sample", lambda interval=1.0: (procs, cpu))
+    monkeypatch.setattr(self_health, "_plugin_last_used", lambda: {})
+    monkeypatch.setattr(self_health.time, "time", lambda: now)
+    monkeypatch.setattr(self_health, "_terminate_tree", lambda pid, name: (stopped.append(pid), True)[1])
+    monkeypatch.setattr(self_health, "_stop_orphan_bridges", lambda: [])
+    monkeypatch.setattr(self_health, "_trim_caches", lambda: 0.0)
+    monkeypatch.setattr(self_health, "_close_idle_terminals", lambda running: [])
+    monkeypatch.setattr(self_health, "_stop_abandoned_sandboxes", lambda running: [])
+    monkeypatch.setattr(self_health, "_trim_webview", lambda beat: "")
+    out = self_health.free_ducky_memory()
+    assert stopped == [11, 12]
+    assert out["did"] == ["2 idle Forge workers"] and out["freed_mb"] >= 1750
 
 
 def test_the_oom_chats_idle_ducky_is_never_nothing_wrong(monkeypatch):
