@@ -26,10 +26,10 @@ pytestmark = [
 
 MB = 1024 * 1024
 # Budgets (private bytes). Measured on main 2026-11-05, from source, no plugins installed:
-# shared daemon 570 MB at ready, agent host 16 MB at ready (idle, no turn run yet).
-# The daemon guard sits at today's size plus headroom so growth fails the release; the
-# 1.5 GB idle target wants it at 250 MB (or merged), checked by the xfail test below.
-DAEMON_BUDGET_MB = 650
+# shared daemon 84 MB at ready (566 MB before the bridge capped OpenBLAS at one thread),
+# agent host 15 MB at ready (idle, no turn run yet). The daemon guard is that size plus 25%
+# so growth fails the release; DAEMON_TARGET_MB is the 1.5 GB idle plan's share.
+DAEMON_BUDGET_MB = 105
 DAEMON_TARGET_MB = 250
 AGENT_HOST_BUDGET_MB = 300
 SOAK_GROWTH_MB = 50
@@ -76,7 +76,7 @@ def private_mb(pid: int) -> float:
 
 def _child_env(**extra: str) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith("DUCKY_")}
-    for key in ("UEFN_DUCKY_SHARED_MCP_SLOT", "UEFN_DUCKY_PROCESS_ROLE", "UEFN_DUCKY_MCP_BRIDGE", "PYTEST_CURRENT_TEST"):
+    for key in ("OPENBLAS_NUM_THREADS", "UEFN_DUCKY_SHARED_MCP_SLOT", "UEFN_DUCKY_PROCESS_ROLE", "UEFN_DUCKY_MCP_BRIDGE", "PYTEST_CURRENT_TEST"):
         env.pop(key, None)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.update(extra)
@@ -195,7 +195,6 @@ def test_shared_daemon_idle_budget(tmp_path: Path) -> None:
         _stop(proc)
 
 
-@pytest.mark.xfail(reason="shared daemon is ~570 MB at ready; the 1.5 GB target wants 250 MB", strict=False)
 def test_shared_daemon_meets_the_target(tmp_path: Path) -> None:
     proc, client = _start_daemon(tmp_path)
     try:
