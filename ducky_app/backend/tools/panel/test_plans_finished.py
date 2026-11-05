@@ -16,11 +16,14 @@ def _finish(root: str) -> None:
 
 
 def test_an_open_plan_is_not_finished_and_a_ticked_off_one_is(team) -> None:
+    plans.update_node("coord", "a", assignee="group-a", project_root=team)
     assert not plan_finished("coord", team)
+    assert not plan_finished("builder", team, parent_id="a")  # lands in its lead's live plan
     _finish(team)
     assert plan_finished("coord", team)
-    assert plan_finished("builder", team)  # a member's add lands in its lead's plan
     assert not plan_finished("outsider", team)  # no plan at all: add_node answers that
+    # A finished team plan is no member's team plan any more: add_node says "plan not found".
+    assert not plan_finished("builder", team, parent_id="a")
 
 
 def test_ducky_plan_add_node_refuses_a_finished_plan(team, monkeypatch) -> None:

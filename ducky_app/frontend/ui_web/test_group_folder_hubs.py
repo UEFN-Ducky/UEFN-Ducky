@@ -333,9 +333,9 @@ def test_group_create_never_saves_a_plain_folder_even_when_made_fast(tmp_path, m
     plain_saves: list[str] = []
     real_save = pa.save_conversation
 
-    def save_and_check(conv, project_root=None):
+    def save_and_check(conv, project_root=None, **kw):  # group_create saves with wait=True
         plain_saves.extend(f.name for f in load_folders(root) if f.name.startswith("G") and not f.group_hub_id)
-        real_save(conv, project_root)
+        real_save(conv, project_root, **kw)
 
     monkeypatch.setattr(pa, "save_conversation", save_and_check)
     api = PanelApiChatsMixin()

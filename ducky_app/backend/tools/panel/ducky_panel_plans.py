@@ -149,7 +149,7 @@ def ducky_plan_add_node(
     from backend.tools.panel.plans_finished import FINISHED_PLAN_ERROR, plan_finished
 
     cid = _resolve_plan_chat_id(chat_id) if not (template_id or "").strip() else ""
-    if cid and plan_finished(cid, _project_root()):
+    if cid and plan_finished(cid, _project_root(), parent_id):
         return tool_json({"ok": False, "error": FINISHED_PLAN_ERROR}, pretty=pretty)
     try:
         plan = add_node(

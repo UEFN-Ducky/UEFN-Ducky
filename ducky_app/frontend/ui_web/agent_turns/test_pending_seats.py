@@ -18,7 +18,6 @@ def world(monkeypatch):
     alive: set[str] = set()
     started: list[str] = []
     monkeypatch.setattr(adm, "_running", set())
-    monkeypatch.setattr(adm, "_waiting", [])
     monkeypatch.setattr(adm, "_read_free", lambda: 64.0)
     for name, value in (("_line", deque()), ("_starting", set()), ("_user_cap", None), ("_seen", set()),
                         ("_first_starts", deque()), ("_wave_timer", False), ("_starts", {}),
