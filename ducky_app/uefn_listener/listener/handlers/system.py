@@ -123,6 +123,14 @@ def cmd_get_log(last_n: int = 50) -> dict:
     return {"lines": log_ring[-last_n:]}
 
 
+@register("get_memory_ledger")
+def cmd_get_memory_ledger(top: int = 10) -> dict:
+    """Which commands grew UEFN: top rows by memory still held 60 s later."""
+    from listener import memory_ledger
+
+    return memory_ledger.snapshot(metrics, top=top)
+
+
 def _execute_python_blocked(code: str) -> str | None:
     low = code.lower()
     compact = low.replace(" ", "").replace("\n", "").replace("\t", "")

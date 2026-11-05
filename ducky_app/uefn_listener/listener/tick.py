@@ -163,7 +163,7 @@ def register_heavy(name: str) -> None:
         _HEAVY_COMMANDS.add(cmd)
 
 
-from listener import render_trim
+from listener import memory_ledger, render_trim
 from listener.dispatch import dispatch
 from listener.logutil import log_msg
 from listener.save_coalesce import flush_pending_save
@@ -236,6 +236,13 @@ def _self_heal_stuck_inflight() -> None:
     metrics["last_error"] = f"self_heal_cleared_inflight_after_{int(age)}s"
 
 
+def _read_mem() -> int:
+    try:
+        return int(memory_ledger.read_bytes() or 0)
+    except Exception:
+        return 0
+
+
 def tick_handler(delta_time: float) -> None:
     """Every editor frame. Timed into listener.traffic (handler ms and the frame gap)."""
     started = time.time()
@@ -265,6 +272,7 @@ def _tick(delta_time: float) -> None:
 
     processed = 0
     heavy_processed = 0
+    trim_baseline = 0
     batch_limit = tick_batch_limit()
     heavy_limit = heavy_tick_limit()
     budget_ms = float(tick_budget_ms())
@@ -288,6 +296,7 @@ def _tick(delta_time: float) -> None:
             break
 
         t0 = time.time()
+        mem_before = _read_mem()
         cap = None
         unreal._mcp_dispatching = True
         try:
@@ -312,6 +321,10 @@ def _tick(delta_time: float) -> None:
         finally:
             unreal._mcp_dispatching = False
 
+        try:
+            memory_ledger.record(metrics, command, mem_before, _read_mem())
+        except Exception:
+            pass
         elapsed_ms = (time.time() - t0) * 1000
         metrics["total_requests"] += 1
         metrics["last_request_at"] = time.time()
@@ -334,6 +347,8 @@ def _tick(delta_time: float) -> None:
         _clear_in_flight()
         if command in _HEAVY_COMMANDS:
             heavy_processed += 1
+            if mem_before > 0 and (not trim_baseline or mem_before < trim_baseline):
+                trim_baseline = mem_before
         processed += 1
 
     flush_pending_save()
@@ -341,8 +356,12 @@ def _tick(delta_time: float) -> None:
         # Heavy commands render off-screen (captures, thumbnails, material
         # previews); a non-realtime viewport would otherwise never let the
         # render-target pool release what they allocated.
-        render_trim.request_trim()
+        render_trim.request_trim(baseline=trim_baseline or None)
     render_trim.tick()
+    try:
+        memory_ledger.settle(metrics)
+    except Exception:
+        pass
 
     now = time.time()
     with responses_lock:
