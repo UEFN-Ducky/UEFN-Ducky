@@ -35,6 +35,10 @@ from backend.util.json_util import tool_json
 from backend.tools.panel.archive_tree import archive_tree
 from backend.bridge.status import ListenerStatusState, fetch_listener_status
 from backend.server import mcp
+from backend.tools.panel.spawn_nesting import (  # noqa: F401  (test_groups reads _resolve_group_hub_id here)
+    _caller_own_group, _is_lead_seat, _lead_if_leaderless, _require_own_team, _resolve_group_hub_id,
+    _seat_leads, _spawn_parent_folder,
+)
 
 _status_state = ListenerStatusState()
 _MAX_MESSAGE_CHARS = 8000
@@ -990,14 +994,14 @@ def ducky_group_create(name: str, parent_folder_id: str = "", pretty: bool = Fal
     """Find or create a Group Chat hub (+ linked folder) by name.
 
     A live group with this name inside ``parent_folder_id`` is reused, so calling
-    this twice does not stack duplicate groups. Pass ``parent_folder_id`` to nest
-    inside another group's folder. After create, add yourself with
+    this twice does not stack duplicate groups. An agent in a group always makes the
+    new group inside its own group (no ``parent_folder_id`` = its group's folder; a
+    folder outside its group is refused). After create, add yourself with
     ``ducky_group_add_member(..., as_leader=true)`` if you want to lead the swarm.
     """
+    parent = _spawn_parent_folder(_resolve_sender(""), (parent_folder_id or "").strip())
     api = _panel_api()
-    res = api.group_find_or_create(
-        name=name.strip() or "Group", folder_id=parent_folder_id or "", open_tab=True
-    )
+    res = api.group_find_or_create(name=name.strip() or "Group", folder_id=parent, open_tab=True)
     return tool_json(res, pretty=pretty)
 
 
@@ -1022,9 +1026,12 @@ def _require_lane_authority(group_id: str) -> str:
 @mcp.tool()
 def ducky_group_invite(
     group_id: str, ducky: str, write_allowed: Optional[list[str]] = None, name: str = "",
-    model: str = "", context_limit: str = "", pretty: bool = False,
+    model: str = "", context_limit: str = "", as_leader: bool = False, pretty: bool = False,
 ) -> str:
     """Invite a ducky profile into a group as a lasting swarm member (not a parent-linked subagent).
+
+    ``as_leader=true`` (or a seat named "Lead: …") makes the new member that group's leader;
+    otherwise the chat seating it leads a group that has no leader yet.
 
     ``name`` names the seat by its role ("Search lead", "Bench lead"); without it a second
     seat of the same profile is called "Verse Coder 2". Name every team seat by its role.
@@ -1052,7 +1059,10 @@ def ducky_group_invite(
     from backend.workspace import identity as run_identity
 
     ctx = run_identity.resolve_context()
-    _lead_if_leaderless(group_id, str(getattr(ctx, "conv_id", "") or ""), _project_root())
+    caller = str(getattr(ctx, "conv_id", "") or "")
+    lead_seat = _is_lead_seat(name, as_leader)
+    if not lead_seat:
+        _lead_if_leaderless(group_id, caller, _project_root())
     if write_allowed is not None:
         _require_lane_authority(group_id)
     api = _panel_api()
@@ -1061,6 +1071,9 @@ def ducky_group_invite(
     )
     if not res.get("ok"):
         raise ValueError(str(res.get("error") or "group_invite failed"))
+    if lead_seat:
+        _seat_leads(group_id, str((res.get("member") or {}).get("member_conv_id") or ""), _project_root(),
+                    force=bool(as_leader))
     _store_context_limit(str((res.get("member") or {}).get("member_conv_id") or ""), context_limit)
     return tool_json(res, pretty=pretty)
 
@@ -1882,73 +1895,6 @@ def _profile_spawn_kwargs(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _caller_own_group(caller: str) -> str:
-    """The group hub this chat already belongs to, or ''."""
-    if not (caller or "").strip():
-        return ""
-    from frontend.ui_web.group_orchestrator import is_group_conversation
-
-    root = _project_root()
-    conv = load_conversation(caller, project_root=root)
-    if conv is None:
-        return ""
-    if is_group_conversation(conv):
-        return caller
-    parent_id = (getattr(conv, "parent_conv_id", None) or "").strip()
-    if not parent_id:
-        return ""
-    parent = load_conversation(parent_id, project_root=root)
-    if parent is not None and is_group_conversation(parent):
-        return parent_id
-    return ""
-
-
-def _resolve_group_hub_id(group_id: str = "", folder_id: str = "") -> str:
-    """Resolve a group hub id from an explicit hub id or a group folder id."""
-    root = _project_root()
-    gid = (group_id or "").strip()
-    if gid:
-        flush_chat_saves(gid, timeout=10.0)  # a group made a moment ago may still be queued
-        hub = load_conversation(gid, project_root=root)
-        if hub is not None and getattr(hub, "is_group", False):
-            return gid
-        # A member's chat id (what a spawn answered with) means the group it sits in.
-        parent_id = str(getattr(hub, "parent_conv_id", "") or "").strip() if hub is not None else ""
-        parent = load_conversation(parent_id, project_root=root) if parent_id else None
-        if parent is not None and getattr(parent, "is_group", False):
-            return parent_id
-        if hub is None and not (folder_id or "").strip():
-            try:
-                return _resolve_group_hub_id(folder_id=gid)  # a group's folder id
-            except ValueError:
-                pass
-        raise ValueError(f"{gid!r} is not a group hub. Pass the group hub id from ducky_group_create.")
-    fid = (folder_id or "").strip()
-    if fid and fid != "default":
-        for folder in load_folders(root):
-            if folder.id == fid:
-                hub_id = (getattr(folder, "group_hub_id", None) or "").strip()
-                if hub_id:
-                    return hub_id
-                break
-        raise ValueError(
-            f"Folder {fid!r} is not a group folder. Create one with ducky_group_create first."
-        )
-    return ""
-
-
-def _lead_if_leaderless(hub_id: str, caller: str, root: str | None) -> None:
-    """The chat that seats a member into a group with no leader leads it (a pointer: the chat is
-    not moved). Nov 3 2026: a lead spawned into a group by id, and its later ducky_group_invite
-    there was refused with "This group has no leader yet"."""
-    if not caller or caller == hub_id:
-        return
-    hub = load_conversation(hub_id, project_root=root)
-    if hub is not None and not (getattr(hub, "leader_conv_id", None) or "").strip():
-        hub.leader_conv_id = caller
-        save_conversation(hub, root)
-
-
 @mcp.tool()
 def ducky_spawn_chat(
     message: str,
@@ -1966,9 +1912,13 @@ def ducky_spawn_chat(
     name: str = "",
     model: str = "",
     context_limit: str = "",
+    as_leader: bool = False,
     pretty: bool = False,
 ) -> str:
     """Invite a specialist into a Group swarm and send the first message.
+
+    The target group must be your own group or one nested in it: spawns never land outside
+    it. ``as_leader=true`` (or ``name`` "Lead: …") makes the new member that group's leader.
 
     ``model`` seats a new member on that model instead of the profile's own (an idle seat
     that is reused keeps its model). ``context_limit`` ("200k") is its context limit: past
@@ -2040,7 +1990,10 @@ def ducky_spawn_chat(
         hub_id = str(created.get("id") or "").strip()
     if not hub_id:
         raise ValueError("No group to seat this ducky in.")
-    _lead_if_leaderless(hub_id, caller, root)
+    _require_own_team(hub_id, caller, root)
+    lead_seat = _is_lead_seat(name, as_leader)
+    if not lead_seat:
+        _lead_if_leaderless(hub_id, caller, root)
     if _spawn_needs_plan(caller, hub_id, root):
         return tool_json({"status": "not_sent", "sender": caller, "reason": LEAD_NEEDS_PLAN}, pretty=pretty)
 
@@ -2061,6 +2014,8 @@ def ducky_spawn_chat(
     conv_id = str(member.get("member_conv_id") or "").strip()
     if not conv_id:
         raise ValueError("group_invite did not return a member_conv_id")
+    if lead_seat:
+        _seat_leads(hub_id, conv_id, root, force=bool(as_leader))
     _store_context_limit(conv_id, context_limit)
 
     from frontend.ui_web.agent_turns.routing import run_message, run_message_and_wait
