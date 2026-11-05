@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from frontend.settings import PanelSettings
 from frontend.ui_web.lag.output_pacer import OutputPacer
-from frontend.ui_web.terminal import commit_guard, repo_lock, resource_guard, run_durations
+from frontend.ui_web.terminal import commit_guard, resource_guard, run_durations
 from frontend.ui_web.terminal.bridge import TerminalBridge
 from frontend.ui_web.terminal.session import (
     _OUTPUT_RING_CHARS,
@@ -97,9 +97,6 @@ class TerminalManager:
         self._reaper_stop = threading.Event()
         # Terminals a running workflow still needs: never closed as idle until it lets go.
         self._held: set[str] = set()
-        # Terminals an agent command was handed to and has not given back yet (a test run
-        # waiting for its repo's lock is not busy yet but is no idle shell either).
-        self._in_command: set[str] = set()
         self._push: Callable[[dict[str, Any]], None] | None = None
         # session id -> {"value", "sent", "at", "timer"}: coalesced terminal_busy pushes.
         self._busy_push: dict[str, dict[str, Any]] = {}
@@ -293,7 +290,7 @@ class TerminalManager:
         with self._lock:
             agents = [(e.session, e.chat) for e in self._sessions.values() if e.chat or e.run_owned]
             asked = {p.session_id for p in self._pending.values()}
-            held = self._held | self._in_command
+            held = set(self._held)
         snapshot = functools.cache(_process_snapshot)
         closed: list[str] = []
         for session, chat in agents:
@@ -833,41 +830,10 @@ class TerminalManager:
         return out
 
     def _run_command(self, session: TerminalSession, command: str, *, timeout_s: float, conv_id: str = "") -> dict[str, Any]:
-        """session.run_command (waited); a test or build run holds its repo's lock until it
-        really ends (an early-returned one too), so a second one in that repo waits."""
-        # Oct 28 2026: the release's test step waited minutes for another agent's pytest in
-        # this repo; quiet and not busy yet, the idle reaper closed its terminal under it.
-        sid = str(getattr(session, "id", "") or "")
-        with self._lock:
-            self._in_command.add(sid)
-        try:
-            # ponytail: background commands are never locked; their end can't be seen.
-            if not repo_lock.is_heavy(command):
-                return self._run_watched(session, command, timeout_s)
-            repo = repo_lock.repo_of(str(getattr(session, "cwd", "") or "."))
-            label = _chat_title(conv_id) or "another terminal"
-
-            def waiting(where: str) -> Callable[[str], None]:
-                def tell(holder: str) -> None:
-                    note = getattr(session, "note", None)
-                    if note:
-                        note(f"Waiting for {holder}'s test or build run {where}")
-                return tell
-
-            # The repo first, then the PC: Nov 3 2026 a Rust build (6.4 GB) and two repos'
-            # test suites ran side by side beside UEFN; one heavy run at a time on the PC.
-            repo_lock.acquire(repo, label, on_wait=waiting("in this repo"))
-            try:
-                repo_lock.acquire(repo_lock.PC, label, on_wait=waiting("on this PC"))
-                try:
-                    return self._run_watched(session, command, timeout_s)
-                finally:
-                    repo_lock.release(repo_lock.PC)
-            finally:
-                repo_lock.release(repo)
-        finally:
-            with self._lock:
-                self._in_command.discard(sid)
+        """session.run_command (waited). Test and build runs start at once, never queued behind
+        another terminal's: Nov 5 2026 a deploy sat 14 minutes on "Waiting for <chat>'s test or
+        build run on this PC". Agent terminals still run below normal priority in a memory cap."""
+        return self._run_watched(session, command, timeout_s)
 
     @staticmethod
     def _run_watched(session: TerminalSession, command: str, timeout_s: float) -> dict[str, Any]:

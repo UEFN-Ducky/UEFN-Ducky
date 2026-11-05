@@ -1,9 +1,8 @@
-"""One test or build run per repo, and one on the whole PC, at a time."""
+"""Test and build runs in agent terminals never wait on each other."""
 
 from __future__ import annotations
 
 import threading
-import time
 
 from frontend.ui_web.terminal import repo_lock
 from frontend.ui_web.terminal.manager import TerminalManager
@@ -62,81 +61,16 @@ def test_repo_is_the_git_top(tmp_path) -> None:
     assert repo_lock.repo_of(src) == repo_lock.repo_of(str(tmp_path / "a"))
 
 
-def test_a_second_run_in_the_same_repo_waits(tmp_path) -> None:
+def test_two_test_runs_in_the_same_repo_start_at_once(tmp_path) -> None:
+    # Nov 5 2026: a deploy sat 14 minutes on "Waiting for <chat>'s test or build run on this PC".
     mgr = TerminalManager()
     cwd = _repo(tmp_path, "same")
     first, second = _Run(cwd), _Run(cwd)
-    t1 = _start(mgr, first)
-    assert first.started.wait(2)
-    t2 = _start(mgr, second)
-    time.sleep(0.2)
-    assert not second.started.is_set()
-    assert second.notes == ["Waiting for another terminal's test or build run in this repo"]
+    t1 = _start(mgr, first, "py -3 -m pytest")
+    t2 = _start(mgr, second, "py -3 -m pytest")
+    assert first.started.wait(2) and second.started.wait(2)  # both run side by side
+    assert first.notes == [] and second.notes == []  # no "Waiting for" note
     first.finish.set()
-    t1.join(2)
-    assert second.started.wait(2)
     second.finish.set()
+    t1.join(2)
     t2.join(2)
-    assert repo_lock.holder(repo_lock.repo_of(cwd)) == ""
-
-
-def test_different_repos_take_turns_on_the_pc(tmp_path) -> None:
-    mgr = TerminalManager()
-    a, b = _Run(_repo(tmp_path, "a")), _Run(_repo(tmp_path, "b"))
-    t1 = _start(mgr, a, "cargo test -p core")
-    assert a.started.wait(2)
-    t2 = _start(mgr, b)
-    time.sleep(0.2)
-    assert not b.started.is_set()
-    assert b.notes == ["Waiting for another terminal's test or build run on this PC"]
-    a.finish.set()
-    t1.join(2)
-    assert b.started.wait(2)
-    b.finish.set()
-    t2.join(2)
-    assert repo_lock.holder(repo_lock.PC) == ""
-
-
-def test_a_light_command_never_waits(tmp_path) -> None:
-    mgr = TerminalManager()
-    cwd = _repo(tmp_path, "light")
-    tests, status = _Run(cwd), _Run(cwd)
-    t1 = _start(mgr, tests)
-    assert tests.started.wait(2)
-    status.finish.set()
-    _start(mgr, status, "git status").join(2)
-    assert status.started.is_set()
-    tests.finish.set()
-    t1.join(2)
-
-
-def test_a_killed_run_lets_go(tmp_path) -> None:
-    mgr = TerminalManager()
-    cwd = _repo(tmp_path, "killed")
-    killed = _Run(cwd)
-    killed.run_command = lambda command, **kw: (killed.started.set(), killed.finish.wait(5),  # type: ignore[method-assign]
-                                                 {"ok": False, "error": "terminal closed"})[-1]
-    t1 = _start(mgr, killed)
-    assert killed.started.wait(2)
-    killed.finish.set()  # TerminalSession.kill ends its run_command the same way
-    t1.join(2)
-    after = _Run(cwd)
-    after.finish.set()
-    _start(mgr, after).join(2)
-    assert after.started.is_set() and after.notes == []
-
-
-def test_a_run_that_raises_lets_go(tmp_path) -> None:
-    mgr = TerminalManager()
-    cwd = _repo(tmp_path, "raises")
-    broken = _Run(cwd)
-
-    def boom(command: str, **_kw) -> dict:
-        raise RuntimeError("terminal session not running")
-
-    broken.run_command = boom  # type: ignore[method-assign]
-    try:
-        mgr._run_command(broken, "pytest", timeout_s=1)
-    except RuntimeError:
-        pass
-    assert repo_lock.holder(repo_lock.repo_of(cwd)) == ""

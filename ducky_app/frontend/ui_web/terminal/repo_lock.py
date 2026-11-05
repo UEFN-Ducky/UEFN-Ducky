@@ -1,8 +1,7 @@
-"""One test or build run per repo at a time.
+"""Which commands are test or build runs, and which repo a folder is in.
 
-Oct 24 2026: a team's agents ran pytest suites in the same repo side by side, each taking
-minutes and gigabytes. A heavy command now waits for the one already running in its repo
-(the git top of its folder), then for the one running anywhere on the PC (PC).
+Agent terminals never wait on each other (Nov 5 2026): TerminalManager runs every command at
+once. The per-repo lock below is left only for sandbox_run (backend/sandbox/service.py).
 """
 
 from __future__ import annotations
@@ -17,9 +16,6 @@ HEAVY_RE = re.compile(
     r"cargo (?:test|build|check|clippy|nextest)|rustc|msbuild|dotnet (?:build|test)|gradlew?|"
     r"go (?:build|test)|cmake --build|vite build|build_exes|publish_app|release\.sh|tsc -b)\b"
 )
-# The lock key every heavy run also holds: one at a time on the whole PC.
-PC = "<this PC>"
-
 _cond = threading.Condition()
 _held: dict[str, str] = {}  # repo -> label of the run holding it
 

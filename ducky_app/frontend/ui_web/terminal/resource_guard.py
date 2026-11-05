@@ -3,7 +3,7 @@
 Nov 3 2026: an agent's ``cargo test`` compiled a 220k-line crate; one rustc held 6.4 GB beside
 UEFN (12 GB), nine agents and 26 node test workers. On a 16 GB PC that freezes everything.
 Agent terminals now run below normal priority inside a memory cap (the person's own terminals
-keep neither), and test and build runs take turns across the whole PC (repo_lock.PC).
+keep neither). Test and build runs never wait on each other's (Nov 5 2026).
 """
 
 from __future__ import annotations
