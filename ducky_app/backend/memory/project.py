@@ -207,12 +207,30 @@ def _list_subs(entry: str, project_root: str) -> list[dict[str, Any]]:
     return out
 
 
+def stored_author(author: str, private: bool) -> str:
+    """The DB author column for an entry: private entries carry _PRIVATE_AUTHOR_PREFIX."""
+    return f"{_PRIVATE_AUTHOR_PREFIX}{author}" if private else author
+
+
+def _sub_index_item(name: str, description: str, author: str, private: bool) -> dict[str, Any]:
+    """A sub line of the index: name + description; a private sub also says who may see it."""
+    item: dict[str, Any] = {"name": name, "description": description}
+    if private:
+        item.update(private=True, author=author)
+    return item
+
+
 def list_entries(project_root: str = "") -> list[dict[str, Any]]:
     """Index of a project's entries (frontmatter only + sub index), newest-updated first."""
     if _use_db():
         rows = _repo().index(_project_id(project_root))
         for row in rows:
             row["author"], row["private"] = _decode_author(row.get("author"))
+            subs = []
+            for s in row.get("subs") or []:
+                author, private = _decode_author(s.get("author"))
+                subs.append(_sub_index_item(s["name"], s["description"], author, private))
+            row["subs"] = subs
         return rows
     d = memory_dir(project_root)
     if not d.is_dir():
@@ -237,7 +255,7 @@ def list_entries(project_root: str = "") -> list[dict[str, Any]]:
             continue
         info["name"] = sub_dir.name
         info["subs"] = [
-            {"name": s["name"], "description": s["description"]}
+            _sub_index_item(s["name"], s["description"], s["author"], s["private"])
             for s in _list_subs(sub_dir.name, project_root)
         ]
         out.append(info)
@@ -359,8 +377,14 @@ def save_entry(
                 updated=meta["updated"],
                 body=f"Index topic for `{entry}` — content lives in its sub-entries.",
             )
-        stored_author = f"{_PRIVATE_AUTHOR_PREFIX}{meta['author']}" if is_private else meta["author"]
-        repo.put(project_id, slug, description=meta["description"], author=stored_author, updated=meta["updated"], body=body)
+        repo.put(
+            project_id,
+            slug,
+            description=meta["description"],
+            author=stored_author(meta["author"], is_private),
+            updated=meta["updated"],
+            body=body,
+        )
         return {**meta, "chars": len(body), "path": ""}
 
     if sub:
@@ -527,15 +551,15 @@ def index_markdown(
     newest first; subs stay under their parent, best ``task`` match first.
     """
     me = (private_author or author_filter or "").strip().lower()
-    entries = [
-        e
-        for e in list_entries(project_root)
-        if not e.get("private") or (me and str(e.get("author") or "").strip().lower() == me)
-    ]
+
+    def visible(item: dict[str, Any]) -> bool:
+        return not item.get("private") or bool(me and str(item.get("author") or "").strip().lower() == me)
+
+    entries = [e for e in list_entries(project_root) if visible(e)]
     task_words = _words(task)
     ranked: list[tuple[tuple[int, int, int, int], dict[str, Any], list[dict[str, Any]]]] = []
     for pos, e in enumerate(entries):
-        subs = list(e.get("subs") or [])
+        subs = [s for s in (e.get("subs") or []) if visible(s)]
         sub_scores = {s["name"]: _score(task_words, s["name"], s.get("description", "")) for s in subs}
         subs.sort(key=lambda s: -sub_scores[s["name"]])
         score = max([_score(task_words, e["name"], e.get("description", "")), *sub_scores.values()])
@@ -584,6 +608,8 @@ def suggest_entries(text: str, project_root: str = "", *, limit: int = 3) -> lis
         if e.get("private"):
             continue
         for item in [e, *(e.get("subs") or [])]:
+            if item.get("private"):
+                continue
             s = _score(words, item["name"], item.get("description", ""))
             if s > 0:
                 scored.append((-s, pos, item["name"]))

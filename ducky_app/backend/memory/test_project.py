@@ -349,6 +349,48 @@ def test_suggest_entries_returns_best_match(isolated_appdata, tmp_path):
     assert suggest_entries("nothing relevant here", root) == []
 
 
+@pytest.mark.parametrize("store", ["db", "files"])
+def test_private_sub_entry_hidden_from_other_authors(isolated_appdata, tmp_path, monkeypatch, store):
+    from backend.memory.project import index_markdown, read_entry, save_entry, suggest_entries
+
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_MEMORY", store)
+    root = str(tmp_path / "Proj")
+    save_entry("team-x", "main", description="Team X", author="Alice", project_root=root)
+    save_entry("team-x/notes", "secret", description="Alice notes", author="Alice", private=True, project_root=root)
+    save_entry("team-x/plan", "open", description="Shared plan", author="Alice", project_root=root)
+    bob = index_markdown(root, private_author="Bob")
+    assert "  - team-x/plan" in bob and "team-x/notes" not in bob
+    assert "  - team-x/notes — Alice notes" in index_markdown(root, private_author="alice")
+    assert read_entry("team-x/notes", root)["private"] is True
+    assert read_entry("team-x/notes", root)["author"] == "Alice"
+    assert suggest_entries("alice notes", root) == []
+
+
+def test_private_sub_entry_survives_the_move_into_the_db(isolated_appdata, tmp_path, monkeypatch):
+    from backend.memory import project as mem
+    from frontend.settings import default_app_data_dir
+    from frontend.ui_web.chats.store import project_slug
+
+    root = str(tmp_path / "Proj")
+    d = default_app_data_dir() / "memory" / "projects" / project_slug(root) / "team-x"
+    d.mkdir(parents=True)
+    (d / "MEMORY.md").write_text("---\nname: team-x\ndescription: Team X\nauthor: Alice\n---\n\nIndex\n", encoding="utf-8")
+    (d / "notes.md").write_text(
+        "---\nname: team-x/notes\ndescription: Alice notes\nauthor: Alice\nprivate: true\n---\n\nSecret\n", encoding="utf-8"
+    )
+    (d / "plan.md").write_text("---\nname: team-x/plan\ndescription: Shared plan\nauthor: Alice\n---\n\nOpen\n", encoding="utf-8")
+
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_MEMORY", "db")
+    bob = mem.index_markdown(root, private_author="Bob")  # first DB read imports the markdown
+    assert mem._use_db() and not d.exists()
+    assert "team-x/plan" in bob and "team-x/notes" not in bob
+    notes = mem.read_entry("team-x/notes", root)
+    assert notes["private"] is True and notes["author"] == "Alice" and notes["content"] == "Secret"
+    # Saving it again in the DB keeps it private.
+    mem.save_entry("team-x/notes", "Secret, edited", project_root=root)
+    assert "team-x/notes" not in mem.index_markdown(root, private_author="Bob")
+
+
 def test_prompt_carries_index_not_bodies(isolated_appdata, tmp_path):
     from backend.memory.project import save_entry
     from backend.agent.prompt import get_system_prompt_parts

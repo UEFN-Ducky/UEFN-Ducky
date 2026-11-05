@@ -42,7 +42,7 @@ def import_templates(root: Path) -> dict[str, Any]:
 
 
 def import_memory(root: Path) -> dict[str, Any]:
-    from backend.memory.project import _default_description, _parse_entry
+    from backend.memory.project import _default_description, _is_true, _parse_entry, stored_author
 
     report = {"projects": 0, "entries": 0}
     base = root / "memory" / "projects"
@@ -58,7 +58,7 @@ def import_memory(root: Path) -> dict[str, Any]:
             project_id,
             name,
             description=meta.get("description") or _default_description(body),
-            author=meta.get("author") or "",
+            author=stored_author(meta.get("author") or "", _is_true(meta.get("private"))),
             updated=meta.get("updated") or "",
             body=body.strip(),
         )

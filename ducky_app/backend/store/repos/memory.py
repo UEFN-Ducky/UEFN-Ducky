@@ -53,7 +53,9 @@ def index(project_id: str) -> list[dict[str, Any]]:
     subs: dict[str, list[dict[str, str]]] = {}
     for r in rows:
         if r["parent"]:
-            subs.setdefault(str(r["parent"]), []).append({"name": str(r["name"]), "description": str(r["description"])})
+            subs.setdefault(str(r["parent"]), []).append(
+                {"name": str(r["name"]), "description": str(r["description"]), "author": str(r["author"])}
+            )
         else:
             tops[str(r["name"])] = {
                 "name": str(r["name"]),
