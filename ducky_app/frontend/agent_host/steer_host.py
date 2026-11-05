@@ -14,6 +14,9 @@ pipe (``backend/panel/rpc.host_rpc``) instead of the app, so a busy window never
 
 One request per connection: ``{"method": "steer_take", "params": {"conv_id": "c1"}}`` gets one
 reply, e.g. ``{"lease_id": "…", "texts": ["use blue"], "steer_ids": ["s1"]}``.
+
+``{"method": "memory_report", "params": {"top": 20}}`` answers what this host process holds
+(``frontend.memory_report.report``): ``ducky_memory_report`` only measures the app window.
 """
 
 from __future__ import annotations
@@ -79,7 +82,22 @@ def answer(method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {"pending": steer.has_queued(conv_id)}
     if method == "question_gate":
         return {"blocked": question_gate(conv_id, GATE_WAIT_S)}
+    if method == "memory_report":
+        return _memory_report(params)
     return {"error": f"unknown method {method!r}"}
+
+
+def _memory_report(params: dict[str, Any]) -> dict[str, Any]:
+    from frontend import memory_report
+
+    try:
+        return memory_report.report(
+            start_trace=bool(params.get("start_trace")), stop_trace=bool(params.get("stop_trace")),
+            collect=bool(params.get("collect", True)), top=int(params.get("top") or memory_report.TOP),
+            walk_budget_s=float(params.get("walk_budget_s") or memory_report.WALK_BUDGET_S),
+        )
+    except Exception as exc:  # noqa: BLE001 - the caller hears why
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def _serve_one(conn: Any) -> None:

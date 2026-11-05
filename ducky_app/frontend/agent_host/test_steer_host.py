@@ -132,3 +132,18 @@ def test_the_runner_puts_the_hosts_pipe_in_the_uefn_servers_env(tmp_path, monkey
     servers = json.loads(path.read_text())["mcpServers"]
     assert servers["uefn"]["env"] == {"DUCKY_CONV_ID": "c6", "DUCKY_AGENT_HOST_PIPE": "p", "DUCKY_AGENT_HOST_KEY": "k"}
     assert "env" not in servers["other"]
+
+
+def test_the_hosts_pipe_answers_a_memory_report_for_the_host_process():
+    """ducky_memory_report only measured the app; an idle host held 1.12 GB (Nov 5 2026)."""
+    import os
+
+    from backend.panel import rpc
+
+    steer_host.enable()
+    env = steer_host.mcp_env()
+    pipe, key = env[rpc.HOST_PIPE_ENV], bytes.fromhex(env[rpc.HOST_KEY_ENV])
+    report = rpc.host_rpc(pipe, key, "memory_report", {"top": 3, "walk_budget_s": 1, "collect": False}, 60)
+    assert report["process"]["pid"] == os.getpid()  # measured here, in the host
+    assert {"native", "gc", "containers", "took_s"} <= set(report)
+    assert len(report["gc"]["types"]) <= 3
