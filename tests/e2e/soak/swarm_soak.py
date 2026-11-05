@@ -862,6 +862,50 @@ class ListenerCounter:
             sock.close()
 
 
+class CorePinner:
+    """The older-PC pass: keep the app and every process it starts on the first ``cores``
+    logical cores (psutil ``cpu_affinity``), re-applied every ``every_s`` as children start."""
+
+    def __init__(self, root_pid: int, cores: int, every_s: float = 1.0) -> None:
+        self.root_pid, self.cpus, self.every_s = root_pid, list(range(cores)), every_s
+        self.pinned: set[int] = set()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._loop, name="core-pinner", daemon=True)
+
+    def start(self) -> "CorePinner":
+        self.pin_once()
+        self._thread.start()
+        return self
+
+    def pin_once(self) -> int:
+        """Pin every process of the tree not pinned yet. Returns how many were pinned now."""
+        import psutil
+
+        try:
+            root = psutil.Process(self.root_pid)
+            procs = [root, *root.children(recursive=True)]
+        except psutil.Error:
+            return 0
+        done = 0
+        for p in procs:
+            if p.pid in self.pinned:
+                continue
+            try:
+                p.cpu_affinity(self.cpus)
+            except (psutil.Error, OSError, ValueError):
+                continue
+            self.pinned.add(p.pid)
+            done += 1
+        return done
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.every_s):
+            self.pin_once()
+
+    def close(self) -> None:
+        self._stop.set()
+
+
 def start_filler(free_target_gb: float) -> subprocess.Popen | None:
     """Hold memory in a child process until the PC has about ``free_target_gb`` free (the
     squeezed pass). None when the PC already has less free."""
@@ -1289,6 +1333,8 @@ def main() -> int:
     ap.add_argument("--burst", action="store_true",
                     help="pass B: judge the seat cap, waves, commit and listener only (every seat sent at once)")
     ap.add_argument("--seat-cap", type=int, default=0, help="the seat cap to hold (default: this PC's pc_limit)")
+    ap.add_argument("--cores", type=int, default=0,
+                    help="older-PC pass: pin the app's whole process tree to this many logical cores")
     ap.add_argument("--port-base", type=int, default=PANEL_PORT,
                     help="sandbox listener port; panel API = base-1, bridge = base+1 (two soaks at once)")
     args = ap.parse_args()
@@ -1335,6 +1381,10 @@ def main() -> int:
     extra["STUB_TERMINAL_S"] = str(args.terminal_s)
     if args.shared_mcp:
         extra["UEFN_DUCKY_SHARED_MCP"] = "1"
+    if args.cores:
+        # The app sizes its agent hosts from os.cpu_count(), which ignores affinity: give it
+        # what a PC with this many cores would get. (Its seat cap stays this PC's, a harder test.)
+        extra["DUCKY_MAX_AGENT_HOSTS"] = str(min(args.cores, 8))
     env = sandbox_env(box, extra)
 
     filler = start_filler(args.squeeze_free_gb) if args.squeeze_free_gb else None
@@ -1342,6 +1392,7 @@ def main() -> int:
     before = pc_state()
     proc = subprocess.Popen([str(exe)], cwd=str(box), env=env)
     print(f"sandbox Ducky pid {proc.pid}, panel :{PANEL_PORT - 1}, box {box}", flush=True)
+    pinner = CorePinner(proc.pid, args.cores).start() if args.cores else None
     results: dict[str, Any] = {}
     try:
         panel = Panel(PANEL_PORT - 1)
@@ -1365,7 +1416,12 @@ def main() -> int:
             results["memory"] = memory_table(summary, args.memory_mb, before.get("free_gb"))
         if listener is not None:
             results["listener_by_request"] = dict(sorted(listener.requests.items(), key=lambda kv: -kv[1]))
+        if pinner is not None:
+            results["cores"] = {"pinned_to": args.cores, "processes_pinned": len(pinner.pinned),
+                                "pc_logical_cores": os.cpu_count()}
     finally:
+        if pinner is not None:
+            pinner.close()
         stop_tree(proc.pid)
         if listener is not None:
             listener.close()

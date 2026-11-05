@@ -442,3 +442,32 @@ def test_create_chat_gives_up_and_never_retries_other_errors():
     with pytest.raises(RuntimeError, match="folder not found"):
         soak.create_chat(other, config={}, pause=0)
     assert len(other.calls) == 1
+
+
+def test_core_pinner_pins_the_root_and_children_started_later():
+    import subprocess
+    import pytest
+    psutil = pytest.importorskip("psutil")
+    if not hasattr(psutil.Process(), "cpu_affinity"):
+        pytest.skip("no cpu_affinity on this platform")
+    code = ("import subprocess, sys, time; time.sleep(0.5); "
+            "c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+            "print(c.pid, flush=True); time.sleep(30)")
+    root = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    pinner = soak.CorePinner(root.pid, 1, every_s=0.1)
+    try:
+        pinner.start()
+        child = int(root.stdout.readline())
+        for _ in range(50):
+            if child in pinner.pinned:
+                break
+            import time
+            time.sleep(0.1)
+        assert psutil.Process(root.pid).cpu_affinity() == [0]
+        assert psutil.Process(child).cpu_affinity() == [0]
+    finally:
+        pinner.close()
+        for p in psutil.Process(root.pid).children(recursive=True):
+            p.kill()
+        root.kill()
+        root.wait(10)
