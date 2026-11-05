@@ -220,6 +220,53 @@ def test_free_ducky_memory_stops_leftovers_and_spares_live_work(monkeypatch):
     assert self_health.self_care("format_disk")["ok"] is False and "free_ducky_memory" in self_health.ACTIONS
 
 
+def test_the_oom_chats_idle_ducky_is_never_nothing_wrong(monkeypatch):
+    """Nov 5 2026: ducky_health said 'Nothing in Ducky looks wrong' while Ducky held 9-10 GB."""
+    from backend.util import proc_table
+
+    me, mb = 100, 1 << 20
+
+    def proc(pid, name, ppid, size_mb):
+        return proc_table.Proc(pid, ppid, name, size_mb * mb, size_mb * mb, 1, 1, 0.0, 100.0 if pid == me else 200.0)
+
+    rows = [proc(me, "UEFN-Ducky.exe", 1, 1350), proc(1, "explorer.exe", 0, 50),
+            proc(101, "UEFN-Ducky.exe", me, 1120),  # agent host
+            proc(102, "UEFN-Ducky-Bridge.exe", 1, 932), proc(103, "UEFN-Ducky-Bridge.exe", 1, 722),  # 2 shared servers
+            proc(104, "msedgewebview2.exe", me, 978), proc(105, "msedgewebview2.exe", 104, 331),
+            proc(106, "claude.exe", 101, 200)]
+    rows += [proc(110 + i, "python.exe", me, 725) for i in range(4)]  # Forge workers, 2.9 GB
+    rows += [proc(200 + i, "conhost.exe", me, 6) for i in range(20)]
+    rows.append(proc(300, "UnrealEditorFortnite.exe", 1, 12000))  # never Ducky's
+    procs = {p.pid: p for p in rows}
+    forge = ["python.exe", "C:/Users/x/AppData/Local/UEFN-Ducky/plugins/uefn-plugin-forge/worker.py"]
+    monkeypatch.setattr(self_health, "_cmdline", lambda pid: (forge, "") if 110 <= pid < 114 else ([], ""))
+    known = {101: ("agent host", "C:/Ducky/1.2.470/UEFN-Ducky.exe"),
+             102: ("shared tool server", "C:/Ducky/1.2.470/UEFN-Ducky-Bridge.exe"),
+             103: ("shared tool server", "C:/Ducky/1.2.470/UEFN-Ducky-Bridge.exe")}
+    dt = self_health.ducky_footprint(procs, me, known, {101}, idle=True, now=10_000.0,
+                                     last_used={"forge": 10_000.0 - 40 * 60})
+    assert dt["parts"]["plugin_workers"] == 2900 and dt["parts"]["tool_servers"] == 1654
+    assert dt["parts"]["app"] == 1350 and dt["parts"]["agent_hosts"] == 1120 and dt["conhosts"] == 20
+    assert 300 not in [b["pid"] for b in dt["big_idle_processes"]]
+    snap = _base()
+    snap["pc"]["memory_total_gb"] = 32
+    snap["ducky_total"] = dt
+    out = self_health.findings(snap)
+    whats = [f["what"] for f in out if f["severity"] == "high"]
+    assert not any("Nothing in Ducky looks wrong" in f["what"] for f in out)
+    assert any(w.startswith("Ducky uses 8.5 GB: app 1.32 GB, agent hosts 1.09 GB, tool servers 1.62 GB") and "plugin workers 2.83 GB" in w and "20 conhosts" in w for w in whats)
+    assert any("hold over 500 MB while no turn runs" in w and "UEFN-Ducky.exe (app)" in w for w in whats)
+    assert any("2 shared tool servers of one version (1.2.470)" in w and "(1 expected)" in w for w in whats)
+    assert any(w.startswith("forge plugin workers: 4 processes") and "unused 40 min" in w for w in whats)
+    assert any("20 console hosts" in w for w in whats)
+    assert "free_ducky_memory" in json.dumps(out)
+    # A small idle Ducky: its total is reported, and nothing is wrong.
+    small = self_health.ducky_footprint({me: proc(me, "UEFN-Ducky.exe", 1, 380)}, me, idle=True, last_used={})
+    snap["ducky_total"] = small
+    sev = [(f["severity"], f["what"]) for f in self_health.findings(snap)]
+    assert ("ok", "Ducky uses 0.4 GB: app 380 MB.") in sev and all(s == "ok" for s, _ in sev)
+
+
 def test_a_look_reads_the_process_table_not_each_process(monkeypatch):
     """A busy PC answered psutil's per-process questions in 50-120 ms each: one look at
     ~700 processes took minutes. The snapshot reads one table (twice, for CPU) and asks

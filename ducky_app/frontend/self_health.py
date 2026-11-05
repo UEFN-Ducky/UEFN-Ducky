@@ -224,6 +224,11 @@ def snapshot(detail: bool = False) -> dict[str, Any]:
         row.update({"role": role, "exe": exe,
                     "orphan": role not in ("app", "shared tool server", "agent host") and proc_table.orphan(procs, proc.pid)})
         ducky_rows.append(row)
+    hosts = agent_hosts(procs, cpu)
+    running = _running_agents()
+    footprint = ducky_footprint(
+        procs, me_pid, {r["pid"]: (r["role"], r["exe"]) for r in ducky_rows},
+        {int(h["pid"]) for h in hosts if h.get("pid")}, idle=not running.get("count"))
 
     merged: dict[str, float] = {}
     for proc in procs.values():
@@ -246,14 +251,158 @@ def snapshot(detail: bool = False) -> dict[str, Any]:
         "sandboxes": _sandboxes(procs, cpu),
         "terminals": _terminals(),
         "storage": _storage(),
-        "running_agents": _running_agents(),
-        "agent_hosts": agent_hosts(procs, cpu),
+        "running_agents": running,
+        "agent_hosts": hosts,
+        "ducky_total": footprint,
         "agents_in_window": agents_in_window(),
         "ui_last_hour": _ui_last_hour(),
     }
     if detail:
         out["perf"] = _perf()
     out["findings"] = findings(out)
+    return out
+
+
+_PARTS = (("app", "app"), ("agent_hosts", "agent hosts"), ("tool_servers", "tool servers"),
+          ("plugin_workers", "plugin workers"), ("webview2", "WebView2"), ("terminals", "terminals"),
+          ("conhosts", "conhosts"), ("agents", "agent CLIs"))
+_SHELLS = ("bash.exe", "sh.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "wsl.exe", "openconsole.exe")
+IDLE_PROCESS_MB = 500  # one Ducky process holding more while no turn runs is a finding
+PLUGIN_IDLE_MIN = 10
+MAX_CONHOSTS = 6
+
+
+def _plugin_of(cmd: list[str]) -> str:
+    """The plugin a worker belongs to, from its command line ('forge' from '…uefn-plugin-forge…')."""
+    import re
+
+    text = " ".join(cmd).replace("\\", "/")
+    hit = re.search(r"uefn-plugin-([\w-]+)", text, re.I) or re.search(r"/plugins/([^/\s]+)/", text, re.I)
+    if hit:
+        return hit.group(1)
+    script = next((a for a in reversed(cmd) if a.lower().endswith(".py")), "")
+    return Path(script).parent.name if script else "plugin"
+
+
+def _plugin_last_used() -> dict[str, float]:
+    """Plugin id -> epoch seconds of its last tool call in this process; {} when unknown."""
+    try:
+        from backend.mcp_plugins.client_pool import get_plugin_pool
+
+        conns = dict(getattr(get_plugin_pool(), "_connections", {}) or {})
+        return {str(k): float(getattr(c, "last_used", 0) or 0) for k, c in conns.items()}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def ducky_footprint(procs: dict[int, Any], me_pid: int, known: dict[int, tuple[str, str]] | None = None,
+                    host_pids: set[int] | None = None, *, idle: bool = False, now: float | None = None,
+                    last_used: dict[str, float] | None = None) -> dict[str, Any]:
+    """Everything Ducky holds: its process tree plus Ducky's other processes (shared tool
+    servers), in parts (MB of private memory). ``known`` = pid -> (role, exe) already read;
+    command lines are asked only for Python children (plugin workers)."""
+    from backend.util import proc_table
+
+    known, host_pids = known or {}, host_pids or set()
+    now = time.time() if now is None else now
+    tree = proc_table.tree(procs, me_pid)
+    mine = set(tree)
+    pids = tree + [pid for pid, p in procs.items() if _ducky_named(p) and pid not in mine]
+    parts = {key: 0.0 for key, _ in _PARTS}
+    servers: list[dict[str, Any]] = []
+    workers: list[dict[str, Any]] = []
+    big: list[dict[str, Any]] = []
+    conhosts = 0
+    last = _plugin_last_used() if last_used is None else last_used
+    for pid in pids:
+        proc = procs[pid]
+        name, mb = proc.name.lower(), _mb(proc.private)
+        role, exe = known.get(pid, ("", ""))
+        if pid == me_pid:
+            part = "app"
+        elif pid in host_pids or role == "agent host":
+            part = "agent_hosts"
+        elif _ducky_named(proc):
+            part = "tool_servers"
+            if role == "shared tool server":
+                servers.append({"pid": pid, "exe": exe, "version": Path(exe).parent.name if exe else "", "mb": mb})
+        elif "webview2" in name:
+            part = "webview2"
+        elif name == "conhost.exe":
+            part, conhosts = "conhosts", conhosts + 1
+        elif name.startswith(("python", "pythonw")) and any("worker" in a.lower() for a in _cmdline(pid)[0]):
+            part = "plugin_workers"
+            cmd = _cmdline(pid)[0]
+            plugin = _plugin_of(cmd)
+            joined = " ".join(cmd).lower()
+            used = max((t for k, t in last.items() if k.lower() in joined or plugin.lower() in k.lower()), default=0.0)
+            workers.append({"pid": pid, "plugin": plugin, "mb": mb,
+                            "idle_min": round((now - used) / 60) if used else None})
+        elif name in _SHELLS:
+            part = "terminals"
+        else:
+            part = "agents"
+        parts[part] = round(parts[part] + mb, 1)
+        if idle and mb > IDLE_PROCESS_MB:
+            big.append({"pid": pid, "name": proc.name, "part": part, "private_mb": mb})
+    return {"total_mb": round(sum(parts.values()), 1), "parts": parts, "idle": idle, "conhosts": conhosts,
+            "shared_tool_servers": servers, "plugin_workers": workers,
+            "big_idle_processes": sorted(big, key=lambda r: -r["private_mb"])}
+
+
+def _gb_text(mb: float) -> str:
+    return f"{mb / 1024:.2f}".rstrip("0").rstrip(".") + " GB" if mb >= 1024 else f"{mb:.0f} MB"
+
+
+def _footprint_findings(dt: dict[str, Any], pc: dict[str, Any]) -> list[dict[str, str]]:
+    """Ducky's own total (always), and the leftovers that make it big."""
+    out: list[dict[str, str]] = []
+    free_fix = "ducky_self_care(action='free_ducky_memory')"
+    total_gb = float(dt.get("total_mb") or 0) / 1024
+    ram_gb = float(pc.get("memory_total_gb") or 0)
+    parts = dt.get("parts") or {}
+    if total_gb > 5 or (ram_gb and total_gb > 0.15 * ram_gb):
+        severity = "high"
+    else:
+        severity = "medium" if total_gb > 3 else "ok"
+    shown = [f"{label} {_gb_text(float(parts.get(key) or 0))}" for key, label in _PARTS
+             if key != "conhosts" and float(parts.get(key) or 0) >= 1]
+    if dt.get("conhosts"):
+        shown.append(f"{dt['conhosts']} conhosts")
+    out.append({"severity": severity, "what": f"Ducky uses {total_gb:.1f} GB: {', '.join(shown)}.",
+                "why": ("Ducky's own processes hold more than they should" + (" while no agent runs." if dt.get("idle") else "."))
+                if severity != "ok" else "Within Ducky's normal range (under 3 GB).",
+                "fix": f"{free_fix} frees its leftovers; ducky_self_care has each step on its own." if severity != "ok" else ""})
+    big = dt.get("big_idle_processes") or []
+    if big:
+        names = ", ".join(f"{b['name']} ({b['part'].replace('_', ' ')}) {_gb_text(float(b['private_mb']))}" for b in big[:6])
+        out.append({"severity": "high", "what": f"{len(big)} Ducky processes hold over {IDLE_PROCESS_MB} MB while no turn runs: {names}.",
+                    "why": "An idle Ducky process should sit at a few hundred MB; more means leftovers or growth.",
+                    "fix": f"{free_fix}; restart Ducky if the app or an agent host stays big."})
+    by_version: dict[str, list[dict[str, Any]]] = {}
+    for s in dt.get("shared_tool_servers") or []:
+        by_version.setdefault(str(s.get("version") or s.get("exe") or "?"), []).append(s)
+    for version, rows in by_version.items():
+        if len(rows) > 1:
+            out.append({"severity": "high",
+                        "what": f"{len(rows)} shared tool servers of one version ({version}) hold "
+                                f"{_gb_text(sum(float(r['mb']) for r in rows))} (1 expected).",
+                        "why": "A second shared tool server started instead of reusing the first one.",
+                        "fix": "Restart Ducky to keep one; ducky_self_care(action='stop_orphan_bridges') stops orphaned ones."})
+    stale: dict[str, list[dict[str, Any]]] = {}
+    for w in dt.get("plugin_workers") or []:
+        if w.get("idle_min") is not None and int(w["idle_min"]) >= PLUGIN_IDLE_MIN:
+            stale.setdefault(str(w["plugin"]), []).append(w)
+    for plugin, rows in stale.items():
+        out.append({"severity": "high",
+                    "what": f"{plugin} plugin workers: {len(rows)} processes hold {_gb_text(sum(float(r['mb']) for r in rows))}, "
+                            f"unused {max(int(r['idle_min']) for r in rows)} min.",
+                    "why": f"The plugin had no call in {PLUGIN_IDLE_MIN} minutes but its workers stay loaded.",
+                    "fix": f"Close the {plugin} panel or restart Ducky to stop them; {free_fix} frees the rest."})
+    if int(dt.get("conhosts") or 0) > MAX_CONHOSTS:
+        out.append({"severity": "high", "what": f"{dt['conhosts']} console hosts (conhost.exe) run under Ducky.",
+                    "why": "Each console a terminal or tool opened and never closed keeps one alive.",
+                    "fix": "ducky_self_care(action='close_idle_terminals'), or " + free_fix})
     return out
 
 
@@ -498,7 +647,9 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
                     "why": f"The biggest user is {biggest.get('name', '?')} ({round(float(biggest.get('memory_mb') or 0) / 1024, 1)} GB)."
                            + (" It's mostly not Ducky." if ducky_mb < 0.15 * float(pc.get("memory_total_gb") or 1) * 1024 else ""),
                     "fix": "Close what you don't need among the top apps listed."})
-    if not out:
+    if snap.get("ducky_total"):
+        out.extend(_footprint_findings(snap["ducky_total"], pc))
+    if not any(f["severity"] != "ok" for f in out):
         out.append({"severity": "ok", "what": "Nothing in Ducky looks wrong right now.", "why": "CPU, memory, handles, helpers, "
                     "sandboxes and terminals are all in their normal range.", "fix": ""})
     order = {"high": 0, "medium": 1, "low": 2, "ok": 3}
