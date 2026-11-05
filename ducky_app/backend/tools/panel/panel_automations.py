@@ -825,6 +825,27 @@ def _caller_chat(conv_id: str) -> str:
         return ""
 
 
+def _failed_step_lines(steps: Any) -> list[str]:
+    """The failed step's name and the end of its output. Nov 2026: a release failed three
+    times as just "Command failed (exit code 1)", and its run log was 4 MB to dig through."""
+    failed = [s for s in steps or [] if isinstance(s, dict) and s.get("ok") is False]
+    if not failed:
+        return []
+    step = failed[-1]
+    lines = [f"Failed step: {step.get('label') or step.get('type') or step.get('id')}"]
+    todo, tail = [step], ""
+    while todo and not tail:  # the command's output sits a few levels down in its result
+        item = todo.pop(0)
+        if isinstance(item, dict):
+            tail = str(item.get("output_tail") or "")
+            todo.extend(v for v in item.values() if isinstance(v, (dict, list)))
+        elif isinstance(item, list):
+            todo.extend(item)
+    if tail.strip():
+        lines.append("Last output:\n" + "\n".join(tail.strip().splitlines()[-20:])[-2000:])
+    return lines
+
+
 def _tell_caller(chat_id: str, workflow_id: str, out: dict[str, Any]) -> None:
     """A background run ended: one notice to the chat that started it (wakes its ducky when idle)."""
     if not chat_id:
@@ -834,6 +855,8 @@ def _tell_caller(chat_id: str, workflow_id: str, out: dict[str, Any]) -> None:
     name = str((_get(workflow_id) or {}).get("name") or workflow_id)
     state = "ok" if out.get("ok") else f"failed: {out.get('error') or 'unknown error'}"
     lines = [f"[Workflow] {name} finished: {state} (run `{out.get('run') or ''}`)."]
+    if not out.get("ok"):
+        lines.extend(_failed_step_lines(out.get("steps")))
     text = str(out.get("text") or "").strip()
     if text:
         lines.append(text[:2000])

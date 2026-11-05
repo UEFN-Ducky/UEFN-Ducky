@@ -105,18 +105,20 @@ _APP_NOISE_FILES = {
 }
 
 
-# What a *running* Ducky (its agents, their sandboxes and terminals, the live
-# database) rewrites while a suite runs next to it. With the panel open these are
-# the app's own writes, so the guard leaves them out instead of printing noise; a
-# test that leaks still lands in the stores above (memory, settings, plugins, ...).
-_LIVE_PANEL_DIRS = {
-    "chats", "crash", "locks", "logs", "sandboxes", "terminals", "agent_hosts", "webview", "verify-evidence",
-    # Live workflow runs' records: the release workflow rewrites its own while its test phase runs.
-    "workflow-runs",
-    # The in-app browser's private profile: the open panel's WebView2 writes it on its own.
-    "webview2_browser_private",
-}
-_LIVE_PANEL_FILES = {"ducky.db", "run_durations.json", "editor_lease.json"}
+# With the panel open, the running Ducky (its agents, sandboxes, terminals, browser
+# profile, workflow runs, live database) rewrites AppData all through a suite. Nov 2026:
+# skipping its folders one by one failed three release runs in a row, each on a folder
+# nobody had listed yet. So with the panel open the guard watches only the stores a
+# leaking test lands in (and that the idle app leaves alone): memory, plugins, skill
+# packs, templates and the settings files. Without the panel it watches everything.
+_LEAK_STORE_DIRS = frozenset({
+    "memory", "file_history", "changesets", "plan_templates", "skill_packs", "uefn_plugins",
+    "ai_plugins", "mcp_plugins", "verse_templates", "automation_templates", "duckies", "sounds",
+    "uefn_plugin_prefs", "tasks",
+})
+_LEAK_STORE_FILES = frozenset({
+    "panel_settings.json", "config.json", "mcp.json", "credentials.dat", "recent_projects.json",
+})
 
 
 def _panel_is_running(real: Path) -> bool:
@@ -135,15 +137,16 @@ def _tree_signature(root: Path, live_panel: bool = False) -> dict[str, tuple[int
     sig: dict[str, tuple[int, int]] = {}
     if not root.is_dir():
         return sig
-    skip_dirs = _APP_NOISE_DIRS | (_LIVE_PANEL_DIRS if live_panel else set())
-    skip_files = _APP_NOISE_FILES | (_LIVE_PANEL_FILES if live_panel else set())
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = Path(dirpath).relative_to(root)
-        if rel_dir.parts and rel_dir.parts[0] in skip_dirs:
+        top = rel_dir.parts[0] if rel_dir.parts else ""
+        if top in _APP_NOISE_DIRS or (live_panel and top and top not in _LEAK_STORE_DIRS):
             dirnames[:] = []
             continue
         for name in filenames:
-            if name in skip_files or ".bak." in name or name.endswith(".tmp"):
+            if name in _APP_NOISE_FILES or ".bak." in name or name.endswith(".tmp"):
+                continue
+            if live_panel and not top and name not in _LEAK_STORE_FILES:
                 continue
             p = Path(dirpath) / name
             try:

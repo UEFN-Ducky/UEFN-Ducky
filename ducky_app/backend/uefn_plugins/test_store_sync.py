@@ -122,7 +122,9 @@ def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
             elapsed = time.perf_counter() - t0
 
         assert out.get("ok"), out
-        assert elapsed < 3.0, f"uninstall blocked on teardown: {elapsed:.2f}s"
+        # The reload hangs 60 s; well under that proves uninstall never waits on it. A full
+        # suite beside the app and UEFN took over 3 s for the disk work alone (Nov 2026).
+        assert elapsed < 15.0, f"uninstall blocked on teardown: {elapsed:.2f}s"
         assert not is_plugin_installed("wedge")
         assert not dest.exists()
         hang.set()  # release daemon so the process can exit cleanly

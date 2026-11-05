@@ -351,13 +351,14 @@ def test_node_in_a_bash_terminal_finishes_for_the_agent_and_the_person(tmp_path)
         # Ask once the first prompt (and its PROMPT_COMMAND) is up; a loaded PC takes longer
         # than fixed sleeps to start Git Bash and answer, so wait for the prompt and the line.
         # Never through run_command here: its own prefix drops the alias this test looks for.
-        deadline = time.time() + 30
+        # 60 s: a full release suite beside the app and UEFN took Git Bash past 30 s (Nov 2026).
+        deadline = time.time() + 60
         while "$" not in plain_terminal_text(session.read_output_tail(4000)) and time.time() < deadline:
             time.sleep(0.5)
         time.sleep(1)  # the prompt is drawn after PROMPT_COMMAND ran; let the line settle
         session.write("type node\r")
         typed: list[str] = []
-        deadline = time.time() + 30
+        deadline = time.time() + 60
         while not typed and time.time() < deadline:
             time.sleep(0.5)
             text = plain_terminal_text(session.read_output_tail(4000))

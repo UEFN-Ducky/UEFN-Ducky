@@ -117,7 +117,7 @@ def commit_and_push_before_publish(root: Path, changelog: str = "") -> None:
             # Detached release worktree: publish onto origin's default branch.
             default = _git(root, "symbolic-ref", "-q", "refs/remotes/origin/HEAD", check=False).stdout.strip()
             branch = default.rsplit("/", 1)[-1] or "main"
-            push = _git(root, "push", "origin", f"HEAD:refs/heads/{branch}", check=False)
+            push = _push_detached(root, branch)
         else:
             push = _git(root, "push", "-u", "origin", "HEAD", check=False)
         if push.returncode != 0:
@@ -125,6 +125,33 @@ def commit_and_push_before_publish(root: Path, changelog: str = "") -> None:
         print("pushed HEAD to origin before Store publish")
     else:
         print("no origin remote — Store zip is from this committed HEAD only")
+
+
+PUSH_TRIES = 3
+
+
+def _push_detached(root: Path, branch: str) -> subprocess.CompletedProcess[str]:
+    """Push the release commit onto origin's branch. Nov 2026: a fix pushed to main while
+    the release built made the push non-fast-forward, and the whole release stopped after
+    a passed test run and a finished build. A rejected push now rebases the release commit
+    onto the new tip and tries again; a rebase conflict still stops the release."""
+    push = _git(root, "push", "origin", f"HEAD:refs/heads/{branch}", check=False)
+    for _ in range(PUSH_TRIES - 1):
+        if push.returncode == 0:
+            return push
+        _git(root, "fetch", "-q", "origin", branch, check=False)
+        incoming = _git(root, "log", "--oneline", f"HEAD..origin/{branch}", check=False).stdout.strip()
+        if not incoming:
+            return push  # not behind: refused for another reason (auth, hook)
+        rebase = _git(root, "rebase", "-q", f"origin/{branch}", check=False)
+        if rebase.returncode != 0:
+            _git(root, "rebase", "--abort", check=False)
+            raise SystemExit(f"{branch} moved during the release and the release commit does not rebase onto it:\n"
+                             + (rebase.stderr or rebase.stdout))
+        print(f"  {branch} moved during the release; rebased onto it (these are on {branch} but not in this "
+              f"build):\n    " + incoming.replace("\n", "\n    "))
+        push = _git(root, "push", "origin", f"HEAD:refs/heads/{branch}", check=False)
+    return push
 
 
 def _self_check() -> None:
