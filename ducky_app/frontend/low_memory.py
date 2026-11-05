@@ -45,6 +45,7 @@ FREE_EVERY_S = 300.0  # Ducky frees its own leftovers at most this often, and on
 _last_alert = 0.0  # the last critical alert
 _last_freed = 0.0  # when Ducky last freed its own leftovers
 _freed_this_spell = False  # reset when free memory is back above the warning level
+_gpu_warned = False  # one graphics-memory alert per spell: reset when the GPU is under FULL_SHARE again
 _last_warn = 0.0  # the last warning or critical alert
 _recent: deque[tuple[float, float]] = deque()  # (monotonic, free GB) within DROP_WINDOW_S
 
@@ -230,7 +231,36 @@ def _freed_text(freed: dict[str, Any]) -> str:
     return f"Ducky already freed{amount}" + (f" ({', '.join(did)})" if did else "") + ". "
 
 
+def check_gpu() -> None:
+    """One alert per spell when the graphics card's memory is nearly full, naming what fills it."""
+    global _gpu_warned
+    try:
+        from frontend import gpu_memory
+
+        info = gpu_memory.read()
+        if not gpu_memory.full(info):
+            if info:
+                _gpu_warned = False
+            return
+        if _gpu_warned:
+            return
+        _gpu_warned = True
+        what, fix = gpu_memory.describe(info)
+        from frontend import notifications
+
+        notifications.alert("UEFN Ducky", "Graphics memory is almost full.", level="error",
+                            detail=f"{what} {fix} Save your work in UEFN.")
+    except Exception:
+        pass
+
+
 def on_heartbeat(beat: dict[str, Any]) -> None:
+    """boot_report's 30 s sample: graphics memory first, then system RAM."""
+    check_gpu()
+    _check_ram(beat)
+
+
+def _check_ram(beat: dict[str, Any]) -> None:
     """boot_report's 30 s memory sample: a warning when the PC is getting full or emptying fast,
     and a stronger alert when it is nearly full. Below the warning level Ducky first frees its
     own leftovers (once per spell) and only warns when that wasn't enough."""

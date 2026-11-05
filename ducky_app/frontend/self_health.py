@@ -254,6 +254,7 @@ def snapshot(detail: bool = False) -> dict[str, Any]:
         "running_agents": running,
         "agent_hosts": hosts,
         "ducky_total": footprint,
+        "gpu": _gpu(procs),
         "agents_in_window": agents_in_window(),
         "ui_last_hour": _ui_last_hour(),
     }
@@ -440,6 +441,15 @@ def agents_in_window(threads: list[threading.Thread] | None = None, hosts_on: bo
         return []
     names = [t.name for t in (threading.enumerate() if threads is None else threads)]
     return sorted({n[len("ca-stdout-"):] for n in names if n.startswith("ca-stdout-")})
+
+
+def _gpu(procs: Any = None) -> dict[str, Any] | None:
+    try:
+        from frontend import gpu_memory
+
+        return gpu_memory.read(procs=procs)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _inflight() -> dict[str, Any]:
@@ -649,6 +659,18 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
                     "fix": "Close what you don't need among the top apps listed."})
     if snap.get("ducky_total"):
         out.extend(_footprint_findings(snap["ducky_total"], pc))
+    gpu = snap.get("gpu")
+    try:
+        from frontend import gpu_memory
+
+        if gpu_memory.full(gpu):
+            what, fix = gpu_memory.describe(gpu)
+            out.append({"severity": "high", "what": what,
+                        "why": f"Over {round(gpu_memory.FULL_SHARE * 100)}% of the graphics card's memory is in use; "
+                               "UEFN then fails with 'Out of video memory'.",
+                        "fix": fix})
+    except Exception:  # noqa: BLE001
+        pass
     if not any(f["severity"] != "ok" for f in out):
         out.append({"severity": "ok", "what": "Nothing in Ducky looks wrong right now.", "why": "CPU, memory, handles, helpers, "
                     "sandboxes and terminals are all in their normal range.", "fix": ""})

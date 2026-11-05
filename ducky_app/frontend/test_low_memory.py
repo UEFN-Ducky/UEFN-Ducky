@@ -44,6 +44,7 @@ def pc(monkeypatch):
     monkeypatch.setattr(low_memory, "_last_warn", 0.0)
     monkeypatch.setattr(low_memory, "_last_freed", 0.0)
     monkeypatch.setattr(low_memory, "_freed_this_spell", False)
+    monkeypatch.setattr("frontend.gpu_memory.read", lambda *a, **k: None)  # test_gpu_memory covers VRAM
     state["growth"] = None
     monkeypatch.setattr(low_memory, "_uefn_growth", lambda: state["growth"])
     monkeypatch.setattr("frontend.self_health.free_ducky_memory",
