@@ -28,6 +28,11 @@ class Event:
             handler(*args)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_soft(monkeypatch):
+    monkeypatch.setattr(memory, "_soft", {"at": 0.0})
+
+
 @pytest.fixture
 def window(monkeypatch):
     monkeypatch.setattr(memory, "enabled", lambda: True)
@@ -141,11 +146,10 @@ def test_async_attachment_reads_latest_visibility(window, monkeypatch):
 
 
 def test_trim_only_when_hidden_idle_big_and_not_too_soon():
-    big = {"webview_gb": 2.5, "agents": 0}
+    big = {"webview_gb": 1.6, "agents": 0}
     t = memory.TRIM_EVERY_S + 1
     assert memory.should_trim(big, active=False, now=t, last_at=0.0)
     assert not memory.should_trim(big, active=True, now=t, last_at=0.0)  # the person is looking
-    assert not memory.should_trim({**big, "agents": 1}, active=False, now=t, last_at=0.0)  # a turn runs
     assert not memory.should_trim({**big, "webview_gb": 1.2}, active=False, now=t, last_at=0.0)
     assert not memory.should_trim(big, active=False, now=t, last_at=t - 60)  # trimmed a minute ago
     assert not memory.should_trim({"webview_gb": "?"}, active=False, now=t, last_at=0.0)
@@ -157,8 +161,95 @@ def test_an_open_window_nobody_uses_trims_past_the_open_cap():
     idle = memory.OPEN_IDLE_S + 60
     assert memory.should_trim({"webview_gb": 2.7, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
     assert not memory.should_trim({"webview_gb": 2.7, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=30)
-    assert not memory.should_trim({"webview_gb": 2.2, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
-    assert not memory.should_trim({"webview_gb": 2.7, "agents": 1}, active=True, now=t, last_at=0.0, idle_s=idle)
+    assert not memory.should_trim({"webview_gb": 1.2, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
+
+
+def test_hidden_past_the_cap_reloads_even_with_agents_running(window, monkeypatch):
+    """Nov 5 2026: agents always run, so the old 0-turn rule never let the reload fire."""
+    queued, reloaded = [], []
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(memory, "input_idle_s", lambda: 5.0)
+    from frontend import error_log
+    from frontend.ui_web import panel_api
+
+    monkeypatch.setattr(panel_api, "mark_crash_reload", lambda: None)
+    monkeypatch.setattr(error_log, "record_activity", lambda src, msg: None)
+    window.native.BeginInvoke = queued.append
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    window.native.WindowState = "Minimized"
+    assert memory.trim_if_bloated(window, {"webview_gb": 1.6, "agents": 3})
+    queued.pop()()
+    assert reloaded == [1]
+
+
+def test_an_open_window_in_use_is_never_reloaded(window, monkeypatch):
+    reloaded = []
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(memory, "input_idle_s", lambda: 3.0)
+    window.native.BeginInvoke = lambda fn: fn()
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    for agents in (0, 4):
+        assert not memory.trim_if_bloated(window, {"webview_gb": 3.0, "agents": agents})
+    assert reloaded == []
+    assert window.native.Controls[0].CoreWebView2.MemoryUsageTargetLevel == Level.Normal
+
+
+def test_idle_open_window_over_a_gb_goes_low_then_normal_on_input(window, monkeypatch):
+    idle = {"s": memory.SOFT_IDLE_S + 1}
+    monkeypatch.setattr(memory, "input_idle_s", lambda: idle["s"])
+    monkeypatch.setattr(memory, "_last_trim", {"at": memory.time.monotonic()})  # no reload here
+    core = window.native.Controls[0].CoreWebView2
+    assert not memory.trim_if_bloated(window, {"webview_gb": 1.2, "agents": 2})
+    assert core.MemoryUsageTargetLevel == Level.Low
+    assert not memory.trim_if_bloated(window, {"webview_gb": 1.2, "agents": 2})  # still idle: stays Low
+    assert core.MemoryUsageTargetLevel == Level.Low
+    idle["s"] = 0.0  # the person moved the mouse
+    memory.trim_if_bloated(window, {"webview_gb": 1.2, "agents": 2})
+    assert core.MemoryUsageTargetLevel == Level.Normal and memory._soft["at"] == 0.0
+
+
+def test_soft_level_needs_a_gb_and_idle():
+    beat = {"webview_gb": 0.8}
+    assert memory.soft_level(beat, active=True, idle_s=999, now=10.0, low_at=0.0) == ""
+    assert memory.soft_level({"webview_gb": 1.2}, active=True, idle_s=5, now=10.0, low_at=0.0) == ""
+    assert memory.soft_level({"webview_gb": 1.2}, active=False, idle_s=999, now=10.0, low_at=0.0) == ""
+
+
+def test_trim_now_sets_low_without_hiding_the_page(window):
+    control = window.native.Controls[0]
+    control.CoreWebView2Controller = SimpleNamespace(IsVisible=True)
+    assert memory.trim_now(window, "free_ducky_memory")
+    assert control.CoreWebView2.MemoryUsageTargetLevel == Level.Low
+    assert control.CoreWebView2Controller.IsVisible is True
+    assert memory._soft["at"] > 0
+
+
+def test_try_suspend_is_never_called(window, monkeypatch):
+    calls = []
+    core = window.native.Controls[0].CoreWebView2
+    core.TrySuspendAsync = lambda *a: calls.append("suspend")
+    core.Resume = lambda *a: calls.append("resume")
+    core.Reload = lambda: None
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(memory, "input_idle_s", lambda: memory.OPEN_IDLE_S + 1)
+    from frontend import error_log
+    from frontend.ui_web import panel_api
+
+    monkeypatch.setattr(panel_api, "mark_crash_reload", lambda: None)
+    monkeypatch.setattr(error_log, "record_activity", lambda src, msg: None)
+    window.native.BeginInvoke = lambda fn: fn()
+    memory.install(window)
+    window.events.shown.fire()
+    memory.trim_now(window, "test")
+    memory.trim_if_bloated(window, {"webview_gb": 2.0, "agents": 1})
+    window.native.Visible = False
+    window.native.VisibleChanged.fire(None, None)
+    window.native.Visible = True
+    window.native.VisibleChanged.fire(None, None)
+    assert calls == []
+    assert "TrySuspend" not in __import__("inspect").getsource(memory).replace("never suspend", "")
 
 
 def test_input_idle_is_a_number():

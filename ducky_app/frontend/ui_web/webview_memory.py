@@ -1,6 +1,10 @@
-"""Best-effort WebView2 memory targets; never suspend scripts. The one reload: an idle window
-whose WebView2 grew too big (``trim_if_bloated``): hidden past TRIM_GB, or open but untouched
-for OPEN_IDLE_S past OPEN_TRIM_GB."""
+"""Best-effort WebView2 memory, in two levels; never suspend scripts (chats stream while hidden).
+
+Soft: ``MemoryUsageTargetLevel = Low`` while hidden or minimized, while open and untouched for
+SOFT_IDLE_S past SOFT_GB, and at once on ``trim_now``. WebView2 never sets it back by itself, so
+showing or using the window sets ``Normal`` again. Reload (``trim_if_bloated``): hidden past
+TRIM_GB even while agents run, or open but untouched for OPEN_IDLE_S past OPEN_TRIM_GB; a window
+in use is never reloaded."""
 
 from __future__ import annotations
 
@@ -50,12 +54,17 @@ def update_control(control: Any, *, active: bool) -> bool:
             controller.IsVisible = bool(active)
     except Exception:
         pass
+    return _set_level(control, low=not active)
+
+
+def _set_level(control: Any, *, low: bool) -> bool:
+    """Only the memory target; rendering stays as it is (the soft level of an open window)."""
     try:
         core = control.CoreWebView2
         current = core.MemoryUsageTargetLevel
         # Use the enum supplied by the loaded SDK; importing a newer assembly is
         # unnecessary and would make older packaged runtimes fail at startup.
-        target = getattr(type(current), "Normal" if active else "Low")
+        target = getattr(type(current), "Low" if low else "Normal")
         if current != target:
             core.MemoryUsageTargetLevel = target
         return True
@@ -63,15 +72,17 @@ def update_control(control: Any, *, active: bool) -> bool:
         return False
 
 
-# A 12.6 h session on 1.2.447 grew WebView2 from 0 to 2.5 GB before Ducky closed by itself, and
-# webview_browser_exit_oom hit one PC 4 times (Oct 28 2026). Idle WebView2 sits under 0.5 GB.
-TRIM_GB = 2.0
+# Budget 500 MB. Nov 5 2026: the renderer held 978 MB plus 331 MB GPU during a team run, and the
+# old 2.0 / 2.5 GB reloads waited for 0 agent turns, so with agents always running they never fired.
+SOFT_GB = 1.0
+SOFT_IDLE_S = 2 * 60
+TRIM_GB = 1.5
 TRIM_EVERY_S = 30 * 60
-# An open window nobody touched: 1.2.461 (a soft-cap build) still had 3 browser + 1 renderer
-# OOM exits on Nov 2 2026, and a 'closed by itself' report showed 2.7 GB in an open, idle window.
-OPEN_TRIM_GB = 2.5
+OPEN_TRIM_GB = 1.5
 OPEN_IDLE_S = 10 * 60
 _last_trim = {"at": 0.0}
+# When the soft level was set on an open window (monotonic s); 0 = not set.
+_soft = {"at": 0.0}
 
 
 def input_idle_s() -> float:
@@ -94,16 +105,73 @@ def input_idle_s() -> float:
         return 0.0
 
 
-def should_trim(beat: dict[str, Any], *, active: bool, now: float, last_at: float, idle_s: float = 0.0) -> bool:
-    """Reload only when nobody is using it and nothing runs: no agent turn, not within
-    TRIM_EVERY_S of the last time, and either hidden or minimized past TRIM_GB, or open with
-    no input for OPEN_IDLE_S past OPEN_TRIM_GB."""
+def _gb(beat: dict[str, Any]) -> float:
     try:
-        webview_gb = float(beat.get("webview_gb") or 0.0)
+        return float(beat.get("webview_gb") or 0.0)
     except (TypeError, ValueError):
-        return False
+        return 0.0
+
+
+def should_trim(beat: dict[str, Any], *, active: bool, now: float, last_at: float, idle_s: float = 0.0) -> bool:
+    """Reload when nobody is using the window, agent turns or not (mark_crash_reload brings the
+    open chats back): not within TRIM_EVERY_S of the last time, and either hidden or minimized
+    past TRIM_GB, or open with no input for OPEN_IDLE_S past OPEN_TRIM_GB."""
+    webview_gb = _gb(beat)
     big = webview_gb >= OPEN_TRIM_GB and idle_s >= OPEN_IDLE_S if active else webview_gb >= TRIM_GB
-    return big and int(beat.get("agents") or 0) == 0 and now - last_at >= TRIM_EVERY_S
+    return big and now - last_at >= TRIM_EVERY_S
+
+
+def soft_level(beat: dict[str, Any], *, active: bool, idle_s: float, now: float, low_at: float) -> str:
+    """What an open window's memory target should become: "Low" (untouched for SOFT_IDLE_S
+    past SOFT_GB), "Normal" (used since it was set Low), or "" (leave it). Hidden or minimized
+    windows are Low already (update_form)."""
+    if not active:
+        return ""
+    if low_at:
+        return "Normal" if idle_s < now - low_at else ""
+    return "Low" if _gb(beat) >= SOFT_GB and idle_s >= SOFT_IDLE_S else ""
+
+
+def _on_ui(native: Any, fn: Any) -> None:
+    if native.InvokeRequired:
+        from System import Action
+
+        native.BeginInvoke(Action(fn))
+    else:
+        fn()
+
+
+def _lower(native: Any) -> None:
+    if not native.IsDisposed:
+        for control in native.Controls:
+            _set_level(control, low=True)
+
+
+def trim_now(window: Any, reason: str = "") -> bool:
+    """Set the soft level (Low) on every page now, without a reload; using or showing the
+    window sets Normal again. True when it was asked."""
+    if not enabled():
+        return False
+    native = getattr(window, "native", None)
+    try:
+        if native is None or native.IsDisposed:
+            return False
+        _soft["at"] = time.monotonic()
+        _on_ui(native, lambda: _lower(native))
+        _log.info("WebView2 set to low memory%s", f": {reason}" if reason else "")
+        return True
+    except Exception:
+        _log.debug("WebView memory trim unavailable", exc_info=True)
+        return False
+
+
+def _apply_soft(native: Any, beat: dict[str, Any], *, active: bool, idle_s: float, now: float) -> None:
+    level = soft_level(beat, active=active, idle_s=idle_s, now=now, low_at=_soft["at"])
+    if level == "Low":
+        _soft["at"] = now
+        _on_ui(native, lambda: _lower(native))
+    elif level == "Normal":
+        _on_ui(native, lambda: update_form(native))  # clears _soft
 
 
 def _form_active(native: Any) -> bool:
@@ -120,8 +188,9 @@ def trim_if_bloated(window: Any, beat: dict[str, Any]) -> bool:
         if native is None or native.IsDisposed:
             return False
         now = time.monotonic()
-        if not should_trim(beat, active=_form_active(native), now=now, last_at=_last_trim["at"],
-                           idle_s=input_idle_s()):
+        active, idle_s = _form_active(native), input_idle_s()
+        _apply_soft(native, beat, active=active, idle_s=idle_s, now=now)
+        if not should_trim(beat, active=active, now=now, last_at=_last_trim["at"], idle_s=idle_s):
             return False
         _last_trim["at"] = now
         gb = float(beat.get("webview_gb") or 0.0)
@@ -152,9 +221,11 @@ def trim_if_bloated(window: Any, beat: dict[str, Any]) -> bool:
 
 
 def update_form(native: Any) -> None:
-    """Read current visibility at dispatch time, including native browser panes."""
+    """Read current visibility at dispatch time, including native browser panes. Sets each
+    page's level from it, so an earlier soft level is over."""
     if native.IsDisposed:
         return
+    _soft["at"] = 0.0
     active = bool(native.Visible) and str(native.WindowState) != "Minimized"
     for control in native.Controls:
         update_control(control, active=active and bool(control.Visible))
