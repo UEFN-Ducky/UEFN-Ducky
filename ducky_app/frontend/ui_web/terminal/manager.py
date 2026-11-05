@@ -22,6 +22,8 @@ from frontend.ui_web.terminal.session import (
     TerminalSession,
     _process_snapshot,
     agent_command_output,
+    console_hosts,
+    terminate_pid,
 )
 from frontend.ui_web.terminal.shells import shell_label
 
@@ -98,6 +100,8 @@ class TerminalManager:
         self._reaper: threading.Thread | None = None
         self._reaper_stop = threading.Event()
         self._budget_ticker: threading.Thread | None = None
+        # Console hosts Ducky had before its first terminal (its own console): never reaped.
+        self._host_baseline: set[int] | None = None
         # Terminals a running workflow still needs: never closed as idle until it lets go.
         self._held: set[str] = set()
         self._push: Callable[[dict[str, Any]], None] | None = None
@@ -203,6 +207,8 @@ class TerminalManager:
             session._on_exit = on_exit  # type: ignore[attr-defined]
             session._on_busy = lambda busy, sid=session.id: self._busy_changed(sid, busy)  # type: ignore[attr-defined]
             shell_fallback = False
+            if self._host_baseline is None:
+                self._host_baseline = console_hosts(_process_snapshot)
             try:
                 session.spawn()
             except Exception as exc:
@@ -275,6 +281,24 @@ class TerminalManager:
                 self.close_idle_agent_terminals()
             except Exception:
                 pass
+            try:
+                self.reap_console_hosts()
+            except Exception:
+                pass
+
+    def reap_console_hosts(self) -> list[int]:
+        """End console hosts (conhost/OpenConsole) under Ducky that no open terminal owns: a
+        terminal that closed without releasing its ConPTY left one behind for good."""
+        with self._lock:  # a terminal starting now records its host before this looks
+            if self._host_baseline is None:
+                return []
+            owned: set[int] = set()
+            for entry in self._sessions.values():
+                owned |= set(getattr(entry.session, "console_hosts", ()) or ())
+            stray = console_hosts(_process_snapshot) - owned - self._host_baseline
+        for pid in stray:
+            terminate_pid(pid)
+        return sorted(stray)
 
     def hold(self, session_id: str) -> Callable[[], None]:
         """Keep this terminal from the idle reaper while a workflow run goes on; the run

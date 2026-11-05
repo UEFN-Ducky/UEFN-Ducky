@@ -218,6 +218,37 @@ def _tracking_job(shell_pid: int, *, guarded: bool = False) -> Any:
         return None
 
 
+# A terminal's console host (ConPTY): conhost.exe, or the OpenConsole.exe pywinpty bundles. It is
+# a child of Ducky, not of the shell, so a tree kill of the shell never reaches it.
+_CONSOLE_HOSTS = ("conhost.exe", "openconsole.exe")
+
+
+def console_hosts(snapshot: ProcessSnapshot | None = None) -> set[int]:
+    """The console hosts that are children of this process right now."""
+    if os.name != "nt" and snapshot is None:
+        return set()
+    try:
+        children, names = (snapshot or _process_snapshot)()
+    except Exception:
+        return set()
+    return {pid for pid in children.get(os.getpid(), []) if names.get(pid, "") in _CONSOLE_HOSTS}
+
+
+def terminate_pid(pid: int) -> None:
+    """End one process (no tree)."""
+    if os.name != "nt":
+        return
+    import ctypes
+
+    k32 = ctypes.windll.kernel32
+    handle = k32.OpenProcess(0x0001, False, int(pid))  # PROCESS_TERMINATE
+    if handle:
+        try:
+            k32.TerminateProcess(handle, 1)
+        finally:
+            k32.CloseHandle(handle)
+
+
 def kill_process_tree(pid: int) -> None:
     """Force-kill ``pid`` and every descendant (running command + its children)."""
     import subprocess
@@ -396,6 +427,9 @@ class TerminalSession:
         self._winpty_dropped = False
         # Every process the shell starts, found even when Git Bash leaves it no living parent.
         self._job: Any = None
+        # The console host(s) its ConPTY started: ended with it (Nov 2026: ~20 conhosts piled
+        # up under Ducky; microsoft/terminal#4050).
+        self.console_hosts: set[int] = set()
 
     def spawn(self) -> None:
         from winpty import PtyProcess
@@ -418,6 +452,7 @@ class TerminalSession:
         if self.shell == "bash" and not self.spawn_argv:
             # Runs once, before the first prompt, after the profile scripts made the aliases.
             env.setdefault("PROMPT_COMMAND", f"{_BASH_DROP_WINPTY}; unset PROMPT_COMMAND")
+        hosts_before = console_hosts()
         with ctrl_c_on_for_children():
             self._pty = PtyProcess.spawn(
                 argv,
@@ -425,6 +460,7 @@ class TerminalSession:
                 env=env,
                 dimensions=(self._rows, self._cols),
             )
+        self.console_hosts = console_hosts() - hosts_before
         self._job = _tracking_job(int(getattr(self._pty, "pid", 0) or 0), guarded=self.agent)
         self._stop.clear()
         self._read_thread = threading.Thread(target=self._read_loop, daemon=True, name=f"pty-{self.id}")
@@ -570,14 +606,22 @@ class TerminalSession:
         if pty is not None:
             pid = getattr(pty, "pid", None)
             try:
-                if pty.isalive():
+                if pty.isalive() and pid:
                     # Tree-kill first: closing only the ConPTY can orphan a
                     # running command's children (dev servers, watchers, …).
-                    if pid:
-                        kill_process_tree(int(pid))
-                    pty.close(force=True)
+                    kill_process_tree(int(pid))
             except Exception:
                 pass
+            try:
+                # Even when the shell already exited: only close() releases the console host.
+                pty.close(force=True)
+            except Exception:
+                pass
+        hosts, self.console_hosts = self.console_hosts, set()
+        if hosts:
+            alive = console_hosts()
+            for host in hosts & alive:
+                terminate_pid(host)
         job, self._job = self._job, None
         if job is not None:
             job.close()

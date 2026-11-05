@@ -16,12 +16,14 @@ class _Pty:
     def __init__(self, pid: int) -> None:
         self.pid = pid
         self.alive = True
+        self.closed = 0
 
     def isalive(self) -> bool:
         return self.alive
 
     def close(self, force: bool = False) -> None:
         self.alive = False
+        self.closed += 1
 
 
 class _Bridge:
@@ -47,6 +49,7 @@ def mgr(monkeypatch):
     names = {9999: "npm.exe"}
     monkeypatch.setattr(manager_module, "_process_snapshot", lambda: (running, names))
     monkeypatch.setattr(TerminalManager, "_ensure_reaper", lambda self: None)  # tests call it directly
+    monkeypatch.setattr(TerminalManager, "ensure_budget_ticker", lambda self: None)
     m = TerminalManager()
     events: list[dict] = []
     m.set_push(events.append)
@@ -339,3 +342,49 @@ def test_a_terminal_whose_background_job_still_runs_is_never_closed(mgr, tmp_pat
     assert first[0] in mgr._sessions
     mgr.running.pop(cargo._pty.pid)  # cargo ends: an ordinary idle terminal again
     assert mgr.close_chat_terminals(["chat-a"], now=later) == [first[0]]
+
+
+def _hosts(monkeypatch, running: dict, names: dict) -> list[int]:
+    """Console hosts under this process are made up; terminations are only recorded."""
+    import os as _os
+
+    ended: list[int] = []
+    monkeypatch.setattr(session_module, "_process_snapshot", lambda: (running, names))
+    monkeypatch.setattr(session_module, "terminate_pid", ended.append)
+    monkeypatch.setattr(manager_module, "terminate_pid", ended.append)
+    running.setdefault(_os.getpid(), [])
+    return ended
+
+
+def test_kill_closes_a_pty_whose_shell_already_exited(mgr, tmp_path):
+    shell = mgr.get_session(_open(mgr, tmp_path)["session_id"])
+    pty = shell._pty
+    pty.alive = False  # the shell exited by itself; its console host still runs
+    mgr.kill(shell.id)
+    assert pty.closed == 1
+
+
+def test_the_recorded_console_host_ends_with_its_terminal(mgr, tmp_path, monkeypatch):
+    import os as _os
+
+    names = {555: "openconsole.exe", 556: "conhost.exe"}
+    ended = _hosts(monkeypatch, {_os.getpid(): [555, 556]}, names)
+    shell = mgr.get_session(_open(mgr, tmp_path)["session_id"])
+    shell.console_hosts = {555}
+    mgr.kill(shell.id)
+    assert ended == [555]  # the other terminal's host stays
+
+
+def test_the_reaper_ends_orphaned_hosts_and_spares_live_ones(mgr, tmp_path, monkeypatch):
+    import os as _os
+
+    mine = _os.getpid()
+    mgr.running[mine] = [703]  # Ducky's own console, there before any terminal
+    names = {700: "conhost.exe", 701: "openconsole.exe", 702: "python.exe", 703: "conhost.exe"}
+    monkeypatch.setattr(manager_module, "_process_snapshot", lambda: (mgr.running, names))
+    ended = _hosts(monkeypatch, mgr.running, names)
+    live = mgr.get_session(_open(mgr, tmp_path)["session_id"])
+    live.console_hosts = {700}
+    mgr.running[mine] = [700, 701, 702, 703]
+    assert mgr.reap_console_hosts() == [701]
+    assert ended == [701]
