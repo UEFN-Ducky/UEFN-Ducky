@@ -2468,6 +2468,12 @@ def _resolve_plan_chat_id(chat_id: str = "") -> str:
     return (os.environ.get("DUCKY_CONV_ID") or "").strip()
 
 
+def _plan_head(plan: dict[str, Any], full: bool) -> dict[str, Any]:
+    """A plan in a tool reply: the whole plan only on ``full``. Nov 5 2026: a 50-step plan echoed
+    78k chars back on every update, too big for the agent to read."""
+    return plan if full else {k: plan.get(k) for k in ("id", "chat_id", "title", "status")}
+
+
 @mcp.tool()
 def ducky_create_plan(
     title: str = "",
@@ -2476,9 +2482,12 @@ def ducky_create_plan(
     nodes: list[dict[str, Any]] | None = None,
     todos: list[dict[str, Any]] | None = None,
     chat_id: str = "",
+    full: bool = False,
     pretty: bool = False,
 ) -> str:
     """Create a project Plan with an outline tree (main → subplans). In Plan mode, create then stop.
+
+    Replies with the plan's id/title/status, progress and outline; ``full=true`` adds every node.
 
     Field roles (do NOT mix):
     - ``title``: the plan's short name (left out: the first words of ``overview``).
@@ -2549,7 +2558,7 @@ def ducky_create_plan(
     prog = todo_progress(plan)
     out: dict[str, Any] = {
         "ok": True,
-        "plan": plan,
+        "plan": _plan_head(plan, full),
         "progress": prog,
         "outline": [
             {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
@@ -2585,9 +2594,11 @@ def ducky_update_plan(
     status: str = "",
     chat_id: str = "",
     reason: str = "",
+    full: bool = False,
     pretty: bool = False,
 ) -> str:
-    """Update the active chat Plan outline/body.
+    """Update the active chat Plan outline/body. Replies with id/title/status, progress and the
+    outline (no step bodies); ``full=true`` adds every node.
 
     Closing a plan (status="finished") X's its open steps; pass reason= to say why.
 
@@ -2630,7 +2641,7 @@ def ducky_update_plan(
     prog = todo_progress(plan)
     out: dict[str, Any] = {
         "ok": True,
-        "plan": plan,
+        "plan": _plan_head(plan, full),
         "progress": prog,
         "outline": [
             {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
