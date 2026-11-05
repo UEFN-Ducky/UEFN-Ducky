@@ -94,7 +94,7 @@ def bridge_exe_for(app_exe: Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def resolve_bridge_command() -> str:
+def resolve_bridge_command(own_run: bool = False) -> str:
     """
     Path written into IDE MCP configs.
 
@@ -105,9 +105,19 @@ def resolve_bridge_command() -> str:
     instead of being a second row named exactly like the app.
 
     Dev: newest built exe in ``dist/``, else ``python`` + launcher.py.
+
+    ``own_run``: the config is for one of this app's own agent turns, which end before this
+    version folder can be cleaned up. Those start the running version's Bridge directly: the
+    started EXE's Bridge only hands off to it, two processes for every turn's tool server.
     """
     if is_packaged_runtime():
         from frontend.app_versions import stable_exe
+
+        if own_run:
+            here = Path(sys.executable).resolve()
+            bridge = bridge_exe_for(here)
+            if bridge is not None:
+                return str(bridge)
 
         # The started EXE, never a version folder Ducky downloaded (those get cleaned up).
         running = stable_exe().resolve()
@@ -140,8 +150,8 @@ def resolve_bridge_args(settings: PanelSettings) -> list[str]:
     return [str(entry), "bridge"] + port_args
 
 
-def build_uefn_server_block(settings: PanelSettings) -> dict:
-    """Return dict suitable for mcpServers['uefn'] (stdio)."""
+def build_uefn_server_block(settings: PanelSettings, own_run: bool = False) -> dict:
+    """Return dict suitable for mcpServers['uefn'] (stdio). ``own_run``: see resolve_bridge_command."""
     env = _base_os_env()
     env["UEFN_DUCKY_PORT"] = str(settings.port)
     for key in ("UEFN_VSCODE_WORKSPACE_FOLDERS", "UEFN_DUCKY_PROJECT_ROOT"):
@@ -153,7 +163,7 @@ def build_uefn_server_block(settings: PanelSettings) -> dict:
         env["UEFN_DUCKY_PROJECT_ROOT"] = root
     return {
         "type": "stdio",
-        "command": resolve_bridge_command(),
+        "command": resolve_bridge_command(own_run),
         "args": resolve_bridge_args(settings),
         "env": env,
     }

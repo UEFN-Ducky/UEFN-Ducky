@@ -92,7 +92,8 @@ def test_fifty_fake_agents_finish_and_idle_hosts_exit(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     tally = Tally()
     sup = supervisor.Supervisor(on_frame=tally, argv_for=stub_argv(tmp_path / "stub_host.py"),
-                                log_dir=tmp_path / "logs", per_host=4, max_hosts=16, idle_exit_s=0.5, reap_s=0.1)
+                                log_dir=tmp_path / "logs", per_host=4, max_hosts=16, idle_exit_s=0.5, reap_s=0.1,
+                                keep_warm=0)
     try:
         seats = run_fake_agents(sup, tally, 50)
         hosts = {h.slot: h for h in seats}

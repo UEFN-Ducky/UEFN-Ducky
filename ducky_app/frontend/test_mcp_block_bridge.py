@@ -87,6 +87,21 @@ def test_packaged_run_points_ides_at_the_bridge(dist: Path, monkeypatch) -> None
     assert mcp_block.resolve_bridge_command() == str(folder / "UEFN-Ducky-Bridge.exe")
 
 
+def test_own_agent_turns_start_the_running_versions_bridge_not_the_launcher(dist: Path, monkeypatch, tmp_path) -> None:
+    # The installed launcher's Bridge only hands off to the version's: two processes per turn.
+    running = _onedir(dist, "1.2.72")
+    installed = tmp_path / "Programs" / "UEFN Ducky" / "UEFN-Ducky.exe"
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(b"MZ")
+    installed.with_name("UEFN-Ducky-Bridge.exe").write_bytes(b"MZ")
+    monkeypatch.setattr(mcp_block, "is_packaged_runtime", lambda: True)
+    monkeypatch.setattr(mcp_block.sys, "executable", str(running / "UEFN-Ducky.exe"))
+    monkeypatch.setenv("UEFN_DUCKY_LAUNCHER_EXE", str(installed))
+    assert mcp_block.resolve_bridge_command(own_run=True) == str((running / "UEFN-Ducky-Bridge.exe").resolve())
+    # IDE configs outlive this version: they keep naming the installed EXE's Bridge.
+    assert mcp_block.resolve_bridge_command() == str(installed.with_name("UEFN-Ducky-Bridge.exe").resolve())
+
+
 def test_packaged_one_file_run_falls_back_to_itself(dist: Path, monkeypatch) -> None:
     """Upgrading from a one-file install must not write a path that does not exist."""
     exe = _onefile(dist, "1.2.66")

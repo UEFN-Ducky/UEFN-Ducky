@@ -180,3 +180,13 @@ def test_an_agent_cancelling_the_call_still_stops_the_tool() -> None:
 
     asyncio.run(scenario())
     assert mcp.cancelled.is_set()
+
+
+def test_a_daemon_with_stuck_connections_and_no_tool_call_for_hours_stops(monkeypatch) -> None:
+    # Nov 2026: a 415 MB daemon lived 34 hours: dead connections kept its client count above 0.
+    monkeypatch.setattr(shared_mcp, "_last_traffic", 1000.0)
+    monkeypatch.setattr(shared_mcp, "_runs_here", lambda: False)
+    assert not shared_mcp._stuck_idle(1000.0 + 3600)
+    assert shared_mcp._stuck_idle(1000.0 + shared_mcp._STUCK_IDLE_S)
+    monkeypatch.setattr(shared_mcp, "_runs_here", lambda: True)  # a workflow run keeps it
+    assert not shared_mcp._stuck_idle(1000.0 + shared_mcp._STUCK_IDLE_S)

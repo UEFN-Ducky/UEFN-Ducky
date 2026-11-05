@@ -119,7 +119,7 @@ def test_uefn_server_config_leaves_server_level_always_load_unset(monkeypatch) -
     monkeypatch.setattr(
         mcp_inject,
         "build_uefn_server_block",
-        lambda _s: {"type": "stdio", "command": "node", "args": [], "alwaysLoad": False},
+        lambda _s, own_run=False: {"type": "stdio", "command": "node", "args": [], "alwaysLoad": False},
     )
     servers = mcp_inject.build_uefn_mcp_servers(settings=object())
     assert "alwaysLoad" not in servers["uefn"]

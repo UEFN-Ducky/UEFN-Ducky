@@ -65,7 +65,7 @@ def _windows_hidden_bridge_block(base: dict[str, Any]) -> dict[str, Any]:
 
 def build_uefn_mcp_servers(settings: PanelSettings | None = None) -> dict[str, Any]:
     s = settings or PanelSettings.load()
-    block = build_uefn_server_block(s)
+    block = build_uefn_server_block(s, own_run=True)
     # Server-level alwaysLoad: true would load all ~1,000 tools; false would defer
     # the CORE_TOOLS the bridge marks per tool (core_tools.py). Leave it unset.
     block = {k: v for k, v in block.items() if k != "alwaysLoad"}

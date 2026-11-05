@@ -77,6 +77,78 @@ def test_hidden_chat_gets_at_most_one_status_a_second():
     assert sent[-1][2][0]["type"] == "agent_stopped"  # turn end still goes at once
 
 
+def _statuses(sent):
+    return [e for _, _, batch in sent for e in batch if e["type"] == "status"]
+
+
+def test_non_turn_events_never_start_a_status_line():
+    # Nov 2026: a hidden chat showed "Working · 137168s" for hours after a link event.
+    b, clock, sent = _batcher()
+    b.set_visible([])
+    clock.t = 137_000.0
+    for kind in ("linked_agent", "chats_changed", "plan_updated"):
+        b.feed({"type": kind, "conv_id": "c1"})
+    for i in range(50):
+        clock.t += 0.1
+        b.flush_due()
+    assert _statuses(sent) == []
+
+
+def test_status_time_counts_from_the_first_turn_event_not_from_zero():
+    b, clock, sent = _batcher()
+    b.set_visible([])
+    clock.t = 137_000.0
+    b.feed({"type": "text_delta", "text": "hi", "conv_id": "c1"})  # no run_id
+    clock.t += 3.0
+    b.flush_due()
+    status = _statuses(sent)[-1]
+    assert status["elapsed_s"] == 3
+    assert status["text"] == "Working · 3s"
+    assert status["heartbeat"] is True
+
+
+def test_an_error_stops_the_status_line():
+    b, clock, sent = _batcher()
+    b.set_visible([])
+    b.feed(_delta(0))
+    clock.t = 1.0
+    b.flush_due()
+    before = len(_statuses(sent))
+    assert before >= 1
+    b.feed({"type": "error", "text": "boom", "conv_id": "c1", "run_id": "r1"})
+    for i in range(30):
+        clock.t += 1.0
+        b.flush_due()
+    assert len(_statuses(sent)) == before
+
+
+def test_a_turn_that_goes_silent_stops_its_status_line():
+    b, clock, sent = _batcher()
+    b.set_visible([])
+    b.feed(_delta(0))
+    for i in range(200):
+        clock.t += 1.0
+        b.flush_due()
+    statuses = _statuses(sent)
+    assert 100 <= len(statuses) <= 121
+    assert statuses[-1]["elapsed_s"] <= 121
+
+
+def test_a_long_tool_keeps_its_status_until_the_cap():
+    b, clock, sent = _batcher()
+    b.set_visible([])
+    b.feed({"type": "tool", "tool": {"name": "workspace_compile_verse"}, "conv_id": "c1", "run_id": "r1"})
+    clock.t = 600.0
+    b.flush_due()
+    assert _statuses(sent)[-1]["text"] == "workspace_compile_verse · 600s"
+    clock.t = 1900.0
+    b.flush_due()
+    count = len(_statuses(sent))
+    clock.t = 1901.0
+    b.flush_due()
+    assert len(_statuses(sent)) == count
+
+
 def test_chat_going_off_screen_sends_its_waiting_text_first():
     b, clock, sent = _batcher()
     b.feed(_delta(0))

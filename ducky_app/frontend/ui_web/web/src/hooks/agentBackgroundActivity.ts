@@ -12,7 +12,7 @@ const TURN_EVENTS = new Set(["agent_started", "text_delta", "thinking", "tool", 
 
 /** One tray row per running chat. Its detail line is what the turn is doing now; the
  *  tool calls themselves stay in the chat's own tool list, never in the tray. */
-export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title || event.conv_id || "Agent", now = Date.now()): void {
+export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title || event.conv_id || "Agent", now = Date.now(), confirmed = false): void {
   const convId = event.conv_id;
   if (!convId) return;
   const turnId = `agent:${convId}`;
@@ -38,16 +38,25 @@ export function applyAgentBackgroundEvent(event: AgentEvent, title = event.title
   if (!TURN_EVENTS.has(event.type)) return;
   const step = agentStepText(event) || "Working";
   const newRun = Boolean(event.run_id && turn?.runId && turn.runId !== event.run_id);
+  // A hidden chat's once-a-second status line is not proof of a turn: it opens a row only once
+  // the backend says the chat runs (`confirmed`), and never keeps a row from going stale.
+  const heartbeat = event.type === "status" && Boolean(event.heartbeat);
   if (!turn || turn.phase !== "working" || newRun) {
+    if (heartbeat && !confirmed) return;
+    const elapsed = heartbeat && typeof event.elapsed_s === "number" && event.elapsed_s >= 0 && event.elapsed_s < MAX_ELAPSED_S
+      ? event.elapsed_s * 1000 : 0;
     upsertBackgroundJob({ id: turnId, source: "agent", title: `${title} is working`, detail: step,
-      convId, runId: event.run_id, phase: "working", startedAt: now, endedAt: 0, expectedMs: 0, estimated: false, ts: now });
+      convId, runId: event.run_id, phase: "working", startedAt: now - elapsed, endedAt: 0, expectedMs: 0, estimated: false, ts: now });
     return;
   }
   // Text streams in hundreds of deltas: only a new step touches the store.
   if (turn.detail !== step || (event.run_id && !turn.runId)) {
-    upsertBackgroundJob({ id: turnId, detail: step, ...(event.run_id ? { runId: event.run_id } : {}), ts: now });
+    upsertBackgroundJob({ id: turnId, detail: step, ...(event.run_id ? { runId: event.run_id } : {}), ts: heartbeat ? turn.ts : now });
   }
 }
+
+/** Longer than any real turn: a status line older than this came from a broken clock. */
+const MAX_ELAPSED_S = 24 * 3600;
 
 // A turn whose stop event never came (a group's side-chat note streams text with no turn
 // around it; a chat deleted mid-run sends nothing) would read "is working" forever.
@@ -145,6 +154,7 @@ export function subscribeAgentBackgroundActivity(): () => void {
   let checking = false;
   let active = true;
   const touched = new Set<string>();
+  const lastConfirm = new Map<string, number>();
   const api = getApi();
   // Rows from builds that listed every tool call (kept across reloads in sessionStorage).
   for (const job of getBackgroundJobs()) {
@@ -176,7 +186,26 @@ export function subscribeAgentBackgroundActivity(): () => void {
       void refreshTitles().then(() => { if (active && existing) reconcileAgentJobs(null, existing); });
     } else if (event.conv_id && !titles.has(event.conv_id) && !touched.has(event.conv_id)) void refreshTitles();
     if (event.conv_id) touched.add(event.conv_id);
-    applyAgentBackgroundEvent(event, titles.get(event.conv_id || "") || event.title || event.conv_id);
+    const title = titles.get(event.conv_id || "") || event.title || event.conv_id;
+    if (event.type === "status" && event.heartbeat && event.conv_id) {
+      const convId = event.conv_id;
+      const row = getBackgroundJobs().find((j) => j.id === `agent:${convId}`);
+      if (row?.phase !== "working") {
+        // No row yet: ask the backend once in a while, open one only if the chat really runs.
+        const last = lastConfirm.get(convId) || 0;
+        if (Date.now() - last < SETTLE_MS) return;
+        lastConfirm.set(convId, Date.now());
+        void Promise.resolve(api?.list_running_agents?.())
+          .then((ids) => {
+            if (active && Array.isArray(ids) && ids.includes(convId)) {
+              applyAgentBackgroundEvent(event, titles.get(convId) || title, Date.now(), true);
+            }
+          })
+          .catch(() => {});
+        return;
+      }
+    }
+    applyAgentBackgroundEvent(event, title);
   });
   void (async () => {
     await refreshTitles();

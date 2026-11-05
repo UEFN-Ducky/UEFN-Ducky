@@ -201,6 +201,40 @@ it("offers Hide only for a row that cannot be stopped", async () => {
   expect(getBackgroundJobs()).toHaveLength(0);
 });
 
+const beat = (elapsed: number, conv = "other"): AgentEvent => ({ type: "status", conv_id: conv, run_id: "",
+  text: `Working · ${elapsed}s`, heartbeat: true, elapsed_s: elapsed });
+
+it("a hidden chat's status line alone never opens a row for a chat the backend does not run", async () => {
+  // Nov 2026: the Now tray kept "Working · 137168s · 11h 52m" rows that closed and came back.
+  const stop = subscribeAgentBackgroundActivity();
+  await act(async () => {});
+  for (let i = 0; i < 30; i++) {
+    await act(async () => { mocks.listener!(beat(137168 + i)); await vi.advanceTimersByTimeAsync(1000); });
+  }
+  expect(getBackgroundJobs()).toEqual([]);
+  // At most one backend check per 10 s, not one per status line.
+  expect(mocks.api.list_running_agents.mock.calls.length).toBeLessThanOrEqual(5);
+  stop();
+});
+
+it("a status line opens a row once the backend says the chat runs, timed from the turn's start", async () => {
+  const stop = subscribeAgentBackgroundActivity();
+  await act(async () => {});
+  mocks.api.list_running_agents.mockResolvedValue(["other"]);
+  await act(async () => { mocks.listener!(beat(42)); await vi.advanceTimersByTimeAsync(0); });
+  const row = getBackgroundJobs().find((j) => j.id === "agent:other");
+  expect(row?.phase).toBe("working");
+  expect(Date.now() - (row?.startedAt || 0)).toBe(42_000);
+  stop();
+});
+
+it("ignores a broken status clock and lets status lines go stale so a dead turn closes", async () => {
+  applyAgentBackgroundEvent(beat(137168), "Coordinator", 1000, true);
+  expect(getBackgroundJobs()[0].startedAt).toBe(1000);
+  applyAgentBackgroundEvent(beat(137169), "Coordinator", 2000);
+  expect(getBackgroundJobs()[0].ts).toBe(1000);
+});
+
 it("phone back after a drop: a run that finished meanwhile stops saying 'is working' at once", async () => {
   // Nov 1 2026: the phone's Now row kept "Hide streaming popup is working · Running tests 33s".
   const stop = subscribeAgentBackgroundActivity();

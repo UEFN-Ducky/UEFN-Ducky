@@ -7,6 +7,11 @@ batch, e.g. one ``text_delta`` carrying 100 tokens, and sends it as one ``event`
 Text, thinking and status lines wait for the next slot; anything else (tool start/done, errors,
 turn end) goes at once, after the text before it. Chats not on screen (``set_visible``) get no
 text, only one status line per second: the running tool and how long it has run.
+
+Only a turn's own events (text, thinking, status, tool calls) make a chat busy; an error or
+turn end stops its status line, and so do 2 minutes with no event (a turn that died without
+``agent_stopped``) or a tool call past 30 minutes. A chat-list or link event never does: those
+once kept a status line ticking for hours from a clock that had never started.
 """
 
 from __future__ import annotations
@@ -19,6 +24,10 @@ from typing import Any, Callable
 FOLD_TYPES = frozenset({"text_delta", "thinking", "status"})
 HIDDEN_FOLD_TYPES = FOLD_TYPES | {"tool", "tool_done"}
 END_TYPES = frozenset({"agent_stopped"})
+QUIET_TYPES = END_TYPES | {"error"}
+BUSY_TYPES = HIDDEN_FOLD_TYPES
+SILENT_AFTER_S = 120.0
+TOOL_CAP_S = 1800.0
 
 Emit = Callable[[str, list[dict[str, Any]]], None]
 
@@ -58,6 +67,7 @@ class _Chat:
     tool: str = ""
     tool_started: float = 0.0
     last_status: float = float("-inf")
+    last_event: float = 0.0
     active: bool = False
 
 
@@ -118,12 +128,16 @@ class Batcher:
             for conv_id, chat in list(self._chats.items()):
                 if chat.pending and now >= chat.due:
                     self._flush(conv_id, chat, now)
+                elif chat.active and self._went_quiet(chat, now):
+                    chat.active, chat.tool = False, ""
                 elif (
                     chat.active
                     and not self._is_visible(conv_id)
                     and now - chat.last_status >= self._status_every_s
                 ):
                     self._send_status(conv_id, chat, now)
+                if not chat.active and not chat.pending:
+                    self._chats.pop(conv_id, None)
 
     def flush(self) -> None:
         """Send everything waiting now (host shutdown)."""
@@ -136,14 +150,24 @@ class Batcher:
         return self._visible is None or conv_id in self._visible
 
     @staticmethod
+    def _went_quiet(chat: _Chat, now: float) -> bool:
+        if chat.tool:
+            return now - chat.tool_started > TOOL_CAP_S
+        return now - chat.last_event > SILENT_AFTER_S
+
+    @staticmethod
     def _track(chat: _Chat, event: dict[str, Any], kind: str, now: float) -> None:
         run_id = str(event.get("run_id") or "")
         if run_id and run_id != chat.run_id:
             chat.run_id, chat.run_started, chat.tool = run_id, now, ""
-        if kind in END_TYPES:
+        if kind in QUIET_TYPES:
             chat.active, chat.tool = False, ""
             return
-        chat.active = True
+        if kind not in BUSY_TYPES:
+            return
+        if not chat.active:
+            chat.active, chat.run_started = True, now
+        chat.last_event = now
         if kind == "tool":
             tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
             chat.tool, chat.tool_started = str(tool.get("name") or "tool"), now
@@ -172,6 +196,7 @@ class Batcher:
                     "text": f"{label} · {elapsed}s",
                     "tool": chat.tool,
                     "elapsed_s": elapsed,
+                    "heartbeat": True,
                 }
             ],
         )

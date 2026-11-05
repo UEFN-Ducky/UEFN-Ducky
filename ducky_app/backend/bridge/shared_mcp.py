@@ -36,6 +36,11 @@ _MAX_FRAME = 16 * 1024 * 1024
 # agents that wait only ~1 s for MCP servers came up with no Ducky tools.
 _IDLE_EXIT_S = 900.0
 _STARTUP_GRACE_S = 60.0
+# Connections that never close (an agent killed without a goodbye, a socket nobody reads) kept
+# ``_clients`` above 0, so the idle timer never ran: a 415 MB daemon lived 34 hours with no tool
+# call. With no real traffic for this long it stops anyway; adapters reconnect to a fresh one.
+_STUCK_IDLE_S = 4 * 3600.0
+_STUCK_CHECK_S = 60.0
 # Handshake must finish while another tool call is still running. A cold
 # plugin load may wait this long; a ready load does not wait at all.
 _LIST_WAIT_S = 3.0
@@ -1234,6 +1239,19 @@ def _idle_expired(gen: int) -> None:
     request_stop()
 
 
+def _stuck_idle(now: float | None = None) -> bool:
+    """No tool call for ``_STUCK_IDLE_S`` and no workflow run here, whatever the open connections say."""
+    now = time.monotonic() if now is None else now
+    return now - _last_traffic >= _STUCK_IDLE_S and not _runs_here()
+
+
+def _watch_stuck() -> None:
+    while not _stop.wait(_STUCK_CHECK_S):
+        if _stuck_idle():
+            request_stop()
+            return
+
+
 def serve_daemon(mcp: Any) -> None:
     """Block until idle after the last adapter disconnects."""
     global _shared_serving, _clients, _listen_sock
@@ -1262,6 +1280,7 @@ def serve_daemon(mcp: Any) -> None:
     grace = threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop())
     grace.daemon = True
     grace.start()
+    threading.Thread(target=_watch_stuck, daemon=True, name="shared-mcp-stuck-watch").start()
     try:
         while not _stop.is_set():
             try:

@@ -244,8 +244,24 @@ def test_defaults_seat_sixteen_per_host_and_env_overrides(monkeypatch):
     assert supervisor._env_int("DUCKY_AGENTS_PER_HOST", 16) == 16
 
 
+def test_lowest_idle_host_stays_warm_and_extra_ones_exit(tmp_path):
+    sup = supervisor.Supervisor(log_dir=tmp_path, idle_exit_s=0.5, reap_s=3600)
+    try:
+        hosts = []
+        for slot in (1, 0, 2):
+            host = supervisor.Host(slot, f"p{slot}", b"k", _Launched())
+            host.ready.set()
+            host.idle_since -= 10
+            sup._hosts[slot] = host
+            hosts.append(host)
+        sup.reap()
+        assert [h.slot for h in sup.hosts()] == [0]  # one warm host keeps its tool server up
+    finally:
+        sup.stop_all()
+
+
 def test_idle_host_exits_after_timeout(tmp_path):
-    sup = supervisor.Supervisor(log_dir=tmp_path, idle_exit_s=0.5, reap_s=0.1)
+    sup = supervisor.Supervisor(log_dir=tmp_path, idle_exit_s=0.5, reap_s=0.1, keep_warm=0)
     try:
         host = sup.assign("c1")
         assert host.ready.wait(60)

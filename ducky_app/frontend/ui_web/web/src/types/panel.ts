@@ -2162,6 +2162,10 @@ export interface AgentEvent {
   text?: string;
   /** run_expect: how long the chat's running sandbox/terminal command should take (ms, 0 = ended). */
   expected_ms?: number;
+  /** status: the once-a-second line of a chat not on screen (not proof the turn still runs). */
+  heartbeat?: boolean;
+  /** status heartbeat: seconds the turn (or its running tool) has run. */
+  elapsed_s?: number;
   /** run_expect: expected_ms is the median of this command's past runs, not the agent's own figure. */
   estimated?: boolean;
   /** user_steered: id of the queued prompt the running turn took in. */

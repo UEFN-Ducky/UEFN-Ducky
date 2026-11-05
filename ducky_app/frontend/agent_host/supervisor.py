@@ -4,7 +4,9 @@ One host per ``PER_HOST`` running agents, at most ``MAX_HOSTS``; each has its ow
 the CLI almost all the time (16 fake agents: 1.6 % of a core, +0.03 MB each), so a host takes 16;
 past ``PER_HOST × MAX_HOSTS`` the least-busy host takes one more. Every host sits in a job with KILL_ON_JOB_CLOSE (the
 sandbox's ``jobs.Launched``), so when the app process ends, for any reason, its hosts end too.
-A host that has had no agents for ``IDLE_EXIT_S`` is told to shut down and then killed.
+A host that has had no agents for ``IDLE_EXIT_S`` is told to shut down and then killed, except the
+``KEEP_WARM`` lowest-slot hosts: each one that exits takes its Ducky tool server and plugin engines
+(forge, rea: about 450 MB) with it, and the next turn started them all again every 5 minutes.
 
 ``assign(conv_id)`` picks (or starts) the host for a turn; ``release(conv_id)`` frees the seat.
 """
@@ -36,6 +38,7 @@ def _env_int(name: str, default: int) -> int:
 PER_HOST = _env_int("DUCKY_AGENTS_PER_HOST", 16)
 MAX_HOSTS = _env_int("DUCKY_MAX_AGENT_HOSTS", min(os.cpu_count() or 8, 8))
 IDLE_EXIT_S = 300.0
+KEEP_WARM = 1
 CONNECT_S = 60.0
 _REAP_S = 5.0
 RESTART_AGAIN_S = 600.0  # a seat cut off twice within this long is left to its lead
@@ -155,7 +158,9 @@ class Supervisor:
         idle_exit_s: float = IDLE_EXIT_S,
         reap_s: float = _REAP_S,
         restart_seat: RestartSeat | None = None,
+        keep_warm: int = KEEP_WARM,
     ) -> None:
+        self.keep_warm = max(0, keep_warm)
         self._on_frame = on_frame
         self._restart_seat = restart_seat or restart_seat_turn
         self._restarted: dict[str, float] = {}
@@ -368,12 +373,15 @@ class Supervisor:
         now = time.monotonic()
         doomed: list[tuple[Host, str]] = []
         with self._lock:
+            live = sorted((h for h in self._hosts.values() if h.launched.alive() and h.ready.is_set()),
+                          key=lambda h: h.slot)
+            warm = {h.slot for h in live[: self.keep_warm]}
             for host in list(self._hosts.values()):
                 if not host.launched.alive():
                     reason = "exited"
                 elif not host.ready.is_set() and now - host.started >= CONNECT_S:
                     reason = "never connected"
-                elif not host.agents and now - host.idle_since >= self.idle_exit_s:
+                elif not host.agents and now - host.idle_since >= self.idle_exit_s and host.slot not in warm:
                     reason = "idle"
                 else:
                     continue
