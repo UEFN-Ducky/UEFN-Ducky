@@ -125,7 +125,13 @@ def _uefn_closed() -> bool:
 
 
 def _listener_headers(**extra: str) -> dict[str, str]:
-    return {"X-Ducky-Client": client_tag(), **extra}
+    from backend.bridge import bridge_version
+
+    headers = {"X-Ducky-Client": client_tag(), **extra}
+    version = bridge_version.own_version()
+    if version:
+        headers["X-Ducky-Version"] = version
+    return headers
 
 
 def _offline_error(port: int) -> ConnectionError:
@@ -305,6 +311,11 @@ def _post_json_locked(
     if _uefn_closed():
         # Reads as a refused connection, so callers give their usual offline answer.
         raise urllib.error.URLError(ConnectionRefusedError(10061, "UEFN is not running"))
+    # A bridge older than the running app (left over from before an update) refuses
+    # the call and exits before it ever reaches the listener; the app stops them too.
+    from backend.bridge import bridge_version
+
+    bridge_version.ensure_current()
     last_http: Optional[urllib.error.HTTPError] = None
     busy_started: Optional[float] = None
     attempt = 0

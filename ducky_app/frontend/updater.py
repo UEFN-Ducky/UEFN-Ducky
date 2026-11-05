@@ -171,6 +171,10 @@ def sweep_installer_cache(*, keep_newer_than: str | None = None) -> int:
     successful upgrade the new app version matches the Setup file, so it is
     removed on next startup.
     """
+    if keep_newer_than is None:
+        # Startup sweep of the (new) app. Not the old app's own sweep after Setup in
+        # apply_update: that process is the old version and is about to exit.
+        stop_old_bridges_after_update()
     cache_dir = installer_cache_dir()
     if not cache_dir.is_dir():
         return 0
@@ -185,6 +189,25 @@ def sweep_installer_cache(*, keep_newer_than: str | None = None) -> int:
             removed += 1
     sweep_setup_host_leftovers()
     return removed
+
+
+def stop_old_bridges_after_update() -> list[int]:
+    """The newly installed app stops tool servers (bridges) from the old install.
+
+    An IDE can keep an old ``UEFN-Ducky*.exe`` bridge running across the update (a
+    versioned EXE Setup never had to replace) and it keeps connecting to the listener.
+    Records this app as the running version, then stops every older bridge. Returns
+    the stopped pids; never raises.
+    """
+    try:
+        from backend.bridge import bridge_version
+
+        if not bridge_version.registry_active():
+            return []
+        bridge_version.note_running_app(__version__)
+        return bridge_version.stop_old_bridges(version=__version__)
+    except Exception:
+        return []
 
 
 # What the Ducky Setup host and its engine leave in %LOCALAPPDATA%/UEFN-Ducky.
