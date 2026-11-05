@@ -402,8 +402,20 @@ def group_set_leader(self, group_id: str, member_conv_id: str) -> dict[str, Any]
         return {"ok": False, "error": "Member not in this group"}
     group.leader_conv_id = mid
     _pa.save_conversation(group)
+    _sync_moves([mid], keep_hub=group.id)
     _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
     return {"ok": True, "leader_conv_id": mid, "group_members": members}
+
+
+def _sync_moves(conv_ids: list[str], keep_hub: str = "", root: str | None = None) -> dict[str, Any]:
+    """Teams follow a re-nest: the moved chats' rows, leaders and parents (see sync_membership).
+    A failed sync never fails the move itself."""
+    from frontend.ui_web.chats.groups import sync_membership
+
+    try:
+        return sync_membership(root, conv_ids, keep_hub=keep_hub)
+    except Exception:  # noqa: BLE001 - the move is saved; the next re-nest syncs again
+        return {}
 
 
 def group_add_member(
@@ -482,6 +494,8 @@ def group_add_member(
     if as_leader or not (getattr(group, "leader_conv_id", None) or "").strip():
         group.leader_conv_id = cid
     self._save_roster(group, existing)
+    _sync_moves([cid], keep_hub=group_id)
+    group = _pa.load_conversation(group_id) or group
     _pa.notify_chats_changed(group.id, group.title, group.folder_id, open_tab=False)
     out: dict[str, Any] = {
         "ok": True,

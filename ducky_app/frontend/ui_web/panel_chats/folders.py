@@ -263,6 +263,10 @@ def move_conversation(self, conv_id: str, folder_id: str) -> None:
             if is_agent_running(target_id):
                 _pa.cancel_agent(target_id)
     _pa.move_conversation(conv_id, folder_id or "", root)
+    if not archiving:
+        from frontend.ui_web.panel_chats.groups import _sync_moves
+
+        _sync_moves([conv_id], root=root)
     # Archived chats leave every open window's tree at once; a restore reloads them.
     _pa.notify_chats_changed(open_tab=False, removed_conv_ids=leaving)
 
@@ -315,6 +319,14 @@ def apply_sidebar_layout(self, payload: dict[str, Any]) -> None:
     project_root = self._layout_project_root(str(payload.get("project_slug") or ""))
     # Unknown ids (deleted elsewhere) are skipped, never re-created.
     _pa.apply_sidebar_layout(folders=folders, chats=chats, project_root=project_root)
+    from frontend.ui_web.chats.groups import sync_membership
+
+    moved = [str(c.get("id") or "") for c in chats if isinstance(c, dict)]
+    moved += [str(f.get("group_hub_id") or "") for f in folders if isinstance(f, dict)]
+    try:  # dragging in or out of a group folder changes its team, leader and parent
+        sync_membership(project_root, [cid for cid in moved if cid])
+    except Exception:  # noqa: BLE001 - the layout is saved; the next re-nest syncs again
+        pass
     # Drag in/out of a group folder is a roster change — refresh IN THIS CHAT
     # after disk is saved (the optimistic tree is too early to fetch against).
     _pa.notify_chats_changed(open_tab=False)

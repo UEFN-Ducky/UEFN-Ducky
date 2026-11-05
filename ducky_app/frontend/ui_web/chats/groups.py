@@ -225,6 +225,10 @@ def restore_archived_group(hub_id: str, project_root: str | None = None, parent_
 
     target = parent_folder_id if _folders._folder_is_known(parent_folder_id, project_root) else ""
     _restore_group(hub, "" if is_archive_folder_id(target) else target)
+    try:  # its team rows and leader follow it back
+        sync_membership(project_root, restored)
+    except Exception:  # noqa: BLE001 - the group is back; the next re-nest syncs again
+        pass
     return restored
 
 
@@ -271,6 +275,192 @@ def conversation_descendant_ids(conv_id: str, project_root: str | None = None) -
         seen.add(child_id)
         out.append(child_id)
         queue.extend(children.get(child_id, []))
+    return out
+
+
+def _member_id(row: object) -> str:
+    return str(row.get("member_conv_id") or "").strip() if isinstance(row, dict) else ""
+
+
+def sync_membership(root: str | None, conv_ids: list[str], *, keep_hub: str = "") -> dict[str, dict]:
+    """After a re-nest (folder drag, move, add member, set leader, unarchive), make each moved
+    chat's team rows, leader and parent match where it is filed now.
+
+    Each moved chat leaves every other group's roster (an outer lead keeps its row in a group
+    nested in the one it leads), joins the group its folder is in, and points its parent there.
+    A group whose leader left it, or whose leader works in an unrelated team, loses that leader;
+    a remaining member filed in its folder (a "Lead: …" seat first, else the only one) takes it.
+    Nov 5 2026: group 0cadd26f sat in its own folder but still listed the 1.2.469 lead as its
+    leader and member, and its new lead was bound to the wrong plan.
+
+    Returns ``{conv_id: {left, joined, leader_changed, old_leader, new_leader}}`` for each chat
+    whose team or leader changed (``left`` / ``joined`` are group ids, '' for none).
+    ``keep_hub``: the group the caller just added these chats to or made them lead; their
+    place there stays as asked.
+    """
+    from frontend.ui_web import group_orchestrator as _go
+
+    ids = [c for c in dict.fromkeys(str(x or "").strip() for x in conv_ids or []) if c]
+    if not ids:
+        return {}
+    for cid in ids:  # a move's own saves may still be queued
+        _saves.flush_chat_saves(cid, timeout=5.0)
+    convs, folders = island_for_conversation(ids[0], root)
+    by_id = {c.id: c for c in convs}
+    rows = {f.id: f for f in folders}
+    hub_folder = {(getattr(f, "group_hub_id", None) or "").strip(): f.id for f in folders
+                  if (getattr(f, "group_hub_id", None) or "").strip() and not is_archive_folder_id(f.id)}
+    loaded: dict[str, Conversation] = {}
+
+    def full(cid: str) -> Conversation | None:
+        # Saves need the full chat: a metadata row saved back would blank its history.
+        if cid not in loaded:
+            conv = _convs.load_conversation(cid, root)
+            if conv is not None:
+                loaded[cid] = conv
+        return loaded.get(cid)
+
+    def meta(cid: str):
+        return loaded.get(cid) or by_id.get(cid) or full(cid)
+
+    def container(fid: str) -> str:
+        seen: set[str] = set()
+        while fid and fid not in seen:
+            seen.add(fid)
+            hub = (getattr(rows.get(fid), "group_hub_id", None) or "").strip()
+            if hub and hub in hub_folder:
+                return hub
+            fid = (getattr(rows.get(fid), "parent_id", None) or "").strip()
+        return ""
+
+    def outer_of(hub: str) -> str:
+        return container((getattr(rows.get(hub_folder.get(hub, "")), "parent_id", None) or "").strip())
+
+    def inside(hub: str, outer: str) -> bool:
+        seen: set[str] = set()
+        while hub and hub not in seen:
+            if hub == outer:
+                return True
+            seen.add(hub)
+            hub = outer_of(hub)
+        return False
+
+    def team_of(conv) -> str:
+        if getattr(conv, "is_group", False):
+            return outer_of(conv.id)
+        return container((getattr(conv, "folder_id", None) or "").strip())
+
+    def leader(hub: str) -> str:
+        return (getattr(meta(hub), "leader_conv_id", None) or "").strip()
+
+    def roster(hub: str) -> list[dict]:
+        return [r for r in (getattr(meta(hub), "group_members", None) or []) if isinstance(r, dict)]
+
+    def seats(hub: str) -> list[tuple[str, str]]:
+        """(name, chat id) of the hub's members filed in its own folder."""
+        out = []
+        for row in roster(hub):
+            conv = meta(_member_id(row))
+            if conv is not None and not getattr(conv, "is_group", False) and team_of(conv) == hub:
+                out.append((str(row.get("name") or getattr(conv, "title", "") or ""), conv.id))
+        return out
+
+    def lead_seat(hub: str) -> str:
+        return next((cid for name, cid in seats(hub) if name.strip().lower().startswith("lead:")), "")
+
+    def heir(hub: str) -> str:
+        names = seats(hub)
+        return lead_seat(hub) or (names[0][1] if len(names) == 1 else "")
+
+    def leader_is_stale(hub: str) -> bool:
+        """The leader is gone, or sits in a team unrelated to this one, or sits on its own
+        while the group has a "Lead: …" seat of its own."""
+        lid = leader(hub)
+        if not lid or lid == hub:
+            return False
+        conv = meta(lid)
+        if conv is None:
+            return True
+        sits = {team_of(conv), (getattr(conv, "parent_conv_id", None) or "").strip()} & set(hub_folder)
+        if any(t != hub and not inside(hub, t) and not inside(t, hub) for t in sits):
+            return True
+        return not sits and lead_seat(hub) not in ("", lid)
+
+    dirty: set[str] = set()
+
+    def drop(hub: str, cid: str) -> None:
+        conv = full(hub)
+        if conv is None:
+            return
+        conv.group_members = [r for r in roster(hub) if _member_id(r) != cid]
+        if leader(hub) == cid:
+            conv.leader_conv_id = heir(hub)
+        dirty.add(hub)
+
+    out: dict[str, dict] = {}
+    for cid in ids:
+        conv = meta(cid)
+        if conv is None or is_archive_folder_id(getattr(conv, "folder_id", "") or ""):
+            continue
+        new = team_of(conv)
+        prev_parent = (getattr(conv, "parent_conv_id", None) or "").strip()
+        touched = {h for h in hub_folder if any(_member_id(r) == cid for r in roster(h))} | {new}
+        touched |= {prev_parent} if prev_parent in hub_folder else set()
+        before = {h: leader(h) for h in touched if h}
+        left = ""
+        for hub in sorted(h for h in touched if h):
+            if hub in (new, cid, keep_hub):
+                continue
+            if any(_member_id(r) == cid for r in roster(hub)):
+                pointer_lead = leader(hub) == cid and prev_parent != hub and (not new or inside(hub, new))
+                if pointer_lead or (new and leader(new) == cid and inside(hub, new)):
+                    continue  # a lead stays on the groups it leads from outside, and on its subgroups
+                drop(hub, cid)
+            left = left or hub
+        if prev_parent and prev_parent != new and prev_parent in hub_folder:
+            left = prev_parent
+        joined = ""
+        if new:
+            if not getattr(conv, "is_group", False) and cid not in {_member_id(r) for r in roster(new)}:
+                hub = full(new)
+                if hub is not None:
+                    rows_now = roster(new)
+                    hub.group_members = [*rows_now, _go.normalize_member({
+                        "member_conv_id": cid, "name": conv.ducky_name or conv.title or "Ducky",
+                        "ducky_name": conv.ducky_name or "", "ducky_style": conv.ducky_style or "",
+                        "profile_id": str(getattr(conv, "profile_id", None) or ""),
+                        "model": conv.model or "", "coding_agent": str(getattr(conv, "coding_agent", None) or ""),
+                    }, index=len(rows_now))]
+                    dirty.add(new)
+                    joined = new
+            if getattr(conv, "is_group", False):
+                joined = new if left else joined  # a group's own parent follows its folder elsewhere
+            elif prev_parent != new and (not prev_parent or prev_parent in hub_folder or not meta(prev_parent)):
+                target = full(cid)
+                if target is not None:
+                    target.parent_conv_id = new
+                    _saves.save_conversation(target, root)
+                joined = new
+            elif left:
+                joined = new
+        elif prev_parent in hub_folder and not getattr(conv, "is_group", False):
+            target = full(cid)
+            if target is not None:
+                target.parent_conv_id = ""
+                _saves.save_conversation(target, root)
+        for hub in [h for h in (new, *touched) if h and h in hub_folder and h != keep_hub]:
+            if leader_is_stale(hub):
+                drop(hub, leader(hub))
+        after = {h: leader(h) for h in before}
+        changed = any(after[h] != before[h] for h in before)
+        if left or joined or changed:
+            out[cid] = {"left": left, "joined": joined, "leader_changed": changed,
+                        "old_leader": before.get(left, "") if left else "",
+                        "new_leader": after.get(new, leader(new)) if new else ""}
+    for hub in dirty:
+        conv = loaded.get(hub)
+        if conv is not None:
+            _go.save_group_roster(conv, list(conv.group_members or []), root)
     return out
 
 

@@ -1238,6 +1238,9 @@ def ducky_move_chat(conv_id: str, folder_id: str, pretty: bool = False) -> str:
         raise ValueError("Archiving asks the person first: use ducky_archive_chats.")
     root = _project_root()
     move_conversation(conv_id.strip(), folder_id.strip(), project_root=root)
+    from frontend.ui_web.panel_chats.groups import _sync_moves
+
+    _sync_moves([conv_id.strip()], root=root)  # its team, leader and parent follow the move
     conv = load_conversation(conv_id.strip(), project_root=root)
     if conv is None:
         raise ValueError(f"Conversation not found: {conv_id!r}")
