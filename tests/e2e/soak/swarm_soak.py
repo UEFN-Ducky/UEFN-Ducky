@@ -1335,6 +1335,8 @@ def main() -> int:
     ap.add_argument("--seat-cap", type=int, default=0, help="the seat cap to hold (default: this PC's pc_limit)")
     ap.add_argument("--cores", type=int, default=0,
                     help="older-PC pass: pin the app's whole process tree to this many logical cores")
+    ap.add_argument("--min-free-gb", type=float, default=0.0,
+                    help="older-PC pass: admission's free-RAM floor of a smaller PC (16 GB: 2.4)")
     ap.add_argument("--port-base", type=int, default=PANEL_PORT,
                     help="sandbox listener port; panel API = base-1, bridge = base+1 (two soaks at once)")
     args = ap.parse_args()
@@ -1385,6 +1387,10 @@ def main() -> int:
         # The app sizes its agent hosts from os.cpu_count(), which ignores affinity: give it
         # what a PC with this many cores would get. (Its seat cap stays this PC's, a harder test.)
         extra["DUCKY_MAX_AGENT_HOSTS"] = str(min(args.cores, 8))
+    if args.min_free_gb:
+        # Admission keeps 15% of the PC's RAM free (1.5-6 GB): squeezing a big PC to 8 GB free
+        # still uses the big PC's 6 GB floor, so an older PC's floor is given here.
+        extra["UEFN_DUCKY_AGENT_MIN_FREE_RAM_GB"] = f"{args.min_free_gb:g}"
     env = sandbox_env(box, extra)
 
     filler = start_filler(args.squeeze_free_gb) if args.squeeze_free_gb else None
