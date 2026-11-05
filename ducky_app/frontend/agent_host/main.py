@@ -68,6 +68,9 @@ def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
     finally:
         _batcher = None
         box[0].close("shutdown")
+        from frontend.agent_host import tool_server
+
+        tool_server.stop()  # its state file goes with the host
 
 
 def main(argv: list[str]) -> int:

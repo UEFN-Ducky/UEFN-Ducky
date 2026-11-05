@@ -8,6 +8,7 @@ Work only the window should do (pollers, presence, sync rounds, crash heal) chec
 from __future__ import annotations
 
 import os
+import sys
 
 ENV = "UEFN_DUCKY_PROCESS_ROLE"
 ROLES = ("app", "tool_server", "agent_host")
@@ -15,9 +16,21 @@ ROLES = ("app", "tool_server", "agent_host")
 
 def role() -> str:
     value = os.environ.get(ENV, "").strip()
+    if value == "agent_host" and _shared_call():
+        # An agent host serves its agents' tools in-process: a tool call there acts as the
+        # tool server it replaced (asks the app for runs, never treats the host's as all).
+        return "tool_server"
     if value in ROLES:
         return value
     return "tool_server" if os.environ.get("UEFN_DUCKY_MCP_BRIDGE") == "1" else "app"
+
+
+def _shared_call() -> bool:
+    identity = sys.modules.get("backend.workspace.identity")  # never imported from here
+    try:
+        return bool(identity is not None and identity.is_shared_call())
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def set_role(value: str) -> None:

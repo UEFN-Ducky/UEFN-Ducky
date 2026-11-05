@@ -63,6 +63,7 @@ _ready = threading.Event()
 _ready_info: dict[str, Any] = {}
 _inflight: dict[tuple[int, str], asyncio.Future[Any]] = {}
 _shared_serving = False
+_embedded = False  # served inside an agent host: it never idles out on its own
 _listen_sock: socket.socket | None = None
 # Answered from Ducky's own tool catalog and skill index: a call past this never answers,
 # so it is stopped and the agent hears why. Oct 18 2026: a user's agent sat 29 minutes on
@@ -1271,12 +1272,17 @@ def _watch_stuck() -> None:
             return
 
 
-def serve_daemon(mcp: Any) -> None:
-    """Block until idle after the last adapter disconnects."""
-    global _shared_serving, _clients, _listen_sock
+def serve_daemon(mcp: Any, *, embedded: bool = False) -> None:
+    """Block until idle after the last adapter disconnects.
+
+    ``embedded``: served on a thread of an agent host (frontend.agent_host.tool_server), which
+    lives as long as its agents: no idle, startup-grace or stuck exit; the host stops it.
+    """
+    global _shared_serving, _clients, _listen_sock, _embedded
     lock = _acquire_single_instance()
     if lock is None:
         return  # a daemon is already serving; the adapter will find it via state
+    _embedded = embedded
     _shared_serving = True
     _stop.clear()
     watch_registry(mcp)
@@ -1295,11 +1301,12 @@ def serve_daemon(mcp: Any) -> None:
     _ensure_loop()
     _note_traffic()  # the idle window starts when we start serving
     conn_seq = 0
-    # No adapter within the grace window (spawner died / raced) → do not linger.
-    grace = threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop())
-    grace.daemon = True
-    grace.start()
-    threading.Thread(target=_watch_stuck, daemon=True, name="shared-mcp-stuck-watch").start()
+    if not embedded:
+        # No adapter within the grace window (spawner died / raced) → do not linger.
+        grace = threading.Timer(_STARTUP_GRACE_S, lambda: _clients or conn_seq or request_stop())
+        grace.daemon = True
+        grace.start()
+        threading.Thread(target=_watch_stuck, daemon=True, name="shared-mcp-stuck-watch").start()
     try:
         while not _stop.is_set():
             try:
@@ -1326,7 +1333,7 @@ def serve_daemon(mcp: Any) -> None:
                 finally:
                     with _clients_lock:
                         _clients -= 1
-                        if _clients <= 0 and not _stop.is_set():
+                        if _clients <= 0 and not _stop.is_set() and not _embedded:
                             # Counted from the last real traffic, so a probe cannot extend it.
                             _arm_idle_timer(_idle_left())
 
@@ -1336,6 +1343,8 @@ def serve_daemon(mcp: Any) -> None:
         _listen_sock = None
         _clear_state()
         _shared_serving = False
+        _embedded = False
+        _ready.clear()
         try:
             lock.close()
         except OSError:
@@ -1381,6 +1390,13 @@ def start_daemon_from_app() -> dict[str, Any]:
     global _spawned_at
     if not enabled():
         return {"ok": False, "error": "shared MCP is off"}
+    from backend.process_role import role
+
+    if role() == "agent_host" and (os.environ.get(SLOT_ENV) or "").strip().isdigit():
+        # The host serves its agents' tools itself: no separate process per host.
+        from frontend.agent_host import tool_server
+
+        return tool_server.start()
     with _spawn_lock:
         if _daemon_answers():
             return {"ok": True, "started": False}
