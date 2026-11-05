@@ -33,6 +33,8 @@ MAX_PROGRAMS_PER_CHAT = 8
 MAX_PROGRAMS = 24
 _SIZE_TTL_S = 30.0
 _HTTP_MAX = 200_000
+_OUTPUT_PAGE = 20_000
+_MAX_BACKGROUND_RUNS = 50
 
 
 @dataclass
@@ -52,6 +54,8 @@ class _Program:
 _lock = threading.RLock()
 _programs: dict[int, _Program] = {}
 _sizes: dict[str, tuple[float, int]] = {}
+# Background sandbox runs by terminal session: {conv_id, command, started, result (None while running)}.
+_background: dict[str, dict[str, Any]] = {}
 
 
 def _sandbox(conv_id: str) -> Path:
@@ -154,8 +158,10 @@ def open_sandbox(conv_id: str) -> dict[str, Any]:
 
 
 def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: float = 600.0,
-                expect_minutes: float = 0.0) -> dict[str, Any]:
-    """Run ``command`` in the chat's sandbox terminal (visible in the header's terminal list)."""
+                expect_minutes: float = 0.0, background: bool = False) -> dict[str, Any]:
+    """Run ``command`` in the chat's sandbox terminal (visible in the header's terminal list).
+
+    background: start it and return at once with its session_id; ``output`` reads it later."""
     why = refusal(command)
     if why:
         return {"ok": False, "error": why}
@@ -172,6 +178,8 @@ def run_command(conv_id: str, command: str, shell: str = "bash", timeout_s: floa
     manifest.record(box, "run", command=command)
     # Never a lock: sandboxes of one repo in different chats run at the same time (Nov 5 2026,
     # chats sat waiting on each other's test runs).
+    if background:
+        return _start_background(mgr, box, conv_id, command, shell, timeout_s, changed, expect_minutes)
     session, result = _run_in_terminal(mgr, box, conv_id, command, shell, timeout_s, changed, expect_minutes)
     if isinstance(result, dict) and result.get("error") == "command timed out":
         result = _stop_leftovers(mgr, session, result)
@@ -199,6 +207,117 @@ def _run_in_terminal(mgr: Any, box: Path, conv_id: str, command: str, shell: str
         if not (isinstance(result, dict) and result.get("error") == "session not found"):
             break
     return session, result
+
+
+def _start_background(mgr: Any, box: Path, conv_id: str, command: str, shell: str, timeout_s: float,
+                      changed: dict[str, str], expect_minutes: float) -> dict[str, Any]:
+    """Open a new sandbox terminal, run ``command`` in it from a thread, return at once.
+
+    The thread waits for the end (early_return=False) so the exit code is kept for ``output``;
+    the agent's turn and its chat never wait. A new terminal (not a reused idle one) starts in
+    work/ and can't be closed under the run by the idle cleanup."""
+    opened = mgr.spawn(shell=shell, cwd=str(box / "work"), title="sandbox", push_open=True, conv_id=conv_id,
+                       env_extra=changed, activate=False, reuse_idle=False)
+    session = str(opened.get("session_id") or "")
+    if not session:
+        return {"ok": False, "error": str(opened.get("error") or "The sandbox terminal did not open.")}
+    entry: dict[str, Any] = {"conv_id": conv_id, "command": command, "started": time.monotonic(), "result": None}
+    with _lock:
+        _background[session] = entry
+        done = [sid for sid, e in _background.items() if e["result"] is not None]
+        while len(_background) > _MAX_BACKGROUND_RUNS and done:
+            _background.pop(done.pop(0), None)
+
+    def work() -> None:
+        try:
+            result = mgr.run_agent_command(session, command, source="sandbox_run", conv_id=conv_id, wait=True,
+                                           command_timeout_s=max(5.0, min(float(timeout_s), 3600.0)),
+                                           auto_approve=True, expect_minutes=expect_minutes, early_return=False)
+            if isinstance(result, dict) and result.get("error") == "command timed out":
+                result = _stop_leftovers(mgr, session, result)
+        except Exception as exc:  # noqa: BLE001 - the run's failure is the agent's to read
+            result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        entry["result"] = result if isinstance(result, dict) else {"ok": False, "error": "no result"}
+        _background_done(mgr, box, session, entry)
+
+    threading.Thread(target=work, daemon=True, name=f"sandbox-run-{session}").start()
+    paths.touch(box)
+    _sizes.pop(conv_id, None)
+    return {"ok": True, "session_id": session, "running": True,
+            "read_with": f'sandbox_output(session_id="{session}")'}
+
+
+def _took(secs: float) -> str:
+    secs = int(round(secs))
+    return f"{secs // 60} m {secs % 60} s" if secs >= 60 else f"{secs} s"
+
+
+def _background_done(mgr: Any, box: Path, session_id: str, entry: dict[str, Any]) -> None:
+    """One line where the person watches it (the run's terminal) and in the sandbox's record.
+    ponytail: no hook posts a finished background run into its chat; the terminal line is it."""
+    result = entry["result"] or {}
+    code = result.get("exit_code")
+    line = (f"sandbox run finished, exit {code if code is not None else '?'}, "
+            f"{_took(time.monotonic() - entry['started'])}")
+    if code is None and result.get("error"):
+        line += f" ({result['error']})"
+    try:
+        manifest.record(box, "run_done", command=entry["command"], exit_code=code)
+    except (ValueError, OSError):
+        pass
+    session = mgr.get_session(session_id)
+    if session is not None and hasattr(session, "note"):
+        try:
+            session.note(line)
+        except Exception:  # noqa: BLE001 - a closed terminal takes no note
+            pass
+
+
+def output(conv_id: str, session_id: str, offset: int = 0) -> dict[str, Any]:
+    """A background sandbox run's output from ``offset`` on, and whether it still runs (only
+    this chat's own runs)."""
+    with _lock:
+        entry = _background.get(str(session_id or ""))
+    if entry is None or entry["conv_id"] != conv_id:
+        return {"ok": False, "error": f"No background sandbox run {session_id} in this chat."}
+    result = entry["result"]
+    text = _live_output(session_id)
+    if not text and result is not None:  # its terminal was closed since: the end of it, as the run returned it
+        text = str(result.get("output_tail") or "")
+    start = max(0, int(offset or 0))
+    if start > len(text):  # the terminal's kept output was cut at its front meanwhile
+        start = 0
+    chunk = text[start:start + _OUTPUT_PAGE]
+    out: dict[str, Any] = {"ok": True, "session_id": session_id, "running": result is None, "output": chunk,
+                           "next_offset": start + len(chunk), "more": start + len(chunk) < len(text),
+                           "seconds": round(time.monotonic() - entry["started"], 1)}
+    if result is not None:
+        out["exit_code"] = result.get("exit_code")
+        out["succeeded"] = bool(result.get("ok"))
+        if result.get("error"):
+            out["error"] = str(result["error"])
+    return out
+
+
+def _live_output(session_id: str) -> str:
+    """The run's whole kept output, between its begin and done markers. Not agent_command_output:
+    that keeps the last 8000 characters only, so offsets would slide once a run prints more."""
+    from frontend.ui_web.terminal import get_terminal_manager
+    from frontend.ui_web.terminal.session import plain_terminal_text
+
+    session = get_terminal_manager().get_session(session_id)
+    if session is None:
+        return ""
+    text = plain_terminal_text(session.read_output_tail(max_chars=512 * 1024))
+    tag = str(getattr(session, "run_tag", "") or "")
+    if tag:
+        begin = text.rfind(f"__DUCKY_BEGIN_{tag}__")
+        if begin >= 0:
+            text = text[begin + len(f"__DUCKY_BEGIN_{tag}__"):]
+        done = text.find(f"__DUCKY_DONE_{tag}__")
+        if done >= 0:
+            text = text[:done]
+    return text.strip("\n")
 
 
 def _from_work(shell: str, work: Path, command: str) -> str:
@@ -593,7 +712,7 @@ def prune_now_and_then() -> None:
 _CALLS: dict[str, Any] = {
     "open": open_sandbox, "run": run_command, "launch": launch, "look": look, "stop": stop, "clear": clear,
     "http": http, "status": status, "fetch": fetch, "clone": _clone, "worktree": _worktree, "setup": _setup,
-    "mcp": _mcp, "relaunch": relaunch,
+    "mcp": _mcp, "relaunch": relaunch, "output": output,
 }
 
 

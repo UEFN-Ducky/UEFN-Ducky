@@ -129,12 +129,15 @@ def sandbox_setup(runtime: str, pretty: bool = False) -> str:
 
 @mcp.tool()
 def sandbox_run(command: str, shell: str = "bash", timeout_s: float = 600.0, expect_minutes: float = 0,
-                pretty: bool = False) -> str:
+                background: bool = False, pretty: bool = False) -> str:
     """Run a command in the sandbox's own terminal (cwd = its work folder, its own profile
     folders and caches; visible in the header's terminal list) and wait for it. Asks first
     unless the chat allows sandbox commands. For servers and apps that keep running, use
     sandbox_launch instead. Never runs: admin, system installers, registry/PATH changes,
     scheduled tasks, releases/publishes/deploys, git push.
+
+    background=true for anything over a minute (test suites, builds): the chat stays free;
+    check with sandbox_output. It returns at once with its session_id.
 
     expect_minutes: how long this run should take; shows the person a progress bar, and a run
     three times slower (at least 2 min) comes back still running."""
@@ -145,9 +148,17 @@ def sandbox_run(command: str, shell: str = "bash", timeout_s: float = 600.0, exp
 
     # ponytail: the read hint is ducky_terminal_read_output, not sandbox_look: look reads
     # launched programs only, a sandbox_run lives in a terminal session.
-    return tool_json(early_return_hint(_forward("run", command=command, shell=shell, timeout_s=timeout_s,
-                                                     expect_minutes=max(0.0, float(expect_minutes or 0)))),
-                     pretty=pretty)
+    out = _forward("run", command=command, shell=shell, timeout_s=timeout_s,
+                   expect_minutes=max(0.0, float(expect_minutes or 0)), background=bool(background))
+    return tool_json(out if background else early_return_hint(out), pretty=pretty)
+
+
+@mcp.tool()
+def sandbox_output(session_id: str, offset: int = 0, pretty: bool = False) -> str:
+    """A background sandbox_run's output: what it printed from ``offset`` on (pass the last
+    next_offset to read only what is new), running, and exit_code once it ended. Only this
+    chat's own runs."""
+    return tool_json(_forward("output", session_id=session_id, offset=int(offset or 0)), pretty=pretty)
 
 
 @mcp.tool()

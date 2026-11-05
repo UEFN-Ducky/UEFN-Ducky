@@ -591,3 +591,87 @@ def test_a_reused_sandbox_shell_runs_from_work_again(tmp_path):
         assert out.returncode == 0 and out.stdout.strip().endswith("it's a box/work/check")
     assert service._from_work("powershell", Path("C:/a'b/work"), "dir").startswith("Set-Location -LiteralPath 'C:")
     assert "a''b" in service._from_work("powershell", Path("C:/a'b/work"), "dir")
+
+
+class _BackgroundTerminals:
+    """A terminal manager whose one run prints a line, waits for ``gate``, prints more and exits 0."""
+
+    def __init__(self):
+        import threading
+
+        self.gate = threading.Event()
+        self.text = ""
+        self.notes: list[str] = []
+        self.run_tag = "t1"
+
+    def set_push(self, _push):
+        pass
+
+    def spawn(self, **kw):
+        return {"session_id": "bg-1"}
+
+    def run_agent_command(self, session, command, **kw):
+        assert kw["wait"] is True and kw["early_return"] is False  # the run's own thread waits, never the chat
+        self.text = "__DUCKY_BEGIN_t1__\ncollecting\n"
+        self.gate.wait(5)
+        self.text += "2104 passed\n__DUCKY_DONE_t1__0__\n"
+        return {"ok": True, "exit_code": 0, "output_tail": "collecting\n2104 passed"}
+
+    def get_session(self, sid):
+        return self if sid == "bg-1" else None
+
+    def read_output_tail(self, max_chars=8000):
+        return self.text
+
+    def note(self, line):
+        self.notes.append(line)
+
+
+def _background_run(monkeypatch, conv):
+    mgr = _BackgroundTerminals()
+    monkeypatch.setattr("frontend.ui_web.terminal.get_terminal_manager", lambda: mgr)
+    monkeypatch.setattr("frontend.ui_web.agent_turns.push.get_panel_push", lambda: None)
+    started = time.monotonic()
+    out = service.run_command(conv, "py -3 -m pytest -n 4", background=True)
+    return mgr, out, time.monotonic() - started
+
+
+def test_a_background_run_returns_at_once_while_it_keeps_running(monkeypatch):
+    mgr, out, took = _background_run(monkeypatch, CONV)
+    try:
+        assert took < 1.0
+        assert out == {"ok": True, "session_id": "bg-1", "running": True,
+                       "read_with": 'sandbox_output(session_id="bg-1")'}
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and "collecting" not in mgr.text:
+            time.sleep(0.01)
+        now = service.output(CONV, "bg-1")
+        assert now["running"] is True and now["output"] == "collecting" and "exit_code" not in now
+    finally:
+        mgr.gate.set()
+
+
+def test_sandbox_output_returns_the_later_lines_and_the_exit_code(monkeypatch):
+    mgr, _out, _took = _background_run(monkeypatch, CONV)
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and "collecting" not in mgr.text:
+        time.sleep(0.01)
+    first = service.output(CONV, "bg-1")
+    mgr.gate.set()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and service.output(CONV, "bg-1")["running"]:
+        time.sleep(0.01)
+    later = service.output(CONV, "bg-1", offset=first["next_offset"])
+    assert later["running"] is False and later["exit_code"] == 0 and later["succeeded"] is True
+    assert later["output"].strip() == "2104 passed" and "collecting" not in later["output"]
+    assert len(mgr.notes) == 1 and mgr.notes[0].startswith("sandbox run finished, exit 0, ")
+
+
+def test_another_chat_cannot_read_a_background_run(monkeypatch):
+    mgr, _out, _took = _background_run(monkeypatch, CONV)
+    try:
+        other = service.output("chat-sbx-other", "bg-1")
+        assert other["ok"] is False and "output" not in other
+        assert service.call("output", {"conv_id": "chat-sbx-other", "session_id": "bg-1"})["ok"] is False
+    finally:
+        mgr.gate.set()

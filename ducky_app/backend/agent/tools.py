@@ -617,6 +617,7 @@ HOST_ONLY_TOOLS = frozenset(
         "sandbox_worktree",
         "sandbox_setup",
         "sandbox_run",
+        "sandbox_output",
         "sandbox_launch",
         "sandbox_look",
         "sandbox_http",
