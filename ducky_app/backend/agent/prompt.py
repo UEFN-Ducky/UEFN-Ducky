@@ -9,21 +9,17 @@ _skill_cache: str | None = None
 # Only the memory INDEX goes into prompts (skills-style); entry bodies are
 # pulled on demand via project_memory_get. Cap can be overridden via settings.
 _MEMORY_INDEX_PROMPT_CHARS = 8_000
-# The old settings default; a saved 2,500 means "never changed", so it gets the new budget.
-_LEGACY_MEMORY_INDEX_CHARS = 2_500
 
 
 def memory_index_budget() -> int:
-    """Chars for the memory index in a prompt: the setting, or 8,000 when it is unset/legacy."""
+    """Chars for the memory index in a prompt: the setting, else 8,000."""
     try:
         from frontend.settings import PanelSettings
 
         raw = int(PanelSettings.load().memory_index_max_chars or 0)
     except Exception:
         raw = 0
-    if raw <= 0 or raw == _LEGACY_MEMORY_INDEX_CHARS:
-        return _MEMORY_INDEX_PROMPT_CHARS
-    return max(200, raw)
+    return max(200, raw) if raw > 0 else _MEMORY_INDEX_PROMPT_CHARS
 
 
 def _chat_plan(conv_id: str, project_root: str) -> dict[str, Any] | None:

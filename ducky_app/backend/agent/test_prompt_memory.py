@@ -65,3 +65,13 @@ def test_the_8000_budget_holds(isolated_appdata, tmp_path, monkeypatch):
     assert "author_filter" not in seen
     block = text.split("### Index (names + descriptions only)\n", 1)[1]
     assert len(block.split("\n\n")[0]) <= 8_000
+
+
+def test_a_saved_budget_is_used_as_is(isolated_appdata):
+    from backend.agent import prompt
+    from frontend.settings import PanelSettings
+
+    s = PanelSettings.load()
+    s.memory_index_max_chars = 3_000
+    s.save()
+    assert prompt.memory_index_budget() == 3_000
