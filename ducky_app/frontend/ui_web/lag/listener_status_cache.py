@@ -12,6 +12,16 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
+# The newest status any cache in this process fetched: the tray icon and the account's
+# presence read it instead of asking the listener themselves.
+_last: dict[str, Any] | None = None
+
+
+def last_status() -> dict[str, Any] | None:
+    """The newest fetched listener status (a copy), or None before any fetch. Never contacts UEFN."""
+    value = _last
+    return dict(value) if value is not None else None
+
 
 class ListenerStatusCache:
     def __init__(
@@ -49,6 +59,7 @@ class ListenerStatusCache:
         threading.Thread(target=self._run_fetch, daemon=True, name="listener-status").start()
 
     def _run_fetch(self) -> None:
+        global _last
         while True:
             try:
                 result = self._fetch()
@@ -56,6 +67,7 @@ class ListenerStatusCache:
                 result = dict(self._placeholder(), status_text="Offline", error=str(exc))
             with self._lock:
                 self._value = result
+                _last = result
                 self.fetches += 1
                 again, self._again = self._again, False
                 if not again:

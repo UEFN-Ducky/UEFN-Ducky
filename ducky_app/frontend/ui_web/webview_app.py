@@ -48,41 +48,20 @@ def _web_root() -> Path:
     return Path(__file__).resolve().parent / "web" / "dist"
 
 
-# The icon's own listener check: only while a UEFN process runs, at most this often. Nov 4 2026:
-# with no cached status the 8 s heartbeat probed the listener forever (100 requests in 13 idle
-# minutes with UEFN closed).
-_PROBE_EVERY_S = 60.0
-_probe: dict[str, object] = {"at": float("-inf"), "mode": "offline"}
+def _connection_mode_from_status(cached: dict | None) -> str:
+    """The icon's mode from the last fetched status. The icon never asks the listener: Nov 4-5
+    2026, its own probe sent an idle UEFN a health GET every minute (100 in 13 minutes before
+    that, every 8 s). The status is fetched on a UEFN tool call or the person's refresh."""
+    if not isinstance(cached, dict):
+        from frontend.ui_web.lag.listener_status_cache import last_status
 
-
-def _uefn_process_running() -> bool:
-    try:
-        from backend.bridge.editor_presence import uefn_running
-
-        return uefn_running()
-    except Exception:
-        return False
-
-
-def _connection_mode_from_status(cached: dict | None, now: float | None = None) -> str:
+        cached = last_status()
     if isinstance(cached, dict):
         if bool(cached.get("wedged")):
             return "wedged"
         if bool(cached.get("online")):
             return "online"
-        return "offline"
-    if not _uefn_process_running():
-        _probe["at"] = float("-inf")  # UEFN starts again: check it at once
-        return "offline"
-    now = time.monotonic() if now is None else now
-    if now - float(_probe["at"]) < _PROBE_EVERY_S:
-        return str(_probe["mode"])
-    from backend.bridge import listener_get_health
-
-    health = listener_get_health(PANEL_LISTENER_PORT)
-    _probe["at"] = now
-    _probe["mode"] = "online" if health is not None and health.get("status") == "ok" else "offline"
-    return str(_probe["mode"])
+    return "offline"
 
 
 def _apply_shell_icons(api: object, mode: str) -> None:
@@ -121,8 +100,7 @@ def _poll_once(api: object, last_mode: str | None) -> str | None:
 
 
 def _poll_listener(api: object) -> None:
-    """Tray + taskbar icon heartbeat: the cached status, else a process check (see
-    ``_connection_mode_from_status``); the listener is asked only while UEFN runs."""
+    """Tray + taskbar icon heartbeat: the last fetched status only, never a listener request."""
     last_mode: str | None = None
     while True:
         last_mode = _poll_once(api, last_mode)

@@ -4,7 +4,9 @@ Two PCs share one island through Unreal Revision Control (``revision_push`` /
 ``revision_pull``). A thread in the app process watches the island UEFN has open:
 
 - the listener's health GET names it (``island_dir``: served off the editor thread, nothing
-  queues in UEFN); no listener or no island, nothing runs but that GET;
+  queues in UEFN) once per watch; later rounds reuse that answer while the UEFN process runs
+  (a process check, no request), so an idle UEFN gets no listener requests from the watch.
+  No listener or no island: that GET each round, and the watch stops after two;
 - one ``lore --remote history 1 --branch main`` per round reads the remote head (~1 s); while
   the island is behind, ``lore status`` too, so a pull made anywhere clears the alert;
 - only when one of them moved, ``lore_cli.repo_state`` (3 calls) says which remote revisions
@@ -34,8 +36,9 @@ never alert.
 Rounds: every :data:`ACTIVE_S` while the person uses this PC, :data:`IDLE_S` once they've
 been away :data:`notifications.AWAY_S`; a failing lore call backs off to :data:`ERROR_MAX_S`.
 
-When it runs (2026-11-03): never at app boot. The first successful UEFN tool call starts it
-(:func:`on_uefn_call_ok`); after :data:`STOP_AFTER_MISSES` rounds in a row with no island
+When it runs (2026-11-03): never at app boot, and only in the app process (a tool server
+never runs it: ``ducky_get_status`` reads its doc). The first successful UEFN tool call starts
+it (:func:`on_uefn_call_ok`); after :data:`STOP_AFTER_MISSES` rounds in a row with no island
 (UEFN closed) it stops itself, so a closed UEFN costs no listener requests.
 """
 
@@ -67,6 +70,9 @@ _stop = threading.Event()
 _thread: threading.Thread | None = None
 _st: dict[str, Any] = {}
 _misses = 0  # rounds in a row with no island
+# The island the listener named for this watch. Nov 5 2026: asking every round sent an idle,
+# open UEFN 6-12 health GETs a minute; now a watch asks once (and again after wake()).
+_known_island = ""
 
 
 def _reset(island: str = "") -> None:
@@ -92,14 +98,31 @@ def _lore():
     return lore_cli
 
 
+def _uefn_running() -> bool:
+    try:
+        from backend.bridge.editor_presence import uefn_running
+
+        return uefn_running()
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _open_island() -> str:
+    """The island UEFN has open: the known one while UEFN runs, else one health GET."""
+    global _known_island
+    if _known_island:
+        if _uefn_running():
+            return _known_island
+        _known_island = ""  # UEFN closed: the next UEFN may open another island
     from backend.bridge import listener_get_health
     from frontend.settings import PANEL_LISTENER_PORT
 
     health = listener_get_health(PANEL_LISTENER_PORT)
     if not health or health.get("status") != "ok":
         return ""
-    return os.path.normpath(str(health.get("island_dir") or "")) if health.get("island_dir") else ""
+    island = os.path.normpath(str(health.get("island_dir") or "")) if health.get("island_dir") else ""
+    _known_island = island
+    return island
 
 
 def _person_away() -> bool:
@@ -433,7 +456,10 @@ def locks_for_agents(limit: int = 20) -> dict[str, Any] | None:
 
 
 def wake() -> None:
-    """Check again now (after a pull or push made from this process)."""
+    """Check again now (after a pull or push made from this process), asking the listener
+    which island is open too."""
+    global _known_island
+    _known_island = ""
     _wake.set()
 
 
@@ -470,19 +496,30 @@ def running() -> bool:
 
 
 def start() -> None:
-    global _thread, _misses
+    global _thread, _misses, _known_island
     with _lock:
         if _thread is not None and _thread.is_alive():
             return
         _stop.clear()
         _misses = 0
+        _known_island = ""  # a new watch asks the listener once
         _thread = threading.Thread(target=_loop, daemon=True, name="island-watch")
         _thread.start()
 
 
+def _in_app() -> bool:
+    try:
+        from backend import process_role
+
+        return process_role.role() == "app"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def on_uefn_call_ok() -> None:
-    """A UEFN tool call just worked: UEFN is open, so watch its island (no-op when running)."""
-    if not running():
+    """A UEFN tool call just worked: UEFN is open, so watch its island (no-op when running,
+    and outside the app process: one watch per PC, never one per tool server)."""
+    if _in_app() and not running():
         start()
 
 
@@ -492,8 +529,9 @@ def stop() -> None:
 
 
 def reset_for_tests() -> None:
-    global _misses
+    global _misses, _known_island
     with _lock:
         _reset()
         _misses = 0
+        _known_island = ""
     _wake.clear()

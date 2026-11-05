@@ -1479,12 +1479,16 @@ def _presence_project_label() -> str:
 
 
 def _presence_uefn_online() -> bool:
+    """UEFN running and the last fetched listener status online. Never asks the listener:
+    Nov 5 2026, a health GET on every presence beat kept an idle UEFN busy."""
     try:
-        from backend.bridge import listener_get_health
-        from frontend.settings import PANEL_LISTENER_PORT
+        from backend.bridge.editor_presence import uefn_running
+        from frontend.ui_web.lag.listener_status_cache import last_status
 
-        health = listener_get_health(PANEL_LISTENER_PORT)
-        return bool(health is not None and health.get("status") == "ok")
+        if not uefn_running():
+            return False
+        status = last_status()
+        return bool(status and status.get("online"))
     except Exception:
         return False
 
