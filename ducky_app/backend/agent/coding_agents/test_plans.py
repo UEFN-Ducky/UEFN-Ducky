@@ -104,9 +104,10 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(ui["assignee"], "seat-ui")
         self.assertEqual([(c["content"], c["status"]) for c in ui["children"]], [
             ("Tabs", "completed"), ("List", "completed"), ("Fix list.js separator", "pending")])
-        # Finished steps stay frozen: nothing goes under a finished leaf.
-        with self.assertRaises(ValueError):
-            plans.add_node("chat-fix", content="Under a leaf", parent_id="u1", project_root=self.root)
+        # The lead may split a finished leaf too: it becomes a section with an open step.
+        doc = plans.add_node("chat-fix", content="Under a leaf", parent_id="u1", project_root=self.root)
+        u1 = plans._walk_find(doc["nodes"], "u1")[2]
+        self.assertEqual([c["content"] for c in u1["children"]], ["Under a leaf"])
 
     def test_planned_assignee_is_set_and_cleared_without_starting_anyone(self) -> None:
         from frontend.ui_web.chats import conversations as chat_convs
@@ -151,9 +152,9 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(b["content"], "Store: list")
         self.assertEqual([c["content"] for c in b["children"]], ["Store: detail page"])
         self.assertNotEqual(loaded["status"], "paused")
-        # A started step stays frozen.
-        with self.assertRaises(ValueError):
-            plans.update_node("chat-play", "a", content="Renamed", project_root=self.root)
+        # A started step is reworded too: the lead edits at any time.
+        plans.update_node("chat-play", "a", content="Renamed", project_root=self.root)
+        self.assertEqual(plans.load_plan("chat-play", self.root)["nodes"][0]["content"], "Renamed")
 
     def test_create_update_merge_get(self) -> None:
         # Legacy on-disk contract (<project>/.ducky/plans/*.json); rows are covered by
@@ -411,13 +412,12 @@ class PlansStoreTests(unittest.TestCase):
         assert loaded is not None
         self.assertFalse(any(n["id"] == "c1" for n in plans._flatten_nodes(loaded["nodes"])))
 
-        # Mid-flight: playing locks; pause unlocks unfinished work; completed stays frozen.
+        # Mid-flight: the lock is a flag the panel shows, never a refusal.
         plans.update_node("chat-tree", "p1", status="in_progress", project_root=self.root)
         loaded = plans.load_plan("chat-tree", project_root=self.root)
         assert loaded is not None
         self.assertTrue(plans.plan_structure_locked(loaded))
-        with self.assertRaises(ValueError):
-            plans.update_node("chat-tree", "p1", content="Renamed", project_root=self.root)
+        plans.update_node("chat-tree", "p1", content="Renamed", project_root=self.root)
         plans.update_plan("chat-tree", status="paused", project_root=self.root)
         loaded = plans.load_plan("chat-tree", project_root=self.root)
         assert loaded is not None
@@ -427,10 +427,7 @@ class PlansStoreTests(unittest.TestCase):
         assert loaded is not None
         mid = next(n for n in plans._flatten_nodes(loaded["nodes"]) if n["content"] == "Midflight")
         plans.update_node("chat-tree", mid["id"], status="completed", project_root=self.root)
-        with self.assertRaises(ValueError):
-            plans.update_node(
-                "chat-tree", mid["id"], content="Nope", project_root=self.root
-            )
+        plans.update_node("chat-tree", mid["id"], content="Midflight done", project_root=self.root)
         plans.update_plan("chat-tree", status="open", project_root=self.root)
         self.assertTrue(
             plans.plan_structure_locked(plans.load_plan("chat-tree", project_root=self.root))
@@ -447,10 +444,9 @@ class PlansStoreTests(unittest.TestCase):
         assert loaded is not None
         self.assertEqual(loaded["status"], "finished")
         self.assertTrue(plans.plan_structure_locked(loaded))
-        with self.assertRaises(ValueError):
-            plans.add_node("chat-tree", content="Extra2", project_root=self.root)
-        with self.assertRaises(ValueError):
-            plans.update_plan("chat-tree", title="Nope", project_root=self.root)
+        # A finished plan stays editable; an open step added to it reopens it.
+        self.assertEqual(plans.update_plan("chat-tree", title="Arena v2", project_root=self.root)["status"], "finished")
+        self.assertEqual(plans.add_node("chat-tree", content="Extra2", project_root=self.root)["status"], "open")
 
         copied = plans.copy_plan(
             source_chat_id="chat-tree",
@@ -576,7 +572,7 @@ class PlansStoreTests(unittest.TestCase):
         self.assertEqual(ids.count(plans.DEMO_TEMPLATE_ID), 1)
         self.assertEqual(ids.count(plans.VERIFY_LOOP_TEMPLATE_ID), 1)
 
-    def test_verify_leaf_requires_evidence(self) -> None:
+    def test_verify_leaf_ticks_with_or_without_evidence(self) -> None:
         from backend.agent import verify_evidence as ve
 
         plans.create_plan(
@@ -594,9 +590,10 @@ class PlansStoreTests(unittest.TestCase):
             project_root=self.root,
         )
         plans.update_node("chat-verify", "fix", status="completed", project_root=self.root)
-        with self.assertRaises(ValueError) as ctx:
-            plans.update_node("chat-verify", "v1", status="completed", project_root=self.root)
-        self.assertIn("check tool", str(ctx.exception).lower())
+        # No check this turn: ticked anyway, and its notes say so.
+        done = plans.update_node("chat-verify", "v1", status="completed", project_root=self.root)
+        self.assertEqual(plans._walk_find(done["nodes"], "v1")[2]["body_markdown"], "(no check tool ran this turn)")
+        plans.update_node("chat-verify", "v1", status="pending", body_markdown="", project_root=self.root)
         tok = ve.bind_conversation("chat-verify")
         try:
             ve.record_ok("workspace_compile_verse")
@@ -634,12 +631,11 @@ class PlansStoreTests(unittest.TestCase):
             nodes=[{"id": "v1", "content": "Verify: the team's test run", "status": "pending", "children": []}],
             project_root=self.root,
         )
-        with self.assertRaises(ValueError):
-            plans.update_node("chat-owner", "v1", status="completed", project_root=self.root)
         plans.update_node("chat-owner", "v1", status="completed", project_root=self.root, by_user=True)
         loaded = plans.load_plan("chat-owner", project_root=self.root)
         assert loaded is not None
         self.assertEqual(loaded["nodes"][0]["status"], "completed")
+        self.assertNotIn("no check tool", loaded["nodes"][0].get("body_markdown") or "")  # their word is the check
 
     def test_ensure_verify_loop_template_idempotent(self) -> None:
         first = plans.ensure_verify_loop_template()

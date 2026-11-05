@@ -371,8 +371,8 @@ def test_a_lead_adds_an_owned_step_while_the_team_plays(team):
     added = plan['nodes'][-1]
     assert added['assignee'] == 'builder' and added['after'] == ['a1']
     plans.update_node('coord', 'a1', status='completed', project_root=team)
-    with pytest.raises(ValueError, match="frozen"):
-        plans.add_node('coord', content='Under a finished step', parent_id='a1', project_root=team)
+    plan = plans.add_node('coord', content='Under a finished step', parent_id='a1', project_root=team)
+    assert [c['content'] for c in plans._walk_find(plan['nodes'], 'a1')[2]['children']] == ['Under a finished step']
 
 @pytest.mark.parametrize('backend', ['files', 'db'])
 def test_deleted_assigned_node_falls_back_without_changing_master(team, monkeypatch, backend):

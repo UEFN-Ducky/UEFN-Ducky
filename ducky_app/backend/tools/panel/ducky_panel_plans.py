@@ -132,10 +132,11 @@ def ducky_plan_add_node(
     Finish every assignment: completed, or cancelled with the reason; set notes
     (body_markdown) and status in one call, preserving original notes. A section
     completes itself when its last step does, so put your result in that step's
-    notes; never tick or annotate the finished section. Notes,
-    status and owner are bookkeeping allowed while playing; finished steps stay
-    frozen. Content, moving and deleting steps require a pause; adding a step does
-    not. Assigning a sub plan starts its member: Ducky sends it the task, starts it again
+    notes; never tick or annotate the finished section. The lead (the plan's own
+    chat) and the person edit, move, delete, X and reopen any step at any time, completed
+    ones and finished plans included: no pause. A member does the same inside its own
+    sub plan (the section itself: notes and status); another member's steps are refused.
+    Assigning a sub plan starts its member: Ducky sends it the task, starts it again
     when a turn ends with points left, and tells the lead when the sub plan is finished
     (with its notes) or the member ends with "BLOCKED: ...". Nobody dispatches by message.
     A team works in ONE plan, its lead's: members never create their own. Members tick
@@ -146,11 +147,8 @@ def ducky_plan_add_node(
     the fix as a step for that teammate and sets the blocked step's ``after`` to it.
     """
     from backend.agent.coding_agents.plans import add_node, push_plan_updated
-    from backend.tools.panel.plans_finished import FINISHED_PLAN_ERROR, plan_finished
 
     cid = _resolve_plan_chat_id(chat_id) if not (template_id or "").strip() else ""
-    if cid and plan_finished(cid, _project_root(), parent_id):
-        return tool_json({"ok": False, "error": FINISHED_PLAN_ERROR}, pretty=pretty)
     try:
         plan = add_node(
             cid,
@@ -196,7 +194,9 @@ def ducky_plan_update_node(
     ``planned_assignee`` = the ducky profile or chat id picked to own this sub plan later
     (``""`` clears it). It never starts anyone: Launch seats the planned owners.
 
-    Status, notes and assignee updates are allowed after start. ``assignee`` is the chat or
+    Any field, any time; ``status`` may also reopen a step (completed or cancelled back to
+    pending). A Verify step ticked with no check this turn is ticked, its notes saying so.
+    ``assignee`` is the chat or
     group id that owns this part (``""`` clears it): that group's chats then show this
     part as their plan instead of "No plan".
 
@@ -205,10 +205,11 @@ def ducky_plan_update_node(
     Finish every assignment: completed, or cancelled with the reason; set notes
     (body_markdown) and status in one call, preserving original notes. A section
     completes itself when its last step does, so put your result in that step's
-    notes; never tick or annotate the finished section. Notes,
-    status and owner are bookkeeping allowed while playing; finished steps stay
-    frozen. Content, moving and deleting steps require a pause; adding a step does
-    not. Assigning a sub plan starts its member: Ducky sends it the task, starts it again
+    notes; never tick or annotate the finished section. The lead (the plan's own
+    chat) and the person edit, move, delete, X and reopen any step at any time, completed
+    ones and finished plans included: no pause. A member does the same inside its own
+    sub plan (the section itself: notes and status); another member's steps are refused.
+    Assigning a sub plan starts its member: Ducky sends it the task, starts it again
     when a turn ends with points left, and tells the lead when the sub plan is finished
     (with its notes) or the member ends with "BLOCKED: ...". Nobody dispatches by message.
     A team works in ONE plan, its lead's: members never create their own. Members tick
@@ -320,7 +321,8 @@ def ducky_plan_delete_node(
     template_id: str = "",
     pretty: bool = False,
 ) -> str:
-    """Delete a subplan node and its nested children."""
+    """Delete a step or subplan and its nested children, completed ones included (a member: only
+    inside its own sub plan)."""
     from backend.agent.coding_agents.plans import delete_node, push_plan_updated
 
     cid = _resolve_plan_chat_id(chat_id) if not (template_id or "").strip() else ""
@@ -350,7 +352,8 @@ def ducky_plan_move_node(
     template_id: str = "",
     pretty: bool = False,
 ) -> str:
-    """Move a subplan under parent_id (empty = root) at index. Renumbers the outline."""
+    """Move a step or subplan under parent_id (empty = root) at index, any time. Renumbers the
+    outline. A member moves steps within its own sub plan."""
     from backend.agent.coding_agents.plans import move_node, push_plan_updated
 
     cid = _resolve_plan_chat_id(chat_id) if not (template_id or "").strip() else ""

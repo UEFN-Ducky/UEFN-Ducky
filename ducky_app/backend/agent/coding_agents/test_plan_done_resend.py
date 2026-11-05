@@ -1,4 +1,4 @@
-"""Resending what a completed step already holds is a no-op; a real change is still refused."""
+"""Resending what a completed step already holds is a no-op; a real change is saved."""
 
 from __future__ import annotations
 
@@ -25,5 +25,6 @@ def test_identical_resend_on_done_step_is_ok(root):
     plans.update_node("lead", "s1", status="completed", body_markdown="done", project_root=root)
     node = next(n for n in plans._flatten_nodes(plans.load_plan("lead", root)["nodes"]) if n["id"] == "s1")
     assert (node["status"], node["body_markdown"]) == ("completed", "done")
-    with pytest.raises(ValueError, match="can't be edited"):
-        plans.update_node("lead", "s1", body_markdown="something else", project_root=root)
+    plans.update_node("lead", "s1", body_markdown="something else", project_root=root)
+    node = next(n for n in plans._flatten_nodes(plans.load_plan("lead", root)["nodes"]) if n["id"] == "s1")
+    assert (node["status"], node["body_markdown"]) == ("completed", "something else")

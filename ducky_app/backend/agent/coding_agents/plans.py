@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import time
@@ -70,6 +71,7 @@ def _serialize_plan_edit(edit):
         from frontend.ui_web.chats.store import _conversation_lock
 
         template_id = (kwargs.get("template_id") or "").strip()
+        actor = ""
         if template_id:
             key = f"plan-template:{_templates_dir(create=False).resolve()}:{_safe_id(template_id)}"
         else:
@@ -80,13 +82,18 @@ def _serialize_plan_edit(edit):
             if edit.__name__ in _STEP_EDITS:
                 # Before the lock, so the edit holds the key of the plan it really changes.
                 step = kwargs.get("node_id") or (args[0] if args else "") or kwargs.get("parent_id") or ""
+                actor = _actor_for(chat_id)
                 chat_id = _edit_target(chat_id, str(step), root)
             key = f"plan:{_project_id(root)}:{_safe_id(chat_id)}"
         file_key = "plan-" + _safe_id(key.split(":", 1)[1].replace(":", "-"))[:120]
-        with _conversation_lock(key), held_file_lock(file_key, _EDIT_LOCK_WAIT_S) as got:
-            if not got:
-                raise ValueError("another seat is saving this plan right now: send the same edit again")
-            return edit(chat_id, *args, **kwargs)
+        token = _edit_actor.set(actor)
+        try:
+            with _conversation_lock(key), held_file_lock(file_key, _EDIT_LOCK_WAIT_S) as got:
+                if not got:
+                    raise ValueError("another seat is saving this plan right now: send the same edit again")
+                return edit(chat_id, *args, **kwargs)
+        finally:
+            _edit_actor.reset(token)
     return locked
 
 
@@ -113,6 +120,14 @@ def _edit_target(chat_id: str, step_id: str, project_root: str | None) -> str:
         team = None
     if team is not None and (not sid or _has_step(team, sid)):
         return str(team.get("chat_id") or cid)
+    # A member's finished sub plan still takes its edits (un-X a step, fix a note).
+    try:
+        view = assigned_plan_view(cid, project_root) if sid else None
+    except ValueError:
+        view = None
+    lead = str((view or {}).get("chat_id") or "")
+    if lead and _has_step(load_plan(lead, project_root) or {}, sid):
+        return lead
     return cid
 
 
@@ -433,10 +448,9 @@ def plan_is_paused(plan: dict[str, Any] | None) -> bool:
 
 
 def plan_structure_locked(plan: dict[str, Any] | None) -> bool:
-    """True when human structure/content edits are blocked (playing after start, or finished).
-
-    Pause unlocks unfinished work; completed nodes stay frozen separately.
-    """
+    """True when the plan plays (a step started) or is finished: a read-only flag the panel may
+    show. It never refuses an edit: the person, Nov 5 2026: "the LEAD should be able to edit
+    the plan ALWAYS"."""
     if not isinstance(plan, dict):
         return False
     st = str(plan.get("status") or "").strip().lower()
@@ -450,47 +464,50 @@ def plan_structure_locked(plan: dict[str, Any] | None) -> bool:
     return False
 
 
-def _refuse_if_structure_locked(plan: dict[str, Any]) -> None:
-    if plan_structure_locked(plan):
-        raise ValueError("plan is playing — pause it to edit, move or delete unfinished steps "
-                         "(adding a step needs no pause)")
-
-
-def _unstarted(node: dict[str, Any]) -> bool:
-    """``node`` and everything inside it are still pending."""
-    return all(str(n.get("status") or "pending") == "pending"
-               for n in [node, *_flatten_nodes(node.get("children") or [])])
-
-
 def _is_done_node(node: dict[str, Any] | None) -> bool:
     return isinstance(node, dict) and str(node.get("status") or "") in _DONE
 
 
-def _refuse_if_done_node(node: dict[str, Any], *, action: str = "edit") -> None:
-    if _is_done_node(node):
-        raise ValueError(f"completed steps can't be {action}ed")
+# The chat that called a step edit, before it was redirected to its team's plan.
+_edit_actor: contextvars.ContextVar[str] = contextvars.ContextVar("plan_edit_actor", default="")
 
 
-def _assert_completed_tree_preserved(
-    old_nodes: list[dict[str, Any]] | None,
-    new_nodes: list[dict[str, Any]] | None,
-) -> None:
-    """Completed nodes must keep content/status/kind/body and child id order."""
-    old_flat = {str(n.get("id")): n for n in _flatten_nodes(old_nodes)}
-    new_flat = {str(n.get("id")): n for n in _flatten_nodes(new_nodes)}
-    for oid, on in old_flat.items():
-        if not _is_done_node(on):
-            continue
-        nn = new_flat.get(oid)
-        if nn is None:
-            raise ValueError("completed steps can't be removed")
-        for key in ("content", "status", "kind", "body_markdown"):
-            if str(on.get(key) or "") != str(nn.get(key) or ""):
-                raise ValueError("completed steps can't be edited")
-        old_kids = [str(c.get("id")) for c in (on.get("children") or []) if isinstance(c, dict)]
-        new_kids = [str(c.get("id")) for c in (nn.get("children") or []) if isinstance(c, dict)]
-        if old_kids != new_kids:
-            raise ValueError("completed steps can't be restructured")
+def _actor_for(chat_id: str) -> str:
+    try:
+        from backend.agent.verify_evidence import current_conversation
+
+        return (current_conversation() or chat_id or "").strip()
+    except Exception:
+        return (chat_id or "").strip()
+
+
+def _refuse_outside_own_section(doc: dict[str, Any], node_id: str, *, by_user: bool = False,
+                                notes_only: bool = False, project_root: str | None = None) -> None:
+    """The lead (the plan's own chat) and the person edit anything. A member edits every step
+    inside its own sub plan, completed ones too; the sub plan itself takes notes and status
+    only, and a step in another member's sub plan is refused with its owner."""
+    actor = _edit_actor.get()
+    if by_user or not actor or doc.get("kind") == "template" or actor == str(doc.get("chat_id") or ""):
+        return
+    trail = _path_to(list(doc.get("nodes") or []), node_id)
+    owned = [n for n in trail if n.get("assignee")]
+    if not owned:
+        return
+    mine = set(_chat_and_group_ids(actor, project_root)) or {actor}
+    ours = [n for n in owned if str(n.get("assignee")) in mine]
+    if not ours:
+        label = next((lab for lab, n in outline_numbers(doc.get("nodes")) if n is trail[-1]), node_id)
+        raise ValueError(f"Step {label} belongs to {owned[-1].get('assignee')}'s sub plan: ask your lead")
+    if not notes_only and trail[-1] is ours[0] and trail[-1].get("children"):
+        raise ValueError("Your sub plan itself takes notes and status only: edit, move or delete "
+                         "the steps inside it, or ask your lead to change the section")
+
+
+def _reopen_above(roots: list[dict[str, Any]], node_id: str) -> None:
+    """A step that is open again reopens the finished sections above it."""
+    for up in _path_to(roots, node_id)[:-1]:
+        if str(up.get("status")) == "completed":
+            up["status"] = "in_progress"
 
 
 def _descendants_done(node: dict[str, Any]) -> bool:
@@ -543,7 +560,8 @@ def is_verify_leaf(node: dict[str, Any] | None) -> bool:
 
 def _apply_status_gate(node: dict[str, Any], status: str, chat_id: str = "", *, by_user: bool = False,
                        owners: set[str] | None = None, project_root: str | None = None) -> str:
-    """Refuse completed unless descendants are done and Verify leaves have evidence.
+    """Refuse completed unless descendants are done; a Verify leaf ticked with no check this
+    turn is ticked anyway, its notes saying so (it used to be refused).
 
     *by_user*: the user ticked it in the plan view; their word is the evidence.
     *owners*: the assignees on the step and the sections above it; a chat among them (or in
@@ -551,17 +569,17 @@ def _apply_status_gate(node: dict[str, Any], status: str, chat_id: str = "", *, 
     st = _normalize_status(status)
     if st == "completed" and not _descendants_done(node):
         raise ValueError("cannot complete a subplan while nested subplans are unfinished")
-    if st == "completed" and not by_user and is_verify_leaf(node):
+    if st == "completed" and not by_user and is_verify_leaf(node) and str(node.get("status")) != "completed":
         from backend.agent.verify_evidence import has_evidence
 
         if not has_evidence(chat_id) and not _owner_has_evidence(owners or set(), project_root):
-            raise ValueError(
-                "cannot complete a Verify leaf until a check tool returned ok this turn: run one now, "
-                "then tick it in the same turn (ducky_plugin_validate or ducky_plugin_test for a plugin, "
-                "ducky_terminal_run with passing tests, workspace_compile_verse for Verse; with UEFN "
-                "closed, workspace_list_verse_errors)"
-            )
+            body = str(node.get("body_markdown") or "").rstrip()
+            if _NO_CHECK_NOTE not in body:
+                node["body_markdown"] = f"{body}\n{_NO_CHECK_NOTE}".strip()
     return st
+
+
+_NO_CHECK_NOTE = "(no check tool ran this turn)"
 
 
 def _owner_has_evidence(owners: set[str], project_root: str | None) -> bool:
@@ -777,7 +795,8 @@ def save_plan(plan: dict[str, Any], project_root: str | None = None) -> dict[str
                 raise ValueError("assignee must identify an existing chat or group")
     plan["updated_at"] = time.time()
     _rollup_completed_parents(plan.get("nodes"))
-    _roll_plan_status(plan)
+    if not plan.pop("_status_set", False):  # the lead's own open/finished stands as given
+        _roll_plan_status(plan)
     reports = plan_hooks.completion_reports(previous, plan)
     previous_nodes = {n["id"]: n for n in _flatten_nodes(previous.get("nodes"))}
     started = any(n.get("status") == "in_progress" and
@@ -866,12 +885,7 @@ def update_plan(
         if nodes is not None or recovered:
             nodes = recovered_nodes
 
-    # Status ticks (todos merge / plan status) stay allowed while playing;
-    # pause unlocks structure + prose. Finished stays locked.
-    content_touch = title is not None or overview is not None or body_markdown is not None or nodes is not None
-    if content_touch:
-        _refuse_if_structure_locked(plan)
-
+    # The plan's own chat edits it at any time, playing or finished: no pause, no frozen steps.
     if title is not None:
         plan["title"] = (title or "Plan").strip()[:200]
     if overview is not None:
@@ -879,15 +893,11 @@ def update_plan(
     if body_markdown is not None:
         plan["body_markdown"] = (body_markdown or "").strip()
     if status is not None:
-        next_status = (status or "open").strip()[:40]
-        if str(plan.get("status") or "").strip().lower() == "finished" and next_status != "finished":
-            raise ValueError("finished plans can't be resumed — duplicate to start a fresh copy")
-        plan["status"] = next_status
+        plan["status"] = (status or "open").strip()[:40]
+        plan["_status_set"] = True
 
     if nodes is not None:
-        normalized = _normalize_nodes(nodes)
-        _assert_completed_tree_preserved(plan.get("nodes"), normalized)
-        plan["nodes"] = normalized
+        plan["nodes"] = _normalize_nodes(nodes)
     elif todos is not None:
         incoming = _todos_to_nodes(todos)
         if not merge:
@@ -950,9 +960,8 @@ def add_node(
     doc, save = _load_editable(chat_id, project_root=project_root, template_id=template_id)
     node["body_markdown"] = _cap_notes(doc, node, node.get("body_markdown"), project_root)
     _nudge(doc, node)
-    playing = doc.get("kind") != "template" and plan_structure_locked(doc)
-    if playing and str(doc.get("status") or "").strip().lower() == "finished":
-        _refuse_if_structure_locked(doc)
+    if (parent_id or "").strip():
+        _refuse_outside_own_section(doc, parent_id.strip(), notes_only=True, project_root=project_root)
     roots = list(doc.get("nodes") or [])
     if after is not None:
         _set_after(doc, node, after)
@@ -976,11 +985,9 @@ def add_node(
             parent_node = named[0]
             parent = str(parent_node.get("id"))
         # A fix for a finished section goes back to the same seat: the section (and any finished
-        # section above it) is in progress again, so its owner is woken; its old steps stay frozen.
+        # section above it) is in progress again, so its owner is woken.
         # Every follow-up as a new top-level section grew one plan to 22 sections.
         reopen = str(parent_node.get("status")) == "completed" and bool(parent_node.get("children"))
-        if playing and _is_done_node(parent_node) and not reopen:
-            raise ValueError("completed steps stay frozen while the plan plays: add the new step beside it")
         kids = list(parent_node.get("children") or [])
         idx = len(kids) if index is None else max(0, min(int(index), len(kids)))
         kids.insert(idx, node)
@@ -1018,18 +1025,14 @@ def update_node(
     _, _, node = _walk_find(roots, node_id)
     if node is None:
         raise ValueError("node not found")
-    if doc.get("kind") != "template" and _is_done_node(node):
-        sent = {"content": content, "kind": kind, "body_markdown": body_markdown, "assignee": assignee,
-                "after": after, "planned_assignee": planned_assignee, "status": status}
-        if not _changes_done_node(node, sent):
-            # A resend of what the done step already holds (lost reply, then retry) is a no-op, not a refusal.
-            return save(doc)
-        if node.get("children") and node.get("status") == "completed":
-            raise ValueError(
-                "completed steps can't be edited: this section completed itself when its last "
-                "step did, and the notes on its steps are its record. Nothing more to tick."
-            )
-        _refuse_if_done_node(node)
+    sent = {"content": content, "kind": kind, "body_markdown": body_markdown, "assignee": assignee,
+            "after": after, "planned_assignee": planned_assignee, "status": status}
+    if doc.get("kind") != "template" and _is_done_node(node) and not _changes_done_node(node, sent):
+        # A resend of what the done step already holds (lost reply, then retry) is a no-op.
+        return save(doc)
+    _refuse_outside_own_section(
+        doc, node_id, by_user=by_user, project_root=project_root,
+        notes_only=all(sent[k] is None for k in ("content", "kind", "assignee", "after", "planned_assignee")))
     # Who owns a step is bookkeeping like its status: allowed while the plan plays.
     if assignee is not None:
         owner = assignee.strip()
@@ -1048,13 +1051,6 @@ def update_node(
             node["planned_assignee"] = planned
         else:
             node.pop("planned_assignee", None)
-    structure_touch = content is not None or kind is not None
-    if structure_touch and doc.get("kind") != "template":
-        # A step nobody has started can be reworded while the plan plays: pausing to split one
-        # oversized step stopped every seat of the team.
-        if not _unstarted(node):
-            _refuse_if_structure_locked(doc)
-        _refuse_if_done_node(node)
     if content is not None:
         text = (content or "").strip()
         if not text:
@@ -1071,6 +1067,8 @@ def update_node(
             plan_hooks.before_complete(doc, node, chat_id)
         node["status"] = _apply_status_gate(node, status, chat_id, by_user=by_user,
                                             owners=_owners_of(roots, node_id), project_root=project_root)
+        if node["status"] not in _DONE:
+            _reopen_above(roots, node_id)  # un-complete / un-X: the sections above are open again
     if any(v is not None for v in (assignee, body_markdown, content, after)):
         _nudge(doc, node, by_user=by_user)  # a same-value re-assign counts too
     doc["nodes"] = roots
@@ -1129,16 +1127,11 @@ def delete_node(
     template_id: str | None = None,
 ) -> dict[str, Any]:
     doc, save = _load_editable(chat_id, project_root=project_root, template_id=template_id)
-    if doc.get("kind") != "template":
-        _refuse_if_structure_locked(doc)
     roots = list(doc.get("nodes") or [])
     sibs, idx, node = _walk_find(roots, node_id)
     if node is None or sibs is None or idx < 0:
         raise ValueError("node not found")
-    if doc.get("kind") != "template":
-        _refuse_if_done_node(node, action="remov")
-        if any(_is_done_node(n) for n in _flatten_nodes(list(node.get("children") or []))):
-            raise ValueError("can't remove a branch that contains completed steps")
+    _refuse_outside_own_section(doc, node_id, project_root=project_root)
     sibs.pop(idx)
     doc["nodes"] = roots
     return save(doc)
@@ -1156,18 +1149,19 @@ def move_node(
 ) -> dict[str, Any]:
     """Move a subplan under parent_id (empty = root) at index. Refuses cycles."""
     doc, save = _load_editable(chat_id, project_root=project_root, template_id=template_id)
-    if doc.get("kind") != "template":
-        _refuse_if_structure_locked(doc)
     roots = list(doc.get("nodes") or [])
     sibs, idx, node = _walk_find(roots, node_id)
     if node is None or sibs is None or idx < 0:
         raise ValueError("node not found")
-    if doc.get("kind") != "template":
-        _refuse_if_done_node(node, action="mov")
-        if any(_is_done_node(n) for n in _flatten_nodes(list(node.get("children") or []))):
-            raise ValueError("can't move a branch that contains completed steps")
-    moved = sibs.pop(idx)
     new_parent = (parent_id or "").strip()
+    _refuse_outside_own_section(doc, node_id, project_root=project_root)
+    if new_parent:
+        _refuse_outside_own_section(doc, new_parent, notes_only=True, project_root=project_root)
+    elif _edit_actor.get() and _edit_actor.get() != str(doc.get("chat_id") or "") and _path_to(roots, node_id)[:-1]:
+        # A member moves its steps within its own sub plan, never out to the top of the plan.
+        if any(n.get("assignee") for n in _path_to(roots, node_id)[:-1]):
+            raise ValueError("Move your step within your own sub plan (pass parent_id): ask your lead to move it out")
+    moved = sibs.pop(idx)
     if new_parent:
         if new_parent == str(moved.get("id")) or _contains_id(list(moved.get("children") or []), new_parent):
             raise ValueError("cannot move a subplan under itself or a descendant")
