@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import threading
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +28,25 @@ _KILL_ON_JOB_CLOSE = 0x2000
 _LIMIT_JOB_MEMORY = 0x0200
 _LIMIT_PRIORITY_CLASS = 0x0020
 _BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+_IDLE_PRIORITY_CLASS = 0x0040
 _EXTENDED_LIMIT_INFO = 9
 _PROCESS_SET_QUOTA_AND_TERMINATE = 0x0100 | 0x0001
+# Agent terminals' and sandbox programs' jobs: they share one memory budget
+# (frontend.ui_web.terminal.resource_guard.rebalance), so together they leave room for UEFN.
+_shared: "weakref.WeakSet[_Job]" = weakref.WeakSet()
+_shared_lock = threading.Lock()
+
+
+def share_budget(job: "_Job") -> None:
+    """Count this job in the shared memory budget until it closes."""
+    if job.handle and job.memory_mb > 0:
+        with _shared_lock:
+            _shared.add(job)
+
+
+def shared_jobs() -> list["_Job"]:
+    with _shared_lock:
+        return [job for job in _shared if job.handle]
 
 
 class _Job:
@@ -43,6 +61,9 @@ class _Job:
         them all at below-normal priority, so the PC's own apps stay responsive."""
         self.handle: int = 0
         self.memory_mb = max(0, int(memory_mb))
+        self._below_normal = bool(below_normal)
+        # The most the shared budget may give it (0: no ceiling).
+        self.ceiling_mb = 0
         if not _WIN:
             return
         k32 = _kernel32()
@@ -62,6 +83,44 @@ class _Job:
             k32.CloseHandle(job)
             raise OSError(ctypes.get_last_error(), "SetInformationJobObject failed")
         self.handle = int(job)
+
+    def set_memory_limit(self, mb: int) -> bool:
+        """Change the job's memory cap while its processes run (other limits stay). Lowered
+        below what they hold, their next allocations are refused; nothing is killed."""
+        mb = max(1, int(mb))
+        if not self.handle:
+            self.memory_mb = mb
+            return False
+        info = self._query()
+        if info is None:
+            return False
+        info.BasicLimitInformation.LimitFlags |= _LIMIT_JOB_MEMORY
+        info.JobMemoryLimit = mb * 1024 * 1024
+        if not _kernel32().SetInformationJobObject(self.handle, _EXTENDED_LIMIT_INFO, ctypes.byref(info),
+                                                    ctypes.sizeof(info)):
+            return False
+        self.memory_mb = mb
+        return True
+
+    def set_idle(self, idle: bool) -> bool:
+        """Run the job's processes at idle priority (True) or back at what it was made with."""
+        if not self.handle:
+            return False
+        info = self._query()
+        if info is None:
+            return False
+        basic = info.BasicLimitInformation
+        if idle:
+            basic.LimitFlags |= _LIMIT_PRIORITY_CLASS
+            basic.PriorityClass = _IDLE_PRIORITY_CLASS
+        elif self._below_normal:
+            basic.LimitFlags |= _LIMIT_PRIORITY_CLASS
+            basic.PriorityClass = _BELOW_NORMAL_PRIORITY_CLASS
+        else:
+            basic.LimitFlags &= ~_LIMIT_PRIORITY_CLASS
+            basic.PriorityClass = 0
+        return bool(_kernel32().SetInformationJobObject(self.handle, _EXTENDED_LIMIT_INFO, ctypes.byref(info),
+                                                         ctypes.sizeof(info)))
 
     def assign(self, proc: subprocess.Popen) -> None:
         if self.handle and not _kernel32().AssignProcessToJobObject(self.handle, int(proc._handle)):  # type: ignore[attr-defined]
@@ -122,6 +181,8 @@ class _Job:
             _kernel32().TerminateJobObject(self.handle, 1)
 
     def close(self) -> None:
+        with _shared_lock:
+            _shared.discard(self)
         if self.handle:
             _kernel32().CloseHandle(self.handle)
             self.handle = 0
@@ -227,7 +288,8 @@ class Launched:
     """A program started in its own job, its output going to ``log``."""
 
     def __init__(self, argv: list[str], *, cwd: str, env: dict[str, str], log: Path,
-                 memory_mb: int = DEFAULT_MEMORY_MB) -> None:
+                 memory_mb: int = DEFAULT_MEMORY_MB, share: bool = False) -> None:
+        """share: an agent's program; its cap follows the shared budget (share_budget)."""
         self.log = log
         self.job = _Job(memory_mb)
         flags = 0
@@ -250,6 +312,8 @@ class Launched:
             raise
         if _WIN:
             _resume(self.proc)
+        if share:
+            share_budget(self.job)
         self._pump = threading.Thread(target=_pump, args=(self.proc.stdout, log), name=f"sandbox-log-{self.proc.pid}",
                                       daemon=True)
         self._pump.start()

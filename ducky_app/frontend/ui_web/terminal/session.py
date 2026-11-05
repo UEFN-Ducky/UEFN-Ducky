@@ -189,18 +189,21 @@ def shell_has_foreground_child(shell_pid: int, snapshot: ProcessSnapshot | None 
 def _tracking_job(shell_pid: int, *, guarded: bool = False) -> Any:
     """A job holding the shell and what it already started, so every later process joins it;
     None off Windows or when Windows refuses. guarded (an agent's terminal): the job is also
-    capped in memory and runs below normal priority (resource_guard)."""
+    capped in memory and runs below normal priority; its cap is its share of the budget every
+    agent run shares (resource_guard)."""
     if os.name != "nt" or not shell_pid:
         return None
     try:
-        from backend.sandbox.jobs import _Job
+        from backend.sandbox.jobs import _Job, share_budget
         from frontend.ui_web.terminal import resource_guard
 
-        cap = resource_guard.memory_cap_mb() if guarded else 0
+        cap = resource_guard.new_job_cap_mb() if guarded else 0
         job = _Job(cap, track_only=True, below_normal=guarded)
         if not job.assign_pid(shell_pid):
             job.close()
             return None
+        if guarded:
+            share_budget(job)
         # Git's bash.exe shim may have started the real bash before it joined.
         children, _names = _process_snapshot()
         seen, todo = {shell_pid}, [shell_pid]
@@ -439,6 +442,15 @@ class TerminalSession:
             return int(job.peak_mb()), int(getattr(job, "memory_mb", 0) or 0)
         except Exception:
             return 0, 0
+
+    def set_idle(self, idle: bool) -> bool:
+        """Run what this terminal runs at idle priority (a test or build beside UEFN), or back
+        at its own priority."""
+        job = self._job
+        try:
+            return bool(job is not None and job.set_idle(idle))
+        except Exception:
+            return False
 
     def _read_loop(self) -> None:
         pty = self._pty

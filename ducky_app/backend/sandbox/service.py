@@ -58,6 +58,27 @@ _sizes: dict[str, tuple[float, int]] = {}
 _background: dict[str, dict[str, Any]] = {}
 
 
+def _launch_cap(asked_mb: int) -> int:
+    """A sandbox program's memory cap: what was asked, never more than its share of the
+    budget agent runs share with UEFN (resource_guard)."""
+    try:
+        from frontend.ui_web.terminal import resource_guard
+
+        return max(1, min(int(asked_mb), resource_guard.new_job_cap_mb()))
+    except Exception:
+        return int(asked_mb)
+
+
+def _watch_budget() -> None:
+    """Keep the shared budget ticking while this program runs (no terminal may have started it)."""
+    try:
+        from frontend.ui_web.terminal import get_terminal_manager
+
+        get_terminal_manager().ensure_budget_ticker()
+    except Exception:
+        pass
+
+
 def _sandbox(conv_id: str) -> Path:
     return paths.sandbox_dir(conv_id, create=True)
 
@@ -402,9 +423,11 @@ def launch(conv_id: str, program: str, args: list[str] | None = None, cwd: str =
         argv[0] = found
     log = box / "logs" / f"{int(time.time() * 1000)}.log"
     try:
-        run = Launched(argv, cwd=str(workdir), env=run_env, log=log, memory_mb=memory_mb)
+        run = Launched(argv, cwd=str(workdir), env=run_env, log=log, memory_mb=_launch_cap(memory_mb), share=True)
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": f"Could not start {program}: {exc}"}
+    run.job.ceiling_mb = int(memory_mb)  # the budget never raises it past what was asked
+    _watch_budget()
     prog = _Program(conv_id=conv_id, name=name or Path(argv[0]).name, argv=argv, cwd=str(workdir),
                     started=time.time(), ports=port_map, run=run)
     with _lock:

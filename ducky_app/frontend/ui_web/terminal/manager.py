@@ -45,6 +45,8 @@ _AGENT_STALE_CLOSE_S = 600.0
 # still ran. Its agent done and the terminal quiet this long, it closes anyway, tree and all.
 _ORPHAN_BACKGROUND_CLOSE_S = 3600.0
 _REAP_EVERY_S = 15.0
+# How often agent terminals' and sandbox programs' memory caps follow the shared budget.
+_BUDGET_EVERY_S = 5.0
 # A waited command (or its Allow card) stops waiting when the person writes: checked after
 # the first 10 s, then every 2 s. The command keeps running (Oct 24 2026: 16 runs over 120 s
 # in 3 h held the person's message until each ended).
@@ -95,6 +97,7 @@ class TerminalManager:
         self._decided: dict[str, PendingCommand] = {}
         self._reaper: threading.Thread | None = None
         self._reaper_stop = threading.Event()
+        self._budget_ticker: threading.Thread | None = None
         # Terminals a running workflow still needs: never closed as idle until it lets go.
         self._held: set[str] = set()
         self._push: Callable[[dict[str, Any]], None] | None = None
@@ -235,6 +238,7 @@ class TerminalManager:
             self._emit_open(session, conv_id, activate)
         if conv_id or from_agent:
             self._ensure_reaper()
+            self.ensure_budget_ticker()
         return result
 
     def _ensure_reaper(self) -> None:
@@ -243,6 +247,27 @@ class TerminalManager:
                 return
             self._reaper = threading.Thread(target=self._reap_loop, daemon=True, name="terminal-reaper")
             self._reaper.start()
+
+    def ensure_budget_ticker(self) -> None:
+        """Every _BUDGET_EVERY_S, split the memory budget agent runs share with UEFN across the
+        live agent terminals and sandbox programs (resource_guard.rebalance). Nothing waits."""
+        if os.name != "nt":
+            return
+        with self._lock:
+            if self._budget_ticker is not None and self._budget_ticker.is_alive():
+                return
+            self._budget_ticker = threading.Thread(target=self._budget_loop, daemon=True, name="memory-budget")
+            self._budget_ticker.start()
+
+    def _budget_loop(self) -> None:
+        from backend.sandbox.jobs import shared_jobs
+
+        while not self._reaper_stop.wait(_BUDGET_EVERY_S):
+            try:
+                if shared_jobs():
+                    resource_guard.rebalance()
+            except Exception:
+                pass
 
     def _reap_loop(self) -> None:
         while not self._reaper_stop.wait(_REAP_EVERY_S):
@@ -847,7 +872,12 @@ class TerminalManager:
             return (peak, cap) if isinstance(peak, int) and isinstance(cap, int) else (0, 0)
 
         before, cap = peak_and_cap()
-        ran = session.run_command(command, background=False, timeout_s=timeout_s)
+        idle = _idle_beside_uefn(session, command)
+        try:
+            ran = session.run_command(command, background=False, timeout_s=timeout_s)
+        finally:
+            if idle:
+                session.set_idle(False)
         if cap:
             after, _cap = peak_and_cap()
             if resource_guard.hit_cap(before, after, cap) and isinstance(ran, dict):
@@ -905,6 +935,20 @@ class TerminalManager:
         entry.session.kill()
         entry.bridge.stop()
         return entry
+
+
+def _idle_beside_uefn(session: Any, command: str) -> bool:
+    """With UEFN open, an agent's test or build run goes to idle priority, so UEFN keeps the
+    CPU (Nov 5 2026: pytest on 16 cores and an EXE build ran while UEFN crashed). True when
+    the terminal was switched and must be switched back."""
+    if not getattr(session, "agent", False) or not resource_guard.is_heavy(command):
+        return False
+    try:
+        if not resource_guard.uefn_private_mb():
+            return False
+        return bool(session.set_idle(True))
+    except Exception:
+        return False
 
 
 def _steer_check(conv_id: str) -> Callable[[], bool] | None:
