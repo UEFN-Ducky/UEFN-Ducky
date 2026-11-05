@@ -105,6 +105,16 @@ _APP_NOISE_FILES = {
 }
 
 
+# What a *running* Ducky (its agents, their sandboxes and terminals, the live
+# database) rewrites while a suite runs next to it. With the panel open these are
+# the app's own writes, so the guard leaves them out instead of printing noise; a
+# test that leaks still lands in the stores above (memory, settings, plugins, ...).
+_LIVE_PANEL_DIRS = {
+    "chats", "crash", "locks", "logs", "sandboxes", "terminals", "agent_hosts", "webview", "verify-evidence",
+}
+_LIVE_PANEL_FILES = {"ducky.db", "run_durations.json", "editor_lease.json"}
+
+
 def _panel_is_running(real: Path) -> bool:
     try:
         pid = int((real / "panel.pid").read_text().strip())
@@ -115,18 +125,21 @@ def _panel_is_running(real: Path) -> bool:
         return False
 
 
-def _tree_signature(root: Path) -> dict[str, tuple[int, int]]:
-    """(size, mtime_ns) per file under *root*, minus the app's own background noise."""
+def _tree_signature(root: Path, live_panel: bool = False) -> dict[str, tuple[int, int]]:
+    """(size, mtime_ns) per file under *root*, minus the app's own background noise
+    (and, with the panel running, minus what the live app rewrites on its own)."""
     sig: dict[str, tuple[int, int]] = {}
     if not root.is_dir():
         return sig
+    skip_dirs = _APP_NOISE_DIRS | (_LIVE_PANEL_DIRS if live_panel else set())
+    skip_files = _APP_NOISE_FILES | (_LIVE_PANEL_FILES if live_panel else set())
     for dirpath, dirnames, filenames in os.walk(root):
         rel_dir = Path(dirpath).relative_to(root)
-        if rel_dir.parts and rel_dir.parts[0] in _APP_NOISE_DIRS:
+        if rel_dir.parts and rel_dir.parts[0] in skip_dirs:
             dirnames[:] = []
             continue
         for name in filenames:
-            if name in _APP_NOISE_FILES or ".bak." in name or name.endswith(".tmp"):
+            if name in skip_files or ".bak." in name or name.endswith(".tmp"):
                 continue
             p = Path(dirpath) / name
             try:
@@ -154,7 +167,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config._ducky_isolated_root = root  # type: ignore[attr-defined]
     real = Path(_REAL_LOCAL) / "UEFN-Ducky" if _REAL_LOCAL else None
     config._ducky_real_root = real  # type: ignore[attr-defined]
-    config._ducky_real_sig = _tree_signature(real) if real else {}  # type: ignore[attr-defined]
+    live = bool(real) and _panel_is_running(real)
+    config._ducky_live_panel = live  # type: ignore[attr-defined]
+    config._ducky_real_sig = _tree_signature(real, live) if real else {}  # type: ignore[attr-defined]
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -163,7 +178,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if _OPT_OUT or real is None:
         return
     before: dict = getattr(config, "_ducky_real_sig", {})
-    after = _tree_signature(real)
+    live = bool(getattr(config, "_ducky_live_panel", False))
+    after = _tree_signature(real, live)
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
     if changed:
         rep = session.config.pluginmanager.get_plugin("terminalreporter")
@@ -171,12 +187,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             f"the real AppData changed during the run ({real}); {len(changed)} paths, e.g. "
             + ", ".join(changed[:5])
         )
-        # With the panel open the user may simply be chatting while tests run; only a
-        # run with no live panel (CI, a quiet machine) can blame the tests with certainty.
-        if _panel_is_running(real):
-            if rep is not None:
-                rep.write_line("REAL APPDATA GUARD (panel running, not failing): " + msg, yellow=True)
-            return
+        # The live panel's own writes are already left out above, so what is left is
+        # a leak: it fails the run with the reason, never just a printed warning.
         if rep is not None:
             rep.write_line("REAL APPDATA GUARD: tests wrote into the real AppData. " + msg, red=True)
         session.exitstatus = 3  # surfaced as an exit-code failure in CI
