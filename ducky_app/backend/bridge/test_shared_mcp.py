@@ -950,3 +950,122 @@ def test_stuck_terminal_run_says_it_waits_for_the_approval_card(stuck_events) ->
     payload = stuck_events("ducky_terminal_run")
     assert payload["phase"] == "approval card"
     assert payload["message"] == "ducky_terminal_run: waiting_on approval card (conv 450a3ccd, 0 s)"
+
+
+def _bye(sock) -> None:
+    shared_mcp.write_frame(sock, {"op": "bye"})
+    shared_mcp.read_frame(sock)
+    shared_mcp.close_handle(sock)
+
+
+def _wait_clients(n: int) -> None:
+    deadline = time.monotonic() + 5
+    while shared_mcp._clients != n and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert shared_mcp._clients == n
+
+
+def test_an_idle_daemon_exits_after_three_minutes_and_removes_its_state(monkeypatch, tmp_path) -> None:
+    """Nov 5 2026: with 15 minutes, a 0-client daemon sat at 0.7-0.9 GB between turns."""
+    assert shared_mcp._IDLE_EXIT_S == 180.0
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
+    state = tmp_path / "shared_mcp.json"
+    try:
+        assert state.exists()
+        sock = _hello("run-1")
+        _rpc(sock, "tools/list")
+        _bye(sock)
+        _wait_clients(0)
+        with shared_mcp._clients_lock:
+            gen = shared_mcp._idle_gen
+            shared_mcp._last_traffic = time.monotonic() - 181.0  # three minutes pass
+        shared_mcp._idle_expired(gen)
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert not state.exists()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+        shared_mcp.reset_for_tests()
+
+
+def test_a_client_during_the_countdown_cancels_it(monkeypatch, tmp_path) -> None:
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        first = _hello("run-1")
+        _rpc(first, "tools/list")
+        _bye(first)
+        _wait_clients(0)
+        assert shared_mcp._idle_timer is not None  # the countdown runs
+        second = _hello("run-2")
+        _wait_clients(1)
+        assert shared_mcp._idle_timer is None  # the new client cancelled it
+        with shared_mcp._clients_lock:
+            gen = shared_mcp._idle_gen
+            shared_mcp._last_traffic = time.monotonic() - 181.0
+        shared_mcp._idle_expired(gen)  # a timer that fired anyway does not stop it
+        assert shared_mcp.serving() and thread.is_alive()
+        assert [t["name"] for t in _rpc(second, "tools/list")["tools"]] == ["ping", "workspace_write_file"]
+        _bye(second)
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+        shared_mcp.reset_for_tests()
+
+
+def test_memory_report_op_answers_and_is_not_traffic(monkeypatch, tmp_path) -> None:
+    from frontend import memory_report
+
+    asked: list[dict] = []
+    monkeypatch.setattr(memory_report, "report",
+                        lambda **kw: asked.append(kw) or {"process": {"private_mb": 80.0}})
+    thread = serve(FakeMcp(), monkeypatch, tmp_path)
+    try:
+        sock = _hello("probe")
+        before = shared_mcp._last_traffic
+        shared_mcp.write_frame(sock, {"op": "memory_report", "top": 5, "walk_budget_s": 2})
+        reply = shared_mcp.read_frame(sock)
+        assert reply == {"op": "memory_report", "report": {"process": {"private_mb": 80.0}}}
+        assert asked == [{"collect": True, "top": 5, "walk_budget_s": 2.0}]
+        assert shared_mcp._last_traffic == before  # never keeps an idle daemon up
+        _bye(sock)
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+        shared_mcp.reset_for_tests()
+
+
+def test_host_agents_only_ever_start_their_hosts_daemon(monkeypatch, tmp_path) -> None:
+    """The app's unslotted daemon idled at 0 clients and 722 MB while every agent ran in a host."""
+    import subprocess
+
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP", raising=False)
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "3")
+    monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(shared_mcp, "_spawned_at", 0.0)
+    monkeypatch.setattr(shared_mcp, "_daemon_answers", lambda: False)
+    started: list[dict] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(kw["env"]))
+    monkeypatch.setattr(ad, "_ask_app_to_start", lambda: pytest.fail("asked the app"))
+    monkeypatch.setattr(ad.subprocess, "Popen", lambda cmd, **kw: started.append(kw["env"]))
+
+    assert shared_mcp.start_daemon_from_app()["started"] is True  # the host's readiness gate
+    ad._spawn_daemon(["--port", "4200"])  # its agent's adapter replacing a dead one
+    assert [env[shared_mcp.SLOT_ENV] for env in started] == ["3", "3"]
+    assert shared_mcp.state_path().name == "shared_mcp-h3.json"
+    assert not (tmp_path / "shared_mcp.json").exists()
+
+
+def test_tool_servers_load_numpy_with_one_blas_thread(monkeypatch) -> None:
+    """Nov 5 2026: OpenBLAS committed 32 MB per CPU thread on numpy's import, 480 MB of the
+    daemon's 573 MB private memory on a 16-thread PC (86 MB with one thread)."""
+    from frontend import launcher
+
+    monkeypatch.delenv("OPENBLAS_NUM_THREADS", raising=False)
+    launcher.limit_blas_threads()
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "1"
+    monkeypatch.setenv("OPENBLAS_NUM_THREADS", "4")
+    launcher.limit_blas_threads()
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "4"  # the person's own setting wins

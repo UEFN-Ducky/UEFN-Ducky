@@ -11,6 +11,19 @@ import os
 import sys
 from pathlib import Path
 
+# Before anything imports numpy, and inherited by every child (agent hosts, tool servers).
+# Nov 5 2026: OpenBLAS commits a 32 MB buffer per CPU thread when numpy loads, 480 MB of
+# private memory on a 16-thread PC in every Ducky process, though search only needs one.
+BLAS_THREAD_ENV = ("OPENBLAS_NUM_THREADS",)
+
+
+def limit_blas_threads() -> None:
+    for key in BLAS_THREAD_ENV:
+        os.environ.setdefault(key, "1")
+
+
+limit_blas_threads()
+
 # Bootloader leftovers. After Python starts, this process uses sys._MEIPASS;
 # children that inherit these think they are still inside our extract dir.
 _PYI_BOOT_ENV_KEYS = (

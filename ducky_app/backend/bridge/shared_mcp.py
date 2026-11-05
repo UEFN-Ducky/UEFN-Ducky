@@ -33,8 +33,9 @@ _STATE_NAME = "shared_mcp.json"
 _MAX_FRAME = 16 * 1024 * 1024
 # Ducky starts a new agent process every turn. A 3 s idle exit made almost every turn
 # start this server again (5-9 s: backend import + 1,000+ tool registrations), and
-# agents that wait only ~1 s for MCP servers came up with no Ducky tools.
-_IDLE_EXIT_S = 900.0
+# agents that wait only ~1 s for MCP servers came up with no Ducky tools. Nov 5 2026: 15 minutes
+# kept a 0-client daemon at 0.7-0.9 GB between turns; 3 minutes still covers a turn's gap.
+_IDLE_EXIT_S = 180.0
 _STARTUP_GRACE_S = 60.0
 # Connections that never close (an agent killed without a goodbye, a socket nobody reads) kept
 # ``_clients`` above 0, so the idle timer never ran: a 415 MB daemon lived 34 hours with no tool
@@ -1143,6 +1144,11 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
             if op == "bye":
                 _send({"op": "bye"})
                 return
+            if op == "memory_report":
+                # What this daemon holds (frontend.memory_report); not traffic: it never
+                # keeps an idle daemon up.
+                _send({"op": "memory_report", "report": _memory_report(msg)})
+                continue
             if op == "cancel":
                 fut = _inflight.get((conn_id, str(msg.get("id"))))
                 if fut is not None:
@@ -1165,6 +1171,19 @@ def _client_loop(mcp: Any, handle: int, token: str, key: dict[str, str], conn_id
         closed.set()
         wake_catalog_watchers()
         close_handle(handle)
+
+
+def _memory_report(msg: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from frontend import memory_report
+
+        return memory_report.report(
+            collect=bool(msg.get("collect", True)),
+            top=int(msg.get("top") or memory_report.TOP),
+            walk_budget_s=float(msg.get("walk_budget_s") or memory_report.WALK_BUDGET_S),
+        )
+    except Exception as exc:  # noqa: BLE001 — the caller hears why
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def _acquire_single_instance() -> Any | None:
