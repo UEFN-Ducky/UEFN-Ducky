@@ -36,12 +36,20 @@ def _coerce(name: str, value: Any) -> Any:
             out = int(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{name}: expected int") from exc
+    elif ftype == "float":
+        try:
+            out = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name}: expected number") from exc
     elif ftype == "str":
         out = str(value)
     else:
         out = value
     if enum is not None and out not in enum:
         raise ValueError(f"{name}: must be one of {enum}")
+    low, high = schema_field.get("min"), schema_field.get("max")
+    if low is not None and high is not None and not low <= out <= high:
+        raise ValueError(f"{name}: must be {low:g}–{high:g}")
     return out
 
 

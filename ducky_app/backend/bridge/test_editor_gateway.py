@@ -53,7 +53,7 @@ def test_growth_of_4_5_gb_since_load_refuses(memory) -> None:
     editor_gateway.call("", "import_asset", True, lambda: None)
     memory["uefn"] = (100, 5.0, int(25.5 * GB))
     ran: list[str] = []
-    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"UEFN grew 4\.5 GB since the island loaded \(PC free 32\.0 GB\): save and restart UEFN first \(ask the person\)"):
+    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"UEFN grew 4\.5 GB since the island loaded \(limit 4 GB, PC free 32\.0 GB\): save and restart UEFN first \(ask the person\)"):
         editor_gateway.call("", "unreal__VerseToolset.Build", True, lambda: ran.append("x"))
     assert ran == []
 

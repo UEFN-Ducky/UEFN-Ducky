@@ -1908,6 +1908,9 @@ def _resolve_group_hub_id(group_id: str = "", folder_id: str = "") -> str:
     root = _project_root()
     gid = (group_id or "").strip()
     if gid:
+        from frontend.ui_web.chats.saves import flush_chat_saves
+
+        flush_chat_saves(gid, timeout=10.0)  # a group made a moment ago may still be queued
         hub = load_conversation(gid, project_root=root)
         if hub is not None and getattr(hub, "is_group", False):
             return gid

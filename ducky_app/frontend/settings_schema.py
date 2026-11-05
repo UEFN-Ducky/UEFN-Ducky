@@ -18,7 +18,7 @@ from frontend.settings import PanelSettings
 
 
 class FieldMeta:
-    __slots__ = ("label", "tab", "settable", "enum", "restart_required", "description")
+    __slots__ = ("label", "tab", "settable", "enum", "restart_required", "description", "value_range")
 
     def __init__(
         self,
@@ -29,6 +29,7 @@ class FieldMeta:
         enum: tuple[str, ...] | None = None,
         restart_required: bool = False,
         description: str = "",
+        value_range: tuple[float, float] | None = None,
     ) -> None:
         self.label = label
         self.tab = tab
@@ -36,6 +37,7 @@ class FieldMeta:
         self.enum = enum
         self.restart_required = restart_required
         self.description = description
+        self.value_range = value_range
 
 
 # One entry per PanelSettings field. `settable` marks fields ducky_settings_set
@@ -237,6 +239,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Team sync interval (s)", "Team", settable=True,
         description="Seconds between checks for teammates' changes (30–600).",
     ),
+    "uefn_memory_growth_limit_gb": FieldMeta(
+        "UEFN memory growth limit (GB)", "Agent", settable=True, value_range=(0.1, 64.0),
+        description="Heavy UEFN calls (Verse build, play, import) are refused once UEFN grew this many GB since its island loaded (0.1–64).",
+    ),
     "prompt_caching_enabled": FieldMeta(
         "Legacy provider cache markers fallback", "LLMs", settable=True
     ),
@@ -398,6 +404,8 @@ def _type_name(annotation: Any) -> str:
         return "bool"
     if raw.startswith("int"):
         return "int"
+    if raw.startswith("float"):
+        return "float"
     if raw.startswith("str"):
         return "str"
     if raw.startswith("list") or raw.startswith("List"):
@@ -432,6 +440,8 @@ def settings_schema() -> dict[str, Any]:
         }
         if meta and meta.enum:
             entry["enum"] = list(meta.enum)
+        if meta and meta.value_range:
+            entry["min"], entry["max"] = meta.value_range
         if meta and meta.description:
             entry["description"] = meta.description
         fields[name] = entry

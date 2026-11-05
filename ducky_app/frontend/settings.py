@@ -295,6 +295,9 @@ class PanelSettings:
     team_poll_s: int = 60
     """Team data: seconds between checks for teammates' changes (30–600)."""
 
+    uefn_memory_growth_limit_gb: float = 4.0
+    """Editor gateway: GB UEFN may grow since its island loaded before heavy calls are refused (0.1–64)."""
+
     prompt_caching_enabled: bool = True
     """Legacy fallback when Anthropic/OpenAI plugin prefs omit promptCaching."""
 
@@ -468,6 +471,10 @@ class PanelSettings:
             self.tts_volume = max(0.0, min(1.0, float(self.tts_volume)))
         except (TypeError, ValueError):
             self.tts_volume = 1.0
+        try:
+            self.uefn_memory_growth_limit_gb = max(0.1, min(64.0, float(self.uefn_memory_growth_limit_gb)))
+        except (TypeError, ValueError):
+            self.uefn_memory_growth_limit_gb = 4.0
         try:
             self.voice_process_talk = max(0.0, min(1.0, float(self.voice_process_talk)))
         except (TypeError, ValueError):

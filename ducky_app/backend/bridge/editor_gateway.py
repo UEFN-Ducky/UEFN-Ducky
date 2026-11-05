@@ -296,7 +296,7 @@ def check_memory(op: str) -> None:
     if growth > limit or (free_gb is not None and free_gb < MIN_FREE_RAM_GB):
         free_text = f"{free_gb:.1f} GB" if free_gb is not None else "unknown"
         raise EditorMemoryLow(
-            f"UEFN grew {growth:.1f} GB since the island loaded (PC free {free_text}): save and "
+            f"UEFN grew {growth:.1f} GB since the island loaded (limit {limit:g} GB, PC free {free_text}): save and "
             f"restart UEFN first (ask the person). `{op}` not sent; the limits are "
             f"{limit:g} GB of growth and {MIN_FREE_RAM_GB:g} GB free RAM."
         )
