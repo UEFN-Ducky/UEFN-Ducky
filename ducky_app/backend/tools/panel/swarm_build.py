@@ -372,6 +372,20 @@ def _relative_lane(path: str, root: str) -> str:
     return normalize_glob(p)
 
 
+def anchor_in_repo(tree: list[dict[str, Any]], repo: str, open_root: str) -> None:
+    """Each seat's relative Files made full paths in *repo* (the plan's ``Repo:``) when that is
+    not the open project, so the lanes mean the repo's files whichever project is open."""
+    r = (repo or "").replace("\\", "/").rstrip("/")
+    o = (open_root or "").replace("\\", "/").rstrip("/")
+    if not r or r.lower() == o.lower():
+        return
+    from backend.workspace.lanes import _is_abs
+
+    for s in walk_seats(tree):
+        s["paths"] = [p if _is_abs(p.replace("\\", "/")) else f"{r}/{p.replace(chr(92), '/').removeprefix('./')}"
+                      for p in s.get("paths") or []]
+
+
 def validate(tree: list[dict[str, Any]], root: str) -> list[str]:
     """Every reason the build would fail halfway, checked before anything is made. Lanes are
     rewritten project-relative in place."""
@@ -538,9 +552,11 @@ def build_swarm(preview: dict[str, Any] | None = None, api: Any = None,
     if not lead:
         raise SwarmBuildError("No calling chat: ducky_swarm_create must run in the lead's chat.")
     if from_plan is not None:
+        from backend.tools.panel.swarm_preview import plan_repo
+
         tree = seats_from_plan(from_plan)
         return _build(str(from_plan.get("title") or "").strip() or "Swarm", tree, str(from_plan.get("id") or ""),
-                      lead, api)
+                      lead, api, repo=plan_repo(from_plan))
     return _build(preview["goal"], preview["tree"], "", lead, api, preview=preview)
 
 
@@ -572,17 +588,21 @@ def launch_plan(chat_id: str, api: Any = None) -> dict[str, Any]:
     tree = keep(tree)
     if not tree:
         return {"ok": True, "seated": [], "failed": []}
+    from backend.tools.panel.swarm_preview import plan_repo
+
     built = _build(str(plan.get("title") or "").strip() or "Swarm", tree, str(plan.get("id") or ""),
-                   chat_id, api, known=known)
+                   chat_id, api, known=known, repo=plan_repo(plan))
     # The Build card's 'Trust AI plugin drafts' grant: members' ducky_plugin_test never stops on needs_trust.
     api.trust_drafts([built["root_group_id"], *(g["group_id"] for g in walk_groups(tree) if g.get("group_id"))])
     return {"ok": True, "seated": [s["name"] for s in walk_seats(tree) if s.get("status") == "assigned"], **built}
 
 
 def _build(goal: str, tree: list[dict[str, Any]], plan_id: str, lead: str, api: Any,
-           preview: dict[str, Any] | None = None, known: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+           preview: dict[str, Any] | None = None, known: list[dict[str, Any]] | None = None,
+           repo: str = "") -> dict[str, Any]:
     if not list(walk_seats(tree)):
         raise SwarmBuildError("Nothing to seat: no section has steps.")
+    anchor_in_repo(tree, repo, api.project_root())
     errors = validate(tree, api.project_root())
     if errors:
         raise SwarmBuildError("; ".join(errors))

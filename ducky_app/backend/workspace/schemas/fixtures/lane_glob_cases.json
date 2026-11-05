@@ -37,6 +37,7 @@
     { "a": "Content/Verse/Shop/**", "b": "Content/Verse/module_declarations.verse", "expected": null },
     { "a": "Content/Verse/*.verse", "b": "Content/Verse/a.verse", "expected": "matches" },
     { "a": "Content/*/Shop/**", "b": "Content/Verse/Shop/**", "expected": "maybe" },
+    { "a": "**/work/*/ducky_app/x/**", "b": "Content/Verse/Shop/**", "expected": null },
     { "a": "Content/Verse/Shop/**", "b": "Content/Verse/Hub/**", "expected": null },
     { "a": "Content/Verse/a.verse", "b": "Content/Verse/b.verse", "expected": null }
   ]

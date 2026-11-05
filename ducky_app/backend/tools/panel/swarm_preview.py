@@ -944,3 +944,45 @@ def check_plan(plan: dict[str, Any] | None, repo_files: list[str] | None = None,
     return {"status": "needs_answers" if any(found.values()) else "ok", **found,
             "oversized": oversized_steps(seats), "estimate": estimate(seats),
             "balance": balance(seats, deps, found["conflicts"], pc_limit)}
+
+
+# ---- the plan's repo ----------------------------------------------------------------------
+
+_REPO_LINE = re.compile(r"^\s*(?:[-*]\s*)?(?:\*\*)?Repo(?:\*\*)?\s*:(?:\*\*)?\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+
+
+def _plan_texts(plan: dict[str, Any]) -> list[str]:
+    out = [str(plan.get(k) or "") for k in ("overview", "body_markdown", "description")]
+
+    def walk(nodes: Any) -> None:
+        for n in nodes or []:
+            if isinstance(n, dict):
+                out.append(str(n.get("body_markdown") or ""))
+                walk(n.get("children"))
+
+    walk(plan.get("nodes"))
+    return out
+
+
+def plan_repo(plan: dict[str, Any] | None, roots: list[str] | None = None) -> str:
+    """The repo a plan's relative Files mean: its ``Repo:`` line (a full path inside one of the
+    person's Ducky projects), '' when it names none. Nov 5 2026: a plan about UEFN-Ducky-Release
+    built while LimoRide was open put every member's ``ducky_app/...`` lane inside the island."""
+    if not plan:
+        return ""
+    if roots is None:
+        from backend.workspace.lanes import project_roots
+
+        roots = project_roots()
+    known = [r.replace("\\", "/").rstrip("/") for r in roots if r]
+    for text in _plan_texts(plan):
+        for m in _REPO_LINE.finditer(text):
+            line = m.group(1)
+            for raw in [*re.findall(r"`([^`]+)`", line), line]:
+                p = raw.strip().strip("`*. ").replace("\\", "/").rstrip("/")
+                if not p:
+                    continue
+                for r in sorted(known, key=len, reverse=True):
+                    if p.lower() == r.lower() or p.lower().startswith(r.lower() + "/"):
+                        return r + p[len(r):]
+    return ""

@@ -90,6 +90,54 @@ def project_roots() -> list[str]:
     return [r.replace("\\", "/").rstrip("/") for r in roots if r and str(r).strip()]
 
 
+def _default_sandboxes_root() -> str:
+    from backend.sandbox.paths import root
+
+    return str(root())
+
+
+_sandboxes_source: Callable[[], str] = _default_sandboxes_root
+
+
+def set_sandboxes_root_source(getter: Callable[[], str]) -> None:
+    """Install the reader for the folder holding every chat's sandbox."""
+    global _sandboxes_source
+    _sandboxes_source = getter
+
+
+def own_sandbox_rest(conv_id: str, full_path: str) -> str | None:
+    """The part of ``full_path`` after ``<sandboxes>/<conv_id>/work/<worktree>/`` (a member's own
+    sandbox worktree), else None. Nov 5 2026: members working in their own worktrees of the team's
+    repo were refused every write, and the lead could not add the sandbox to a lane."""
+    cid = (conv_id or "").strip()
+    if not cid or "/" in cid or "\\" in cid or cid in (".", ".."):
+        return None
+    try:
+        base = str(_sandboxes_source() or "").replace("\\", "/").rstrip("/")
+    except Exception:  # noqa: BLE001 - no sandbox folder: nothing is a sandbox
+        return None
+    if not base:
+        return None
+    work = f"{base}/{cid}/work"
+    p = full_path.replace("\\", "/")
+    if not _inside(p, work) or p.lower() == work.lower():
+        return None
+    parts = p[len(work) + 1:].split("/", 1)
+    if len(parts) < 2 or not parts[1] or any(seg == ".." for seg in parts[1].split("/")):
+        return None
+    return parts[1]
+
+
+def _project_relative(glob: str) -> str | None:
+    """A lane glob as a path relative to its project (a full-path glob loses its project root)."""
+    if not _is_abs(glob):
+        return glob
+    for root in sorted(project_roots(), key=len, reverse=True):
+        if _inside(glob, root) and glob.lower() != root.lower():
+            return glob[len(root) + 1:]
+    return None
+
+
 def _is_abs(path: str) -> bool:
     return path.startswith("/") or (len(path) > 1 and path[1] == ":")
 
@@ -256,7 +304,9 @@ def overlap(a: str, b: str) -> str | None:
     if na.lower() == nb.lower():
         return "identical"
     pa, pb = literal_prefix(na), literal_prefix(nb)
-    related = _is_prefix(pa, pb) or _is_prefix(pb, pa)
+    # Only real paths are compared: a pattern with no literal folder (``**/x/**``, a member's
+    # own-sandbox pattern) is related to nothing, so it no longer flags every lane "maybe".
+    related = bool(pa and pb) and (_is_prefix(pa, pb) or _is_prefix(pb, pa))
     # "Plain" directory lanes (only a trailing /**) have decidable containment.
     plain_a = is_dir_glob(na) and not _has_mid_wildcard(na)
     plain_b = is_dir_glob(nb) and not _has_mid_wildcard(nb)
@@ -476,12 +526,13 @@ def resolve_lane(conv_id: str, *, now: float | None = None) -> tuple[str, ...] |
 
 
 def reset_for_tests() -> None:
-    global _mode_source, _roots_source
+    global _mode_source, _roots_source, _sandboxes_source
     with _providers_lock:
         _providers.clear()
         _cache.clear()
     _mode_source = _default_mode
     _roots_source = tuple
+    _sandboxes_source = str
     _compiled.clear()
 
 
@@ -505,7 +556,7 @@ class LanePolicy:
         lane = ctx.lane if ctx.lane is not None else resolve_lane(ctx.conv_id)
         if lane is None:
             return ALLOW
-        outside = [p for p in request.paths if not in_lane(lane, p, request.other_project)]
+        outside = [p for p in request.paths if not in_lane(lane, p, request.other_project, ctx.conv_id)]
         if not outside:
             return Decision(policy=self.name)
         reason = denial_text(outside[0], lane, ctx.leader_conv_id)
@@ -527,14 +578,28 @@ class LanePolicy:
         return Decision(policy=self.name, shadow_violation=True, reason=reason, details=details)
 
 
-def in_lane(lane: Sequence[str], path: str, other_project: str = "") -> bool:
+def in_lane(lane: Sequence[str], path: str, other_project: str = "", conv_id: str = "") -> bool:
     """Project-relative globs cover the open project; full-path globs cover the file's
-    full path in whichever Ducky project holds it (``other_project`` or the open one)."""
+    full path in whichever Ducky project holds it (``other_project`` or the open one).
+    In ``conv_id``'s own sandbox worktrees (``<sandboxes>/<conv_id>/work/<name>/``) the same
+    patterns cover the path below the worktree."""
     rel = [g for g in lane if not _is_abs(g)]
     full_globs = [g for g in lane if _is_abs(g)]
     p = path.replace("\\", "/")
     if not other_project and not _is_abs(p) and any_match(rel, p):
         return True
+    if conv_id and (other_project or _is_abs(p)):
+        full = p if _is_abs(p) else f"{other_project.replace(chr(92), '/').rstrip('/')}/{normalize_rel(p)}"
+        rest = own_sandbox_rest(conv_id, full)
+        if rest is not None:
+            for g in lane:
+                relative = _project_relative(g)
+                try:
+                    if relative and match(relative, rest):
+                        return True
+                except LaneGlobError:
+                    continue
+            return False
     if not full_globs:
         return False
     if _is_abs(p):

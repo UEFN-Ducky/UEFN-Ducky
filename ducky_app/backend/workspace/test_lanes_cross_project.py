@@ -129,3 +129,60 @@ def test_only_the_member_being_set_changes_its_lane() -> None:
     # An older copy never wins over a newer stored lane, even when it carries a lane.
     older = [{"member_conv_id": "b", "write_allowed": ["Content"], "lane_set_by": "user", "lane_set_at": 1.0}]
     assert lanes.keep_stored_lanes(older, stored)[0]["write_allowed"] == []
+
+
+SANDBOXES = "C:/Users/me/AppData/Local/UEFN-Ducky/sandboxes"
+
+
+def _member_check(conv_id, lane, path, other_project=""):
+    ctx = RunContext(run_id="r", conv_id=conv_id, lane=tuple(lane))
+    request = WriteRequest(op="write", paths=(path,), tool="workspace_write_file", ctx=ctx, other_project=other_project)
+    return lanes.LanePolicy(mode=lambda: "enforce").check(request)
+
+
+def test_a_swarm_whose_plan_names_a_repo_gets_lanes_in_that_repo() -> None:
+    # Nov 5 2026: a UEFN-Ducky-Release plan built while another project was open put every
+    # member's ducky_app/... lane inside the open project.
+    from backend.tools.panel.swarm_build import anchor_in_repo, validate
+    from backend.tools.panel.swarm_preview import plan_repo
+
+    plan = {"overview": "Release", "body_markdown": f"**Repo:** `{DUCKYOS}`.\n\nBuild it.", "nodes": []}
+    assert plan_repo(plan) == DUCKYOS
+    assert plan_repo({"nodes": [{"body_markdown": f"Repo: {DUCKYOS.lower()}/sub"}]}) == f"{DUCKYOS}/sub"
+    assert plan_repo({"overview": "Repo: C:/Elsewhere"}) == ""  # in no Ducky project
+    tree = [{"name": "Seat 1", "profile": "developer", "paths": ["ducky_app/x.py", "ducky_app/web/**"],
+             "sub_plan": {"id": "s1", "steps": []}}]
+    anchor_in_repo(tree, plan_repo(plan), HOME)
+    assert validate(tree, HOME) == []
+    assert tree[0]["paths"] == [f"{DUCKYOS}/ducky_app/web/**", f"{DUCKYOS}/ducky_app/x.py"]
+    rows, _ = lanes.set_member_lane([{"member_conv_id": "m"}], "m", tree[0]["paths"], set_by="lead", now=1.0)
+    lane = rows[0]["write_allowed"]
+    assert _member_check("m", lane, "ducky_app/x.py", other_project=DUCKYOS).allow
+    assert not _member_check("m", lane, "ducky_app/x.py").allow  # the open project's file is not the repo's
+
+
+def test_a_member_may_write_its_lane_inside_its_own_sandbox_worktree() -> None:
+    lanes.set_sandboxes_root_source(lambda: SANDBOXES.replace("/", "\\"))
+    lane = lanes.normalize_lane([f"{DUCKYOS}/ducky_app/x.py", "src/app.py"])
+    mine = f"{SANDBOXES}/m1"
+    assert _member_check("m1", lane, "work/a/ducky_app/x.py", other_project=mine).allow
+    assert _member_check("m1", lane, f"{mine}/work/b/ducky_app/x.py").allow
+    assert _member_check("m1", lane, "work/a/src/app.py", other_project=mine).allow
+    assert not _member_check("m1", lane, "work/a/ducky_app/y.py", other_project=mine).allow
+    assert not _member_check("m1", lane, "downloads/ducky_app/x.py", other_project=mine).allow
+    # Another member's sandbox is not its own.
+    assert not _member_check("m1", lane, f"{SANDBOXES}/m2/work/a/ducky_app/x.py").allow
+
+
+def test_two_members_sandbox_lanes_report_no_overlap() -> None:
+    a = lanes.normalize_lane([f"{DUCKYOS}/ducky_app/a/**"])
+    b = lanes.normalize_lane([f"{DUCKYOS}/ducky_app/b/**"])
+    assert lanes.check_lane_set({"A": a, "B": b}) == {"errors": [], "warnings": []}
+    # A pattern with no literal folder relates to no real path: no "(maybe)" flood.
+    verdict = lanes.check_lane_set({"A": ["**/work/*/ducky_app/a/**"], "B": ["ducky_app/b/**", "src/x.py"]})
+    assert verdict == {"errors": [], "warnings": []}
+    # Each member's own sandbox is checked against its own chat id only.
+    lanes.set_sandboxes_root_source(lambda: SANDBOXES)
+    assert _member_check("A", a, f"{SANDBOXES}/A/work/w/ducky_app/a/x.py").allow
+    assert not _member_check("A", a, f"{SANDBOXES}/A/work/w/ducky_app/b/x.py").allow
+    assert _member_check("B", b, f"{SANDBOXES}/B/work/w/ducky_app/b/x.py").allow

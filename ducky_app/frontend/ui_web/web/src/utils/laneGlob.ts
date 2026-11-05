@@ -137,7 +137,8 @@ export function overlap(a: string, b: string): OverlapKind {
   if (na.toLowerCase() === nb.toLowerCase()) return "identical";
   const pa = literalPrefix(na);
   const pb = literalPrefix(nb);
-  const related = isPrefix(pa, pb) || isPrefix(pb, pa);
+  // Only real paths are compared: a pattern with no literal folder (`**/x/**`) is related to nothing.
+  const related = pa !== "" && pb !== "" && (isPrefix(pa, pb) || isPrefix(pb, pa));
   const plainA = isDirGlob(na) && !hasMidWildcard(na);
   const plainB = isDirGlob(nb) && !hasMidWildcard(nb);
   if (plainA && plainB && related) return "contains";
