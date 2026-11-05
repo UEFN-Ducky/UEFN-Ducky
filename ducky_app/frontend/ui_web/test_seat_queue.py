@@ -27,7 +27,6 @@ def q(monkeypatch):
     monkeypatch.setattr(sq, "_idle_since", {})
     alive: set[str] = set()  # chats with a live agent turn
     monkeypatch.setattr(sq, "_agent_running", lambda cid: cid in alive)
-    monkeypatch.setattr(adm, "_waiting", [])
     notices: list[tuple[str, str]] = []
     monkeypatch.setattr(sq, "_notify_lead", lambda cid, text: notices.append((cid, text)))
     monkeypatch.setattr(sq, "WAVE_SIZE", 100)  # the cap tests start no waves
@@ -113,11 +112,11 @@ def test_the_slider_lowers_the_cap_but_never_past_the_pc_limit(q):
     assert q["started"] == ["s0", "s1", "s2"]
 
 
-def test_memory_admission_is_part_of_the_same_gate(q, monkeypatch):
-    monkeypatch.setattr(adm, "_read_free", lambda: 1.0)  # low memory: admission's floor of 2
+def test_low_memory_never_holds_a_seat(q, monkeypatch):
+    monkeypatch.setattr(adm, "_read_free", lambda: 1.0)  # far under the memory floor
     for i in range(4):
         sq.request(f"s{i}", q["starter"](f"s{i}"))
-    assert q["started"] == ["s0", "s1"]
+    assert q["started"] == ["s0", "s1", "s2", "s3"]  # only the seat cap (4) counts
 
 
 def test_a_running_or_waiting_seat_is_busy_and_stop_drops_it(q):

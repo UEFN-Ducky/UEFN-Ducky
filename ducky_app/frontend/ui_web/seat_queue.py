@@ -3,9 +3,8 @@
 Oct 24 2026: 16 agents made the app lag (GIL-capped app, a 539-thread UI herd, chats taking
 10–45 s). Keeper wakes and plan dispatches ask ``request`` before starting a member's turn:
 under the cap it starts now, over it the seat waits in one FIFO line and starts when a turn
-ends (``on_turn_end``). The cap sits on top of the memory admission (admission.py), so there
-is one gate: a seat starts only while fewer than ``limit()`` member turns run *and* admission
-has memory room; the running count is admission's own slots plus seats this queue is starting.
+ends (``on_turn_end``). The running count is admission.py's member slots plus seats this queue
+is starting. Free memory never holds a seat (Nov 5 2026): admission.py only warns.
 ``limit()`` defaults from CPU cores and RAM (``pc_limit``); the card's "Run at once" slider
 (``set_run_at_once``) can lower it, never raise it past the PC limit.
 
@@ -152,10 +151,8 @@ def _running() -> set[str]:
 
 
 def _room(running: int) -> bool:
-    """Call under ``_lock``. Seats being started count against memory before admission sees them."""
-    if running >= limit():
-        return False
-    return admission.has_room(running, extra=len(_starting))
+    """Call under ``_lock``."""
+    return running < limit()
 
 
 def is_busy(conv_id: str) -> bool:

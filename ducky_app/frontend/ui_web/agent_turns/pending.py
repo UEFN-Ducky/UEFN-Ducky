@@ -37,15 +37,13 @@ def _with_admission(fn):
     @wraps(fn)
     def admitted(conv_id, user_text, mode, model, **kwargs):
         if not kwargs.get("_local") and _in_bridge_process():
-            kwargs.pop("_mem_admitted", None)
             return fn(conv_id, user_text, mode, model, **kwargs)
         from frontend.ui_web import admission
 
-        # A slot from the memory wait line (admission.py): this call already holds it.
-        slot = {"held": bool(kwargs.pop("_mem_admitted", False)), "started": False}
+        # The member slot admission.py gives this turn (freed here if no turn starts).
+        slot = {"held": False, "started": False}
         try:
             return _admit(fn, conv_id, user_text, mode, model, kwargs, slot,
-                          lambda: admitted(conv_id, user_text, mode, model, _mem_admitted=True, **kwargs),
                           lambda: admitted(conv_id, user_text, mode, model, **kwargs))
         finally:
             if slot["held"] and not slot["started"]:
@@ -66,7 +64,7 @@ def _seat_capped(conv_id: str) -> bool:
         return False
 
 
-def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_later, start_again=None) -> str:
+def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_again=None) -> str:
     queue = kwargs.get("queue_if_busy", False) and not kwargs.get("force", False)
     from backend.agent.a2a_broker import automatic_work_blocked, resume_by_user
     from frontend.ui_web import admission
@@ -84,7 +82,7 @@ def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_later, start
         return hold() if queue else _queue_person_send(conv_id, user_text, mode, kwargs)
     # Agent work for a team seat (an agent_send delivery) goes through the seat cap, as keeper
     # wakes and plan dispatches do: Nov 4 2026 a lead's agent_send to 299 members started 151
-    # turns in a minute past memory admission alone, and the PC ran out of commit memory.
+    # turns in a minute, and the PC ran out of commit memory.
     # The seat queue's own start comes back here and goes on (is_starting).
     if queue and not slot["held"] and start_again is not None and _seat_capped(conv_id):
         from frontend.ui_web import seat_queue
@@ -94,11 +92,10 @@ def _admit(fn, conv_id, user_text, mode, model, kwargs, slot, start_later, start
                 return hold()
             return "queued"
     if not slot["held"]:
-        # A person's own send (no parent, no starter) never waits for memory; agent work may.
+        # Never waits for memory (Nov 5 2026): a member turn takes its slot now, and low
+        # memory only posts a warning. A person's own send (no parent, no starter) takes none.
         person = not queue and not kwargs.get("parent") and kwargs.get("started_by") is None
-        if not admission.may_start(conv_id, "person" if person else "agent", start=start_later,
-                                   push=_resolve_push(kwargs.get("push"))):
-            return "queued"
+        admission.may_start(conv_id, "person" if person else "agent", push=_resolve_push(kwargs.get("push")))
         slot["held"] = admission.holds(conv_id)
     token = _reserve_admission(conv_id)
     if token is None:

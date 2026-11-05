@@ -564,9 +564,6 @@ def _cancel_here(conv_id: str | None = None, *, by_user: bool = True) -> None:
                 _pending_person_sends.pop(cid, None)
                 _pending_steered.pop(cid, None)
             if by_user:
-                from frontend.ui_web import admission
-
-                admission.drop(cid)  # a Stopped chat leaves the memory wait line
                 from backend.agent.a2a_broker import on_agent_cancelled_by_user
 
                 on_agent_cancelled_by_user(cid)
