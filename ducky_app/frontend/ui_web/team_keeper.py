@@ -52,6 +52,13 @@ WAKE_TEXT = (
     "starts the members itself: don't message them."
 )
 
+STUCK_TEXT = (
+    "[Ducky keeper] Nothing in your plan can move until someone acts on these steps:\n{steps}\n"
+    "Give an orphaned step a new owner (ducky_plan_update_node assignee) or cancel it with the "
+    "reason; ask the person once with ducky_ask_user for what only they can do. This is the only "
+    "notice: Ducky stays quiet until the plan changes."
+)
+
 STALL_TEXT = (
     "[Ducky keeper] Your team has been working for {minutes} minutes and no plan step has "
     "finished ({done} of {total} done). Busy without finishing is a circle. Read the busy "
@@ -166,17 +173,58 @@ def _long_job_chats() -> set[str]:
 _PERSON = {"person", "user", "owner", "you", "me", "human"}
 
 
-def _person_only(plan: dict[str, Any]) -> bool:
-    """Every open step that can start now is the person's: assigned to them, or owned by a
-    member that ended BLOCKED. Oct 24 2026: owner-only Google Cloud steps woke the lead with
-    "nothing can move" again and again."""
+def _stuck_steps(plan: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
+    """Every open step that can start now, with why nobody can close it: ``person`` (assigned to
+    them), ``blocked`` (its member ended BLOCKED) or ``orphaned`` (its owner chat or group is
+    deleted or archived). Empty when any of them can still move.
+
+    Oct 24 2026: owner-only Google Cloud steps woke the lead with "nothing can move" again and
+    again. Nov 5 2026: steps owned by deleted member chats did the same every few minutes."""
     lead = str(plan.get("chat_id") or "")
     blocked = {st.get("owner") for st in _members.values() if st.get("lead") == lead and st.get("blocked")}
-    owners = [owner for _, owner, _ in _open_leaves(plan)]
     root = plan.get("project_root")
-    # An archived owner works nothing: its points wait on the person too.
-    return bool(owners) and all(owner.lower() in _PERSON or owner in blocked or _archived(owner, root)
-                                for owner in owners)
+    out: list[tuple[dict[str, Any], str]] = []
+    for node, owner, _ in _open_leaves(plan):
+        if owner.lower() in _PERSON:
+            why = "person"
+        elif owner and owner in blocked:
+            why = "blocked"
+        elif owner and _orphaned(owner, root):
+            why = "orphaned"
+        else:
+            return []
+        out.append((node, why))
+    return out
+
+
+def _person_only(plan: dict[str, Any]) -> bool:
+    """Only the person (or the lead, for orphaned steps) can move the plan: ``_stuck_steps``."""
+    return bool(_stuck_steps(plan))
+
+
+_STUCK_WHY = {
+    "person": "waits on the person",
+    "blocked": "its member is BLOCKED",
+    "orphaned": "orphaned: its owner chat was deleted or archived",
+}
+
+
+def _stuck_text(stuck: list[tuple[dict[str, Any], str]]) -> str:
+    rows = "\n".join(f"- `{node.get('id')}` {node.get('content')}: {_STUCK_WHY[why]}" for node, why in stuck)
+    return STUCK_TEXT.format(steps=rows)
+
+
+def _orphaned(owner: str, project_root: str | None) -> bool:
+    """Nobody can work the owner's steps: its chat or group is deleted or archived. A failed
+    read is not orphaned (the store may be busy); a deleted chat reads as None."""
+    from frontend.archive_folder import is_archive_folder_id
+    from frontend.ui_web.chats.conversations import load_conversation
+
+    try:
+        conv = load_conversation(owner, project_root=project_root) if owner else None
+    except Exception:
+        return False
+    return conv is None or is_archive_folder_id(str(getattr(conv, "folder_id", "") or ""))
 
 
 def _archived(owner: str, project_root: str | None) -> bool:
@@ -491,14 +539,17 @@ def tick(
             if st.get("moves") != moves:
                 st["moves"] = moves
                 _unpark(cid, st)  # a step moved: the next quiet spell wakes it again
-            # Only the person can move it: one wake, then quiet until the plan changes.
-            limit = 1 if _person_only(plan) else _PARK_AFTER
+            # Only the person (or a new owner) can move it: one notice naming the steps, then
+            # quiet until the plan changes.
+            stuck = _stuck_steps(plan)
+            limit = 1 if stuck else _PARK_AFTER
             if st["wakes"] >= limit:
                 continue
             if automatic_work_blocked(cid) or now - st["quiet_since"] < _IDLE_S or now < st["next_wake"]:
                 continue
             minutes = int((now - st["quiet_since"]) // 60)
-            text = WAKE_TEXT.format(minutes=minutes, open_steps=_open_steps(plan)) + details
+            text = (_stuck_text(stuck) if stuck
+                    else WAKE_TEXT.format(minutes=minutes, open_steps=_open_steps(plan))) + details
             try:
                 wake(cid, text)
             except Exception:

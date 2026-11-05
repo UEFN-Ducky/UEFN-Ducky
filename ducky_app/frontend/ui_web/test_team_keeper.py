@@ -9,6 +9,7 @@ from frontend.ui_web import team_keeper as keeper
 MIN = 60.0
 _REAL_ENQUEUE, _REAL_WAITING = keeper._enqueue, keeper._waiting
 _REAL_READERS = (keeper._blocked_reason, keeper._reply_mark, keeper._said_committed)
+_REAL_ORPHANED = keeper._orphaned
 PLAN = {"chat_id": "coord", "status": "open", "progress": {"pending": 3, "in_progress": 1, "completed": 2}}
 
 
@@ -47,6 +48,7 @@ def _world(monkeypatch):
     """Members are the owners themselves, nobody is blocked, the broker allows work."""
     told: list[tuple[str, str]] = []
     monkeypatch.setattr(keeper, "_member_chat", lambda owner, root: owner)
+    monkeypatch.setattr(keeper, "_orphaned", lambda owner, root: False)  # every owner chat exists
     monkeypatch.setattr(keeper, "_blocked_reason", lambda member: "")
     monkeypatch.setattr(keeper, "_reply_mark", lambda member: 0)
     monkeypatch.setattr(keeper, "_said_committed", lambda member: False)
@@ -1018,3 +1020,70 @@ def test_a_plan_that_leaves_the_keeper_finished_is_forgotten_and_a_paused_one_is
     _run(1 * MIN, [], woke, plans=[])  # kept_plans no longer lists either plan
     assert "builder" not in keeper._members  # coord's plan is finished: its team is forgotten
     assert "m2" in keeper._members  # lead2's is only paused: its members keep their place
+
+
+def _owner_world(monkeypatch, convs: dict) -> None:
+    from frontend.ui_web.chats import conversations as chat_convs
+
+    monkeypatch.setattr(chat_convs, "load_conversation", lambda cid, **kw: convs.get(cid))
+    monkeypatch.setattr(keeper, "_orphaned", _REAL_ORPHANED)
+    monkeypatch.setattr(keeper, "_member_chat", lambda owner, root: owner if owner in convs else "")
+    monkeypatch.setattr(keeper, "_team_context", lambda plan, busy=frozenset(): (set(), ""))
+    monkeypatch.setattr("backend.agent.a2a_broker.automatic_work_blocked", lambda cid, **kw: False)
+
+
+def test_a_deleted_or_archived_owner_orphans_its_steps(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    _owner_world(monkeypatch, {"live": SimpleNamespace(folder_id=""), "shelved": SimpleNamespace(folder_id="archive")})
+    assert keeper._orphaned("gone", None) and keeper._orphaned("shelved", None)
+    assert not keeper._orphaned("live", None)
+
+    def boom(cid, **kw):
+        raise OSError("store busy")
+
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", boom)
+    assert not keeper._orphaned("gone", None)  # a failed read is not a deleted chat
+
+
+def test_steps_of_a_deleted_member_get_one_notice_naming_them_then_quiet(monkeypatch) -> None:
+    # Nov 5 2026: the person deleted a team's old member chats; their open steps made the keeper
+    # say "Nothing in your plan can move" every few minutes.
+    from types import SimpleNamespace
+
+    _owner_world(monkeypatch, {"builder": SimpleNamespace(folder_id="")})
+    plan = {**PLAN, "nodes": [
+        {"id": "done", "content": "Build", "assignee": "builder", "status": "completed"},
+        {"id": "docs", "content": "Port the docs", "assignee": "deleted-seat", "status": "in_progress"}]}
+    woke: list[tuple[str, str]] = []
+    assert [m for m in range(0, 240) if _run(m * MIN, [], woke, plans=[plan])] == [2]
+    assert [cid for cid, _ in woke] == ["coord"]
+    assert "`docs` Port the docs: orphaned" in woke[0][1] and "only notice" in woke[0][1]
+    # The lead hands it to a live member: the plan changed, so that member is started.
+    moved = {**plan, "nodes": [plan["nodes"][0], {**plan["nodes"][1], "assignee": "builder"}]}
+    _run(240 * MIN, [], woke, plans=[moved])
+    assert woke[-1][0] == "builder" and "Port the docs" in woke[-1][1]
+
+
+def test_a_person_wait_step_gets_one_notice_naming_it_then_quiet(monkeypatch) -> None:
+    _owner_world(monkeypatch, {})
+    plan = {**PLAN, "nodes": [
+        {"id": "key", "content": "Create the API key", "assignee": "person", "status": "pending"},
+        {"id": "docs", "content": "Port the docs", "assignee": "deleted-seat", "status": "pending"}]}
+    woke: list[tuple[str, str]] = []
+    assert [m for m in range(0, 480) if _run(m * MIN, [], woke, plans=[plan])] == [2]
+    assert "`key` Create the API key: waits on the person" in woke[0][1]
+    assert "`docs` Port the docs: orphaned" in woke[0][1]
+
+
+def test_one_step_that_can_still_move_keeps_the_ordinary_wakes(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    _owner_world(monkeypatch, {"idle": SimpleNamespace(folder_id="")})
+    plan = {**PLAN, "nodes": [
+        {"id": "docs", "content": "Port the docs", "assignee": "deleted-seat", "status": "pending"},
+        {"id": "open", "content": "Unowned", "status": "pending"}]}
+    assert keeper._stuck_steps(plan) == []  # an unowned step: the lead can still give it out
+    woke: list[tuple[str, str]] = []
+    assert [m for m in range(0, 240) if _run(m * MIN, [], woke, plans=[plan])] == [2, 4, 8]
+    assert "Nothing in your plan can move on its own" in woke[0][1]
