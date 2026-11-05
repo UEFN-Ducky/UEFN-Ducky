@@ -570,6 +570,36 @@ def upload_update_pack(base: str, api_key: str, version: str) -> dict | None:
 
 
 
+UPLOAD_CHUNK = 256 * 1024
+PROGRESS_EVERY_S = 10.0
+
+
+class UploadProgress:
+    """One line every PROGRESS_EVERY_S while a file uploads: percent, MB, speed, time left."""
+
+    def __init__(self, name: str, total: int, clock=time.monotonic, out=print) -> None:
+        self.name, self.total, self.clock, self.out = name, max(1, int(total)), clock, out
+        self.sent = 0
+        self.started = self.last = clock()
+
+    def line(self) -> str:
+        elapsed = max(0.001, self.clock() - self.started)
+        rate = self.sent / elapsed
+        left = (self.total - self.sent) / rate if rate > 0 else 0.0
+        eta = f"{int(left // 60)}m{int(left % 60):02d}s left" if self.sent < self.total else "sent"
+        return (f"  upload {self.name}: {100 * self.sent / self.total:5.1f}%  "
+                f"{self.sent / 1e6:.1f}/{self.total / 1e6:.1f} MB  {rate / 1024:,.0f} KB/s  {eta}")
+
+    def add(self, n: int) -> None:
+        self.sent += n
+        if self.clock() - self.last >= PROGRESS_EVERY_S:
+            self.last = self.clock()
+            self.out(self.line(), flush=True)
+
+    def done(self) -> None:
+        self.out(self.line() + " — waiting for the server", flush=True)
+
+
 def _presigned_put_file(upload_url: str, exe_path: Path, size: int) -> None:
     """Stream the file handle to the presigned URL (no second in-memory copy)."""
     parsed = urlparse(upload_url)
@@ -587,7 +617,17 @@ def _presigned_put_file(upload_url: str, exe_path: Path, size: int) -> None:
     conn = conn_cls(parsed.hostname, parsed.port, timeout=600)
     try:
         with exe_path.open("rb") as fh:
-            conn.request("PUT", path, body=fh, headers=headers)
+            conn.putrequest("PUT", path, skip_accept_encoding=True)
+            for name, value in headers.items():
+                conn.putheader(name, value)
+            conn.endheaders()
+            # Nov 2026: a 137 MB Setup on a 40 KB/s uplink sat silent for an hour; the
+            # terminal now shows how far it is, how fast, and how long is left.
+            progress = UploadProgress(exe_path.name, size)
+            while chunk := fh.read(UPLOAD_CHUNK):
+                conn.send(chunk)
+                progress.add(len(chunk))
+            progress.done()
             resp = conn.getresponse()
             body = resp.read()
             if resp.status >= 400:

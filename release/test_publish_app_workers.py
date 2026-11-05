@@ -31,6 +31,23 @@ def test_without_uefn_half_the_cores() -> None:
     assert pa.pytest_workers(False, cores=2) == "2"  # never below 2
 
 
+def test_an_upload_prints_percent_speed_and_time_left() -> None:
+    pa = _load()
+    now = [0.0]
+    lines: list[str] = []
+    progress = pa.UploadProgress("Setup.exe", 100_000_000, clock=lambda: now[0],
+                                 out=lambda text, flush=False: lines.append(text))
+    for _ in range(4):  # 10 MB every 10 s: 1 MB/s
+        now[0] += 10.0
+        progress.add(10_000_000)
+    assert len(lines) == 4
+    assert "40.0%" in lines[-1] and "40.0/100.0 MB" in lines[-1] and "977 KB/s" in lines[-1]
+    assert "1m00s left" in lines[-1]
+    progress.add(60_000_000)
+    progress.done()
+    assert "100.0%" in lines[-1] and "sent" in lines[-1] and "waiting for the server" in lines[-1]
+
+
 def test_the_suite_and_build_use_the_scaled_settings(monkeypatch) -> None:
     pa = _load()
     calls: list[tuple[list[str], dict]] = []
