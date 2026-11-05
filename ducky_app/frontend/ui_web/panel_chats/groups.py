@@ -89,7 +89,18 @@ def _group_create_locked(
     outer_hub = (getattr(outer, "group_hub_id", None) or "").strip() if outer is not None else ""
     if outer_hub:
         conv.parent_conv_id = outer_hub
-    _pa.save_conversation(conv, project_root)
+    # Written before answering: is_group is not a placement field, so a plain save only
+    # queued it, and a seat call right after found "not a group hub" (Nov 5 2026).
+    _pa.save_conversation(conv, project_root, wait=True)
+    stored = _pa.load_conversation(conv.id, project_root=project_root)
+    if stored is None or not getattr(stored, "is_group", False):
+        _pa.save_conversation(conv, project_root, wait=True, full=True)
+        stored = _pa.load_conversation(conv.id, project_root=project_root)
+    if stored is None or not getattr(stored, "is_group", False):
+        from frontend.ui_web.chats.folders import save_folders
+
+        save_folders([f for f in _pa.load_folders(project_root) if f.id != hub_folder.id], project_root)
+        return {"ok": False, "error": f"Group {title!r} was not saved; nothing was created."}
     _pa.notify_chats_changed(conv.id, conv.title, conv.folder_id, open_tab=bool(open_tab))
     return {
         "ok": True,

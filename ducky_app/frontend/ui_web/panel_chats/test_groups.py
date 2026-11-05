@@ -67,3 +67,64 @@ def test_an_api_key_chat_is_refused_to_agents(monkeypatch):
     assert "API key" in groups._agent_api_key_refusal("c")
     monkeypatch.setattr(_pa.PanelSettings, "load", staticmethod(lambda: SimpleNamespace(agent_api_keys=["OpenAI"])))
     assert groups._agent_api_key_refusal("c") == ""
+
+
+def _fake_group_store(monkeypatch, *, lands: bool):
+    """A store where a group save lands (or never does), recording each save's wait."""
+    folders: list = []
+    stored: dict = {}
+    waits: list = []
+
+    def create_folder(name, parent, root, group_hub_id=""):
+        folder = SimpleNamespace(id="f-new", name=name, parent_id=parent, group_hub_id=group_hub_id)
+        folders.append(folder)
+        return folder
+
+    def create_conversation(settings, folder_id, **kw):
+        return SimpleNamespace(id=kw["conv_id"], title=kw["title"], folder_id=folder_id,
+                               is_group=False, parent_conv_id="", leader_conv_id="", group_members=[])
+
+    def save_conversation(conv, root=None, *, wait=False, full=False):
+        waits.append(wait)
+        if lands:
+            stored[conv.id] = SimpleNamespace(**vars(conv))
+
+    monkeypatch.setattr(_pa, "create_folder", create_folder)
+    monkeypatch.setattr(_pa, "create_conversation", create_conversation)
+    monkeypatch.setattr(_pa, "save_conversation", save_conversation)
+    monkeypatch.setattr(_pa, "load_conversation", lambda cid, project_root=None: stored.get(cid))
+    monkeypatch.setattr(_pa, "load_folders", lambda root=None: list(folders))
+    monkeypatch.setattr(_pa, "default_bundled_style", lambda: "classic")
+    monkeypatch.setattr(_pa, "notify_chats_changed", lambda *a, **kw: None)
+    from frontend.ui_web.chats import folders as folder_store
+
+    monkeypatch.setattr(folder_store, "save_folders", lambda fs, root=None: folders.__setitem__(slice(None), fs))
+    return folders, stored, waits
+
+
+def test_a_new_group_is_written_before_it_answers_so_a_seat_call_finds_it(monkeypatch):
+    # Nov 5 2026: ducky_group_create said ok, then ducky_spawn_chat into it said "not a group hub".
+    folders, stored, waits = _fake_group_store(monkeypatch, lands=True)
+    res = groups._group_create_locked(PanelApiChatsMixin(), "Release X", "", SimpleNamespace(), None, False)
+    assert res["ok"] and stored[res["id"]].is_group and waits[-1] is True
+    assert [f.id for f in folders] == ["f-new"]
+
+
+def test_a_group_whose_save_never_lands_answers_not_ok_and_leaves_no_folder(monkeypatch):
+    folders, stored, _ = _fake_group_store(monkeypatch, lands=False)
+    res = groups._group_create_locked(PanelApiChatsMixin(), "Release X", "", SimpleNamespace(), None, False)
+    assert not res["ok"] and "not saved" in res["error"] and folders == [] and stored == {}
+
+
+def test_a_seat_call_right_after_create_finds_the_group_by_its_id_and_by_its_folder(monkeypatch):
+    from backend.tools.panel import ducky_panel
+    from frontend.ui_web.chats import saves
+
+    folders, stored, _ = _fake_group_store(monkeypatch, lands=True)
+    res = groups._group_create_locked(PanelApiChatsMixin(), "Release X", "", SimpleNamespace(), None, False)
+    monkeypatch.setattr(ducky_panel, "_project_root", lambda: "")
+    monkeypatch.setattr(ducky_panel, "load_conversation", lambda cid, project_root=None: stored.get(cid))
+    monkeypatch.setattr(ducky_panel, "load_folders", lambda root=None: list(folders))
+    monkeypatch.setattr(saves, "flush_chat_saves", lambda *a, **kw: True)
+    assert ducky_panel._resolve_group_hub_id(group_id=res["id"]) == res["id"]
+    assert ducky_panel._resolve_group_hub_id(folder_id=res["folder_id"]) == res["id"]
