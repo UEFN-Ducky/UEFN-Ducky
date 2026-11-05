@@ -84,7 +84,7 @@ def ducky_get_plan(chat_id: str = "", pretty: bool = False, section: str = "", o
         label = next((lab for lab, n in outline_numbers(plan.get("nodes")) if n is found), "")
         return tool_json(
             attach_next_tick({"ok": True, "plan": head, "n": label, "section": found,
-                              "progress": todo_progress({"nodes": [found]})}, plan),
+                              "progress": todo_progress({"nodes": [found]})}, plan, caller=cid),
             pretty=pretty,
         )
     if outline:
@@ -95,7 +95,7 @@ def ducky_get_plan(chat_id: str = "", pretty: bool = False, section: str = "", o
                 row["owner"] = n["assignee"]
             rows.append(row)
         return tool_json(
-            attach_next_tick({"ok": True, "plan": head, "progress": todo_progress(plan), "outline": rows}, plan),
+            attach_next_tick({"ok": True, "plan": head, "progress": todo_progress(plan), "outline": rows}, plan, caller=cid),
             pretty=pretty,
         )
     return tool_json(
@@ -107,6 +107,7 @@ def ducky_get_plan(chat_id: str = "", pretty: bool = False, section: str = "", o
                 "outline": [{"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]} for lab, n in outline_numbers(plan.get("nodes"))],
             },
             plan,
+            caller=cid,
         ),
         pretty=pretty,
     )
@@ -170,7 +171,8 @@ def ducky_plan_add_node(
 
     added = next((n for n in reversed(list(_walk_nodes(plan.get("nodes")))) if n.get("content") == content), None)
     result = with_plan_review(_plan_edit_result(plan, added), plan)
-    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None), pretty=pretty)
+    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None, caller=cid),
+                     pretty=pretty)
 
 
 @mcp.tool()
@@ -267,7 +269,8 @@ def ducky_plan_update_node(
         result["sections_completed"] = [n.get("id") for n in closed]
         result["note"] = (f"{names} completed itself with this step. The note on this step is its "
                           "record: do not tick or annotate the section.")
-    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None), pretty=pretty)
+    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None, caller=cid),
+                     pretty=pretty)
 
 
 _NOTES_IN_REPLY = 240
@@ -340,7 +343,8 @@ def ducky_plan_delete_node(
     from backend.agent.coding_agents.plans import attach_next_tick
 
     result = _plan_edit_result(plan, {"id": node_id, "deleted": True})
-    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None), pretty=pretty)
+    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None, caller=cid),
+                     pretty=pretty)
 
 
 @mcp.tool()
@@ -374,4 +378,5 @@ def ducky_plan_move_node(
 
     moved = next((n for n in _walk_nodes(plan.get("nodes")) if n.get("id") == node_id), None)
     result = _plan_edit_result(plan, moved)
-    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None), pretty=pretty)
+    return tool_json(attach_next_tick(result, plan if plan.get("kind") != "template" else None, caller=cid),
+                     pretty=pretty)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
+from pathlib import Path
 from typing import Any
 
 # Single copy of the Diagnose→Fix→Verify protocol (prompt / MCP / BYOA / modes).
@@ -49,6 +50,43 @@ _HANDS_OVER_RE = re.compile(r"\bhands over:", re.IGNORECASE)
 _TICKED_RE = re.compile(r"`([^`\s(]+)`")
 _FILE_EXT_RE = re.compile(r"\.[A-Za-z]\w{0,5}$")
 _READ_FIRST_RE = re.compile(r"\bread first:", re.IGNORECASE)
+_APP = Path(__file__).resolve().parents[3]  # ducky_app/
+_NEAR_CAP = 100
+_SPLIT_RE = re.compile(r"^\s*split\b", re.IGNORECASE)
+
+
+def _size_caps(app: Path) -> tuple[int, dict[str, int]]:
+    """(MAX_LINES, SPLITTING) read from ``test_file_sizes.py`` as text; (0, {}) without it."""
+    try:
+        text = (app / "test_file_sizes.py").read_text(encoding="utf-8")
+    except OSError:
+        return 0, {}
+    m = re.search(r"^MAX_LINES\s*=\s*(\d+)", text, re.MULTILINE)
+    caps = {k: int(v) for k, v in re.findall(r"^\s*'([^']+\.py)':\s*(\d+),", text, re.MULTILINE)}
+    return (int(m.group(1)) if m else 0), caps
+
+
+def near_size_cap(paths: list[str], app: Path | None = None) -> list[tuple[str, int, int]]:
+    """(path, lines, cap) for each named source file within 100 lines of its test_file_sizes.py cap.
+
+    Nov 5 2026: plans.py and worldgen.py went over their caps mid-run and main was red for 17 min."""
+    root = app or _APP
+    limit, caps = _size_caps(root)
+    out = []
+    for raw in paths:
+        rel = raw.replace("\\", "/").removeprefix("./").removeprefix("ducky_app/")
+        name = rel.rsplit("/", 1)[-1]
+        if not rel.endswith(".py") or name.startswith("test_") or name == "conftest.py":
+            continue
+        cap = caps.get(rel, limit)
+        try:
+            with open(root / rel, "rb") as fh:
+                lines = sum(1 for _ in fh)
+        except OSError:
+            continue
+        if cap and lines >= cap - _NEAR_CAP:
+            out.append((raw, lines, cap))
+    return out
 
 
 def suggest_read_first(text: str, plan: dict[str, Any] | None) -> list[str]:
@@ -182,6 +220,9 @@ def plan_review(plan: dict[str, Any] | None) -> list[dict[str, str]]:
                 if not _inside(path, lane):
                     issues.append({"n": label, "issue": f"Outside its lane: {path} is not in its sub plan's Files; "
                                                         "make it a Hand-off: step in the owner's section."})
+        if not _SPLIT_RE.match(content):
+            for path, lines, cap in near_size_cap(_files(body) or []):
+                issues.append({"n": label, "issue": f"Add a `Split:` step first: {path} is {lines}/{cap} lines"})
         # Advice only: the lessons a team step should open with, so nobody repeats one.
         if team and not _READ_FIRST_RE.search(body):
             names = suggest_read_first(f"{content}\n{body}", plan)
