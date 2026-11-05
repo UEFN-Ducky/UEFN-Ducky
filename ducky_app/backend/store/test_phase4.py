@@ -110,8 +110,13 @@ def test_memory_parity(backend: str, island: str) -> None:
     top = mem.read_entry("verse-naming", island)
     assert "no spaces" in top["content"] and top["author"] == "Coder"
     assert mem.read_entry("verse-naming/props", island)["content"].strip() == "Props get a Prop_ prefix."
-    index = mem.index_markdown(island, author_filter="coder")
-    assert "verse-naming — naming (Coder)" in index and "  - verse-naming/props" in index
+    index = mem.index_markdown(island, private_author="Bob")
+    assert "verse-naming — naming" in index and "(Coder)" not in index and "  - verse-naming/props" in index
+    mem.save_entry("coder-diary", "Private note.", description="mine", author="Coder", private=True, project_root=island)
+    assert "coder-diary" not in mem.index_markdown(island, private_author="Bob")
+    assert "coder-diary" in mem.index_markdown(island, private_author="coder")
+    assert mem.read_entry("coder-diary", island)["author"] == "Coder"
+    assert mem.delete_entry("coder-diary", island) is True
     assert mem.delete_entry("verse-naming/props", island) is True
     assert mem.read_entry("verse-naming", island)["subs"] == []
     assert mem.delete_entry("verse-naming", island) is True

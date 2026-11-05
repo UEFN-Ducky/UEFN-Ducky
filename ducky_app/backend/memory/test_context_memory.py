@@ -1,4 +1,4 @@
-"""Rolling chat context summaries + author-filtered project-memory index."""
+"""Rolling chat context summaries + shared project-memory index (private entries hidden)."""
 
 from __future__ import annotations
 
@@ -15,24 +15,33 @@ def isolated_appdata(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_index_author_filter_shared_and_self(isolated_appdata, tmp_path):
-    from backend.memory.project import index_markdown, save_entry
+def test_index_is_shared_and_hides_only_private_entries(isolated_appdata, tmp_path):
+    from backend.memory.project import index_markdown, read_entry, save_entry
 
     root = str(tmp_path / "MemProj")
     (tmp_path / "MemProj").mkdir()
     save_entry("shared-note", "Everyone sees this.", description="Shared fact", author="", project_root=root)
-    save_entry("alice-note", "Alice only.", description="Alice fact", author="Alice", project_root=root)
-    save_entry("bob-note", "Bob only.", description="Bob fact", author="Bob", project_root=root)
+    save_entry("alice-note", "Alice wrote it.", description="Alice fact", author="Alice", project_root=root)
+    save_entry("bob-note", "Bob wrote it.", description="Bob fact", author="Bob", project_root=root)
+    save_entry("alice-diary", "Alice only.", description="Alice private", author="Alice", private=True, project_root=root)
+    assert read_entry("alice-diary", root)["private"] is True
+    assert read_entry("alice-diary", root)["author"] == "Alice"
 
-    alice_idx = index_markdown(root, author_filter="Alice")
-    assert "shared-note" in alice_idx
-    assert "alice-note" in alice_idx
-    assert "bob-note" not in alice_idx
+    bob_idx = index_markdown(root, private_author="bob")
+    assert "shared-note" in bob_idx and "bob-note" in bob_idx
+    assert "alice-note" in bob_idx  # other authors' lessons are shared
+    assert "alice-diary" not in bob_idx  # a private entry stays hidden from Bob
 
-    bob_idx = index_markdown(root, author_filter="bob")  # case-insensitive
-    assert "shared-note" in bob_idx
-    assert "bob-note" in bob_idx
-    assert "alice-note" not in bob_idx
+    alice_idx = index_markdown(root, private_author="ALICE")  # case-insensitive
+    assert "alice-diary" in alice_idx and "bob-note" in alice_idx
+
+    # author_filter is the deprecated alias of private_author.
+    assert "alice-diary" in index_markdown(root, author_filter="Alice")
+    assert "alice-diary" not in index_markdown(root)
+
+    # Saving again without private= keeps the flag.
+    save_entry("alice-diary", "Still private.", project_root=root)
+    assert read_entry("alice-diary", root)["private"] is True
 
 
 def test_should_compress_thresholds(isolated_appdata):
