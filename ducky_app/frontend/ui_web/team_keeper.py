@@ -575,7 +575,7 @@ _ONE_AT_A_TIME = (
 )
 UNTICKED_TEXT = "You finished work without ticking: tick the points you completed now."
 TASK_TEXT = (
-    "[Ducky] Your task: the sub plan “{section}” in the plan “{plan}”.\n{spec}{about}"
+    "[Ducky] Your task: the sub plan “{section}” in the plan “{plan}”.\n{read_first}{spec}{about}"
     "Points:\n{points}\n\n"
     "Work like a sub-agent: alone, writing the code, until every point is ticked. Send no messages "
     "to teammates or your lead (Ducky refuses them). Everything you need is above: don't search "
@@ -718,10 +718,57 @@ def _spec(plan: dict[str, Any]) -> str:
     return spec_brief(plan)
 
 
+_READ_FIRST_LINE_RE = re.compile(r"(?im)\bread first:\**\s*([^\n]+)")
+_READ_FIRST_MAX = 5
+
+
+def _read_first_names(plan: dict[str, Any], work: dict[str, Any]) -> list[str]:
+    """Memory entries a member pulls before it builds: the plan's own `Read first:` lines,
+    then entries that match the work, then the team-workflow lessons. Nov 5 2026: seats
+    repeated four mistakes that were already in project memory."""
+    section = work.get("section") or {}
+    points = list(work.get("points") or [])
+    nodes = [section, *points] if section else points
+    text = "\n".join(f"{n.get('content') or ''}\n{n.get('body_markdown') or ''}" for n in nodes)
+    names: list[str] = []
+    for m in _READ_FIRST_LINE_RE.finditer(text):
+        names += [p.strip(" `*.") for p in m.group(1).split(",")]
+    root = ""
+    try:
+        from backend.memory.scope import memory_root
+
+        root = memory_root(plan=plan)
+    except (ImportError, TypeError):
+        root = ""
+    try:
+        from backend.memory.project import list_entries, suggest_entries
+
+        names += suggest_entries(text, root)
+        for entry in list_entries(root):
+            if entry.get("private"):
+                continue
+            for item in [entry, *(entry.get("subs") or [])]:
+                if str(item.get("name") or "").startswith("team-workflow/"):
+                    names.append(str(item["name"]))
+    except (ImportError, TypeError, ValueError, OSError):
+        pass
+    out: list[str] = []
+    for name in names:
+        if name and name not in out:
+            out.append(name)
+    return out[:_READ_FIRST_MAX]
+
+
+def _read_first(plan: dict[str, Any], work: dict[str, Any]) -> str:
+    names = _read_first_names(plan, work)
+    return f"Before you build, project_memory_get each of these: {', '.join(names)}.\n" if names else ""
+
+
 def _task_text(plan: dict[str, Any], work: dict[str, Any]) -> str:
     section = work.get("section") or {}
     about = str(section.get("body_markdown") or "").strip() if section.get("children") else ""
     return TASK_TEXT.format(section=_section_title(work), plan=plan.get("title") or "Plan", spec=_spec(plan),
+                            read_first=_read_first(plan, work),
                             about=(about + "\n") if about else "", points=_points(work["points"], bodies=True))
 
 
