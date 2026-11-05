@@ -267,5 +267,63 @@ def test_agent_host_idle_budget(tmp_path: Path) -> None:
         _stop(proc)
 
 
+# ── app window imports (no UI) ───────────────────────────────────────────────────────────
+
+APP_IMPORT_BUDGET_MB = 400
+_APP_IMPORTS = (
+    "frontend.launcher",  # the frozen EXE's entry: caps BLAS threads at import
+    "frontend.settings",
+    "backend.server",
+    "backend.tools",
+    "backend.search.query",
+    "backend.search.embedder",
+    "numpy",
+    "frontend.ui_web.panel_api",
+)
+_APP_SCRIPT = r"""
+import importlib, json, os, sys, time
+failed = {}
+for name in sys.argv[1:]:
+    try:
+        importlib.import_module(name)
+    except Exception as exc:
+        failed[name] = f"{type(exc).__name__}: {exc}"
+time.sleep(3)
+print(json.dumps({"blas": os.environ.get("OPENBLAS_NUM_THREADS"), "numpy": "numpy" in sys.modules, "failed": failed}), flush=True)
+time.sleep(600)
+"""
+
+
+def test_app_imports_stay_under_budget_with_blas_capped(tmp_path: Path) -> None:
+    import json
+
+    log = tmp_path / "app.log"
+    out = open(log, "wb")  # noqa: SIM115
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _APP_SCRIPT, *_APP_IMPORTS],
+        cwd=str(_DUCKY_APP), env=_child_env(), stdin=subprocess.DEVNULL, stdout=out,
+        stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        deadline = time.monotonic() + READY_TIMEOUT_S
+        report: dict[str, Any] | None = None
+        while time.monotonic() < deadline and report is None:
+            if proc.poll() is not None:
+                pytest.fail(f"app import probe exited ({proc.returncode}):\n{_tail(log)}")
+            for line in _tail(log).splitlines():
+                if line.startswith("{") and '"blas"' in line:
+                    report = json.loads(line)
+            time.sleep(0.2)
+        assert report is not None, _tail(log)
+        assert report["blas"] == "1" and report["numpy"], report
+        used = private_mb(proc.pid)
+        _report(f"app imports (failed: {sorted(report['failed'])})", used, APP_IMPORT_BUDGET_MB)
+        assert used <= APP_IMPORT_BUDGET_MB, f"app imports {used:.0f} MB > {APP_IMPORT_BUDGET_MB} MB"
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+        out.close()
+
+
 def test_private_mb_reads_this_process() -> None:
     assert 1 < private_mb(os.getpid()) < 64 * 1024
