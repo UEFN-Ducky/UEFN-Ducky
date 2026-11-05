@@ -272,11 +272,81 @@ def test_index_markdown_lines_and_overflow(isolated_appdata, tmp_path):
     for i in range(5):
         save_entry(f"fact-{i}", f"body {i}", description=f"desc {i}", author="D", project_root=root)
     index = index_markdown(root)
-    assert "- fact-0 — desc 0 (D)" in index
+    assert "- fact-0 — desc 0" in index
+    assert "(D)" not in index  # no author attribution: it costs chars
     assert "body 0" not in index  # bodies never leak into the index
 
     tiny = index_markdown(root, max_chars=40)
-    assert "more — call project_memory_list" in tiny
+    assert "5 more entries left out — project_memory_list has them all" in tiny
+
+
+def _save_at(root: str, name: str, description: str, updated: str, **kw) -> None:
+    """save_entry, then pin its ``updated`` stamp so storage order is known."""
+    from backend.memory import project as mem
+
+    mem.save_entry(name, f"body of {name}", description=description, project_root=root, **kw)
+    if mem._use_db():
+        repo = mem._repo()
+        row = repo.get(mem._project_id(root), mem.slugify_entry_name(name))
+        repo.put(mem._project_id(root), row["name"], description=row["description"], author=row["author"], updated=updated, body=row["body"])
+    else:
+        path = mem.read_entry(name, root)["path"]
+        text = open(path, encoding="utf-8").read()
+        import re as _re
+
+        open(path, "w", encoding="utf-8").write(_re.sub(r"updated: .*", f"updated: {updated}", text, count=1))
+
+
+def test_index_ranks_core_entries_before_newer_ones(isolated_appdata, tmp_path):
+    from backend.memory.project import index_markdown
+
+    root = str(tmp_path / "Proj")
+    _save_at(root, "team-workflow/team-playbook", "How a team plans and ticks", "2026-01-01 00:00 UTC")
+    _save_at(root, "zebra-fact", "A newer non-core note", "2026-11-01 00:00 UTC")
+    lines = index_markdown(root).splitlines()
+    assert lines[0].startswith("- team-workflow")
+    assert lines[1].startswith("  - team-workflow/team-playbook")
+    assert lines.index("- zebra-fact — A newer non-core note") > 1
+
+
+def test_index_task_match_pulls_its_entry_ahead(isolated_appdata, tmp_path):
+    from backend.memory.project import index_markdown
+
+    root = str(tmp_path / "Proj")
+    _save_at(root, "verse-naming", "Device naming in Verse", "2026-11-03 00:00 UTC")
+    _save_at(root, "blender-export", "FBX export scale from Blender", "2026-01-01 00:00 UTC")
+    _save_at(root, "team-workflow/git-and-worktrees", "Git worktree add and remove", "2026-01-01 00:00 UTC")
+    _save_at(root, "team-workflow/team-playbook", "How a team plans", "2026-11-04 00:00 UTC")
+    plain = index_markdown(root).splitlines()
+    assert plain.index("- verse-naming — Device naming in Verse") < plain.index("- blender-export — FBX export scale from Blender")
+    ranked = index_markdown(root, task="blender fbx export").splitlines()
+    assert ranked.index("- blender-export — FBX export scale from Blender") < ranked.index("- verse-naming — Device naming in Verse")
+    git = index_markdown(root, task="git worktree remove").splitlines()
+    assert git[0].startswith("- team-workflow")
+    assert git[1].startswith("  - team-workflow/git-and-worktrees")
+
+
+def test_index_budget_holds(isolated_appdata, tmp_path):
+    from backend.memory.project import index_markdown, save_entry
+
+    root = str(tmp_path / "Proj")
+    for i in range(40):
+        save_entry(f"fact-{i}", "body", description="a fairly long description " * 3, project_root=root)
+    index = index_markdown(root, max_chars=1_000)
+    assert len(index) <= 1_000
+    assert index.splitlines()[-1].endswith("left out — project_memory_list has them all")
+
+
+def test_suggest_entries_returns_best_match(isolated_appdata, tmp_path):
+    from backend.memory.project import save_entry, suggest_entries
+
+    root = str(tmp_path / "Proj")
+    save_entry("team-workflow/git-and-worktrees", "x", description="Git worktree add and remove", project_root=root)
+    save_entry("verse-naming", "x", description="Device naming in Verse", project_root=root)
+    save_entry("blender-export", "x", description="FBX export scale from Blender", project_root=root)
+    assert suggest_entries("remove the git worktree after a run", root)[0] == "team-workflow/git-and-worktrees"
+    assert suggest_entries("fbx scale", root, limit=1) == ["blender-export"]
+    assert suggest_entries("nothing relevant here", root) == []
 
 
 def test_prompt_carries_index_not_bodies(isolated_appdata, tmp_path):

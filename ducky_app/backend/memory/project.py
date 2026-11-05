@@ -19,6 +19,7 @@ in app data, entries survive deletion of the project folder itself.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,20 @@ _MAX_DESCRIPTION_CHARS = 140
 _MAX_SLUG_CHARS = 60
 
 _MAIN_FILE = "MEMORY.md"
+# The database has no private column: a private entry's author is stored with this prefix.
+_PRIVATE_AUTHOR_PREFIX = "private:"
+
+
+def _is_true(value: Any) -> bool:
+    return str(value or "").strip().lower() in ("true", "yes", "1")
+
+
+def _decode_author(raw: Any) -> tuple[str, bool]:
+    """DB author column → (author, private)."""
+    text = str(raw or "")
+    if text.startswith(_PRIVATE_AUTHOR_PREFIX):
+        return text[len(_PRIVATE_AUTHOR_PREFIX):], True
+    return text, False
 
 
 def resolve_project_root(explicit: str = "") -> str:
@@ -146,8 +161,8 @@ def _parse_entry(text: str) -> tuple[dict[str, str], str]:
 
 def _format_entry(meta: dict[str, str], body: str) -> str:
     lines = ["---"]
-    for key in ("name", "description", "author", "updated"):
-        value = (meta.get(key) or "").replace("\n", " ").strip()
+    for key in ("name", "description", "author", "private", "updated"):
+        value = str(meta.get(key) or "").replace("\n", " ").strip()
         if value:
             lines.append(f"{key}: {value}")
     lines.append("---")
@@ -171,6 +186,7 @@ def _read_meta(path: Path, fallback_name: str) -> dict[str, Any] | None:
         "name": meta.get("name") or fallback_name,
         "description": meta.get("description") or _default_description(body),
         "author": meta.get("author") or "",
+        "private": _is_true(meta.get("private")),
         "updated": meta.get("updated") or "",
         "chars": len(body),
     }
@@ -194,7 +210,10 @@ def _list_subs(entry: str, project_root: str) -> list[dict[str, Any]]:
 def list_entries(project_root: str = "") -> list[dict[str, Any]]:
     """Index of a project's entries (frontmatter only + sub index), newest-updated first."""
     if _use_db():
-        return _repo().index(_project_id(project_root))
+        rows = _repo().index(_project_id(project_root))
+        for row in rows:
+            row["author"], row["private"] = _decode_author(row.get("author"))
+        return rows
     d = memory_dir(project_root)
     if not d.is_dir():
         return []
@@ -236,10 +255,12 @@ def read_entry(name: str, project_root: str = "") -> dict[str, Any] | None:
         row = repo.get(project_id, slug)
         if row is None:
             return None
+        author, private = _decode_author(row["author"])
         out: dict[str, Any] = {
             "name": slug,
             "description": row["description"] or _default_description(row["body"]),
-            "author": row["author"] or "",
+            "author": author,
+            "private": private,
             "updated": row["updated"] or "",
             "content": row["body"],
             "path": "",
@@ -256,6 +277,7 @@ def read_entry(name: str, project_root: str = "") -> dict[str, Any] | None:
             "name": f"{entry}/{sub}",
             "description": meta.get("description") or _default_description(body),
             "author": meta.get("author") or "",
+            "private": _is_true(meta.get("private")),
             "updated": meta.get("updated") or "",
             "content": body,
             "path": str(path),
@@ -268,6 +290,7 @@ def read_entry(name: str, project_root: str = "") -> dict[str, Any] | None:
         "name": entry,
         "description": meta.get("description") or _default_description(body),
         "author": meta.get("author") or "",
+        "private": _is_true(meta.get("private")),
         "updated": meta.get("updated") or "",
         "content": body,
         "subs": [
@@ -294,8 +317,13 @@ def save_entry(
     description: str = "",
     author: str = "",
     project_root: str = "",
+    private: bool | None = None,
 ) -> dict[str, Any]:
-    """Create or replace ``entry`` or ``entry/sub`` in THIS project's memory."""
+    """Create or replace ``entry`` or ``entry/sub`` in THIS project's memory.
+
+    ``private=True`` keeps the entry out of every other ducky's index; ``None``
+    keeps the existing flag.
+    """
     slug = slugify_entry_name(name)
     entry, sub = _split_slug(slug)
     body = (content or "").strip()
@@ -315,6 +343,9 @@ def save_entry(
         "author": (author or "").strip() or (existing or {}).get("author") or "",
         "updated": _now_stamp(),
     }
+    is_private = bool((existing or {}).get("private")) if private is None else bool(private)
+    if is_private:
+        meta["private"] = "true"
 
     if _use_db():
         repo = _repo()
@@ -328,7 +359,8 @@ def save_entry(
                 updated=meta["updated"],
                 body=f"Index topic for `{entry}` — content lives in its sub-entries.",
             )
-        repo.put(project_id, slug, description=meta["description"], author=meta["author"], updated=meta["updated"], body=body)
+        stored_author = f"{_PRIVATE_AUTHOR_PREFIX}{meta['author']}" if is_private else meta["author"]
+        repo.put(project_id, slug, description=meta["description"], author=stored_author, updated=meta["updated"], body=body)
         return {**meta, "chars": len(body), "path": ""}
 
     if sub:
@@ -443,45 +475,118 @@ def delete_entry(name: str, project_root: str = "") -> bool:
     return removed
 
 
+CORE_PREFIXES = ("team-workflow", "decision", "architecture", "bug", "git", "testing")
+
+_STOPWORDS = frozenset(
+    "the and for with from that this into when then than what your you are was were has have not but all any "
+    "its his her our out use one two can will via per".split()
+)
+
+
+def _words(text: str) -> set[str]:
+    out: set[str] = set()
+    for w in re.findall(r"[a-z0-9]+", (text or "").lower()):
+        if len(w) < 3 or w in _STOPWORDS:
+            continue
+        if len(w) > 4 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        out.add(w)
+    return out
+
+
+def _score(task_words: set[str], name: str, description: str) -> int:
+    if not task_words:
+        return 0
+    return len(task_words & _words(f"{name.replace('/', ' ')} {description}"))
+
+
+def _core_rank(name: str) -> int:
+    """Position in CORE_PREFIXES for ``name`` (its top-level part), else -1."""
+    top = name.split("/", 1)[0]
+    for i, prefix in enumerate(CORE_PREFIXES):
+        if top == prefix or top.startswith(prefix + "-"):
+            return i
+    return -1
+
+
 def index_markdown(
     project_root: str = "",
     *,
     max_entries: int = 60,
     max_chars: int = 3_000,
     author_filter: str = "",
+    task: str = "",
+    private_author: str = "",
 ) -> str:
     """One line per entry (subs indented beneath) for prompt injection — never bodies.
 
-    When ``author_filter`` is set, only shared entries (empty author) and entries
-    authored by that ducky are listed — other duckies' notes stay out of the prompt.
+    Every ducky's entries are listed: lessons are shared whoever wrote them. Only
+    entries marked private (``private: true``) are hidden, except from their author
+    (``private_author``; ``author_filter`` is its deprecated alias). Order: core
+    prefixes (CORE_PREFIXES) first, then entries matching ``task``, then the rest
+    newest first; subs stay under their parent, best ``task`` match first.
     """
-    entries = list_entries(project_root)
-    want = (author_filter or "").strip().lower()
-    if want:
-        entries = [
-            e
-            for e in entries
-            if not str(e.get("author") or "").strip()
-            or str(e.get("author") or "").strip().lower() == want
-        ]
+    me = (private_author or author_filter or "").strip().lower()
+    entries = [
+        e
+        for e in list_entries(project_root)
+        if not e.get("private") or (me and str(e.get("author") or "").strip().lower() == me)
+    ]
+    task_words = _words(task)
+    ranked: list[tuple[tuple[int, int, int, int], dict[str, Any], list[dict[str, Any]]]] = []
+    for pos, e in enumerate(entries):
+        subs = list(e.get("subs") or [])
+        sub_scores = {s["name"]: _score(task_words, s["name"], s.get("description", "")) for s in subs}
+        subs.sort(key=lambda s: -sub_scores[s["name"]])
+        score = max([_score(task_words, e["name"], e.get("description", "")), *sub_scores.values()])
+        core = _core_rank(e["name"])
+        if core >= 0:
+            key = (0, -score, core, pos)
+        elif score > 0:
+            key = (1, -score, 0, pos)
+        else:
+            key = (2, 0, 0, pos)
+        ranked.append((key, e, subs))
+    ranked.sort(key=lambda r: r[0])
+
+    total = sum(1 + len(subs) for _, _, subs in ranked)
+    # Room for the trailer line, so the whole index stays within max_chars.
+    budget = max(0, max_chars - 70)
     lines: list[str] = []
     used = 0
     shown = 0
-    for e in entries[:max_entries]:
-        who = str(e.get("author") or "")
-        attribution = f" ({who})" if who else ""
-        line = f"- {e['name']} — {e['description']}{attribution}"
-        if used + len(line) > max_chars:
-            break
-        lines.append(line)
-        used += len(line) + 1
-        shown += 1
-        for s in e.get("subs") or []:
-            sub_line = f"  - {s['name']} — {s['description']}"
-            if used + len(sub_line) > max_chars:
+    full = False
+    for _, e, subs in ranked[:max_entries]:
+        for line in [f"- {e['name']} — {e.get('description', '')}"] + [
+            f"  - {s['name']} — {s.get('description', '')}" for s in subs
+        ]:
+            if used + len(line) > budget:
+                full = True
                 break
-            lines.append(sub_line)
-            used += len(sub_line) + 1
-    if shown < len(entries):
-        lines.append(f"- …+{len(entries) - shown} more — call project_memory_list for the full index")
+            lines.append(line)
+            used += len(line) + 1
+            shown += 1
+        if full:
+            break
+    if shown < total:
+        lines.append(f"- …{total - shown} more entries left out — project_memory_list has them all")
     return "\n".join(lines)
+
+
+def suggest_entries(text: str, project_root: str = "", *, limit: int = 3) -> list[str]:
+    """Names of the entries (subs included) whose name + description best match ``text``."""
+    words = _words(text)
+    if not words or limit <= 0:
+        return []
+    scored: list[tuple[int, int, str]] = []
+    pos = 0
+    for e in list_entries(project_root):
+        if e.get("private"):
+            continue
+        for item in [e, *(e.get("subs") or [])]:
+            s = _score(words, item["name"], item.get("description", ""))
+            if s > 0:
+                scored.append((-s, pos, item["name"]))
+            pos += 1
+    scored.sort()
+    return [name for _, _, name in scored[:limit]]
