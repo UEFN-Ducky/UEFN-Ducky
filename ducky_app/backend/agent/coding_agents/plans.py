@@ -867,8 +867,12 @@ def update_plan(
     merge: bool = True,
     status: str | None = None,
     project_root: str | None = None,
+    reason: str = "",
 ) -> dict[str, Any]:
-    """Update a project plan. merge=True merges root/flat todos by id when todos= is used."""
+    """Update a project plan. merge=True merges root/flat todos by id when todos= is used.
+
+    ``status="finished"`` closes the plan: every open step is X'd with "Cancelled: plan
+    closed — <reason>", so the plan finishes instead of leaving leftovers."""
     cid = (chat_id or "").strip()
     if not cid:
         raise ValueError("chat_id required")
@@ -921,7 +925,22 @@ def update_plan(
                     roots.append(item)
                     plan["nodes"] = roots
 
+    if str(plan.get("status") or "").strip().lower() == "finished" and status is not None:
+        _close_open_steps(plan.get("nodes"), reason)
     return save_plan(plan, project_root)
+
+
+def _close_open_steps(nodes: list[dict[str, Any]] | None, reason: str = "") -> None:
+    """X every unfinished step, its notes saying why: the lead closed the plan. Sections then
+    complete themselves (the rollup), so their finished work still reads as done."""
+    why = (reason or "").strip()
+    line = f"Cancelled: plan closed — {why}" if why else "Cancelled: plan closed"
+    for node in _flatten_nodes(nodes):
+        if str(node.get("status") or "pending") in _DONE or node.get("children"):
+            continue
+        node["status"] = "cancelled"
+        body = str(node.get("body_markdown") or "").rstrip()
+        node["body_markdown"] = f"{body}\n\n{line}".strip()
 
 
 @_serialize_plan_edit

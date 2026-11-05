@@ -32,8 +32,15 @@ describe("plan status line", () => {
     expect(planStatusLine(p)[1]!.title).toBe("3 Later waits for 1");
   });
 
-  it("done", () => {
-    expect(line(plan([step("a", "completed"), step("b", "cancelled")]))).toBe("Done · 2/2");
+  it("done: X'd steps leave the count", () => {
+    expect(line(plan([step("a", "completed"), step("b", "cancelled")]))).toBe("Done · 1/1");
+    const thirteen = Array.from({ length: 13 }, (_, i) => step(`c${i}`, "completed"));
+    expect(line(plan([...thirteen, step("x", "cancelled")]))).toBe("Done · 13/13");
+  });
+
+  it("2 completed + 1 X + 1 pending reads 2/3", () => {
+    const p = plan([step("a", "completed"), step("b", "completed"), step("x", "cancelled"), step("c", "pending")]);
+    expect(line(p)).toBe("0 working · 2/3");
   });
 
   it("a cancelled step shows ✕ and an ⓘ whose popover holds the reason", () => {
@@ -48,7 +55,7 @@ describe("plan status line", () => {
     expect(screen.getByRole("tooltip").textContent).toBe("Release run stopped by the user's request at step 4/13.");
     fireEvent.click(why);
     expect(why.className).toContain("is-open");
-    expect(screen.getByText("2 of 2 steps completed")).toBeTruthy();
+    expect(screen.getByText("1 of 1 steps completed")).toBeTruthy();
     expect(container.querySelector('[data-plan-node-id="a"] .plan-todo-why')).toBeNull();
   });
 

@@ -46,10 +46,10 @@ function nodesFromPlan(plan: ChatPlan): PlanNode[] {
   }));
 }
 
-/** Cancelled steps count as finished, like the backend's `_DONE`: 13 completed + 1 cancelled of 14 reads 14/14. */
+/** X'd (cancelled) steps leave the count, like the backend's `todo_progress`: 13 completed + 1 X reads 13/13. */
 export function countProgress(plan: ChatPlan, progress?: PlanProgress | null): { done: number; total: number } {
   const c = progress ?? progressForPlan(plan);
-  const done = c.completed + (c.cancelled || 0);
+  const done = c.completed;
   // Summed from the parts so it holds whether `total` leaves cancelled steps out or not.
   return { done, total: done + (c.in_progress || 0) + (c.pending || 0) };
 }
