@@ -233,7 +233,33 @@ def test_an_agent_command_or_allow_card_is_never_closed_as_stale(mgr, tmp_path):
     mgr.get_session(waiting).set_busy(True)
     mgr.request_command(asking, "npm test", conv_id="lead")
     stale = mgr.get_session(waiting).last_activity + manager_module._AGENT_STALE_CLOSE_S + 1
-    assert mgr.close_idle_agent_terminals(now=stale, running=set()) == []
+    assert mgr.close_idle_agent_terminals(now=stale, running={"lead"}) == []
+
+
+def test_a_finished_duckys_hung_command_no_longer_keeps_its_terminal_for_good(mgr, tmp_path):
+    # Nov 2026: a ducky's last command still counted as busy after its turn (queued behind another
+    # chat's test run, or hung), so its shell stayed open until Ducky quit.
+    hung = _open(mgr, tmp_path, "done-ducky")["session_id"]
+    asking = _open(mgr, tmp_path, "done-ducky")["session_id"]
+    mgr.get_session(hung).set_busy(True)
+    mgr.request_command(asking, "npm test", conv_id="done-ducky")
+    start = mgr.get_session(hung).last_activity
+    assert mgr.close_idle_agent_terminals(now=start + manager_module._AGENT_IDLE_CLOSE_S + 1, running=set()) == []
+    stale = start + manager_module._AGENT_STALE_CLOSE_S + 1
+    assert mgr.close_idle_agent_terminals(now=stale, running=set()) == [hung]
+    assert asking in mgr._sessions  # an Allow card still waits on the person
+
+
+def test_a_finished_duckys_forgotten_background_command_closes_after_an_hour(mgr, tmp_path):
+    server = _open(mgr, tmp_path, "done-ducky")["session_id"]
+    shell = mgr.get_session(server)
+    shell.ran_background = True
+    mgr.running[shell._pty.pid] = [9998]  # a dev server it never stopped
+    start = shell.last_activity
+    assert mgr.close_idle_agent_terminals(now=start + manager_module._AGENT_STALE_CLOSE_S + 1, running=set()) == []
+    later = start + manager_module._ORPHAN_BACKGROUND_CLOSE_S + 1
+    assert mgr.close_idle_agent_terminals(now=later, running={"done-ducky"}) == []  # its ducky still works
+    assert mgr.close_idle_agent_terminals(now=later, running=set()) == [server]
 
 
 def test_close_chat_terminals_kills_a_hung_child_and_keeps_the_rest(mgr, tmp_path, monkeypatch):

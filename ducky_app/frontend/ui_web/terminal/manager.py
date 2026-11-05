@@ -40,6 +40,10 @@ _AGENT_IDLE_CLOSE_S = 60.0
 # Oct 24 2026: a lead that stays running, or a hung child (git, a pager), kept shells open all
 # day. Quiet this long with no agent command waiting, an agent's terminal closes anyway.
 _AGENT_STALE_CLOSE_S = 600.0
+# Nov 2026: a finished ducky's terminal stayed open for good when its last command still counted
+# as busy (hung, or queued behind another chat's test run) or a background command it started
+# still ran. Its agent done and the terminal quiet this long, it closes anyway, tree and all.
+_ORPHAN_BACKGROUND_CLOSE_S = 3600.0
 _REAP_EVERY_S = 15.0
 # A waited command (or its Allow card) stops waiting when the person writes: checked after
 # the first 10 s, then every 2 s. The command keeps running (Oct 24 2026: 16 runs over 120 s
@@ -294,8 +298,12 @@ class TerminalManager:
         closed: list[str] = []
         for session, chat in agents:
             quiet = now - float(getattr(session, "last_activity", now))
-            if (quiet < _AGENT_IDLE_CLOSE_S or session.id in asked or session.id in held
-                    or session.is_busy() or session.background_alive(snapshot)):
+            if quiet < _AGENT_IDLE_CLOSE_S or session.id in asked or session.id in held:
+                continue
+            done = not chat or chat not in running
+            if session.is_busy() and not (done and quiet >= _AGENT_STALE_CLOSE_S):
+                continue
+            if session.background_alive(snapshot) and not (done and quiet >= _ORPHAN_BACKGROUND_CLOSE_S):
                 continue
             if quiet < _AGENT_STALE_CLOSE_S and (chat in running or session.has_running_command(snapshot)):
                 continue

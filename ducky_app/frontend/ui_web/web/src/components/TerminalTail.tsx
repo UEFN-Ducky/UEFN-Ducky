@@ -74,6 +74,40 @@ export function TerminalTail({
   );
 }
 
+/** What a finished terminal command printed, from its tool result (an object or its JSON text). */
+export function terminalRunOutput(result: unknown): string {
+  let value = result;
+  if (Array.isArray(value)) {
+    // MCP content blocks: [{type: "text", text: "{...}"}]
+    const block = value.find((b) => b && typeof b === "object" && typeof (b as { text?: unknown }).text === "string");
+    value = block ? (block as { text: string }).text : "";
+  }
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return "";
+    }
+  }
+  if (!value || typeof value !== "object") return "";
+  const rec = value as Record<string, unknown>;
+  for (const key of ["output_tail", "output_so_far", "output", "stdout"]) {
+    const text = rec[key];
+    if (typeof text === "string" && tailText(text).trim()) return text;
+  }
+  return "";
+}
+
+/** A finished command's output stays on its card, open: a test run's results, not a folded row
+ *  (Nov 5 2026: the live tail vanished the moment the run ended). */
+export function FinishedTerminalTail({ output, sessionId = "" }: { output: string; sessionId?: string }) {
+  return (
+    <div className="tool-execution-card-terminal-tail">
+      <TerminalTail output={output} open live={false} sessionId={sessionId} />
+    </div>
+  );
+}
+
 const POLL_MS = 700;
 
 /** While a terminal command runs, show what it prints (polled), never just a spinner. */

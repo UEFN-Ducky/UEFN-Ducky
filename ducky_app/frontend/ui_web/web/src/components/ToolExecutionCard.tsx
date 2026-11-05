@@ -17,7 +17,7 @@ import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/b
 import { isPictureSearch, resolveToolCategory, webToolIcon } from "./tool-cards/toolCategories";
 import { ToolInlineView, ToolOpenChip, openTargetFor } from "./tool-cards/ToolInlineView";
 import { bareToolName, hasViewContent, toolViewSpec } from "./tool-cards/toolView";
-import { LiveTerminalTail } from "./TerminalTail";
+import { FinishedTerminalTail, LiveTerminalTail, terminalRunOutput } from "./TerminalTail";
 import { useToolOwners } from "../hooks/useToolView";
 import { usePluginContributions } from "../hooks/usePluginContributions";
 import { runAgentWalkthrough } from "../walkthrough/agentWalkthrough";
@@ -233,6 +233,10 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const owner = useToolOwners([bareName])[bareName] ?? null;
   const liveTerminalSession =
     isRunning && bareName === "ducky_terminal_run" ? String(meta.arguments?.session_id ?? "") : "";
+  const finishedTerminalOutput = useMemo(
+    () => (!isRunning && (bareName === "ducky_terminal_run" || bareName === "sandbox_run") ? terminalRunOutput(meta.result) : ""),
+    [isRunning, bareName, meta.result],
+  );
   const pluginContrib = usePluginContributions();
   const viewSpec = useMemo(
     () => (isRunning || !isSuccess ? null : toolViewSpec(meta.name, meta.arguments || {}, meta.result)),
@@ -434,6 +438,12 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
 
         {/* A running terminal command always shows what it prints, folded card or not. */}
         {liveTerminalSession ? <LiveTerminalTail sessionId={liveTerminalSession} /> : null}
+        {finishedTerminalOutput ? (
+          <FinishedTerminalTail
+            output={finishedTerminalOutput}
+            sessionId={bareName === "ducky_terminal_run" ? String(meta.arguments?.session_id ?? "") : ""}
+          />
+        ) : null}
 
         {viewSpec && hasViewContent(viewSpec) && !captureBody && !isGuardBlocked ? (
           <div className="tool-execution-card-body tool-execution-card-body--view">

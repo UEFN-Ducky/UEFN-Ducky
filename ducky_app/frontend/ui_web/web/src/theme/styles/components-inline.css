@@ -1588,16 +1588,6 @@ html.window-maximized .window-resize-grip {
   animation: spin-slow 0.8s linear infinite;
 }
 
-/* The sidebar's rings (SidebarBusySpinner): one turns, the rest stand still, so 10 working
-   agents cost one animation, not one each. */
-.sidebar-agent-spinner--shared {
-  animation: none;
-}
-
-.sidebar-agent-spinner--shared.is-lead {
-  animation: spin-slow 0.8s linear infinite;
-}
-
 /* A workflow the chat started is running (its agent may be idle): a still glyph in a dashed amber ring. */
 .sidebar-workflow-spinner {
   position: relative;
