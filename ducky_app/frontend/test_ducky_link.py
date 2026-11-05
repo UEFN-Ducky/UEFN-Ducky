@@ -19,7 +19,11 @@ def test_a_sealed_message_opens_only_for_its_own_request() -> None:
     aad = _aad("k1", "k2", "load_messages", "r1", "req")
     env = ducky_link.seal({"conversation_id": "c1", "text": "héllo"}, adk=ADK, aad=aad)
     assert set(env) == {"sealed"}
-    assert "c1" not in env["sealed"] and "llo" not in env["sealed"]
+    # The ciphertext bytes, not their base64 text: a random nonce's base64 can spell "c1".
+    import base64
+
+    raw = base64.b64decode(env["sealed"])
+    assert b'"conversation_id"' not in raw and b'"c1"' not in raw and "héllo".encode() not in raw
     assert ducky_link.open_sealed(env, adk=ADK, aad=aad) == {"conversation_id": "c1", "text": "héllo"}
     # Another request, another Ducky, the answer direction or another account's key: refused.
     for other in (
