@@ -97,6 +97,54 @@ def test_capturer_starts_at_30_and_rises_to_60_only_while_under_budget(monkeypat
     assert cap.fps <= 30
 
 
+def _displays_asleep() -> bool:
+    """True only while idle time has reached the power plan's "turn off display after" (0 = never)."""
+    try:
+        import uuid
+        from ctypes import wintypes
+
+        class _LastInput(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+
+        class _PowerStatus(ctypes.Structure):
+            _fields_ = [
+                ("ACLineStatus", ctypes.c_ubyte),
+                ("BatteryFlag", ctypes.c_ubyte),
+                ("BatteryLifePercent", ctypes.c_ubyte),
+                ("SystemStatusFlag", ctypes.c_ubyte),
+                ("BatteryLifeTime", wintypes.DWORD),
+                ("BatteryFullLifeTime", wintypes.DWORD),
+            ]
+
+        user32, kernel32, powrprof = ctypes.windll.user32, ctypes.windll.kernel32, ctypes.windll.powrprof
+        li = _LastInput(ctypes.sizeof(_LastInput), 0)
+        if not user32.GetLastInputInfo(ctypes.byref(li)):
+            return False
+        idle_s = ((kernel32.GetTickCount() - li.dwTime) & 0xFFFFFFFF) / 1000
+
+        ps = _PowerStatus()
+        on_battery = bool(kernel32.GetSystemPowerStatus(ctypes.byref(ps))) and ps.ACLineStatus == 0
+        read = powrprof.PowerReadDCValueIndex if on_battery else powrprof.PowerReadACValueIndex
+        read.argtypes = [ctypes.c_void_p] * 4 + [ctypes.POINTER(wintypes.DWORD)]
+        powrprof.PowerGetActiveScheme.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+
+        scheme = ctypes.c_void_p()
+        if powrprof.PowerGetActiveScheme(None, ctypes.byref(scheme)):
+            return False
+        try:
+            sub = ctypes.create_string_buffer(uuid.UUID("7516b95f-f776-4464-8c53-06167f40cc99").bytes_le, 16)
+            idle = ctypes.create_string_buffer(uuid.UUID("3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e").bytes_le, 16)
+            after = wintypes.DWORD()
+            if read(None, scheme, sub, idle, ctypes.byref(after)):
+                return False
+        finally:
+            kernel32.LocalFree(scheme)
+        return after.value > 0 and idle_s >= after.value
+    except Exception:
+        return False
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="DXGI")
 def test_dxgi_grabs_every_monitor_fast_enough_for_60fps_and_always_gives_a_first_frame():
     from frontend.native_capture_dxgi import DxgiGrabber
@@ -111,6 +159,8 @@ def test_dxgi_grabs_every_monitor_fast_enough_for_60fps_and_always_gives_a_first
             w, h = min(1920, right - left) & ~1, min(1080, bottom - top) & ~1
             # A new rect on a still screen still gets its first picture.
             first = g.grab(left, top, w, h)
+            if first is None and _displays_asleep():
+                pytest.skip("the displays are off for idleness: Windows draws no frame to duplicate")
             assert first is not None and len(first) == w * h * 4
             dst = ctypes.create_string_buffer(w * h * 4)
             g.grab_into(left, top, w, h, ctypes.addressof(dst))  # straight into a caller buffer
