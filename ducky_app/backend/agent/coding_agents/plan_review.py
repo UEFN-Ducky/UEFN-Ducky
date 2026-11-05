@@ -48,6 +48,26 @@ _DONE_WHEN_RE = re.compile(r"\bdone[ -]when\b", re.IGNORECASE)
 _HANDS_OVER_RE = re.compile(r"\bhands over:", re.IGNORECASE)
 _TICKED_RE = re.compile(r"`([^`\s(]+)`")
 _FILE_EXT_RE = re.compile(r"\.[A-Za-z]\w{0,5}$")
+_READ_FIRST_RE = re.compile(r"\bread first:", re.IGNORECASE)
+
+
+def suggest_read_first(text: str, plan: dict[str, Any] | None) -> list[str]:
+    """Project memory entries that fit *text*, read from the plan's repo ([] until memory can say)."""
+    try:
+        from backend.memory.project import suggest_entries
+    except ImportError:
+        return []
+    root = ""
+    try:
+        from backend.memory.scope import memory_root
+
+        root = memory_root(plan=plan)
+    except (ImportError, TypeError):
+        root = ""
+    try:
+        return [str(n) for n in suggest_entries(text, root) or [] if str(n).strip()]
+    except (TypeError, ValueError, OSError):
+        return []
 
 
 def _files(body: str) -> list[str] | None:
@@ -162,6 +182,11 @@ def plan_review(plan: dict[str, Any] | None) -> list[dict[str, str]]:
                 if not _inside(path, lane):
                     issues.append({"n": label, "issue": f"Outside its lane: {path} is not in its sub plan's Files; "
                                                         "make it a Hand-off: step in the owner's section."})
+        # Advice only: the lessons a team step should open with, so nobody repeats one.
+        if team and not _READ_FIRST_RE.search(body):
+            names = suggest_read_first(f"{content}\n{body}", plan)
+            if names:
+                issues.append({"n": label, "issue": f"Add `Read first: {', '.join(names)}`"})
         if len(issues) >= _REVIEW_MAX:
             break
     for i, (_, a, a_files) in enumerate(lanes):
