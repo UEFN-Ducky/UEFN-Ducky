@@ -1775,7 +1775,8 @@ def ducky_agent_stop(conv_id: str, cascade: bool = False, pretty: bool = False) 
     from backend.agent.a2a_client import on_agent_cancelled_by_user
 
     target = conv_id.strip()
-    if load_conversation(target, project_root=_project_root()) is None:
+    # A running agent whose chat was deleted (or is mid-delete) can still be stopped by its id.
+    if load_conversation(target, project_root=_project_root()) is None and not is_agent_running(target):
         raise ValueError(f"Conversation not found: {conv_id!r}")
     stopped: list[str] = []
     targets = [target] + (linked_children_of(target) if cascade else [])

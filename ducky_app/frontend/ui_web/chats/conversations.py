@@ -792,6 +792,11 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
     # A spawned chat is owned by its parent. Permanently deleting the parent must
     # not leave orphaned sub-agent conversations behind.
     ids = [conv_id, *_groups.conversation_descendant_ids(conv_id, project_root)]
+    # A deleted chat's agent and terminals stop with it (Nov 5 2026: an archived seat deleted
+    # by "Empty" kept its turn and sandbox terminal, and could no longer be stopped by id).
+    from frontend.ui_web.chats.archive_stop import stop_archived
+
+    stop_archived(ids)
     try:
         from backend.tools.panel.permission_prompt import forget_chat
     except Exception:
