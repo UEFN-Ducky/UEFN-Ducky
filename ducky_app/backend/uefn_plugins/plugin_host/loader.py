@@ -699,7 +699,7 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             _load_marker_end(marker)
         _REGISTERED.add(pid)
         if api is not None:
-            write_tool_schemas(pid, root, manifest, set(api._api_calls))
+            write_tool_schemas(pid, root, manifest, set(api._api_calls), set(api._node_types))
         _LOADED_SIGNATURE[pid] = signature
         _LOAD_FAILURES.pop(pid, None)
         pending = _RESTART_PENDING.pop(pid, None)

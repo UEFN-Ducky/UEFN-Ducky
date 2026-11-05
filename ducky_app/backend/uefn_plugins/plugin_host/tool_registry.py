@@ -498,10 +498,14 @@ def plugin_tool_slot(pid: str) -> Iterator[None]:
 # Nov 5 2026: Forge's worker ran in all four Ducky processes, each importing every plugin.
 
 _SCHEMA_DIR = "plugin_tool_schemas"
-_SCHEMA_FORMAT = 1
-# api members a register() may touch and still load lazily: they add tools or only read.
-# Anything else (providers, coding agents, nodes, hooks, panels RPC, connections) needs the
-# backend in every process, so that plugin keeps loading at boot.
+_SCHEMA_FORMAT = 2
+# api members a register() may touch and still load lazily in helpers:
+# - tools and workflow nodes: served as stubs from the cache, loading the plugin on first use;
+# - reads with no lasting effect;
+# - hooks only the app window serves (panel RPC, Settings secret tests, header connections and
+#   people, @/ chat rows, spotlights): helpers never call them in-process.
+# Anything else (LLM providers, coding agents, TTS, media generators, IDE hookups, spaces)
+# is needed in every process, so that plugin keeps loading at boot.
 _LAZY_SAFE_API = frozenset(
     {
         "plugin_id",
@@ -509,6 +513,8 @@ _LAZY_SAFE_API = frozenset(
         "log",
         "is_enabled",
         "tool",
+        "register_automation_node",
+        "register_pipeline_node",
         "local_dir",
         "media_url",
         "crypto",
@@ -518,8 +524,17 @@ _LAZY_SAFE_API = frozenset(
         "resolve_image",
         "asset_pack_path",
         "asset_packs",
+        "register_panel_rpc",
+        "register_secret_test",
+        "connection",
+        "people",
+        "chat_reference",
+        "spotlight",
     }
 )
+# Contributions whose RPC is called in-process outside the app too (known_projects, references):
+# a plugin with one keeps its panel RPCs loaded everywhere.
+_IN_PROCESS_RPC_CONTRIBS = ("project.sources", "project_sources", "chat_reference_sources")
 _LAZY_PENDING: dict[str, tuple[Any, dict[str, Any]]] = {}
 _LAZY_FORCED: set[str] = set()
 _LAZY_GUARD = threading.Lock()
@@ -577,14 +592,28 @@ def recording_plugin_api(pid: str) -> Any:
                         calls.add(name)
                 return object.__getattribute__(self, name)
 
+            def register_automation_node(self, node_type: str, handler: Any = None) -> Any:
+                self._node_types.add(str(node_type or "").strip())
+                return super().register_automation_node(node_type, handler)
+
         cls = _LAZY_CLASSES.setdefault("api", _RecordingPluginApi)
     api = cls(pid)
     api._api_calls = set()
+    api._node_types = set()
     return api
 
 
-def write_tool_schemas(pid: str, root: Any, manifest: dict[str, Any], api_calls: set[str]) -> None:
-    """After a full register(): save this plugin's tool schemas for later helper processes."""
+def _uses_in_process_rpc(manifest: dict[str, Any]) -> bool:
+    contributes = manifest.get("contributes") if isinstance(manifest.get("contributes"), dict) else {}
+    chat = contributes.get("chat") if isinstance(contributes.get("chat"), dict) else {}
+    return bool(chat.get("reference_sources")) or any(contributes.get(k) for k in _IN_PROCESS_RPC_CONTRIBS)
+
+
+def write_tool_schemas(
+    pid: str, root: Any, manifest: dict[str, Any], api_calls: set[str], node_types: set[str] | None = None
+) -> None:
+    """After a full register(): save this plugin's tool schemas and workflow node types for
+    later helper processes."""
     import json
     import os
 
@@ -615,6 +644,8 @@ def write_tool_schemas(pid: str, root: Any, manifest: dict[str, Any], api_calls:
                 }
             )
         unsafe = sorted(c for c in api_calls if c not in _LAZY_SAFE_API)
+        if "register_panel_rpc" in api_calls and _uses_in_process_rpc(manifest):
+            unsafe.append("register_panel_rpc (project or reference sources)")
         data = {
             "format": _SCHEMA_FORMAT,
             "plugin": pid,
@@ -624,6 +655,7 @@ def write_tool_schemas(pid: str, root: Any, manifest: dict[str, Any], api_calls:
             "unsafe_api": unsafe,
             "intent": intent,
             "tools": rows,
+            "nodes": sorted(n for n in (node_types or ()) if n),
         }
         path = _schema_path(pid, manifest)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -729,6 +761,30 @@ def _install_lazy_tools(pid: str, root: Any, manifest: dict[str, Any], data: dic
         )
         manager._tools[name] = stub
         _record_plugin_api_tool(pid, name, intent=intent, listener=bool(row.get("listener")))
+    nodes = [str(n).strip() for n in data.get("nodes") or [] if str(n).strip()]
+    if nodes:
+        from backend.automations.plugin import handler_plugin_id, register_node
+
+        for node_type in nodes:
+            if handler_plugin_id(node_type) not in ("", pid):
+                continue  # another plugin owns this node type
+            register_node(pid, node_type, _lazy_node_handler(pid, node_type))
+
+
+def _lazy_node_handler(pid: str, node_type: str) -> Any:
+    """A workflow node handler that loads ``pid`` on first use, then runs the real one."""
+
+    def run(*args: Any, **kwargs: Any) -> Any:
+        from backend.automations.plugin import get_handler
+
+        load_lazy_backend(pid)  # its register() clears this stub and names the real handler
+        real = get_handler(node_type)
+        if real is None or getattr(real, "_ducky_lazy_node", False):
+            raise RuntimeError(f"Workflow node {node_type}: the {_plugin_label(pid)} plugin did not register it")
+        return real(*args, **kwargs)
+
+    run._ducky_lazy_node = True  # type: ignore[attr-defined]
+    return run
 
 
 def _drop_lazy_stubs(pid: str) -> None:

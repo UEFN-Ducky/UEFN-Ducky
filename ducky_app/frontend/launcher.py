@@ -191,10 +191,6 @@ def run_bridge() -> None:
     from backend.process_role import set_role
 
     set_role("tool_server")  # also sets UEFN_DUCKY_MCP_BRIDGE=1
-    # numpy's OpenBLAS commits a buffer per thread at import, one thread per core: 487 MB of
-    # the shared daemon's 556 MB at ready on a 16-core PC (74 MB with one). A tool server's
-    # vector math (search) is small; one thread is plenty. Must be set before numpy loads.
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
     if "--adapter" in sys.argv[2:]:
         # Shared MCP (flag-on installs): stdlib relay to the one daemon. Runs before
@@ -498,12 +494,6 @@ def main() -> None:
             from frontend import boot_report
 
             boot_report.begin(str(_version))
-        except Exception:
-            pass
-        try:
-            from frontend.app_logging import configure as configure_logging
-
-            configure_logging()
         except Exception:
             pass
         # Logo window before panel_api / webview imports — otherwise double-click is a blank wait.

@@ -30,12 +30,14 @@ def register(api):
 '''
 
 
-def _plugin(extra: str = "") -> tuple[Path, dict]:
+def _plugin(extra: str = "", contributes: dict | None = None) -> tuple[Path, dict]:
     from backend.uefn_plugins.store import appdata_uefn_plugins_dir
 
     root = appdata_uefn_plugins_dir() / PID
     root.mkdir(parents=True, exist_ok=True)
     manifest = {"id": PID, "label": "Lazy probe", "version": "1.0.0", "backend": {"entry": "backend"}}
+    if contributes:
+        manifest["contributes"] = contributes
     (root / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
     (root / "backend.py").write_text(_BACKEND.format(extra=extra), encoding="utf-8")
     return root, manifest
@@ -118,8 +120,48 @@ def test_a_tool_server_without_a_cache_loads_now_and_writes_it(probe, monkeypatc
     assert tool_registry.lazy_tool_schemas(PID, root, manifest) is not None
 
 
+_NODE = "api.register_pipeline_node('lazyprobe.node', lambda inputs=None, **kw: {'node': 'ran'})"
+
+
+def test_a_tool_server_runs_a_cached_node_by_loading_the_plugin(probe, monkeypatch) -> None:
+    from backend.automations.plugin import clear_for_plugin, get_handler
+
+    root, manifest = _plugin(extra=_NODE)
+    loader._load_one(PID, root, manifest)
+    assert tool_registry.lazy_tool_schemas(PID, root, manifest)["nodes"] == ["lazyprobe.node"]
+    _reset(monkeypatch, "tool_server")
+    clear_for_plugin(PID)
+    try:
+        loader._load_one(PID, root, manifest)
+        assert _registers(root) == 1  # still lazy: nodes are served as stubs
+        stub = get_handler("lazyprobe.node")
+        assert getattr(stub, "_ducky_lazy_node", False)
+        assert stub({}) == {"node": "ran"}
+        assert _registers(root) == 2
+        real = get_handler("lazyprobe.node")
+        assert not getattr(real, "_ducky_lazy_node", False)
+    finally:
+        clear_for_plugin(PID)
+
+
+def test_app_only_hooks_stay_lazy(probe, monkeypatch) -> None:
+    root, manifest = _plugin(extra="api.register_panel_rpc('status', lambda: {}); api.register_secret_test('k', lambda v: True)")
+    loader._load_one(PID, root, manifest)
+    data = tool_registry.lazy_tool_schemas(PID, root, manifest)
+    assert data is not None and data["unsafe_api"] == []
+
+
+def test_panel_rpc_behind_project_sources_stays_eager(probe, monkeypatch) -> None:
+    root, manifest = _plugin(
+        extra="api.register_panel_rpc('projects', lambda: [])",
+        contributes={"project.sources": [{"id": "p", "rpc": "projects"}]},
+    )
+    loader._load_one(PID, root, manifest)
+    assert tool_registry.lazy_tool_schemas(PID, root, manifest) is None
+
+
 def test_a_plugin_that_registers_more_than_tools_stays_eager(probe, monkeypatch) -> None:
-    root, manifest = _plugin(extra="api.register_secret_test('lazyprobe_key', lambda v: True)")
+    root, manifest = _plugin(extra="api.register_tts(lambda text, **kw: b'')")
     loader._load_one(PID, root, manifest)
     assert tool_registry.lazy_tool_schemas(PID, root, manifest) is None
     _reset(monkeypatch, "tool_server")
