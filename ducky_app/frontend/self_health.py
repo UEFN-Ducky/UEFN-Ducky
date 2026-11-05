@@ -505,7 +505,8 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(out, key=lambda f: order.get(f["severity"], 9))
 
 
-ACTIONS = ("stop_sandbox", "close_idle_terminals", "stop_orphan_bridges", "trim_caches", "prune_sandboxes", "collect_garbage")
+ACTIONS = ("stop_sandbox", "close_idle_terminals", "stop_orphan_bridges", "trim_caches", "prune_sandboxes", "collect_garbage",
+           "free_ducky_memory")
 
 
 def self_care(action: str, target: str = "") -> dict[str, Any]:
@@ -529,31 +530,9 @@ def self_care(action: str, target: str = "") -> dict[str, Any]:
         # running ones, ones waiting on a card and the person's own stay.
         done["closed"] = mgr.close_idle_agent_terminals(now=time.time() + 24 * 3600)
     elif act == "stop_orphan_bridges":
-        from backend.util import proc_table
-
-        procs = proc_table.table()
-        stopped = []
-        for proc in procs.values():
-            if proc.pid == os.getpid() or not _ducky_named(proc) or not proc_table.orphan(procs, proc.pid):
-                continue
-            role = _role(_cmdline(proc.pid)[0])
-            if role in ("app", "shared tool server"):
-                continue
-            if _terminate(proc.pid, proc.name):
-                stopped.append({"pid": proc.pid, "role": role})
-        done["stopped"] = stopped
+        done["stopped"] = [{"pid": r["pid"], "role": r["role"]} for r in _stop_orphan_bridges()]
     elif act == "trim_caches":
-        from backend.tools.core.web_video import cache_dir
-
-        freed = 0
-        for f in cache_dir().glob("*"):
-            try:
-                if f.is_file():
-                    freed += f.stat().st_size
-                    f.unlink()
-            except OSError:
-                pass
-        done["freed_mb"] = _mb(freed)
+        done["freed_mb"] = _trim_caches()
     elif act == "prune_sandboxes":
         from backend.sandbox import service
         from backend.tools.panel.permission_prompt import _chat_exists
@@ -561,8 +540,175 @@ def self_care(action: str, target: str = "") -> dict[str, Any]:
         done["removed"] = service.prune(chat_exists=_chat_exists)
     elif act == "collect_garbage":
         done["objects_freed"] = gc.collect()
+    elif act == "free_ducky_memory":
+        done.update(free_ducky_memory())
     else:
         return {"ok": False, "error": f"action must be one of: {', '.join(ACTIONS)}."}
     after = psutil.Process(os.getpid()).memory_info().rss
     done["app_memory_mb"] = {"before": _mb(before), "after": _mb(after)}
     return done
+
+
+def _stop_orphan_bridges(procs: dict[int, Any] | None = None) -> list[dict[str, Any]]:
+    """Stop Ducky tool servers whose IDE or agent is gone (never the app or a shared tool
+    server, never a process outside Ducky): ``[{pid, role, mb}]``."""
+    from backend.util import proc_table
+
+    procs = proc_table.table() if procs is None else procs
+    stopped = []
+    for proc in procs.values():
+        if proc.pid == os.getpid() or not _ducky_named(proc) or not proc_table.orphan(procs, proc.pid):
+            continue
+        role = _role(_cmdline(proc.pid)[0])
+        if role in ("app", "shared tool server"):
+            continue
+        if _terminate(proc.pid, proc.name):
+            stopped.append({"pid": proc.pid, "role": role, "mb": _mb(proc.private)})
+    return stopped
+
+
+def _trim_caches() -> float:
+    """Delete the downloaded-video cache; MB freed on disk."""
+    from backend.tools.core.web_video import cache_dir
+
+    freed = 0
+    for f in cache_dir().glob("*"):
+        try:
+            if f.is_file():
+                freed += f.stat().st_size
+                f.unlink()
+        except OSError:
+            pass
+    return _mb(freed)
+
+
+def _running_chats() -> set[str] | None:
+    """Chats with a running turn; None when that can't be read (then nothing of a chat is stopped)."""
+    try:
+        from frontend.ui_web.agent_turns.state import list_running_agents
+
+        return set(list_running_agents())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _stop_abandoned_sandboxes(running: set[str] | None) -> list[dict[str, Any]]:
+    """Stop sandbox programs whose chat has no running turn: ``[{conv_id, name, mb}]``."""
+    if running is None:
+        return []
+    from backend.sandbox import service
+
+    stopped = []
+    for prog in service.all_programs():
+        conv = str(prog.get("conv_id") or "")
+        if not conv or conv in running:
+            continue
+        result = service.stop(conv, int(prog.get("pid") or 0))
+        if result.get("ok"):
+            stopped.append({"conv_id": conv, "name": prog.get("name"), "mb": float(prog.get("memory_mb") or 0)})
+    return stopped
+
+
+def _close_idle_terminals(running: set[str] | None) -> list[str]:
+    """Agent terminals with no running command (running ones, Allow cards and the person's
+    own terminals stay)."""
+    from frontend.ui_web.terminal import get_terminal_manager
+
+    kwargs: dict[str, Any] = {"now": time.time() + 24 * 3600}
+    if running is not None:
+        kwargs["running"] = running
+    return list(get_terminal_manager().close_idle_agent_terminals(**kwargs) or [])
+
+
+def _webview_window() -> Any:
+    try:
+        import webview
+
+        return webview.windows[0] if webview.windows else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _trim_webview(beat: dict[str, Any] | None) -> str:
+    """Ask WebView2 to give memory back: reload it when bloated (webview_memory's own rules),
+    or set the low memory target while the window isn't focused. What it did, or ''."""
+    from frontend.ui_web import webview_memory
+
+    window = _webview_window()
+    if window is None or not webview_memory.enabled():
+        return ""
+    if webview_memory.trim_if_bloated(window, dict(beat or {})):
+        return "reloaded the window's browser engine"
+    native = getattr(window, "native", None)
+    try:
+        if native is None or native.IsDisposed or bool(native.ContainsFocus):
+            return ""
+        from System import Action, EventHandler
+
+        def low() -> None:
+            for control in native.Controls:
+                webview_memory.update_control(control, active=False)
+            if not getattr(native, "_ducky_low_ram_hook", False):
+                # Back to normal the moment the person uses the window again.
+                native.Activated += EventHandler(lambda _s, _e: webview_memory.update_form(native))
+                native._ducky_low_ram_hook = True
+
+        native.BeginInvoke(Action(low))
+        return "set the browser engine to low memory"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def free_ducky_memory(beat: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Free what Ducky itself holds and no longer uses, in order: orphaned bridges/tool
+    servers, idle agent terminals, sandbox programs of chats with no running turn, caches and
+    garbage, then WebView2. Never a running turn, a running terminal command, UEFN, or
+    anything outside Ducky. ``{freed_mb, did: [..]}``; each part that fails is skipped."""
+    import psutil
+
+    did: list[str] = []
+    freed = 0.0
+    try:
+        before = psutil.Process(os.getpid()).memory_info().rss
+    except Exception:  # noqa: BLE001
+        before = 0
+    running = _running_chats()
+    steps = (
+        ("bridges", lambda: _stop_orphan_bridges()),
+        ("terminals", lambda: _close_idle_terminals(running)),
+        ("sandboxes", lambda: _stop_abandoned_sandboxes(running)),
+    )
+    for kind, step in steps:
+        try:
+            rows = step()
+        except Exception:  # noqa: BLE001
+            continue
+        if not rows:
+            continue
+        if kind == "bridges":
+            did.append(_plural(len(rows), "leftover bridge", "leftover bridges"))
+        elif kind == "terminals":
+            did.append(_plural(len(rows), "idle terminal", "idle terminals"))
+        else:
+            did.append(_plural(len(rows), "abandoned sandbox program", "abandoned sandbox programs"))
+        freed += sum(float(r.get("mb") or 0) for r in rows if isinstance(r, dict))
+    try:
+        _trim_caches()
+        gc.collect()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        web = _trim_webview(beat)
+        if web:
+            did.append(web)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        freed += max(0.0, _mb(before - psutil.Process(os.getpid()).memory_info().rss)) if before else 0.0
+    except Exception:  # noqa: BLE001
+        pass
+    return {"freed_mb": round(freed, 1), "did": did}

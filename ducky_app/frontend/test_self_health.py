@@ -179,6 +179,47 @@ def test_orphan_bridges_only_stop_tool_servers_whose_parent_is_gone(monkeypatch)
     assert 15 not in asked and 14 not in asked  # command lines only for Ducky's orphaned processes
 
 
+def test_free_ducky_memory_stops_leftovers_and_spares_live_work(monkeypatch):
+    from backend.sandbox import service
+    from backend.util import proc_table
+    from frontend.ui_web import terminal
+
+    def proc(pid, name, ppid, mb):
+        return proc_table.Proc(pid, ppid, name, mb << 20, mb << 20, 1, 1, 0.0, 100.0)
+
+    procs = {p.pid: p for p in (
+        proc(1, "System", 0, 1),
+        proc(11, "UEFN-Ducky-Bridge.exe", 999999, 900),  # orphaned bridge: stopped
+        proc(14, "UEFN-Ducky-Bridge.exe", 1, 700),  # a live agent's bridge: kept
+        proc(20, "UnrealEditorFortnite.exe", 999999, 9000),  # never Ducky's to stop
+    )}
+    stopped, sandbox_stops, terminal_calls = [], [], []
+    monkeypatch.setattr(proc_table, "table", lambda: procs)
+    monkeypatch.setattr(self_health, "_cmdline", lambda pid: (["x", "bridge", "--adapter"], ""))
+    monkeypatch.setattr(self_health, "_terminate", lambda pid, name: (stopped.append(pid), True)[1])
+    monkeypatch.setattr(self_health, "_running_chats", lambda: {"busy-chat"})
+    monkeypatch.setattr(self_health, "_trim_caches", lambda: 0.0)
+    monkeypatch.setattr(self_health, "_trim_webview", lambda beat: "")
+
+    class _Terms:
+        def close_idle_agent_terminals(self, now=None, running=None):
+            terminal_calls.append(running)
+            return ["t-done-1", "t-done-2"]  # the manager keeps terminals with a running command
+
+    monkeypatch.setattr(terminal, "get_terminal_manager", lambda: _Terms())
+    monkeypatch.setattr(service, "all_programs", lambda: [
+        {"conv_id": "busy-chat", "pid": 31, "name": "vite", "memory_mb": 300},
+        {"conv_id": "done-chat", "pid": 32, "name": "npm run dev", "memory_mb": 500}])
+    monkeypatch.setattr(service, "stop", lambda conv, pid=0: sandbox_stops.append((conv, pid)) or {"ok": True})
+    out = self_health.free_ducky_memory()
+    assert stopped == [11]
+    assert sandbox_stops == [("done-chat", 32)]
+    assert terminal_calls == [{"busy-chat"}]
+    assert out["did"] == ["1 leftover bridge", "2 idle terminals", "1 abandoned sandbox program"]
+    assert out["freed_mb"] >= 1400
+    assert self_health.self_care("format_disk")["ok"] is False and "free_ducky_memory" in self_health.ACTIONS
+
+
 def test_a_look_reads_the_process_table_not_each_process(monkeypatch):
     """A busy PC answered psutil's per-process questions in 50-120 ms each: one look at
     ~700 processes took minutes. The snapshot reads one table (twice, for CPU) and asks

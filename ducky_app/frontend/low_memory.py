@@ -40,7 +40,11 @@ _NOT_PROGRAMS = {"system", "registry", "memory compression", "secure system", "i
 _FREE_BUCKETS = ((0.5, "under_0_5gb"), (1.0, "under_1gb"), (1.5, "under_1_5gb"), (2.0, "under_2gb"),
                  (4.0, "under_4gb"), (None, "4gb_plus"))
 
+FREE_EVERY_S = 300.0  # Ducky frees its own leftovers at most this often, and once per low spell
+
 _last_alert = 0.0  # the last critical alert
+_last_freed = 0.0  # when Ducky last freed its own leftovers
+_freed_this_spell = False  # reset when free memory is back above the warning level
 _last_warn = 0.0  # the last warning or critical alert
 _recent: deque[tuple[float, float]] = deque()  # (monotonic, free GB) within DROP_WINDOW_S
 
@@ -148,20 +152,60 @@ def _count_warning(free: float) -> None:
         pass
 
 
+def _free_own_leftovers(beat: dict[str, Any], now: float) -> dict[str, Any]:
+    """Once per low spell (and at most every FREE_EVERY_S): Ducky stops its own leftovers."""
+    global _last_freed, _freed_this_spell
+    if _freed_this_spell or (_last_freed and now - _last_freed < FREE_EVERY_S):
+        return {}
+    _freed_this_spell, _last_freed = True, now
+    try:
+        from frontend import self_health
+
+        return self_health.free_ducky_memory(beat) or {}
+    except Exception:
+        return {}
+
+
+def _freed_text(freed: dict[str, Any]) -> str:
+    """'Ducky freed 1.4 GB (2 leftover bridges, 3 idle terminals). ', or '' when it freed nothing."""
+    did = [str(d) for d in freed.get("did") or []]
+    mb = float(freed.get("freed_mb") or 0)
+    if not did and mb < 50:
+        return ""
+    amount = f" {mb / 1024:.1f} GB" if mb >= 50 else ""
+    return f"Ducky freed{amount}" + (f" ({', '.join(did)})" if did else "") + ". "
+
+
 def on_heartbeat(beat: dict[str, Any]) -> None:
     """boot_report's 30 s memory sample: a warning when the PC is getting full or emptying fast,
-    and a stronger alert when it is nearly full."""
-    global _last_alert, _last_warn
+    and a stronger alert when it is nearly full. Below the warning level Ducky first frees its
+    own leftovers (once per spell) and only warns when that wasn't enough."""
+    global _last_alert, _last_warn, _freed_this_spell
     free = beat.get("free_gb")
     if not isinstance(free, (int, float)) or isinstance(free, bool):
         return
     now = time.monotonic()
     dropped = _fast_drop(now, float(free))
+    warn_at = warn_below_gb(beat.get("total_gb"))
+    freed: dict[str, Any] = {}
+    if free >= warn_at:
+        _freed_this_spell = False
+    else:
+        freed = _free_own_leftovers(beat, now)
+        if freed.get("did") or float(freed.get("freed_mb") or 0) > 0:
+            try:
+                from frontend.ui_web.admission import free_memory_gb
+
+                free = free_memory_gb()
+            except Exception:
+                pass
+            if free >= warn_at:
+                return  # Ducky's own leftovers were enough: nothing to tell the person
     critical = free < RUN_GB
     if critical:
         if _last_alert and now - _last_alert < RUN_EVERY_S:
             return
-    elif free < warn_below_gb(beat.get("total_gb")) or dropped:
+    elif free < warn_at or dropped:
         if _last_warn and now - _last_warn < WARN_EVERY_S:
             return
     else:
@@ -170,7 +214,8 @@ def on_heartbeat(beat: dict[str, Any]) -> None:
     if critical:
         _last_alert = now
     names = biggest_programs()
-    using = f" Using the most: {names}." if names else ""
+    using = f" {_freed_text(freed).strip()}" if _freed_text(freed) else ""
+    using += f" Using the most: {names}." if names else ""
     from frontend import notifications
 
     if critical:

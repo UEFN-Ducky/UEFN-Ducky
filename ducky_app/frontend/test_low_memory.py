@@ -32,7 +32,8 @@ def _pc_table() -> dict[int, proc_table.Proc]:
 
 @pytest.fixture
 def pc(monkeypatch):
-    state = {"free": [2.0], "asked": [], "alerts": [], "events": []}
+    state = {"free": [2.0], "asked": [], "alerts": [], "events": [], "freed": [],
+             "frees": {"freed_mb": 0.0, "did": []}}
     monkeypatch.delenv("DUCKY_SKIP_LOW_MEMORY_CHECK", raising=False)
     monkeypatch.setattr(admission, "free_memory_gb", lambda: state["free"].pop(0) if len(state["free"]) > 1 else state["free"][0])
     monkeypatch.setattr(proc_table, "table", _pc_table)
@@ -41,6 +42,10 @@ def pc(monkeypatch):
     monkeypatch.setattr(low_memory, "_count", lambda: None)
     monkeypatch.setattr(low_memory, "_last_alert", 0.0)
     monkeypatch.setattr(low_memory, "_last_warn", 0.0)
+    monkeypatch.setattr(low_memory, "_last_freed", 0.0)
+    monkeypatch.setattr(low_memory, "_freed_this_spell", False)
+    monkeypatch.setattr("frontend.self_health.free_ducky_memory",
+                        lambda beat=None: state["freed"].append(beat) or dict(state["frees"]))
     monkeypatch.setattr(low_memory, "_recent", low_memory.deque())
     clock = [1000.0]
     monkeypatch.setattr(low_memory.time, "monotonic", lambda: clock[0])
@@ -148,6 +153,34 @@ def test_a_running_ducky_raises_one_critical_alert_per_half_hour_while_the_pc_is
     assert status == "Your PC is almost out of memory." and "chrome 6.2 GB" in extra["detail"]
     _beat(pc, 0.3, after_s=low_memory.RUN_EVERY_S)
     assert len(pc["alerts"]) == 2
+
+
+def test_a_low_beat_frees_duckys_leftovers_once_per_spell(pc) -> None:
+    _beat(pc, 1.1)
+    _beat(pc, 1.0)  # same spell: not again
+    assert len(pc["freed"]) == 1 and pc["freed"][0]["free_gb"] == 1.1
+    _beat(pc, 3.0)  # the spell ends
+    _beat(pc, 1.1)  # a new spell, but within five minutes of the last free
+    assert len(pc["freed"]) == 1
+    _beat(pc, 3.0)
+    _beat(pc, 1.1, after_s=low_memory.FREE_EVERY_S)
+    assert len(pc["freed"]) == 2
+
+
+def test_freeing_enough_sends_no_alert(pc) -> None:
+    # At 0.3 GB free Ducky stops its leftovers and the PC is at 1.7 GB: above the line.
+    pc["frees"] = {"freed_mb": 1434.0, "did": ["2 leftover bridges", "1 abandoned sandbox program"]}
+    pc["free"] = [1.7]
+    _beat(pc, 0.3)
+    assert len(pc["freed"]) == 1 and pc["alerts"] == [] and pc["events"] == []
+
+
+def test_the_alert_says_what_ducky_already_freed(pc) -> None:
+    pc["frees"] = {"freed_mb": 1434.0, "did": ["2 leftover bridges", "3 idle terminals"]}
+    pc["free"] = [1.1]
+    _beat(pc, 0.4)
+    assert len(pc["alerts"]) == 1
+    assert "Ducky freed 1.4 GB (2 leftover bridges, 3 idle terminals)." in pc["alerts"][0][1]["detail"]
 
 
 def test_the_usage_event_carries_only_the_free_memory_bucket() -> None:
