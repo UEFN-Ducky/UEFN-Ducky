@@ -24,10 +24,11 @@ def test_uefn_in_the_process_list_means_fewer_workers() -> None:
     assert pa.pytest_workers(True, cores=4) == "2"  # never below 2
 
 
-def test_without_uefn_every_core() -> None:
+def test_without_uefn_half_the_cores() -> None:
     pa = _load()
     assert not pa.uefn_open(["System", "explorer.exe", "UEFN-Ducky.exe"])
-    assert pa.pytest_workers(pa.uefn_open([]), cores=16) == "auto"
+    assert pa.pytest_workers(pa.uefn_open([]), cores=16) == "8"
+    assert pa.pytest_workers(False, cores=2) == "2"  # never below 2
 
 
 def test_the_suite_and_build_use_the_scaled_settings(monkeypatch) -> None:

@@ -905,12 +905,12 @@ def uefn_open(names: list[str] | None = None) -> bool:
 
 
 def pytest_workers(uefn: bool, cores: int | None = None) -> str:
-    """pytest's -n: every core, or a quarter of them (at least 2) while UEFN is open.
-    Nov 5 2026: UEFN ran out of memory beside pytest on 16 workers, vitest and the EXE build.
-    The release never waits for UEFN to close; it only runs smaller."""
-    if not uefn:
-        return "auto"
-    return str(max(2, int(cores or os.cpu_count() or 4) // 4))
+    """pytest's -n: half the cores, or a quarter of them (at least 2) while UEFN is open.
+    Nov 5 2026: UEFN ran out of memory beside pytest on 16 workers, vitest and the EXE build;
+    later that day the PC hard-reset during a release test run on every core. The release
+    never waits for UEFN to close; it only runs smaller."""
+    count = int(cores or os.cpu_count() or 4)
+    return str(max(2, count // 4 if uefn else count // 2))
 
 
 def run_regression_tests() -> None:
@@ -940,11 +940,11 @@ def run_regression_tests() -> None:
     subprocess.run([npm, "run", "-s", "predev"], check=True, cwd=str(web))
     uefn = uefn_open()
     workers = pytest_workers(uefn)
-    if uefn:
-        print(f"UEFN is open: tests use {workers} workers ({os.cpu_count()} cores)")
+    print(f"tests use {workers} workers ({os.cpu_count()} cores{', UEFN is open' if uefn else ''})")
     print("=== vitest (panel) ===")
-    subprocess.run([npm, "test", *(["--", "--maxWorkers=2"] if uefn else [])], check=True, cwd=str(web))
-    # Every core, each test file on one worker (module state stays together): about 3
+    vitest_workers = "2" if uefn else workers
+    subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
+    # Half the cores, each test file on one worker (module state stays together): about 3
     # minutes instead of 11 to 19 on one core. A test stuck for 5 minutes fails with its
     # stack instead of holding the release forever (a lock deadlock once hung it 45 minutes).
     print("=== pytest (required before Store publish) ===")
