@@ -112,6 +112,30 @@ def _save_records(box: Path, rows: list[dict[str, str]]) -> None:
     (box / "worktrees.json").write_text(json.dumps(rows, indent=1), encoding="utf-8")
 
 
+_EOL_KEYS = ("core.autocrlf", "core.eol")
+
+
+def _keep_line_endings(repo: Path, env: dict[str, str]) -> None:
+    """Pin the person's line-ending settings in the repo's own config, which its worktrees
+    share. Sandbox terminals run git with their own profile, so a setting from the person's
+    global config was lost there and edits came out CRLF (Nov 2026). Same value, so the
+    person's own git behaves as before."""
+    for key in _EOL_KEYS:
+        try:
+            value = _git(["config", "--get", key], cwd=str(repo), env=env, timeout=30)
+        except GitError:
+            continue  # not set anywhere: git's default everywhere
+        try:
+            _git(["config", "--local", "--get", key], cwd=str(repo), env=env, timeout=30)
+            continue  # already in the repo's config
+        except GitError:
+            pass
+        try:
+            _git(["config", "--local", key, value], cwd=str(repo), env=env, timeout=30)
+        except GitError:
+            pass
+
+
 def worktree(conv_id: str, repo_path: str, commit: str = "HEAD", name: str = "",
              copy: list[str] | None = None, copy_from: str = "") -> dict[str, Any]:
     """A detached worktree of ``commit``, plus ignored files listed in ``copy`` (relative to
@@ -124,6 +148,7 @@ def worktree(conv_id: str, repo_path: str, commit: str = "HEAD", name: str = "",
         raise GitError(f"{target.name} already exists in the sandbox; pass another name.")
     sha = _git(["rev-parse", "--verify", f"{commit}^{{commit}}"], cwd=str(repo), env=env)
     _git(["worktree", "add", "--detach", str(target), sha], cwd=str(repo), env=env)
+    _keep_line_endings(repo, env)
     rows = _records(box)
     rows.append({"repo": str(repo), "path": str(target)})
     _save_records(box, rows)

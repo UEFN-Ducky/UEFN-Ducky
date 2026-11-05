@@ -430,6 +430,9 @@ class TerminalSession:
         # The console host(s) its ConPTY started: ended with it (Nov 2026: ~20 conhosts piled
         # up under Ducky; microsoft/terminal#4050).
         self.console_hosts: set[int] = set()
+        # A background test or build started here beside UEFN: the terminal stays at idle
+        # priority until it ends (background_alive).
+        self._bg_idle = False
 
     def spawn(self) -> None:
         from winpty import PtyProcess
@@ -482,6 +485,8 @@ class TerminalSession:
     def set_idle(self, idle: bool) -> bool:
         """Run what this terminal runs at idle priority (a test or build beside UEFN), or back
         at its own priority."""
+        if not idle and self._bg_idle:
+            return True  # a background test or build still runs here
         job = self._job
         try:
             return bool(job is not None and job.set_idle(idle))
@@ -724,7 +729,23 @@ class TerminalSession:
         if any(pid not in self._bg_before for pid in self._descendants(snapshot)):
             return True
         self.ran_background = False
+        if self._bg_idle:
+            self._bg_idle = False
+            self.set_idle(False)
         return False
+
+    def _idle_for_background(self, command: str) -> None:
+        """An agent's background test or build with UEFN open runs at idle priority, like a
+        waited one (TerminalManager._run_watched)."""
+        if not self.agent or self._bg_idle:
+            return
+        try:
+            from frontend.ui_web.terminal import resource_guard
+
+            if resource_guard.is_heavy(command) and resource_guard.uefn_private_mb() and self.set_idle(True):
+                self._bg_idle = True
+        except Exception:
+            pass
 
     def _descendants(self, snapshot: ProcessSnapshot | None = None) -> dict[int, str]:
         """Every process under this terminal's shell: {pid: exe name}."""
@@ -813,6 +834,8 @@ class TerminalSession:
         if background and not self.ran_background:
             self._bg_before = set(self._descendants())
         self.ran_background = self.ran_background or background
+        if background:
+            self._idle_for_background(command)
         self.set_busy(not background)
         self._pending_done = None if background else threading.Event()
         self._pending_exit_code = None

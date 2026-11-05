@@ -165,6 +165,53 @@ def test_heavy_runs_go_idle_beside_uefn(monkeypatch) -> None:
     assert not manager._idle_beside_uefn(term, "cargo test")
 
 
+class _LivePty:
+    pid = 424242
+
+    def __init__(self) -> None:
+        self.typed: list[str] = []
+
+    def isalive(self) -> bool:
+        return True
+
+    def write(self, data: str) -> None:
+        self.typed.append(data)
+
+
+class _IdleJob:
+    def __init__(self) -> None:
+        self.idle: list[bool] = []
+
+    def set_idle(self, idle: bool) -> bool:
+        self.idle.append(idle)
+        return True
+
+    def pids(self) -> list[int]:
+        return []
+
+
+def test_a_background_test_run_beside_uefn_stays_idle_until_it_ends(monkeypatch, tmp_path) -> None:
+    from frontend.ui_web.terminal import session as session_module
+    from frontend.ui_web.terminal.session import TerminalSession
+
+    under_shell: dict[int, list[int]] = {}
+    monkeypatch.setattr(session_module, "_process_snapshot", lambda: (under_shell, {9: "python.exe"}))
+    monkeypatch.setattr(resource_guard, "uefn_private_mb", lambda names=None: 20 * GB)
+    term = TerminalSession(shell="bash", cwd=str(tmp_path), agent=True)  # type: ignore[arg-type]
+    term._pty, term._job = _LivePty(), _IdleJob()
+    assert term.run_command("py -3 -m pytest -q", background=True)["ok"]
+    assert term._job.idle == [True]
+    under_shell[_LivePty.pid] = [9]  # pytest runs
+    assert term.set_idle(False) and term._job.idle == [True]  # a waited command's restore keeps it idle
+    assert term.background_alive()
+    under_shell.clear()  # pytest ended
+    assert not term.background_alive() and term._job.idle == [True, False]
+    # A background dev server, or any run with UEFN closed, keeps its priority.
+    assert term.run_command("npm run dev", background=True)["ok"] and term._job.idle == [True, False]
+    monkeypatch.setattr(resource_guard, "uefn_private_mb", lambda names=None: 0)
+    assert term.run_command("cargo test", background=True)["ok"] and term._job.idle == [True, False]
+
+
 class _Capped:
     """A terminal whose memory peak climbs to its cap while the command runs."""
 
