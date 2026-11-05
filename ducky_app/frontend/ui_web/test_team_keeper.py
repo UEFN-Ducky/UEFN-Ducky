@@ -967,3 +967,54 @@ def test_a_live_member_is_still_woken(monkeypatch) -> None:
     assert keeper._member_chat("builder", None) == "builder"
     assert keeper._member_chat("team", None) == "builder"
     assert not keeper._archived("builder", None)
+
+
+def _ticked_off(plan: dict) -> dict:
+    """``plan`` with every step completed: what rolls a plan to "finished"."""
+    def walk(nodes):
+        return [{**n, "status": "completed", "children": walk(n.get("children") or [])} for n in nodes]
+    return {**plan, "status": "finished", "nodes": walk(plan["nodes"]),
+            "progress": {"completed": 4, "pending": 0, "in_progress": 0}}
+
+
+def test_a_finished_plan_stops_its_keeper_and_forgets_its_members(monkeypatch, _fresh) -> None:
+    # Nov 5 2026: the person ticked the last step of a release plan, and its keeper kept going.
+    monkeypatch.setattr(keeper, "_team_context", lambda plan, **_: ({"builder", "builder2"}, ""))
+    monkeypatch.setattr("backend.agent.a2a_broker.automatic_work_blocked", lambda cid, **kw: False)
+    woke: list[tuple[str, str]] = []
+    for minute in range(0, 10):
+        _run(minute * MIN, [], woke, plans=[SUB])
+    assert "builder" in [cid for cid, _ in woke] and keeper.status("coord")["state"] != "off"
+    keeper._lead_told["coord"] = "x"
+    _fresh["coord"] = "parked-at"  # a parked mark saved for the app's next start
+    keeper._teams["coord"]["wakes"] = float(keeper._PARK_AFTER)
+    done = _ticked_off(SUB)
+    before = len(woke)
+    for minute in range(10, 240):
+        assert _run(minute * MIN, [], woke, plans=[done]) == []
+    assert len(woke) == before  # no lead wake, no member "continue"
+    assert keeper.status("coord") == {"state": "off"}
+    assert "builder" not in keeper._members and "coord" not in keeper._lead_told and "coord" not in _fresh
+
+
+def test_a_plan_with_every_step_closed_counts_as_finished_whatever_its_status() -> None:
+    assert keeper._finished({"status": "finished"}) and keeper._finished({"status": "archived"})
+    assert keeper._finished({"status": "open", "progress": {"completed": 2, "cancelled": 1}})
+    assert not keeper._finished({"status": "open", "progress": {"completed": 2, "pending": 1}})
+    assert not keeper._finished({"status": "open", "progress": {}})  # an empty plan isn't done
+
+
+def test_a_plan_that_leaves_the_keeper_finished_is_forgotten_and_a_paused_one_is_not(monkeypatch) -> None:
+    import backend.agent.coding_agents.plans as plans
+
+    stored = {"coord": {"status": "finished"}, "lead2": {"status": "paused"}}
+    monkeypatch.setattr(plans, "load_plan", lambda cid, project_root=None: stored.get(cid))
+    monkeypatch.setattr(keeper, "_team_context", lambda plan, **_: ({"builder", "builder2"}, ""))
+    monkeypatch.setattr("backend.agent.a2a_broker.automatic_work_blocked", lambda cid, **kw: False)
+    woke: list[tuple[str, str]] = []
+    paused = {**PLAN, "chat_id": "lead2"}
+    _run(0, [], woke, plans=[SUB, paused])
+    keeper._members["m2"] = {"lead": "lead2"}
+    _run(1 * MIN, [], woke, plans=[])  # kept_plans no longer lists either plan
+    assert "builder" not in keeper._members  # coord's plan is finished: its team is forgotten
+    assert "m2" in keeper._members  # lead2's is only paused: its members keep their place

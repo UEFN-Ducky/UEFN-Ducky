@@ -73,6 +73,41 @@ def _open_steps(plan: dict[str, Any]) -> int:
     return int(prog.get("pending") or 0) + int(prog.get("in_progress") or 0)
 
 
+_FINISHED = ("finished", "completed", "archived")
+
+
+def _finished(plan: dict[str, Any]) -> bool:
+    """Finished: its status says so, or it has steps and none is open."""
+    if str(plan.get("status") or "open").strip().lower() in _FINISHED:
+        return True
+    return _total(plan) > 0 and not _open_steps(plan)
+
+
+def _stored_finished(cid: str, project_root: str | None) -> bool:
+    """The lead's stored plan is finished (or gone): what the keeper checks when a plan leaves."""
+    try:
+        from backend.agent.coding_agents.plans import load_plan
+
+        plan = load_plan(cid, project_root)
+    except Exception:
+        return False
+    return plan is None or str(plan.get("status") or "open").strip().lower() in _FINISHED
+
+
+def _forget(lead: str) -> None:
+    """A finished plan's keeper stops for good: its lead, its members and its parked mark.
+    Nov 5 2026: a release plan's keeper kept waking its lead after the plan was done.
+    Must hold ``_lock``."""
+    st = _teams.pop(lead, None)
+    _lead_told.pop(lead, None)
+    _person_told.pop(lead, None)
+    for member in [m for m, row in _members.items() if row.get("lead") == lead]:
+        _members.pop(member, None)
+        _had_work.discard(member)
+    if st is not None and st.get("wakes", 0) >= _PARK_AFTER:
+        _save_parked(lead, None)
+
+
 def _started(plan: dict[str, Any]) -> bool:
     prog = plan.get("progress") or {}
     return int(prog.get("completed") or 0) + int(prog.get("in_progress") or 0) > 0
@@ -395,15 +430,22 @@ def tick(
     busy = set(running)
     woke: list[str] = []
     with _lock:
+        for plan in [p for p in plans if _finished(p)]:
+            _forget(str(plan.get("chat_id") or ""))
+        plans = [p for p in plans if not _finished(p)]
         live = {str(p.get("chat_id") or "") for p in plans}
         for gone in [cid for cid in _teams if cid not in live]:
-            _teams.pop(gone, None)
+            if _stored_finished(gone, _teams[gone].get("root")):
+                _forget(gone)
+            else:
+                _teams.pop(gone, None)
         member_woke, movable = _dispatch_members(plans, busy, now, wake)
         for plan in plans:
             cid = str(plan.get("chat_id") or "")
             st = _teams.get(cid)
             if st is None:
-                st = _teams[cid] = {"quiet_since": now, "wakes": 0.0, "next_wake": 0.0}
+                st = _teams[cid] = {"quiet_since": now, "wakes": 0.0, "next_wake": 0.0,
+                                    "root": plan.get("project_root")}
                 parked = _load_parked(cid)
                 if parked is not None:
                     # Parked before a restart: three more wakes per app start added up.
