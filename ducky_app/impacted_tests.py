@@ -11,15 +11,20 @@ file's mtime and size; resolution always runs fresh, so a new or deleted file is
 impacted() turns that into the test files a change reaches through any chain of imports,
 plus an always-run set, and asks for the whole suite when the graph can't see the change
 (pytest config, requirements, the root conftest, or a module that loads code by path).
-CLI: py -3 ducky_app/impacted_tests.py <changed paths...>  prints one test path per line.
+Run the tests for your change (from the repo root):
+    py -3 ducky_app/impacted_tests.py --run                 # changes since origin/main + uncommitted
+    py -3 ducky_app/impacted_tests.py --list --files a.py   # just print the selection
+    py -3 ducky_app/impacted_tests.py --since HEAD~3 --run -- -x   # extra pytest args after --
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import fnmatch
 import json
 import os
+import subprocess
 import sys
 from collections import deque
 from dataclasses import dataclass, field
@@ -282,7 +287,89 @@ def impacted(root: str | os.PathLike[str], changed_paths: list[str], use_cache: 
     return Selection(sorted(selected), False, f"{len(changed)} changed file(s) reach {len(selected)} test file(s)")
 
 
-if __name__ == "__main__":
-    sel = impacted(Path(__file__).resolve().parent.parent, sys.argv[1:])
-    print(f"# {'run all: ' if sel.run_all else ''}{sel.reason}", file=sys.stderr)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+FULL_SUITE = ("ducky_app", "tests", "release")
+WEB_PANEL = "ducky_app/frontend/ui_web/web/"
+MAX_CMD_CHARS = 24_000  # Windows caps a command line at 32,767 characters
+
+
+def _git(root: Path, *args: str) -> list[str]:
+    done = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    return [line.strip() for line in done.stdout.splitlines() if line.strip()]
+
+
+def changed_files(root: Path, since: str) -> list[str]:
+    """Committed since `since` (merge base), uncommitted, and untracked .py files."""
+    out = set(_git(root, "diff", "--name-only", f"{since}...HEAD"))
+    out |= set(_git(root, "diff", "--name-only", "HEAD"))
+    out |= {p for p in _git(root, "ls-files", "--others", "--exclude-standard") if p.endswith(".py")}
+    return sorted(out)
+
+
+def _pytest(runner, root: Path, targets: list[str], extra: list[str]) -> int:
+    # ponytail: chunked so a big selection fits a Windows command line; first failure's code wins.
+    base = [sys.executable, "-m", "pytest", "-q", *extra]
+    chunks: list[list[str]] = [[]]
+    for target in targets:
+        if chunks[-1] and sum(len(t) + 1 for t in chunks[-1]) + len(target) > MAX_CMD_CHARS:
+            chunks.append([])
+        chunks[-1].append(target)
+    code = 0
+    for chunk in chunks:
+        rc = runner([*base, *chunk], root)
+        code = code or rc
+    return code
+
+
+def _call(cmd: list[str], cwd: Path) -> int:
+    return subprocess.call(cmd, cwd=cwd)
+
+
+def main(argv: list[str] | None = None, root: Path = REPO_ROOT, runner=_call) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    extra: list[str] = []
+    if "--" in argv:
+        at = argv.index("--")
+        argv, extra = argv[:at], argv[at + 1:]
+    parser = argparse.ArgumentParser(prog="impacted_tests.py", description="Run the tests a change reaches.")
+    parser.add_argument("--since", default="origin/main", help="git ref to diff against (default origin/main)")
+    parser.add_argument("--files", nargs="+", help="changed files, instead of asking git")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--list", action="store_true", help="print the selected test files (default)")
+    mode.add_argument("--run", action="store_true", help="run them with pytest")
+    args = parser.parse_args(argv)
+
+    if args.files:
+        changed, source = list(args.files), "--files"
+    else:
+        try:
+            changed = changed_files(root, args.since)
+        except (OSError, subprocess.CalledProcessError) as exc:
+            print(f"git could not list changes since {args.since}: {getattr(exc, 'stderr', '') or exc}", file=sys.stderr)
+            return 2
+        source = f"since {args.since}"
+    if any(Path(p).as_posix().startswith(WEB_PANEL) for p in changed):
+        print("web panel changed: also run vitest")
+    if not changed:
+        print(f"no changed files ({source}): no tests selected")
+        return 0
+
+    sel = impacted(root, changed)
+    if sel.run_all:
+        print(f"run all: {sel.reason}")
+        if args.run:
+            return _pytest(runner, root, list(FULL_SUITE), extra)
+        print("\n".join(sel.tests))
+        return 0
+    if not sel.tests:
+        print(f"no test files for {len(changed)} changed files ({source})")
+        return 0
+    print(f"{len(sel.tests)} test files for {len(changed)} changed files ({source})")
+    if args.run:
+        return _pytest(runner, root, sel.tests, extra)
     print("\n".join(sel.tests))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

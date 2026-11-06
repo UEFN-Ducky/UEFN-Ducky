@@ -6,11 +6,14 @@ the always-run checks, and the whole suite for changes the graph can't see."""
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from impacted_tests import build_graph, impacted
+import impacted_tests
+from impacted_tests import build_graph, impacted, main
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -194,3 +197,79 @@ def test_the_real_repo_terminal_manager_reaches_the_panel_forwarding_test() -> N
     sel = impacted(Path(__file__).resolve().parent.parent, ["ducky_app/frontend/ui_web/terminal/manager.py"])
     assert not sel.run_all, sel.reason
     assert "ducky_app/backend/tools/panel/test_terminal_forwarding.py" in sel.tests
+
+
+def _git_repo(tmp_path: Path) -> Path:
+    repo = _select_repo(tmp_path)
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-qm", "base"], ["branch", "base"]):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    return repo
+
+
+class _Runner:
+    def __init__(self, code: int = 0) -> None:
+        self.code, self.calls = code, []
+
+    def __call__(self, cmd: list[str], cwd: Path) -> int:
+        self.calls.append(cmd)
+        return self.code
+
+
+def _commit(repo: Path, rel: str, text: str) -> None:
+    _write(repo, {rel: text})
+    subprocess.run(["git", "commit", "-qam", "edit"], cwd=repo, check=True, capture_output=True)
+
+
+def test_list_on_a_git_repo_with_one_committed_change(tmp_path: Path, capsys) -> None:
+    repo = _git_repo(tmp_path)
+    _commit(repo, "ducky_app/frontend/ui_web/terminal/shells.py", "X = 1\n")
+    assert main(["--since", "base", "--list"], root=repo) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == f"{len(ALWAYS) + 2} test files for 1 changed files (since base)"
+    assert "ducky_app/backend/tools/panel/test_fwd.py" in out[1:]
+
+
+def test_uncommitted_and_untracked_changes_count(tmp_path: Path, capsys) -> None:
+    repo = _git_repo(tmp_path)
+    _write(repo, {"ducky_app/backend/cyc_a.py": "X = 1\n", "ducky_app/backend/test_new.py": ""})
+    assert main(["--since", "base"], root=repo) == 0
+    out = capsys.readouterr().out
+    assert "for 2 changed files" in out
+    assert "ducky_app/backend/test_cyc.py" in out and "ducky_app/backend/test_new.py" in out
+
+
+def test_a_run_all_trigger_runs_the_full_suite(tmp_path: Path, capsys) -> None:
+    repo = _git_repo(tmp_path)
+    _commit(repo, "pytest.ini", "[pytest]\naddopts = -q\n")
+    runner = _Runner()
+    assert main(["--since", "base", "--run", "--", "-x"], root=repo, runner=runner) == 0
+    assert "run all: pytest.ini" in capsys.readouterr().out
+    assert runner.calls == [[sys.executable, "-m", "pytest", "-q", "-x", "ducky_app", "tests", "release"]]
+
+
+def test_no_changes_selects_nothing_and_exits_0(tmp_path: Path, capsys) -> None:
+    runner = _Runner(1)
+    assert main(["--since", "base", "--run"], root=_git_repo(tmp_path), runner=runner) == 0
+    assert "no tests selected" in capsys.readouterr().out and runner.calls == []
+
+
+def test_pytest_exit_code_is_passed_through(tmp_path: Path) -> None:
+    repo = _select_repo(tmp_path)
+    runner = _Runner(1)
+    assert main(["--files", "ducky_app/backend/cyc_a.py", "--run"], root=repo, runner=runner) == 1
+    assert "ducky_app/backend/test_cyc.py" in runner.calls[0]
+
+
+def test_a_web_panel_change_asks_for_vitest(tmp_path: Path, capsys) -> None:
+    repo = _select_repo(tmp_path)
+    assert main(["--files", "ducky_app/frontend/ui_web/web/src/App.tsx"], root=repo) == 0
+    assert "web panel changed: also run vitest" in capsys.readouterr().out
+
+
+def test_a_big_selection_is_split_to_fit_a_windows_command_line(tmp_path: Path) -> None:
+    runner = _Runner()
+    targets = [f"ducky_app/some/folder/test_{i:04d}_with_a_long_name.py" for i in range(1000)]
+    assert impacted_tests._pytest(runner, tmp_path, targets, []) == 0
+    assert len(runner.calls) > 1 and all(len(" ".join(c)) < 32_000 for c in runner.calls)
+    assert [t for c in runner.calls for t in c if t.startswith("ducky_app/")] == targets
