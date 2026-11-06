@@ -603,6 +603,7 @@ class _BackgroundTerminals:
         self.text = ""
         self.notes: list[str] = []
         self.run_tag = "t1"
+        self.killed: list[str] = []
 
     def set_push(self, _push):
         pass
@@ -618,7 +619,11 @@ class _BackgroundTerminals:
         return {"ok": True, "exit_code": 0, "output_tail": "collecting\n2104 passed"}
 
     def get_session(self, sid):
-        return self if sid == "bg-1" else None
+        return self if sid == "bg-1" and sid not in self.killed else None
+
+    def kill(self, sid):
+        self.killed.append(sid)
+        return {"ok": True}
 
     def read_output_tail(self, max_chars=8000):
         return self.text
@@ -665,6 +670,9 @@ def test_sandbox_output_returns_the_later_lines_and_the_exit_code(monkeypatch):
     assert later["running"] is False and later["exit_code"] == 0 and later["succeeded"] is True
     assert later["output"].strip() == "2104 passed" and "collecting" not in later["output"]
     assert len(mgr.notes) == 1 and mgr.notes[0].startswith("sandbox run finished, exit 0, ")
+    # The finished run's terminal closed; its whole output is still readable.
+    assert mgr.killed == ["bg-1"]
+    assert service.output(CONV, "bg-1")["output"] == "collecting\n2104 passed"
 
 
 def test_another_chat_cannot_read_a_background_run(monkeypatch):

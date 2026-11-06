@@ -274,8 +274,10 @@ def _took(secs: float) -> str:
 
 
 def _background_done(mgr: Any, box: Path, session_id: str, entry: dict[str, Any]) -> None:
-    """One line where the person watches it (the run's terminal) and in the sandbox's record.
-    ponytail: no hook posts a finished background run into its chat; the terminal line is it."""
+    """One line in the sandbox's record, then the run's terminal closes: its output is kept
+    here for ``output``. Nov 6 2026: every background run opened its own terminal and, while
+    its chat kept working, each finished one stayed open up to 10 minutes and piled up.
+    ponytail: no hook posts a finished background run into its chat; sandbox_output is it."""
     result = entry["result"] or {}
     code = result.get("exit_code")
     line = (f"sandbox run finished, exit {code if code is not None else '?'}, "
@@ -292,6 +294,11 @@ def _background_done(mgr: Any, box: Path, session_id: str, entry: dict[str, Any]
             session.note(line)
         except Exception:  # noqa: BLE001 - a closed terminal takes no note
             pass
+    entry["output_full"] = _live_output(session_id)
+    try:
+        mgr.kill(session_id)
+    except Exception:  # noqa: BLE001 - already closed (sandbox_stop, the idle cleanup)
+        pass
 
 
 def output(conv_id: str, session_id: str, offset: int = 0) -> dict[str, Any]:
@@ -302,7 +309,7 @@ def output(conv_id: str, session_id: str, offset: int = 0) -> dict[str, Any]:
     if entry is None or entry["conv_id"] != conv_id:
         return {"ok": False, "error": f"No background sandbox run {session_id} in this chat."}
     result = entry["result"]
-    text = _live_output(session_id)
+    text = _live_output(session_id) or str(entry.get("output_full") or "")
     if not text and result is not None:  # its terminal was closed since: the end of it, as the run returned it
         text = str(result.get("output_tail") or "")
     start = max(0, int(offset or 0))
