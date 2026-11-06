@@ -1,0 +1,11 @@
+{"t":"hello","protocol":1,"app_version":"1.2.471","port":4710,"origin":"http://127.0.0.1:4710","profile_dir":"C:/profile","pid":1234,"extra":"ignored"}
+{"t":"result","id":"7","ok":true,"value":{"a":[1,2]}}
+{"t":"result","id":"8","ok":false,"error":"boom"}
+{"t":"event","name":"toast","data":{"text":"hi"}}
+{"t":"event","name":"title","data":{"title":"Ducky"}}
+{"t":"event","name":"quit","data":{}}
+{"t":"future_kind","x":1}
+not json at all
+
+[1,2,3]
+{"t":"hello","protocol":2,"app_version":"9.9.9","port":1,"origin":"http://127.0.0.1:1","profile_dir":"","pid":1}

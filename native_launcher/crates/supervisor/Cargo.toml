@@ -1,0 +1,9 @@
+[package]
+name = "supervisor"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Runs UEFN-Ducky.exe --backend: JSON-lines contract, hello, restarts, crash loop"
+
+[dependencies]
+serde_json = "1"
