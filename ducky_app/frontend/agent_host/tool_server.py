@@ -10,6 +10,11 @@ its agent's conv id, project and host pipe, so every call runs as its own agent.
 A tool call that raises answers the agent with an error (``shared_mcp._client_loop``); the host
 keeps running. If another process already serves this slot (an older daemon still holding the
 lock), :func:`start` leaves it to answer.
+
+Plugin engines load here on their first tool call (``plugin_host.tool_registry``: helpers list
+a plugin's tools from its cached schemas). :func:`note_deferred` remembers which plugins the
+host served that way, and :func:`shed_engines` (the warm host's ``shed`` op, idle) unloads the
+ones a turn loaded since and serves them as stubs again, so an idle host keeps no engine.
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ from typing import Any
 _lock = threading.Lock()
 _thread: threading.Thread | None = None
 READY_WAIT_S = 20.0
+# plugin id -> (root, manifest) of every plugin this host served lazily at least once.
+_deferred: dict[str, tuple[Any, dict[str, Any]]] = {}
 
 
 def _server() -> Any:
@@ -61,6 +68,70 @@ def _warmup(mcp: Any) -> None:
             getattr(importlib.import_module(module), name)(*args)
         except Exception:  # noqa: BLE001 - one step failing never stops the others
             pass
+        if name == "ensure_plugins_loaded":
+            note_deferred()
+
+
+def note_deferred() -> list[str]:
+    """Remember the plugins this host serves as stubs now (their engines not imported)."""
+    try:
+        from backend.uefn_plugins.plugin_host import tool_registry
+
+        with tool_registry._LAZY_GUARD:
+            pending = dict(tool_registry._LAZY_PENDING)
+    except Exception:  # noqa: BLE001 - no plugin host (tests): nothing to remember
+        return []
+    with _lock:
+        for pid, src in pending.items():
+            _deferred.setdefault(pid, src)
+        return sorted(_deferred)
+
+
+def loaded_engines() -> list[str]:
+    """Plugins served lazily here whose engine a tool call has loaded since."""
+    try:
+        from backend.uefn_plugins.plugin_host.tool_registry import lazy_pending
+    except Exception:  # noqa: BLE001
+        return []
+    with _lock:
+        pids = sorted(_deferred)
+    return [pid for pid in pids if not lazy_pending(pid)]
+
+
+def shed_engines() -> list[str]:
+    """Unload every engine :func:`loaded_engines` names and list its tools as stubs again
+    (same names and schemas); the next call loads it once more. Returns the plugins shed.
+
+    Only plugins whose schema cache still says lazy are touched: one that must load eagerly
+    (or whose copy changed on disk) stays as it is."""
+    from backend.uefn_plugins.plugin_host import tool_registry
+    from backend.uefn_plugins.plugin_host.lifecycle import invalidate_plugin_runtime
+
+    shed: list[str] = []
+    for pid in loaded_engines():
+        with _lock:
+            root, manifest = _deferred[pid]
+        if tool_registry.lazy_tool_schemas(pid, root, manifest) is None:
+            continue
+        try:
+            invalidate_plugin_runtime(pid)
+            if not tool_registry.defer_plugin_register(pid, root, manifest):
+                with tool_registry._LAZY_GUARD:
+                    tool_registry._LAZY_PENDING.setdefault(pid, (root, manifest))
+                tool_registry.load_lazy_backend(pid)  # could not stub it: load it back now
+                continue
+        except Exception:  # noqa: BLE001 - one plugin never stops the others
+            continue
+        shed.append(pid)
+    if shed:
+        try:
+            from backend.bridge.plugin_gate import clear_mcp_tool_cache
+            from backend.server import mcp
+
+            clear_mcp_tool_cache(mcp)
+        except Exception:  # noqa: BLE001
+            pass
+    return shed
 
 
 def start(timeout_s: float = READY_WAIT_S) -> dict[str, Any]:
