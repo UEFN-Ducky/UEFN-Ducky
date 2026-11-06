@@ -352,6 +352,36 @@ def _heartbeat_lines(beat: dict[str, Any], ended: float | None) -> list[str]:
     return lines
 
 
+def _stage_rows(stages: Any) -> list[tuple[str, float]]:
+    """``[[name, seconds], ...]`` as pairs; a row of any other shape (another writer, a newer
+    version) is skipped, never raised on: a bad row must not stop the crash record."""
+    rows: list[tuple[str, float]] = []
+    for row in stages if isinstance(stages, list) else []:
+        if not isinstance(row, (list, tuple)) or len(row) < 2:
+            continue
+        try:
+            rows.append((str(row[0]), float(row[1])))
+        except (TypeError, ValueError):
+            continue
+    return rows
+
+
+def _launcher_line(launcher: Any) -> str:
+    """The native launcher's part of the record (the ``launcher`` key Ducky-Launcher.exe
+    adds to boot.json): its stages and exit code. "" when there is none."""
+    if not isinstance(launcher, dict):
+        return ""
+    stages = _stage_rows(launcher.get("stages"))
+    parts = []
+    if launcher.get("exit_code") is not None:
+        parts.append(f"exit {launcher.get('exit_code')} {launcher.get('exit_reason') or ''}".strip())
+    if stages:
+        parts.append("stages " + ", ".join(f"{name} {offset:.1f}s" for name, offset in stages[-25:]))
+    if launcher.get("error"):
+        parts.append("error " + str(launcher["error"])[-500:])
+    return ("Launcher: " + "; ".join(parts)) if parts else ""
+
+
 def build_report(
     previous: dict[str, Any],
     native: str,
@@ -376,7 +406,7 @@ def build_report(
     if state == "stuck" and previous.get("reported") and not native:
         return None  # the pop-up already asked while that launch was open
     started = float(previous.get("started") or 0.0)
-    stages = previous.get("stages") or []
+    stages = _stage_rows(previous.get("stages"))
     last = stages[-1][0] if stages else "launch"
     if native:
         when = "while starting" if state not in _QUIET_STATES else "while running"
@@ -395,7 +425,14 @@ def build_report(
         "Started " + (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)) if started else "?"),
         "Stages: " + ", ".join(f"{name} {offset:.1f}s" for name, offset in stages[-25:]),
     ]
-    plugins = _loading_plugins(int(previous.get("pid") or 0))
+    launcher = _launcher_line(previous.get("launcher"))
+    if launcher:
+        lines.append(launcher)
+    try:
+        pid = int(previous.get("pid") or 0)
+    except (TypeError, ValueError):
+        pid = 0
+    plugins = _loading_plugins(pid)
     if plugins:
         lines.append("Loading when it closed: " + ", ".join(plugins))
     if previous.get("error"):
