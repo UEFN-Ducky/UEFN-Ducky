@@ -179,3 +179,83 @@ def test_launcher_that_never_paints_is_killed_and_python_runs(
     _falls_back(appdata, list(ARGV))
     assert procs and procs[0].killed
     assert starts and starts[0][0] == "python" and starts[0][3] in ("no_hello", "timeout")
+
+
+# --- 21: protocol mismatch, 22: crash loop ----------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["on", "auto"])
+@pytest.mark.parametrize(("code", "reason"), [(21, "protocol"), (22, "crash_loop")])
+def test_exit_21_and_22_run_python_with_the_same_argv(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, mode: str, code: int, reason: str
+) -> None:
+    _setting(mode)
+    cmds = _spawn_exiting(monkeypatch, code)
+    _falls_back(appdata, list(ARGV))
+    assert cmds == [[str(ns.launcher_exe()), *ARGV[1:]]]
+    assert starts == [("python", None, None, reason)]
+    assert len(json.loads(ns.crash_loop_path().read_text(encoding="utf-8"))["failures"]) == 1
+
+
+def _at(monkeypatch: pytest.MonkeyPatch, when: float) -> None:
+    monkeypatch.setattr(ns.time, "time", lambda: when)
+
+
+def test_three_failures_hold_auto_on_python_for_24_hours(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setting("auto")
+    t0 = 1_800_000_000.0
+    cmds = _spawn_exiting(monkeypatch, ns.EXIT_PROTOCOL)
+    for i in range(3):  # 3 failures within 10 min write the marker
+        _at(monkeypatch, t0 + i * 60)
+        _falls_back(appdata, list(ARGV))
+    assert len(cmds) == 3
+    marker = json.loads(ns.crash_loop_path().read_text(encoding="utf-8"))
+    assert marker["until"] == pytest.approx(t0 + 120 + 24 * 3600)
+    starts.clear()
+    for later in (121, 3600, 24 * 3600 + 119):  # held: no launcher at all
+        _at(monkeypatch, t0 + later)
+        _falls_back(appdata, list(ARGV))
+    assert len(cmds) == 3
+    assert [s[3] for s in starts] == ["crash_loop_active"] * 3
+    assert len(json.loads(ns.crash_loop_path().read_text(encoding="utf-8")).get("failures", [])) == 0
+    _at(monkeypatch, t0 + 24 * 3600 + 121)  # the hold is over: auto tries again
+    _falls_back(appdata, list(ARGV))
+    assert len(cmds) == 4
+
+
+def test_on_still_tries_the_launcher_during_the_hold(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _setting("on")
+    now = 1_800_000_000.0
+    _at(monkeypatch, now)
+    ns._write_json(ns.crash_loop_path(), {"failures": [], "until": now + 3600})
+    cmds = _spawn_exiting(monkeypatch, ns.EXIT_PROTOCOL)
+    _falls_back(appdata, list(ARGV))
+    assert len(cmds) == 1 and starts == [("python", None, None, "protocol")]
+
+
+@pytest.mark.parametrize("marker", [None, "{not json", json.dumps({"until": 9e18, "failures": [1, 2]})])
+def test_off_never_reads_the_marker(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, marker: str | None
+) -> None:
+    _setting("off")
+    if marker is not None:
+        ns.crash_loop_path().parent.mkdir(parents=True, exist_ok=True)
+        ns.crash_loop_path().write_text(marker, encoding="utf-8")
+    before = ns.crash_loop_path().read_bytes() if marker is not None else None
+
+    def boom(*_a: object) -> None:
+        raise AssertionError("off read launcher state")
+
+    for name in ("crash_loop_active", "_crash_loop_state", "_read_json", "webview2_ok", "launcher_exe"):
+        monkeypatch.setattr(ns, name, boom)
+    _no_spawn(monkeypatch)
+    _falls_back(appdata, list(ARGV))
+    assert starts == []
+    if before is None:
+        assert not ns.crash_loop_path().exists()
+    else:
+        assert ns.crash_loop_path().read_bytes() == before
