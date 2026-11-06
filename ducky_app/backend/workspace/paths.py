@@ -85,6 +85,34 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:HASH_HEX_CHARS]
 
 
+_LONG_PREFIX = "\\\\?\\"
+_LONG_UNC_PREFIX = "\\\\?\\UNC\\"
+_DELETED_DIR = "\\$extend\\$deleted\\"
+
+
+def real_path(path: str) -> str:
+    """``os.path.realpath`` that holds while another thread creates or replaces the file.
+
+    On Windows, realpath of a file that is being replaced can name the old copy
+    (``C:\\$Extend\\$Deleted\\…``) or keep the ``\\\\?\\`` prefix it added; the path then
+    looks outside its project. That result is resolved again from the parent folder.
+    """
+    full = os.path.abspath(path)
+    got = os.path.realpath(full)
+    if os.name != "nt":
+        return got
+    if not full.startswith(_LONG_PREFIX):
+        if got.startswith(_LONG_UNC_PREFIX):
+            got = "\\\\" + got[len(_LONG_UNC_PREFIX):]
+        elif got.startswith(_LONG_PREFIX):
+            got = got[len(_LONG_PREFIX):]
+    if _DELETED_DIR in os.path.normcase(got):
+        parent, name = os.path.split(full)
+        if name and parent != full:
+            got = os.path.join(real_path(parent), name)
+    return got
+
+
 def rel_from_root(full_path: str, root: str) -> str | None:
     """``full_path`` relative to ``root`` with forward slashes, or None if outside."""
     try:
