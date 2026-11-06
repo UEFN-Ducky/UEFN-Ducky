@@ -260,6 +260,46 @@ def test_lowest_idle_host_stays_warm_and_extra_ones_exit(tmp_path):
         sup.stop_all()
 
 
+class _Channel(_Recorder):
+    def close(self, reason=""):
+        self.closed = True
+
+
+def test_idle_warm_host_is_sent_shed_once_per_idle_spell(tmp_path, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(supervisor, "time", type("Clock", (), {"monotonic": staticmethod(lambda: clock[0]),
+                                                               "sleep": staticmethod(time.sleep)}))
+    sup = supervisor.Supervisor(log_dir=tmp_path, idle_exit_s=300, reap_s=3600)
+    try:
+        warm, extra = (supervisor.Host(slot, f"p{slot}", b"k", _Launched()) for slot in (0, 1))
+        for host in (warm, extra):
+            host.ready.set()
+            host.channel = _Channel()
+            sup._hosts[host.slot] = host
+        sup.reap()
+        assert warm.channel.sent == []  # not idle long enough yet
+        clock[0] += 301
+        sup.reap()
+        assert warm.channel.sent == [("shed", {})]
+        assert ("shed", {}) not in extra.channel.sent  # an extra host exits instead
+        assert [h.slot for h in sup.hosts()] == [0]
+        sup.reap()
+        clock[0] += 600
+        sup.reap()
+        assert warm.channel.sent == [("shed", {})]  # once per idle spell
+
+        assert sup.assign("c1") is warm  # the next turn reuses the warm host
+        clock[0] += 400
+        sup.reap()
+        assert warm.channel.sent == [("shed", {})]  # never while it has an agent
+        sup.release("c1")
+        clock[0] += 301
+        sup.reap()
+        assert warm.channel.sent == [("shed", {}), ("shed", {})]  # idle again: shed again
+    finally:
+        sup.stop_all()
+
+
 def test_idle_host_exits_after_timeout(tmp_path):
     sup = supervisor.Supervisor(log_dir=tmp_path, idle_exit_s=0.5, reap_s=0.1, keep_warm=0)
     try:

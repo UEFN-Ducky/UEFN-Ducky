@@ -7,6 +7,8 @@ sandbox's ``jobs.Launched``), so when the app process ends, for any reason, its 
 A host that has had no agents for ``IDLE_EXIT_S`` is told to shut down and then killed, except the
 ``KEEP_WARM`` lowest-slot hosts: each one that exits takes its Ducky tool server and plugin engines
 (forge, rea: about 450 MB) with it, and the next turn started them all again every 5 minutes.
+A warm host idle that long is sent ``shed`` once instead (once per idle spell): it unloads the
+plugin engines its turns loaded, drops its caches and trims its heap, and stays up.
 
 ``assign(conv_id)`` picks (or starts) the host for a turn; ``release(conv_id)`` frees the seat.
 """
@@ -46,7 +48,7 @@ RESTART_DELAY_S = 2.0  # the cut-off turn ends first, so the seat queue sees the
 SEATED_ROLES = frozenset({"member", "sub_lead"})
 _DUCKY_APP = str(Path(__file__).resolve().parents[2])
 # ponytail: visible_chats is added here, not in protocol.APP_OPS (another lane); fold it in there later.
-APP_OPS = protocol.APP_OPS | {"visible_chats"}
+APP_OPS = protocol.APP_OPS | {"visible_chats", "shed"}
 
 OnFrame = Callable[["Host", dict[str, Any]], None]
 RestartSeat = Callable[[str, bool], None]
@@ -108,6 +110,7 @@ class Host:
         self.ready = threading.Event()
         self.agents: set[str] = set()
         self.started = self.idle_since = time.monotonic()
+        self.shed_for: float | None = None  # the idle_since a shed was sent for
         self.stopping = False
         self.dead = False
 
@@ -372,6 +375,7 @@ class Supervisor:
         """Stop hosts idle past ``idle_exit_s``, hosts that never connected, and dead ones."""
         now = time.monotonic()
         doomed: list[tuple[Host, str]] = []
+        shed: list[Host] = []
         with self._lock:
             live = sorted((h for h in self._hosts.values() if h.launched.alive() and h.ready.is_set()),
                           key=lambda h: h.slot)
@@ -384,10 +388,16 @@ class Supervisor:
                 elif not host.agents and now - host.idle_since >= self.idle_exit_s and host.slot not in warm:
                     reason = "idle"
                 else:
+                    if (host.slot in warm and not host.agents and now - host.idle_since >= self.idle_exit_s
+                            and host.shed_for != host.idle_since):
+                        host.shed_for = host.idle_since
+                        shed.append(host)
                     continue
                 if reason == "idle":
                     self._drop(host)  # under the same lock as the check: no seat can sneak in
                 doomed.append((host, reason))
+        for host in shed:
+            host.send("shed")
         for host, reason in doomed:
             if reason == "idle":
                 host.stop()

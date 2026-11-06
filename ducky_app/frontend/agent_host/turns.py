@@ -261,6 +261,21 @@ def on_host_closed(host: Any, reason: str) -> None:
 _cancels: dict[str, threading.Event] = {}
 
 
+def running() -> int:
+    """How many turns this host runs now."""
+    return len(_cancels)
+
+
+def _forget_turn_caches(conv_id: str) -> None:
+    """The turn ended: its checkpoint prefix (the chat's whole message list, Nov 5 2026: one
+    idle chat held 249 MB in the host) is only needed while a turn checkpoints."""
+    saves = sys.modules.get("frontend.ui_web.chats.saves")
+    stats = getattr(saves, "_PREFIX_STATS", None)
+    if stats is not None:
+        with saves._row_stats_lock:  # type: ignore[union-attr]
+            stats.pop(conv_id, None)
+
+
 def _jsonable(event: dict[str, Any]) -> dict[str, Any]:
     """The channel's writer thread dies on an unserialisable frame: stringify odd values here."""
     return json.loads(json.dumps(event, default=str))
@@ -334,6 +349,7 @@ def _host_turn(channel: Any, frame: dict[str, Any]) -> None:
         from frontend.agent_host import steer_host
 
         steer_host.set_question(conv_id, False)
+        _forget_turn_caches(conv_id)
         _flush()
         channel.send("turn_ended", conv_id=conv_id, run_id=run_id, error=error)
 

@@ -7,12 +7,18 @@ takes the single-instance lock, opens a window, applies IDE config or syncs skil
 Turn events go through ``feed(event)``: a ``Batcher`` sends them as ``event`` frames, live text
 only for chats on screen (the app's ``visible_chats`` frame), one status a second for the rest.
 Other frames go to ``frontend.agent_host.turns.on_frame(channel, frame)`` once that module exists.
+
+``shed`` (the warm host idle, from the supervisor's reaper): :func:`shed` on a thread unloads
+the plugin engines turns loaded, drops the chat caches turns filled, collects and trims the heap.
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
+import logging
 import os
+import sys
 import threading
 from multiprocessing.connection import Client
 from typing import Any
@@ -23,6 +29,8 @@ from frontend.agent_host.supervisor import APP_OPS, KEY_ENV
 
 _TICK_S = 0.05
 _batcher: Batcher | None = None
+_log = logging.getLogger(__name__)
+_shed_lock = threading.Lock()
 
 
 def feed(event: dict[str, Any]) -> None:
@@ -37,6 +45,54 @@ def _turns_handler() -> Any:
     except ImportError:
         return None
     return getattr(turns, "on_frame", None)
+
+
+def _drop_caches() -> list[str]:
+    """Empty the chat caches turns filled here (only modules already loaded)."""
+    dropped: list[str] = []
+    saves = sys.modules.get("frontend.ui_web.chats.saves")
+    stats = getattr(saves, "_PREFIX_STATS", None)
+    if stats:  # each entry pins a chat's whole message list (Nov 5 2026: 278 MB)
+        with saves._row_stats_lock:  # type: ignore[union-attr]
+            stats.clear()
+        dropped.append("prefix_stats")
+    chats = sys.modules.get("backend.store.repos.chats")
+    if chats is not None and getattr(chats, "_parts_open", None):
+        chats.forget_parts()
+        dropped.append("parts_open")
+    return dropped
+
+
+def _trim_heap() -> bool:
+    try:
+        from frontend import heap_trim
+    except ImportError:
+        return False
+    trim = getattr(heap_trim, "trim", None)
+    if not callable(trim):
+        return False
+    trim()
+    return True
+
+
+def shed() -> dict[str, Any]:
+    """The warm host has had no agents for a while: give back what its turns left behind.
+    A turn that started meanwhile skips it (its engines and caches are in use)."""
+    from frontend.agent_host import tool_server, turns
+
+    with _shed_lock:
+        if turns.running():
+            return {"skipped": "turns running"}
+        out: dict[str, Any] = {}
+        steps = (("engines", tool_server.shed_engines), ("caches", _drop_caches),
+                 ("collected", gc.collect), ("trimmed", _trim_heap))
+        for name, step in steps:
+            try:
+                out[name] = step()
+            except Exception:  # noqa: BLE001 - one step failing never stops the others
+                _log.debug("shed step %s failed", name, exc_info=True)
+        _log.info("agent host shed: %s", out)
+        return out
 
 
 def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
@@ -54,6 +110,8 @@ def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
         elif op == "visible_chats":
             ids = frame.get("conv_ids")
             batcher.set_visible(None if ids is None else [str(i) for i in ids])
+        elif op == "shed":
+            threading.Thread(target=lambda: shed(), name="agent-host-shed", daemon=True).start()
         elif handler is not None and box:
             handler(box[0], frame)
 
