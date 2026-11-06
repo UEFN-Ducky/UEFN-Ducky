@@ -97,52 +97,82 @@ def test_capturer_starts_at_30_and_rises_to_60_only_while_under_budget(monkeypat
     assert cap.fps <= 30
 
 
-def _displays_asleep() -> bool:
-    """True only while idle time has reached the power plan's "turn off display after" (0 = never)."""
+def _wake_displays():
+    """Power the displays on for idleness-off monitors; returns the undo. Draws nothing, no window.
+
+    Desktop Duplication only hands over frames Windows composes for a powered output, so a test
+    window or private desktop can't stand in: the display itself must be on.
+    """
+    import ctypes.wintypes as wt
+
+    kernel32, user32 = ctypes.windll.kernel32, ctypes.windll.user32
+    kernel32.SetThreadExecutionState.restype = wt.DWORD
+    # ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED: on, and kept on while we grab.
+    kernel32.SetThreadExecutionState(0x80000003)
+
+    class _MouseInput(ctypes.Structure):
+        _fields_ = [
+            ("dx", wt.LONG), ("dy", wt.LONG), ("mouseData", wt.DWORD),
+            ("dwFlags", wt.DWORD), ("time", wt.DWORD), ("dwExtraInfo", ctypes.c_size_t),
+        ]
+
+    class _Input(ctypes.Structure):
+        _fields_ = [("type", wt.DWORD), ("mi", _MouseInput)]  # MOUSEINPUT is the union's largest member
+
+    # A zero-distance relative move: resets the idle timer (wakes a monitor that ignores the
+    # execution state) without moving the pointer.
+    inp = _Input(0, _MouseInput(0, 0, 0, 0x0001, 0, 0))
+    user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_Input))
+    return lambda: kernel32.SetThreadExecutionState(0x80000000)
+
+
+def _first_frame(grab, wake, timeout_s: float = 6.0):
+    """The first picture of a rect; a sleeping display is woken and given time, never skipped."""
+    first = grab()
+    if first is not None:
+        return first
+    restore = wake()
     try:
-        import uuid
-        from ctypes import wintypes
+        deadline = time.perf_counter() + timeout_s
+        while time.perf_counter() < deadline:
+            try:
+                first = grab()
+            except OSError:
+                first = None  # access lost while the output powers up: the grabber reopened it
+            if first is not None:
+                return first
+            time.sleep(0.1)
+        return None
+    finally:
+        restore()
 
-        class _LastInput(ctypes.Structure):
-            _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
 
-        class _PowerStatus(ctypes.Structure):
-            _fields_ = [
-                ("ACLineStatus", ctypes.c_ubyte),
-                ("BatteryFlag", ctypes.c_ubyte),
-                ("BatteryLifePercent", ctypes.c_ubyte),
-                ("SystemStatusFlag", ctypes.c_ubyte),
-                ("BatteryLifeTime", wintypes.DWORD),
-                ("BatteryFullLifeTime", wintypes.DWORD),
-            ]
+def test_first_frame_wakes_a_sleeping_display_and_retries_instead_of_skipping():
+    calls = {"wake": 0, "restore": 0}
+    answers = [None, OSError("access lost"), None, b"px"]
 
-        user32, kernel32, powrprof = ctypes.windll.user32, ctypes.windll.kernel32, ctypes.windll.powrprof
-        li = _LastInput(ctypes.sizeof(_LastInput), 0)
-        if not user32.GetLastInputInfo(ctypes.byref(li)):
-            return False
-        idle_s = ((kernel32.GetTickCount() - li.dwTime) & 0xFFFFFFFF) / 1000
+    def grab():
+        a = answers.pop(0)
+        if isinstance(a, Exception):
+            raise a
+        return a
 
-        ps = _PowerStatus()
-        on_battery = bool(kernel32.GetSystemPowerStatus(ctypes.byref(ps))) and ps.ACLineStatus == 0
-        read = powrprof.PowerReadDCValueIndex if on_battery else powrprof.PowerReadACValueIndex
-        read.argtypes = [ctypes.c_void_p] * 4 + [ctypes.POINTER(wintypes.DWORD)]
-        powrprof.PowerGetActiveScheme.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
-        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    def wake():
+        calls["wake"] += 1
+        return lambda: calls.__setitem__("restore", calls["restore"] + 1)
 
-        scheme = ctypes.c_void_p()
-        if powrprof.PowerGetActiveScheme(None, ctypes.byref(scheme)):
-            return False
-        try:
-            sub = ctypes.create_string_buffer(uuid.UUID("7516b95f-f776-4464-8c53-06167f40cc99").bytes_le, 16)
-            idle = ctypes.create_string_buffer(uuid.UUID("3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e").bytes_le, 16)
-            after = wintypes.DWORD()
-            if read(None, scheme, sub, idle, ctypes.byref(after)):
-                return False
-        finally:
-            kernel32.LocalFree(scheme)
-        return after.value > 0 and idle_s >= after.value
-    except Exception:
-        return False
+    assert _first_frame(grab, wake) == b"px"
+    assert calls == {"wake": 1, "restore": 1}
+
+
+def test_first_frame_gives_none_so_the_caller_fails_when_no_frame_ever_comes():
+    calls = []
+    assert _first_frame(lambda: None, lambda: (calls.append("wake"), lambda: calls.append("restore"))[1], 0.3) is None
+    assert calls == ["wake", "restore"]
+
+
+def test_first_frame_leaves_an_awake_display_alone():
+    assert _first_frame(lambda: b"px", lambda: pytest.fail("woke an awake display")) == b"px"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="DXGI")
@@ -157,10 +187,8 @@ def test_dxgi_grabs_every_monitor_fast_enough_for_60fps_and_always_gives_a_first
         for o in g._outputs:
             left, top, right, bottom = o.rect
             w, h = min(1920, right - left) & ~1, min(1080, bottom - top) & ~1
-            # A new rect on a still screen still gets its first picture.
-            first = g.grab(left, top, w, h)
-            if first is None and _displays_asleep():
-                pytest.skip("the displays are off for idleness: Windows draws no frame to duplicate")
+            # A new rect on a still screen still gets its first picture, displays asleep or not.
+            first = _first_frame(lambda: g.grab(left, top, w, h), _wake_displays)
             assert first is not None and len(first) == w * h * 4
             dst = ctypes.create_string_buffer(w * h * 4)
             g.grab_into(left, top, w, h, ctypes.addressof(dst))  # straight into a caller buffer
