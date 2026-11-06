@@ -533,10 +533,11 @@ def install_workspace_services() -> None:
         logging.getLogger(__name__).warning("boot orphan close failed to start", exc_info=True)
 
 
-def start_panel_server() -> tuple[str, bool, str]:
+def start_panel_server(ui_port: int | None = None) -> tuple[str, bool, str]:
     """The panel's loopback HTTP server (or the Vite dev URL): ``(url, web_debug, bundled_http)``.
 
-    The window and ``--backend`` both serve the panel through this, on the same port."""
+    The window and ``--backend`` both serve the panel through this, on the same port, unless
+    ``--backend`` passes ``ui_port`` (the launcher owns the public port and proxies there)."""
     bundled_index = _web_root() / "index.html"
     if not bundled_index.is_file():
         raise FileNotFoundError(
@@ -546,7 +547,7 @@ def start_panel_server() -> tuple[str, bool, str]:
     from frontend.ui_web.panel_httpd import start_panel_ui_server
     from frontend.ui_web.web_dev import resolve_web_url
 
-    bundled_http = start_panel_ui_server(bundled_index.parent)
+    bundled_http = start_panel_ui_server(bundled_index.parent, bind_port=ui_port)
     url, web_debug = resolve_web_url(
         bundled_index_uri=bundled_index.as_uri(),
         bundled_http_url=bundled_http,

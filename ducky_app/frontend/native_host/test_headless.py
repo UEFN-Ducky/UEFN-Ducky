@@ -47,7 +47,7 @@ _BACKEND_PROBE = textwrap.dedent(
     webview_app.make_background_work = lambda: (lambda: None)
     webview_app.boot_panel_api = Api
     webview_app.install_workspace_services = lambda: None
-    webview_app.start_panel_server = lambda: ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/")
+    webview_app.start_panel_server = lambda ui_port=None: ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/")
 
     out = io.BytesIO()
     code = headless.run_backend(["UEFN-Ducky.exe", "--backend"], stdin=io.BytesIO(b""), stdout=out)
@@ -191,3 +191,67 @@ def test_writer_lines_and_size_limit() -> None:
     big = json.loads(lines[1])
     assert big["id"] == "big" and big["ok"] is False
     assert lines[2] == b""
+
+
+# --- under the launcher: the UI server on an internal port -------------------------------
+
+
+def test_backend_ui_port_env(monkeypatch) -> None:
+    monkeypatch.delenv(headless.BACKEND_UI_PORT_ENV, raising=False)
+    assert headless.backend_ui_port() is None
+    for raw, want in (("0", 0), (" 51234 ", 51234), ("x", None), ("70000", None), ("", None)):
+        monkeypatch.setenv(headless.BACKEND_UI_PORT_ENV, raw)
+        assert headless.backend_ui_port() == want
+        assert headless.BACKEND_UI_PORT_ENV not in os.environ  # children never inherit it
+
+
+@pytest.fixture
+def internal_ui_server(tmp_path):
+    """The real panel UI server on a free internal port; the public port is never bound."""
+    from frontend.ui_web import panel_httpd
+
+    (tmp_path / "index.html").write_text("<!doctype html><title>t</title>", encoding="utf-8")
+    assert panel_httpd._server is None
+    public = panel_httpd.PANEL_UI_HTTP_PORT
+    url = panel_httpd.start_panel_ui_server(tmp_path, bind_port=0)
+    try:
+        yield panel_httpd, url, public, panel_httpd.panel_ui_bound_port()
+    finally:
+        panel_httpd._server.shutdown()
+        panel_httpd._server.server_close()
+        panel_httpd._server = None
+        panel_httpd._root = None
+
+
+def _post(port: int, origin: str | None, host: str | None = None) -> int:
+    import http.client
+
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    headers = {"Content-Length": "0", "Host": host or f"127.0.0.1:{port}"}
+    if origin is not None:
+        headers["Origin"] = origin
+    try:
+        conn.request("POST", "/__ducky_no_such_route", headers=headers)
+        return conn.getresponse().status
+    finally:
+        conn.close()
+
+
+def test_internal_port_keeps_the_public_origin(internal_ui_server) -> None:
+    panel_httpd, url, public, internal = internal_ui_server
+    assert internal not in (0, public)
+    # What the page, panel.pid's hand-off and the IDE bridges use stays public.
+    assert url == panel_httpd.panel_ui_http_url() == f"http://127.0.0.1:{public}/"
+    assert panel_httpd.PANEL_UI_HTTP_PORT == public
+
+
+def test_internal_port_accepts_the_launchers_origin_only(internal_ui_server) -> None:
+    _panel_httpd, _url, public, internal = internal_ui_server
+    launcher = f"http://127.0.0.1:{public}"
+    assert _post(internal, launcher) != 403  # proxied with the internal Host
+    assert _post(internal, launcher, host=f"127.0.0.1:{public}") != 403  # Host passed through
+    assert _post(internal, f"http://127.0.0.1:{internal}") != 403  # the internal origin itself
+    assert _post(internal, None) != 403
+    assert _post(internal, "http://evil.example") == 403
+    assert _post(internal, "http://127.0.0.1:1") == 403
+    assert _post(internal, "null") == 403

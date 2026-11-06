@@ -802,8 +802,18 @@ def verify_panel_dist(dist_root: Path) -> None:
             )
 
 
-def start_panel_ui_server(dist_root: Path) -> str:
-    """Start (or reuse) a loopback static server for ``dist_root``; return the panel URL."""
+def panel_ui_bound_port() -> int:
+    """The port the UI server listens on: ``PANEL_UI_HTTP_PORT``, or ``--backend``'s internal one."""
+    server = _server
+    return int(server.server_address[1]) if server is not None else int(PANEL_UI_HTTP_PORT)
+
+
+def start_panel_ui_server(dist_root: Path, bind_port: int | None = None) -> str:
+    """Start (or reuse) a loopback static server for ``dist_root``; return the panel URL.
+
+    ``bind_port`` (``--backend`` under the launcher, 0 = any free port) listens there instead;
+    the page's origin, and so the URL returned and the POST Origin check, stay on
+    ``PANEL_UI_HTTP_PORT``: the launcher serves that port and proxies here."""
     global _server, _root
 
     root = dist_root.resolve()
@@ -1583,7 +1593,8 @@ def start_panel_ui_server(dist_root: Path) -> str:
                 self.end_headers()
                 self.wfile.write(data)
 
-        _server = _PanelServer(("127.0.0.1", PANEL_UI_HTTP_PORT), Handler)
+        port = PANEL_UI_HTTP_PORT if bind_port is None else int(bind_port)
+        _server = _PanelServer(("127.0.0.1", port), Handler)
         threading.Thread(target=_server.serve_forever, daemon=True, name="panel-ui-http").start()
 
     return panel_ui_http_url()

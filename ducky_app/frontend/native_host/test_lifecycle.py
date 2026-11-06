@@ -96,8 +96,10 @@ def stubbed_backend(monkeypatch):
     monkeypatch.setattr(webview_app, "boot_panel_api", _Api)
     monkeypatch.setattr(webview_app, "install_workspace_services", lambda: None)
     monkeypatch.setattr(webview_app, "webview_profile_dir", lambda: "P:/webview")
+    monkeypatch.delenv("UEFN_DUCKY_BACKEND_UI_PORT", raising=False)
     monkeypatch.setattr(
-        webview_app, "start_panel_server", lambda: ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/")
+        webview_app, "start_panel_server",
+        lambda ui_port=None: ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/"),
     )
     monkeypatch.setattr(lifecycle, "watch_parent", lambda pid, on_dead: None)
     ended: list[str] = []
@@ -122,6 +124,35 @@ def test_backend_stdin_eof_runs_the_graceful_exit(stubbed_backend) -> None:
     assert code == 0
     assert lines[0]["t"] == "hello" and lines[0]["port"] == 4567
     assert stubbed_backend == ["stdin_eof"]
+
+
+def test_backend_without_the_env_var_serves_todays_port(stubbed_backend, monkeypatch) -> None:
+    from frontend.ui_web import webview_app
+
+    asked: list = []
+    monkeypatch.setattr(webview_app, "start_panel_server", lambda ui_port=None: (
+        asked.append(ui_port) or ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/")))
+    _code, lines = _run(io.BytesIO(b""))
+    assert asked == [None]
+    assert lines[0]["port"] == 4567 and lines[0]["origin"] == "http://127.0.0.1:4567"
+    assert "public_port" not in lines[0]
+
+
+def test_backend_env_var_binds_an_internal_port_and_hello_reports_it(stubbed_backend, monkeypatch) -> None:
+    from frontend.ui_web import panel_httpd, webview_app
+
+    asked: list = []
+    monkeypatch.setenv("UEFN_DUCKY_BACKEND_UI_PORT", "0")
+    monkeypatch.setattr(panel_httpd, "PANEL_UI_HTTP_PORT", 4567)
+    monkeypatch.setattr(panel_httpd, "panel_ui_bound_port", lambda: 51234)
+    monkeypatch.setattr(webview_app, "start_panel_server", lambda ui_port=None: (
+        asked.append(ui_port) or ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/")))
+    _code, lines = _run(io.BytesIO(b""))
+    assert asked == [0]
+    hello = lines[0]
+    assert hello["port"] == 51234 and hello["origin"] == "http://127.0.0.1:51234"
+    assert hello["public_port"] == 4567
+    assert hello["url"] == "http://127.0.0.1:4567/"  # the page loads from the launcher's origin
 
 
 def test_backend_bye_runs_the_graceful_exit_and_answers_calls_first(stubbed_backend, monkeypatch) -> None:

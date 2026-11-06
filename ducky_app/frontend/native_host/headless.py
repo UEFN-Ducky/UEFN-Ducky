@@ -105,6 +105,23 @@ def server_port(http_url: str) -> int:
     return int(urlparse(http_url).port or 0)
 
 
+BACKEND_UI_PORT_ENV = "UEFN_DUCKY_BACKEND_UI_PORT"
+
+
+def backend_ui_port() -> int | None:
+    """The internal UI port the launcher asked for (0 = any free one); None = the usual port.
+    Taken out of the environment so the processes this one starts never see it."""
+    raw = (os.environ.pop(BACKEND_UI_PORT_ENV, None) or "").strip()
+    if not raw:
+        return None
+    try:
+        port = int(raw)
+    except ValueError:
+        _log.warning("%s=%r is not a port; using the usual one", BACKEND_UI_PORT_ENV, raw)
+        return None
+    return port if 0 <= port <= 65535 else None
+
+
 def hello_message(*, port: int, profile_dir: str | None, pid: int | None = None, **extra: Any) -> dict[str, Any]:
     message: dict[str, Any] = {
         "t": "hello",
@@ -308,13 +325,21 @@ def run_backend(
 
         api.bind_window(window, on_hide=lambda: None, on_exit=_on_exit)
         _bind_open_handlers(writer)
-        url, _web_debug, bundled_http = panel.start_panel_server()
+        ui_port = backend_ui_port()
+        url, _web_debug, bundled_http = panel.start_panel_server(ui_port=ui_port)
+        port, extra = server_port(bundled_http), {}
+        if ui_port is not None:
+            # The launcher owns the public port (url, panel.pid, hand-off, IDE bridges keep it)
+            # and proxies to this internal one.
+            from frontend.ui_web.panel_httpd import panel_ui_bound_port
+
+            port, extra = panel_ui_bound_port(), {"public_port": _living_port()}
         _bind_notifications(writer)
     except Exception:
         _log.exception("--backend did not start")
         return EXIT_START_FAILED
 
-    writer.send(hello_message(port=server_port(bundled_http), profile_dir=panel.webview_profile_dir(), url=url))
+    writer.send(hello_message(port=port, profile_dir=panel.webview_profile_dir(), url=url, **extra))
     try:
         from frontend.ui_web.web_dev import is_dev_panel
 
