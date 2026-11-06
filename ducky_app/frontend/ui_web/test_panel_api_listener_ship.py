@@ -37,6 +37,26 @@ def test_status_reads_and_refreshes_never_ship_or_revive(monkeypatch):
     assert done.wait(5)
     assert shipped == [] and revived == []
 
+
+def test_status_read_shows_live_plugin_rows_without_fetching_uefn(monkeypatch):
+    # Nov 5 2026: Blender opened after the last UEFN fetch kept saying Offline in the header,
+    # and a plugin loaded after that fetch had no row, until UEFN was checked again.
+    api = panel_api.PanelApi.__new__(panel_api.PanelApi)
+    api._listener_status_lock = threading.Lock()
+    fetched = []
+    monkeypatch.setattr(api, "_fetch_listener_status", lambda: fetched.append(1) or {}, raising=False)
+    blender = {"online": False}
+    patch_host(
+        monkeypatch,
+        "attach_plugin_connections",
+        lambda s: {**s, "plugin_connections": [{"id": "blender", "online": blender["online"]}]},
+        raising=False,
+    )
+    assert api.get_listener_status()["plugin_connections"] == [{"id": "blender", "online": False}]
+    blender["online"] = True  # Blender opened: the next read says so
+    assert api.get_listener_status()["plugin_connections"] == [{"id": "blender", "online": True}]
+    assert fetched == []
+
 def test_switching_or_removing_a_project_forgets_the_last_projects_listener_state(monkeypatch):
     # Oct 10 2026: a switch reset two attributes nothing read, so a listener that reported
     # no project fields kept showing the previous project's UEFN name and folder.

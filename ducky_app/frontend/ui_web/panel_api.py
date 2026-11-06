@@ -1165,7 +1165,24 @@ class PanelApi(
         cache = self._listener_status_cache()
         if refresh:
             cache.refresh()
-        return cache.get()
+        return self._with_plugin_connections(cache.get())
+
+    @staticmethod
+    def _with_plugin_connections(status: dict[str, Any]) -> dict[str, Any]:
+        """Plugin rows (Blender, Adobe…) checked now, not frozen in the UEFN snapshot.
+
+        The UEFN status is only fetched on a refresh, so its plugin rows kept whatever
+        they were then: Blender opened later still said Offline, and a plugin that
+        loaded after that fetch had no row at all. Plugin probes are cheap socket
+        checks with their own 30 s cache and never contact UEFN.
+        """
+        try:
+            from backend.uefn_plugins.plugin_host.services import attach_plugin_connections
+
+            return attach_plugin_connections(status)
+        except Exception:
+            status.setdefault("plugin_connections", [])
+            return status
 
     def _listener_status_cache(self) -> Any:
         cache = getattr(self, "_status_cache", None)
