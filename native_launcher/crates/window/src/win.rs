@@ -83,6 +83,8 @@ pub fn create(mut opts: WindowOptions) -> windows::core::Result<HWND> {
             lpfnWndProc: Some(wndproc),
             hInstance: instance,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
+            // The EXE's icon resource 1 (app/build.rs): the taskbar button and Alt+Tab.
+            hIcon: LoadIconW(Some(instance), PCWSTR(1 as _)).unwrap_or_default(),
             hbrBackground: CreateSolidBrush(COLORREF(0x000A_0A0A)),
             lpszClassName: CLASS_NAME,
             ..Default::default()
