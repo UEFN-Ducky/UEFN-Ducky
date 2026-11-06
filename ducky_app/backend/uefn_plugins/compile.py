@@ -431,6 +431,11 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
         "--quiet",
         "--no-progressbar",
     ]
+    # A busy PC (many agents, a capped terminal) runs out of memory with one C compiler per core:
+    # DUCKY_NUITKA_JOBS=2 builds with fewer at a time, in Nuitka's low-memory mode.
+    jobs = os.environ.get("DUCKY_NUITKA_JOBS", "").strip()
+    if jobs.isdigit() and int(jobs) > 0:
+        cmd += [f"--jobs={int(jobs)}", "--low-memory"]
     env = dict(os.environ, CFLAGS=BASELINE_CPU_FLAGS, LDFLAGS=BASELINE_CPU_FLAGS)
     # zig's shared cache (%LOCALAPPDATA%\zig) kept entries whose files were gone, and every
     # zig cc that hit one failed with "failed to link with LLD: FileNotFound" (Forge 1.2.10).
