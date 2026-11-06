@@ -51,6 +51,30 @@ def check_launcher(app: Path, version: str, *, signed: bool,
     print(f"PASS: {LAUNCHER} + {LOADER_DLL} present{', signed' if signed else ''}, --version {version}", flush=True)
 
 
+ISS = REPO / "release" / "installer" / "UEFN-Ducky.iss"
+
+
+def check_launch_targets(iss: str) -> None:
+    """Start menu / desktop shortcuts and the Open with commands start the launcher.
+
+    innoextract cannot give back the compiled script, so this reads the .iss the engine
+    was built from (the release builds it from this checkout)."""
+    if f'#define MyLauncherExeName "{LAUNCHER}"' not in iss:
+        raise RuntimeError(f"installer script does not define MyLauncherExeName as {LAUNCHER}")
+    lines = iss.splitlines()
+    shortcuts = [l for l in lines if l.startswith('Name: "{auto')]
+    commands = [l for l in lines if l.startswith("Root: HKA;") and "\\command" in l]
+    if len(shortcuts) < 2 or len(commands) < 2:
+        raise RuntimeError("installer script lost its shortcuts or Open with commands")
+    for line in shortcuts:
+        if 'Filename: "{app}\\{#MyLauncherExeName}"' not in line:
+            raise RuntimeError(f"shortcut does not start {LAUNCHER}: {line}")
+    for line in commands:
+        if '""{app}\\{#MyLauncherExeName}""' not in line:
+            raise RuntimeError(f"Open with command does not start {LAUNCHER}: {line}")
+    print(f"PASS: shortcuts and Open with start {LAUNCHER}", flush=True)
+
+
 def check_default_off(report: dict) -> None:
     """Fresh settings keep the native launcher off (the runtime-smoke report's value)."""
     mode = report.get("native_launcher")
@@ -80,6 +104,7 @@ def run_check(exe: Path, flag: str, output: Path, *, succeeds: bool, recovered=N
 
 def verify(extractor: Path, engine: Path, *, version: str = "", signed: bool | None = None) -> None:
     version = version or app_version()
+    check_launch_targets(ISS.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory(prefix="ducky-installer-panel-proof-") as scratch:
         root = Path(scratch)
         subprocess.run(

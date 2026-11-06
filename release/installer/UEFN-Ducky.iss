@@ -21,6 +21,9 @@
 #define MyAppPublisher "UEFN Ducky"
 #define MyAppURL "https://uefnducky.org"
 #define MyAppExeName "UEFN-Ducky.exe"
+; What shortcuts and Open with start: the native launcher, installed beside MyAppExeName
+; (with its WebView2Loader.dll) by the whole-folder [Files] entry. Icons stay on MyAppExeName.
+#define MyLauncherExeName "Ducky-Launcher.exe"
 ; NEVER change this GUID — it must stay identical across every release AND match
 ; INNO_APP_ID in frontend/install_info.py. Same AppId is what makes a newer
 ; Setup run as an in-place upgrade (same folder, same uninstall entry) instead of
@@ -109,8 +112,8 @@ Source: "ducky.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; if the user answers Yes to the prompt in [Code] below.
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyLauncherExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyLauncherExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 ; Appear in Explorer "Open with" for ANY file type (same pattern as VS Code).
 ; HKA = HKCU (per-user) or HKLM (per-machine) depending on install scope.
@@ -119,11 +122,11 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\{#MyAppExeName},0"
 Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}\SupportedTypes"; ValueType: string; ValueName: ".*"; ValueData: ""
-Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyLauncherExeName}"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\*\OpenWithList\{#MyAppExeName}"; ValueType: string; ValueName: ""; ValueData: ""; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky"; ValueType: string; ValueName: ""; ValueData: "Open with UEFN Ducky"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#MyAppExeName}"
-Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyLauncherExeName}"" ""%1"""
 ; Start with Windows: the app writes this per-user value itself (frontend/autostart.py, a
 ; switch in Settings). Setup only removes it on uninstall, so no orphan entry is left behind.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "UEFN Ducky"; Flags: uninsdeletevalue dontcreatekey
@@ -267,7 +270,7 @@ var
 begin
   ShellExec('',
     ExpandConstant('{win}\explorer.exe'),
-    '"' + ExpandConstant('{app}\{#MyAppExeName}') + '"',
+    '"' + ExpandConstant('{app}\{#MyLauncherExeName}') + '"',
     ExpandConstant('{app}'),
     SW_SHOWNORMAL, ewNoWait, ErrorCode);
 end;

@@ -1,5 +1,5 @@
-"""The installer ships, signs and closes the optional native launcher (Ducky-Launcher.exe)
-without touching shortcuts, AppId or uninstall."""
+"""The installer ships, signs and closes the native launcher (Ducky-Launcher.exe), and its
+shortcuts and Open with commands start it; AppId, icons and uninstall are unchanged."""
 
 from __future__ import annotations
 
@@ -19,8 +19,7 @@ PINNED = [
     "AppId={{{#MyAppId}}",
     '#define MyAppExeName "UEFN-Ducky.exe"',
     'Source: "{#MyAppDir}\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
-    'Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"',
-    'Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon',
+    'UninstallDisplayIcon={app}\\{#MyAppExeName}',
     "  UninstallRegKey = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{{#MyAppId}}_is1';",
 ]
 
@@ -29,6 +28,59 @@ def test_pinned_lines_are_unchanged():
     lines = ISS.splitlines()
     for line in PINNED:
         assert line in lines, line
+
+
+# The launch lines before the Repoint, exactly as 1.2.47x shipped them.
+PINNED_TARGETS = [
+    'Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"',
+    'Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon',
+    'Root: HKA; Subkey: "Software\\Classes\\Applications\\{#MyAppExeName}\\shell\\open\\command"; ValueType: string; ValueName: ""; ValueData: """{app}\\{#MyAppExeName}"" ""%1"""',
+    'Root: HKA; Subkey: "Software\\Classes\\*\\shell\\UEFNDucky\\command"; ValueType: string; ValueName: ""; ValueData: """{app}\\{#MyAppExeName}"" ""%1"""',
+]
+
+
+def _repointed(line: str) -> str:
+    """The pinned line with only its target swapped (shortcuts keep the app's icon)."""
+    if line.startswith("Name:"):
+        return line.replace(
+            'Filename: "{app}\\{#MyAppExeName}"',
+            'Filename: "{app}\\{#MyLauncherExeName}"; IconFilename: "{app}\\{#MyAppExeName}"',
+        )
+    return line.replace('"""{app}\\{#MyAppExeName}""', '"""{app}\\{#MyLauncherExeName}""')
+
+
+def test_launch_lines_differ_from_the_pinned_copy_only_in_their_target():
+    lines = ISS.splitlines()
+    assert '#define MyLauncherExeName "Ducky-Launcher.exe"' in lines
+    for old in PINNED_TARGETS:
+        assert old not in lines, old
+        assert _repointed(old) in lines, _repointed(old)
+    # Key names, icons and the friendly name stay on UEFN-Ducky.exe.
+    for keep in ("Applications\\{#MyAppExeName}\\DefaultIcon", "*\\OpenWithList\\{#MyAppExeName}",
+                 'ValueName: "Icon"; ValueData: "{app}\\{#MyAppExeName}"'):
+        assert keep in ISS, keep
+    # The finish-page launch starts the launcher too.
+    assert "ExpandConstant('{app}\\{#MyLauncherExeName}')" in ISS
+
+
+def test_verify_accepts_this_script_and_rejects_the_old_targets():
+    vip = _vip()
+    vip.check_launch_targets(ISS)
+    old = ISS
+    for line in PINNED_TARGETS:
+        old = old.replace(_repointed(line), line)
+    with pytest.raises(RuntimeError, match="does not start"):
+        vip.check_launch_targets(old)
+    with pytest.raises(RuntimeError, match="MyLauncherExeName"):
+        vip.check_launch_targets(ISS.replace('"Ducky-Launcher.exe"', '"UEFN-Ducky.exe"'))
+
+
+@pytest.mark.parametrize("gone", ["Ducky-Launcher.exe", "WebView2Loader.dll"])
+def test_verify_fails_without_either_root_file(tmp_path, gone):
+    vip, app = _vip(), _extracted(tmp_path, True)  # app/ is the install root
+    (app / gone).unlink()
+    with pytest.raises(RuntimeError, match="missing|without"):
+        vip.check_launcher(app, "1.2.3", signed=False, run=_Ran("1.2.3"))
 
 
 def test_launcher_is_optional_no_named_file_entry():
