@@ -7,12 +7,17 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 _PLUGIN = (
     Path(__file__).resolve().parents[4]
     / "uefn-plugins"
     / "uefn-plugin-cursor"
     / "backend"
 )
+# The Cursor plugin is its own repo, beside this checkout; a worktree elsewhere (a sandbox,
+# CI) has no copy of it, and every test here failed with FileNotFoundError.
+pytestmark = pytest.mark.skipif(not _PLUGIN.is_dir(), reason=f"the Cursor plugin repo isn't at {_PLUGIN}")
 
 
 def _adapter():

@@ -583,7 +583,9 @@ def test_error_kind_comes_from_the_message_but_the_message_never_leaves(monkeypa
     errors = [r["props"] for r in rows if r["name"] == "error.code"]
     assert errors[0]["kind"] == "bad_request" and errors[0]["code"] == "agent_stream"
     assert errors[1] == {"code": "agent_crash_codex", "where": "agent", "kind": "crash", "version": errors[0]["version"]}
-    assert "secret" not in str(rows) and "400" not in str(rows)
+    # What is sent (names and props), not the timestamps: a ts like 1794003196.6567516 holds "400".
+    sent = str([(r["name"], r["props"]) for r in rows])
+    assert "secret" not in sent and "400" not in sent
 
 
 def test_an_uncaught_thread_exception_is_one_error_code(monkeypatch, tmp_path) -> None:
