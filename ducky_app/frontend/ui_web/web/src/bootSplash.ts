@@ -23,15 +23,6 @@ export function dismissBootSplash(): void {
  */
 export function dismissBootSplashAfterPaint(): void {
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      dismissBootSplash();
-      notifyPainted();
-    });
+    requestAnimationFrame(() => dismissBootSplash());
   });
-}
-
-/** Tell Ducky the live page is drawn: it closes the last session's picture shown at start. */
-function notifyPainted(): void {
-  if (/[?&]direct=/.test(window.location.search) || typeof fetch !== "function") return;
-  void fetch("/__panel_boot", { method: "POST", body: '{"painted":true}' }).catch(() => undefined);
 }

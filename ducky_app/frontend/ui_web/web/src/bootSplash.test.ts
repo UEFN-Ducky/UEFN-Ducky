@@ -32,20 +32,6 @@ describe("boot splash", () => {
     expect(done()).toBe(true);
   });
 
-  it("tells Ducky the page is drawn so the start picture closes (not on the phone panel)", async () => {
-    const fetchSpy = vi.fn(async () => new Response("{}"));
-    vi.stubGlobal("fetch", fetchSpy);
-    dismissBootSplashAfterPaint();
-    await vi.advanceTimersByTimeAsync(5);
-    expect(fetchSpy).toHaveBeenCalledWith("/__panel_boot", { method: "POST", body: '{"painted":true}' });
-    fetchSpy.mockClear();
-    window.history.replaceState(null, "", "/panel/index.html?direct=1");
-    document.body.innerHTML = '<div id="boot-splash"></div>';
-    dismissBootSplashAfterPaint();
-    await vi.advanceTimersByTimeAsync(5);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
   it("is removed from the page once its fade ends", async () => {
     dismissBootSplashAfterPaint();
     await vi.advanceTimersByTimeAsync(5);

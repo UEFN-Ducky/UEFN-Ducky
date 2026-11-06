@@ -1003,11 +1003,6 @@ def start_panel_ui_server(dist_root: Path) -> str:
 
                         if payload.get("started"):
                             boot_report.page_started()
-                        elif payload.get("painted"):
-                            # The live page is drawn: the last session's picture can go.
-                            from frontend.snapshot_splash import dismiss as dismiss_snapshot
-
-                            dismiss_snapshot()
                         elif payload.get("error"):
                             boot_report.page_error(str(payload["error"]))
                     self._send_json(200, {"ok": True})
