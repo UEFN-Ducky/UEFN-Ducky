@@ -25,10 +25,12 @@ pytestmark = [
 ]
 
 MB = 1024 * 1024
-# Budgets (private bytes). Measured on main 2026-11-05, from source, no plugins installed:
-# shared daemon 84 MB at ready (566 MB before the bridge capped OpenBLAS at one thread),
-# agent host 15 MB at ready (idle, no turn run yet). The daemon guard is that size plus 25%
-# so growth fails the release; DAEMON_TARGET_MB is the 1.5 GB idle plan's share.
+# Budgets (private bytes). Measured from source, no plugins installed: shared daemon 84 MB
+# at ready without the search model (2026-11-05; 566 MB before the bridge capped OpenBLAS
+# at one thread) and 95-97 MB with it (2026-11-06, build/search-model fetched as on the
+# release PC; mapped matrix, no tokenizers thread pool), agent host 15 MB at ready (idle,
+# no turn run yet). The daemon guard holds the with-model size under 105 MB so growth
+# fails the release; DAEMON_TARGET_MB is the 1.5 GB idle plan's share.
 DAEMON_BUDGET_MB = 105
 DAEMON_TARGET_MB = 250
 AGENT_HOST_BUDGET_MB = 300

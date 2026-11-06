@@ -60,8 +60,13 @@ class Embedder:
         import numpy as np
         from tokenizers import Tokenizer
 
+        # No rayon thread pool (~5 MB private for good): batches here are small and the
+        # indexer runs in the background, so one thread is fast enough.
+        os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
         self.folder = folder
-        self.matrix = np.load(folder / MATRIX_FILE, allow_pickle=False)
+        # Mapped, not read: the 15 MB matrix stays file-backed (shared, pageable) instead
+        # of private bytes in every process that searches.
+        self.matrix = np.load(folder / MATRIX_FILE, allow_pickle=False, mmap_mode="r")
         self.dim = int(self.matrix.shape[1])
         config: dict[str, Any] = {}
         manifest: dict[str, Any] = {}
