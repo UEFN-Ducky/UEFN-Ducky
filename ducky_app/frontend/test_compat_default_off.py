@@ -1,0 +1,315 @@
+"""Default off: an update that ships Ducky-Launcher.exe changes nothing until the setting says so.
+
+Pins what every older version and every Windows entry point relies on: the EXE names, the
+Run key, Open with and ``uefn-ducky://``, the uninstall key, the panel port, the panel.pid
+hand-off, and that ``native_launcher`` off (or absent) never spawns the launcher.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import types
+from pathlib import Path
+
+import pytest
+
+from frontend import autostart, native_switch, open_files, settings
+from frontend.app_paths import exe_name_matches, process_name_matches, resolve_app_data_dir
+from frontend.frozen_process import is_uefn_ducky_executable, panel_pid_path
+
+LAUNCHER = "Ducky-Launcher.exe"
+
+
+# --- fixtures ---------------------------------------------------------------------------
+
+
+class _FakeKey:
+    def __init__(self, reg: "_FakeWinreg", path: str) -> None:
+        self.reg, self.path = reg, path
+
+    def __enter__(self) -> "_FakeKey":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+class _FakeWinreg(types.ModuleType):
+    """Just enough winreg to see every value a register call would write."""
+
+    HKEY_CURRENT_USER = "HKCU"
+    HKEY_LOCAL_MACHINE = "HKLM"
+    REG_SZ = 1
+    KEY_SET_VALUE = 2
+    KEY_READ = 4
+    KEY_WOW64_64KEY = 8
+    KEY_WOW64_32KEY = 16
+
+    def __init__(self) -> None:
+        super().__init__("winreg")
+        self.values: dict[tuple[str, str], str] = {}
+
+    def CreateKeyEx(self, root, path, *args):  # noqa: N802 — winreg's names
+        return _FakeKey(self, path)
+
+    def OpenKey(self, root, path, *args):  # noqa: N802
+        if not any(p == path for p, _ in self.values):
+            raise OSError("missing")
+        return _FakeKey(self, path)
+
+    def SetValueEx(self, key, name, _reserved, _kind, value):  # noqa: N802
+        self.values[(key.path, name)] = value
+
+    def QueryValueEx(self, key, name):  # noqa: N802
+        try:
+            return self.values[(key.path, name)], 1
+        except KeyError:
+            raise OSError("missing") from None
+
+    def DeleteValue(self, key, name):  # noqa: N802
+        self.values.pop((key.path, name), None)
+
+
+@pytest.fixture
+def fake_winreg(monkeypatch: pytest.MonkeyPatch) -> _FakeWinreg:
+    reg = _FakeWinreg()
+    monkeypatch.setitem(sys.modules, "winreg", reg)
+    monkeypatch.setattr(sys, "platform", "win32")
+    return reg
+
+
+@pytest.fixture
+def install_dir(tmp_path: Path) -> Path:
+    """An install folder after an update: UEFN-Ducky.exe with Ducky-Launcher.exe beside it."""
+    folder = tmp_path / "Programs" / "UEFN Ducky"
+    folder.mkdir(parents=True)
+    (folder / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    (folder / LAUNCHER).write_bytes(b"MZ")
+    return folder
+
+
+@pytest.fixture
+def files_backend(monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", "files")
+    path = resolve_app_data_dir() / "panel_settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# --- 1. EXE names -----------------------------------------------------------------------
+
+
+def test_exe_names_are_pinned() -> None:
+    assert native_switch.LAUNCHER_EXE_NAME == LAUNCHER
+    for name in ("UEFN-Ducky.exe", "UEFN-Ducky-1.2.470.exe", "UEFN-Ducky-Bridge.exe"):
+        assert exe_name_matches(name) and is_uefn_ducky_executable(name)
+    # Old versions sweep UEFN-Ducky*: the launcher's name must never match them.
+    assert not exe_name_matches(LAUNCHER)
+    assert not is_uefn_ducky_executable(Path("C:/x") / LAUNCHER)
+    assert not process_name_matches("Ducky-Launcher")
+    assert not exe_name_matches("UEFN-Ducky-Setup-1.2.470.exe")
+
+
+def test_launcher_is_looked_up_next_to_the_app_exe(monkeypatch: pytest.MonkeyPatch, install_dir: Path) -> None:
+    monkeypatch.delenv(native_switch.LAUNCHER_EXE_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(install_dir / "UEFN-Ducky.exe"))
+    assert native_switch.launcher_exe() == (install_dir / LAUNCHER).resolve()
+
+
+# --- 2. Run 'UEFN Ducky' ----------------------------------------------------------------
+
+
+def test_run_key_and_command_are_pinned(install_dir: Path) -> None:
+    assert autostart.RUN_KEY == r"Software\Microsoft\Windows\CurrentVersion\Run"
+    assert autostart.VALUE_NAME == "UEFN Ducky"
+    exe = install_dir / "UEFN-Ducky.exe"
+    assert autostart.command_for(exe) == f'"{exe}" --background'
+
+
+def _packaged(monkeypatch: pytest.MonkeyPatch, stable: Path) -> None:
+    import frontend.app_versions as app_versions
+    import frontend.bundle_root as bundle_root
+
+    monkeypatch.delenv("DUCKY_SANDBOX", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(bundle_root, "is_packaged_runtime", lambda: True)
+    monkeypatch.setattr(app_versions, "stable_exe", lambda *a, **k: stable)
+
+
+def test_run_key_names_uefn_ducky_exe_never_the_launcher(
+    monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path
+) -> None:
+    _packaged(monkeypatch, install_dir / "UEFN-Ducky.exe")
+    assert autostart.apply(True) is True
+    command = fake_winreg.values[(autostart.RUN_KEY, "UEFN Ducky")]
+    assert command == f'"{(install_dir / "UEFN-Ducky.exe").resolve()}" --background'
+    assert LAUNCHER not in command
+
+    # Even if something resolved the stable EXE to the launcher, the entry is left alone.
+    fake_winreg.values.clear()
+    _packaged(monkeypatch, install_dir / LAUNCHER)
+    assert autostart.managed_exe() is None
+    assert autostart.apply(True) is False
+    assert fake_winreg.values == {}
+
+
+# --- 3. Open with and uefn-ducky:// -----------------------------------------------------
+
+
+def test_open_with_registers_uefn_ducky_exe(fake_winreg: _FakeWinreg, install_dir: Path) -> None:
+    exe = (install_dir / "UEFN-Ducky.exe").resolve()
+    open_files.register_windows_open_with(exe)
+    app_key = r"Software\Classes\Applications\UEFN-Ducky.exe"
+    assert fake_winreg.values[(rf"{app_key}\shell\open\command", "")] == f'"{exe}" "%1"'
+    assert fake_winreg.values[(app_key, "FriendlyAppName")] == "UEFN Ducky"
+    assert fake_winreg.values[(rf"{app_key}\SupportedTypes", ".*")] == ""
+    assert (r"Software\Classes\*\OpenWithList\UEFN-Ducky.exe", "") in fake_winreg.values
+
+
+def test_url_protocol_registers_uefn_ducky_exe(fake_winreg: _FakeWinreg, install_dir: Path) -> None:
+    exe = (install_dir / "UEFN-Ducky.exe").resolve()
+    assert open_files.DEEP_LINK_PREFIX == "uefn-ducky://"
+    open_files.register_windows_url_protocol(exe)
+    key = r"Software\Classes\uefn-ducky"
+    assert fake_winreg.values[(key, "")] == "URL:UEFN Ducky"
+    assert fake_winreg.values[(key, "URL Protocol")] == ""
+    assert fake_winreg.values[(rf"{key}\shell\open\command", "")] == f'"{exe}" "%1"'
+
+
+def test_launcher_exe_is_never_registered(fake_winreg: _FakeWinreg, install_dir: Path) -> None:
+    open_files.register_windows_open_with(install_dir / LAUNCHER)
+    open_files.register_windows_url_protocol(install_dir / LAUNCHER)
+    assert fake_winreg.values == {}
+
+
+def test_deep_links_and_paths_still_parse_from_the_same_argv(tmp_path: Path) -> None:
+    f = tmp_path / "a.txt"
+    f.write_text("x", encoding="utf-8")
+    argv = ["UEFN-Ducky.exe", "uefn-ducky://store/install?id=x", str(f)]
+    assert open_files.cli_deep_links(argv) == ["uefn-ducky://store/install?id=x"]
+    assert [Path(p).resolve() for p in open_files.cli_open_paths(argv)] == [f.resolve()]
+
+
+# --- 4. Uninstall keys ------------------------------------------------------------------
+
+
+def test_uninstall_key_is_pinned() -> None:
+    from frontend.install_info import INNO_APP_ID, UNINSTALL_KEY
+
+    assert INNO_APP_ID == "{EAD694ED-E221-40B0-909B-AFFD7F683C9E}"
+    assert UNINSTALL_KEY == (
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{EAD694ED-E221-40B0-909B-AFFD7F683C9E}_is1"
+    )
+
+
+# --- 5. pick_panel_port -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["off", "on", "auto", None])
+def test_pick_panel_port_ignores_the_setting(
+    monkeypatch: pytest.MonkeyPatch, files_backend: Path, mode: str | None
+) -> None:
+    if mode is not None:
+        files_backend.write_text(json.dumps({"native_launcher": mode}), encoding="utf-8")
+    monkeypatch.setenv("UEFN_DUCKY_PANEL_PORT", "")
+    monkeypatch.delenv("UEFN_DUCKY_PANEL_PORT")
+    monkeypatch.setattr(settings, "PANEL_LISTENER_PORT", settings.DEFAULT_PANEL_LISTENER_PORT)
+    monkeypatch.setattr(settings, "_port_reserved", lambda port: False)
+    assert settings.DEFAULT_PANEL_LISTENER_PORT == 4200
+    assert settings.PANEL_PORT_FILE == "panel_port.json"
+    assert settings.pick_panel_port() == 4200
+    assert not (resolve_app_data_dir() / settings.PANEL_PORT_FILE).exists()
+    assert "UEFN_DUCKY_PANEL_PORT" not in os.environ
+
+
+# --- 6. panel.pid hand-off --------------------------------------------------------------
+
+
+def test_panel_pid_path_and_handoff_read() -> None:
+    path = panel_pid_path(for_write=True)
+    assert path == resolve_app_data_dir() / "panel.pid"
+    assert open_files.read_living_panel_pid() is None
+    path.write_text(str(os.getpid()), encoding="utf-8")
+    assert open_files.read_living_panel_pid() == os.getpid()
+    path.write_text("not a pid", encoding="utf-8")
+    assert open_files.read_living_panel_pid() is None
+    # Nothing launcher-specific sits next to it: a hand-off still finds the same file.
+    assert not (resolve_app_data_dir() / "launcher").exists()
+
+
+# --- 7. off or absent never spawns Ducky-Launcher.exe -----------------------------------
+
+
+@pytest.fixture
+def no_spawn(monkeypatch: pytest.MonkeyPatch, install_dir: Path) -> list[object]:
+    """Every way the switch could start a process or look at the disk fails the test."""
+    spawned: list[object] = []
+
+    def boom(*args: object, **kwargs: object) -> None:
+        spawned.append(args)
+        raise AssertionError("off must not spawn or probe anything")
+
+    monkeypatch.setenv(native_switch.LAUNCHER_EXE_ENV, str(install_dir / LAUNCHER))
+    monkeypatch.delenv(native_switch.NATIVE_CHILD_ENV, raising=False)
+    monkeypatch.setattr(subprocess, "Popen", boom)
+    monkeypatch.setattr(native_switch, "_spawn", boom)
+    monkeypatch.setattr(native_switch, "run_native", boom)
+    monkeypatch.setattr(native_switch, "webview2_ok", boom)
+    monkeypatch.setattr(native_switch, "crash_loop_active", boom)
+    monkeypatch.setattr(native_switch, "launcher_exe", boom)
+    monkeypatch.setattr(native_switch, "record_start", boom)
+    monkeypatch.setattr(native_switch, "record_start_soon", boom)
+    return spawned
+
+
+ARGV = ["UEFN-Ducky.exe", "uefn-ducky://store/install?id=x"]
+
+
+def test_absent_setting_file_backend_never_spawns(files_backend: Path, no_spawn: list[object]) -> None:
+    assert not files_backend.exists()
+    assert native_switch.maybe_start_native(list(ARGV)) is False
+    assert no_spawn == []
+
+
+def test_absent_setting_db_backend_never_spawns(monkeypatch: pytest.MonkeyPatch, no_spawn: list[object]) -> None:
+    monkeypatch.delenv("DUCKY_STORE_BACKEND", raising=False)
+    monkeypatch.delenv("DUCKY_STORE_BACKEND_SETTINGS", raising=False)
+    assert native_switch.maybe_start_native(list(ARGV)) is False
+    assert no_spawn == []
+
+
+@pytest.mark.parametrize("raw", ["off", "garbage", "", None, 0])
+def test_off_or_bad_value_never_spawns(files_backend: Path, no_spawn: list[object], raw: object) -> None:
+    files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": raw}), encoding="utf-8")
+    assert native_switch.maybe_start_native(list(ARGV)) is False
+    assert no_spawn == []
+
+
+def test_off_never_writes_launcher_state(files_backend: Path, no_spawn: list[object]) -> None:
+    native_switch.maybe_start_native(list(ARGV), setting="off")
+    assert not (resolve_app_data_dir() / "launcher").exists()
+
+
+def test_decide_off_is_python_whatever_else_is_true() -> None:
+    for exe in (True, False):
+        for wv2 in (True, False):
+            for held in (True, False):
+                assert native_switch.decide("off", exe, wv2, held) == "python"
+
+
+def test_launcher_py_runs_the_hook_before_the_python_window() -> None:
+    """The only launch hook is native_switch.maybe_start_native, after the hand-off to a running
+    Ducky and before the Python window; it is wrapped so any error runs the Python window."""
+    src = (Path(__file__).resolve().parent / "launcher.py").read_text(encoding="utf-8")
+    main = src[src.index("def main()"):]
+    hook = main.index("maybe_start_native(sys.argv, start_hidden=start_hidden)")
+    assert main.index("pick_panel_port()") < main.index("_hand_off_to_newest(bridge=False)") < hook
+    assert hook < main.index("boot_report.begin(") < main.index("from frontend.ui_web.run import run")
+    block = main[main.rindex("try:", 0, hook):main.index("raise SystemExit(0)", hook)]
+    assert "except Exception:" in block and "native = False" in block
+    # No other spawn of the launcher anywhere in launcher.py.
+    code = "\n".join(line.split("#", 1)[0] for line in src.splitlines())
+    assert LAUNCHER not in code and "run_native" not in code and "Popen" not in code
