@@ -24,6 +24,9 @@ pub enum End {
 pub trait Host {
     /// A living Ducky took this launch's argv (or `--background` left it running).
     fn hand_off(&mut self) -> bool;
+    /// Serve the static UI on the public port (`crates/server`), backend paths held until
+    /// hello. True = the page can load before hello and the backend binds an internal port.
+    fn serve_static(&mut self) -> bool;
     /// Start `--backend` without waiting: Python's ~1.8 s boot runs while the window opens.
     fn spawn_backend(&mut self, plan: &StartPlan) -> Result<(), String>;
     fn webview2_ok(&mut self) -> bool;
@@ -31,6 +34,8 @@ pub trait Host {
     fn open_window(&mut self, plan: &StartPlan) -> Result<(), String>;
     /// Wait (pumping the window) for the backend's hello.
     fn wait_hello(&mut self) -> Result<Hello, StartError>;
+    /// Let the held `/api`, `/__*` and websocket requests through to `hello.origin`.
+    fn release(&mut self, hello: &Hello) -> Result<(), String>;
     /// Load the backend's page (or, started hidden, only report ready).
     fn navigate(&mut self, hello: &Hello) -> Result<(), String>;
     /// Page calls, tray, toasts and dialogs until the end.
@@ -70,6 +75,9 @@ fn steps(host: &mut impl Host, plan: &StartPlan) -> (u8, String) {
         return (exit::OK, String::new());
     }
     host.stage("instance");
+    if host.serve_static() {
+        host.stage("static_served");
+    }
     if let Err(e) = host.spawn_backend(plan) {
         return (exit::START_ERROR, format!("backend: {e}"));
     }
@@ -91,6 +99,9 @@ fn steps(host: &mut impl Host, plan: &StartPlan) -> (u8, String) {
         // The backend handed this launch to another Ducky: no page here.
         return (exit::OK, String::new());
     }
+    if let Err(e) = host.release(&hello) {
+        return (exit::START_ERROR, format!("release: {e}"));
+    }
     if let Err(e) = host.navigate(&hello) {
         return (exit::START_ERROR, format!("navigate: {e}"));
     }
@@ -98,6 +109,24 @@ fn steps(host: &mut impl Host, plan: &StartPlan) -> (u8, String) {
         End::Exited => (exit::OK, String::new()),
         End::Fatal(code, reason) => (contract_code(code), reason),
     }
+}
+
+/// Load the page now? With the static UI served here (`early_page`) the WebView2 navigates
+/// as soon as it is ready; otherwise it waits for the backend's hello.
+pub fn should_navigate(page_host_ready: bool, navigated: bool, early_page: bool, backend_ready: bool) -> bool {
+    page_host_ready
+        && !navigated
+        && splash::first_paint(early_page, backend_ready) == splash::FirstPaint::Navigate
+}
+
+/// The panel's built web UI for a backend EXE, as `webview_app._web_root` finds it: the
+/// PyInstaller `_internal` folder, a flat (Nuitka) layout, or a source checkout.
+pub fn web_dist(backend_exe: &Path) -> Option<PathBuf> {
+    let dir = backend_exe.parent()?;
+    let rel = Path::new("frontend").join("ui_web").join("web").join("dist");
+    [dir.join("_internal").join(&rel), dir.join(&rel), dir.join("ducky_app").join(&rel)]
+        .into_iter()
+        .find(|d| d.join("index.html").is_file())
 }
 
 /// `launcher/ready-<pid>.json`: `native_switch.run_native` waits for it, then exits.
@@ -148,6 +177,14 @@ mod tests {
         fn hand_off(&mut self) -> bool {
             self.calls.push("hand_off".into());
             self.handed_off
+        }
+        fn serve_static(&mut self) -> bool {
+            self.calls.push("static".into());
+            true
+        }
+        fn release(&mut self, _hello: &Hello) -> Result<(), String> {
+            self.calls.push("release".into());
+            Ok(())
         }
         fn webview2_ok(&mut self) -> bool {
             self.calls.push("webview2".into());
@@ -205,8 +242,9 @@ mod tests {
         assert_eq!(
             m.calls,
             [
-                "hand_off", "stage:instance", "spawn", "stage:backend_spawned", "webview2", "window(show=true)",
-                "stage:window", "hello", "stage:hello", "navigate", "serve", "stop", "finish:0"
+                "hand_off", "stage:instance", "static", "stage:static_served", "spawn", "stage:backend_spawned",
+                "webview2", "window(show=true)", "stage:window", "hello", "stage:hello", "release", "navigate",
+                "serve", "stop", "finish:0"
             ]
         );
     }
@@ -299,7 +337,48 @@ mod tests {
     fn no_hello_still_gives_23_after_an_early_spawn() {
         let mut m = Mock { backend: err(supervisor::exit::NO_HELLO), ..Default::default() };
         assert_eq!(launch(&mut m, &plan(&[]), false), 23);
-        assert!(!m.calls.iter().any(|c| c == "navigate"));
+        assert!(!m.calls.iter().any(|c| c == "navigate" || c == "release"));
+    }
+
+    #[test]
+    fn static_ui_before_spawn_and_release_right_after_hello() {
+        let mut m = Mock::default();
+        launch(&mut m, &plan(&[]), false);
+        let at = |name: &str| m.calls.iter().position(|c| c == name).unwrap();
+        assert!(at("static") < at("spawn"));
+        assert_eq!(at("release"), at("stage:hello") + 1);
+        assert!(at("release") < at("navigate"));
+        // A hand-off hello releases nothing: that page belongs to another Ducky.
+        let mut m = Mock { backend: Some(Ok(hello(true))), ..Default::default() };
+        launch(&mut m, &plan(&[]), false);
+        assert!(!m.calls.iter().any(|c| c == "release"));
+    }
+
+    #[test]
+    fn page_loads_on_env_ready_not_on_hello() {
+        // Static UI served here: navigate as soon as the WebView2 is ready, before hello.
+        assert!(should_navigate(true, false, true, false));
+        // Not before the WebView2 (and its shim) is ready, and only once.
+        assert!(!should_navigate(false, false, true, false));
+        assert!(!should_navigate(true, true, true, true));
+        // No static UI here: wait for hello, as before.
+        assert!(!should_navigate(true, false, false, false));
+        assert!(should_navigate(true, false, false, true));
+    }
+
+    #[test]
+    fn web_dist_layouts() {
+        let base = std::env::temp_dir().join(format!("ducky-dist-{}", std::process::id()));
+        let rel = Path::new("frontend/ui_web/web/dist");
+        for layout in ["_internal", "", "ducky_app"] {
+            let _ = std::fs::remove_dir_all(&base);
+            let dist = base.join(layout).join(rel);
+            std::fs::create_dir_all(&dist).unwrap();
+            std::fs::write(dist.join("index.html"), "<html>").unwrap();
+            assert_eq!(web_dist(&base.join("UEFN-Ducky.exe")), Some(dist), "{layout}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(web_dist(&base.join("UEFN-Ducky.exe")), None);
     }
 
     #[test]

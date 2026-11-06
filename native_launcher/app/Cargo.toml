@@ -19,6 +19,7 @@ autostart = { path = "../crates/autostart" }
 bounds = { path = "../crates/bounds" }
 dialogs = { path = "../crates/dialogs" }
 report = { path = "../crates/report" }
+server = { path = "../crates/server" }
 shim = { path = "../crates/shim" }
 splash = { path = "../crates/splash" }
 supervisor = { path = "../crates/supervisor" }

@@ -37,6 +37,11 @@ const WM_WAKE: u32 = WM_APP + 1;
 const TITLE: &str = "UEFN Ducky";
 const BACKEND_EXE_ENV: &str = "UEFN_DUCKY_BACKEND_EXE";
 const NATIVE_CHILD_ENV: &str = "UEFN_DUCKY_NATIVE_CHILD";
+/// `headless.BACKEND_UI_PORT_ENV`: the backend binds here (0 = any free port) while the
+/// launcher serves the public UI port.
+const BACKEND_UI_PORT_ENV: &str = "UEFN_DUCKY_BACKEND_UI_PORT";
+/// A Vite dev URL replaces the bundled page: no static UI from here then.
+const WEB_DEV_ENV: &str = "UEFN_DUCKY_WEB_DEV";
 /// How often the supervisor thread looks for page calls between backend lines.
 /// ponytail: polling, a wake pipe if 10 ms of call latency ever shows.
 const SUP_POLL: Duration = Duration::from_millis(10);
@@ -65,7 +70,13 @@ struct Ui {
     page_host_ready: bool,
     url: Option<String>,
     navigated: bool,
+    /// The static UI and the held backend paths on the public port (`serve_static`).
+    server: Option<server::Server>,
+    hello_seen: bool,
     ready_written: bool,
+    painted_ms: Option<u64>,
+    /// Started by `native_switch.run_native`: the ready file waits for hello too.
+    ready_needs_hello: bool,
     window_ms: u64,
     title: String,
     tray: Option<tray::win::Tray>,
@@ -122,7 +133,11 @@ impl UiHost {
                 page_host_ready: false,
                 url: None,
                 navigated: false,
+                server: None,
+                hello_seen: false,
                 ready_written: false,
+                painted_ms: None,
+                ready_needs_hello: std::env::var(NATIVE_CHILD_ENV).is_ok_and(|v| v.trim() == "1"),
                 window_ms: 0,
                 title: TITLE.to_string(),
                 tray: None,
@@ -160,6 +175,38 @@ impl Host for UiHost {
         }
     }
 
+    fn serve_static(&mut self) -> bool {
+        if std::env::var_os(WEB_DEV_ENV).is_some_and(|v| !v.is_empty()) {
+            return false;
+        }
+        let Some(dist) = start::web_dist(&backend_exe()) else {
+            return false;
+        };
+        let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
+        let port = server::port::pick_panel_port(&app_data).ui_port();
+        // Taken (another Ducky or an old window): the backend keeps the port, as before.
+        let Ok(srv) = server::Server::bind(port, dist, server::DEFAULT_HOLD) else {
+            return false;
+        };
+        with(|u| {
+            u.server = Some(srv);
+            u.url = Some(format!("http://127.0.0.1:{port}/"));
+        });
+        true
+    }
+
+    fn release(&mut self, hello: &Hello) -> Result<(), String> {
+        let released = with(|u| {
+            u.hello_seen = true;
+            u.server.as_ref().map(|s| s.release_origin(&hello.origin))
+        })
+        .flatten();
+        match released {
+            Some(false) => Err(format!("backend origin does not parse: {}", hello.origin)),
+            _ => Ok(()),
+        }
+    }
+
     fn webview2_ok(&mut self) -> bool {
         window::check_webview2().is_ok()
     }
@@ -192,6 +239,9 @@ impl Host for UiHost {
         let mut cfg = supervisor::Config::ducky(backend_exe(), &plan.argv[1..], app_data);
         cfg.env = plan.backend_env.clone();
         cfg.env.push((NATIVE_CHILD_ENV.to_string(), "1".to_string()));
+        if with(|u| u.server.is_some()).unwrap_or(false) {
+            cfg.env.push((BACKEND_UI_PORT_ENV.to_string(), "0".to_string()));
+        }
         let (to_sup, sup_rx) = mpsc::channel();
         let (ui_tx, from_sup) = mpsc::channel();
         let wake = msg_hwnd.0 as isize;
@@ -227,18 +277,22 @@ impl Host for UiHost {
     }
 
     fn navigate(&mut self, hello: &Hello) -> Result<(), String> {
-        let url = window::start_url(&hello.origin).map_err(|e| e.to_string())?;
+        let early = with(|u| u.server.is_some()).unwrap_or(false);
+        // With the static UI here the page stays on the public port; hello's origin is the
+        // backend's internal one, reached through the released gate.
+        let url = if early { None } else { Some(window::start_url(&hello.origin).map_err(|e| e.to_string())?) };
         let shown = with(|u| {
-            u.url = Some(url);
+            if let Some(url) = url {
+                u.url = Some(url);
+            }
             u.main.is_some()
         })
         .unwrap_or(false);
         if shown {
             navigate_when_ready();
-        } else {
-            // Started hidden: the backend is up, so `run_native` may let go now.
-            write_ready_once();
         }
+        // Hidden start, or a page that painted before hello: `run_native` may let go now.
+        write_ready_once();
         Ok(())
     }
 
@@ -351,13 +405,30 @@ fn on_step(step: Step) {
         }
         Step::Msg(BackendMsg::Event { name, data }) => on_event(&name, data),
         Step::Msg(_) | Step::Idle => {}
-        Step::Restarted(_) => {
-            // Same port, same origin: the page's own reconnects reach the new backend.
-            with(|u| u.record.stage("restarted"));
+        Step::Restarted(hello) => {
+            // The page keeps its origin; requests wait while the new backend starts, then go
+            // to its (new) internal port.
+            with(|u| {
+                u.record.stage("restarted");
+                if let Some(s) = &u.server {
+                    s.gate().hold();
+                    s.release_origin(&hello.origin);
+                }
+            });
         }
-        Step::Exited => end_with(End::Exited),
-        Step::Fatal(e) => end_with(End::Fatal(e.code, e.reason)),
+        Step::Exited => {
+            close_gate();
+            end_with(End::Exited)
+        }
+        Step::Fatal(e) => {
+            close_gate();
+            end_with(End::Fatal(e.code, e.reason))
+        }
     }
+}
+
+fn close_gate() {
+    with(|u| u.server.as_ref().map(|s| s.gate().close()));
 }
 
 fn end_with(end: End) {
@@ -513,10 +584,8 @@ fn on_page_host(webview: ICoreWebView2) -> windows::core::Result<()> {
 
 fn navigate_when_ready() {
     let go = with(|u| {
-        let backend_ready = u.url.is_some();
-        // No launcher-side static server yet, so there is no cached page to paint early.
-        let decision = splash::first_paint(false, backend_ready);
-        if u.page_host_ready && !u.navigated && decision == splash::FirstPaint::Navigate {
+        let early = u.server.is_some();
+        if u.url.is_some() && start::should_navigate(u.page_host_ready, u.navigated, early, u.hello_seen) {
             u.navigated = true;
             u.webview.clone().zip(u.url.clone())
         } else {
@@ -536,6 +605,10 @@ fn on_page_painted() {
         if !u.navigated {
             return None;
         }
+        if u.painted_ms.is_none() {
+            u.painted_ms = Some(ms_since(u.t0));
+            u.record.stage("painted");
+        }
         u.splash.on_painted();
         u.splash_hwnd.take()
     })
@@ -548,14 +621,19 @@ fn on_page_painted() {
     write_ready_once();
 }
 
+/// `ready-<pid>.json` once the page has painted (a hidden start: once hello came). Under
+/// `run_native` it also waits for hello: Python lets go at this file, and a backend that
+/// never says hello must still reach Python's fallback.
 fn write_ready_once() {
     with(|u| {
-        if u.ready_written {
+        if u.ready_written || (u.main.is_some() && u.painted_ms.is_none()) {
+            return;
+        }
+        if (u.ready_needs_hello || u.main.is_none()) && !u.hello_seen {
             return;
         }
         u.ready_written = true;
-        u.record.stage("painted");
-        let painted = ms_since(u.t0);
+        let painted = u.painted_ms.unwrap_or_else(|| ms_since(u.t0));
         let _ = start::write_ready(&u.app_data, std::process::id(), u.window_ms, painted);
     });
 }

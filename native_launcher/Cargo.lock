@@ -36,6 +36,7 @@ dependencies = [
  "ducky-instance",
  "report",
  "serde_json",
+ "server",
  "shim",
  "splash",
  "supervisor",
