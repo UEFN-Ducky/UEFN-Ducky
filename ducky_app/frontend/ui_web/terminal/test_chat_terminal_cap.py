@@ -527,3 +527,24 @@ def test_another_managers_reaper_never_ends_a_live_terminals_console_host(mgr, t
     mgr.running[_os.getpid()] = [800, 801]  # 801: a host no terminal owns
     assert other.reap_console_hosts() == [801]
     assert ended == [801]
+
+
+def test_no_reaper_ends_a_bare_sessions_console_host(mgr, monkeypatch):
+    # Nov 6 2026: test_shell_memory's bare TerminalSession (in no manager) failed under -n 4: a
+    # leaked manager in the same worker took its conhost for a stray. Live sessions own theirs.
+    import os as _os
+
+    from frontend.ui_web.terminal import session as session_module
+
+    names = {900: "conhost.exe", 901: "conhost.exe"}
+    monkeypatch.setattr(manager_module, "_process_snapshot", lambda: (mgr.running, names))
+    ended = _hosts(monkeypatch, mgr.running, names)
+    monkeypatch.setattr(session_module, "_live_hosts", {1: {900}})  # a bare session spawned it
+    other = TerminalManager()
+    other._host_baseline = set()
+    mgr.running[_os.getpid()] = [900, 901]
+    monkeypatch.setattr(session_module, "_spawning", 1)  # a session is starting: its host unknown
+    assert other.reap_console_hosts() == [] and ended == []
+    monkeypatch.setattr(session_module, "_spawning", 0)
+    assert other.reap_console_hosts() == [901]
+    assert ended == [901]

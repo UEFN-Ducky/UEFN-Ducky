@@ -25,6 +25,7 @@ from frontend.ui_web.terminal.session import (
     _process_snapshot,
     agent_command_output,
     console_hosts,
+    live_console_hosts,
     terminate_pid,
 )
 from frontend.ui_web.terminal.shells import agent_shell, shell_label
@@ -309,11 +310,15 @@ class TerminalManager:
     def reap_console_hosts(self) -> list[int]:
         """End console hosts (conhost/OpenConsole) under Ducky that no open terminal owns: a
         terminal that closed without releasing its ConPTY left one behind for good. Hosts any
-        manager in this process owns, or had before its first terminal, are never stray.
+        manager in this process owns, or had before its first terminal, and any live session's
+        (one with no manager too), are never stray; nothing is while a session is starting.
 
         ponytail: another manager's terminal mid-start (host up, session not yet listed) is
         not seen; only this manager's start is locked out. One manager per app makes it moot."""
-        others: set[int] = set()
+        live = live_console_hosts()
+        if live is None:
+            return []
+        others: set[int] = set(live)
         for mgr in list(_managers):
             if mgr is self:
                 continue

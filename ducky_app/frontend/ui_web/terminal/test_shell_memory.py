@@ -46,7 +46,8 @@ def test_measure_agent_shell_private_mb(tmp_path, label, shell, argv):
         pytest.skip(f"cannot start {label}: {exc}")
     try:
         for _ in range(20):
-            assert session.run_command("echo hi", timeout_s=60)["ok"]
+            r = session.run_command("echo hi", timeout_s=60)
+            assert r["ok"], r
         print(f"\n{label}: {_private_mb(int(session._pty.pid)):.1f} MB private")
     finally:
         session.kill()

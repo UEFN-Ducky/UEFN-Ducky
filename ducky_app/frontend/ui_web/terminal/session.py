@@ -236,6 +236,21 @@ def console_hosts(snapshot: ProcessSnapshot | None = None) -> set[int]:
     return {pid for pid in children.get(os.getpid(), []) if names.get(pid, "") in _CONSOLE_HOSTS}
 
 
+# Every spawned session's console hosts, in a manager or not, and how many spawns are mid-start.
+# Nov 6 2026: a leaked manager's stray-host reaper ended a bare session's conhost under -n 4.
+_live_lock = threading.Lock()
+_live_hosts: dict[int, set[int]] = {}  # id(session) -> its hosts, until kill()
+_spawning = 0
+
+
+def live_console_hosts() -> set[int] | None:
+    """Hosts a live session owns; None while one is starting (its host is up but not known yet)."""
+    with _live_lock:
+        if _spawning:
+            return None
+        return set().union(*_live_hosts.values())
+
+
 def terminate_pid(pid: int) -> None:
     """End one process (no tree)."""
     if os.name != "nt":
@@ -467,15 +482,24 @@ class TerminalSession:
         if self.shell == "bash" and not self.spawn_argv:
             # Runs once, before the first prompt, after the profile scripts made the aliases.
             env.setdefault("PROMPT_COMMAND", f"{_BASH_DROP_WINPTY}; unset PROMPT_COMMAND")
-        hosts_before = console_hosts()
-        with ctrl_c_on_for_children():
-            self._pty = PtyProcess.spawn(
-                argv,
-                cwd=self.cwd,
-                env=env,
-                dimensions=(self._rows, self._cols),
-            )
-        self.console_hosts = console_hosts() - hosts_before
+        global _spawning
+        with _live_lock:
+            _spawning += 1
+        try:
+            hosts_before = console_hosts()
+            with ctrl_c_on_for_children():
+                self._pty = PtyProcess.spawn(
+                    argv,
+                    cwd=self.cwd,
+                    env=env,
+                    dimensions=(self._rows, self._cols),
+                )
+            self.console_hosts = console_hosts() - hosts_before
+            with _live_lock:
+                _live_hosts[id(self)] = set(self.console_hosts)
+        finally:
+            with _live_lock:
+                _spawning -= 1
         self._job = _tracking_job(int(getattr(self._pty, "pid", 0) or 0), guarded=self.agent)
         self._stop.clear()
         self._read_thread = threading.Thread(target=self._read_loop, daemon=True, name=f"pty-{self.id}")
@@ -642,6 +666,8 @@ class TerminalSession:
             except Exception:
                 pass
         hosts, self.console_hosts = self.console_hosts, set()
+        with _live_lock:
+            _live_hosts.pop(id(self), None)
         if hosts:
             alive = console_hosts()
             for host in hosts & alive:
