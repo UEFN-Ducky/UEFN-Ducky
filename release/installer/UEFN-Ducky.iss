@@ -314,7 +314,8 @@ end;
 
 // Close every Ducky process before files change: the app, background MCP bridges (an
 // IDE or agent may have started them, and they have no window for the Restart Manager)
-// and stuck copies. One left running keeps its files locked, and a half-replaced install
+// the native launcher (Ducky-Launcher.exe, when the build shipped one) and stuck copies.
+// One left running keeps its files locked, and a half-replaced install
 // is what then fails to open. Exact image names only (never /T): the in-app updater
 // starts this Setup from Ducky, so killing Ducky's process tree would kill Setup too.
 procedure CloseDuckyProcesses();
@@ -324,7 +325,7 @@ var
 begin
   for I := 1 to 5 do
   begin
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM UEFN-Ducky.exe /IM UEFN-Ducky-Bridge.exe',
+    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM UEFN-Ducky.exe /IM UEFN-Ducky-Bridge.exe /IM Ducky-Launcher.exe',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // taskkill returns 128 when nothing with those names is running.
     if ResultCode = 128 then
