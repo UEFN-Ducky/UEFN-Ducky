@@ -1,0 +1,12 @@
+[package]
+name = "bounds"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Window position/size shared with ducky_app/frontend/ui_web/window_bounds.py"
+
+[dependencies]
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi"] }
