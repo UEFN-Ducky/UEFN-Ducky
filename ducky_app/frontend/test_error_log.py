@@ -6,7 +6,10 @@ import json
 import time
 from pathlib import Path
 
+import pytest
+
 import frontend.error_log as error_log
+from backend.util import privacy
 from frontend.support_dump import _redact, format_support_dump
 
 
@@ -29,8 +32,21 @@ def test_activity_roundtrip(tmp_path: Path, monkeypatch) -> None:
     assert rows[0]["source"] == "panel"
 
 
-def test_scrub_home_keeps_tail() -> None:
-    home = str(Path.home()).rstrip("\\/")
+@pytest.fixture(params=["real", "temp"])
+def home(request, tmp_path: Path, monkeypatch) -> str:
+    """The home folder scrub sees: the real one, or a temp one (a sandbox's). ``_home_pattern``
+    is cached per process, so it is cleared on both sides or another test's home leaks in."""
+    if request.param == "temp":
+        fake = tmp_path / "fake home"
+        fake.mkdir()
+        monkeypatch.setenv("USERPROFILE", str(fake))
+        monkeypatch.setenv("HOME", str(fake))
+    privacy._home_pattern.cache_clear()
+    yield str(Path.home()).rstrip("\\/")
+    privacy._home_pattern.cache_clear()
+
+
+def test_scrub_home_keeps_tail(home: str) -> None:
     win_tail = "AppData\\Roaming\\Claude\\claude_desktop_config.json"
     posix_tail = "AppData/Roaming/Claude/claude_desktop_config.json"
     assert error_log._scrub(home + "\\" + win_tail) == "~\\" + win_tail
@@ -42,10 +58,9 @@ def test_scrub_home_keeps_tail() -> None:
     assert "claude_desktop_config.json" in scrubbed
 
 
-def test_scrub_home_on_write(tmp_path: Path, monkeypatch) -> None:
+def test_scrub_home_on_write(home: str, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(error_log, "default_app_data_dir", lambda: tmp_path)
     monkeypatch.setattr(error_log, "_use_db", lambda: False)
-    home = str(Path.home()).rstrip("\\/")
     error_log.record_activity("panel", f"Skill copy -> {home}\\.cursor\\UEFN-Ducky-SKILL.md")
     error_log.record_error("deploy", f"failed {home}/Documents/Fortnite Projects/Tycoony/Content/Python/init_unreal.py")
     act = error_log.read_activity()[0]["message"]
@@ -55,10 +70,9 @@ def test_scrub_home_on_write(tmp_path: Path, monkeypatch) -> None:
     assert "~" in err and "init_unreal.py" in err
 
 
-def test_scrub_home_on_read_legacy(tmp_path: Path, monkeypatch) -> None:
+def test_scrub_home_on_read_legacy(home: str, tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(error_log, "default_app_data_dir", lambda: tmp_path)
     monkeypatch.setattr(error_log, "_use_db", lambda: False)
-    home = str(Path.home()).rstrip("\\/")
     path = tmp_path / "errors.jsonl"
     path.write_text(
         json.dumps({
