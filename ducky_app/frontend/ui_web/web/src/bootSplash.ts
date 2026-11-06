@@ -1,11 +1,21 @@
-/** Dismiss the inline `#boot-splash` from index.html after the React shell has painted. */
+/** Dismiss the inline `#boot-splash` from index.html once the React shell is drawn. */
 
 const SPLASH_ID = "boot-splash";
-const FADE_MS = 160;
+/** Matches the `transition: opacity 0.05s` in index.html. */
+export const FADE_MS = 50;
+/** A root that never fills (a crash before ErrorBoundary) must not keep the splash up forever. */
+const MAX_WAIT_MS = 5000;
+
+/** No fade: reduced motion, or the native launcher (its first data came from the start-up
+ *  cache, so the UI underneath is complete the moment it commits). */
+function instant(): boolean {
+  if ((window as Window & { pywebview?: { native?: boolean } }).pywebview?.native) return true;
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 export function dismissBootSplash(): void {
   const el = document.getElementById(SPLASH_ID);
-  if (!el || el.classList.contains("boot-splash--done")) {
+  if (!el || el.classList.contains("boot-splash--done") || instant()) {
     el?.remove();
     return;
   }
@@ -16,13 +26,21 @@ export function dismissBootSplash(): void {
   }, FADE_MS);
 }
 
+function rootHasContent(): boolean {
+  const root = document.getElementById("root");
+  return !root || root.childElementCount > 0;
+}
+
 /**
- * Fade the splash out as soon as the React shell has painted. The desktop showed the logo
- * on its native splash since ~0.6 s already; a 1.2 s minimum hold here kept a drawn app
- * hidden on every start.
+ * Hide the splash on the first frame after React has committed the shell into `#root`
+ * (never while the root is still empty, so no blank flash). The desktop showed the logo
+ * on its native splash already; holding this one longer only hides a drawn app.
  */
 export function dismissBootSplashAfterPaint(): void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => dismissBootSplash());
-  });
+  const start = performance.now();
+  const tick = () => {
+    if (rootHasContent() || performance.now() - start > MAX_WAIT_MS) dismissBootSplash();
+    else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
