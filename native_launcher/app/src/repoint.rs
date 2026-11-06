@@ -40,10 +40,17 @@ pub enum Root {
     Stub(PathBuf),
 }
 
+/// What `current.json` points at: the launcher EXE and the version it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pointer {
+    pub exe: PathBuf,
+    pub version: String,
+}
+
 /// The launcher in `current.json` at `file`, `dir` resolved against `base` (or absolute),
 /// when that EXE exists. `app_versions.write_current` writes `versions/app-<v>` (relative
 /// to `%LOCALAPPDATA%/UEFN-Ducky`) or the installed EXE's absolute folder.
-pub fn pointer_launcher(file: &Path, base: &Path) -> Option<PathBuf> {
+pub fn pointer_launcher(file: &Path, base: &Path) -> Option<Pointer> {
     let text = std::fs::read_to_string(file).ok()?;
     let v: Value = serde_json::from_str(&text).ok()?;
     let dir = v.get("dir")?.as_str()?.trim();
@@ -52,12 +59,13 @@ pub fn pointer_launcher(file: &Path, base: &Path) -> Option<PathBuf> {
     }
     // `join` keeps an absolute `dir` as it is.
     let exe = base.join(dir).join(LAUNCHER_EXE);
-    exe.is_file().then_some(exe)
+    let version = v.get("version").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    exe.is_file().then_some(Pointer { exe, version })
 }
 
 /// `%LOCALAPPDATA%/UEFN-Ducky/versions/current.json` first (what Python writes), then
 /// `<root>/versions/current.json` (a portable/drill layout, `dir` relative to the root).
-pub fn current_launcher(app_data: &Path, root: &Path) -> Option<PathBuf> {
+pub fn current_launcher(app_data: &Path, root: &Path) -> Option<Pointer> {
     pointer_launcher(&app_data.join(VERSIONS_DIR).join(CURRENT_FILE), app_data)
         .or_else(|| pointer_launcher(&root.join(VERSIONS_DIR).join(CURRENT_FILE), root))
 }
@@ -76,9 +84,18 @@ fn in_version_folder(exe: &Path) -> bool {
     named(dir, &|n| n.starts_with("app-")) && dir.parent().is_some_and(|v| named(v, &|n| n.eq_ignore_ascii_case(VERSIONS_DIR)))
 }
 
+/// The root can run `version` itself: it is this launcher's own version and the root holds a
+/// complete install (`.ready`, as `app_versions.is_ready`, or at least its stub).
+fn root_runs(root: &Path, own_version: &str, version: &str) -> bool {
+    !version.is_empty()
+        && version == own_version
+        && (root.join(".ready").is_file() || root.join(STUB_EXE).is_file())
+}
+
 /// Root mode: an installed root launcher (the stub beside it, not a version folder), not
-/// hopped. A dev build with no stub beside it always runs here.
-pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path) -> Root {
+/// hopped. A dev build with no stub beside it always runs here. `own_version` is this
+/// launcher's `--version`.
+pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path, own_version: &str) -> Root {
     let Some(root) = exe.parent() else {
         return Root::RunHere;
     };
@@ -87,8 +104,12 @@ pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path) -> Root {
     }
     match current_launcher(app_data, root) {
         // The pointer names this very launcher (no update yet): it is the current one.
-        Some(target) if same_file(&target, exe) => Root::RunHere,
-        Some(target) => Root::Exec(target),
+        Some(p) if same_file(&p.exe, exe) => Root::RunHere,
+        // Same version as the root (Setup installed it, then a start pinned its folder):
+        // the hop would only cost 120–490 ms.
+        Some(p) if root_runs(root, own_version, &p.version) => Root::RunHere,
+        // Another version (an in-place update or a rollback): its own launcher.
+        Some(p) => Root::Exec(p.exe),
         None => Root::Stub(root.join(STUB_EXE)),
     }
 }
@@ -179,6 +200,7 @@ pub fn before_start(
     hopped: bool,
     native_child: bool,
     app_data: &Path,
+    own_version: &str,
     setting: impl FnOnce() -> String,
     crash_loop_active: impl FnOnce() -> bool,
 ) -> Option<Spawn> {
@@ -192,7 +214,7 @@ pub fn before_start(
     if !wants_native(&mode, mode == "auto" && crash_loop_active()) {
         return Some(Spawn::python(sibling_stub(exe), args));
     }
-    match root_decision(exe, hopped, app_data) {
+    match root_decision(exe, hopped, app_data, own_version) {
         Root::RunHere => None,
         Root::Exec(target) => Some(Spawn::hop(target, args)),
         // No usable pointer: one Python window, never a launcher again.
@@ -214,6 +236,25 @@ mod tests {
     fn touch(p: &Path) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, b"").unwrap();
+    }
+
+    /// The test launcher's own version: never one a pointer below names, unless on purpose.
+    const OWN: &str = "9.9.9";
+
+    #[test]
+    fn same_version_runs_at_the_root_other_versions_hop_once() {
+        let l = Layout::new("samever");
+        // Setup's version pinned in its versions folder: same as the root, no hop.
+        l.pointer(&serde_json::json!({"version": OWN, "dir": "versions/app-1.2.472"}).to_string());
+        assert_eq!(l.decide(false), Root::RunHere);
+        assert!(l.start(&args(), false, false, "auto").is_none());
+        // An in-place update (or a rollback) to another version: one hop to its launcher.
+        l.pointer(r#"{"version":"1.2.472","dir":"versions/app-1.2.472"}"#);
+        assert_eq!(l.start(&args(), false, false, "auto"), Some(Spawn::hop(l.version.clone(), &args())));
+        // No version in the pointer: it can't be the same, so hop as before.
+        l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
+        assert_eq!(l.decide(false), Root::Exec(l.version.clone()));
+        l.drop_all();
     }
 
     /// An install root (stub + launcher) and an app data folder holding one version.
@@ -242,12 +283,12 @@ mod tests {
         }
 
         fn decide(&self, hopped: bool) -> Root {
-            root_decision(&self.exe, hopped, &self.app_data)
+            root_decision(&self.exe, hopped, &self.app_data, OWN)
         }
 
         fn start(&self, args: &[OsString], hopped: bool, native_child: bool, mode: &str) -> Option<Spawn> {
             let mode = mode.to_string();
-            before_start(&self.exe, args, hopped, native_child, &self.app_data, move || mode, || false)
+            before_start(&self.exe, args, hopped, native_child, &self.app_data, OWN, move || mode, || false)
         }
 
         fn drop_all(self) {
@@ -327,7 +368,7 @@ mod tests {
         let l = Layout::new("child");
         l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
         let never = || -> String { panic!("setting read under run_native") };
-        assert!(before_start(&l.exe, &args(), false, true, &l.app_data, never, || panic!()).is_none());
+        assert!(before_start(&l.exe, &args(), false, true, &l.app_data, OWN, never, || panic!()).is_none());
         l.drop_all();
     }
 
@@ -349,11 +390,11 @@ mod tests {
         let l = Layout::new("version");
         l.pointer(r#"{"dir":"versions/app-1.2.9"}"#);
         touch(&l.version.with_file_name(STUB_EXE));
-        assert_eq!(root_decision(&l.version, false, &l.app_data), Root::RunHere);
+        assert_eq!(root_decision(&l.version, false, &l.app_data, OWN), Root::RunHere);
         // A cargo build with no stub beside it never hops into the installed app.
         let dev = l.app_data.join("target/release").join(LAUNCHER_EXE);
         touch(&dev);
-        assert_eq!(root_decision(&dev, false, &l.app_data), Root::RunHere);
+        assert_eq!(root_decision(&dev, false, &l.app_data, OWN), Root::RunHere);
         l.drop_all();
     }
 
@@ -380,7 +421,7 @@ mod tests {
     fn version_launcher_setting_and_hold() {
         let l = Layout::new("hold");
         let v = |mode: &'static str, hold: bool| {
-            before_start(&l.version, &args(), true, false, &l.app_data, move || mode.into(), move || hold)
+            before_start(&l.version, &args(), true, false, &l.app_data, OWN, move || mode.into(), move || hold)
         };
         assert_eq!(v("off", false), Some(Spawn::python(sibling_stub(&l.version), &args())));
         assert!(v("auto", true).is_some());

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use autostart::StartPlan;
 use ducky_instance::{InstanceLock, Launch, RealSystem};
 use serde_json::{json, Value};
-use shim::{NativeOp, Route, ShimError};
+use shim::NativeOp;
 use supervisor::protocol::{BackendMsg, Hello};
 use supervisor::{StartError, Step, Supervisor};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -29,6 +29,7 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::ExtractIconW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use crate::page::{Action, Bridge};
 use crate::{dialog, repoint};
 use crate::start::{self, End, Host};
 use crate::LOCK_WAIT;
@@ -73,6 +74,8 @@ struct Ui {
     /// The static UI and the held backend paths on the public port (`serve_static`).
     server: Option<server::Server>,
     hello_seen: bool,
+    /// Page calls, backend results and the start-up cache.
+    bridge: Bridge,
     ready_written: bool,
     painted_ms: Option<u64>,
     /// Started by `native_switch.run_native`: the ready file waits for hello too.
@@ -135,6 +138,9 @@ impl UiHost {
                 navigated: false,
                 server: None,
                 hello_seen: false,
+                bridge: Bridge::new(
+                    shim::cache::default_path().map(|p| shim::cache::StartupCache::load(p, crate::APP_VERSION)),
+                ),
                 ready_written: false,
                 painted_ms: None,
                 ready_needs_hello: std::env::var(NATIVE_CHILD_ENV).is_ok_and(|v| v.trim() == "1"),
@@ -198,6 +204,7 @@ impl Host for UiHost {
     fn release(&mut self, hello: &Hello) -> Result<(), String> {
         let released = with(|u| {
             u.hello_seen = true;
+            u.bridge.on_hello(hello);
             u.server.as_ref().map(|s| s.release_origin(&hello.origin))
         })
         .flatten();
@@ -399,9 +406,8 @@ fn drain_backend() {
 fn on_step(step: Step) {
     match step {
         Step::Msg(BackendMsg::Result { id, result }) => {
-            if id.starts_with(shim::PAGE_ID_PREFIX) {
-                post_page(&shim::result_message(&id, result));
-            }
+            let actions = with(|u| u.bridge.on_result(&id, &result)).unwrap_or_default();
+            run_actions(actions);
         }
         Step::Msg(BackendMsg::Event { name, data }) => on_event(&name, data),
         Step::Msg(_) | Step::Idle => {}
@@ -410,6 +416,7 @@ fn on_step(step: Step) {
             // to its (new) internal port.
             with(|u| {
                 u.record.stage("restarted");
+                u.bridge.on_hello(&hello);
                 if let Some(s) = &u.server {
                     s.gate().hold();
                     s.release_origin(&hello.origin);
@@ -487,22 +494,26 @@ fn post_page(json_text: &str) {
 }
 
 fn on_page_message(text: &str) {
-    let call = match shim::parse_page_message(text) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    match shim::route(call.clone()) {
-        Ok(Route::Native { id, op }) => {
-            let value = native_op(op);
-            post_page(&shim::result_message(&id, Ok(value)));
-        }
-        Ok(Route::Backend { id, .. }) => {
-            if !send_call(id.clone(), call.name, call.args) {
-                post_page(&shim::result_message(&id, Err("backend is not running".into())));
+    let actions = with(|u| u.bridge.on_page_message(text)).unwrap_or_default();
+    run_actions(actions);
+}
+
+/// Carry out bridge actions outside the state borrow (native ops call into Win32).
+fn run_actions(actions: Vec<Action>) {
+    for action in actions {
+        match action {
+            Action::Page(msg) => post_page(&msg),
+            Action::Native { id, op } => {
+                let value = native_op(op);
+                post_page(&shim::result_message(&id, Ok(value)));
+            }
+            Action::Backend { id, name, args } => {
+                let page_call = id.starts_with(shim::PAGE_ID_PREFIX);
+                if !send_call(id.clone(), name, args) && page_call {
+                    post_page(&shim::result_message(&id, Err("backend is not running".into())));
+                }
             }
         }
-        Err(ShimError::BadArgs { id, error }) => post_page(&shim::result_message(&id, Err(error))),
-        Err(ShimError::BadMessage(_)) => {}
     }
 }
 

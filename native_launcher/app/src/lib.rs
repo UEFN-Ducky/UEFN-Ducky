@@ -5,6 +5,7 @@ pub mod argv;
 pub mod console;
 pub mod dialog;
 pub mod exit;
+pub mod page;
 pub mod repoint;
 pub mod start;
 #[cfg(windows)]
@@ -36,6 +37,7 @@ pub fn run(args: Vec<OsString>) -> u8 {
         env_is(repoint::HOP_ENV, "1"),
         native_child,
         &app_data,
+        APP_VERSION,
         || repoint::native_setting(&app_data),
         || supervisor::policy::CrashLoop::load(&app_data).active(supervisor::policy::unix_now()),
     );
