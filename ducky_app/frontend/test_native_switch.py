@@ -83,3 +83,288 @@ def test_schema_describes_the_setting() -> None:
     assert entry["default"] == "off"
     assert entry["enum"] == ["off", "on", "auto"]
     assert entry["settable"] is False
+
+
+# --- d3: decide / run_native / the launch hook ----------------------------------------
+
+from frontend import native_switch as ns  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "setting, exe, wv2, loop, expected",
+    [
+        ("off", True, True, False, "python"),
+        ("off", True, True, True, "python"),
+        ("garbage", True, True, False, "python"),
+        ("on", True, True, False, "native"),
+        ("on", True, True, True, "native"),
+        ("on", False, True, False, "python"),
+        ("on", True, False, False, "python"),
+        ("auto", True, True, False, "native"),
+        ("auto", True, True, True, "python"),
+        ("auto", False, True, False, "python"),
+        ("auto", True, False, False, "python"),
+    ],
+)
+def test_decision_table(setting: str, exe: bool, wv2: bool, loop: bool, expected: str) -> None:
+    assert ns.decide(setting, exe, wv2, loop) == expected
+
+
+def test_python_reason() -> None:
+    assert ns.python_reason("off", False, False, True) == ""
+    assert ns.python_reason("on", False, True, False) == "no_exe"
+    assert ns.python_reason("auto", True, False, False) == "webview2"
+    assert ns.python_reason("auto", True, True, True) == "crash_loop_active"
+    assert ns.python_reason("on", True, True, True) == ""
+
+
+class FakeProc:
+    def __init__(self, pid: int, *, exit_after: float | None = None, code: int = 0,
+                 ready_after: float | None = None, ready: dict | None = None) -> None:
+        self.pid = pid
+        self.started = time_now()
+        self.exit_after = exit_after
+        self.code = code
+        self.ready_after = ready_after
+        self.ready = ready if ready is not None else {"painted_ms": 640, "window_ms": 95}
+        self.killed = False
+
+    def poll(self) -> int | None:
+        elapsed = time_now() - self.started
+        if self.ready_after is not None and elapsed >= self.ready_after:
+            path = ns.ready_path(self.pid)
+            if not path.exists() and not getattr(self, "_wrote", False):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(self.ready), encoding="utf-8")
+                self._wrote = True
+        if self.killed:
+            return 1
+        if self.exit_after is not None and elapsed >= self.exit_after:
+            return self.code
+        return None
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def time_now() -> float:
+    import time
+
+    return time.monotonic()
+
+
+def _spawner(proc: FakeProc, calls: list):
+    def spawn(cmd: list[str], env: dict[str, str]) -> FakeProc:
+        calls.append((cmd, env))
+        return proc
+
+    return spawn
+
+
+def test_run_native_ready_returns_none(tmp_path: Path) -> None:
+    calls: list = []
+    proc = FakeProc(4242, ready_after=0.0)
+    out = ns.run_native(["UEFN-Ducky.exe", "uefn-ducky://x", "--flag"], 5, spawn=_spawner(proc, calls),
+                        exe=tmp_path / "Ducky-Launcher.exe")
+    assert out is None
+    assert ns.last_ready == {"painted_ms": 640, "window_ms": 95}
+    cmd, env = calls[0]
+    assert cmd == [str(tmp_path / "Ducky-Launcher.exe"), "uefn-ducky://x", "--flag"]
+    assert env[ns.NATIVE_CHILD_ENV] == "1"
+    assert not ns.ready_path(4242).exists()
+
+
+@pytest.mark.parametrize("code", [20, 21, 22, 23, 24, 7])
+def test_run_native_exit_code_means_fallback(tmp_path: Path, code: int) -> None:
+    proc = FakeProc(5000 + code, exit_after=0.0, code=code)
+    assert ns.run_native(["x"], 5, spawn=_spawner(proc, []), exe=tmp_path / "L.exe") == code
+
+
+def test_run_native_exit_zero_is_ready(tmp_path: Path) -> None:
+    proc = FakeProc(6000, exit_after=0.0, code=0)
+    assert ns.run_native(["x"], 5, spawn=_spawner(proc, []), exe=tmp_path / "L.exe") is None
+
+
+def test_run_native_timeout_kills_and_returns_23(tmp_path: Path) -> None:
+    proc = FakeProc(6001)
+    assert ns.run_native(["x"], 0.05, spawn=_spawner(proc, []), exe=tmp_path / "L.exe") == 23
+    assert proc.killed
+
+
+def test_run_native_spawn_error_returns_24(tmp_path: Path) -> None:
+    def boom(cmd, env):
+        raise OSError("nope")
+
+    assert ns.run_native(["x"], 5, spawn=boom, exe=tmp_path / "L.exe") == 24
+
+
+def test_real_spawn_of_a_missing_exe_returns_24(tmp_path: Path) -> None:
+    assert ns.run_native(["x"], 1, exe=tmp_path / "missing" / "Ducky-Launcher.exe") == 24
+
+
+def test_crash_loop_three_failures_in_ten_minutes_hold_auto_for_a_day() -> None:
+    t = 1_000_000.0
+    assert not ns.note_failure(t)
+    assert not ns.note_failure(t + 60)
+    assert not ns.crash_loop_active(t + 61)
+    assert ns.note_failure(t + 120)
+    assert ns.crash_loop_active(t + 121)
+    assert ns.crash_loop_active(t + 120 + 24 * 3600 - 1)
+    assert not ns.crash_loop_active(t + 120 + 24 * 3600 + 1)
+    assert ns.decide("auto", True, True, ns.crash_loop_active(t + 121)) == "python"
+
+
+def test_old_failures_drop_out_of_the_window() -> None:
+    t = 2_000_000.0
+    ns.note_failure(t)
+    ns.note_failure(t + 1)
+    assert not ns.note_failure(t + 11 * 60)
+    assert not ns.crash_loop_active(t + 11 * 60)
+
+
+def test_crash_loop_file_written_by_the_launcher_is_read() -> None:
+    import time
+
+    path = ns.crash_loop_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"failures": [], "until": time.time() + 3600, "extra": 1}), encoding="utf-8")
+    assert ns.crash_loop_active()
+    path.write_text("not json", encoding="utf-8")
+    assert not ns.crash_loop_active()
+
+
+@pytest.fixture
+def no_spawn(monkeypatch: pytest.MonkeyPatch) -> list:
+    spawned: list = []
+
+    def refuse(*a, **k):
+        spawned.append(a)
+        raise AssertionError("off must never spawn")
+
+    monkeypatch.setattr(ns.subprocess, "Popen", refuse)
+    monkeypatch.setattr(ns, "_spawn", refuse)
+    monkeypatch.setattr(ns, "run_native", refuse)
+    return spawned
+
+
+def test_off_means_no_spawn_and_no_record(no_spawn: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list = []
+    monkeypatch.setattr(ns, "record_start", lambda *a: recorded.append(a))
+    monkeypatch.setattr(ns, "record_start_soon", lambda *a: recorded.append(a))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False  # the saved default
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="off") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="junk") is False
+    assert no_spawn == [] and recorded == []
+
+
+def test_hidden_start_backend_and_child_never_spawn(no_spawn: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on", start_hidden=True) is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe", "--backend"], setting="on") is False
+    monkeypatch.setenv(ns.NATIVE_CHILD_ENV, "1")
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert no_spawn == []
+
+
+@pytest.fixture
+def launcher_present(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    exe = tmp_path / "Ducky-Launcher.exe"
+    exe.write_bytes(b"MZ")
+    monkeypatch.setenv(ns.LAUNCHER_EXE_ENV, str(exe))
+    monkeypatch.setattr(ns, "webview2_ok", lambda: True)
+    monkeypatch.delenv(ns.NATIVE_CHILD_ENV, raising=False)
+    return exe
+
+
+def _sync_records(monkeypatch: pytest.MonkeyPatch) -> list:
+    rows: list = []
+    monkeypatch.setattr(ns, "record_start_soon", lambda *a: rows.append(a))
+    monkeypatch.setattr(ns, "record_start", lambda *a: rows.append(a))
+    return rows
+
+
+def test_hook_native_ready(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = _sync_records(monkeypatch)
+    proc = FakeProc(7001, ready_after=0.0)
+    monkeypatch.setattr(ns, "_spawn", _spawner(proc, []))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is True
+    assert rows == [("native", 95, 640, "")]
+
+
+@pytest.mark.parametrize("code, reason", [(20, "webview2"), (21, "protocol"), (22, "crash_loop"),
+                                          (23, "no_hello"), (24, "start_error"), (9, "exit_other")])
+def test_hook_each_exit_code_falls_back(launcher_present: Path, monkeypatch: pytest.MonkeyPatch,
+                                        code: int, reason: str) -> None:
+    rows = _sync_records(monkeypatch)
+    monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7100 + code, exit_after=0.0, code=code), []))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="auto") is False
+    assert rows == [("python", None, None, reason)]
+    failures = json.loads(ns.crash_loop_path().read_text(encoding="utf-8"))["failures"] if reason != "webview2" else []
+    assert len(failures) == (0 if reason == "webview2" else 1)
+
+
+def test_hook_timeout_falls_back(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = _sync_records(monkeypatch)
+    proc = FakeProc(7200)
+    monkeypatch.setattr(ns, "_spawn", _spawner(proc, []))
+    real = ns.run_native
+    monkeypatch.setattr(ns, "run_native", lambda argv, timeout_s=15, **k: real(argv, 0.05, **k))
+    monkeypatch.setattr(ns.time, "perf_counter", _fake_clock([0.0, 16.0, 16.0]))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert proc.killed
+    assert rows == [("python", None, None, "timeout")]
+
+
+def _fake_clock(values: list[float]):
+    it = iter(values)
+    last = [values[-1]]
+
+    def clock() -> float:
+        try:
+            last[0] = next(it)
+        except StopIteration:
+            pass
+        return last[0]
+
+    return clock
+
+
+def test_hook_spawn_error_falls_back(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = _sync_records(monkeypatch)
+
+    def boom(cmd, env):
+        raise OSError("blocked by antivirus")
+
+    monkeypatch.setattr(ns, "_spawn", boom)
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert rows == [("python", None, None, "start_error")]
+
+
+def test_hook_missing_exe_or_webview2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_spawn: list) -> None:
+    rows = _sync_records(monkeypatch)
+    monkeypatch.setenv(ns.LAUNCHER_EXE_ENV, str(tmp_path / "nope.exe"))
+    monkeypatch.delenv(ns.NATIVE_CHILD_ENV, raising=False)
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    exe = tmp_path / "Ducky-Launcher.exe"
+    exe.write_bytes(b"MZ")
+    monkeypatch.setenv(ns.LAUNCHER_EXE_ENV, str(exe))
+    monkeypatch.setattr(ns, "webview2_ok", lambda: False)
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="auto") is False
+    assert rows == [("python", None, None, "no_exe"), ("python", None, None, "webview2")]
+    assert no_spawn == []
+
+
+def test_hook_auto_in_crash_loop_stays_python(launcher_present: Path, monkeypatch: pytest.MonkeyPatch,
+                                              no_spawn: list) -> None:
+    rows = _sync_records(monkeypatch)
+    import time
+
+    for i in range(3):
+        ns.note_failure(time.time() + i)
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="auto") is False
+    assert rows == [("python", None, None, "crash_loop_active")]
+
+
+def test_launcher_main_exits_when_native_painted(monkeypatch: pytest.MonkeyPatch) -> None:
+    src = (Path(ns.__file__).parent / "launcher.py").read_text(encoding="utf-8")
+    hook = src.index("maybe_start_native(sys.argv, start_hidden=start_hidden)")
+    assert src.index("_hand_off_to_newest(bridge=False)") < hook < src.index("from frontend.ui_web.run import run")

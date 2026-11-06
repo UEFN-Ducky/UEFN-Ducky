@@ -491,6 +491,16 @@ def main() -> None:
             pass
         _wait_for_previous_version()
         _hand_off_to_newest(bridge=False)
+        # native_launcher on/auto: Ducky-Launcher.exe draws the window and this process exits.
+        # Off (the default) spawns nothing; any launcher failure runs the Python window below.
+        try:
+            from frontend.native_switch import maybe_start_native
+
+            native = maybe_start_native(sys.argv, start_hidden=start_hidden)
+        except Exception:
+            native = False
+        if native:
+            raise SystemExit(0)
         # Before the crash recorder starts, so a Cancel here never reads as a crash next time.
         try:
             from frontend.low_memory import check_at_launch
