@@ -1,0 +1,9 @@
+[package]
+name = "report"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Launcher stages and exit codes added to the crash record ducky_app/frontend/boot_report.py reads"
+
+[dependencies]
+serde_json = "1"
