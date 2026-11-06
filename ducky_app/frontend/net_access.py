@@ -242,6 +242,17 @@ def content_checked_opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(proxy_handler(), _ContentCheckedHTTPSHandler())
 
 
+class Answer(tuple):
+    """``(status, parsed, raw)`` as before, plus the answer's ``headers`` (a 429's Retry-After)."""
+
+    headers: Any = None
+
+    def __new__(cls, items: tuple, headers: Any = None) -> "Answer":
+        out = super().__new__(cls, items)
+        out.headers = headers
+        return out
+
+
 def build_opener(*handlers: Any) -> urllib.request.OpenerDirector:
     """urllib.request.build_opener with the PC's proxy and Windows certificate checks."""
     return urllib.request.build_opener(proxy_handler(), WindowsTrustHTTPSHandler(), *handlers)

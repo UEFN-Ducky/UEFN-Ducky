@@ -30,7 +30,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from frontend import __version__
-from frontend.net_access import build_opener as net_build_opener
+from frontend.net_access import Answer, build_opener as net_build_opener
 from frontend.ssl_boot import https_context
 from frontend.ui_web.remote_link import mailbox, presence
 
@@ -1275,7 +1275,7 @@ def api_request(
                         parsed = obj
                 except (TypeError, ValueError, json.JSONDecodeError):
                     parsed = None
-            return int(status), parsed, raw
+            return Answer((int(status), parsed, raw), resp.headers)
     except urllib.error.HTTPError as exc:
         raw = ""
         try:
@@ -1312,7 +1312,7 @@ def api_request(
             raise DuckyOSAccountError(
                 "Session expired — log in again", code="session_expired"
             ) from exc
-        return int(exc.code), parsed, raw
+        return Answer((int(exc.code), parsed, raw), exc.headers)
     except (OSError, urllib.error.URLError, ValueError, http.client.HTTPException) as exc:
         # HTTPException: a body cut off mid-read (IncompleteRead), a bad status line.
         raise DuckyOSAccountError(f"Network error: {exc}", code="network") from exc

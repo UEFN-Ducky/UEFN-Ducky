@@ -107,7 +107,8 @@ def reload_if_folders_moved(pid: str) -> bool:
             if manifest is None or not root.is_dir() or not is_plugin_enabled(pid):
                 raise RuntimeError("it is no longer installed and on")
             label = str(manifest.get("label") or pid)
-            _load_one(pid, root, manifest)
+            with loading_now(pid):  # the call waiting on it needs the real tool, not a stub
+                _load_one(pid, root, manifest)
             if pid not in _REGISTERED:
                 raise RuntimeError(_LOAD_FAILURES.get(pid) or "its register() didn't finish")
         except Exception as exc:  # noqa: BLE001 — the call says why instead of running stale code
@@ -187,6 +188,7 @@ from backend.uefn_plugins.plugin_host.lifecycle import (  # noqa: E402
     reload_single_plugin,
 )
 from backend.uefn_plugins.plugin_host.loader import _load_one  # noqa: E402
+from backend.uefn_plugins.plugin_host.tool_registry import loading_now  # noqa: E402
 from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _FOLDER_EPOCH,
     _FOLDER_MOVED,

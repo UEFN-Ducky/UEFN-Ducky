@@ -11,6 +11,13 @@ V6B = (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:4700::2", 443, 0, 0))
 V4A = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.21.73.49", 443))
 
 
+def test_an_answer_unpacks_as_before_and_keeps_its_headers():
+    got = na.Answer((429, {"error": "busy"}, "{}"), {"Retry-After": "7"})
+    status, parsed, raw = got  # every api_request caller unpacks three
+    assert (status, parsed, raw, len(got)) == (429, {"error": "busy"}, "{}", 3)
+    assert got.headers["Retry-After"] == "7" and na.Answer((200, None, "")).headers is None
+
+
 class _Sock:
     """A connected socket that remembers its timeout."""
 

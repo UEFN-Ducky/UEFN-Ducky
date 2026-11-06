@@ -824,6 +824,19 @@ def _drop_lazy_stubs(pid: str) -> None:
                 tools.pop(name, None)
 
 
+@contextlib.contextmanager
+def loading_now(pid: str) -> Iterator[None]:
+    """Loads of ``pid`` inside run its register() at once, never as stubs: a call that needs
+    the real tool now (its first call, a restart after its folders moved)."""
+    with _LAZY_GUARD:
+        _LAZY_FORCED.add(pid)
+    try:
+        yield
+    finally:
+        with _LAZY_GUARD:
+            _LAZY_FORCED.discard(pid)
+
+
 def load_lazy_backend(pid: str) -> None:
     """Import ``pid``'s backend and run its register() now (no-op when it is not pending)."""
     from backend.uefn_plugins.plugin_host.loader import _load_enabled_plugin_locked, _plugin_load_lock
@@ -831,17 +844,16 @@ def load_lazy_backend(pid: str) -> None:
     with _plugin_load_lock(pid):
         with _LAZY_GUARD:
             src = _LAZY_PENDING.get(pid)
-            if src is None:
-                return
-            _LAZY_FORCED.add(pid)
+        if src is None:
+            return
         root, manifest = src
         try:
-            _drop_lazy_stubs(pid)
-            _log.info("Plugin %s: loading its backend for its first tool call", pid)
-            _load_enabled_plugin_locked(pid, root, manifest)
+            with loading_now(pid):
+                _drop_lazy_stubs(pid)
+                _log.info("Plugin %s: loading its backend for its first tool call", pid)
+                _load_enabled_plugin_locked(pid, root, manifest)
         finally:
             with _LAZY_GUARD:
-                _LAZY_FORCED.discard(pid)
                 _LAZY_PENDING.pop(pid, None)
 
 
