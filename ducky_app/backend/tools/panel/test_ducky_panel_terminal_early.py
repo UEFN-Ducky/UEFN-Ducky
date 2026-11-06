@@ -80,12 +80,16 @@ def test_open_with_no_identity_owns_nothing_and_is_run_owned(monkeypatch) -> Non
     assert kw["conv_id"] == "" and kw["from_agent"] is True  # the manager marks it run_owned
 
 
-def test_the_window_proxy_drops_from_agent(monkeypatch) -> None:
+def test_the_window_proxy_passes_from_agent(monkeypatch) -> None:
+    # The window must see from_agent, or a chat-less agent's terminal counts as the person's
+    # own and the reaper never closes it (Nov 5 2026 soak).
     sent = []
     proxy = term._PanelTerminalManager()
-    monkeypatch.setattr(proxy, "_call", lambda method, args, timeout=30.0: sent.append(args) or {"ok": True})
-    proxy.spawn(shell="bash", cwd=None, conv_id="c", from_agent=True)
-    assert "from_agent" not in sent[0] and sent[0]["conv_id"] == "c"
+    monkeypatch.setattr(proxy, "_call", lambda method, args, timeout=30.0: sent.append((method, args)) or {"ok": True})
+    proxy.spawn(shell="bash", cwd=None, conv_id="", from_agent=True)
+    method, args = sent[0]
+    assert method == "terminal_spawn"
+    assert args["from_agent"] is True and args["conv_id"] == "" and args["cwd"] == ""
 
 
 def test_sandbox_run_carries_the_early_return(monkeypatch) -> None:
