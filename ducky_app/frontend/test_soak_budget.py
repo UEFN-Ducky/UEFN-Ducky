@@ -88,7 +88,8 @@ def _table(app=500, host=300, renderer=450, gpu=120, other_renderer=80):
 
 def _samples(minutes, **rates):
     """One sample a minute; each role grows by ``rates[role]`` MB/h from its base."""
-    base = {"app": 500.0, "agent_host": 300.0, "renderer": 450.0, "gpu": 120.0, "tree": 1500.0}
+    base = {"app": 500.0, "agent_host": 300.0, "renderer": 450.0, "gpu": 120.0, "tree": 1500.0,
+            "ducky": 900.0, "workload": 600.0, "tool_servers": 100.0, "agents": 6, "terminals": 2}
     out = []
     for m in range(minutes + 1):
         s = {"t": 1000.0 + m * 60}
@@ -109,8 +110,49 @@ def test_role_of():
 def test_memory_sample_by_tree_and_cmdline():
     procs, cmd = _table()
     s = soak_budget.memory_sample(procs, 10, cmd, now=5.0)
+    tree = 500 + 300 + 90 + 450 + 120 + 80
     assert s == {"t": 5.0, "app": 500.0, "agent_host": 300.0, "renderer": 450.0, "gpu": 120.0,
-                 "tree": 500 + 300 + 90 + 450 + 120 + 80}
+                 "tree": tree, "ducky": tree, "workload": 0.0, "tool_servers": 0.0,
+                 "agents": 0, "terminals": 0, "tool_server_count": 0}
+
+
+def _agent_table():
+    """The app with a host, a bridge, an agent (cmd launcher + stub) with its own bridge, and a
+    terminal running a build: the bridges and consoles are Ducky's, the rest is agent workload."""
+    procs, cmd = _table(app=200, host=100, renderer=100, gpu=50, other_renderer=10)
+    more = {
+        20: (_proc(20, 10, "UEFN-Ducky.exe", 20), ["UEFN-Ducky.exe", "bridge", "--port", "1"]),
+        30: (_proc(30, 11, "cmd.exe", 5), ["cmd.exe", "/c", "C:\\box\\stub\\claude.cmd", "-p"]),
+        31: (_proc(31, 30, "python.exe", 40), ["python.exe", "C:\\soak\\stub_claude.py", "-p"]),
+        32: (_proc(32, 31, "UEFN-Ducky.exe", 15), ["UEFN-Ducky.exe", "bridge"]),
+        40: (_proc(40, 11, "powershell.exe", 90), ["powershell.exe", "-NoLogo", "-NoExit"]),
+        41: (_proc(41, 40, "conhost.exe", 3), ["conhost.exe", "0x4"]),
+        42: (_proc(42, 40, "node.exe", 300), ["node.exe", "vite", "build"]),
+    }
+    for pid, (proc, line) in more.items():
+        procs[pid] = proc
+    lines = {pid: line for pid, (_, line) in more.items()}
+    return procs, (lambda pid: lines.get(pid) or cmd(pid))
+
+
+def test_kind_of():
+    assert soak_budget.kind_of("UEFN-Ducky.exe", ["x", "bridge"]) == "tool_server"
+    assert soak_budget.kind_of("UEFN-Ducky-Bridge.exe", ["x"]) == "tool_server"
+    assert soak_budget.kind_of("OpenConsole.exe", ["x", "--headless"]) == "console"
+    assert soak_budget.kind_of("claude.exe", ["x", "-p"]) == "agent"
+    assert soak_budget.kind_of("cmd.exe", ["x", "/c", "C:\\stub\\claude.cmd"]) == "agent"
+    assert soak_budget.kind_of("pwsh.exe", ["x", "-NoLogo"]) == "terminal"
+    assert soak_budget.kind_of("UEFN-Ducky.exe", ["x", "agent-host"]) == "ducky"
+
+
+def test_memory_sample_splits_ducky_from_agent_workload():
+    procs, cmd = _agent_table()
+    s = soak_budget.memory_sample(procs, 10, cmd, now=5.0)
+    ducky = 200 + 100 + 90 + 100 + 50 + 10 + 20 + 15 + 3  # app, host, webview, 2 bridges, conhost
+    workload = 5 + 40 + 90 + 300  # launcher, stub, terminal, the build it runs
+    assert (s["ducky"], s["workload"], s["tree"]) == (ducky, workload, ducky + workload)
+    assert (s["tool_servers"], s["tool_server_count"]) == (35.0, 2)
+    assert (s["agents"], s["terminals"]) == (2, 1)
 
 
 def test_memory_within_budget_passes():
@@ -119,17 +161,65 @@ def test_memory_within_budget_passes():
 
 def test_memory_over_budget():
     samples = _samples(60)
-    samples[-1].update(renderer=912.0, app=600.0, agent_host=874.0, tree=2900.0)
+    samples[-1].update(renderer=912.0, app=600.0, agent_host=874.0, ducky=2900.0)
     broken = soak_budget.check_memory(samples)
     assert "renderer: 912 MB > 500 MB budget" in broken
     assert "app: 600 MB > 550 MB budget" in broken
     assert "agent host: 874 MB > 350 MB budget" in broken
-    assert "tree: 2900 MB > 1600 MB budget" in broken
+    assert "ducky: 2900 MB > 1000 MB budget" in broken
+
+
+def test_ducky_over_budget():
+    samples = _samples(60)
+    samples[-1]["ducky"] = 1040.0
+    assert soak_budget.check_memory(samples) == ["ducky: 1040 MB > 1000 MB budget"]
+
+
+def test_heavy_agent_workload_with_ducky_under_budget_passes():
+    samples = _samples(60)
+    samples[-1].update(workload=4000.0, tree=4900.0)
+    assert soak_budget.check_memory(samples, agents=6) == []
+
+
+def test_tool_servers_per_agent():
+    samples = _samples(60)
+    samples[30]["tool_servers"] = 165.0  # the peak counts, not only the last sample
+    assert soak_budget.check_memory(samples, agents=6) == ["tool servers: 165 MB peak > 150 MB (25 MB × 6 agents)"]
+    assert soak_budget.check_memory(samples, agents=7) == []
+
+
+def _ending(terminals_late):
+    """Agents finish at t=1000+50*60; samples every 10 s after, terminals as given then."""
+    samples = _samples(50)
+    end = samples[-1]["t"]
+    for i, n in enumerate(terminals_late, start=1):
+        samples.append({**samples[-1], "t": end + 10 * i, "agents": 0, "terminals": n})
+    return samples, end + 10
+
+
+def test_terminals_left_open_after_the_agents():
+    samples, ended = _ending([6, 6, 6])
+    assert soak_budget.agents_ended_at(samples) == ended
+    assert soak_budget.check_memory(samples, ended_at=ended) == [
+        "terminals: 6 still open 15 s after the agents finished"]
+
+
+def test_terminals_closed_in_time():
+    samples, ended = _ending([6, 3, 0, 0])  # first sample at +15 s or later: +20 s, 0 left
+    assert soak_budget.check_memory(samples, ended_at=ended) == []
+
+
+def test_ended_at_prefers_results_json():
+    samples, _ = _ending([0])
+    assert soak_budget.agents_ended_at(samples, {"last_turn_end": 42.0}) == 42.0
+    rows = [{"t": 1.0, "agents_running": 3}, {"t": 9.0, "agents_running": 0}]
+    assert soak_budget.agents_ended_at(samples, {"samples": rows}) == 9.0
+    assert soak_budget.agents_ended_at(_samples(5)) is None  # agents still running
 
 
 def test_memory_growth_from_minute_10_to_60():
-    broken = soak_budget.check_memory(_samples(60, app=40.0, tree=60.0))
-    assert broken == ["tree growth: 60 MB/h > 50 MB/h (minute 10-60)"]
+    broken = soak_budget.check_memory(_samples(60, app=40.0, ducky=60.0, workload=500.0))
+    assert broken == ["ducky growth: 60 MB/h > 50 MB/h (minute 10-60)"]
 
 
 def test_growth_before_minute_10_is_ignored():
@@ -140,8 +230,10 @@ def test_growth_before_minute_10_is_ignored():
 
 
 def test_short_run_skips_growth_but_checks_budget():
-    samples = _samples(12, tree=5000.0)
-    assert soak_budget.check_memory(samples) == ["tree: 2500 MB > 1600 MB budget"]
+    samples = _samples(12, ducky=5000.0)
+    assert soak_budget.check_memory(samples) == ["ducky: 1900 MB > 1000 MB budget"]
+    old = [{k: v for k, v in s.items() if k != "ducky"} for s in _samples(12)]  # pre-split samples
+    assert soak_budget.check_memory(old) == ["ducky: 1500 MB > 1000 MB budget"]
     assert soak_budget.check_memory([]) == ["memory: no samples"]
 
 
@@ -167,3 +259,11 @@ def test_memory_cli_exit_codes(tmp_path, capsys):
     path.write_text("\n".join(json.dumps(s) for s in bad) + "\n", encoding="utf-8")
     assert soak_budget.main(["--memory", str(path)]) == 1
     assert "renderer: 912 MB > 500 MB budget" in capsys.readouterr().out
+    samples, _ = _ending([6, 6, 6])
+    path.write_text("\n".join(json.dumps(s) for s in samples) + "\n", encoding="utf-8")
+    results = tmp_path / "results.json"
+    results.write_text(json.dumps({"summary": {"agents": 6}}), encoding="utf-8")
+    assert soak_budget.main(["--memory", str(path), "--results", str(results)]) == 1
+    out = capsys.readouterr().out
+    assert "terminals: 6 still open 15 s after the agents finished" in out
+    assert "agent workload 600 MB" in out
