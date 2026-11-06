@@ -102,15 +102,32 @@ fn work_areas_has_a_primary() {
     assert!(areas[0].width() > 0 && areas[0].height() > 0);
 }
 
-/// Rust writes, Python's own `window_bounds.get_bounds` reads it back. Skipped when
-/// no Python or no ducky_app checkout is next to native_launcher.
+/// A Python that really runs: `$PYTHON`, then `py -3`, `python3`, `python`. Each must pass
+/// `--version` (the Windows Store stub doesn't). None works: the test fails, never skips.
+fn find_python() -> Vec<String> {
+    let mut candidates: Vec<Vec<String>> = Vec::new();
+    if let Ok(p) = std::env::var("PYTHON") {
+        if !p.trim().is_empty() {
+            candidates.push(vec![p]);
+        }
+    }
+    candidates.push(vec!["py".into(), "-3".into()]);
+    candidates.push(vec!["python3".into()]);
+    candidates.push(vec!["python".into()]);
+    for c in &candidates {
+        let ok = Command::new(&c[0]).args(&c[1..]).arg("--version").output().map(|o| o.status.success()).unwrap_or(false);
+        if ok {
+            return c.clone();
+        }
+    }
+    panic!("no working Python: tried {candidates:?} (each must run `--version`); set $PYTHON or install the py launcher");
+}
+
+/// Rust writes, Python's own `window_bounds.get_bounds` reads it back.
 #[test]
 fn python_reads_back_what_rust_writes() {
     let app = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../ducky_app");
-    if !app.join("frontend/ui_web/window_bounds.py").is_file() {
-        eprintln!("skip: no ducky_app next to native_launcher");
-        return;
-    }
+    assert!(app.join("frontend/ui_web/window_bounds.py").is_file(), "no ducky_app next to native_launcher at {}", app.display());
     let path = temp_file("python");
     let localappdata = path.parent().unwrap().join("lad");
     let file = localappdata.join("UEFN-Ducky").join("window_bounds.json");
@@ -123,14 +140,15 @@ from frontend.ui_web import window_bounds as wb\n\
 wb._use_db = lambda: False\n\
 print(json.dumps([wb.get_bounds('main'), wb.get_bounds('focus:x')]))\n\
 wb.save_bounds('focus:py', 3, 4, 500, 400)\n";
-    let py = std::env::var("PYTHON").unwrap_or_else(|_| "python".into());
-    let out = match Command::new(&py).arg("-c").arg(script).arg(&app).env("LOCALAPPDATA", &localappdata).output() {
-        Ok(o) => o,
-        Err(_) => {
-            eprintln!("skip: no python");
-            return;
-        }
-    };
+    let py = find_python();
+    let out = Command::new(&py[0])
+        .args(&py[1..])
+        .arg("-c")
+        .arg(script)
+        .arg(&app)
+        .env("LOCALAPPDATA", &localappdata)
+        .output()
+        .unwrap_or_else(|e| panic!("could not run {py:?}: {e}"));
     assert!(out.status.success(), "python failed: {}", String::from_utf8_lossy(&out.stderr));
     let got: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(
