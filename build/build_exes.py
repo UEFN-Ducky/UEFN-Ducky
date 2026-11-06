@@ -265,6 +265,105 @@ def missing_search_model_files(app_dir: Path) -> list[str]:
     return [name for name in SEARCH_MODEL_FILES if not (folder / name).is_file()]
 
 
+LAUNCHER_EXE = "Ducky-Launcher.exe"
+# Build output and editor/VCS litter never change the launcher binary.
+_LAUNCHER_HASH_SKIP_DIRS = frozenset({"target", ".git", ".idea", ".vscode"})
+
+
+def launcher_source_files(src: Path) -> list[Path]:
+    """Files under ``native_launcher/`` that decide the launcher binary, sorted."""
+    files: list[Path] = []
+    for p in src.rglob("*"):
+        rel = p.relative_to(src)
+        if any(part in _LAUNCHER_HASH_SKIP_DIRS for part in rel.parts[:-1]):
+            continue
+        if p.is_file():
+            files.append(p)
+    return sorted(files, key=lambda p: p.relative_to(src).as_posix())
+
+
+def launcher_source_hash(src: Path) -> str:
+    """SHA-256 over every source file's relative path and bytes (``target/`` excluded)."""
+    import hashlib
+
+    h = hashlib.sha256()
+    for p in launcher_source_files(src):
+        h.update(p.relative_to(src).as_posix().encode("utf-8"))
+        h.update(b"\0")
+        h.update(p.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:24]
+
+
+def launcher_cache_root() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(base) / "UEFN-Ducky" / "build_cache" / "launcher"
+
+
+def build_launcher(
+    src: Path,
+    *,
+    cache_root: Path | None = None,
+    cargo: str | None = None,
+    run=subprocess.run,
+) -> Path | None:
+    """Return the cached ``Ducky-Launcher.exe`` for ``src``, running cargo only on a miss.
+
+    None (with a warning) when there is no launcher source, no cargo, or the build fails:
+    the launcher is optional, and Ducky ships without it.
+    """
+    if not (src / "Cargo.toml").is_file():
+        print(f"Note: no {src / 'Cargo.toml'}; building without {LAUNCHER_EXE}")
+        return None
+    cache_root = cache_root or launcher_cache_root()
+    digest = launcher_source_hash(src)
+    cached = cache_root / digest / LAUNCHER_EXE
+    if cached.is_file():
+        print(f"{LAUNCHER_EXE}: cache hit {digest} ({cached})")
+        return cached
+    cargo = cargo or shutil.which("cargo")
+    if not cargo:
+        print(
+            f"WARNING: cargo not found on PATH; this build ships WITHOUT {LAUNCHER_EXE}.",
+            file=sys.stderr,
+        )
+        return None
+    # One shared target dir keeps incremental builds fast across source hashes.
+    target_dir = cache_root / "target"
+    cmd = [cargo, "build", "--release", "--manifest-path", str(src / "Cargo.toml"), "--target-dir", str(target_dir)]
+    print(f"{LAUNCHER_EXE}: cache miss {digest}")
+    print(">", " ".join(cmd))
+    try:
+        proc = run(cmd, cwd=str(src))
+    except OSError as exc:
+        print(f"WARNING: cargo could not start ({exc}); this build ships WITHOUT {LAUNCHER_EXE}.", file=sys.stderr)
+        return None
+    built = target_dir / "release" / LAUNCHER_EXE
+    if getattr(proc, "returncode", 1) != 0 or not built.is_file():
+        print(
+            f"WARNING: cargo build failed (rc={getattr(proc, 'returncode', '?')}); "
+            f"this build ships WITHOUT {LAUNCHER_EXE}.",
+            file=sys.stderr,
+        )
+        return None
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cached.with_suffix(".exe.tmp")
+    shutil.copy2(built, tmp)
+    os.replace(tmp, cached)
+    print(f"{LAUNCHER_EXE}: cached {cached}")
+    return cached
+
+
+def place_launcher(launcher: Path | None, app_dir: Path) -> Path | None:
+    """Copy the launcher beside ``UEFN-Ducky.exe``; None when there is none to ship."""
+    if launcher is None or not launcher.is_file():
+        return None
+    dest = app_dir / LAUNCHER_EXE
+    shutil.copy2(launcher, dest)
+    print(f"Placed {dest}")
+    return dest
+
+
 def main() -> int:
     args = _parse_args()
     dev_build = bool(args.dev)
@@ -308,6 +407,9 @@ def main() -> int:
     from fetch_search_model import ensure_model as ensure_search_model
 
     ensure_search_model()
+
+    # Optional Rust launcher: cargo runs only when native_launcher/ changed.
+    launcher_exe = build_launcher(root / "native_launcher")
 
     _build_react_panel(root)
     # Freeze the panel before PyInstaller. npm rebuilds during Analysis replace
@@ -459,6 +561,12 @@ def main() -> int:
             "  Close any running panel or bridge holding files in that folder.",
             file=sys.stderr,
         )
+        return 1
+
+    try:
+        place_launcher(launcher_exe, wrote)
+    except OSError as exc:
+        print(f"ERROR: could not copy {LAUNCHER_EXE} into {wrote} ({exc})", file=sys.stderr)
         return 1
 
     packaged_panel = wrote / "_internal" / "frontend" / "ui_web" / "web" / "dist"

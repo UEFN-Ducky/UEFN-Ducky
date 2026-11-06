@@ -50,3 +50,119 @@ def test_search_model_present(tmp_path: Path) -> None:
 def test_search_model_missing_is_reported(tmp_path: Path) -> None:
     (tmp_path / "_internal").mkdir()
     assert be.missing_search_model_files(tmp_path) == list(be.SEARCH_MODEL_FILES)
+
+
+def _launcher_src(tmp_path: Path) -> Path:
+    src = tmp_path / "native_launcher"
+    (src / "app" / "src").mkdir(parents=True)
+    (src / "Cargo.toml").write_text('[workspace]\nmembers=["app","crates/*"]\n', encoding="utf-8")
+    (src / "app" / "src" / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+    return src
+
+
+class _FakeCargo:
+    def __init__(self, rc: int = 0) -> None:
+        self.calls: list[list[str]] = []
+        self.rc = rc
+
+    def __call__(self, cmd, cwd=None):
+        self.calls.append(list(cmd))
+        target = Path(cmd[cmd.index("--target-dir") + 1])
+        if self.rc == 0:
+            (target / "release").mkdir(parents=True, exist_ok=True)
+            (target / "release" / be.LAUNCHER_EXE).write_bytes(b"MZ launcher")
+
+        class _P:
+            returncode = self.rc
+
+        return _P()
+
+
+def test_launcher_hash_ignores_target_and_tracks_sources(tmp_path: Path) -> None:
+    src = _launcher_src(tmp_path)
+    first = be.launcher_source_hash(src)
+    (src / "target" / "release").mkdir(parents=True)
+    (src / "target" / "release" / "junk.o").write_bytes(b"x")
+    (src / "app" / "target").mkdir()
+    (src / "app" / "target" / "x").write_bytes(b"y")
+    assert be.launcher_source_hash(src) == first
+    assert all("target" not in p.relative_to(src).parts for p in be.launcher_source_files(src))
+    (src / "app" / "src" / "main.rs").write_text("fn main() { }\n", encoding="utf-8")
+    assert be.launcher_source_hash(src) != first
+    crate = src / "crates" / "ipc" / "src"
+    crate.mkdir(parents=True)
+    (crate / "lib.rs").write_text("", encoding="utf-8")
+    assert be.launcher_source_hash(src) != first
+
+
+def test_launcher_hash_depends_on_path_not_just_bytes(tmp_path: Path) -> None:
+    src = _launcher_src(tmp_path)
+    (src / "a.rs").write_text("x", encoding="utf-8")
+    one = be.launcher_source_hash(src)
+    (src / "a.rs").rename(src / "b.rs")
+    assert be.launcher_source_hash(src) != one
+
+
+def test_launcher_cache_miss_runs_cargo_then_hit_skips_it(tmp_path: Path) -> None:
+    src = _launcher_src(tmp_path)
+    cache = tmp_path / "cache"
+    cargo = _FakeCargo()
+    first = be.build_launcher(src, cache_root=cache, cargo="cargo", run=cargo)
+    assert first is not None and first.is_file()
+    assert first.parent == cache / be.launcher_source_hash(src)
+    assert len(cargo.calls) == 1
+    assert cargo.calls[0][:3] == ["cargo", "build", "--release"]
+
+    def _boom(*_a, **_k):
+        raise AssertionError("cargo must not run on a cache hit")
+
+    assert be.build_launcher(src, cache_root=cache, cargo="cargo", run=_boom) == first
+
+
+def test_launcher_source_change_is_a_miss(tmp_path: Path) -> None:
+    src = _launcher_src(tmp_path)
+    cache = tmp_path / "cache"
+    cargo = _FakeCargo()
+    a = be.build_launcher(src, cache_root=cache, cargo="cargo", run=cargo)
+    (src / "app" / "src" / "main.rs").write_text("fn main() { println!(); }\n", encoding="utf-8")
+    b = be.build_launcher(src, cache_root=cache, cargo="cargo", run=cargo)
+    assert len(cargo.calls) == 2 and a != b
+
+
+def test_no_cargo_warns_and_builds_without_launcher(tmp_path: Path, monkeypatch, capsys) -> None:
+    src = _launcher_src(tmp_path)
+    monkeypatch.setattr(be.shutil, "which", lambda _name: None)
+    assert be.build_launcher(src, cache_root=tmp_path / "cache") is None
+    assert "WITHOUT Ducky-Launcher.exe" in capsys.readouterr().err
+    app = tmp_path / "app"
+    app.mkdir()
+    assert be.place_launcher(None, app) is None
+    assert not (app / be.LAUNCHER_EXE).exists()
+
+
+def test_failed_cargo_build_ships_without_launcher(tmp_path: Path, capsys) -> None:
+    src = _launcher_src(tmp_path)
+    cache = tmp_path / "cache"
+    assert be.build_launcher(src, cache_root=cache, cargo="cargo", run=_FakeCargo(rc=101)) is None
+    assert "WITHOUT" in capsys.readouterr().err
+    assert not (cache / be.launcher_source_hash(src)).exists()
+
+
+def test_missing_source_tree_is_skipped(tmp_path: Path) -> None:
+    assert be.build_launcher(tmp_path / "native_launcher", cache_root=tmp_path / "c", run=_FakeCargo()) is None
+
+
+def test_launcher_is_placed_beside_the_app(tmp_path: Path) -> None:
+    exe = tmp_path / "cached" / be.LAUNCHER_EXE
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ")
+    app = tmp_path / "UEFN-Ducky-1.2.3"
+    app.mkdir()
+    (app / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    placed = be.place_launcher(exe, app)
+    assert placed == app / "Ducky-Launcher.exe" and placed.read_bytes() == b"MZ"
+
+
+def test_cache_root_is_under_localappdata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert be.launcher_cache_root() == tmp_path / "UEFN-Ducky" / "build_cache" / "launcher"
