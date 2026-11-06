@@ -52,6 +52,8 @@ def test_window_launch_threads_it_and_every_https_user_waits():
     assert "ssl_boot.inject_in_background()" in main_src
     assert "ssl_boot.inject_now()" in main_src  # agent host, bridge, db: right away
     assert "truststore.inject_into_ssl()" not in main_src
-    panel_src = inspect.getsource(webview_app._run_panel)
+    # The window and --backend both build the panel API through boot_panel_api.
+    assert "api = boot_panel_api()" in inspect.getsource(webview_app._run_panel)
+    panel_src = inspect.getsource(webview_app.boot_panel_api)
     assert panel_src.index("wait_for_ssl_boot()") < panel_src.index("from frontend.ui_web.panel_api import")
     assert "wait_for_ssl_boot()" in inspect.getsource(boot_report._send)

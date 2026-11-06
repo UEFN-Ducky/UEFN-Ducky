@@ -324,9 +324,9 @@ def _default_read_pid() -> int | None:
 
 
 def _default_alive(pid: int) -> bool:
-    from frontend.ui_web.webview_app import _ducky_process_alive
+    from frontend.ui_web.webview_app import ducky_process_alive
 
-    return _ducky_process_alive(pid)
+    return ducky_process_alive(pid)
 
 
 def _default_handoff(paths: list[str], links: list[str], first: bool) -> bool:

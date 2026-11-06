@@ -187,7 +187,7 @@ def _boot_trace(name: str, t0: float, **meta: object) -> None:
 _LIVING_PANEL_WAIT_S = 45.0
 
 
-def _ducky_process_alive(pid: int) -> bool:
+def ducky_process_alive(pid: int) -> bool:
     """``pid`` is still a running Ducky (not a process that got its number since)."""
     from frontend.open_files import panel_process_alive
 
@@ -199,6 +199,9 @@ def _ducky_process_alive(pid: int) -> bool:
         return psutil.Process(pid).name().lower().startswith("uefn-ducky")
     except Exception:
         return True  # alive by the check above; not knowing its name is no reason to kill it
+
+
+_ducky_process_alive = ducky_process_alive
 
 
 def _hand_off_to_living_panel(open_paths: list[str], deep_links: list[str]) -> bool:

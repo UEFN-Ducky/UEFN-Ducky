@@ -38,10 +38,15 @@ def test_main_thread_never_imports_the_mcp_tool_package():
 
 
 def test_popup_guard_still_starts_from_the_startup_thread():
-    tree = _run_panel_tree()
+    # _run_panel and --backend share make_background_work; its _startup_bg runs on its own thread.
+    assert "make_background_work" in _calls_outside_nested_functions(_run_panel_tree())
+    source = textwrap.dedent(inspect.getsource(webview_app.make_background_work))
+    tree = ast.parse(source).body[0]
     bg = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_startup_bg")
     calls = {n.func.id for n in ast.walk(bg) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     assert "start_popup_guard" in calls
+    assert "start_popup_guard" not in _calls_outside_nested_functions(tree)
+    assert 'threading.Thread(target=_startup_bg, daemon=True, name="panel-startup-bg")' in source
 
 
 def test_warmup_imports_on_a_worker_thread():
@@ -73,8 +78,10 @@ def test_panel_api_starts_while_webview_still_warms():
     # waiting behind the join.
     source = inspect.getsource(webview_app._run_panel)
     join_at = source.index("webview_warmup.join(")
-    assert source.index("from frontend.ui_web.panel_api import shared_panel_api") < join_at
-    assert source.index("api = shared_panel_api()") < join_at
+    assert source.index("api = boot_panel_api()") < join_at
+    boot = inspect.getsource(webview_app.boot_panel_api)
+    assert boot.index("from frontend.ui_web.panel_api import shared_panel_api") < boot.index("api = shared_panel_api()")
+    assert "webview_warmup" not in boot and "import webview" not in boot
 
 
 def _calls_outside_nested_functions(fn: ast.FunctionDef) -> set[str]:
