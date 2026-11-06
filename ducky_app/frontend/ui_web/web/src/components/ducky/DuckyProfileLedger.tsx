@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
+import { useChatsChanged } from "../../hooks/useChatsChanged";
 import type { ChatTab } from "../../types/panel";
 
 // Lazy like the other ChangesView hosts, so the ledger stays out of the boot chunk.
@@ -13,13 +14,14 @@ type Props = {
 /** Island changeset ledger for every current chat of this ducky type. */
 export function DuckyProfileLedger({ profileId, profileName }: Props) {
   const [chats, setChats] = useState<ChatTab[]>([]);
+  const seqRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = useCallback(async () => {
+    const seq = ++seqRef.current;
     const api = getApi();
     if (!api?.list_all_conversations) return;
-    void api.list_all_conversations().then((rows) => {
-      if (cancelled || !Array.isArray(rows)) return;
+    await api.list_all_conversations().then((rows) => {
+      if (seq !== seqRef.current || !Array.isArray(rows)) return;
       const pid = profileId.trim();
       const name = profileName.trim().toLowerCase();
       setChats(
@@ -40,10 +42,16 @@ export function DuckyProfileLedger({ profileId, profileName }: Props) {
           })),
       );
     });
-    return () => {
-      cancelled = true;
-    };
   }, [profileId, profileName]);
+
+  useEffect(() => {
+    void load();
+    return () => {
+      seqRef.current++;
+    };
+  }, [load]);
+  // Chats come and go (and the launcher's start-up copy is refreshed with chats_changed).
+  useChatsChanged(load);
 
   return (
     <div className="ducky-profile-ledger">

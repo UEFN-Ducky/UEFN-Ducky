@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from "react-dom";
 import { getApi } from "../hooks/usePanelApi";
 import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
+import { useChatsChanged } from "../hooks/useChatsChanged";
 import { getDirectTransport } from "../remote/directTransport";
 import { enqueueComposerDraft } from "../hooks/chatComposerCache";
 import { requestOpenPlanTab } from "../navigation/openPlanTab";
@@ -449,6 +450,12 @@ export function PlanPane({
       })),
     );
   }, []);
+
+  // An open Send menu follows chats being made or removed (and a start-up list the native
+  // launcher served from its cache, refreshed with chats_changed).
+  useChatsChanged(async () => {
+    if (sendOpen) await refreshChats();
+  });
 
   const openSendMenu = () => {
     setSendOpen((v) => !v);
