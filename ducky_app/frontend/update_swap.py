@@ -315,6 +315,7 @@ def switch(version: str) -> dict[str, Any]:
     if not app_versions.start_detached(exe, ["--after-update", str(os.getpid())], env=env):
         continue_chats(chats)
         return {"ok": False, "error": f"{version} could not be started."}
+    app_versions.write_current(version)
     _set(phase="switching")
     _log.info("switching to %s", version)
     try:

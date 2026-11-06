@@ -6,6 +6,7 @@
         app-1.2.412.partial\\    a download in progress
         boot.json               starts per version that never reached ready, and bad versions
         handover.json           window state left by the version that switched to a newer one
+        current.json            the folder a start lands on, for Ducky-Launcher.exe (no Python)
 
 Whatever EXE gets started (the installed one, a pin, ``ducky.cmd``, an IDE's MCP config)
 hands off to the newest ready version that isn't bad, so every start lands on the
@@ -16,6 +17,7 @@ hand-off runs before anything else is imported.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -31,6 +33,10 @@ READY_MARKER = ".ready"
 PARTIAL_SUFFIX = ".partial"
 BOOT_FILE = "boot.json"
 HANDOVER_FILE = "handover.json"
+# {"version", "dir", "written", "installed"}: "dir" is relative to versions_dir().parent
+# for a downloaded version, or the installed EXE's absolute folder. Older versions never
+# read it: a new, additive file.
+CURRENT_FILE = "current.json"
 # The EXE that was started, before any hand-off: saved paths (IDE configs, Open with,
 # the uefn-ducky:// link) must name it, never a folder under versions\.
 LAUNCHER_ENV = "UEFN_DUCKY_LAUNCHER_EXE"
@@ -51,6 +57,7 @@ _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 _DETACHED_PROCESS = 0x00000008
 _jobs: list[int] = []
+_log = logging.getLogger(__name__)
 
 
 def parse_version(text: str) -> tuple[int, int, int] | None:
@@ -148,6 +155,7 @@ def record_start(version: str) -> bool:
 
 def mark_ready(version: str) -> None:
     """The panel of ``version`` came up: its failed-start count goes back to zero."""
+    write_current(version)
     boot = read_boot()
     row = _boot_row(boot, version)
     if not row.get("starts"):
@@ -173,6 +181,43 @@ def newest_usable(current: str) -> tuple[str, Path] | None:
         if not is_bad(version, boot):
             return version, folder
     return None
+
+
+def read_current() -> dict[str, Any]:
+    try:
+        data = json.loads((versions_dir() / CURRENT_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def write_current(version: str, installed: str = "") -> None:
+    """Point current.json at the folder starts land on: ``version``'s folder when it is
+    ready and not bad, else the installed EXE's folder. ``installed`` is the installed
+    EXE's version (kept from the file when not given). Never raises."""
+    if not getattr(sys, "frozen", False) or os.environ.get(NO_HOP_ENV):
+        return  # dev runs and sandboxed builds never repoint the real install
+    try:
+        old = read_current()
+        installed = installed or str(old.get("installed") or "")
+        folder = version_dir(version) if parse_version(version) else None
+        if folder is not None and is_ready(folder) and not is_bad(version):
+            where = f"{VERSIONS_DIR_NAME}/{folder.name}"
+        else:
+            version, where = installed, str(launcher_exe().parent)
+        data = {"version": version, "dir": where, "installed": installed}
+        if {k: old.get(k) for k in data} == data:
+            return
+        _write_json(versions_dir() / CURRENT_FILE, {**data, "written": time.time()})
+    except Exception:
+        _log.warning("versions/current.json could not be written", exc_info=True)
+
+
+def repoint_to_installed_pick() -> None:
+    """Rewrite current.json to what the installed EXE would start now (after a rollback)."""
+    installed = str(read_current().get("installed") or "")
+    target = newest_usable(installed) if installed else None
+    write_current(target[0] if target else installed, installed)
 
 
 def backend_mode(argv: list[str] | None = None) -> bool:
@@ -315,25 +360,29 @@ def hand_off(current: str, *, bridge: bool) -> None:
     this EXE is the one to run (nothing newer, a dev run, or hand-off turned off)."""
     if not getattr(sys, "frozen", False) or os.environ.get(NO_HOP_ENV):
         return
+    installed = "" if running_from_versions() else current
     for _ in range(4):
         target = newest_usable(current)
         if target is None:
-            return
+            break
         version, folder = target
         exe = folder / Path(sys.executable).name
         if not exe.is_file():
-            return
+            break
         if bridge:
+            write_current(version, installed)
             raise SystemExit(run_attached(exe, sys.argv[1:]))
         if not record_start(version):
             continue  # failed to start before: try the next one down
+        write_current(version, installed)
         if backend_mode():
             # Ducky-Launcher.exe talks to us over stdin/stdout: the newer version must
             # keep those pipes, so it runs attached instead of detached.
             raise SystemExit(run_attached(exe, sys.argv[1:]))
         if start_detached(exe, sys.argv[1:]):
             os._exit(0)
-        return
+        break
+    write_current(current, installed)  # this EXE runs
 
 
 def fall_back_after_failed_start(current: str, reason: str) -> bool:
@@ -346,6 +395,7 @@ def fall_back_after_failed_start(current: str, reason: str) -> bool:
     if not running_from_versions():
         return False
     mark_bad(current, reason)
+    repoint_to_installed_pick()
     if backend_mode():
         return False
     exe = launcher_exe()
