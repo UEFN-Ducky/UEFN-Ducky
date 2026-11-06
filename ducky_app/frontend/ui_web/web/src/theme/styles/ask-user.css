@@ -469,6 +469,14 @@
   background: color-mix(in srgb, var(--fg) 4%, var(--sidebar, var(--card)));
 }
 
+.ask-user-footer-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .ask-user-footer-right {
   display: flex;
   align-items: center;

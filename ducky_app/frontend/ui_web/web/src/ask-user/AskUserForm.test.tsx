@@ -4,6 +4,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AskUserForm } from "./AskUserForm";
 import { parseAskUserQuestions } from "./types";
 
+vi.mock("../hooks/usePanelApi", () => ({
+  getApi: () => ({ save_chat_file: vi.fn(async () => ({ ok: true, path: "C:/chat/a.png" })) }),
+}));
+
 afterEach(cleanup);
 
 const questions = parseAskUserQuestions([
@@ -57,11 +61,19 @@ it("a typed answer is a textarea: Shift+Enter keeps typing, Enter sends", () => 
   expect(done).toHaveBeenCalledOnce();
 });
 
-it("Cancel closes a required question without an answer and has no Attach button", () => {
+it("Attach sits in the footer bar, not under the answer box", () => {
+  const { container } = render(
+    <AskUserForm questions={questions} title="" captureKeys={false} chatId="c1" onComplete={() => {}} />,
+  );
+  const attach = screen.getByRole("button", { name: /Attach/ });
+  expect(attach.closest(".ask-user-footer")).toBeTruthy();
+  expect(container.querySelector(".ask-user-options .ask-user-attach-btn")).toBeNull();
+});
+
+it("Cancel closes a required question without an answer", () => {
   const done = vi.fn();
   render(<AskUserForm questions={questions} title="" captureKeys={false} chatId="c1" onComplete={done} />);
   fireEvent.click(screen.getByRole("radio", { name: /Snow/ }));
-  expect(screen.queryByRole("button", { name: /Attach/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(done).toHaveBeenCalledOnce();
   expect(done.mock.calls[0][0]).toMatchObject({
