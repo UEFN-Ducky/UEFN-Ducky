@@ -66,6 +66,15 @@ fn cacheable_names_are_python_getters_in_the_inventory() {
 }
 
 #[test]
+fn shim_js_never_reloads_the_page() {
+    for needle in ["reload(", "location.href =", "location.assign", "location.replace"] {
+        assert!(!SHIM_JS.contains(needle), "shim.js must refresh in place, found {needle}");
+    }
+    let page = repo_file("ducky_app/frontend/ui_web/web/src/hooks/startupRefresh.ts");
+    assert!(page.contains("\"ducky-native-startup-refresh\""), "page no longer listens for startup-refresh");
+}
+
+#[test]
 fn shim_js_exposes_pywebview_surface() {
     for needle in ["window.pywebview.api", "pywebviewready", "chrome.webview", "postMessage", "new Proxy", "\"js-\""] {
         assert!(SHIM_JS.contains(needle), "shim.js lacks {needle}");

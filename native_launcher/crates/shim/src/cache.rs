@@ -6,8 +6,9 @@
 //! - before hello, a cached getter is answered at once (`Intercept::Answered`) and the
 //!   same call goes to the backend under a `cache-` id, so the page never sees its result;
 //! - once every refresh call is back, the file is rewritten from the live results and, when
-//!   any value changed, a `startup-refresh` event goes to the page (shim.js reloads the page
-//!   once unless a listener calls `preventDefault`; after hello nothing comes from the cache).
+//!   any value changed, a `startup-refresh` event `{stale:[names]}` goes to the page, which
+//!   re-runs the loaders for those names in place (web `hooks/startupRefresh.ts`, never a
+//!   reload). After hello nothing comes from the cache.
 //!
 //! Only pure getters are in [`CACHEABLE`]; a missing, broken or other-version file means
 //! no cache, so calls wait for Python exactly as without it.

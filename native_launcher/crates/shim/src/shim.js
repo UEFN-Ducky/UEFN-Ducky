@@ -45,12 +45,8 @@
     if (msg.t === "result") settle(msg);
     else if (msg.t === "names" && Array.isArray(msg.names)) names = new Set(msg.names);
     else if (msg.t === "event" && typeof msg.name === "string") {
-      var ev2 = new CustomEvent("ducky-native-" + msg.name, { detail: msg.data || {}, cancelable: true });
-      var kept = window.dispatchEvent(ev2);
-      // Start-up values came from the launcher's cache and Python now says otherwise. The page
-      // has no re-fetch path for them, so load it once more (live this time) unless a
-      // listener handled it with preventDefault().
-      if (msg.name === "startup-refresh" && kept) location.reload();
+      // startup-refresh ({stale:[names]}) is handled in place by the page (hooks/startupRefresh.ts).
+      window.dispatchEvent(new CustomEvent("ducky-native-" + msg.name, { detail: msg.data || {} }));
     }
   });
 

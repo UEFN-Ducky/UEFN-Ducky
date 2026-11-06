@@ -23,6 +23,7 @@ import {
 } from "./remote/directTransport";
 import { RemoteDuckyBar } from "./components/RemoteDuckyBar";
 import { installAppIdle } from "./utils/appIdle";
+import { installStartupRefresh } from "./hooks/startupRefresh";
 
 const remoteDucky = isRemoteDuckyWindow();
 // Phone panel on the panel host, or a window showing another of your UEFN Duckies:
@@ -40,6 +41,8 @@ if (isDirectMode()) {
 
 // Endless glows hold still while the window sits in the background.
 installAppIdle();
+// Native launcher: start-up values that came from its cache and changed refresh in place.
+installStartupRefresh();
 
 function render() {
   ReactDOM.createRoot(document.getElementById("root")!).render(
