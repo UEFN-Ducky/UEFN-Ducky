@@ -372,6 +372,42 @@ _detect_cache_at = 0.0
 _detect_refresh_lock = threading.Lock()
 _detect_refresh_inflight = False
 _detect_updated_hook: Any = None
+# Nov 6 2026: every start probed every CLI (opencode, codex, claude, node, reg) in its first
+# seconds. The last result is saved; a start serves it and probes a minute later instead.
+_DETECT_BOOT_RECHECK_SEC = 60.0
+_detect_saved_read = False
+
+
+def _detect_saved_path() -> Path:
+    from backend.skills.discovery import appdata_dir
+
+    return appdata_dir() / "coding_agents_detect.json"
+
+
+def _read_saved_detect() -> dict[str, Any] | None:
+    import json
+
+    try:
+        data = json.loads(_detect_saved_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("agents"), list) else None
+
+
+def _save_detect(payload: dict[str, Any] | None) -> None:
+    import json
+    import os
+
+    if not isinstance(payload, dict):
+        return
+    try:
+        path = _detect_saved_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(payload, default=str), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 — no saved result only means the next start probes
+        pass
 
 
 def set_detect_updated_hook(hook: Any) -> None:
@@ -487,6 +523,9 @@ def kick_detect_refresh() -> None:
                     _publish()
             if not adapters:
                 _publish()
+            with _detect_lock:
+                final = _detect_cache
+            _save_detect(final)
         finally:
             with _detect_refresh_lock:
                 _detect_refresh_inflight = False
@@ -501,7 +540,17 @@ def detect_all(settings: Any | None = None) -> dict[str, Any]:
     if settings is not None:
         agents = list_coding_agents(settings)
         return {"agents": [a.to_dict() for a in agents]}
+    global _detect_saved_read, _detect_cache, _detect_cache_at
     now = time.monotonic()
+    with _detect_lock:
+        first = not _detect_saved_read
+        _detect_saved_read = True
+    if first:  # this process's first ask: the last start's result, probed again in a minute
+        saved = _read_saved_detect()
+        with _detect_lock:
+            if saved is not None and _detect_cache is None:
+                _detect_cache = saved
+                _detect_cache_at = now - _DETECT_TTL_SEC + _DETECT_BOOT_RECHECK_SEC
     with _detect_lock:
         cached = _detect_cache
         age_ok = cached is not None and (now - _detect_cache_at) < _DETECT_TTL_SEC

@@ -5,7 +5,15 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 import backend.agent.coding_agents.base as base
+
+
+@pytest.fixture(autouse=True)
+def _saved_detect_in_tmp(monkeypatch, tmp_path):
+    monkeypatch.setattr(base, "_detect_saved_path", lambda: tmp_path / "coding_agents_detect.json")
+    monkeypatch.setattr(base, "_detect_saved_read", True)  # tests opt in to the boot read
 
 
 def _reset_detect() -> None:
@@ -135,6 +143,45 @@ def test_opening_chats_and_settings_does_not_reprobe_every_cli(monkeypatch):
     list_agents()
     list_agents()
     assert calls == {"a": 2, "b": 2}
+
+
+def test_a_start_serves_the_saved_result_and_probes_a_minute_later(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    calls = []
+
+    class _Counting:
+        def detect(self, _settings):
+            calls.append(1)
+            return base.CodingAgentInfo(id="a", label="a", enabled=True, available=True, status="ok")
+
+    monkeypatch.setattr(base, "listed_external_coding_agents", lambda: ["a"])
+    monkeypatch.setattr(base, "get_adapter", lambda aid: _Counting())
+    monkeypatch.setattr(base, "_instant_detect_payload", lambda: {"agents": [{"id": "a"}], "checking": True})
+    clock = [1000.0]
+    monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def wait_refresh():
+        deadline = time.monotonic() + 5
+        while base._detect_refresh_inflight and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    _reset_detect()
+    base.detect_all()  # no saved result: probes and saves it
+    wait_refresh()
+    assert calls == [1]
+    assert base._read_saved_detect()["agents"][0]["status"] == "ok"
+
+    _reset_detect()  # the next Ducky start
+    monkeypatch.setattr(base, "_detect_saved_read", False)
+    payload = base.detect_all()
+    wait_refresh()
+    assert payload["agents"][0]["status"] == "ok" and "checking" not in payload
+    assert calls == [1]  # served the saved result: no CLI started
+    clock[0] += base._DETECT_BOOT_RECHECK_SEC + 1
+    base.detect_all()
+    wait_refresh()
+    assert calls == [1, 1]  # probed again a minute after the start
 
 
 def test_a_checking_agent_already_names_its_gateway(monkeypatch) -> None:
