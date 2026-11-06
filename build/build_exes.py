@@ -291,11 +291,13 @@ def launcher_source_files(src: Path) -> list[Path]:
     return sorted(files, key=lambda p: p.relative_to(src).as_posix())
 
 
-def launcher_source_hash(src: Path) -> str:
-    """SHA-256 over every source file's relative path and bytes (``target/`` excluded)."""
+def launcher_source_hash(src: Path, app_version: str = "") -> str:
+    """SHA-256 over every source file's relative path and bytes (``target/`` excluded),
+    plus the app version the launcher bakes in for ``--version``."""
     import hashlib
 
     h = hashlib.sha256()
+    h.update(f"app_version={app_version}\0".encode("utf-8"))
     for p in launcher_source_files(src):
         h.update(p.relative_to(src).as_posix().encode("utf-8"))
         h.update(b"\0")
@@ -320,6 +322,7 @@ def launcher_missing(reason: str) -> SystemExit:
 def build_launcher(
     src: Path,
     *,
+    app_version: str = "",
     cache_root: Path | None = None,
     cargo: str | None = None,
     run=subprocess.run,
@@ -332,7 +335,7 @@ def build_launcher(
     if not (src / "Cargo.toml").is_file():
         raise launcher_missing(f"no {src / 'Cargo.toml'}")
     cache_root = cache_root or launcher_cache_root()
-    digest = launcher_source_hash(src)
+    digest = launcher_source_hash(src, app_version)
     cached = cache_root / digest / LAUNCHER_EXE
     # An entry without the dll (made before the dll was cached) is a miss.
     if cached.is_file() and (cached.parent / LAUNCHER_DLL).is_file():
@@ -347,7 +350,9 @@ def build_launcher(
     print(f"{LAUNCHER_EXE}: cache miss {digest}")
     print(">", " ".join(cmd))
     try:
-        proc = run(cmd, cwd=str(src))
+        # app/build.rs bakes DUCKY_APP_VERSION into --version; pin it to this build's version.
+        env = {**os.environ, "DUCKY_APP_VERSION": app_version} if app_version else None
+        proc = run(cmd, cwd=str(src), env=env)
     except OSError as exc:
         raise launcher_missing(f"cargo could not start ({exc})") from exc
     built = target_dir / "release" / LAUNCHER_EXE
@@ -425,10 +430,6 @@ def main() -> int:
 
     ensure_search_model()
 
-    # Required Rust launcher (stops the build when Rust is missing): cargo runs only when
-    # native_launcher/ changed. First, so a PC without Rust fails before the long freeze.
-    launcher_exe = build_launcher(root / "native_launcher")
-
     _build_react_panel(root)
     # Freeze the panel before PyInstaller. npm rebuilds during Analysis replace
     # hashed assets, and PyInstaller then skips the missing files.
@@ -450,6 +451,10 @@ def main() -> int:
         print(f"Using package version (no bump) -> {app_version} ({init_py})")
     else:
         app_version = _bump_package_version(init_py)
+
+    # Required Rust launcher (stops the build when Rust is missing): cargo runs only when
+    # native_launcher/ or the app version changed. After the bump, so --version matches.
+    launcher_exe = build_launcher(root / "native_launcher", app_version=app_version)
 
     # Deps first: write_ico below needs Pillow, so this must run before it.
     # --upgrade: a ">=" floor already met by an old, vulnerable copy would otherwise ship.

@@ -66,11 +66,13 @@ def _launcher_src(tmp_path: Path) -> Path:
 class _FakeCargo:
     def __init__(self, rc: int = 0, dll: bool = True) -> None:
         self.calls: list[list[str]] = []
+        self.envs: list[dict | None] = []
         self.rc = rc
         self.dll = dll
 
-    def __call__(self, cmd, cwd=None):
+    def __call__(self, cmd, cwd=None, env=None):
         self.calls.append(list(cmd))
+        self.envs.append(env)
         target = Path(cmd[cmd.index("--target-dir") + 1])
         if self.rc == 0:
             (target / "release").mkdir(parents=True, exist_ok=True)
@@ -85,6 +87,26 @@ class _FakeCargo:
             returncode = self.rc
 
         return _P()
+
+
+def test_a_new_app_version_rebuilds_the_launcher_with_that_version(tmp_path: Path) -> None:
+    # The release bumps the version but not native_launcher/: a cache hit would ship a
+    # launcher whose --version prints the old version (verify_installer_panel fails).
+    src = _launcher_src(tmp_path)
+    cache = tmp_path / "cache"
+    cargo = _FakeCargo()
+    old = be.build_launcher(src, app_version="1.2.471", cache_root=cache, cargo="cargo", run=cargo)
+    new = be.build_launcher(src, app_version="1.2.472", cache_root=cache, cargo="cargo", run=cargo)
+    assert old != new and len(cargo.calls) == 2
+    assert [e["DUCKY_APP_VERSION"] for e in cargo.envs] == ["1.2.471", "1.2.472"]
+    assert be.build_launcher(src, app_version="1.2.472", cache_root=cache, cargo="cargo", run=cargo) == new
+    assert len(cargo.calls) == 2
+
+
+def test_the_launcher_is_built_after_the_version_bump() -> None:
+    text = Path(be.__file__).read_text(encoding="utf-8")
+    main = text[text.index("def main("):]
+    assert main.index("_bump_package_version(init_py)") < main.index("build_launcher(")
 
 
 def test_launcher_hash_ignores_target_and_tracks_sources(tmp_path: Path) -> None:
