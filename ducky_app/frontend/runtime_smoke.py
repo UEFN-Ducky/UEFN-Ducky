@@ -143,7 +143,7 @@ def run(output: str) -> int:
 
 
 def native_launcher_default() -> str:
-    """What a fresh install's settings pick (release/verify_installer_panel.py wants 'off')."""
+    """What a fresh install's settings pick (release/verify_installer_panel.py wants 'auto')."""
     from frontend.settings import PanelSettings
 
     return PanelSettings().native_launcher

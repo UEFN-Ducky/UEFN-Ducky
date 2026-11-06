@@ -75,14 +75,14 @@ def check_launch_targets(iss: str) -> None:
     print(f"PASS: shortcuts and Open with start {LAUNCHER}", flush=True)
 
 
-def check_default_off(report: dict) -> None:
-    """Fresh settings keep the native launcher off (the runtime-smoke report's value)."""
+def check_default_launcher(report: dict) -> None:
+    """Fresh settings ship the native launcher on: ``auto`` (the runtime-smoke report's value)."""
     mode = report.get("native_launcher")
     if mode is None:
         raise RuntimeError("runtime-smoke report has no native_launcher (an app older than this check?)")
-    if mode != "off":
-        raise RuntimeError(f"fresh settings have native_launcher={mode!r}, want 'off'")
-    print("PASS: fresh settings have native_launcher off", flush=True)
+    if mode != "auto":
+        raise RuntimeError(f"fresh settings have native_launcher={mode!r}, want 'auto'")
+    print("PASS: fresh settings have native_launcher auto", flush=True)
 
 
 def expect_signed(app: Path, signed: bool | None, signature=_signature_status) -> bool:
@@ -116,7 +116,7 @@ def verify(extractor: Path, engine: Path, *, version: str = "", signed: bool | N
         output = root / "result.json"
         run_check(exe, "--verify-panel", output, succeeds=True)
         run_check(exe, "--panel-recovery-smoke", output, succeeds=True, recovered=False)
-        check_default_off(run_check(exe, "--runtime-smoke", output, succeeds=True))
+        check_default_launcher(run_check(exe, "--runtime-smoke", output, succeeds=True))
         print("PASS: extracted installer, strict asset check and frozen runtime", flush=True)
         check_launcher(root / "app", version, signed=expect_signed(root / "app", signed))
 

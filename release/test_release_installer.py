@@ -242,12 +242,13 @@ def test_launcher_absent_always_fails(tmp_path):
     assert run.calls == []
 
 
-def test_fresh_settings_default_off():
+def test_fresh_settings_default_auto():
     vip = _vip()
-    vip.check_default_off({"ok": True, "native_launcher": "off"})
-    for report in ({"ok": True}, {"ok": True, "native_launcher": "auto"}):
+    assert not hasattr(vip, "check_default_off")
+    vip.check_default_launcher({"ok": True, "native_launcher": "auto"})
+    for report in ({"ok": True}, {"ok": True, "native_launcher": "off"}, {"ok": True, "native_launcher": "on"}):
         with pytest.raises(RuntimeError, match="native_launcher"):
-            vip.check_default_off(report)
+            vip.check_default_launcher(report)
 
 
 @pytest.mark.parametrize("status,want", [("Valid", True), ("NotSigned", False), ("Unknown", False)])

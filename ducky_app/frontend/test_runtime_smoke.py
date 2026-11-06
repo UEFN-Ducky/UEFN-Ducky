@@ -8,8 +8,8 @@ import sys
 from frontend import runtime_smoke
 
 
-def test_fresh_settings_native_launcher_is_off() -> None:
-    assert runtime_smoke.native_launcher_default() == "off"
+def test_fresh_settings_native_launcher_is_auto() -> None:
+    assert runtime_smoke.native_launcher_default() == "auto"
 
 
 def test_report_has_the_key_even_when_the_smoke_fails_later(tmp_path, monkeypatch) -> None:
@@ -17,4 +17,4 @@ def test_report_has_the_key_even_when_the_smoke_fails_later(tmp_path, monkeypatc
     out = tmp_path / "smoke.json"
     assert runtime_smoke.run(str(out)) == 1
     report = json.loads(out.read_text(encoding="utf-8"))
-    assert report["ok"] is False and report["native_launcher"] == "off"
+    assert report["ok"] is False and report["native_launcher"] == "auto"
