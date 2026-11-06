@@ -116,9 +116,12 @@ def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
             handler(box[0], frame)
 
     conn = Client(pipe, authkey=key)
+    # In box and _batcher before it reads: the app sends start_turn the moment we connect, and a
+    # frame handled before then was dropped (its chats never started).
     box.append(protocol.Channel(conn, send_ops=protocol.HOST_OPS, recv_ops=APP_OPS, on_frame=on_frame,
-                                on_closed=lambda _reason: done.set(), heartbeat_s=protocol.HEARTBEAT_S).start())
+                                on_closed=lambda _reason: done.set(), heartbeat_s=protocol.HEARTBEAT_S))
     _batcher = batcher
+    box[0].start()
     try:
         while not done.wait(_TICK_S):
             batcher.flush_due()

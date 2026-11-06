@@ -81,13 +81,44 @@ def test_the_shed_frame_reaches_the_host(monkeypatch) -> None:
     app = protocol.Channel(conn, send_ops=supervisor.APP_OPS, recv_ops=protocol.HOST_OPS,
                            on_frame=lambda f: None).start()
     try:
-        deadline = time.monotonic() + 5
-        while host_main._batcher is None and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert app.send("shed")
+        assert app.send("shed")  # no wait for the host to settle: a frame on connect is handled
         assert got.wait(5)
         assert host.is_alive()  # the host stays up
     finally:
         done.set()
         host.join(5)
         app.close()
+
+
+def test_a_frame_handled_as_the_host_connects_reaches_turns(monkeypatch) -> None:
+    """The 50-agent load test lost a host's 4 chats: start_turn was handled before ``serve`` had
+    put its channel in place, and was dropped. The handler thread may run it before start() returns."""
+    got: list[tuple[object, str, bool]] = []
+    monkeypatch.setattr(host_main, "_turns_handler",
+                        lambda: lambda ch, f: got.append((ch, f["op"], host_main._batcher is not None)))
+
+    class Early(protocol.Channel):
+        def start(self):
+            self._on_frame({"op": "start_turn", "conv_id": "c1", "run_id": "r1"})
+            return super().start()
+
+    tag = f"t-{uuid.uuid4().hex[:8]}"
+    key = os.urandom(16)
+    listener = protocol.listen(tag, key)
+    monkeypatch.setattr(protocol, "Channel", Early)
+    done = threading.Event()
+    host = threading.Thread(target=host_main.serve, args=(protocol.pipe_name(tag), key, done), daemon=True)
+    host.start()
+    conn = listener.accept()
+    listener.close()
+    try:
+        deadline = time.monotonic() + 5
+        while not got and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(got) == 1
+        channel, op, fed = got[0]
+        assert isinstance(channel, Early) and op == "start_turn" and fed
+    finally:
+        done.set()
+        host.join(5)
+        conn.close()
