@@ -64,6 +64,10 @@ FALLBACK_REASONS = (
 _NOT_A_FAILURE = frozenset({"webview2", "no_exe", "crash_loop_active", "launcher_fallback"})
 
 CRASH_LOOP_FAILURES = 3
+# How long a launch waits for the ready file. Longer than the launcher's own 15 s hello
+# wait (which starts after the launcher itself is up), so a silent backend ends in the
+# launcher's exit 23, with its boot.json record, before this deadline kills it.
+NATIVE_WAIT_S = 22.0
 CRASH_LOOP_WINDOW_S = 10 * 60
 CRASH_LOOP_HOLD_S = 24 * 3600
 STARTS_KEPT = 200
@@ -344,7 +348,7 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
     if decide(mode, present, wv2, held) == "python":
         record_start_soon("python", None, None, python_reason(mode, present, wv2, held))
         return False
-    timeout_s = 15.0
+    timeout_s = NATIVE_WAIT_S
     code = run_native(argv, timeout_s, exe=exe)
     if code is None:
         ms = round((time.perf_counter() - started) * 1000)
@@ -353,7 +357,8 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
         return True
     timed_out = code == EXIT_NO_HELLO and time.perf_counter() - started >= timeout_s
     reason = fallback_reason(code, timed_out=timed_out)
-    if reason not in _NOT_A_FAILURE:
+    # A 22 is already in crash_loop.json: the launcher's supervisor wrote it.
+    if reason not in _NOT_A_FAILURE and code != EXIT_CRASH_LOOP:
         note_failure()
     record_start_soon("python", None, None, reason)
     return False

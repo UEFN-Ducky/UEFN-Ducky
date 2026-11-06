@@ -255,7 +255,10 @@ def test_exit_21_and_22_run_python_with_the_same_argv(
     _falls_back(appdata, list(ARGV))
     assert cmds == [[str(ns.launcher_exe()), *ARGV[1:]]]
     assert starts == [("python", None, None, reason)]
-    assert len(json.loads(ns.crash_loop_path().read_text(encoding="utf-8"))["failures"]) == 1
+    marker = ns.crash_loop_path()
+    failures = json.loads(marker.read_text(encoding="utf-8"))["failures"] if marker.is_file() else []
+    # A 22 is counted once, by the launcher's supervisor (it wrote crash_loop.json itself).
+    assert len(failures) == (0 if code == 22 else 1)
 
 
 def _at(monkeypatch: pytest.MonkeyPatch, when: float) -> None:

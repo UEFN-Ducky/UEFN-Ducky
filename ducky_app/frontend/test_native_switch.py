@@ -313,8 +313,10 @@ def test_hook_each_exit_code_falls_back(launcher_present: Path, monkeypatch: pyt
     monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7100 + code, exit_after=0.0, code=code), []))
     assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="auto") is False
     assert rows == [("python", None, None, reason)]
-    failures = json.loads(ns.crash_loop_path().read_text(encoding="utf-8"))["failures"] if reason != "webview2" else []
-    assert len(failures) == (0 if reason == "webview2" else 1)
+    marker = ns.crash_loop_path()
+    failures = json.loads(marker.read_text(encoding="utf-8"))["failures"] if marker.is_file() else []
+    # webview2 never tried the launcher; a 22 is already counted by the launcher's supervisor.
+    assert len(failures) == (0 if reason in ("webview2", "crash_loop") else 1)
 
 
 def test_hook_timeout_falls_back(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -323,10 +325,30 @@ def test_hook_timeout_falls_back(launcher_present: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(ns, "_spawn", _spawner(proc, []))
     real = ns.run_native
     monkeypatch.setattr(ns, "run_native", lambda argv, timeout_s=15, **k: real(argv, 0.05, **k))
-    monkeypatch.setattr(ns.time, "perf_counter", _fake_clock([0.0, 16.0, 16.0]))
+    monkeypatch.setattr(ns.time, "perf_counter", _fake_clock([0.0, 23.0, 23.0]))
     assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
     assert proc.killed
     assert rows == [("python", None, None, "timeout")]
+
+
+def test_hook_waits_for_the_launchers_own_no_hello(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The launcher's 15 s hello wait starts after the launcher is up: its exit 23 at ~16 s
+    must arrive before the hook gives up, and read as no_hello, not timeout."""
+    rows = _sync_records(monkeypatch)
+    assert ns.NATIVE_WAIT_S > 15 + 5
+    calls: list[float] = []
+    real = ns.run_native
+
+    def run(argv, timeout_s=15, **k):
+        calls.append(timeout_s)
+        return real(argv, 0.05, **k)
+
+    monkeypatch.setattr(ns, "run_native", run)
+    monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7300, exit_after=0.0, code=23), []))
+    monkeypatch.setattr(ns.time, "perf_counter", _fake_clock([0.0, 16.0, 16.0]))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="auto") is False
+    assert calls == [ns.NATIVE_WAIT_S]
+    assert rows == [("python", None, None, "no_hello")]
 
 
 def _fake_clock(values: list[float]):
