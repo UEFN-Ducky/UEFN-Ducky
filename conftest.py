@@ -157,6 +157,26 @@ def _tree_signature(root: Path, live_panel: bool = False) -> dict[str, tuple[int
     return sig
 
 
+def _drop_store_updates(real: Path, changed: list[str]) -> list[str]:
+    """The live panel auto-updates Store plugins mid-run. A plugin folder whose record
+    changed and now carries a valid Store signature was such an update (a test can't
+    sign one), so its paths are not a leak."""
+    sig_name = os.path.join("uefn_plugins", "{}", ".ducky-sig.json")
+    try:
+        from backend.uefn_plugins.signing import store_signed_slugs
+
+        signed = store_signed_slugs(real / "uefn_plugins")
+    except Exception:
+        return changed
+    updated = {s for s in signed if sig_name.format(s) in changed}
+
+    def store_update(path: str) -> bool:
+        parts = Path(path).parts
+        return len(parts) > 1 and parts[0] == "uefn_plugins" and parts[1] in updated
+
+    return [p for p in changed if not store_update(p)]
+
+
 def pytest_configure(config: pytest.Config) -> None:
     if _OPT_OUT:
         return
@@ -188,6 +208,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     live = bool(getattr(config, "_ducky_live_panel", False))
     after = _tree_signature(real, live)
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    if changed and live:
+        changed = _drop_store_updates(real, changed)
     if changed:
         rep = session.config.pluginmanager.get_plugin("terminalreporter")
         msg = (

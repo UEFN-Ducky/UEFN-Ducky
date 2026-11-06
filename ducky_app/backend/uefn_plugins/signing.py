@@ -288,6 +288,22 @@ def read_installed_record(plugin_root: Path) -> dict[str, Any] | None:
         return None
 
 
+def store_signed_slugs(plugins_root: Path, pubkey_b64: str = "") -> set[str]:
+    """Plugin folders under *plugins_root* whose record is a valid Store signature for that
+    folder. Only the Store can sign, so these copies came from a real Store install."""
+    found: set[str] = set()
+    try:
+        roots = [p for p in Path(plugins_root).iterdir() if p.is_dir()]
+    except OSError:
+        return found
+    for root in roots:
+        record = read_installed_record(root)
+        if (record and str(record.get("slug") or "") == root.name
+                and verify_signature(record, str(record.get("signature") or ""), pubkey_b64)):
+            found.add(root.name)
+    return found
+
+
 def verify_download(record: dict[str, Any] | None, zip_sha256: str) -> tuple[bool, str]:
     """Verify a Store download before install. Returns (ok, reason).
 
