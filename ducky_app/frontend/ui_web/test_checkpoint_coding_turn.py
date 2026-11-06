@@ -239,3 +239,36 @@ def test_boot_heal_leaves_a_turn_sent_since_launch_alone():
         assert heal_usage_orphaned_turns_for_project(root, sent_before=100) == []
         assert load_conversation(conv.id, project_root=root).messages[-1]["role"] == "user"
         assert heal_usage_orphaned_turns_for_project(root, sent_before=200) == [conv.id]
+
+
+def test_the_final_reply_is_stored_before_the_app_hears_final(monkeypatch):
+    # Nov 5 2026: an agent host told the app "final" while the reply still sat in its
+    # chat-writer queue. The app read the last checkpoint from the database and every
+    # finished turn showed "Interrupted before finishing" with no answer.
+    from frontend.ui_web.chats import store
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = str(Path(tmp))
+        conv = create_conversation(PanelSettings.load(), "", title="Host turn", project_root=root)
+        conv.messages = [{"role": "user", "text": "go", "content": "go", "ts": 1}]
+        from frontend.ui_web.chats.saves import save_conversation
+
+        save_conversation(conv, root, wait=True)
+        seen: list[dict] = []
+
+        def on_saved(conv_id: str, final: bool) -> None:
+            if not final:
+                return
+            if store._use_db():  # the database as another process sees it, no flush
+                rows = store._repo().messages_get(conv_id)
+            else:
+                rows = load_conversation(conv_id, project_root=root).messages
+            seen.append(rows[-1])
+
+        monkeypatch.setattr(runner, "on_saved", on_saved)
+        checkpoint_coding_turn(conv, agent_id="claude", run_id="run-f", blocks=[], project_root=root)
+        runner._emit_assistant(conv, agent_id="claude", reply="all done", push=lambda e: None,
+                               run_id="run-f", streamed=True)
+        assert seen, "the final save was never reported"
+        assert seen[-1]["content"] == "all done"
+        assert not seen[-1].get("incomplete")

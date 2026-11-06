@@ -712,7 +712,9 @@ def _emit_assistant(
     upsert_in_flight_assistant(conv, msg, run_id=run_id)
     if terminal_session_id:
         conv.terminal_session_id = terminal_session_id
-    save_conversation(conv)
+    # Written before the app hears "final": in an agent host the app reads the database
+    # itself, and a queued reply left it the last checkpoint, shown as "Interrupted".
+    save_conversation(conv, wait=True)
     _notify_saved(conv.id, final=True)
     from frontend.ui_web.agent_turns.state import close_changeset_run
 
