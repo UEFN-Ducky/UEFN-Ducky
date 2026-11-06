@@ -50,9 +50,11 @@ DROPPED: Buckets = ((0, "0"), (5, "1-5"), (None, "more"))
 # its 1.3 s outer limit; the bare window shown against the 0.1 s goal.
 PAINTED_MS: Buckets = ((500, "500ms"), (1100, "1100ms"), (1300, "1300ms"), (2000, "2000ms"), (None, "more"))
 WINDOW_MS: Buckets = ((100, "100ms"), (300, "300ms"), (1000, "1000ms"), (None, "more"))
-# Why a launch ran the Python window (native_switch.FALLBACK_REASONS), "none" when it did not.
-LAUNCHER_FALLBACKS = ("none", "webview2", "protocol", "crash_loop", "no_hello", "start_error", "timeout",
-                      "spawn_error", "no_exe", "crash_loop_active", "exit_other", "other")
+# Why a launch ran the Python window, "none" when it did not. Built from native_switch so the
+# two lists can't drift (its top level is stdlib only).
+from frontend.native_switch import FALLBACK_REASONS as _FALLBACK_REASONS  # noqa: E402
+
+LAUNCHER_FALLBACKS = ("none", *_FALLBACK_REASONS)
 # Every remote.* event: which viewer, on what network, which viewer build.
 REMOTE_COMMON: dict[str, Any] = {
     "client": ("android_app", "phone_web", "tablet_web", "desktop_web"),
