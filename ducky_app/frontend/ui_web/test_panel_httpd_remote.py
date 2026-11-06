@@ -110,15 +110,14 @@ def test_publish_panel_events_reaches_pollers():
 
 def test_big_file_edits_do_not_stay_pinned_in_the_event_backlog(monkeypatch):
     import json
-    from collections import deque
+    from frontend.ui_web.event_backlog import EventBacklog
 
-    monkeypatch.setattr(httpd, "_event_backlog", deque())
-    monkeypatch.setattr(httpd, "_event_backlog_bytes", 0, raising=False)
+    monkeypatch.setattr(httpd, "_event_backlog", EventBacklog())
     text = "x" * 200_000
     for n in range(300):  # an agent rewriting a 200 KB file 300 times, then the app goes quiet
         httpd.publish_panel_events([{"type": "tool_done", "conv_id": "c1", "name": "workspace_write_file",
                                      "arguments": {"content": text}, "fileEdit": {"before": text, "after": text, "n": n}}])
-    kept = [event for _seq, event, *_rest in httpd._event_backlog]
+    kept = [event for _seq, event, _size in httpd._event_backlog.rows]
     assert sum(len(json.dumps(event)) for event in kept) <= 8 * 1024 * 1024
     last = httpd._event_seq
     cursor, events = httpd._poll_panel_events(last - 5, timeout=0.0)
