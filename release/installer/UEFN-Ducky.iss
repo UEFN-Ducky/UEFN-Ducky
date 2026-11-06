@@ -124,6 +124,9 @@ Root: HKA; Subkey: "Software\Classes\*\OpenWithList\{#MyAppExeName}"; ValueType:
 Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky"; ValueType: string; ValueName: ""; ValueData: "Open with UEFN Ducky"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#MyAppExeName}"
 Root: HKA; Subkey: "Software\Classes\*\shell\UEFNDucky\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
+; Start with Windows: the app writes this per-user value itself (frontend/autostart.py, a
+; switch in Settings). Setup only removes it on uninstall, so no orphan entry is left behind.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "UEFN Ducky"; Flags: uninsdeletevalue dontcreatekey
 
 ; No [Run] section: the app is launched from [Code] at ssDone instead.
 ;

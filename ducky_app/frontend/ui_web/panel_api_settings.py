@@ -95,6 +95,7 @@ class PanelApiSettingsMixin:
             },
             "first_open_tours": bool(getattr(s, "first_open_tours", True)),
             "show_me_autoplay": bool(getattr(s, "show_me_autoplay", True)),
+            "start_with_windows": bool(getattr(s, "start_with_windows", True)),
         }
 
     def get_appearance(self) -> dict[str, Any]:
@@ -665,6 +666,14 @@ class PanelApiSettingsMixin:
             s.first_open_tours = bool(patch.get("first_open_tours"))
         if "show_me_autoplay" in patch:
             s.show_me_autoplay = bool(patch.get("show_me_autoplay"))
+        if "start_with_windows" in patch:
+            s.start_with_windows = bool(patch.get("start_with_windows"))
+            try:
+                from frontend.autostart import apply as apply_autostart
+
+                apply_autostart(s.start_with_windows)
+            except Exception:
+                pass
         if "walkthrough_completed" in patch:
             raw = patch.get("walkthrough_completed")
             if isinstance(raw, dict):

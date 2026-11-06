@@ -468,6 +468,15 @@ def main() -> None:
         # Wall clock from process entry — webview_app boot traces use this for total_ms.
         os.environ["UEFN_DUCKY_BOOT_T0"] = str(_time.perf_counter())
         _ensure_repo_on_path()
+        # Windows sign-in start (frontend/autostart.py): open hidden in the tray, no logo splash.
+        # Taken out of argv so it is never read as a file to open.
+        from frontend.autostart import START_HIDDEN_ENV, take_background_flag
+
+        start_hidden = take_background_flag(sys.argv)
+        if start_hidden:
+            os.environ[START_HIDDEN_ENV] = "1"
+        else:
+            os.environ.pop(START_HIDDEN_ENV, None)
         # Before panel_httpd reads the port: WinError 10013 (a Windows-reserved port) used to stop startup.
         try:
             from frontend.settings import pick_panel_port
@@ -497,12 +506,13 @@ def main() -> None:
         except Exception:
             pass
         # Logo window before panel_api / webview imports — otherwise double-click is a blank wait.
-        try:
-            from frontend.early_splash import show as show_early_splash
+        if not start_hidden:
+            try:
+                from frontend.early_splash import show as show_early_splash
 
-            show_early_splash()
-        except Exception:
-            pass
+                show_early_splash()
+            except Exception:
+                pass
         from frontend.ui_web.run import run
 
         try:

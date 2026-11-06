@@ -408,6 +408,9 @@ class PanelSettings:
     show_me_autoplay: bool = True
     """Ducky's Show me plays right away. Off: it only leaves the Show me button in chat."""
 
+    start_with_windows: bool = True
+    """Open hidden in the tray at Windows sign-in (frontend/autostart.py), so opening is instant."""
+
     starter_llm_gateways_seeded: bool = False
     """First-run Store install of every starter gateway already attempted."""
 
@@ -611,6 +614,7 @@ class PanelSettings:
             or not self.chat_auto_title
             or not self.first_open_tours
             or not self.show_me_autoplay
+            or not self.start_with_windows
             or not self.chat_mentions_enabled
             or not self.chat_slash_references_enabled
             or self.chat_title_model.strip()

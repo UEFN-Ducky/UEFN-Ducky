@@ -90,6 +90,33 @@ function GuidanceSwitches() {
   );
 }
 
+/** Start with Windows: hidden in the tray at sign-in, so opening Ducky is instant. On unless switched off. */
+export function StartWithWindowsSwitch() {
+  const [on, setOn] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => onApiReady(() => {
+    void Promise.resolve(getApi()?.get_settings?.()).then((settings) => {
+      setOn((settings as { start_with_windows?: boolean } | undefined)?.start_with_windows !== false);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }), []);
+  return (
+    <div className="general-tab-toggle-card">
+      <SettingsToggleRow
+        id="toggle-start-with-windows"
+        label="Start with Windows"
+        description="Ducky opens hidden in the tray when you sign in, so opening it is instant."
+        checked={on}
+        disabled={!loaded}
+        onChange={(value) => {
+          setOn(value);
+          void getApi()?.save_agent_settings({ start_with_windows: value });
+        }}
+      />
+    </div>
+  );
+}
+
 export function AddToUefnTab() {
   const {
     showHiddenFiles,
@@ -123,6 +150,7 @@ export function AddToUefnTab() {
       <h2 className="general-tab-page-title">General</h2>
 
       <AppSection />
+      <StartWithWindowsSwitch />
 
       <hr className="general-tab-divider" />
 

@@ -243,7 +243,14 @@ def run() -> None:
     # Second launch (Open with / drag onto EXE / shortcut while running): hand off
     # to the living panel instead of killing it and starting a duplicate window.
     t_handoff = time.perf_counter()
-    if read_living_panel_pid() is not None:
+    from frontend.autostart import started_in_background
+
+    living_pid = read_living_panel_pid()
+    if started_in_background() and living_pid is not None and _ducky_process_alive(living_pid):
+        # The sign-in start found Ducky already open: leave it as it is (no focus, no window).
+        _boot_trace("background_already_running", t_handoff)
+        raise SystemExit(0)
+    if living_pid is not None:
         if _hand_off_to_living_panel(open_paths, deep_links):
             _boot_trace("handoff_exit", t_handoff)
             try:
@@ -284,8 +291,15 @@ def run() -> None:
         _boot_trace("reclaim_claim", t_reclaim)
         # Registry writes are not needed to paint the window — off the critical path.
         def _register_shell_integrations() -> None:
+            # A test copy (DUCKY_SANDBOX) shares the person's HKCU: it must not point their
+            # Open with, uefn-ducky:// links or sign-in start at itself.
+            if os.environ.get("DUCKY_SANDBOX"):
+                return
             register_windows_open_with()
             register_windows_url_protocol()
+            from frontend.autostart import apply_saved_setting
+
+            apply_saved_setting()
 
         threading.Thread(
             target=_register_shell_integrations,
@@ -585,6 +599,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 return None
             try:
                 w.show()
+                window_holder["hidden"] = False
             except Exception:
                 pass
             try:
@@ -671,7 +686,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     from frontend.app_versions import take_handover
 
     handover = take_handover()
-    window_holder["hidden"] = bool(handover.get("hidden"))
+    from frontend.autostart import started_in_background
+
+    # Windows sign-in start (frontend/autostart.py): ready in the tray, the window shows on
+    # the first click of the shortcut, the tray icon or an Open with.
+    start_hidden = bool(handover.get("hidden")) or started_in_background()
+    window_holder["hidden"] = start_hidden
     t_window = time.perf_counter()
     window = webview.create_window(
         title,
@@ -682,8 +702,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         y=saved["y"] if saved else None,
         min_size=(700, 480),
         resizable=True,
-        hidden=bool(handover.get("hidden")),
-        maximized=bool(handover.get("maximized")) and not handover.get("hidden"),
+        hidden=start_hidden,
+        maximized=bool(handover.get("maximized")) and not start_hidden,
         frameless=True,
         easy_drag=False,
         # Match boot splash / critical.css so the chrome never flashes white.

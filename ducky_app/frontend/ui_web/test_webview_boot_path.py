@@ -137,6 +137,23 @@ def test_start_later_fires_on_a_daemon_timer():
     assert fired.wait(5)
 
 
+def test_sign_in_start_opens_hidden_and_never_focuses_an_open_ducky():
+    run_src = inspect.getsource(webview_app.run)
+    quiet_exit = run_src.index("started_in_background() and living_pid is not None")
+    assert quiet_exit < run_src.index("_hand_off_to_living_panel(")
+    panel_src = inspect.getsource(webview_app._run_panel)
+    assert "start_hidden = bool(handover.get(\"hidden\")) or started_in_background()" in panel_src
+    assert "hidden=start_hidden" in panel_src
+
+
+def test_a_test_copy_registers_nothing_in_hkcu():
+    run_src = inspect.getsource(webview_app.run)
+    reg = run_src[run_src.index("def _register_shell_integrations"):]
+    guard = reg.index('if os.environ.get("DUCKY_SANDBOX")')
+    assert guard < reg.index("register_windows_open_with()")
+    assert guard < reg.index("apply_saved_setting()")
+
+
 def test_panel_api_loads_no_webview():
     import subprocess
 

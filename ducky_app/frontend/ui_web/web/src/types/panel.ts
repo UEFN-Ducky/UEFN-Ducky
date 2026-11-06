@@ -1660,6 +1660,8 @@ export interface PanelSettingsDto {
   first_open_tours?: boolean;
   /** Ducky's Show me plays right away; off = only the chat button. Missing key stays on. */
   show_me_autoplay?: boolean;
+  /** Open hidden in the tray at Windows sign-in so opening is instant. Missing key stays on. */
+  start_with_windows?: boolean;
   coding_agents?: Record<
     string,
     {

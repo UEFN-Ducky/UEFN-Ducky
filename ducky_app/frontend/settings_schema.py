@@ -377,6 +377,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Let Ducky show me things", "General", settable=True,
         description="Ducky's Show me takes you there and highlights it right away. Off: it only leaves a Show me button in chat.",
     ),
+    "start_with_windows": FieldMeta(
+        "Start with Windows", "General", settable=True,
+        description="Ducky opens hidden in the tray when you sign in, so opening it is instant.",
+    ),
     "starter_llm_gateways_seeded": FieldMeta(
         "Starter LLM gateways seeded", "internal",
         description="First-run Store install of every starter gateway already ran once.",
