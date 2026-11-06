@@ -93,6 +93,7 @@ import { usePluginContributions } from "../hooks/usePluginContributions";
 import { installFileDeleteListener, installFileRenameListener, installTabRegistryListener, openInBackground, openOrFocusTab, reportOpenTabs, reportOpenTabsNow } from "../tabs/tabRegistryClient";
 import { useAppearance } from "../theme/AppearanceContext";
 import { setExternalTabDropHandler } from "../utils/editorTabDrag";
+import { chatTabsKey, syncChatTabTitles } from "../utils/chatTabTitles";
 import { DEFAULT_TERMINAL_SHELL, type TerminalShell } from "../terminal/types";
 import { TerminalHeaderBridge } from "../components/TerminalHeaderBridge";
 import { getTerminalsEnabled } from "../contexts/TerminalsSettingsContext";
@@ -992,24 +993,11 @@ function ChatViewBody({ layoutMode, sidebarRefresh, projectSlug, projectPath }: 
     [setOpenTabs],
   );
 
+  // Also when a chat tab opens: one opened by id alone kept its raw id as its name.
+  const openChatTabsKey = useMemo(() => chatTabsKey(openTabs), [openTabs]);
   useEffect(() => {
-    const chatMap = new Map(allChats.map((c) => [c.id, c]));
-    setOpenTabs((prev) => {
-      let changed = false;
-      const next = prev.map((tab) => {
-        if (tab.kind !== "chat" || !tab.chatId) return tab;
-        const chat = chatMap.get(tab.chatId);
-        if (!chat) return tab;
-        const isGroup = Boolean(chat.isGroup);
-        if (tab.name === chat.name && tab.duckyStyle === chat.duckyStyle && Boolean(tab.isGroup) === isGroup) {
-          return tab;
-        }
-        changed = true;
-        return { ...tab, name: chat.name, duckyStyle: chat.duckyStyle, isGroup };
-      });
-      return changed ? next : prev;
-    });
-  }, [allChats, setOpenTabs]);
+    setOpenTabs((prev) => syncChatTabTitles(prev, allChats) ?? prev);
+  }, [allChats, openChatTabsKey, setOpenTabs]);
 
   // Member activity never opens folders: a collapsed folder shows it on its row instead.
   const handleRemoteConversation = useCallback(
