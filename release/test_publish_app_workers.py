@@ -63,7 +63,24 @@ def test_the_suite_and_build_use_the_scaled_settings(monkeypatch) -> None:
     monkeypatch.setattr(pa.shutil, "which", lambda name: "npm")
     monkeypatch.setattr(pa.subprocess, "run", fake_run)
     monkeypatch.setattr(pa.os, "cpu_count", lambda: 16)
+    monkeypatch.syspath_prepend(str(RELEASE))  # publish_app imports retry_scope by name
+    import retry_scope
+
+    # A real dist/release-test-failed.json from an earlier run must not turn this into a retry.
+    monkeypatch.setattr(retry_scope, "retry_targets", lambda root: None)
+    monkeypatch.setattr(retry_scope, "clear", lambda root: None)
     pa.run_regression_tests()
     pytest_cmd = next(cmd for cmd, _kw in calls if "pytest" in cmd and "-n" in cmd)
     assert pytest_cmd[pytest_cmd.index("-n") + 1] == "4"
     assert any(cmd[:2] == ["npm", "test"] and "--maxWorkers=2" in cmd for cmd, _kw in calls)
+
+
+def test_pytest_gets_the_ffmpeg_bundle_when_it_exists(tmp_path, monkeypatch) -> None:
+    pa = _load()
+    monkeypatch.delenv("DUCKY_FFMPEG_DIR", raising=False)
+    assert "DUCKY_FFMPEG_DIR" not in pa.pytest_env(tmp_path)
+    bundle = tmp_path / "build" / "ffmpeg-bundle"
+    bundle.mkdir(parents=True)
+    assert pa.pytest_env(tmp_path)["DUCKY_FFMPEG_DIR"] == str(bundle)
+    monkeypatch.setenv("DUCKY_FFMPEG_DIR", "C:/mine")
+    assert pa.pytest_env(tmp_path)["DUCKY_FFMPEG_DIR"] == "C:/mine"  # never overridden

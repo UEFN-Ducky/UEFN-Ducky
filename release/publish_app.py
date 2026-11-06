@@ -953,6 +953,16 @@ def pytest_workers(uefn: bool, cores: int | None = None) -> str:
     return str(max(2, count // 4 if uefn else count // 2))
 
 
+def pytest_env(root: Path = ROOT) -> dict[str, str]:
+    """pytest's environment: the release PC's ffmpeg bundle, so the ffmpeg tests run instead of
+    skipping. A DUCKY_FFMPEG_DIR already set wins."""
+    env = dict(os.environ)
+    bundle = root / "build" / "ffmpeg-bundle"
+    if bundle.is_dir():
+        env.setdefault("DUCKY_FFMPEG_DIR", str(bundle))
+    return env
+
+
 NATIVE_MANIFEST = ROOT / "native_launcher" / "Cargo.toml"
 # The full pytest run names its folders: pytest.ini's testpaths leaves out release/, whose
 # tests pin these release steps.
@@ -1011,6 +1021,7 @@ def run_regression_tests() -> None:
 
     retry = retry_scope.retry_targets(ROOT)
     vitest_workers = "2" if uefn else workers
+    env = pytest_env()
     if retry is not None:
         # A fix on top of a failed full run: never the whole suite again (see retry_scope).
         print(f"=== retry after {retry.since[:9]}: {len(retry.targets)} test targets, not the full suite ===")
@@ -1023,6 +1034,7 @@ def run_regression_tests() -> None:
             [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
              "--timeout", "300", "--timeout-method", "thread", *retry.targets],
             cwd=str(ROOT),
+            env=env,
         )
         if again.returncode != 0:
             retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or retry.targets)
@@ -1041,6 +1053,7 @@ def run_regression_tests() -> None:
         [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
          "--timeout", "300", "--timeout-method", "thread", *PYTEST_PATHS],
         cwd=str(ROOT),
+        env=env,
     )
     if full.returncode != 0:
         # Release runs used to fail one different test that passes alone (timing, Windows
@@ -1055,6 +1068,7 @@ def run_regression_tests() -> None:
         alone = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--tb=short", *failed],
             cwd=str(ROOT),
+            env=env,
         )
         if alone.returncode != 0:
             # The fixer's commit is tested against just these (and what it touches) next time.
