@@ -304,6 +304,102 @@ def _build_inventory() -> dict[str, dict[str, object]]:
 INVENTORY: dict[str, dict[str, object]] = _build_inventory()
 
 
+# --- pywebview window, dialog, event and tray calls ---------------------------------
+WINDOW_SOURCES: tuple[str, ...] = (
+    "frontend/ui_web/win_frameless.py",
+    "frontend/ui_web/webview_native_menu.py",
+    "frontend/ui_web/window_layout.py",
+    "frontend/ui_web/window_bounds.py",
+    "frontend/tray_icon.py",
+    "frontend/notifications.py",
+)
+# Names a pywebview window object goes by in those files.
+_WINDOW_ROOTS = frozenset({"window", "win", "w", "main_window", "self._window", "api._window"})
+_TRAY_ROOTS = frozenset({"pystray", "icon", "tray", "self._icon", "_icon"})
+
+
+def _dotted(node: ast.AST) -> str | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    parts.append(node.id)
+    return ".".join(reversed(parts))
+
+
+def _classify(dotted: str) -> tuple[str, str] | None:
+    """(kind, normalized name) for a call the launcher must answer for, else None."""
+    parts = dotted.split(".")
+    if parts[-1] == "create_file_dialog":
+        return "dialog", "window.create_file_dialog"
+    if "events" in parts[:-1]:
+        i = parts.index("events")
+        return "event", "window.events." + ".".join(parts[i + 1 :])
+    if parts[0] == "webview":
+        return "webview", dotted
+    for n in (2, 1):
+        root = ".".join(parts[:n])
+        if len(parts) > n and root in _WINDOW_ROOTS:
+            return "window", "window." + ".".join(parts[n:])
+        if len(parts) > n and root in _TRAY_ROOTS:
+            return "tray", "tray." + ".".join(parts[n:])
+    return None
+
+
+def scan_window_calls(sources: tuple[str, ...] = WINDOW_SOURCES) -> dict[str, dict[str, object]]:
+    """{normalized call: {kind, files}} for every pywebview/tray call in ``sources``."""
+    found: dict[str, dict[str, object]] = {}
+    for rel in sources:
+        tree = ast.parse((DUCKY_APP / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                dotted = _dotted(node.func)
+            elif isinstance(node, ast.AugAssign):  # window.events.moved += handler
+                dotted = _dotted(node.target)
+            else:
+                continue
+            hit = _classify(dotted) if dotted else None
+            if hit is None:
+                continue
+            kind, name = hit
+            entry = found.setdefault(name, {"kind": kind, "files": []})
+            if rel not in entry["files"]:
+                entry["files"].append(rel)
+    return found
+
+
+# Every call scan_window_calls finds, and who answers it with the launcher on.
+# handler: the launcher op that replaces it; None = stays on the python (pywebview) path.
+WINDOW_INVENTORY: dict[str, dict[str, object]] = {
+    "window.destroy": {"kind": "window", "lean_cut": True, "handler": "window.close"},
+    "window.maximize": {"kind": "window", "lean_cut": True, "handler": "window.maximize"},
+    "window.minimize": {"kind": "window", "lean_cut": True, "handler": "window.minimize"},
+    "window.restore": {"kind": "window", "lean_cut": True, "handler": "window.restore"},
+    "window.events.moved": {"kind": "event", "lean_cut": True, "handler": "window.bounds"},
+    "window.events.resized": {"kind": "event", "lean_cut": True, "handler": "window.bounds"},
+    "window.events.closing": {"kind": "event", "lean_cut": True, "handler": "window.bounds"},
+    # The tray stays in Python (pystray runs its own thread and message loop).
+    "tray.Icon": {"kind": "tray", "lean_cut": True, "handler": "python"},
+    "tray.Menu": {"kind": "tray", "lean_cut": True, "handler": "python"},
+    "tray.MenuItem": {"kind": "tray", "lean_cut": True, "handler": "python"},
+    "tray.stop": {"kind": "tray", "lean_cut": True, "handler": "python"},
+}
+
+
+def export_json() -> str:
+    """Both inventories as stable JSON (sorted keys), for the Rust side and for diffs."""
+    import json
+
+    return json.dumps(
+        {"js_api": INVENTORY, "window": WINDOW_INVENTORY},
+        sort_keys=True,
+        indent=1,
+        ensure_ascii=False,
+    )
+
+
 def handled_by_launcher(name: str) -> bool:
     handler = (INVENTORY.get(name) or {}).get("handler")
     return isinstance(handler, str) and handler.split(".", 1)[0] in ("window", "dialog")

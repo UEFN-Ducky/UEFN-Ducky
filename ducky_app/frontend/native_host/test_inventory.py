@@ -39,6 +39,61 @@ def test_overrides_name_real_methods():
     assert not set(inventory.LAUNCHER_HANDLERS) & inventory.NOT_LEAN_CUT
 
 
+def test_every_window_call_is_listed():
+    scanned = inventory.scan_window_calls()
+    missing = sorted(set(scanned) - set(inventory.WINDOW_INVENTORY))
+    assert not missing, f"add these pywebview/tray calls to WINDOW_INVENTORY: {missing}"
+    for name, hit in scanned.items():
+        assert inventory.WINDOW_INVENTORY[name]["kind"] == hit["kind"], name
+
+
+def test_no_stale_window_entries():
+    stale = sorted(set(inventory.WINDOW_INVENTORY) - set(inventory.scan_window_calls()))
+    assert not stale, f"these WINDOW_INVENTORY calls are gone from the window code: {stale}"
+
+
+def test_window_scan_sees_calls_dialogs_and_events(tmp_path, monkeypatch):
+    src = tmp_path / "frontend" / "x.py"
+    src.parent.mkdir()
+    src.write_text(
+        "import webview\n"
+        "def f(window, icon):\n"
+        "    webview.create_window('a')\n"
+        "    window.create_file_dialog(1)\n"
+        "    window.events.shown += f\n"
+        "    window.move(1, 2)\n"
+        "    icon.stop()\n"
+        "    other.move(1)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inventory, "DUCKY_APP", tmp_path)
+    found = inventory.scan_window_calls(("frontend/x.py",))
+    assert {k: v["kind"] for k, v in found.items()} == {
+        "webview.create_window": "webview",
+        "window.create_file_dialog": "dialog",
+        "window.events.shown": "event",
+        "window.move": "window",
+        "tray.stop": "tray",
+    }
+
+
+def test_window_lean_cut_entries_have_handlers():
+    for name, entry in inventory.WINDOW_INVENTORY.items():
+        assert entry["handler"] if entry["lean_cut"] else True, name
+
+
+def test_export_json_is_stable_and_sorted():
+    import json
+
+    a, b = inventory.export_json(), inventory.export_json()
+    assert a == b
+    data = json.loads(a)
+    assert list(data) == ["js_api", "window"]
+    assert list(data["js_api"]) == sorted(data["js_api"])
+    assert list(data["window"]) == sorted(data["window"])
+    assert len(data["js_api"]) == len(inventory.INVENTORY)
+
+
 def test_window_bounds_example():
     assert inventory.INVENTORY["get_window_bounds"] == {
         "kind": "js_api",
