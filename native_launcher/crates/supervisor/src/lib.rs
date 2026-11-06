@@ -29,6 +29,8 @@ pub mod exit {
 }
 
 pub const HELLO_TIMEOUT: Duration = Duration::from_secs(15);
+/// `headless.EXIT_INSTANCE_BUSY`: a living Ducky did not take this launch. Not a crash.
+pub const BACKEND_EXIT_BUSY: i32 = 3;
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
@@ -124,10 +126,23 @@ fn kill(child: &mut Child) -> Option<ExitStatus> {
 }
 
 fn describe(st: Option<ExitStatus>) -> String {
-    match st.and_then(|s| s.code()) {
+    describe_code(st.and_then(|s| s.code()))
+}
+
+fn describe_code(code: Option<i32>) -> String {
+    match code {
         Some(c) => format!("exit {c}"),
         None => "exit unknown".to_string(),
     }
+}
+
+/// A backend that ended before hello: BUSY is a start error (24, Python falls back), any
+/// other end counts as a crash.
+fn before_hello_failure(code: Option<i32>) -> SpawnFailure {
+    if code == Some(BACKEND_EXIT_BUSY) {
+        return SpawnFailure::Fatal(StartError::new(exit::START_ERROR, "backend busy: a running Ducky did not take this launch"));
+    }
+    SpawnFailure::Died(format!("backend ended before hello ({})", describe_code(code)))
 }
 
 /// One running backend process that said hello.
@@ -176,7 +191,7 @@ impl Backend {
                 Ok(Line::Eof) | Err(RecvTimeoutError::Disconnected) => {
                     drop(stdin);
                     let st = wait_timeout(&mut child, Duration::from_secs(2)).or_else(|| kill(&mut child));
-                    return Err(SpawnFailure::Died(format!("backend ended before hello ({})", describe(st))));
+                    return Err(before_hello_failure(st.and_then(|s| s.code())));
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     drop(stdin);
@@ -322,5 +337,30 @@ impl Supervisor {
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.shutdown("launcher exit");
+    }
+}
+
+#[cfg(test)]
+mod busy_tests {
+    use super::*;
+
+    #[test]
+    fn busy_before_hello_is_start_error_not_crash() {
+        match before_hello_failure(Some(BACKEND_EXIT_BUSY)) {
+            SpawnFailure::Fatal(e) => assert_eq!(e.code, exit::START_ERROR),
+            SpawnFailure::Died(_) => panic!("busy must not count as a crash"),
+        }
+        assert!(matches!(before_hello_failure(Some(1)), SpawnFailure::Died(_)));
+        assert!(matches!(before_hello_failure(None), SpawnFailure::Died(_)));
+    }
+
+    #[test]
+    fn hello_handoff_flag() {
+        let h = |line: &str| match parse_line(line) {
+            Some(BackendMsg::Hello(h)) => h,
+            other => panic!("{other:?}"),
+        };
+        assert!(h(r#"{"t":"hello","protocol":1,"port":4199,"pid":9,"handoff":true}"#).handoff);
+        assert!(!h(r#"{"t":"hello","protocol":1,"port":4199}"#).handoff);
     }
 }

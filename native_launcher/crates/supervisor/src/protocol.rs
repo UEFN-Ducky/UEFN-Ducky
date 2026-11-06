@@ -15,6 +15,8 @@ pub struct Hello {
     pub origin: String,
     pub profile_dir: String,
     pub pid: u32,
+    /// Another Ducky took this launch; a `quit {reason:"handoff"}` event follows.
+    pub handoff: bool,
 }
 
 impl Hello {
@@ -67,6 +69,7 @@ pub fn parse_line(line: &str) -> Option<BackendMsg> {
                 origin,
                 profile_dir: s(&v, "profile_dir"),
                 pid: v.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32,
+                handoff: v.get("handoff").and_then(Value::as_bool).unwrap_or(false),
             }))
         }
         Some("result") => {

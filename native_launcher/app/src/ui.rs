@@ -1,0 +1,704 @@
+//! The real [`Host`]: the window, splash, tray, page shim and native dialogs on the UI
+//! thread, and the supervisor on its own thread. The two talk over channels; the
+//! supervisor wakes the UI thread with a message to a hidden message-only window (thread
+//! messages would be lost in the move/resize and dialog modal loops).
+
+use std::cell::RefCell;
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use autostart::StartPlan;
+use ducky_instance::{InstanceLock, Launch, RealSystem};
+use serde_json::{json, Value};
+use shim::{NativeOp, Route, ShimError};
+use supervisor::protocol::{BackendMsg, Hello};
+use supervisor::{StartError, Step, Supervisor};
+use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use webview2_com::{
+    take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler, NavigationCompletedEventHandler,
+    WebMessageReceivedEventHandler,
+};
+use windows::core::{w, HSTRING, PCWSTR, PWSTR};
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Shell::ExtractIconW;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+use crate::dialog;
+use crate::start::{self, End, Host};
+use crate::LOCK_WAIT;
+
+const WM_WAKE: u32 = WM_APP + 1;
+const TITLE: &str = "UEFN Ducky";
+const BACKEND_EXE_ENV: &str = "UEFN_DUCKY_BACKEND_EXE";
+const NATIVE_CHILD_ENV: &str = "UEFN_DUCKY_NATIVE_CHILD";
+/// How often the supervisor thread looks for page calls between backend lines.
+/// ponytail: polling, a wake pipe if 10 ms of call latency ever shows.
+const SUP_POLL: Duration = Duration::from_millis(10);
+
+enum ToUi {
+    Started(Result<(Hello, Option<u32>), StartError>),
+    Step(Step),
+}
+
+enum ToSup {
+    Call { id: String, name: String, args: Vec<Value> },
+    Quit,
+}
+
+struct Ui {
+    t0: Instant,
+    app_data: PathBuf,
+    record: report::LauncherRecord,
+    msg_hwnd: HWND,
+    main: Option<HWND>,
+    main_prev_proc: isize,
+    splash_hwnd: Option<HWND>,
+    splash: splash::Splash,
+    webview: Option<ICoreWebView2>,
+    /// about:blank loaded and the shim installed: real navigations may start.
+    page_host_ready: bool,
+    url: Option<String>,
+    navigated: bool,
+    ready_written: bool,
+    window_ms: u64,
+    title: String,
+    tray: Option<tray::win::Tray>,
+    tray_icon: *mut std::ffi::c_void,
+    to_sup: Option<Sender<ToSup>>,
+    from_sup: Option<Receiver<ToUi>>,
+    sup_thread: Option<JoinHandle<()>>,
+    started: Option<Result<(Hello, Option<u32>), StartError>>,
+    end: Option<End>,
+}
+
+thread_local! {
+    static UI: RefCell<Option<Ui>> = const { RefCell::new(None) };
+}
+
+/// Run `f` on the UI state. Never call into Win32 that can re-enter (dialogs, message
+/// pumps, DestroyWindow) inside `f`: take what you need out first.
+fn with<R>(f: impl FnOnce(&mut Ui) -> R) -> Option<R> {
+    UI.with(|u| u.borrow_mut().as_mut().map(f))
+}
+
+fn ms_since(t0: Instant) -> u64 {
+    t0.elapsed().as_millis() as u64
+}
+
+/// `UEFN_DUCKY_BACKEND_EXE` (set by `native_switch`), else `UEFN-Ducky.exe` beside this EXE.
+fn backend_exe() -> PathBuf {
+    if let Some(p) = std::env::var_os(BACKEND_EXE_ENV).filter(|v| !v.is_empty()) {
+        return PathBuf::from(p);
+    }
+    let dir = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)).unwrap_or_default();
+    dir.join("UEFN-Ducky.exe")
+}
+
+pub struct UiHost {
+    args: Vec<OsString>,
+    lock: Option<InstanceLock>,
+}
+
+impl UiHost {
+    pub fn new(args: Vec<OsString>) -> UiHost {
+        let app_data = ducky_instance::Config::from_env().map(|c| c.app_data).unwrap_or_default();
+        UI.with(|u| {
+            *u.borrow_mut() = Some(Ui {
+                t0: Instant::now(),
+                app_data,
+                record: report::LauncherRecord::new(crate::APP_VERSION),
+                msg_hwnd: HWND::default(),
+                main: None,
+                main_prev_proc: 0,
+                splash_hwnd: None,
+                splash: splash::Splash::new(false),
+                webview: None,
+                page_host_ready: false,
+                url: None,
+                navigated: false,
+                ready_written: false,
+                window_ms: 0,
+                title: TITLE.to_string(),
+                tray: None,
+                tray_icon: std::ptr::null_mut(),
+                to_sup: None,
+                from_sup: None,
+                sup_thread: None,
+                started: None,
+                end: None,
+            })
+        });
+        UiHost { args, lock: None }
+    }
+
+    /// The plan for these args (argv[0] put back, as `autostart::plan` expects).
+    pub fn plan(&self) -> StartPlan {
+        let mut argv = vec!["Ducky-Launcher.exe".to_string()];
+        argv.extend(self.args.iter().map(|a| a.to_string_lossy().into_owned()));
+        let hidden = std::env::var(autostart::START_HIDDEN_ENV).ok();
+        autostart::plan(&argv, hidden.as_deref())
+    }
+}
+
+impl Host for UiHost {
+    fn hand_off(&mut self) -> bool {
+        // Held until the backend said hello (it has claimed panel.pid by then), so a second
+        // launch waits for this one and then hands off to it.
+        self.lock = Some(InstanceLock::acquire(LOCK_WAIT));
+        match ducky_instance::Config::from_env() {
+            Some(cfg) => matches!(
+                ducky_instance::decide_launch(&self.args, &cfg, &RealSystem),
+                Launch::HandedOff | Launch::LeftRunning
+            ),
+            None => false,
+        }
+    }
+
+    fn webview2_ok(&mut self) -> bool {
+        window::check_webview2().is_ok()
+    }
+
+    fn open_window(&mut self, plan: &StartPlan) -> Result<(), String> {
+        tray::win::set_process_aumid();
+        let msg_hwnd = create_msg_window().map_err(|e| e.to_string())?;
+        let icon = unsafe { ExtractIconW(None, &HSTRING::from(backend_exe().as_os_str()), 0) };
+        with(|u| {
+            u.msg_hwnd = msg_hwnd;
+            u.splash = splash::Splash::new(plan.show_splash);
+            u.tray_icon = icon.0 as _;
+        });
+        if plan.show_tray {
+            let t = tray::win::Tray::new(icon.0 as _, TITLE, Box::new(on_tray));
+            with(|u| u.tray = t);
+        }
+        if plan.show_window {
+            create_main().map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn start_backend(&mut self, plan: &StartPlan) -> Result<Hello, StartError> {
+        let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
+        let mut cfg = supervisor::Config::ducky(backend_exe(), &plan.argv[1..], app_data);
+        cfg.env = plan.backend_env.clone();
+        cfg.env.push((NATIVE_CHILD_ENV.to_string(), "1".to_string()));
+        let (to_sup, sup_rx) = mpsc::channel();
+        let (ui_tx, from_sup) = mpsc::channel();
+        let wake = with(|u| u.msg_hwnd.0 as isize).unwrap_or(0);
+        let handle = std::thread::spawn(move || supervise(cfg, sup_rx, ui_tx, wake));
+        with(|u| {
+            u.to_sup = Some(to_sup);
+            u.from_sup = Some(from_sup);
+            u.sup_thread = Some(handle);
+        });
+        // Pump the window (splash, drag, tray) until the hello or a start error arrives.
+        let mut msg = MSG::default();
+        loop {
+            if let Some(r) = with(|u| u.started.take()).flatten() {
+                self.lock = None;
+                return r.map(|(hello, pid)| {
+                    with(|u| u.record.backend_pid = pid);
+                    hello
+                });
+            }
+            if !unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+                // Closed before the backend was up: nothing to fall back to.
+                return Err(StartError { code: 0, reason: "closed before hello".into() });
+            }
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+    }
+
+    fn navigate(&mut self, hello: &Hello) -> Result<(), String> {
+        let url = window::start_url(&hello.origin).map_err(|e| e.to_string())?;
+        let shown = with(|u| {
+            u.url = Some(url);
+            u.main.is_some()
+        })
+        .unwrap_or(false);
+        if shown {
+            navigate_when_ready();
+        } else {
+            // Started hidden: the backend is up, so `run_native` may let go now.
+            write_ready_once();
+        }
+        Ok(())
+    }
+
+    fn serve(&mut self) -> End {
+        let mut msg = MSG::default();
+        while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        with(|u| u.end.take()).flatten().unwrap_or(End::Exited)
+    }
+
+    fn stage(&mut self, name: &str) {
+        with(|u| u.record.stage(name));
+    }
+
+    fn finish(&mut self, code: u8, error: &str) {
+        // Stop the backend (bye, then wait) before the process ends.
+        let (tx, thread) = with(|u| (u.to_sup.take(), u.sup_thread.take())).unwrap_or((None, None));
+        if let Some(tx) = tx {
+            let _ = tx.send(ToSup::Quit);
+        }
+        if let Some(t) = thread {
+            let _ = t.join();
+        }
+        drop(with(|u| u.tray.take()));
+        with(|u| {
+            let exit = report::Exit::from_code(code as i32).unwrap_or(report::Exit::StartError);
+            u.record.finish(exit, error);
+            if let Some(path) = report::boot_json_path() {
+                let _ = report::write(&path, &u.record);
+            }
+        });
+    }
+}
+
+// --- supervisor thread ------------------------------------------------------------------
+
+fn supervise(cfg: supervisor::Config, rx: Receiver<ToSup>, ui: Sender<ToUi>, wake: isize) {
+    let post = |m: ToUi| {
+        let _ = ui.send(m);
+        unsafe {
+            let _ = PostMessageW(Some(HWND(wake as _)), WM_WAKE, WPARAM(0), LPARAM(0));
+        }
+    };
+    let mut sup = match Supervisor::start(cfg) {
+        Ok(s) => s,
+        Err(e) => return post(ToUi::Started(Err(e))),
+    };
+    let hello = sup.hello().cloned().expect("started supervisor has a hello");
+    post(ToUi::Started(Ok((hello, sup.backend_pid()))));
+    loop {
+        loop {
+            match rx.try_recv() {
+                Ok(ToSup::Call { id, name, args }) => {
+                    if let Err(e) = sup.call(&id, &name, &args) {
+                        let msg = BackendMsg::Result { id, result: Err(format!("backend: {e}")) };
+                        post(ToUi::Step(Step::Msg(msg)));
+                    }
+                }
+                Ok(ToSup::Quit) | Err(TryRecvError::Disconnected) => {
+                    sup.shutdown("launcher exit");
+                    return;
+                }
+                Err(TryRecvError::Empty) => break,
+            }
+        }
+        match sup.next(SUP_POLL) {
+            Step::Idle => {}
+            end @ (Step::Exited | Step::Fatal(_)) => return post(ToUi::Step(end)),
+            step => post(ToUi::Step(step)),
+        }
+    }
+}
+
+// --- UI thread: backend lines ------------------------------------------------------------
+
+fn drain_backend() {
+    loop {
+        let item = with(|u| u.from_sup.as_ref().map(|rx| rx.try_recv().ok())).flatten().flatten();
+        match item {
+            Some(ToUi::Started(r)) => {
+                with(|u| u.started = Some(r));
+            }
+            Some(ToUi::Step(step)) => on_step(step),
+            None => return,
+        }
+    }
+}
+
+fn on_step(step: Step) {
+    match step {
+        Step::Msg(BackendMsg::Result { id, result }) => {
+            if id.starts_with(shim::PAGE_ID_PREFIX) {
+                post_page(&shim::result_message(&id, result));
+            }
+        }
+        Step::Msg(BackendMsg::Event { name, data }) => on_event(&name, data),
+        Step::Msg(_) | Step::Idle => {}
+        Step::Restarted(_) => {
+            // Same port, same origin: the page's own reconnects reach the new backend.
+            with(|u| u.record.stage("restarted"));
+        }
+        Step::Exited => end_with(End::Exited),
+        Step::Fatal(e) => end_with(End::Fatal(e.code, e.reason)),
+    }
+}
+
+fn end_with(end: End) {
+    with(|u| {
+        u.end = Some(end);
+        u.to_sup = None;
+    });
+    unsafe { PostQuitMessage(0) };
+}
+
+fn on_event(name: &str, data: Value) {
+    match name {
+        "quit" => {}
+        "toast" => {
+            let event = json!({"t": "event", "name": name, "data": data});
+            with(|u| u.tray.as_ref().map(|t| t.handle_event(&event)));
+        }
+        "title" => {
+            if let Some(title) = data.get("title").and_then(Value::as_str) {
+                let main = with(|u| {
+                    u.title = title.to_string();
+                    u.main
+                })
+                .flatten();
+                if let Some(h) = main {
+                    unsafe {
+                        let _ = SetWindowTextW(h, &HSTRING::from(title));
+                    }
+                }
+            }
+        }
+        "dialog" => {
+            let owner = with(|u| u.main.map(|h| h.0 as isize)).flatten().unwrap_or(0);
+            if let Some((id, value)) = dialog::answer(&data, |req| dialogs::show(owner, req)) {
+                send_call(id, "__dialog_result".into(), vec![value]);
+            }
+        }
+        _ => post_page(&shim::event_message(name, &data)),
+    }
+}
+
+fn send_call(id: String, name: String, args: Vec<Value>) -> bool {
+    with(|u| u.to_sup.as_ref().map(|tx| tx.send(ToSup::Call { id, name, args }).is_ok()))
+        .flatten()
+        .unwrap_or(false)
+}
+
+// --- UI thread: the page ------------------------------------------------------------------
+
+fn post_page(json_text: &str) {
+    if let Some(wv) = with(|u| u.webview.clone()).flatten() {
+        unsafe {
+            let _ = wv.PostWebMessageAsJson(&HSTRING::from(json_text));
+        }
+    }
+}
+
+fn on_page_message(text: &str) {
+    let call = match shim::parse_page_message(text) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    match shim::route(call.clone()) {
+        Ok(Route::Native { id, op }) => {
+            let value = native_op(op);
+            post_page(&shim::result_message(&id, Ok(value)));
+        }
+        Ok(Route::Backend { id, .. }) => {
+            if !send_call(id.clone(), call.name, call.args) {
+                post_page(&shim::result_message(&id, Err("backend is not running".into())));
+            }
+        }
+        Err(ShimError::BadArgs { id, error }) => post_page(&shim::result_message(&id, Err(error))),
+        Err(ShimError::BadMessage(_)) => {}
+    }
+}
+
+fn native_op(op: NativeOp) -> Value {
+    let Some(h) = with(|u| u.main).flatten() else {
+        return Value::Null;
+    };
+    unsafe {
+        match op {
+            NativeOp::GetWindowBounds => {
+                let mut r = RECT::default();
+                let _ = GetWindowRect(h, &mut r);
+                let scale = GetDpiForWindow(h).max(96) as f64 / 96.0;
+                json!({"x": r.left, "y": r.top, "width": r.right - r.left, "height": r.bottom - r.top, "scale": scale})
+            }
+            NativeOp::SetWindowBounds { x, y, width, height } => {
+                let _ = SetWindowPos(h, None, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+                Value::Null
+            }
+            NativeOp::UsesNativeWindowChrome => json!(true),
+            NativeOp::BeginMove => json!(window::win::begin_drag(h)),
+            NativeOp::BeginResize { edge } => json!(window::win::begin_resize(h, &edge)),
+            NativeOp::IsMaximized => json!(IsZoomed(h).as_bool()),
+            NativeOp::ToggleMaximize => {
+                let _ = ShowWindow(h, if IsZoomed(h).as_bool() { SW_RESTORE } else { SW_MAXIMIZE });
+                json!(IsZoomed(h).as_bool())
+            }
+            NativeOp::Minimize => {
+                let _ = ShowWindow(h, SW_MINIMIZE);
+                Value::Null
+            }
+            NativeOp::Hide => {
+                let _ = ShowWindow(h, SW_HIDE);
+                Value::Null
+            }
+        }
+    }
+}
+
+/// The first (about:blank) navigation finished: install the shim and the page handlers,
+/// lift the splash above the WebView, then load the backend's page once it is known.
+fn on_page_host(webview: ICoreWebView2) -> windows::core::Result<()> {
+    unsafe {
+        let done = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|_, _| Ok(())));
+        webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(shim::SHIM_JS), &done)?;
+        let mut token = Default::default();
+        let msg = WebMessageReceivedEventHandler::create(Box::new(
+            |_, args: Option<ICoreWebView2WebMessageReceivedEventArgs>| {
+                if let Some(a) = args {
+                    let mut p = PWSTR::null();
+                    if a.TryGetWebMessageAsString(&mut p).is_ok() {
+                        on_page_message(&take_pwstr(p));
+                    }
+                }
+                Ok(())
+            },
+        ));
+        webview.add_WebMessageReceived(&msg, &mut token)?;
+        let nav = NavigationCompletedEventHandler::create(Box::new(|_, _| {
+            on_page_painted();
+            Ok(())
+        }));
+        webview.add_NavigationCompleted(&nav, &mut token)?;
+    }
+    let splash = with(|u| {
+        u.webview = Some(webview);
+        u.page_host_ready = true;
+        u.splash_hwnd
+    })
+    .flatten();
+    if let Some(s) = splash {
+        unsafe {
+            let _ = SetWindowPos(s, Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+    navigate_when_ready();
+    Ok(())
+}
+
+fn navigate_when_ready() {
+    let go = with(|u| {
+        let backend_ready = u.url.is_some();
+        // No launcher-side static server yet, so there is no cached page to paint early.
+        let decision = splash::first_paint(false, backend_ready);
+        if u.page_host_ready && !u.navigated && decision == splash::FirstPaint::Navigate {
+            u.navigated = true;
+            u.webview.clone().zip(u.url.clone())
+        } else {
+            None
+        }
+    })
+    .flatten();
+    if let Some((wv, url)) = go {
+        unsafe {
+            let _ = wv.Navigate(&HSTRING::from(url));
+        }
+    }
+}
+
+fn on_page_painted() {
+    let splash = with(|u| {
+        if !u.navigated {
+            return None;
+        }
+        u.splash.on_painted();
+        u.splash_hwnd.take()
+    })
+    .flatten();
+    if let Some(s) = splash {
+        unsafe {
+            let _ = DestroyWindow(s);
+        }
+    }
+    write_ready_once();
+}
+
+fn write_ready_once() {
+    with(|u| {
+        if u.ready_written {
+            return;
+        }
+        u.ready_written = true;
+        u.record.stage("painted");
+        let painted = ms_since(u.t0);
+        let _ = start::write_ready(&u.app_data, std::process::id(), u.window_ms, painted);
+    });
+}
+
+// --- UI thread: windows -------------------------------------------------------------------
+
+fn create_msg_window() -> windows::core::Result<HWND> {
+    unsafe {
+        let instance: HINSTANCE = GetModuleHandleW(None)?.into();
+        let class = w!("DuckyLauncherWake");
+        let wc = WNDCLASSW { lpfnWndProc: Some(msg_proc), hInstance: instance, lpszClassName: class, ..Default::default() };
+        RegisterClassW(&wc);
+        CreateWindowExW(Default::default(), class, PCWSTR::null(), Default::default(), 0, 0, 0, 0, Some(HWND_MESSAGE), None, Some(instance), None)
+    }
+}
+
+unsafe extern "system" fn msg_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if msg == WM_WAKE {
+        drain_backend();
+        return LRESULT(0);
+    }
+    DefWindowProcW(hwnd, msg, wp, lp)
+}
+
+/// The main window (dark at once), its splash child, saved bounds; WebView2 starts on
+/// about:blank so the shim is in place before the real page loads.
+fn create_main() -> windows::core::Result<HWND> {
+    let (title, show_splash) = with(|u| (u.title.clone(), u.splash.visible())).unwrap_or_default();
+    let opts = window::win::WindowOptions {
+        title,
+        width: bounds::DEFAULT_WIDTH,
+        height: bounds::DEFAULT_HEIGHT,
+        profile_dir: window::profile_dir(None, |k| std::env::var(k).ok()),
+        url: "about:blank".into(),
+        debug_port: window::debug_port_from_env(std::env::var(window::config::DEBUG_PORT_ENV).ok().as_deref()),
+        hit: Default::default(),
+        on_painted: Some(Box::new(|_ok| {
+            if let Some(wv) = window::win::webview() {
+                let _ = on_page_host(wv);
+            }
+        })),
+        on_webview_error: None,
+    };
+    let hwnd = window::win::create(opts)?;
+    unsafe {
+        let saved = bounds::get_bounds(&bounds::default_path(), bounds::MAIN_KEY);
+        let b = bounds::initial_bounds(saved, &bounds::work_areas());
+        let _ = SetWindowPos(hwnd, None, b.x, b.y, b.width, b.height, SWP_NOZORDER | SWP_NOACTIVATE);
+        let prev = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, main_proc as *const () as isize);
+        let splash = if show_splash { create_splash(hwnd).ok() } else { None };
+        with(|u| {
+            u.main = Some(hwnd);
+            u.main_prev_proc = prev;
+            u.splash_hwnd = splash;
+            u.window_ms = ms_since(u.t0);
+        });
+    }
+    Ok(hwnd)
+}
+
+unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_SIZE => {
+            if let Some(s) = with(|u| u.splash_hwnd).flatten() {
+                let mut rc = RECT::default();
+                let _ = GetClientRect(hwnd, &mut rc);
+                let _ = MoveWindow(s, 0, 0, rc.right, rc.bottom, true);
+            }
+        }
+        WM_CLOSE => save_bounds(hwnd),
+        WM_DESTROY => {
+            with(|u| {
+                u.main = None;
+                u.webview = None;
+            });
+        }
+        _ => {}
+    }
+    let prev = with(|u| u.main_prev_proc).unwrap_or(0);
+    // SAFETY: `prev` is the window crate's WNDPROC that SetWindowLongPtrW returned.
+    let prev: WNDPROC = std::mem::transmute::<isize, WNDPROC>(prev);
+    CallWindowProcW(prev, hwnd, msg, wp, lp)
+}
+
+fn save_bounds(hwnd: HWND) {
+    unsafe {
+        if IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+            return;
+        }
+        let mut r = RECT::default();
+        if GetWindowRect(hwnd, &mut r).is_ok() {
+            let b = bounds::Bounds { x: r.left, y: r.top, width: r.right - r.left, height: r.bottom - r.top };
+            let _ = bounds::save_bounds(&bounds::default_path(), bounds::MAIN_KEY, b);
+        }
+    }
+}
+
+fn create_splash(parent: HWND) -> windows::core::Result<HWND> {
+    unsafe {
+        let instance: HINSTANCE = GetModuleHandleW(None)?.into();
+        let class = w!("DuckyLauncherSplash");
+        let wc = WNDCLASSW { lpfnWndProc: Some(splash_proc), hInstance: instance, lpszClassName: class, ..Default::default() };
+        RegisterClassW(&wc);
+        let mut rc = RECT::default();
+        let _ = GetClientRect(parent, &mut rc);
+        CreateWindowExW(
+            Default::default(),
+            class,
+            PCWSTR::null(),
+            WS_CHILD | WS_VISIBLE,
+            0,
+            0,
+            rc.right,
+            rc.bottom,
+            Some(parent),
+            None,
+            Some(instance),
+            None,
+        )
+    }
+}
+
+unsafe extern "system" fn splash_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_ERASEBKGND => LRESULT(1),
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            let mut rc = RECT::default();
+            let _ = GetClientRect(hwnd, &mut rc);
+            splash::paint(hdc.0 as _, rc.right, rc.bottom, GetDpiForWindow(hwnd));
+            let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
+}
+
+fn show_main() {
+    let main = with(|u| u.main).flatten();
+    let h = match main {
+        Some(h) => h,
+        None => match create_main() {
+            Ok(h) => h,
+            Err(_) => return,
+        },
+    };
+    unsafe {
+        let _ = ShowWindow(h, if IsIconic(h).as_bool() { SW_RESTORE } else { SW_SHOW });
+        let _ = SetForegroundWindow(h);
+    }
+}
+
+fn on_tray(event: tray::TrayEvent) {
+    match event {
+        tray::TrayEvent::Menu(tray::MenuAction::Open) => show_main(),
+        tray::TrayEvent::Menu(tray::MenuAction::ExitAll) => end_with(End::Exited),
+        tray::TrayEvent::ToastClicked(target) => {
+            show_main();
+            if let Some(t) = target {
+                post_page(&shim::event_message("toast_clicked", &json!({"kind": t.kind, "id": t.id})));
+            }
+        }
+    }
+}

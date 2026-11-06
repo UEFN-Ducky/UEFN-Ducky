@@ -144,7 +144,8 @@ fn fake_backend_entry() {
                "origin": "http://127.0.0.1:4711", "profile_dir": "p", "pid": std::process::id()})
     };
     match mode.as_str() {
-        "crash" => std::process::exit(3),
+        // Not 3: that is the backend's BUSY exit, a start error rather than a crash.
+        "crash" => std::process::exit(4),
         "silent" => std::thread::sleep(Duration::from_secs(30)),
         "badproto" => {
             say(hello(2));
