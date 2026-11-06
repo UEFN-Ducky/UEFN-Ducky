@@ -382,6 +382,23 @@ def _launcher_line(launcher: Any) -> str:
     return ("Launcher: " + "; ".join(parts)) if parts else ""
 
 
+# A launcher fallback starts this window within the launcher's 15 s hello wait plus its
+# own start; an older launcher entry belongs to some other launch.
+LAUNCHER_CARRY_S = 120.0
+
+
+def _recent_launcher(launcher: Any, now: float) -> dict[str, Any] | None:
+    """The launcher's part of the last record when it is from this launch (it fell back to
+    this Python window): kept unchanged so the next record still says why. None otherwise."""
+    if not isinstance(launcher, dict):
+        return None
+    try:
+        started = float(launcher.get("started") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return dict(launcher) if 0.0 <= now - started <= LAUNCHER_CARRY_S else None
+
+
 def build_report(
     previous: dict[str, Any],
     native: str,
@@ -730,6 +747,9 @@ def begin(version: str) -> None:
             "stages": [["launch", 0.0]],
         }
     )
+    launcher = _recent_launcher(previous.get("launcher") if previous else None, _state["started"])
+    if launcher:
+        _state["launcher"] = launcher
     _write_state()
     try:
         import faulthandler

@@ -256,3 +256,69 @@ def test_begin_reads_boot_json_with_launcher_stages(monkeypatch: pytest.MonkeyPa
     finally:
         boot_report.mark("closed")
         boot_report._state.clear()
+
+
+# --- begin() keeps a fresh launcher fallback ---------------------------------------------
+
+
+@pytest.fixture
+def boot_dir(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("DUCKY_SANDBOX", "1")  # test copy: no pop-up, nothing sent
+    monkeypatch.setattr(boot_report, "_still_running", lambda pid: False)
+    monkeypatch.setattr(boot_report, "_pc_restarted_since", lambda when: False)
+    folder = boot_report._dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    yield folder
+    boot_report.mark("closed")
+    boot_report._state.clear()
+
+
+def _fallback(started: float) -> dict[str, Any]:
+    """What crates/report merges into the backend's record when it exits 21."""
+    return {
+        "pid": 123,
+        "version": "1.2.472",
+        "started": started,
+        "stages": [["launch", 0.0], ["spawn", 0.05], ["hello", 0.4]],
+        "backend_pid": 987654321,
+        "exit_code": 21,
+        "exit_reason": "protocol_mismatch",
+        "error": "backend protocol 2, launcher wants [1,1]",
+    }
+
+
+def _begin(folder: Path, record: dict[str, Any]) -> dict[str, Any]:
+    (folder / "boot.json").write_text(json.dumps(record), encoding="utf-8")
+    boot_report.begin("1.2.472")
+    return json.loads((folder / "boot.json").read_text(encoding="utf-8"))
+
+
+def test_begin_keeps_a_fresh_launcher_fallback(boot_dir: Path) -> None:
+    import time
+
+    launcher = _fallback(time.time() - 16)
+    now = _begin(boot_dir, _record(state="closed", launcher=launcher))
+    assert now["launcher"] == launcher
+    assert now["state"] == "starting" and now["pid"] == os.getpid()
+    boot_report.stage("window")  # later writes keep it too
+    after = json.loads((boot_dir / "boot.json").read_text(encoding="utf-8"))
+    assert after["launcher"] == launcher and after["stages"][-1][0] == "window"
+
+
+def test_begin_drops_a_stale_launcher_entry(boot_dir: Path) -> None:
+    import time
+
+    stale = _fallback(time.time() - boot_report.LAUNCHER_CARRY_S - 60)
+    now = _begin(boot_dir, _record(state="closed", launcher=stale))
+    assert "launcher" not in now
+
+
+@pytest.mark.parametrize("launcher", ["garbage", [], {"started": "x"}, {"exit_code": 21}])
+def test_begin_ignores_odd_launcher_values(boot_dir: Path, launcher: Any) -> None:
+    assert "launcher" not in _begin(boot_dir, _record(state="closed", launcher=launcher))
+
+
+def test_plain_old_boot_json_begins_as_before(boot_dir: Path) -> None:
+    now = _begin(boot_dir, _record(state="closed"))
+    assert set(now) == {"version", "started", "pid", "os", "python", "state", "stages"}
+    assert now["stages"] == [["launch", 0.0]] and now["version"] == "1.2.472"
