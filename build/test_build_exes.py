@@ -61,9 +61,10 @@ def _launcher_src(tmp_path: Path) -> Path:
 
 
 class _FakeCargo:
-    def __init__(self, rc: int = 0) -> None:
+    def __init__(self, rc: int = 0, dll: bool = True) -> None:
         self.calls: list[list[str]] = []
         self.rc = rc
+        self.dll = dll
 
     def __call__(self, cmd, cwd=None):
         self.calls.append(list(cmd))
@@ -71,6 +72,11 @@ class _FakeCargo:
         if self.rc == 0:
             (target / "release").mkdir(parents=True, exist_ok=True)
             (target / "release" / be.LAUNCHER_EXE).write_bytes(b"MZ launcher")
+            if self.dll:
+                out = target / "release" / "build" / "webview2-com-sys-0123abcd" / "out"
+                for arch in ("x64", "x86", "arm64"):
+                    (out / arch).mkdir(parents=True, exist_ok=True)
+                    (out / arch / be.LAUNCHER_DLL).write_bytes(f"MZ loader {arch}".encode())
 
         class _P:
             returncode = self.rc
@@ -159,8 +165,46 @@ def test_launcher_is_placed_beside_the_app(tmp_path: Path) -> None:
     app = tmp_path / "UEFN-Ducky-1.2.3"
     app.mkdir()
     (app / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    (exe.parent / be.LAUNCHER_DLL).write_bytes(b"MZ dll")
     placed = be.place_launcher(exe, app)
     assert placed == app / "Ducky-Launcher.exe" and placed.read_bytes() == b"MZ"
+    assert (app / "WebView2Loader.dll").read_bytes() == b"MZ dll"
+
+
+def test_launcher_without_its_dll_is_not_placed(tmp_path: Path, capsys) -> None:
+    exe = tmp_path / "cached" / be.LAUNCHER_EXE
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ")
+    app = tmp_path / "app"
+    app.mkdir()
+    assert be.place_launcher(exe, app) is None
+    assert list(app.iterdir()) == [] and "WITHOUT" in capsys.readouterr().err
+
+
+def test_cache_holds_the_x64_dll_next_to_the_exe(tmp_path: Path) -> None:
+    src = _launcher_src(tmp_path)
+    exe = be.build_launcher(src, cache_root=tmp_path / "cache", cargo="cargo", run=_FakeCargo())
+    assert (exe.parent / "WebView2Loader.dll").read_bytes() == b"MZ loader x64"
+    assert sorted(p.name for p in exe.parent.iterdir()) == ["Ducky-Launcher.exe", "WebView2Loader.dll"]
+
+
+def test_cache_entry_without_the_dll_is_rebuilt(tmp_path: Path) -> None:
+    src = _launcher_src(tmp_path)
+    cache = tmp_path / "cache"
+    old = cache / be.launcher_source_hash(src) / be.LAUNCHER_EXE
+    old.parent.mkdir(parents=True)
+    old.write_bytes(b"MZ old")
+    cargo = _FakeCargo()
+    assert be.build_launcher(src, cache_root=cache, cargo="cargo", run=cargo) == old
+    assert len(cargo.calls) == 1 and (old.parent / be.LAUNCHER_DLL).is_file()
+
+
+def test_build_without_the_dll_ships_without_launcher(tmp_path: Path, capsys) -> None:
+    src = _launcher_src(tmp_path)
+    cache = tmp_path / "cache"
+    assert be.build_launcher(src, cache_root=cache, cargo="cargo", run=_FakeCargo(dll=False)) is None
+    assert "WebView2Loader.dll" in capsys.readouterr().err
+    assert not (cache / be.launcher_source_hash(src)).exists()
 
 
 def test_cache_root_is_under_localappdata(tmp_path: Path, monkeypatch) -> None:

@@ -266,6 +266,15 @@ def missing_search_model_files(app_dir: Path) -> list[str]:
 
 
 LAUNCHER_EXE = "Ducky-Launcher.exe"
+# webview2-com-sys links this at load time: the launcher cannot even print --version without it.
+LAUNCHER_DLL = "WebView2Loader.dll"
+
+
+def find_loader_dll(target_dir: Path) -> Path | None:
+    """The x64 WebView2Loader.dll webview2-com-sys's build script put under ``target_dir``."""
+    found = list((target_dir / "release" / "build").glob(f"webview2-com-sys-*/out/x64/{LAUNCHER_DLL}"))
+    # ponytail: newest wins when old build-script dirs linger in the shared target dir.
+    return max(found, key=lambda p: p.stat().st_mtime) if found else None
 # Build output and editor/VCS litter never change the launcher binary.
 _LAUNCHER_HASH_SKIP_DIRS = frozenset({"target", ".git", ".idea", ".vscode"})
 
@@ -318,7 +327,8 @@ def build_launcher(
     cache_root = cache_root or launcher_cache_root()
     digest = launcher_source_hash(src)
     cached = cache_root / digest / LAUNCHER_EXE
-    if cached.is_file():
+    # An entry without the dll (made before the dll was cached) is a miss.
+    if cached.is_file() and (cached.parent / LAUNCHER_DLL).is_file():
         print(f"{LAUNCHER_EXE}: cache hit {digest} ({cached})")
         return cached
     cargo = cargo or shutil.which("cargo")
@@ -346,18 +356,34 @@ def build_launcher(
             file=sys.stderr,
         )
         return None
+    dll = find_loader_dll(target_dir)
+    if dll is None:
+        print(
+            f"WARNING: cargo built no x64 {LAUNCHER_DLL} (webview2-com-sys-*/out/x64); "
+            f"this build ships WITHOUT {LAUNCHER_EXE}.",
+            file=sys.stderr,
+        )
+        return None
     cached.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cached.with_suffix(".exe.tmp")
-    shutil.copy2(built, tmp)
-    os.replace(tmp, cached)
+    # The dll first: the EXE landing is what makes the entry a hit.
+    for source, dest in ((dll, cached.parent / LAUNCHER_DLL), (built, cached)):
+        tmp = dest.with_name(dest.name + ".tmp")
+        shutil.copy2(source, tmp)
+        os.replace(tmp, dest)
     print(f"{LAUNCHER_EXE}: cached {cached}")
     return cached
 
 
 def place_launcher(launcher: Path | None, app_dir: Path) -> Path | None:
-    """Copy the launcher beside ``UEFN-Ducky.exe``; None when there is none to ship."""
+    """Copy the launcher and its WebView2Loader.dll beside ``UEFN-Ducky.exe``; None when
+    there is none to ship (an EXE without its dll cannot start, so neither ships)."""
     if launcher is None or not launcher.is_file():
         return None
+    dll = launcher.parent / LAUNCHER_DLL
+    if not dll.is_file():
+        print(f"WARNING: {dll} missing; this build ships WITHOUT {LAUNCHER_EXE}.", file=sys.stderr)
+        return None
+    shutil.copy2(dll, app_dir / LAUNCHER_DLL)
     dest = app_dir / LAUNCHER_EXE
     shutil.copy2(launcher, dest)
     print(f"Placed {dest}")

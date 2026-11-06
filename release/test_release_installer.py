@@ -33,7 +33,8 @@ def test_pinned_lines_are_unchanged():
 
 def test_launcher_is_optional_no_named_file_entry():
     # It rides the whole-folder entry: a build without it still packs (no missing-file error).
-    assert "Ducky-Launcher.exe" not in "".join(l for l in ISS.splitlines() if l.startswith("Source:"))
+    sources = "".join(l for l in ISS.splitlines() if l.startswith("Source:"))
+    assert "Ducky-Launcher.exe" not in sources and "WebView2Loader.dll" not in sources
 
 
 def test_close_kills_the_launcher_with_the_app_and_bridge():
@@ -60,8 +61,9 @@ def test_signer_gets_every_payload_exe_including_the_launcher(tmp_path, monkeypa
     pub = _publish_app()
     monkeypatch.setattr(pub, "ROOT", tmp_path)
     app = tmp_path / "dist" / "UEFN-Ducky-1.2.3"
-    for name in ("UEFN-Ducky.exe", "UEFN-Ducky-Bridge.exe", "Ducky-Launcher.exe"):
+    for name in ("UEFN-Ducky.exe", "UEFN-Ducky-Bridge.exe", "Ducky-Launcher.exe", "WebView2Loader.dll"):
         _touch(app / name)
+    # The Microsoft-signed WebView2Loader.dll is never re-signed: only EXEs go to the signer.
     assert [p.name for p in pub.payload_exes("1.2.3")] == [
         "Ducky-Launcher.exe", "UEFN-Ducky-Bridge.exe", "UEFN-Ducky.exe",
     ]
@@ -91,6 +93,7 @@ def _pack(tmp_path: Path, *, launcher: bool) -> dict:
     _touch(app / "_internal" / "base.dll")
     if launcher:
         _touch(app / "Ducky-Launcher.exe")
+        _touch(app / "WebView2Loader.dll")
     out = tmp_path / "dist"
     out.mkdir()
     return _update_pack().build_update_pack(app, "1.2.3", out)[2]
@@ -99,6 +102,7 @@ def _pack(tmp_path: Path, *, launcher: bool) -> dict:
 def test_pack_carries_the_launcher_marked_optional(tmp_path):
     files = {e["path"]: e for e in _pack(tmp_path, launcher=True)["files"]}
     assert files["Ducky-Launcher.exe"]["optional"] is True
+    assert files["WebView2Loader.dll"]["optional"] is True
     assert "optional" not in files["UEFN-Ducky.exe"] and "optional" not in files["_internal/base.dll"]
 
 
@@ -146,7 +150,17 @@ def _extracted(tmp_path: Path, launcher: bool) -> Path:
     _touch(app / "UEFN-Ducky.exe")
     if launcher:
         _touch(app / "Ducky-Launcher.exe")
+        _touch(app / "WebView2Loader.dll")
     return app
+
+
+@pytest.mark.parametrize("required", [True, False])
+def test_launcher_without_its_dll_fails(tmp_path, required):
+    vip, app, run = _vip(), _extracted(tmp_path, True), _Ran("1.2.3")
+    (app / "WebView2Loader.dll").unlink()
+    with pytest.raises(RuntimeError, match="WebView2Loader.dll"):
+        vip.check_launcher(app, "1.2.3", signed=False, required=required, run=run)
+    assert run.calls == []
 
 
 def test_launcher_present_signed_and_version_matches(tmp_path):

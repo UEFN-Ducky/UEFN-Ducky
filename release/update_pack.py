@@ -24,7 +24,7 @@ MANIFEST_FORMAT = 1
 _LOCAL_HEADER = b"PK\x03\x04"
 # Files a build may or may not ship (the native launcher needs cargo). Marked
 # "optional": true in the manifest; readers that predate the key just ignore it.
-OPTIONAL_FILES = frozenset({"Ducky-Launcher.exe"})
+OPTIONAL_FILES = frozenset({"Ducky-Launcher.exe", "WebView2Loader.dll"})
 
 
 def _sha256(path: Path) -> str:

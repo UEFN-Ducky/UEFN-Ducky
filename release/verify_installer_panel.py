@@ -15,6 +15,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 LAUNCHER = "Ducky-Launcher.exe"
+LOADER_DLL = "WebView2Loader.dll"  # loaded at start: the launcher cannot run without it
 
 
 def app_version(root: Path = REPO) -> str:
@@ -42,6 +43,8 @@ def check_launcher(app: Path, version: str, *, signed: bool, required: bool,
             raise RuntimeError(f"{LAUNCHER} missing from the installer payload")
         print(f"NOTE: no {LAUNCHER} in this build (optional); skipped", flush=True)
         return False
+    if not (app / LOADER_DLL).is_file():
+        raise RuntimeError(f"{LAUNCHER} ships without {LOADER_DLL} beside it")
     if signed and (status := signature(exe)) != "Valid":
         raise RuntimeError(f"{LAUNCHER} is not signed (Authenticode status {status})")
     result = run([str(exe), "--version"], capture_output=True, text=True, timeout=30, check=False)
