@@ -11,6 +11,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from typing import IO, Any
 
@@ -57,18 +58,174 @@ def read_messages(stream: IO[bytes]) -> Iterator[dict[str, Any]]:
             yield message
 
 
-def serve(stream: IO[bytes], *, on_call: Callable[[dict[str, Any]], None]) -> str:
-    """Hand each ``call`` to ``on_call`` until a ``bye`` or stdin's end; return why it ended."""
-    for message in read_messages(stream):
-        kind = message.get("t")
-        if kind == "call":
-            try:
-                on_call(message)
-            except Exception:
-                _log.warning("backend call failed to start", exc_info=True)
-        elif kind == "bye":
-            return f"bye:{message.get('reason') or ''}".rstrip(":")
-    return "stdin_eof"
+def serve(
+    stream: IO[bytes],
+    *,
+    on_call: Callable[[dict[str, Any]], None],
+    dialogs: DialogBroker | None = None,
+    reply: Callable[[dict[str, Any]], Any] | None = None,
+) -> str:
+    """Hand each ``call`` to ``on_call`` until a ``bye`` or stdin's end; return why it ended.
+
+    A ``__dialog_result`` call is the launcher's answer to a ``dialog`` event: it goes to the
+    waiting dialog (``dialogs``), never to ``on_call``. Waiting dialogs end (None) with serve."""
+    try:
+        for message in read_messages(stream):
+            kind = message.get("t")
+            if kind == "call" and message.get("name") == DIALOG_RESULT_CALL:
+                args = message.get("args")
+                value = args[0] if isinstance(args, list) and args else None
+                found = dialogs.answer(message.get("id"), value) if dialogs is not None else False
+                if reply is not None:
+                    try:
+                        reply({"t": "result", "id": message.get("id"), "ok": True, "value": found})
+                    except Exception:
+                        pass
+            elif kind == "call":
+                try:
+                    on_call(message)
+                except Exception:
+                    _log.warning("backend call failed to start", exc_info=True)
+            elif kind == "bye":
+                return f"bye:{message.get('reason') or ''}".rstrip(":")
+        return "stdin_eof"
+    finally:
+        if dialogs is not None:
+            dialogs.cancel_all()
+
+
+# --- file dialogs: the launcher owns the window, so it shows them -------------------------
+
+DIALOG_RESULT_CALL = "__dialog_result"
+DIALOG_TIMEOUT_S = 600.0
+# pywebview's FileDialog values (OPEN, FOLDER, SAVE).
+DIALOG_KINDS = {10: "open", 20: "folder", 30: "save"}
+
+
+class _DialogWaiter:
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.value: Any = None
+
+
+class DialogBroker:
+    """One ``dialog`` event out, then a wait for its ``__dialog_result`` (None after the timeout)."""
+
+    def __init__(
+        self,
+        send_event: Callable[[str, dict[str, Any]], bool],
+        *,
+        timeout_s: float = DIALOG_TIMEOUT_S,
+        new_id: Callable[[], str] | None = None,
+    ) -> None:
+        self._send_event = send_event
+        self._timeout_s = timeout_s
+        self._new_id = new_id or (lambda: f"dlg-{uuid.uuid4().hex}")
+        self._lock = threading.Lock()
+        self._waiting: dict[str, _DialogWaiter] = {}
+        self._closed = False
+
+    def ask(self, args: dict[str, Any]) -> Any:
+        dialog_id = self._new_id()
+        waiter = _DialogWaiter()
+        with self._lock:
+            if self._closed:
+                return None
+            self._waiting[dialog_id] = waiter
+        try:
+            if not self._send_event("dialog", {"id": dialog_id, "args": args}):
+                return None
+            if not waiter.done.wait(self._timeout_s):
+                _log.warning("file dialog %s: no answer in %.0f s", dialog_id, self._timeout_s)
+                return None
+            return waiter.value
+        finally:
+            with self._lock:
+                self._waiting.pop(dialog_id, None)
+
+    def answer(self, dialog_id: object, value: Any) -> bool:
+        """True when a dialog was waiting for this id."""
+        with self._lock:
+            waiter = self._waiting.get(dialog_id) if isinstance(dialog_id, str) else None
+        if waiter is None:
+            return False
+        waiter.value = value
+        waiter.done.set()
+        return True
+
+    def cancel_all(self) -> None:
+        """The launcher is gone: every waiting dialog returns None now."""
+        with self._lock:
+            self._closed = True
+            waiters = list(self._waiting.values())
+        for waiter in waiters:
+            waiter.done.set()
+
+
+def _dialog_type(value: object) -> int:
+    try:
+        return int(getattr(value, "value", value))  # pywebview's FileDialog enum or a plain int
+    except (TypeError, ValueError):
+        return 10
+
+
+def _pywebview_shape(kind: str, value: Any) -> Any:
+    """The launcher's answer as pywebview returns it: a tuple of paths, or None for cancel."""
+    if value is None or value == "" or value == []:
+        return None
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        paths = tuple(str(v) for v in value if v)
+        return paths or None
+    return None
+
+
+class _EventSink:
+    """``window.events.<name> += handler`` does nothing: the launcher has its own window."""
+
+    def __getattr__(self, _name: str) -> _EventSink:
+        return self
+
+    def __iadd__(self, _handler: object) -> _EventSink:
+        return self
+
+    def __isub__(self, _handler: object) -> _EventSink:
+        return self
+
+
+class BackendWindow:
+    """The window object Python code finds in ``--backend`` mode. ``create_file_dialog``
+    asks the launcher; every other window call is a no-op returning None."""
+
+    def __init__(self, dialogs: DialogBroker) -> None:
+        self._dialogs = dialogs
+        self.events = _EventSink()
+
+    def create_file_dialog(
+        self,
+        dialog_type: object = 10,
+        directory: str = "",
+        allow_multiple: bool = False,
+        save_filename: str = "",
+        file_types: tuple[str, ...] | list[str] = (),
+    ) -> Any:
+        kind_id = _dialog_type(dialog_type)
+        kind = DIALOG_KINDS.get(kind_id, "open")
+        args = {
+            "dialog_type": kind_id,
+            "kind": kind,
+            "directory": str(directory or ""),
+            "allow_multiple": bool(allow_multiple),
+            "save_filename": str(save_filename or ""),
+            "file_types": [str(t) for t in (file_types or ())],
+        }
+        return _pywebview_shape(kind, self._dialogs.ask(args))
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return lambda *_a, **_k: None
 
 
 def _app_exit(*, api: Any, tk_root: Any, window_holder: dict[str, object]) -> None:

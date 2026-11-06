@@ -295,15 +295,18 @@ def run_backend(
         start_background = panel.make_background_work()
         api = panel.boot_panel_api()
         panel.install_workspace_services()
+        # Python code that opens a file dialog itself finds this window: the launcher shows it.
+        dialogs = lifecycle.DialogBroker(writer.event)
+        window = lifecycle.BackendWindow(dialogs)
         api._tray = None
-        api._window_holder = {}
+        api._window_holder = {"window": window, "hidden": False}
         ending = lifecycle.Shutdown(api)
 
         def _on_exit() -> None:
             writer.event("quit", {"reason": "app"})
             ending.run("app")
 
-        api.bind_window(None, on_hide=lambda: None, on_exit=_on_exit)
+        api.bind_window(window, on_hide=lambda: None, on_exit=_on_exit)
         _bind_open_handlers(writer)
         url, _web_debug, bundled_http = panel.start_panel_server()
         _bind_notifications(writer)
@@ -337,7 +340,7 @@ def run_backend(
             name="backend-call",
         ).start()
 
-    reason = lifecycle.serve(inp, on_call=_call)
+    reason = lifecycle.serve(inp, on_call=_call, dialogs=dialogs, reply=writer.send)
     ending.run(reason)
     return 0
 

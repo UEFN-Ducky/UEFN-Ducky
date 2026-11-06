@@ -172,6 +172,113 @@ def test_the_apps_own_exit_tells_the_launcher(stubbed_backend, monkeypatch) -> N
     assert stubbed_backend == ["app"]  # the EOF after it does not exit twice
 
 
+# --- file dialogs go through the launcher ------------------------------------------------
+
+
+class _FakeLauncher:
+    """Answers each ``dialog`` event with ``answer(args)`` as a ``__dialog_result`` call."""
+
+    def __init__(self, answer):
+        self.answer = answer
+        self.events: list[dict] = []
+        self.replies: list[dict] = []
+        self.calls: list[dict] = []
+        self.inbox: list[bytes] = []
+        self.ready = threading.Condition()
+        self.dialogs = lifecycle.DialogBroker(self._event, timeout_s=5)
+        self.window = lifecycle.BackendWindow(self.dialogs)
+
+    def _event(self, name, data):
+        self.events.append({"name": name, "data": data})
+        line = json.dumps({"t": "call", "id": data["id"], "name": "__dialog_result",
+                           "args": [self.answer(data["args"])]}).encode("utf-8") + b"\n"
+        with self.ready:
+            self.inbox += [line, b'{"t": "bye"}\n']
+            self.ready.notify_all()
+        return True
+
+    def serve_one(self, extra: bytes = b"") -> threading.Thread:
+        launcher = self
+
+        class _Stdin(io.BytesIO):
+            def readline(self, size=-1):
+                with launcher.ready:
+                    launcher.ready.wait_for(lambda: launcher.inbox, timeout=5)
+                    return launcher.inbox.pop(0) if launcher.inbox else b""
+
+        thread = threading.Thread(target=lambda: lifecycle.serve(
+            _Stdin(), on_call=self.calls.append, dialogs=self.dialogs, reply=self.replies.append), daemon=True)
+        if extra:
+            self.inbox.append(extra)
+        thread.start()
+        return thread
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "answer", "expected", "kind"),
+    [
+        ({"dialog_type": 10, "allow_multiple": True, "file_types": ("Images (*.png)",)},
+         ["C:/a.png", "C:/b.png"], ("C:/a.png", "C:/b.png"), "open"),
+        ({"dialog_type": 30, "directory": "C:/out", "save_filename": "x.json"}, "C:/out/x.json",
+         ("C:/out/x.json",), "save"),
+        ({"dialog_type": 20}, ["C:/folder"], ("C:/folder",), "folder"),
+        ({"dialog_type": 10}, None, None, "open"),
+    ],
+)
+def test_a_file_dialog_is_shown_by_the_launcher(kwargs, answer, expected, kind) -> None:
+    launcher = _FakeLauncher(lambda args: answer)
+    thread = launcher.serve_one()
+    assert launcher.window.create_file_dialog(**kwargs) == expected
+    args = launcher.events[0]["data"]["args"]
+    assert launcher.events[0]["name"] == "dialog"
+    assert args["kind"] == kind and args["dialog_type"] == kwargs["dialog_type"]
+    assert args["save_filename"] == kwargs.get("save_filename", "")
+    assert args["file_types"] == list(kwargs.get("file_types", ()))
+    assert launcher.calls == []  # the answer never reaches the normal calls
+    assert launcher.replies[0]["value"] is True
+    thread.join(5)
+
+
+def test_a_normal_call_still_reaches_on_call_beside_a_dialog() -> None:
+    launcher = _FakeLauncher(lambda args: "C:/a.txt")
+    normal = json.dumps({"t": "call", "id": "n1", "name": "ping", "args": [1]}).encode("utf-8") + b"\n"
+    thread = launcher.serve_one(extra=normal)
+    assert launcher.window.create_file_dialog() == ("C:/a.txt",)
+    thread.join(5)
+    assert [c["id"] for c in launcher.calls] == ["n1"]
+
+
+def test_an_unanswered_dialog_times_out_with_none() -> None:
+    sent: list = []
+    broker = lifecycle.DialogBroker(lambda name, data: sent.append(data) or True, timeout_s=0.05)
+    assert lifecycle.BackendWindow(broker).create_file_dialog(dialog_type=10) is None
+    assert len(sent) == 1
+    assert broker.answer(sent[0]["id"], ["late"]) is False  # a late answer finds nobody
+
+
+def test_the_launchers_end_cancels_waiting_dialogs() -> None:
+    sent: list = []
+    broker = lifecycle.DialogBroker(lambda name, data: sent.append(data) or True, timeout_s=30)
+    box: dict = {}
+    thread = threading.Thread(target=lambda: box.update(v=broker.ask({})), daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not sent and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert lifecycle.serve(_lines({"t": "bye"}), on_call=lambda m: None, dialogs=broker) == "bye"
+    thread.join(5)
+    assert not thread.is_alive() and box["v"] is None
+    assert broker.ask({}) is None  # closed: no event, no wait
+    assert len(sent) == 1
+
+
+def test_backend_window_other_calls_are_no_ops() -> None:
+    window = lifecycle.BackendWindow(lifecycle.DialogBroker(lambda n, d: False))
+    assert window.show() is None and window.evaluate_js("1") is None
+    window.events.closing += lambda: None
+    assert window.create_file_dialog() is None  # event not sent: no wait
+
+
 # --- the launcher (parent) dying ---------------------------------------------------------
 
 
