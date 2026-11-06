@@ -57,6 +57,11 @@ class _Left(Exception):
     pass
 
 
+# A rollback restart waits for the failed process to end (--after-update <pid>): started at
+# once, the old version saw that pid alive in boot.json and turned its crash record off.
+_WAIT_FOR_ME = ["--after-update", str(__import__("os").getpid())]
+
+
 @pytest.fixture
 def starts(monkeypatch) -> list[tuple[Path, list[str]]]:
     """Record detached starts and make os._exit raise instead of leaving."""
@@ -144,7 +149,7 @@ def test_a_failed_new_start_rolls_back_to_the_old_version(trees, starts, monkeyp
     monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe"])
 
     assert av.fall_back_after_failed_start(NEW, "crashed at start") is True
-    assert starts == [(install_exe, [])]
+    assert starts == [(install_exe, _WAIT_FOR_ME)]
     assert av.is_bad(NEW)
 
     # The installed stub starts again and now lands on the old version.
@@ -161,7 +166,7 @@ def test_a_rollback_ignores_the_launcher(trees, starts, monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe"])
 
     assert av.fall_back_after_failed_start(NEW, "crashed") is True
-    assert starts == [(trees["install"] / "UEFN-Ducky.exe", [])]
+    assert starts == [(trees["install"] / "UEFN-Ducky.exe", _WAIT_FOR_ME)]
 
 
 def test_a_failed_backend_only_marks_bad_so_there_is_one_window(trees, starts, monkeypatch) -> None:
@@ -196,7 +201,7 @@ def test_a_hidden_start_stays_hidden_through_the_hand_off(trees, starts, monkeyp
     monkeypatch.setenv(av.LAUNCHER_ENV, str(trees["install"] / "UEFN-Ducky.exe"))
     monkeypatch.setenv(av.START_HIDDEN_ENV, "1")
     assert av.fall_back_after_failed_start(NEW, "crashed") is True  # the rollback restart too
-    assert starts == [(trees["install"] / "UEFN-Ducky.exe", [av.BACKGROUND_ARG])]
+    assert starts == [(trees["install"] / "UEFN-Ducky.exe", [*_WAIT_FOR_ME, av.BACKGROUND_ARG])]
 
 
 def test_failed_while_starting_follows_record_start_and_mark_ready(trees) -> None:
@@ -226,7 +231,7 @@ def test_a_run_panel_failure_rolls_back_before_the_error_dialog(trees, starts, m
     av.record_start(NEW)  # started by the stub's hand-off, panel not up yet
     assert webview_app._roll_back_failed_start(ModuleNotFoundError("No module named '_tkinter'")) is True
     assert av.is_bad(NEW) and "_tkinter" in av.read_boot()[NEW]["reason"]
-    assert starts == [(trees["install"] / "UEFN-Ducky.exe", [])]
+    assert starts == [(trees["install"] / "UEFN-Ducky.exe", _WAIT_FOR_ME)]
 
 
 # --- handover JSON both ways -----------------------------------------------------------

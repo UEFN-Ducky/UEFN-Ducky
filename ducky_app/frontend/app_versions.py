@@ -53,6 +53,8 @@ BACKEND_ARG = "--backend"
 # frontend.autostart's names (this module stays stdlib only): a start hidden in the tray.
 START_HIDDEN_ENV = "UEFN_DUCKY_START_HIDDEN"
 BACKGROUND_ARG = "--background"
+# launcher.py's ``--after-update <pid>``: wait for that process to end first.
+AFTER_UPDATE_ARG = "--after-update"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _DIR_RE = re.compile(r"^app-(\d+\.\d+\.\d+)$")
@@ -423,7 +425,10 @@ def fall_back_after_failed_start(current: str, reason: str) -> bool:
     exe = launcher_exe()
     if not exe.is_file():
         return False
-    return start_detached(exe, _detached_args([]))
+    # --after-update: the EXE waits for this process to end before it starts (every version
+    # reads it). Started at once, it saw this pid alive in boot.json and turned its own crash
+    # record off for the whole session.
+    return start_detached(exe, _detached_args([AFTER_UPDATE_ARG, str(os.getpid())]))
 
 
 def write_handover(state: dict[str, Any]) -> None:
