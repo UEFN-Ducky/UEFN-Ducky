@@ -255,9 +255,16 @@ def check_gpu() -> None:
 
 
 def on_heartbeat(beat: dict[str, Any]) -> None:
-    """boot_report's 30 s sample: graphics memory first, then system RAM."""
+    """boot_report's 30 s sample: graphics memory first, then system RAM, then (throttled, on
+    its own thread) give freed heap back to Windows."""
     check_gpu()
     _check_ram(beat)
+    try:
+        from frontend import heap_trim
+
+        heap_trim.maybe_trim()
+    except Exception:
+        pass
 
 
 def _check_ram(beat: dict[str, Any]) -> None:

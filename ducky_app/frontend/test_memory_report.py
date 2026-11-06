@@ -26,6 +26,7 @@ def test_the_report_has_every_section_and_names_a_big_global() -> None:
     if sys.platform == "win32":  # native memory no Python object accounts for (DPAPI, C libraries)
         native = got["native"]
         assert native["heaps_allocated_mb"] > 0 and native["private_committed_mb"] >= native["heaps_committed_mb"] * 0.5
+        assert 0 <= native["heap_free_mb"] <= native["heaps_committed_mb"]
     json.dumps(got)  # the tool answers it as JSON
 
 

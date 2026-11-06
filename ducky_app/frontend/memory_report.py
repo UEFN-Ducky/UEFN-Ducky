@@ -127,6 +127,8 @@ def _native(top: int = 12) -> dict[str, Any]:
         out["heaps"] = len(rows)
         out["heaps_committed_mb"] = _mb(sum(c for c, _ in rows))
         out["heaps_allocated_mb"] = _mb(sum(a for _, a in rows))
+        # Committed but unused: freed after a past peak and kept by the heap (heap_trim gives it back).
+        out["heap_free_mb"] = _mb(sum(max(c - a, 0) for c, a in rows))
         out["biggest_heaps_mb"] = [{"committed": _mb(c), "allocated": _mb(a)} for c, a in rows[:5]]
     except Exception as exc:  # noqa: BLE001
         out["heaps_error"] = str(exc)
