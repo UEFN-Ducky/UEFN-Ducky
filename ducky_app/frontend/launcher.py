@@ -512,12 +512,25 @@ def main() -> None:
             pass
         # Logo window before panel_api / webview imports — otherwise double-click is a blank wait.
         if not start_hidden:
+            # The last session's picture of the window, where it opens (frontend/boot_snapshot.py):
+            # Ducky looks ready in ~0.5 s. No picture yet (first start, blank capture): the logo.
+            shown_snapshot = False
             try:
-                from frontend.early_splash import show as show_early_splash
+                from frontend import snapshot_splash
+                from frontend.boot_snapshot import load as load_boot_snapshot
 
-                show_early_splash()
+                snapshot = load_boot_snapshot()
+                if snapshot is not None:
+                    shown_snapshot = snapshot_splash.show(snapshot)
             except Exception:
-                pass
+                shown_snapshot = False
+            if not shown_snapshot:
+                try:
+                    from frontend.early_splash import show as show_early_splash
+
+                    show_early_splash()
+                except Exception:
+                    pass
         from frontend.ui_web.run import run
 
         try:
@@ -531,6 +544,12 @@ def main() -> None:
                 from frontend.early_splash import dismiss as dismiss_early_splash
 
                 dismiss_early_splash()
+            except Exception:
+                pass
+            try:
+                from frontend.snapshot_splash import dismiss as dismiss_snapshot
+
+                dismiss_snapshot()
             except Exception:
                 pass
             # A version Ducky downloaded that can't start: go back to the one before it.

@@ -273,6 +273,12 @@ def run() -> None:
                 dismiss_early_splash()
             except Exception:
                 pass
+            try:
+                from frontend.snapshot_splash import dismiss as dismiss_snapshot
+
+                dismiss_snapshot()
+            except Exception:
+                pass
             raise SystemExit(0)
         # Fall through: reclaim kills the wedged instance, then we start fresh.
     _boot_trace("handoff", t_handoff)
@@ -357,6 +363,7 @@ def _start_import_warmup(modules: tuple[str, ...] = _WEBVIEW_WARMUP_MODULES) -> 
 # or at the fallback when no shown event comes (a hidden start after an update switch).
 _BACKGROUND_AFTER_SHOWN_S = 1.5
 _BACKGROUND_FALLBACK_S = 8.0
+_BOOT_SNAPSHOT_EVERY_S = 180.0
 
 
 def _once(fn):
@@ -697,6 +704,10 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # the first click of the shortcut, the tray icon or an Open with.
     start_hidden = bool(handover.get("hidden")) or started_in_background()
     window_holder["hidden"] = start_hidden
+    if start_hidden:
+        from frontend.snapshot_splash import dismiss as dismiss_snapshot
+
+        dismiss_snapshot()
     t_window = time.perf_counter()
     window = webview.create_window(
         title,
@@ -805,7 +816,30 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     threading.Thread(target=_poll_listener, args=(api,), daemon=True, name="listener-poll").start()
 
+    def _save_boot_snapshot() -> None:
+        # The picture the next start shows at ~0.5 s (frontend/boot_snapshot.py).
+        try:
+            from frontend.boot_snapshot import capture_window
+            from frontend.ui_web.win_frameless import _hwnd_from_pywebview
+
+            hwnd = _hwnd_from_pywebview(window)
+            if hwnd:
+                capture_window(hwnd)
+        except Exception:
+            pass
+
+    def _snapshot_now_and_then() -> None:
+        # Also while it runs: a session that ends without closing the window (shutdown, crash,
+        # an update switch) still leaves a recent picture.
+        while True:
+            time.sleep(_BOOT_SNAPSHOT_EVERY_S)
+            if not window_holder.get("hidden"):
+                _save_boot_snapshot()
+
+    threading.Thread(target=_snapshot_now_and_then, daemon=True, name="boot-snapshot").start()
+
     def on_closing() -> bool:
+        _save_boot_snapshot()  # before hiding: a hidden window has nothing to capture
         on_hide()
         try:
             from frontend.ui_web.editor_workspace import flush_focus_windows_to_disk
