@@ -1,9 +1,12 @@
-"""Default off: an update that ships Ducky-Launcher.exe changes nothing until the setting says so.
+"""An update that ships Ducky-Launcher.exe keeps every entry point; explicit off changes nothing.
+
+The default is ``auto`` (a missing key tries the launcher, with the fallback in
+test_compat_fallback.py); a saved ``off`` or a bad value runs today's Python window only.
 
 Pins what every older version and every Windows entry point relies on: the EXE names, the
 Run key, Open with and ``uefn-ducky://`` (names unchanged; the command starts the launcher
 when it is present and the setting isn't off), the uninstall key, the panel port, the
-panel.pid hand-off, and that ``native_launcher`` off (or absent) never spawns the launcher.
+panel.pid hand-off, and that ``native_launcher`` off (or a bad value) never spawns the launcher.
 """
 
 from __future__ import annotations
@@ -273,7 +276,7 @@ def test_panel_pid_path_and_handoff_read() -> None:
     assert not (resolve_app_data_dir() / "launcher").exists()
 
 
-# --- 7. off or absent never spawns Ducky-Launcher.exe -----------------------------------
+# --- 7. the default is auto; explicit off never spawns Ducky-Launcher.exe ---------------
 
 
 @pytest.fixture
@@ -301,20 +304,33 @@ def no_spawn(monkeypatch: pytest.MonkeyPatch, install_dir: Path) -> list[object]
 ARGV = ["UEFN-Ducky.exe", "uefn-ducky://store/install?id=x"]
 
 
-def test_absent_setting_file_backend_never_spawns(files_backend: Path, no_spawn: list[object]) -> None:
-    assert not files_backend.exists()
-    assert native_switch.maybe_start_native(list(ARGV)) is False
-    assert no_spawn == []
+def test_the_default_is_auto() -> None:
+    assert settings.PanelSettings().native_launcher == "auto"
 
 
-def test_absent_setting_db_backend_never_spawns(monkeypatch: pytest.MonkeyPatch, no_spawn: list[object]) -> None:
+@pytest.mark.parametrize("raw", [None, "missing"])
+def test_absent_key_in_the_file_loads_as_auto(files_backend: Path, raw: object) -> None:
+    data: dict[str, object] = {"web_access": "on"}
+    if raw is None:
+        data["native_launcher"] = None  # a null is dropped by the loader: same as missing
+    files_backend.write_text(json.dumps(data), encoding="utf-8")
+    assert settings.PanelSettings.load().native_launcher == "auto"
+
+
+def test_absent_key_in_the_db_loads_as_auto(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DUCKY_STORE_BACKEND", raising=False)
     monkeypatch.delenv("DUCKY_STORE_BACKEND_SETTINGS", raising=False)
-    assert native_switch.maybe_start_native(list(ARGV)) is False
-    assert no_spawn == []
+    assert settings.PanelSettings.load().native_launcher == "auto"
 
 
-@pytest.mark.parametrize("raw", ["off", "garbage", "", None, 0])
+def test_saved_off_survives_a_reload(files_backend: Path) -> None:
+    s = settings.PanelSettings.load()
+    s.native_launcher = "off"
+    s.save()
+    assert settings.PanelSettings.load().native_launcher == "off"
+
+
+@pytest.mark.parametrize("raw", ["off", "OFF", "garbage", "", 0])
 def test_off_or_bad_value_never_spawns(files_backend: Path, no_spawn: list[object], raw: object) -> None:
     files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": raw}), encoding="utf-8")
     assert native_switch.maybe_start_native(list(ARGV)) is False

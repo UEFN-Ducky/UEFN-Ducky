@@ -84,14 +84,14 @@ def test_old_loader_reads_db_rows_with_the_new_key(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("DUCKY_STORE_BACKEND_SETTINGS", raising=False)
     s = PanelSettings.load()
     s.web_access = "on"
-    s.native_launcher = "auto"
+    s.native_launcher = "on"  # auto is the default: the db stores only what differs
     s.save()
     from backend.store.repos import settings as repo
 
     rows, _version = repo.load_fields_versioned()
-    assert rows.get("native_launcher") == "auto"
-    old = _old_load(dict(rows))
-    assert old.web_access == "on"
+    assert rows.get("native_launcher") == "on"
+    old = _old_load(dict(rows, native_launcher="auto"))
+    assert old.web_access == "on" and not hasattr(old, "native_launcher")
 
 
 # --- 2. ducky.db schema is unchanged ----------------------------------------------------

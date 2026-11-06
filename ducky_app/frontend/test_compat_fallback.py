@@ -3,7 +3,8 @@
 For each fallback (20 WebView2 missing or old, 21 protocol mismatch, 22 crash loop,
 23 no hello) the launch hook returns False with argv untouched, so launcher.py goes on to
 the Python window with the same arguments, and nothing outside ``launcher/`` in app data
-changes: panel_settings.json, chats and the WebView2 profile stay byte for byte.
+changes: panel_settings.json, chats and the WebView2 profile stay byte for byte. The same
+holds for the default (no ``native_launcher`` key means ``auto``).
 """
 
 from __future__ import annotations
@@ -179,6 +180,66 @@ def test_launcher_that_never_paints_is_killed_and_python_runs(
     _falls_back(appdata, list(ARGV))
     assert procs and procs[0].killed
     assert starts and starts[0][0] == "python" and starts[0][3] in ("no_hello", "timeout")
+
+
+# --- the default: no native_launcher key means auto -------------------------------------
+
+
+def _no_key() -> None:
+    """A panel_settings.json from before the launcher: no native_launcher key at all."""
+    (resolve_app_data_dir() / "panel_settings.json").write_text(json.dumps({"web_access": "on"}), encoding="utf-8")
+    assert PanelSettings.load().native_launcher == "auto"
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [(20, "webview2"), (21, "protocol"), (22, "crash_loop"), (23, "no_hello"), (24, "start_error")],
+)
+def test_missing_key_tries_the_launcher_and_every_failure_falls_back(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, code: int, reason: str
+) -> None:
+    _no_key()
+    cmds = _spawn_exiting(monkeypatch, code)
+    _falls_back(appdata, list(ARGV))
+    assert cmds == [[str(ns.launcher_exe()), *ARGV[1:]]]
+    assert starts == [("python", None, None, reason)]
+
+
+def test_missing_key_without_webview2_runs_python_untried(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _no_key()
+    monkeypatch.setattr(ns, "webview2_ok", lambda: False)
+    _no_spawn(monkeypatch)
+    _falls_back(appdata, list(ARGV))
+    assert starts == [("python", None, None, "webview2")]
+
+
+def test_missing_key_spawn_error_falls_back(appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    _no_key()
+
+    def spawn(cmd: list[str], env: dict[str, str]) -> _Proc:
+        raise OSError("blocked by antivirus")
+
+    monkeypatch.setattr(ns, "_spawn", spawn)
+    _falls_back(appdata, list(ARGV))
+    assert starts == [("python", None, None, "start_error")]
+
+
+def test_missing_key_launcher_ready_means_exit(appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The success side of the default: a painted launcher ends this process, data untouched."""
+    _no_key()
+    monkeypatch.setattr(ns, "record_start", lambda *a: starts.append(a))
+
+    def spawn(cmd: list[str], env: dict[str, str]) -> _Proc:
+        ns._write_json(ns.ready_path(424242), {"painted_ms": 900, "window_ms": 40})
+        return _Proc(None)
+
+    monkeypatch.setattr(ns, "_spawn", spawn)
+    before = _snapshot(appdata)
+    assert ns.maybe_start_native(list(ARGV)) is True
+    assert _snapshot(appdata) == before
+    assert starts == [("native", 40, 900, "")]
 
 
 # --- 21: protocol mismatch, 22: crash loop ----------------------------------------------
