@@ -98,6 +98,15 @@ def _settings_use_db() -> bool:
 _StoreUnavailable = (OSError, RuntimeError)
 
 MEMORY_INDEX_DEFAULT_CHARS = 8_000
+
+NATIVE_LAUNCHER_MODES = ("off", "on", "auto")
+
+
+def normalize_native_launcher(value: Any) -> str:
+    """The ``native_launcher`` setting as off | on | auto; anything else is off."""
+    mode = str(value or "").strip().lower() if isinstance(value, str) else ""
+    return mode if mode in NATIVE_LAUNCHER_MODES else "off"
+
 _OLD_MEMORY_INDEX_DEFAULT_CHARS = 2_500
 
 
@@ -442,6 +451,11 @@ class PanelSettings:
     _origin_version: int = field(default=-1, repr=False, compare=False)
     """Agent-opened files land in a tab group beside the chat."""
 
+    native_launcher: str = "off"
+    """Fast native window (Ducky-Launcher.exe): off | on | auto. Off runs today's Python
+    window; on and auto fall back to it on any launcher error (frontend/native_switch.py).
+    Any other value counts as off."""
+
     def validate(self) -> None:
         from backend.workspace.ai_ignore import normalize_rules
 
@@ -473,6 +487,7 @@ class PanelSettings:
             self.mic_permission = "ask"
         if self.web_access not in ("off", "ask", "on"):
             self.web_access = "ask"
+        self.native_launcher = normalize_native_launcher(self.native_launcher)
         try:
             self.tts_volume = max(0.0, min(1.0, float(self.tts_volume)))
         except (TypeError, ValueError):
@@ -642,6 +657,7 @@ class PanelSettings:
             or self.follow_code_off_migrated
             or self.follow_code_speed != "normal"
             or not self.follow_code_split_beside_chat
+            or self.native_launcher != "off"
         )
 
     def save(self) -> None:
@@ -723,6 +739,7 @@ class PanelSettings:
             disabled_builtin_toolsets=disabled,
             hidden_bundled_agent_profile_ids=hidden,
             follow_code_enabled=False if off else raw.follow_code_enabled,
+            native_launcher=normalize_native_launcher(raw.native_launcher),
             # The old default (2,500) held about 6 entries: a saved 2,500 counts as unset.
             memory_index_max_chars=(
                 MEMORY_INDEX_DEFAULT_CHARS
