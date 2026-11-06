@@ -36,6 +36,7 @@ from backend.workspace.paths import (
     content_hash,
     island_root,
     normalize_rel,
+    real_path,
     rel_from_root,
     require_not_digest_path,
     require_writable_folder_path,
@@ -272,10 +273,10 @@ class ProjectWriter:
     @classmethod
     def for_root(cls, root: str, **kwargs: Any) -> ProjectWriter:
         """A writer confined to one project root (tests, explicit roots)."""
-        base = os.path.realpath(os.path.abspath(root))
+        base = real_path(root)
 
         def resolve(rel: str) -> str:
-            full = os.path.realpath(os.path.abspath(os.path.join(base, rel)))
+            full = real_path(os.path.join(base, rel))
             if os.path.commonpath([full, base]) != base:
                 raise ValueError(f"Path escapes workspace root: {rel!r}")
             return full

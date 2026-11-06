@@ -1,5 +1,6 @@
 """Existing roster lane claims and protected writes; no external CLI guarantee."""
 from concurrent.futures import ThreadPoolExecutor
+import os
 import threading
 import uuid
 
@@ -98,6 +99,19 @@ def test_concurrent_protected_writes_only_admit_lane_owner(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
         assert list(pool.map(write, ("a", "b"))) == [True, False]
     assert (tmp_path / "Content/a.txt").read_text() == "a"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the \\\\?\\ realpath form is Windows-only")
+def test_extended_realpath_of_a_file_created_mid_call_stays_in_project(tmp_path, monkeypatch):
+    # Python 3.13 realpath returns \\?\C:\... when another thread creates the file
+    # during the call; commonpath then refused it as "outside the active project".
+    from backend.workspace.writer import ProjectWriter
+    real = os.path.realpath
+    monkeypatch.setattr(os.path, "realpath",
+                        lambda p, **k: "\\\\?\\" + real(p, **k) if p.endswith("a.txt") else real(p, **k))
+    writer = ProjectWriter.for_root(str(tmp_path))
+    assert writer.write_text("Content/a.txt", "x").path == "Content/a.txt"
+    assert (tmp_path / "Content/a.txt").read_text() == "x"
 
 
 def test_move_denial_changes_neither_source_nor_destination(tmp_path):

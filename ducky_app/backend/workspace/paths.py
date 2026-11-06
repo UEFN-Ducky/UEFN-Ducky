@@ -47,9 +47,18 @@ _WRITE_BLOCKED_SUFFIXES = (".py", ".pyc")
 HASH_HEX_CHARS = 16
 
 
+def real_path(path: str) -> str:
+    """``os.path.realpath`` without the ``\\\\?\\`` prefix Windows adds when the file appears
+    mid-call (another thread creating it): that form never matches a plain root."""
+    full = os.path.realpath(os.path.abspath(path))
+    if full.startswith("\\\\?\\") and full[5:6] == ":":
+        return full[4:]
+    return full
+
+
 def island_root(path: str) -> str:
     """Island folder. Writer / MCP often hand ``…/<Project>/Content``; the panel hands ``…/<Project>``."""
-    full = os.path.realpath(os.path.abspath(path or ""))
+    full = real_path(path or "")
     if os.path.basename(full).lower() == "content":
         parent = os.path.dirname(full)
         if parent:
@@ -79,8 +88,8 @@ def content_hash(text: str) -> str:
 def rel_from_root(full_path: str, root: str) -> str | None:
     """``full_path`` relative to ``root`` with forward slashes, or None if outside."""
     try:
-        full = os.path.realpath(os.path.abspath(full_path))
-        base = os.path.realpath(os.path.abspath(root))
+        full = real_path(full_path)
+        base = real_path(root)
         if os.path.commonpath([full, base]) != base:
             return None
         return os.path.relpath(full, base).replace("\\", "/")
