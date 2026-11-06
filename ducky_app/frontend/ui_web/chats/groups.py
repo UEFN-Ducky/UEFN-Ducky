@@ -422,8 +422,8 @@ def sync_membership(
         if prev_parent and prev_parent != new and prev_parent in hub_folder:
             left = prev_parent
         joined = ""
-        if getattr(conv, "is_group", False) and prev_parent != new and (
-            not prev_parent or prev_parent in hub_folder or not meta(prev_parent)
+        if getattr(conv, "is_group", False) and prev_parent and prev_parent != new and (
+            prev_parent in hub_folder or not meta(prev_parent)
         ):
             # A nested group's parent is its outer group: dragged out (or into another group),
             # it follows its folder. Nov 5 2026: the Rust launcher team, moved to the top level,
@@ -468,7 +468,9 @@ def sync_membership(
         if left or joined or changed:
             out[cid] = {"left": left, "joined": joined, "leader_changed": changed, "team": new,
                         "old_leader": before.get(left, "") if left else "",
-                        "new_leader": after.get(new, leader(new)) if new else ""}
+                        "new_leader": after.get(new, leader(new)) if new else "",
+                        # A moved group is no agent: its own lead hears where its team went.
+                        "group_lead": leader(cid) if getattr(conv, "is_group", False) else ""}
     for hub in dirty:
         conv = loaded.get(hub)
         if conv is not None:

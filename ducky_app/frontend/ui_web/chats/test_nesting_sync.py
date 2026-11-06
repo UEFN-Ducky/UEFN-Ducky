@@ -119,7 +119,8 @@ def test_a_nested_group_dragged_to_the_top_level_leaves_its_outer_group(island):
     assert island.convs["RUST"].parent_conv_id == ""
     assert island.convs["RUST"].leader_conv_id == "lead" and island.members("RUST") == ["lead"]
     assert island.convs["IMK"].leader_conv_id == "imk" and island.members("IMK") == ["imk"]
-    assert out["RUST"]["left"] == "IMK"
+    assert out["RUST"]["left"] == "IMK" and out["RUST"]["old_leader"] == "imk"
+    assert out["RUST"]["group_lead"] == "lead" and out["RUST"]["new_leader"] == ""
 
 
 def test_a_nested_group_dragged_into_another_group_points_at_it(island):

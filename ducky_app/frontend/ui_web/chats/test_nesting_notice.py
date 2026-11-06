@@ -32,6 +32,29 @@ def test_a_move_between_groups_tells_the_mover_and_each_lead_once():
     assert notes[2][1] == '[ducky:team] "Verse Coder" joined your team "Team B".'
 
 
+def test_a_group_dragged_to_the_top_level_tells_its_own_lead_and_the_old_outer_lead():
+    moves = {"RUST": {"left": "IMK", "joined": "", "leader_changed": False, "team": "",
+                      "old_leader": "imk", "new_leader": "", "group_lead": "rl"}}
+    names = {"RUST": "Rust launcher team", "IMK": "Island Media Kit", "imk": "IMK producer", "rl": "Lead: Rust"}
+    notes = nesting_notice.team_notices(moves, name_of=lambda c: names.get(c, c),
+                                        plan_title_of=lambda c: "", open_steps_of=lambda lead, c: [])
+    assert notes == [
+        ("rl", '[ducky:team] Your team "Rust launcher team" moved out of "Island Media Kit" to the top level; '
+               "you report to nobody: you are the top lead."),
+        ("imk", '[ducky:team] Team "Rust launcher team" (lead Lead: Rust) left your team "Island Media Kit"; '
+                "it no longer reports to you."),
+    ]
+
+
+def test_a_group_dragged_into_another_group_tells_its_lead_who_it_reports_to():
+    moves = {"N": {"left": "A", "joined": "B", "leader_changed": False, "team": "B",
+                   "old_leader": "la", "new_leader": "lb", "group_lead": "nl"}}
+    notes = _notes(moves)
+    assert [to for to, _ in notes] == ["nl", "la", "lb"]
+    assert notes[0][1] == '[ducky:team] Your team "N" moved out of "Team A" into "Team B"; you report to Lead B.'
+    assert notes[2][1] == '[ducky:team] Team "N" (lead nl) joined your team "Team B"; it reports to you.'
+
+
 def test_a_note_names_the_new_plan_or_none():
     moves = {"me": {"left": "R", "joined": "M", "leader_changed": True, "team": "M",
                     "old_leader": "lead", "new_leader": "me"}}

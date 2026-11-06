@@ -56,6 +56,23 @@ def team_notices(
         old_lead, new_lead = str(move.get("old_leader") or ""), str(move.get("new_leader") or "")
         if not (left or joined or move.get("leader_changed")):
             continue
+        group_lead = str(move.get("group_lead") or "")
+        if group_lead:
+            # A whole group was moved: its lead learns who it reports to now, the old outer
+            # lead stops counting on it, the new outer lead learns it has a team under it.
+            boss = f"you report to {name_of(new_lead)}" if new_lead and new_lead != group_lead \
+                else "you report to nobody: you are the top lead"
+            moved = f'Your team "{name_of(cid)}"'
+            where = f'moved out of "{name_of(left)}"' if left else "moved"
+            into = f' into "{name_of(joined)}"' if joined else " to the top level"
+            notes.append((group_lead, f"[ducky:team] {moved} {where}{into}; {boss}."))
+            if left and old_lead and old_lead != group_lead:
+                notes.append((old_lead, f'[ducky:team] Team "{name_of(cid)}" (lead {name_of(group_lead)}) '
+                                        f'left your team "{name_of(left)}"; it no longer reports to you.'))
+            if joined and new_lead and new_lead not in (group_lead, old_lead):
+                notes.append((new_lead, f'[ducky:team] Team "{name_of(cid)}" (lead {name_of(group_lead)}) '
+                                        f'joined your team "{name_of(joined)}"; it reports to you.'))
+            continue
         parts = []
         if left:
             lead = f" (lead {name_of(old_lead)})" if old_lead and old_lead != cid else ""
