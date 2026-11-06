@@ -22,6 +22,9 @@ MANIFEST_NAME = "UEFN-Ducky-Update-{version}-files.zip"
 MANIFEST_ENTRY = "manifest.json"
 MANIFEST_FORMAT = 1
 _LOCAL_HEADER = b"PK\x03\x04"
+# Files a build may or may not ship (the native launcher needs cargo). Marked
+# "optional": true in the manifest; readers that predate the key just ignore it.
+OPTIONAL_FILES = frozenset({"Ducky-Launcher.exe"})
 
 
 def _sha256(path: Path) -> str:
@@ -62,16 +65,17 @@ def build_update_pack(app_dir: Path, version: str, out_dir: Path) -> tuple[Path,
             if header[:4] != _LOCAL_HEADER:
                 raise SystemExit(f"update pack: bad local header for {info.filename}")
             name_len, extra_len = struct.unpack("<HH", header[26:30])
-            entries.append(
-                {
-                    "path": info.filename,
-                    "size": info.file_size,
-                    "sha256": hashes[info.filename],
-                    "offset": info.header_offset + 30 + name_len + extra_len,
-                    "csize": info.compress_size,
-                    "method": info.compress_type,
-                }
-            )
+            entry = {
+                "path": info.filename,
+                "size": info.file_size,
+                "sha256": hashes[info.filename],
+                "offset": info.header_offset + 30 + name_len + extra_len,
+                "csize": info.compress_size,
+                "method": info.compress_type,
+            }
+            if info.filename in OPTIONAL_FILES:
+                entry["optional"] = True
+            entries.append(entry)
     manifest = {
         "format": MANIFEST_FORMAT,
         "version": version,

@@ -71,3 +71,51 @@ def test_signer_list_without_the_launcher_still_works(tmp_path, monkeypatch):
     app = tmp_path / "dist" / "UEFN-Ducky-1.2.3"
     _touch(app / "UEFN-Ducky.exe")
     assert [p.name for p in pub.payload_exes("1.2.3")] == ["UEFN-Ducky.exe"]
+
+
+# --- update pack ---------------------------------------------------------------
+
+
+def _update_pack():
+    spec = importlib.util.spec_from_file_location("update_pack_installer_test", RELEASE / "update_pack.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _pack(tmp_path: Path, *, launcher: bool) -> dict:
+    app = tmp_path / "UEFN-Ducky-1.2.3"
+    _touch(app / "UEFN-Ducky.exe")
+    _touch(app / "_internal" / "base.dll")
+    if launcher:
+        _touch(app / "Ducky-Launcher.exe")
+    out = tmp_path / "dist"
+    out.mkdir()
+    return _update_pack().build_update_pack(app, "1.2.3", out)[2]
+
+
+def test_pack_carries_the_launcher_marked_optional(tmp_path):
+    files = {e["path"]: e for e in _pack(tmp_path, launcher=True)["files"]}
+    assert files["Ducky-Launcher.exe"]["optional"] is True
+    assert "optional" not in files["UEFN-Ducky.exe"] and "optional" not in files["_internal/base.dll"]
+
+
+def test_pack_without_the_launcher_has_no_entry(tmp_path):
+    files = _pack(tmp_path, launcher=False)["files"]
+    assert [e["path"] for e in files] == ["UEFN-Ducky.exe", "_internal/base.dll"]
+
+
+def test_the_shipped_reader_accepts_a_manifest_with_the_optional_key(tmp_path):
+    # Old-reader fixture: app_stage.read_manifest as installed Duckies run it today.
+    import io
+    import json
+    import zipfile
+
+    sys.path.insert(0, str(RELEASE.parent / "ducky_app"))
+    from frontend import app_stage
+
+    manifest = _pack(tmp_path, launcher=True)
+    raw = io.BytesIO()
+    with zipfile.ZipFile(raw, "w") as bundle:
+        bundle.writestr("manifest.json", json.dumps(manifest))
+    assert app_stage.read_manifest(raw.getvalue(), version="1.2.3") == manifest
