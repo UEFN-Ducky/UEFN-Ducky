@@ -73,6 +73,7 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
     """
     if pid in _REGISTERED or _manifest_is_compiled(manifest):
         return
+    _LOAD_THREAD_STATE.in_load = True  # a pool thread of the start's load (boot.py)
     if lazy_eligible(pid, root, manifest) is not None:
         return  # imported on its first tool call or panel RPC
     version = str(manifest.get("version") or "")

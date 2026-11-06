@@ -160,13 +160,22 @@ def test_panel_rpc_behind_project_sources_stays_eager(probe, monkeypatch) -> Non
     assert tool_registry.lazy_tool_schemas(PID, root, manifest) is None
 
 
+def _start_load(root: Path, manifest: dict) -> None:
+    """_load_one as the app's start runs it (on the plugin load thread)."""
+    state._LOAD_THREAD_STATE.in_load = True
+    try:
+        loader._load_one(PID, root, manifest)
+    finally:
+        state._LOAD_THREAD_STATE.in_load = False
+
+
 def test_the_app_defers_a_tools_only_plugin_until_its_first_call(probe, monkeypatch) -> None:
     root, manifest = _plugin()
     loader._load_one(PID, root, manifest)  # first load: no cache yet, so it registers and writes one
     assert "tool" in tool_registry.lazy_tool_schemas(PID, root, manifest)["api_calls"]
     _reset(monkeypatch, "app")
 
-    loader._load_one(PID, root, manifest)
+    _start_load(root, manifest)
     assert _registers(root) == 1  # the app window did not run register() at boot
     assert tool_registry.lazy_pending(PID)
     assert _call("hi") == {"echo": "hi"}
@@ -181,7 +190,7 @@ def test_the_app_loads_a_deferred_plugin_on_its_first_panel_call(probe, monkeypa
     root, manifest = _plugin(extra="api.register_panel_rpc('status', lambda: {'ok': 1})")
     loader._load_one(PID, root, manifest)
     _reset(monkeypatch, "app")
-    loader._load_one(PID, root, manifest)
+    _start_load(root, manifest)
     assert _registers(root) == 1 and tool_registry.lazy_pending(PID)
 
     assert panel_rpc.call_panel_rpc(PID, "status") == {"ok": 1}
@@ -195,7 +204,7 @@ def test_the_app_keeps_loading_a_plugin_it_needs_at_boot(probe, monkeypatch, ext
     loader._load_one(PID, root, manifest)
     assert tool_registry.lazy_tool_schemas(PID, root, manifest) is not None  # helpers may still defer it
     _reset(monkeypatch, "app")
-    loader._load_one(PID, root, manifest)
+    _start_load(root, manifest)
     assert _registers(root) == 2
     assert not tool_registry.lazy_pending(PID)
 
@@ -208,16 +217,39 @@ def test_the_app_loads_eagerly_from_a_cache_without_api_calls(probe, monkeypatch
     data.pop("api_calls")  # written by an older Ducky
     path.write_text(json.dumps(data), encoding="utf-8")
     _reset(monkeypatch, "app")
-    loader._load_one(PID, root, manifest)
+    _start_load(root, manifest)
     assert _registers(root) == 2
     assert "tool" in tool_registry.lazy_tool_schemas(PID, root, manifest)["api_calls"]
+
+
+def test_the_start_does_not_pre_import_a_deferred_plugin(probe, monkeypatch) -> None:
+    import threading
+
+    root, manifest = _plugin()
+    loader._load_one(PID, root, manifest)
+    _reset(monkeypatch, "app")
+    imported = []
+    monkeypatch.setattr(loader, "_import_backend", lambda *a: imported.append(a))
+    worker = threading.Thread(target=loader._warm_plugin_backend, args=(PID, root, manifest))
+    worker.start()  # boot.py runs it on a pool thread
+    worker.join()
+    assert imported == []
+
+
+def test_an_enable_or_reload_in_the_app_still_loads_at_once(probe, monkeypatch) -> None:
+    root, manifest = _plugin()
+    loader._load_one(PID, root, manifest)
+    _reset(monkeypatch, "app")
+    loader._load_one(PID, root, manifest)  # a Store enable worker, not the start's load
+    assert _registers(root) == 2
+    assert not tool_registry.lazy_pending(PID)
 
 
 def test_disabling_a_deferred_plugin_forgets_it(probe, monkeypatch) -> None:
     root, manifest = _plugin()
     loader._load_one(PID, root, manifest)
     _reset(monkeypatch, "app")
-    loader._load_one(PID, root, manifest)
+    _start_load(root, manifest)
     assert tool_registry.lazy_pending(PID)
     invalidate_plugin_runtime(PID)
     assert not tool_registry.lazy_pending(PID)

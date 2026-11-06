@@ -594,6 +594,10 @@ def lazy_eligible(pid: str, root: Any, manifest: dict[str, Any]) -> dict[str, An
     data = lazy_tool_schemas(pid, root, manifest)
     if data is None or lazy_backends_enabled():
         return data
+    from backend.uefn_plugins.plugin_host.state import _LOAD_THREAD_STATE
+
+    if not getattr(_LOAD_THREAD_STATE, "in_load", False):
+        return None  # only the start's load defers: a Store enable or reload loads it now, as before
     calls = data.get("api_calls")
     if not isinstance(calls, list) or _APP_LAZY_UNSAFE.intersection(calls):
         return None
