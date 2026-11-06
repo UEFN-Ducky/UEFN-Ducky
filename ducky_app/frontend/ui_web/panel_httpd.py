@@ -326,11 +326,12 @@ _event_cv = threading.Condition()
 _event_seq = 0
 # (seq, event, approximate size). Capped by size too: tool events carry whole file
 # texts (write arguments, before/after of an edit), and a burst of big edits stayed
-# pinned here for as long as the app sat idle afterwards.
+# pinned here for as long as the app sat idle afterwards. The size is JSON bytes; Python
+# holds about twice that (8 MB of JSON measured 15 MB on Nov 5 2026), so 4 MB here.
 _event_backlog: deque[tuple[int, dict[str, object], int]] = deque()
 _event_backlog_bytes = 0
 _EVENT_BACKLOG_MAX = 4000
-_EVENT_BACKLOG_MAX_BYTES = 8 * 1024 * 1024
+_EVENT_BACKLOG_MAX_BYTES = 4 * 1024 * 1024
 # Appearance fonts downloaded once into AppData (frontend.ui_web.font_cache).
 _FONT_RE = re.compile(r"^__fonts/([a-z0-9][a-z0-9-]{0,63})/(font\.css|\d{1,3}\.woff2)$")
 _CUSTOM_DUCKY_RE = re.compile(r"^duckies/custom/([a-z0-9][a-z0-9_-]{0,63})\.png$", re.IGNORECASE)

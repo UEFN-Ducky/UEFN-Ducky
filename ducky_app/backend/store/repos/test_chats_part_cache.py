@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import zlib
@@ -87,25 +88,49 @@ def test_another_account_opens_the_same_digest_itself(monkeypatch) -> None:
 
 def test_the_size_bound_holds_over_ten_thousand_parts(monkeypatch) -> None:
     _fake_open(monkeypatch)
-    monkeypatch.setattr(repo, "_PARTS_MAX_CHARS", 200_000)
+    monkeypatch.setattr(repo, "_PARTS_MAX_BYTES", 200_000)
     packed = {f"d{i}": zlib.compress(("x%05d" % i * 20).encode()) for i in range(10_000)}
     read = repo._part_reader(lambda: packed, "acct")
     for i in range(10_000):
         assert read(f"d{i}") == "x%05d" % i * 20
-    assert repo._parts_chars == sum(len(t) for t in repo._parts_open.values()) <= 200_000
+    assert repo._parts_bytes == sum(sys.getsizeof(t) for t in repo._parts_open.values()) <= 200_000
     assert ("acct", "d9999") in repo._parts_open and ("acct", "d0") not in repo._parts_open
 
 
 def test_a_part_bigger_than_the_cache_is_not_kept(monkeypatch) -> None:
     _fake_open(monkeypatch)
-    monkeypatch.setattr(repo, "_PARTS_MAX_CHARS", 10)
+    monkeypatch.setattr(repo, "_PARTS_MAX_BYTES", 60)
     assert repo._part_reader(lambda: {"big": zlib.compress(b"y" * 50)}, "acct")("big") == "y" * 50
-    assert repo._parts_chars == 0 and not repo._parts_open
+    assert repo._parts_bytes == 0 and not repo._parts_open
+
+
+def test_five_thousand_20_kb_parts_stay_under_32_mb_newest_kept(monkeypatch) -> None:
+    _fake_open(monkeypatch)
+    assert repo._PARTS_MAX_BYTES == 32 * 1024 * 1024
+    packed = {f"d{i}": zlib.compress(_result(f"p{i}").encode()) for i in range(5000)}
+    read = repo._part_reader(lambda: packed, "acct")
+    for i in range(5000):
+        read(f"d{i}")
+    assert repo._parts_bytes == sum(sys.getsizeof(t) for t in repo._parts_open.values()) <= 32 * 1024 * 1024
+    assert ("acct", "d4999") in repo._parts_open and ("acct", "d0") not in repo._parts_open
+
+
+def test_wide_text_counts_its_real_bytes(monkeypatch) -> None:
+    # One non-Latin-1 character makes every character 2 bytes: the bound counts those bytes.
+    _fake_open(monkeypatch)
+    monkeypatch.setattr(repo, "_PARTS_MAX_BYTES", 100_000)
+    wide = "—" + "w" * 19_999  # 20,000 characters, ~40 KB
+    packed = {f"d{i}": zlib.compress((wide + str(i)).encode()) for i in range(10)}
+    read = repo._part_reader(lambda: packed, "acct")
+    for i in range(10):
+        read(f"d{i}")
+    assert len(repo._parts_open) == 2  # 5 by character count; 2 by bytes
+    assert repo._parts_bytes <= 100_000
 
 
 def test_sixteen_threads_read_correct_text(monkeypatch) -> None:
     _fake_open(monkeypatch)
-    monkeypatch.setattr(repo, "_PARTS_MAX_CHARS", 5_000)  # small: evictions race the reads
+    monkeypatch.setattr(repo, "_PARTS_MAX_BYTES", 5_000)  # small: evictions race the reads
     packed = {f"d{i}": zlib.compress(f"part {i} ".encode() * 10) for i in range(500)}
     errors: list[str] = []
 
@@ -122,7 +147,7 @@ def test_sixteen_threads_read_correct_text(monkeypatch) -> None:
     for t in threads:
         t.join()
     assert not errors
-    assert repo._parts_chars == sum(len(t) for t in repo._parts_open.values()) <= 5_000
+    assert repo._parts_bytes == sum(sys.getsizeof(t) for t in repo._parts_open.values()) <= 5_000
 
 
 def test_last_reply_opens_only_the_tail(monkeypatch) -> None:

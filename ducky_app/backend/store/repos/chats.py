@@ -343,10 +343,13 @@ def _write_parts(
 # again, and the team keeper's passes spent a third of a core on it. A part is named by
 # its content (a digest keyed per account), so an entry never goes stale; the account is
 # in the key too, so one account's text is never handed to another. Memory only.
-_PARTS_MAX_CHARS = 32 * 1024 * 1024
+# Bounded by the bytes Python holds for the text (``sys.getsizeof``), not its length:
+# one non-Latin-1 character makes a str 2-4 bytes a character, and a 32 M-character
+# bound let the cache hold 80-100 MB (Nov 5 2026).
+_PARTS_MAX_BYTES = 32 * 1024 * 1024
 _parts_lock = threading.Lock()
 _parts_open: OrderedDict[tuple[str, str], str] = OrderedDict()
-_parts_chars = 0
+_parts_bytes = 0
 
 
 def _part_cached(account: str, digest: str) -> str | None:
@@ -358,26 +361,27 @@ def _part_cached(account: str, digest: str) -> str | None:
 
 
 def _part_keep(account: str, digest: str, text: str) -> None:
-    global _parts_chars
-    if len(text) > _PARTS_MAX_CHARS:
+    global _parts_bytes
+    size = sys.getsizeof(text)
+    if size > _PARTS_MAX_BYTES:
         return
     with _parts_lock:
         key = (account, digest)
         if key in _parts_open:
             return
         _parts_open[key] = text
-        _parts_chars += len(text)
-        while _parts_chars > _PARTS_MAX_CHARS:
+        _parts_bytes += size
+        while _parts_bytes > _PARTS_MAX_BYTES:
             _, dropped = _parts_open.popitem(last=False)
-            _parts_chars -= len(dropped)
+            _parts_bytes -= sys.getsizeof(dropped)
 
 
 def forget_parts() -> None:
     """Drop every opened part (a sign-out)."""
-    global _parts_chars
+    global _parts_bytes
     with _parts_lock:
         _parts_open.clear()
-        _parts_chars = 0
+        _parts_bytes = 0
 
 
 def _part_reader(packed: Callable[[], dict[str, bytes]], account: str) -> Callable[[str], str | None]:
