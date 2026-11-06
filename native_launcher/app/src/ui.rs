@@ -29,7 +29,7 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::ExtractIconW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::dialog;
+use crate::{dialog, repoint};
 use crate::start::{self, End, Host};
 use crate::LOCK_WAIT;
 
@@ -257,8 +257,7 @@ impl Host for UiHost {
         with(|u| u.record.stage(name));
     }
 
-    fn finish(&mut self, code: u8, error: &str) {
-        // Stop the backend (bye, then wait) before the process ends.
+    fn stop_backend(&mut self) {
         let (tx, thread) = with(|u| (u.to_sup.take(), u.sup_thread.take())).unwrap_or((None, None));
         if let Some(tx) = tx {
             let _ = tx.send(ToSup::Quit);
@@ -266,6 +265,18 @@ impl Host for UiHost {
         if let Some(t) = thread {
             let _ = t.join();
         }
+    }
+
+    fn fallback(&mut self, code: u8) {
+        let exe = std::env::current_exe().unwrap_or_default();
+        let started = repoint::Spawn::python(repoint::sibling_stub(&exe), &self.args).start();
+        with(|u| {
+            u.record.stage(if started.is_ok() { "fallback_python" } else { "fallback_python_failed" });
+            u.record.stage(&format!("fallback_code_{code}"));
+        });
+    }
+
+    fn finish(&mut self, code: u8, error: &str) {
         drop(with(|u| u.tray.take()));
         with(|u| {
             let exit = report::Exit::from_code(code as i32).unwrap_or(report::Exit::StartError);

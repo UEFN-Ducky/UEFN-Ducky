@@ -36,6 +36,10 @@ pub trait Host {
     /// Page calls, tray, toasts and dialogs until the end.
     fn serve(&mut self) -> End;
     fn stage(&mut self, name: &str);
+    /// Bye to the backend and wait for it (so a fallback window doesn't hand off to it).
+    fn stop_backend(&mut self);
+    /// Started directly and failed with 20–24: open the Python window instead.
+    fn fallback(&mut self, code: u8);
     /// Write the crash report with the final code.
     fn finish(&mut self, code: u8, error: &str);
 }
@@ -49,9 +53,14 @@ pub fn contract_code(code: i32) -> u8 {
     }
 }
 
-/// Run one launch through `host`; returns the process exit code.
-pub fn launch(host: &mut impl Host, plan: &StartPlan) -> u8 {
+/// Run one launch through `host`; returns the process exit code. `direct` = not started by
+/// `native_switch.run_native` (which falls back itself on 20–24).
+pub fn launch(host: &mut impl Host, plan: &StartPlan, direct: bool) -> u8 {
     let (code, error) = steps(host, plan);
+    host.stop_backend();
+    if direct && crate::repoint::is_fallback_code(code) {
+        host.fallback(code);
+    }
     host.finish(code, &error);
     code
 }
@@ -167,6 +176,12 @@ mod tests {
         fn stage(&mut self, name: &str) {
             self.calls.push(format!("stage:{name}"));
         }
+        fn stop_backend(&mut self) {
+            self.calls.push("stop".into());
+        }
+        fn fallback(&mut self, code: u8) {
+            self.calls.push(format!("fallback:{code}"));
+        }
         fn finish(&mut self, code: u8, _error: &str) {
             self.calls.push(format!("finish:{code}"));
             self.finished = Some(code);
@@ -186,12 +201,12 @@ mod tests {
     #[test]
     fn start_order_on_a_normal_launch() {
         let mut m = Mock::default();
-        assert_eq!(launch(&mut m, &plan(&[])), 0);
+        assert_eq!(launch(&mut m, &plan(&[]), false), 0);
         assert_eq!(
             m.calls,
             [
                 "hand_off", "stage:instance", "spawn", "stage:backend_spawned", "webview2", "window(show=true)",
-                "stage:window", "hello", "stage:hello", "navigate", "serve", "finish:0"
+                "stage:window", "hello", "stage:hello", "navigate", "serve", "stop", "finish:0"
             ]
         );
     }
@@ -199,28 +214,28 @@ mod tests {
     #[test]
     fn background_opens_hidden() {
         let mut m = Mock::default();
-        launch(&mut m, &plan(&["--background"]));
+        launch(&mut m, &plan(&["--background"]), false);
         assert!(m.calls.contains(&"window(show=false)".to_string()));
     }
 
     #[test]
     fn instance_hand_off_exits_0_before_anything_else() {
         let mut m = Mock { handed_off: true, ..Default::default() };
-        assert_eq!(launch(&mut m, &plan(&[])), 0);
-        assert_eq!(m.calls, ["hand_off", "finish:0"]);
+        assert_eq!(launch(&mut m, &plan(&[]), false), 0);
+        assert_eq!(m.calls, ["hand_off", "stop", "finish:0"]);
     }
 
     #[test]
     fn backend_hand_off_exits_0_without_a_page() {
         let mut m = Mock { backend: Some(Ok(hello(true))), ..Default::default() };
-        assert_eq!(launch(&mut m, &plan(&[])), 0);
+        assert_eq!(launch(&mut m, &plan(&[]), false), 0);
         assert!(!m.calls.iter().any(|c| c == "navigate" || c == "serve"));
         assert_eq!(m.finished, Some(0));
     }
 
     #[test]
     fn exit_codes_per_contract() {
-        let run = |m: &mut Mock| launch(m, &plan(&[]));
+        let run = |m: &mut Mock| launch(m, &plan(&[]), false);
         assert_eq!(run(&mut Mock { no_webview2: true, ..Default::default() }), 20);
         assert_eq!(run(&mut Mock { backend: err(21), ..Default::default() }), 21);
         assert_eq!(run(&mut Mock { backend: err(22), ..Default::default() }), 22);
@@ -233,9 +248,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_start_falls_back_to_python_on_each_code() {
+        let cases: Vec<(Mock, u8)> = vec![
+            (Mock { no_webview2: true, ..Default::default() }, 20),
+            (Mock { backend: err(21), ..Default::default() }, 21),
+            (Mock { backend: err(22), ..Default::default() }, 22),
+            (Mock { backend: err(23), ..Default::default() }, 23),
+            (Mock { window_err: true, ..Default::default() }, 24),
+        ];
+        for (mut m, code) in cases {
+            assert_eq!(launch(&mut m, &plan(&[]), true), code);
+            let n = m.calls.len();
+            // Backend stopped first, then the Python window, then the report.
+            assert_eq!(m.calls[n - 3..], ["stop".to_string(), format!("fallback:{code}"), format!("finish:{code}")]);
+        }
+        // Started by run_native: Python falls back itself.
+        let mut m = Mock { no_webview2: true, ..Default::default() };
+        launch(&mut m, &plan(&[]), false);
+        assert!(!m.calls.iter().any(|c| c.starts_with("fallback")));
+        // Ok and hand-off never fall back.
+        for mut m in [Mock::default(), Mock { handed_off: true, ..Default::default() }] {
+            assert_eq!(launch(&mut m, &plan(&[]), true), 0);
+            assert!(!m.calls.iter().any(|c| c.starts_with("fallback")));
+        }
+    }
+
+    #[test]
     fn webview2_missing_stops_before_the_window() {
         let mut m = Mock { no_webview2: true, ..Default::default() };
-        launch(&mut m, &plan(&[]));
+        launch(&mut m, &plan(&[]), false);
         assert!(!m.calls.iter().any(|c| c.starts_with("window")));
         assert_eq!(m.calls.last().unwrap(), "finish:20");
     }
@@ -243,21 +284,21 @@ mod tests {
     #[test]
     fn backend_spawns_before_webview2_and_window() {
         let mut m = Mock::default();
-        launch(&mut m, &plan(&[]));
+        launch(&mut m, &plan(&[]), false);
         let at = |name: &str| m.calls.iter().position(|c| c.starts_with(name)).unwrap();
         assert!(at("spawn") < at("webview2"));
         assert!(at("spawn") < at("window"));
         assert!(at("window") < at("hello"));
         // Handed off before anything starts: no backend at all.
         let mut m = Mock { handed_off: true, ..Default::default() };
-        launch(&mut m, &plan(&[]));
+        launch(&mut m, &plan(&[]), false);
         assert!(!m.calls.iter().any(|c| c == "spawn"));
     }
 
     #[test]
     fn no_hello_still_gives_23_after_an_early_spawn() {
         let mut m = Mock { backend: err(supervisor::exit::NO_HELLO), ..Default::default() };
-        assert_eq!(launch(&mut m, &plan(&[])), 23);
+        assert_eq!(launch(&mut m, &plan(&[]), false), 23);
         assert!(!m.calls.iter().any(|c| c == "navigate"));
     }
 
