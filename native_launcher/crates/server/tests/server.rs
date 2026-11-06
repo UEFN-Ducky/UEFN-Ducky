@@ -79,8 +79,24 @@ fn serves_static_ui_before_hello() {
     let resp = get(srv.addr(), "GET / HTTP/1.1\r\nHost: x\r\n\r\n");
     assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
     assert!(resp.contains("text/html") && resp.contains("fixture"));
+    srv.gate().close(); // no backend: a path with no file here is a plain 404
     let miss = get(srv.addr(), "GET /nope.js HTTP/1.1\r\n\r\n");
     assert!(miss.starts_with("HTTP/1.1 404"), "{miss}");
+}
+
+#[test]
+fn paths_without_a_file_here_go_to_the_backend() {
+    // Plugin panels load the kit from /plugin-ui/: served from the launcher's folder it was
+    // a 404 and every plugin drew as bare HTML.
+    let srv = Server::bind(0, fixtures().join("ui"), Duration::from_secs(30)).unwrap();
+    let (backend, seen) = fake_backend();
+    srv.release_origin(&format!("http://{backend}"));
+    let resp = get(srv.addr(), "GET /plugin-ui/forge/kit/ducky.css HTTP/1.1\r\nHost: x\r\n\r\n");
+    assert!(resp.starts_with("HTTP/1.1 200") && resp.ends_with("from-backend"), "{resp}");
+    let req = String::from_utf8(seen.join().unwrap()).unwrap();
+    assert!(req.starts_with("GET /plugin-ui/forge/kit/ducky.css HTTP/1.1"), "{req}");
+    // Files the launcher has are still its own.
+    assert!(get(srv.addr(), "GET /index.html HTTP/1.1\r\n\r\n").contains("fixture"));
 }
 
 /// A fake backend that answers one request with its own path, echoing the request bytes.

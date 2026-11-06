@@ -1,9 +1,11 @@
 //! Ducky's UI port, served by the launcher.
 //!
 //! Static UI files come straight from the version folder, so the page paints before the
-//! Python backend is up. Backend paths (`/api/*`, `/__*`) and websocket upgrades are held
-//! until the backend's hello gives its origin, then tunnelled to it byte for byte. Requests
-//! still held when the hold window (30 s from start) ends get a 503.
+//! Python backend is up. Backend paths (`/api/*`, `/__*`), websocket upgrades and every
+//! path with no file here (plugin panels under `/plugin-ui/`, fonts, chat attachments,
+//! generated images) are held until the backend's hello gives its origin, then tunnelled
+//! to it byte for byte. Requests still held when the hold window (30 s from start) ends get
+//! a 503 (a missing file a 404).
 
 pub mod port;
 
@@ -199,10 +201,14 @@ fn handle(mut client: TcpStream, root: &Path, gate: &Gate) -> io::Result<()> {
         None => return respond(&mut client, 400, "text/plain", b"bad request", false),
     };
     client.set_read_timeout(None)?;
-    if is_backend(&head) {
+    let backend = is_backend(&head);
+    // The Python server answers more than /api and /__ (plugin panels' kit CSS/JS sat on 404:
+    // every plugin drew as bare HTML), so anything without a file here is the backend's.
+    if backend || !resolve_static(root, &head.path).is_some_and(|f| f.is_file()) {
         match gate.wait() {
             Some(addr) => tunnel(client, addr, &buf),
-            None => respond(&mut client, 503, "text/plain", b"Ducky backend not ready", false),
+            None if backend => respond(&mut client, 503, "text/plain", b"Ducky backend not ready", false),
+            None => respond(&mut client, 404, "text/plain", b"not found", false),
         }
     } else {
         serve_static(&mut client, root, &head)
