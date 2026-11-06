@@ -316,3 +316,13 @@ def test_real_loopback_background_output_after_sixty_seconds(monkeypatch, tmp_pa
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_a_chat_less_agent_terminal_reaches_the_window_as_an_agents(forwarded, monkeypatch):
+    # Nov 5 2026 soak: an agent host's call with no identity opened a terminal the window
+    # took for the person's own (from_agent was dropped), so the reaper never closed it.
+    monkeypatch.setattr(tools, "_terminal_chat", lambda conv: "")
+    monkeypatch.setattr(forwarded.mgr, "spawn", Mock(return_value={"ok": True, "session_id": "s2"}))
+    tools.ducky_terminal_open(shell="powershell")
+    assert forwarded.mgr.spawn.call_args.kwargs["from_agent"] is True
+    assert forwarded.mgr.spawn.call_args.kwargs["conv_id"] == ""

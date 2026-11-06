@@ -16,8 +16,13 @@ _BASH_CANDIDATES = (
 )
 
 
-def resolve_shell(shell: str) -> tuple[str, list[str]]:
-    """Return (executable, argv prefix) for the requested shell."""
+# An agent's PowerShell: no profile and no PSReadLine (nobody edits lines in it). Nov 5 2026
+# soak: 5 agent terminals held 463 MB, ~93 MB each against ~35 MB for a bare shell.
+_PS_AGENT_ARGS = ("-NoProfile", "-Command", "Remove-Module PSReadLine -ErrorAction SilentlyContinue")
+
+
+def resolve_shell(shell: str, agent: bool = False) -> tuple[str, list[str]]:
+    """Return (executable, argv prefix) for the requested shell. ``agent``: start it light."""
     name = (shell or "bash").strip().lower()
     if name in ("pwsh", "powershell", "ps"):
         exe = shutil.which("powershell") or shutil.which("pwsh")
@@ -29,7 +34,7 @@ def resolve_shell(shell: str) -> tuple[str, list[str]]:
         if not exe:
             raise FileNotFoundError("PowerShell not found on PATH")
         # -NoExit keeps the interactive shell alive under ConPTY/pywinpty.
-        return exe, [exe, "-NoLogo", "-NoExit"]
+        return exe, [exe, "-NoLogo", "-NoExit", *(_PS_AGENT_ARGS if agent else ())]
 
     exe = ""
     for candidate in _BASH_CANDIDATES:

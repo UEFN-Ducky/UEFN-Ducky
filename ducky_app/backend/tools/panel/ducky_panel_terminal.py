@@ -33,9 +33,8 @@ class _PanelTerminalManager:
         return result if isinstance(result, dict) else {"ok": False, "error": "Invalid terminal result"}
 
     def spawn(self, **kwargs) -> dict:
-        # ponytail: the window's terminal_spawn has no from_agent yet, so a chat-less
-        # terminal opened from here isn't run_owned; add it there to close those too.
-        kwargs.pop("from_agent", None)
+        # from_agent reaches the window: a chat-less agent's terminal (an agent host's call with
+        # no identity) counted as the person's own and was never closed (Nov 5 2026 soak).
         return self._call("terminal_spawn", {**kwargs, "cwd": kwargs.get("cwd") or ""})
 
     def get_session(self, session_id: str):

@@ -199,6 +199,19 @@ def test_an_agents_terminal_with_no_chat_closes_when_idle(mgr, tmp_path):
     assert mine in mgr._sessions
 
 
+def test_a_window_terminal_opened_for_a_chat_less_agent_closes_when_idle(mgr, tmp_path, monkeypatch):
+    # Nov 5 2026 soak: agent-host calls reach the window's terminal_spawn, which dropped
+    # from_agent; 5 such terminals (463 MB) stayed open after their agents ended.
+    from frontend.ui_web import terminal
+    from frontend.ui_web.panel_api import PanelApi
+
+    monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
+    opened = PanelApi().terminal_spawn(shell="powershell", cwd=str(tmp_path), from_agent=True)["session_id"]
+    assert mgr.get_session(opened).agent  # also started light (shells._PS_AGENT_ARGS)
+    later = mgr.get_session(opened).last_activity + manager_module._AGENT_IDLE_CLOSE_S + 1
+    assert mgr.close_idle_agent_terminals(now=later, running=set()) == [opened]
+
+
 def test_a_running_leads_long_idle_shell_closes(mgr, tmp_path):
     lead = _open(mgr, tmp_path, "lead")["session_id"]
     stuck = _open(mgr, tmp_path, "member")["session_id"]
