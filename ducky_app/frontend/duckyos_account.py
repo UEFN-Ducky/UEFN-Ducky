@@ -19,7 +19,6 @@ import re
 import secrets as secrets_mod
 import select
 import socket
-import ssl
 import threading
 import time
 import urllib.error
@@ -31,6 +30,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from frontend import __version__
+from frontend.net_access import build_opener as net_build_opener
+from frontend.ssl_boot import https_context
 from frontend.ui_web.remote_link import mailbox, presence
 
 DEFAULT_BASE_URL = "https://uefnducky.org"
@@ -319,8 +320,6 @@ def _request(
 
     # Prefer CookieJar so urllib can follow redirects while keeping cookies when needed.
     jar = CookieJar()
-    from frontend.net_access import build_opener as net_build_opener
-
     opener = net_build_opener(urllib.request.HTTPCookieProcessor(jar))
     req = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
     try:
@@ -1192,8 +1191,6 @@ class _KeepAliveHTTPSHandler(_KeepAlive, urllib.request.HTTPSHandler):
         self._keepalive_init()
 
     def https_open(self, req: urllib.request.Request) -> Any:
-        from frontend.ssl_boot import https_context
-
         return self._keepalive_open(http.client.HTTPSConnection, req, context=https_context())
 
 
@@ -2600,12 +2597,6 @@ def _fetch_store_zip_url(url: str, size: int, *, timeout: float = 120.0) -> byte
     except (OSError, urllib.error.URLError, http.client.HTTPException) as exc:
         host = urlparse(url).netloc
         got = buf.tell()
-        if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
-            from frontend.net_access import explain
-            from frontend.version_check import clock_skew_message
-
-            text = clock_skew_message(f"https://{host}/") or explain(exc, host)[1]
-            raise DuckyOSAccountError(f"Store download: {text}", code="network") from exc
         raise DuckyOSAccountError(
             f"Store download from {host} kept dropping ({got:,} of {size:,} bytes): {exc}", code="network"
         ) from exc

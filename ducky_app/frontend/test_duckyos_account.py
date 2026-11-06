@@ -1159,27 +1159,3 @@ def test_store_zips_download_even_when_the_certificate_cant_be_verified(monkeypa
     monkeypatch.setattr(update_network, "download_resumable", fake)
     assert acc._fetch_store_zip_url("https://bucket.example/p.zip", 3) == b"zip"
     assert seen["content_checked"] is True  # store_zip_bytes checks the Store's sha256
-
-
-def test_a_certificate_failure_says_so_not_kept_dropping(monkeypatch) -> None:
-    import ssl
-    import urllib.error
-
-    import pytest
-
-    from frontend import duckyos_account as acc
-    from frontend import update_network, version_check
-
-    def expired(*_a, **_k):
-        raise urllib.error.URLError(ssl.SSLCertVerificationError("certificate has expired"))
-
-    monkeypatch.setattr(update_network, "download_resumable", expired)
-    monkeypatch.setattr(version_check, "clock_skew_message", lambda _base: None)
-    with pytest.raises(acc.DuckyOSAccountError) as err:
-        acc._fetch_store_zip_url("https://bucket.example/p.zip", 10)
-    assert "kept dropping" not in str(err.value) and "secure connection failed" in str(err.value)
-
-    monkeypatch.setattr(version_check, "clock_skew_message", lambda _base: "Your PC clock is wrong")
-    with pytest.raises(acc.DuckyOSAccountError) as err:
-        acc._fetch_store_zip_url("https://bucket.example/p.zip", 10)
-    assert "Your PC clock is wrong" in str(err.value)
