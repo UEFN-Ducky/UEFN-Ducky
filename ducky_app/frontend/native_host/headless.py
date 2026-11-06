@@ -352,6 +352,15 @@ def run_backend(
         mark_ready(app_version())
     except Exception:
         pass
+    try:
+        from frontend import boot_report
+
+        # The launcher shows the window now: this launch has started. Without it a native
+        # session stayed "starting" in boot.json, and a crash read as "closed while starting".
+        boot_report.stage("hello")
+        boot_report.mark("ok")
+    except Exception:
+        pass
     timer = threading.Timer(BACKGROUND_AFTER_HELLO_S, start_background)
     timer.daemon = True
     timer.start()

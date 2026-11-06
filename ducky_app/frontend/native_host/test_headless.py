@@ -41,6 +41,11 @@ _BACKEND_PROBE = textwrap.dedent(
             super().__init__(api, exit_fn=lambda **_: None, wait_s=0)
 
     app_versions.mark_ready = lambda version: None
+    from frontend import boot_report
+
+    marks = []
+    boot_report.mark = lambda state, **k: marks.append(state)
+    boot_report.stage = lambda name: marks.append("stage:" + name)
     lifecycle.second_instance = lambda paths, links: (lifecycle.FIRST, None)
     lifecycle.watch_parent = lambda pid, on_dead: None
     lifecycle.Shutdown = QuickShutdown
@@ -53,7 +58,7 @@ _BACKEND_PROBE = textwrap.dedent(
     code = headless.run_backend(["UEFN-Ducky.exe", "--backend"], stdin=io.BytesIO(b""), stdout=out)
     lines = [json.loads(line) for line in out.getvalue().decode("utf-8").splitlines()]
     bad = sorted(m for m in ("webview", "tkinter", "_tkinter", "clr", "pythonnet") if m in sys.modules)
-    sys.__stdout__.write(json.dumps({"code": code, "lines": lines, "bad": bad}))
+    sys.__stdout__.write(json.dumps({"code": code, "lines": lines, "bad": bad, "marks": marks}))
     """
 )
 
@@ -98,6 +103,11 @@ def test_hello_carries_the_panel_port(backend_run) -> None:
     assert hello["profile_dir"].endswith("webview")
     assert hello["app_version"]
     assert any(line.get("name") == "title" for line in backend_run["lines"][1:])
+
+
+def test_backend_marks_the_launch_started_after_hello(backend_run) -> None:
+    """boot.json says ok once the launcher has its hello, as the window start does when shown."""
+    assert backend_run["marks"][:2] == ["stage:hello", "ok"]
 
 
 def test_run_signatures_unchanged() -> None:
