@@ -870,24 +870,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         root.withdraw()
         return root
 
-    tk_root = start_tk_pump(_hidden_root)
-    tk_root_holder["root"] = tk_root
-    api_holder["tk_root"] = tk_root
-    api.bind_tk_root(tk_root)
-
-    if tray_supported():
-        try:
-            api._tray = TrayIconController(  # type: ignore[attr-defined]
-                tk_root,
-                on_show=restore,
-                on_exit=on_exit,
-                tooltip="UEFN Ducky",
-                status="offline",
-            )
-            api._tray.run_daemon()  # type: ignore[attr-defined]
-        except Exception:
-            api._tray = None  # type: ignore[attr-defined]
-
     def open_alert(kind: str, target_id: str) -> None:
         """A Windows notification was clicked: the app comes up on that chat or workflow."""
         restore()
@@ -901,39 +883,65 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
             push_ui_event({"type": "open_target", "kind": kind, "id": target_id})
 
-    from frontend import notifications
+    def _after_gui_start() -> None:
+        # pywebview runs this on its own thread once the GUI loop runs, so WebView2 starts
+        # ~0.15 s sooner: the Tk pump, tray, notifications and update switch used to run first.
+        # Everything that reads the Tk root goes through tk_root_holder / api, which allow None.
+        try:
+            tk_root = start_tk_pump(_hidden_root)
+            tk_root_holder["root"] = tk_root
+            api_holder["tk_root"] = tk_root
+            api.bind_tk_root(tk_root)
+            if tray_supported():
+                try:
+                    api._tray = TrayIconController(  # type: ignore[attr-defined]
+                        tk_root,
+                        on_show=restore,
+                        on_exit=on_exit,
+                        tooltip="UEFN Ducky",
+                        status="offline",
+                    )
+                    api._tray.run_daemon()  # type: ignore[attr-defined]
+                except Exception:
+                    api._tray = None  # type: ignore[attr-defined]
+        except Exception:
+            logging.getLogger(__name__).warning("tray / Tk pump did not start", exc_info=True)
+        try:
+            from frontend import notifications
 
-    tray = getattr(api, "_tray", None)
-    notifications.bind_desktop(tray.toast if tray is not None else None, open_alert)
+            tray = getattr(api, "_tray", None)
+            notifications.bind_desktop(tray.toast if tray is not None else None, open_alert)
+        except Exception:
+            logging.getLogger(__name__).warning("desktop notifications did not bind", exc_info=True)
+        try:
+            from frontend import __version__ as _running_version
+            from frontend import app_versions, update_swap
+
+            app_versions.mark_ready(str(_running_version))
+            update_swap.start(api=api, tk_root_holder=tk_root_holder, window_holder=window_holder)
+            update_swap.continue_chats(handover.get("chats"))  # the chats the switch stopped
+        except Exception:
+            logging.getLogger(__name__).warning("auto-update did not start", exc_info=True)
+        try:
+            from frontend import usage_stats
+
+            raw_t0 = os.environ.get("UEFN_DUCKY_BOOT_T0")
+            boot_ms = (time.perf_counter() - float(raw_t0)) * 1000.0 if raw_t0 else None
+            threading.Thread(
+                target=usage_stats.app_opened, args=(boot_ms,), name="usage-stats-open", daemon=True
+            ).start()
+        except Exception:
+            pass
+        try:
+            from frontend import uninstaller_link
+
+            threading.Thread(target=uninstaller_link.ensure_quietly, name="uninstaller-link", daemon=True).start()
+        except Exception:
+            pass
 
     icon_path = resolve_app_icon_path()
     _start_later(background_work["start"], _BACKGROUND_FALLBACK_S)
     _boot_trace("ready_for_webview_start", time.perf_counter())
-    try:
-        from frontend import __version__ as _running_version
-        from frontend import app_versions, update_swap
-
-        app_versions.mark_ready(str(_running_version))
-        update_swap.start(api=api, tk_root_holder=tk_root_holder, window_holder=window_holder)
-        update_swap.continue_chats(handover.get("chats"))  # the chats the switch stopped
-    except Exception:
-        logging.getLogger(__name__).warning("auto-update did not start", exc_info=True)
-    try:
-        from frontend import usage_stats
-
-        raw_t0 = os.environ.get("UEFN_DUCKY_BOOT_T0")
-        boot_ms = (time.perf_counter() - float(raw_t0)) * 1000.0 if raw_t0 else None
-        threading.Thread(
-            target=usage_stats.app_opened, args=(boot_ms,), name="usage-stats-open", daemon=True
-        ).start()
-    except Exception:
-        pass
-    try:
-        from frontend import uninstaller_link
-
-        threading.Thread(target=uninstaller_link.ensure_quietly, name="uninstaller-link", daemon=True).start()
-    except Exception:
-        pass
     # Dev only: native Inspect menu + DevTools. Store EXE stays shipped; ErrorBoundary
     # still calls open_devtools() when someone actually wants Inspector.
     try:
@@ -955,6 +963,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     except Exception:
         logging.getLogger(__name__).warning("webview storage path unavailable", exc_info=True)
     webview.start(
+        _after_gui_start,
         debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
         storage_path=storage_path,

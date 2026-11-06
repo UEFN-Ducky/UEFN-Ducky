@@ -154,6 +154,21 @@ def test_a_test_copy_registers_nothing_in_hkcu():
     assert guard < reg.index("apply_saved_setting()")
 
 
+def test_tray_tk_and_update_setup_run_beside_webview2_not_before_it():
+    tree = _run_panel_tree()
+    after = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_after_gui_start")
+    inside = {n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", "")
+              for n in ast.walk(after) if isinstance(n, ast.Call)}
+    for moved in ("start_tk_pump", "TrayIconController", "bind_desktop", "mark_ready", "start"):
+        assert moved in inside
+    outside = _calls_outside_nested_functions(tree)
+    assert "start_tk_pump" not in outside and "TrayIconController" not in outside
+    source = inspect.getsource(webview_app._run_panel)
+    assert "webview.start(\n        _after_gui_start," in source
+    # The splash Tk belongs to the main thread: still closed there, before webview.start.
+    assert source.index("dismiss_early_splash()") < source.index("webview.start(")
+
+
 def test_panel_api_loads_no_webview():
     import subprocess
 
