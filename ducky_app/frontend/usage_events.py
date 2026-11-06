@@ -46,6 +46,13 @@ BITRATE_KBPS: Buckets = ((500, "500kbps"), (2000, "2mbps"), (5000, "5mbps"), (No
 # Frame height to a resolution label: anything over 720 lines reads as 1080p.
 RES_HEIGHT: Buckets = ((480, "480p"), (720, "720p"), (None, "1080p"))
 DROPPED: Buckets = ((0, "0"), (5, "1-5"), (None, "more"))
+# Ducky-Launcher.exe (frontend/native_switch.py): page painted against the 1.1 s goal and
+# its 1.3 s outer limit; the bare window shown against the 0.1 s goal.
+PAINTED_MS: Buckets = ((500, "500ms"), (1100, "1100ms"), (1300, "1300ms"), (2000, "2000ms"), (None, "more"))
+WINDOW_MS: Buckets = ((100, "100ms"), (300, "300ms"), (1000, "1000ms"), (None, "more"))
+# Why a launch ran the Python window (native_switch.FALLBACK_REASONS), "none" when it did not.
+LAUNCHER_FALLBACKS = ("none", "webview2", "protocol", "crash_loop", "no_hello", "start_error", "timeout",
+                      "spawn_error", "no_exe", "crash_loop_active", "exit_other", "other")
 # Every remote.* event: which viewer, on what network, which viewer build.
 REMOTE_COMMON: dict[str, Any] = {
     "client": ("android_app", "phone_web", "tablet_web", "desktop_web"),
@@ -93,6 +100,13 @@ EVENTS: dict[str, dict[str, Any]] = {
     },
     "app.heartbeat": {"uefn_up": YES_NO},
     "app.close": {"uptime": ("bucket", UPTIME_S, "uptime_s")},
+    # One per window launch with native_launcher on/auto: who drew it, how fast, why it fell back.
+    "launcher.start": {
+        "mode": ("native", "python"),
+        "fallback": LAUNCHER_FALLBACKS,
+        "painted_ms": ("bucket", PAINTED_MS, "painted_ms"),
+        "window_ms": ("bucket", WINDOW_MS, "window_ms"),
+    },
     "update.installed": {"from": ("version",), "to": ("version",)},
     "update.check": {
         "status": ("none", "no_release", "up_to_date", "update_available", "paused", "error"),
