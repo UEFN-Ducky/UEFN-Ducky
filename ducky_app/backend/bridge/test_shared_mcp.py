@@ -1052,8 +1052,8 @@ def test_host_agents_only_ever_start_their_hosts_daemon(monkeypatch, tmp_path) -
     monkeypatch.setattr(ad.subprocess, "Popen", lambda cmd, **kw: started.append(kw["env"]))
 
     assert shared_mcp.start_daemon_from_app()["started"] is True  # the host's readiness gate
-    ad._spawn_daemon(["--port", "4200"])  # its agent's adapter replacing a dead one
-    assert [env[shared_mcp.SLOT_ENV] for env in started] == ["3", "3"]
+    ad._spawn_daemon(["--port", "4200"])  # its agent's adapter: the host serves, it starts nothing
+    assert [env[shared_mcp.SLOT_ENV] for env in started] == ["3"]
     assert shared_mcp.state_path().name == "shared_mcp-h3.json"
     assert not (tmp_path / "shared_mcp.json").exists()
 

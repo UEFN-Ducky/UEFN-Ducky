@@ -256,10 +256,12 @@ def _ask_app_to_start() -> bool:
 
 
 def _spawn_daemon(bridge_args: list[str]) -> None:
-    # An agent host's agent never asks the app: the app has no slot and would start an
-    # unslotted daemon. Its host's readiness gate already started the slot's daemon; this
-    # only replaces one that died, with the slot env inherited (proc_exec spares it).
-    if not _slot() and _ask_app_to_start():
+    # An agent host's agent never starts a tool server: its host serves the slot itself
+    # (agent_host.tool_server), and outlives the agent. A slow hello used to start a whole
+    # --shared-daemon backend per agent here; connect() just keeps waiting for the host.
+    if _slot():
+        return
+    if _ask_app_to_start():
         return
     # No app running (an IDE on its own): start it here, outside this agent's job if allowed.
     if getattr(sys, "frozen", False):

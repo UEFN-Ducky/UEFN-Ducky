@@ -53,13 +53,14 @@ def test_a_host_agent_joins_its_own_hosts_daemon(monkeypatch, app_data) -> None:
 
 
 def test_a_host_agent_never_asks_the_app_for_a_daemon(monkeypatch) -> None:
-    """The app has no slot: it would start an unslotted daemon nobody in the host uses."""
+    """The app has no slot: it would start an unslotted daemon nobody in the host uses. Nor does
+    the agent start one: its host serves the slot itself (a whole backend per agent before)."""
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "1")
     monkeypatch.setattr(ad, "_ask_app_to_start", lambda: pytest.fail("asked the app"))
     started: list[list[str]] = []
     monkeypatch.setattr(ad.subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
     ad._spawn_daemon(["--port", "4200"])
-    assert len(started) == 1 and started[0][-1] == "--shared-daemon"
+    assert started == []
 
 
 def test_a_slow_hello_is_tried_once_more_before_spawning(monkeypatch, app_data) -> None:

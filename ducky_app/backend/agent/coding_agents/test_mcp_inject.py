@@ -161,3 +161,38 @@ def test_team_plan_skill_requires_the_same_tools() -> None:
     assert "`workspace_*` edit tools" in team_rules
     assert "`ducky_terminal_run`" in team_rules
     assert "their own edit tool" not in team_rules
+
+
+def test_agents_in_one_host_start_one_bridge_each(monkeypatch) -> None:
+    """Soak 63ab2ac6: 6 host agents ran 15 bridge processes (a node wrapper in front of each)."""
+    from backend.agent.coding_agents import mcp_inject
+
+    bridge = {"type": "stdio", "command": "C:/D/UEFN-Ducky-Bridge.exe", "args": ["bridge", "--adapter"], "env": {}}
+    monkeypatch.setattr(mcp_inject, "build_uefn_server_block", lambda _s, own_run=False: dict(bridge))
+    monkeypatch.setattr(mcp_inject.shutil, "which", lambda name: "C:/node/node.exe")
+    monkeypatch.setattr(mcp_inject.os, "name", "nt")
+
+    monkeypatch.delenv("UEFN_DUCKY_SHARED_MCP_SLOT", raising=False)
+    assert mcp_inject.build_uefn_mcp_servers(settings=object())["uefn"]["command"].endswith("node.exe")
+
+    monkeypatch.setenv("UEFN_DUCKY_SHARED_MCP_SLOT", "2")
+    agents = [mcp_inject.build_uefn_mcp_servers(settings=object()) for _ in range(6)]
+    commands = [server["command"] for servers in agents for server in servers.values()]
+    assert commands == [bridge["command"]] * 6  # one process per agent: the bridge itself
+
+
+def test_bridge_adapter_imports_no_backend_or_engines() -> None:
+    import subprocess
+    import sys
+
+    app_root = Path(__file__).resolve().parents[3]
+    probe = (
+        "import sys, frontend.shared_mcp_adapter as a\n"
+        "heavy = sorted(m for m in sys.modules if m.split('.')[0] in "
+        "('backend', 'mcp', 'fastmcp', 'pydantic', 'starlette', 'uvicorn'))\n"
+        "print(','.join(heavy))\n"
+    )
+    out = subprocess.run([sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(app_root)!r})\n" + probe],
+                         capture_output=True, text=True, timeout=60, cwd=str(app_root))
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == ""

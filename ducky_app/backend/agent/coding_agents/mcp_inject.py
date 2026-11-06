@@ -34,6 +34,10 @@ def _windows_hidden_bridge_block(base: dict[str, Any]) -> dict[str, Any]:
         return base
     if os.name != "nt":
         return base
+    # In an agent host the CLI already runs with a hidden console (proc_exec CREATE_NO_WINDOW),
+    # which the bridge inherits: no flash, so no node process per agent in front of it.
+    if (os.environ.get("UEFN_DUCKY_SHARED_MCP_SLOT") or "").strip().isdigit():
+        return base
     node = shutil.which("node") or shutil.which("node.exe")
     if not node:
         return base
