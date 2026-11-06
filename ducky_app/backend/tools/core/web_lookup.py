@@ -18,7 +18,6 @@ import ipaddress
 import re
 import secrets
 import socket
-import ssl
 import time
 import unicodedata
 from dataclasses import dataclass
@@ -29,6 +28,7 @@ from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlsplit, urlun
 from backend.agent.a2a_format import wrap_untrusted
 from backend.server import mcp
 from backend.util.json_util import tool_json
+from frontend.ssl_boot import https_context
 
 # Bing answers scripted requests with unrelated pages (Nov 2026: a UEFN crash query came
 # back as Pandora, sushi and Microsoft sign-in). DuckDuckGo's HTML page answers the query;
@@ -498,8 +498,7 @@ def _real_transport(url: str) -> HttpResult:
     raw = socket.create_connection((ip, port), timeout=12)
     try:
         if parts.scheme == "https":
-            ctx = ssl.create_default_context()
-            raw = ctx.wrap_socket(raw, server_hostname=host)
+            raw = https_context().wrap_socket(raw, server_hostname=host)
         conn = http.client.HTTPConnection(host, port, timeout=12)
         conn.sock = raw
         conn.request(

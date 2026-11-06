@@ -1144,3 +1144,27 @@ def test_the_catalog_gets_a_minute_and_a_test_bed_keeps_it(tmp_path, monkeypatch
     first = acc._store_catalog_payload()
     again = acc._store_catalog_payload()
     assert len(calls) == 3 and again == first and again["items"][0]["slug"] == "openai"
+
+
+def test_a_certificate_failure_says_so_not_kept_dropping(monkeypatch) -> None:
+    import ssl
+    import urllib.error
+
+    import pytest
+
+    from frontend import duckyos_account as acc
+    from frontend import update_network, version_check
+
+    def expired(*_a, **_k):
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("certificate has expired"))
+
+    monkeypatch.setattr(update_network, "download_resumable", expired)
+    monkeypatch.setattr(version_check, "clock_skew_message", lambda _base: None)
+    with pytest.raises(acc.DuckyOSAccountError) as err:
+        acc._fetch_store_zip_url("https://bucket.example/p.zip", 10)
+    assert "kept dropping" not in str(err.value) and "secure connection failed" in str(err.value)
+
+    monkeypatch.setattr(version_check, "clock_skew_message", lambda _base: "Your PC clock is wrong")
+    with pytest.raises(acc.DuckyOSAccountError) as err:
+        acc._fetch_store_zip_url("https://bucket.example/p.zip", 10)
+    assert "Your PC clock is wrong" in str(err.value)

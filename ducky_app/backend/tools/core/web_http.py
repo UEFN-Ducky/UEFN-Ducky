@@ -9,12 +9,12 @@ from __future__ import annotations
 import http.client
 import ipaddress
 import socket
-import ssl
 from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urljoin, urlsplit
 
 from backend.tools.core.web_lookup import _blocked_ip
+from frontend.ssl_boot import https_context
 
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
 _MAX_REDIRECTS = 4
@@ -58,7 +58,7 @@ def _send(url: str, method: str, body: bytes | None, headers: dict[str, str], li
     path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
     raw = socket.create_connection((ip, 443), timeout=timeout)
     try:
-        sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
+        sock = https_context().wrap_socket(raw, server_hostname=host)
         conn = http.client.HTTPSConnection(host, 443, timeout=timeout)
         conn.sock = sock
         sent = {"Host": host, "User-Agent": _BROWSER_UA, "Accept-Language": "en-US,en;q=0.9",

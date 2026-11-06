@@ -12,12 +12,12 @@ import ipaddress
 import os
 import re
 import socket
-import ssl
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urljoin, urlsplit
 
 from backend.tools.core.web_lookup import _blocked_ip, reject_url
+from frontend.ssl_boot import https_context
 
 MAX_BYTES = 800 * 1024 * 1024
 _REDIRECTS = frozenset({301, 302, 303, 307, 308})
@@ -46,7 +46,7 @@ def _open(url: str, timeout: float) -> tuple[http.client.HTTPConnection, http.cl
     if not ip:
         raise FetchError("blocked address")
     raw = socket.create_connection((ip, port), timeout=timeout)
-    sock: Any = ssl.create_default_context().wrap_socket(raw, server_hostname=host) if parts.scheme == "https" else raw
+    sock: Any = https_context().wrap_socket(raw, server_hostname=host) if parts.scheme == "https" else raw
     conn = (http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection)(host, port, timeout=timeout)
     conn.sock = sock
     path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")

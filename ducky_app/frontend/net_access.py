@@ -13,6 +13,7 @@ every urllib call in the process:
 """
 from __future__ import annotations
 
+import http.client
 import socket
 import sys
 import threading
@@ -218,6 +219,21 @@ class PacProxyHandler(urllib.request.ProxyHandler):
     https_request = _apply
 
 
+class WindowsTrustHTTPSHandler(urllib.request.HTTPSHandler):
+    """HTTPS verified by Windows' certificate store on every connection (frontend/ssl_boot.py),
+    whether or not the process-wide truststore patch has run."""
+
+    def https_open(self, req: urllib.request.Request) -> Any:
+        from frontend.ssl_boot import https_context
+
+        return self.do_open(http.client.HTTPSConnection, req, context=https_context())
+
+
+def build_opener(*handlers: Any) -> urllib.request.OpenerDirector:
+    """urllib.request.build_opener with the PC's proxy and Windows certificate checks."""
+    return urllib.request.build_opener(proxy_handler(), WindowsTrustHTTPSHandler(), *handlers)
+
+
 _HANDLER: PacProxyHandler | None = None
 
 
@@ -312,7 +328,7 @@ def diagnose(url: str, *, timeout: float = 5.0) -> dict[str, Any]:
     t = time.monotonic()
     try:
         req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "UEFN-Ducky"})
-        with urllib.request.build_opener(proxy_handler()).open(req, timeout=timeout) as resp:
+        with build_opener().open(req, timeout=timeout) as resp:
             out["https"] = {"ok": True, "status": resp.status, "ms": round((time.monotonic() - t) * 1000)}
     except Exception as exc:
         code = getattr(exc, "code", None)
@@ -332,4 +348,4 @@ def install() -> None:
         return
     _installed = True
     socket.create_connection = create_connection  # type: ignore[assignment]
-    urllib.request.install_opener(urllib.request.build_opener(proxy_handler()))
+    urllib.request.install_opener(build_opener())
