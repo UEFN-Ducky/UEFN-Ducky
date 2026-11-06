@@ -319,6 +319,8 @@ def run() -> None:
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException as exc:
+        if _roll_back_failed_start(exc):
+            os._exit(1)
         from frontend.ui_web.shutdown import fatal_error_and_exit
 
         fatal_error_and_exit(
@@ -326,6 +328,22 @@ def run() -> None:
             api=api_holder.get("api"),
             tk_root=api_holder.get("tk_root"),
         )
+
+
+def _roll_back_failed_start(exc: BaseException) -> bool:
+    """A downloaded version that fails before its panel is up goes back to the version
+    before it, like launcher.py does for errors outside _run_panel. True when that version
+    was started (this process should leave without the error dialog)."""
+    try:
+        from frontend import __version__
+        from frontend import app_versions
+
+        version = str(__version__)
+        if not app_versions.failed_while_starting(version):
+            return False  # the panel came up: a later error is not a failed start
+        return app_versions.fall_back_after_failed_start(version, f"{type(exc).__name__}: {exc}")
+    except Exception:
+        return False
 
 
 # pywebview's WinForms/WebView2 backend loads pythonnet and the .NET WinForms and WebView2

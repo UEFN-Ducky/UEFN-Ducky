@@ -180,6 +180,55 @@ def test_the_installed_copy_never_rolls_back(trees, starts, monkeypatch) -> None
     assert starts == []
 
 
+@pytest.mark.parametrize("argv", [[], ["--background"], ["uefn-ducky://store/x"]])
+def test_a_hidden_start_stays_hidden_through_the_hand_off(trees, starts, monkeypatch, argv) -> None:
+    """launcher.py takes --background out of argv and sets START_HIDDEN_ENV before the
+    hand-off: the newer version must get --background back (once), or a sign-in start
+    opens a window."""
+    monkeypatch.setattr(sys, "argv", list(sys.argv))
+    monkeypatch.setenv(av.START_HIDDEN_ENV, "1")
+    _hand_off(argv)
+    want = argv if av.BACKGROUND_ARG in argv else [*argv, av.BACKGROUND_ARG]
+    assert starts == [(trees[NEW] / "UEFN-Ducky.exe", want)]
+    starts.clear()
+    monkeypatch.delenv(av.START_HIDDEN_ENV)
+    monkeypatch.setattr(sys, "executable", str(trees[NEW] / "UEFN-Ducky.exe"))
+    monkeypatch.setenv(av.LAUNCHER_ENV, str(trees["install"] / "UEFN-Ducky.exe"))
+    monkeypatch.setenv(av.START_HIDDEN_ENV, "1")
+    assert av.fall_back_after_failed_start(NEW, "crashed") is True  # the rollback restart too
+    assert starts == [(trees["install"] / "UEFN-Ducky.exe", [av.BACKGROUND_ARG])]
+
+
+def test_failed_while_starting_follows_record_start_and_mark_ready(trees) -> None:
+    assert av.failed_while_starting(NEW) is False
+    av.record_start(NEW)
+    assert av.failed_while_starting(NEW) is True
+    av.mark_ready(NEW)
+    assert av.failed_while_starting(NEW) is False
+
+
+def test_a_run_panel_failure_rolls_back_before_the_error_dialog(trees, starts, monkeypatch) -> None:
+    """webview_app.run catches _run_panel errors itself: a version that fails there before
+    its panel is up must roll back at once (the update drill saw the dialog instead, and
+    the version marked bad only on the 3rd start)."""
+    from frontend.ui_web import webview_app
+
+    import frontend
+
+    monkeypatch.setattr(frontend, "__version__", NEW)
+    monkeypatch.setenv(av.LAUNCHER_ENV, str(trees["install"] / "UEFN-Ducky.exe"))
+    monkeypatch.setattr(sys, "executable", str(trees[NEW] / "UEFN-Ducky.exe"))
+    monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe"])
+    monkeypatch.delenv(av.START_HIDDEN_ENV, raising=False)
+    av.mark_ready(NEW)  # panel came up: a later error is not a failed start
+    assert webview_app._roll_back_failed_start(ModuleNotFoundError("x")) is False
+    assert starts == [] and not av.is_bad(NEW)
+    av.record_start(NEW)  # started by the stub's hand-off, panel not up yet
+    assert webview_app._roll_back_failed_start(ModuleNotFoundError("No module named '_tkinter'")) is True
+    assert av.is_bad(NEW) and "_tkinter" in av.read_boot()[NEW]["reason"]
+    assert starts == [(trees["install"] / "UEFN-Ducky.exe", [])]
+
+
 # --- handover JSON both ways -----------------------------------------------------------
 
 

@@ -50,6 +50,9 @@ NATIVE_LAUNCHER_EXE = "Ducky-Launcher.exe"
 APP_EXE = "UEFN-Ducky.exe"
 # Argument the launcher starts UEFN-Ducky.exe with: the window lives in the launcher.
 BACKEND_ARG = "--backend"
+# frontend.autostart's names (this module stays stdlib only): a start hidden in the tray.
+START_HIDDEN_ENV = "UEFN_DUCKY_START_HIDDEN"
+BACKGROUND_ARG = "--background"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _DIR_RE = re.compile(r"^app-(\d+\.\d+\.\d+)$")
@@ -379,10 +382,29 @@ def hand_off(current: str, *, bridge: bool) -> None:
             # Ducky-Launcher.exe talks to us over stdin/stdout: the newer version must
             # keep those pipes, so it runs attached instead of detached.
             raise SystemExit(run_attached(exe, sys.argv[1:]))
-        if start_detached(exe, sys.argv[1:]):
+        if start_detached(exe, _detached_args(sys.argv[1:])):
             os._exit(0)
         break
     write_current(current, installed)  # this EXE runs
+
+
+def _detached_args(args: list[str]) -> list[str]:
+    """``args`` for the next EXE. launcher.py takes ``--background`` out of argv before the
+    hand-off (START_HIDDEN_ENV says it was there): put it back, or a sign-in start would
+    open a window once it lands on a newer version."""
+    args = list(args)
+    if os.environ.get(START_HIDDEN_ENV) == "1" and BACKGROUND_ARG not in args:
+        args.append(BACKGROUND_ARG)
+    return args
+
+
+def failed_while_starting(version: str) -> bool:
+    """True while ``version``'s start is still open: started by a hand-off
+    (:func:`record_start`) and its panel not up yet (:func:`mark_ready`)."""
+    try:
+        return int(_boot_row(read_boot(), version).get("starts") or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def fall_back_after_failed_start(current: str, reason: str) -> bool:
@@ -401,7 +423,7 @@ def fall_back_after_failed_start(current: str, reason: str) -> bool:
     exe = launcher_exe()
     if not exe.is_file():
         return False
-    return start_detached(exe, [])
+    return start_detached(exe, _detached_args([]))
 
 
 def write_handover(state: dict[str, Any]) -> None:
