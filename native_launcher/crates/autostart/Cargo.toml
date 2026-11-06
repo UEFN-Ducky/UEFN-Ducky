@@ -1,0 +1,8 @@
+[package]
+name = "autostart"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "--background start (hidden to tray) shared with ducky_app/frontend/autostart.py; reads the Run key, never writes it"
+
+[dependencies]
