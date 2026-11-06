@@ -77,6 +77,66 @@ def test_panel_api_starts_while_webview_still_warms():
     assert source.index("api = shared_panel_api()") < join_at
 
 
+def _calls_outside_nested_functions(fn: ast.FunctionDef) -> set[str]:
+    found: set[str] = set()
+
+    def walk(node: ast.AST) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.Call):
+                f = child.func
+                found.add(f.id if isinstance(f, ast.Name) else getattr(f, "attr", ""))
+            walk(child)
+
+    walk(fn)
+    return found
+
+
+def test_background_startup_work_waits_for_the_window():
+    # Popup guard (MCP tool imports), IDE/skill shipping, Store updates, scheduler, sync and
+    # presence shared the GIL with the boot imports and the page's first calls.
+    calls = _calls_outside_nested_functions(_run_panel_tree())
+    for deferred in ("ship_newest_everywhere_async", "start_appdata_maintenance_async", "start_popup_guard"):
+        assert deferred not in calls
+    source = inspect.getsource(webview_app._run_panel)
+    shown = source[source.index("def _on_shown"):]
+    assert '_start_later(background_work["start"], _BACKGROUND_AFTER_SHOWN_S)' in shown[: shown.index("\n    def ") if "\n    def " in shown else None]
+    # A hidden start never fires "shown": the fallback still starts it before webview.start.
+    fallback_at = source.index('_start_later(background_work["start"], _BACKGROUND_FALLBACK_S)')
+    assert fallback_at < source.index("webview.start(")
+    assert webview_app._BACKGROUND_AFTER_SHOWN_S <= 3 and webview_app._BACKGROUND_FALLBACK_S <= 10
+
+
+def test_deferred_work_runs_once_whoever_calls_first():
+    import threading
+
+    ran: list[int] = []
+    start = webview_app._once(lambda: ran.append(1))
+    threads = [threading.Thread(target=start) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    start()
+    assert ran == [1]
+
+
+def test_deferred_work_failure_never_raises():
+    def boom() -> None:
+        raise RuntimeError("x")
+
+    webview_app._once(boom)()
+
+
+def test_start_later_fires_on_a_daemon_timer():
+    import threading
+
+    fired = threading.Event()
+    webview_app._start_later(fired.set, 0.01)
+    assert fired.wait(5)
+
+
 def test_panel_api_loads_no_webview():
     import subprocess
 

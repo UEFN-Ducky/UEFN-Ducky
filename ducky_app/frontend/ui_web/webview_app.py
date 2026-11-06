@@ -337,8 +337,41 @@ def _start_import_warmup(modules: tuple[str, ...] = _WEBVIEW_WARMUP_MODULES) -> 
     return thread
 
 
+# Startup work the window does not need (popup guard: ~0.6 s of MCP tool imports, IDE and
+# skill shipping, Store updates, scheduler, sync, presence) shared the GIL with the boot
+# imports and the page's first API calls. It starts this long after the window shows,
+# or at the fallback when no shown event comes (a hidden start after an update switch).
+_BACKGROUND_AFTER_SHOWN_S = 1.5
+_BACKGROUND_FALLBACK_S = 8.0
+
+
+def _once(fn):
+    """``fn`` runs on the first call only, from whichever thread calls first; never raises."""
+    lock = threading.Lock()
+    done = [False]
+
+    def run_once() -> None:
+        with lock:
+            if done[0]:
+                return
+            done[0] = True
+        try:
+            fn()
+        except Exception:
+            logging.getLogger(__name__).warning("deferred startup work failed", exc_info=True)
+
+    return run_once
+
+
+def _start_later(start, delay_s: float) -> None:
+    timer = threading.Timer(delay_s, start)
+    timer.daemon = True
+    timer.start()
+
+
 def _run_panel(api_holder: dict[str, object]) -> None:
     webview_warmup = _start_import_warmup() if sys.platform == "win32" else None
+    background_work: dict[str, object] = {"start": lambda: None}
     from backend.workspace.diff_workers import enable as enable_diff_workers
 
     enable_diff_workers()
@@ -351,21 +384,25 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     _sys.setswitchinterval(0.001)
     try:
-        from frontend.appdata_maintenance import start_appdata_maintenance_async
-        from frontend.ship_newest import ship_newest_everywhere_async
-
-        # Listener + skills + Cursor/Claude/Antigravity — newest for this EXE, off UI thread
-        # so the window paints immediately instead of blocking 15–20s on sync/copytrees.
-        # ide_apply / merge skip writes when mcp.json is already current (avoids Cursor
-        # "Reloading model…" reconnect mid-chat).
-        ship_newest_everywhere_async(apply_ides=True, force_skills=False)
-        start_appdata_maintenance_async()
         try:
             from frontend.perf_trace import ensure_started
 
             ensure_started()
         except Exception:
             pass
+
+        def _startup_env() -> None:
+            # Cheap, and the page's first calls read it: right away, not with the deferred work.
+            try:
+                from frontend.settings import PanelSettings, apply_workspace_env
+                from backend.uefn_plugins.panel_presence import forget_all
+
+                forget_all()  # no plugin panel is open yet; a crash may have left old rows
+                apply_workspace_env(PanelSettings.load().uefn_project_root)
+            except Exception:
+                pass
+
+        threading.Thread(target=_startup_env, daemon=True, name="panel-startup-env").start()
 
         def _startup_bg() -> None:
             try:
@@ -379,15 +416,10 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             except Exception:
                 pass
             try:
-                from frontend.settings import PanelSettings, apply_workspace_env
                 from frontend.ui_web.project_files import purge_undo_trash
 
                 # A restart forgets the in-memory undo registry, so last session's trash is dead weight.
                 purge_undo_trash()
-                from backend.uefn_plugins.panel_presence import forget_all
-
-                forget_all()  # no plugin panel is open yet; a crash may have left old rows
-                apply_workspace_env(PanelSettings.load().uefn_project_root)
             except Exception:
                 pass
             try:
@@ -433,8 +465,23 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             except Exception:
                 pass
 
-        threading.Thread(target=_startup_bg, daemon=True, name="panel-startup-bg").start()
-        threading.Thread(target=_presence_bg, daemon=True, name="duckyos-presence-start").start()
+        def _start_background_work_now() -> None:
+            # Listener + skills + Cursor/Claude/Antigravity — newest for this EXE, off UI thread
+            # so the window paints immediately instead of blocking 15–20s on sync/copytrees.
+            # ide_apply / merge skip writes when mcp.json is already current (avoids Cursor
+            # "Reloading model…" reconnect mid-chat).
+            try:
+                from frontend.appdata_maintenance import start_appdata_maintenance_async
+                from frontend.ship_newest import ship_newest_everywhere_async
+
+                ship_newest_everywhere_async(apply_ides=True, force_skills=False)
+                start_appdata_maintenance_async()
+            except Exception:
+                pass
+            threading.Thread(target=_startup_bg, daemon=True, name="panel-startup-bg").start()
+            threading.Thread(target=_presence_bg, daemon=True, name="duckyos-presence-start").start()
+
+        background_work["start"] = _once(_start_background_work_now)
     except Exception:
         pass
 
@@ -711,6 +758,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     def _on_shown() -> None:
         threading.Thread(target=_apply_window_icon, daemon=True, name="window-icon").start()
+        _start_later(background_work["start"], _BACKGROUND_AFTER_SHOWN_S)
         _install_crash_dumps()
         try:
             from frontend import boot_report
@@ -800,6 +848,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     notifications.bind_desktop(tray.toast if tray is not None else None, open_alert)
 
     icon_path = resolve_app_icon_path()
+    _start_later(background_work["start"], _BACKGROUND_FALLBACK_S)
     _boot_trace("ready_for_webview_start", time.perf_counter())
     try:
         from frontend import __version__ as _running_version
