@@ -749,8 +749,14 @@ def test_search_and_find_on_this_repo_are_fast(monkeypatch) -> None:
     found = json.loads(wc.workspace_find("*.verse", max_results=2000))
     took_find = time.monotonic() - began
     assert found["complete"] is True and found["count"] > 0
-    # 1 s on a dev PC; the margin is for slow CI runners.
-    assert took < 3 and took_find < 3, (took, took_find)
+    # Baseline: a bare `git ls-files` measured now, so it feels the same CPU load as the
+    # tools did (8 pytest workers pushed a 1 s search to 3.09 s). Alone: search+find ~1.6 s,
+    # ls-files ~0.4 s. Ceiling: 3 s, or 6x the baseline when the PC is busy; a real
+    # slowdown (a Python walk instead of git, a hang) still blows past both.
+    began = time.monotonic()
+    subprocess.run(["git", "ls-files"], cwd=REPO, capture_output=True, check=True)
+    ceiling = max(3.0, 6 * (time.monotonic() - began))
+    assert took < ceiling and took_find < ceiling, (took, took_find, ceiling)
 
 
 # ---------------------------------------------------------------- plain text
