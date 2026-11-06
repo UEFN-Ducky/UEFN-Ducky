@@ -23,6 +23,8 @@ pub const NO_NATIVE_ENV: &str = "UEFN_DUCKY_NO_NATIVE";
 pub const NATIVE_CHILD_ENV: &str = "UEFN_DUCKY_NATIVE_CHILD";
 /// Set on every hop: the next launcher runs here (or the Python window), never hops again.
 pub const HOP_ENV: &str = "UEFN_DUCKY_LAUNCHER_HOP";
+/// `app_versions.LAUNCHER_ENV`: the EXE that was started before any hop.
+pub const LAUNCHER_ENV: &str = "UEFN_DUCKY_LAUNCHER_EXE";
 /// `PanelSettings.native_launcher`'s default in `frontend/settings.py`.
 pub const DEFAULT_NATIVE_LAUNCHER: &str = "auto";
 /// Python's copy of the setting (`settings.LAUNCHER_SETTING_FILE`): the default store keeps
@@ -95,6 +97,12 @@ fn root_runs(root: &Path, own_version: &str, version: &str) -> bool {
         && (root.join(".ready").is_file() || root.join(STUB_EXE).is_file())
 }
 
+/// `version` is older than `than` (dotted numbers); false when either does not parse.
+fn older(version: &str, than: &str) -> bool {
+    let key = |v: &str| v.trim().split('.').map(|p| p.parse::<u32>().ok()).collect::<Option<Vec<_>>>();
+    matches!((key(version), key(than)), (Some(a), Some(b)) if a < b)
+}
+
 /// Root mode: an installed root launcher (the stub beside it, not a version folder), not
 /// hopped. A dev build with no stub beside it always runs here. `own_version` is this
 /// launcher's `--version`.
@@ -111,7 +119,11 @@ pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path, own_version: &st
         // Same version as the root (Setup installed it, then a start pinned its folder):
         // the hop would only cost 120–490 ms.
         Some(p) if root_runs(root, own_version, &p.version) => Root::RunHere,
-        // Another version (an in-place update or a rollback): its own launcher.
+        // An older version than the root: Setup installed a newer one since that folder was
+        // pinned. Like Python's hand_off, never start an older version; this root's backend
+        // repoints current.json at itself (1.2.473 Setup kept starting 1.2.472).
+        Some(p) if older(&p.version, own_version) => Root::RunHere,
+        // A newer version (an in-place update): its own launcher.
         Some(p) => Root::Exec(p.exe),
         None => Root::Stub(root.join(STUB_EXE)),
     }
@@ -183,6 +195,14 @@ impl Spawn {
         // Nobody waits on this child (this launcher exits and `run_native` stops at our exit
         // 0), so it is a direct start that must fall back on its own.
         cmd.env_remove(NATIVE_CHILD_ENV);
+        // The EXE that was started, as Python's hand_off_env passes it: without it the
+        // version's backend took its own folder for the start, called itself portable (no
+        // updates) and pinned the Run key inside versions/.
+        if std::env::var_os(LAUNCHER_ENV).is_none() {
+            if let Ok(me) = std::env::current_exe() {
+                cmd.env(LAUNCHER_ENV, me);
+            }
+        }
         for (k, v) in &self.env {
             cmd.env(k, v);
         }
@@ -244,8 +264,20 @@ mod tests {
         std::fs::write(p, b"").unwrap();
     }
 
-    /// The test launcher's own version: never one a pointer below names, unless on purpose.
-    const OWN: &str = "9.9.9";
+    /// The test launcher's own version: older than every pointer below, unless on purpose.
+    const OWN: &str = "1.2.1";
+
+    #[test]
+    fn an_older_pointer_runs_the_newer_root() {
+        // 1.2.473 Setup over a copy that had updated itself to 1.2.472: start 1.2.473.
+        let l = Layout::new("older");
+        l.pointer(r#"{"version":"1.2.472","dir":"versions/app-1.2.472"}"#);
+        assert_eq!(root_decision(&l.exe, false, &l.app_data, "1.2.473"), Root::RunHere);
+        assert_eq!(root_decision(&l.exe, false, &l.app_data, "1.2.471"), Root::Exec(l.version.clone()));
+        assert!(older("1.2.9", "1.2.10") && !older("1.2.10", "1.2.9") && !older("1.2.472", "1.2.472"));
+        assert!(!older("", "1.2.473") && !older("1.2.x", "1.2.473"));
+        l.drop_all();
+    }
 
     #[test]
     fn same_version_runs_at_the_root_other_versions_hop_once() {

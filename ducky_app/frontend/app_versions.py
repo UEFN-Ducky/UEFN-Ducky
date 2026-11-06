@@ -237,9 +237,26 @@ def launcher_exe() -> Path:
     restarts name its sibling UEFN-Ducky.exe."""
     raw = (os.environ.get(LAUNCHER_ENV) or "").strip()
     exe = Path(raw) if raw else Path(sys.executable)
+    if not raw and running_from_versions():
+        # Started straight from a version folder (a Run key pinned there, or a 1.2.472
+        # launcher hop that passed no env): the version belongs to the install, so that
+        # is the start. Else it called itself portable and never updated again.
+        exe = _installed_exe() or exe
     if exe.name.lower() == NATIVE_LAUNCHER_EXE.lower():
         return exe.with_name(APP_EXE)
     return exe
+
+
+def _installed_exe() -> Path | None:
+    """The registered install's UEFN-Ducky.exe, when there is one on disk."""
+    try:
+        from frontend.install_info import installed_location
+
+        location = installed_location()
+    except Exception:
+        return None
+    exe = Path(location) / APP_EXE if location else None
+    return exe if exe is not None and exe.is_file() else None
 
 
 def stable_exe(name: str | None = None) -> Path:

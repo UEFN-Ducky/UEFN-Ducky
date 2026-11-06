@@ -46,6 +46,14 @@ def _read_uninstall_entry() -> tuple[dict[str, str | None], str] | None:
     return None
 
 
+def installed_location() -> str:
+    """The registered install folder ("" when nothing is installed)."""
+    if sys.platform != "win32":
+        return ""
+    entry = _read_uninstall_entry()
+    return (entry[0].get("InstallLocation") or "").strip() if entry else ""
+
+
 def _exe_under_install_location(install_location: str) -> bool:
     """
     True when the running executable lives inside the registered install folder.

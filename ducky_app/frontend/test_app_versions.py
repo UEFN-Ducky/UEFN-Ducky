@@ -55,6 +55,26 @@ def test_saved_paths_name_the_started_exe(monkeypatch, tmp_path) -> None:
     assert av.launcher_exe() == Path(sys.executable)
 
 
+def test_a_version_started_directly_names_the_install(monkeypatch, tmp_path) -> None:
+    """A Run key pinned in versions/ (or a launcher hop with no env) started 1.2.472 there:
+    it called itself portable and never updated. The install is the start."""
+    from frontend import install_info
+
+    monkeypatch.delenv(av.LAUNCHER_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(_version("1.2.472") / "UEFN-Ducky.exe"))
+    root = tmp_path / "Programs" / "UEFN Ducky"
+    monkeypatch.setattr(install_info, "installed_location", lambda: str(root))
+    # No install on disk: the version's own EXE, as before.
+    assert av.launcher_exe() == Path(sys.executable)
+    root.mkdir(parents=True)
+    (root / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    assert av.launcher_exe() == root / "UEFN-Ducky.exe"
+    assert av.stable_exe("Ducky-Launcher.exe") == root / "Ducky-Launcher.exe"
+    # An EXE outside versions/ (a portable copy beside an install) stays itself.
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "Downloads" / "UEFN-Ducky.exe"))
+    assert av.launcher_exe() == tmp_path / "Downloads" / "UEFN-Ducky.exe"
+
+
 def test_handover_is_read_once_and_only_while_fresh() -> None:
     av.write_handover({"hidden": True, "maximized": False})
     got = av.take_handover()
