@@ -160,6 +160,72 @@ def test_panel_rpc_behind_project_sources_stays_eager(probe, monkeypatch) -> Non
     assert tool_registry.lazy_tool_schemas(PID, root, manifest) is None
 
 
+def test_the_app_defers_a_tools_only_plugin_until_its_first_call(probe, monkeypatch) -> None:
+    root, manifest = _plugin()
+    loader._load_one(PID, root, manifest)  # first load: no cache yet, so it registers and writes one
+    assert "tool" in tool_registry.lazy_tool_schemas(PID, root, manifest)["api_calls"]
+    _reset(monkeypatch, "app")
+
+    loader._load_one(PID, root, manifest)
+    assert _registers(root) == 1  # the app window did not run register() at boot
+    assert tool_registry.lazy_pending(PID)
+    assert _call("hi") == {"echo": "hi"}
+    assert _registers(root) == 2
+    assert not tool_registry.lazy_pending(PID)
+
+
+def test_the_app_loads_a_deferred_plugin_on_its_first_panel_call(probe, monkeypatch) -> None:
+    from backend.uefn_plugins.plugin_host import panel_rpc
+
+    monkeypatch.setattr(panel_rpc, "is_plugin_enabled", lambda pid: True)
+    root, manifest = _plugin(extra="api.register_panel_rpc('status', lambda: {'ok': 1})")
+    loader._load_one(PID, root, manifest)
+    _reset(monkeypatch, "app")
+    loader._load_one(PID, root, manifest)
+    assert _registers(root) == 1 and tool_registry.lazy_pending(PID)
+
+    assert panel_rpc.call_panel_rpc(PID, "status") == {"ok": 1}
+    assert _registers(root) == 2
+    assert not tool_registry.lazy_pending(PID)
+
+
+@pytest.mark.parametrize("extra", ["api.is_app()", "api.register_secret_test('k', lambda v: True)"])
+def test_the_app_keeps_loading_a_plugin_it_needs_at_boot(probe, monkeypatch, extra) -> None:
+    root, manifest = _plugin(extra=extra)
+    loader._load_one(PID, root, manifest)
+    assert tool_registry.lazy_tool_schemas(PID, root, manifest) is not None  # helpers may still defer it
+    _reset(monkeypatch, "app")
+    loader._load_one(PID, root, manifest)
+    assert _registers(root) == 2
+    assert not tool_registry.lazy_pending(PID)
+
+
+def test_the_app_loads_eagerly_from_a_cache_without_api_calls(probe, monkeypatch) -> None:
+    root, manifest = _plugin()
+    loader._load_one(PID, root, manifest)
+    path = tool_registry._schema_path(PID, manifest)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("api_calls")  # written by an older Ducky
+    path.write_text(json.dumps(data), encoding="utf-8")
+    _reset(monkeypatch, "app")
+    loader._load_one(PID, root, manifest)
+    assert _registers(root) == 2
+    assert "tool" in tool_registry.lazy_tool_schemas(PID, root, manifest)["api_calls"]
+
+
+def test_disabling_a_deferred_plugin_forgets_it(probe, monkeypatch) -> None:
+    root, manifest = _plugin()
+    loader._load_one(PID, root, manifest)
+    _reset(monkeypatch, "app")
+    loader._load_one(PID, root, manifest)
+    assert tool_registry.lazy_pending(PID)
+    invalidate_plugin_runtime(PID)
+    assert not tool_registry.lazy_pending(PID)
+    from backend.server import mcp
+
+    assert mcp._tool_manager.get_tool(TOOL) is None
+
+
 def test_a_plugin_that_registers_more_than_tools_stays_eager(probe, monkeypatch) -> None:
     root, manifest = _plugin(extra="api.register_tts(lambda text, **kw: b'')")
     loader._load_one(PID, root, manifest)

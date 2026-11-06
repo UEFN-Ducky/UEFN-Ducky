@@ -51,6 +51,10 @@ def call_panel_rpc(plugin_id: str, method: str, params: dict[str, Any] | None = 
         raise ValueError(str(e)) from e
     if not is_plugin_enabled(pid):
         raise ValueError(f"Plugin '{pid}' is disabled — enable it in Settings → Store")
+    from backend.uefn_plugins.plugin_host.tool_registry import lazy_pending, load_lazy_backend
+
+    if lazy_pending(pid):  # deferred at boot: its first panel call loads it
+        load_lazy_backend(pid)
     name = str(method or "").strip()
     with _LOCK:
         fn = (_PANEL_RPC.get(pid) or {}).get(name)

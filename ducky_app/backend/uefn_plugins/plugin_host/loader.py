@@ -73,8 +73,8 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
     """
     if pid in _REGISTERED or _manifest_is_compiled(manifest):
         return
-    if lazy_backends_enabled() and lazy_tool_schemas(pid, root, manifest) is not None:
-        return  # a helper process imports it on its first tool call
+    if lazy_eligible(pid, root, manifest) is not None:
+        return  # imported on its first tool call or panel RPC
     version = str(manifest.get("version") or "")
     if plugin_crashed_ducky(pid, version):
         return
@@ -634,8 +634,8 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
 
     if not register or pid in _REGISTERED:
         return
-    # Agent hosts and tool servers list its tools from the cached schemas; the backend
-    # loads on the first call (tool_registry.load_lazy_backend).
+    # Its tools are listed from the cached schemas; the backend loads on the first tool
+    # call or panel RPC (tool_registry.load_lazy_backend).
     if defer_plugin_register(pid, root, manifest):
         return
     # One import + register() per plugin at a time. The Store's enable worker and the
@@ -774,8 +774,7 @@ from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
 from backend.uefn_plugins.plugin_host.tool_registry import (  # noqa: E402
     _rebuild_intent_row,
     defer_plugin_register,
-    lazy_backends_enabled,
-    lazy_tool_schemas,
+    lazy_eligible,
     manifest_tool_concurrency,
     recording_plugin_api,
     write_tool_schemas,

@@ -494,8 +494,11 @@ def plugin_tool_slot(pid: str) -> Iterator[None]:
 # ── Lazy plugin backends in helper processes ────────────────────────────────────────────
 # Agent hosts and tool servers serve a plugin's tools from a schema file the last full load
 # wrote; the plugin's backend is imported and its register(api) runs on the first call to one
-# of its tools, in that process only. The app window keeps loading every backend at boot.
+# of its tools, in that process only. The app window defers a plugin too, but only one whose
+# register() touched nothing the window needs before first use (_APP_LAZY_UNSAFE).
 # Nov 5 2026: Forge's worker ran in all four Ducky processes, each importing every plugin.
+# Nov 6 2026: the app window spent ~1 core for its first minute importing and registering
+# every enabled plugin (plugins_load 4.3 s).
 
 _SCHEMA_DIR = "plugin_tool_schemas"
 _SCHEMA_FORMAT = 2
@@ -535,6 +538,10 @@ _LAZY_SAFE_API = frozenset(
 # Contributions whose RPC is called in-process outside the app too (known_projects, references):
 # a plugin with one keeps its panel RPCs loaded everywhere.
 _IN_PROCESS_RPC_CONTRIBS = ("project.sources", "project_sources", "chat_reference_sources")
+# What the app window needs from a plugin before anyone uses it, so a register() that touched
+# one keeps loading at boot there: header connections and people, @/ chat rows, spotlights,
+# Settings key tests, and is_app() (a plugin asks that to start app-only work).
+_APP_LAZY_UNSAFE = frozenset({"is_app", "connection", "people", "chat_reference", "spotlight", "register_secret_test"})
 _LAZY_PENDING: dict[str, tuple[Any, dict[str, Any]]] = {}
 _LAZY_FORCED: set[str] = set()
 _LAZY_GUARD = threading.Lock()
@@ -574,6 +581,21 @@ def lazy_tool_schemas(pid: str, root: Any, manifest: dict[str, Any]) -> dict[str
     if data.get("signature") != _manifest_signature(root):
         return None  # reinstalled since: the next full load writes it again
     if data.get("lazy") is not True or not isinstance(data.get("tools"), list):
+        return None
+    return data
+
+
+def lazy_eligible(pid: str, root: Any, manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """The cached schemas when this process may defer ``pid``'s register(), else None.
+
+    The app window also needs the cache to say which api members register() touched (written
+    since Nov 6 2026); an older cache loads eagerly once and is rewritten.
+    """
+    data = lazy_tool_schemas(pid, root, manifest)
+    if data is None or lazy_backends_enabled():
+        return data
+    calls = data.get("api_calls")
+    if not isinstance(calls, list) or _APP_LAZY_UNSAFE.intersection(calls):
         return None
     return data
 
@@ -653,6 +675,7 @@ def write_tool_schemas(
             "signature": _manifest_signature(root),
             "lazy": not unsafe,
             "unsafe_api": unsafe,
+            "api_calls": sorted(api_calls),
             "intent": intent,
             "tools": rows,
             "nodes": sorted(n for n in (node_types or ()) if n),
@@ -703,17 +726,16 @@ def _lazy_direct_call(pid: str, name: str) -> Any:
 
 
 def defer_plugin_register(pid: str, root: Any, manifest: dict[str, Any]) -> bool:
-    """Helper process: serve ``pid``'s tools as stubs instead of running register() now.
+    """Serve ``pid``'s tools as stubs instead of running register() now.
 
-    False (load it now) in the app, when its cache is missing or stale, when its register()
-    needs more than tools, or when the first call is loading it.
+    False (load it now) when its cache is missing or stale, when its register() needs more
+    than tools (in the app window: anything in _APP_LAZY_UNSAFE too), or when the first
+    call is loading it.
     """
-    if not lazy_backends_enabled():
-        return False
     with _LAZY_GUARD:
         if pid in _LAZY_FORCED:
             return False
-    data = lazy_tool_schemas(pid, root, manifest)
+    data = lazy_eligible(pid, root, manifest)
     if data is None:
         return False
     try:

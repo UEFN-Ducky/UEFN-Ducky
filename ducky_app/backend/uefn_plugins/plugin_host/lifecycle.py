@@ -94,6 +94,10 @@ _INVALIDATE_WAIT_S = 30.0
 
 
 def _drop_plugin_runtime(pid: str, mod_name: str) -> None:
+    from backend.uefn_plugins.plugin_host.tool_registry import _LAZY_GUARD, _LAZY_PENDING
+
+    with _LAZY_GUARD:  # a deferred plugin's stubs go below with its other tools
+        _LAZY_PENDING.pop(pid, None)
     with _LOCK:
         _REGISTERED.discard(pid)
         _LOADED_SIGNATURE.pop(pid, None)
