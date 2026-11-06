@@ -318,9 +318,24 @@ def test_begin_drops_an_entry_already_carried_once(boot_dir: Path) -> None:
     next launch (whose launcher wrote nothing, e.g. killed) must not report it again."""
     import time
 
-    carried = _fallback(time.time() - 40)  # the earlier launcher run
-    now = _begin(boot_dir, _record(state="closed", started=time.time() - 30, launcher=carried))
-    assert "launcher" not in now
+    first = _begin(boot_dir, _record(state="closed", launcher=_fallback(time.time() - 40)))
+    assert first["launcher"]["exit_code"] == 21  # carried once, into the fallback window's record
+    again = _begin(boot_dir, dict(first, state="closed"))
+    assert "launcher" not in again
+
+
+def test_begin_keeps_an_entry_written_into_a_newer_record(boot_dir: Path) -> None:
+    """The launcher writes into the newest record: the backend it started may have begun
+    one after the launcher itself started. That entry is fresh and must be carried."""
+    import time
+
+    fresh = _fallback(time.time() - 20)
+    now = _begin(boot_dir, _record(state="closed", started=time.time() - 10, launcher=fresh))
+    assert now["launcher"] == fresh
+    # A fresh launcher entry written into a record that carried an older one: carried too.
+    newer = _fallback(time.time() - 5)
+    rec = dict(now, launcher=newer, state="closed")
+    assert _begin(boot_dir, rec)["launcher"] == newer
 
 
 @pytest.mark.parametrize("launcher", ["garbage", [], {"started": "x"}, {"exit_code": 21}])

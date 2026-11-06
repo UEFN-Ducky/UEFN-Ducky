@@ -387,21 +387,23 @@ def _launcher_line(launcher: Any) -> str:
 LAUNCHER_CARRY_S = 120.0
 
 
-def _recent_launcher(launcher: Any, now: float, record_started: Any = 0.0) -> dict[str, Any] | None:
-    """The launcher's part of the last record when it is from this launch (it fell back to
-    this Python window): kept unchanged so the next record still says why. None otherwise.
+# The ``started`` of the launcher entry begin() carried into this record. The launcher
+# writes its entry into whichever record is newest (the backend's own, or the last Python
+# window's), so only this mark tells a carried entry from one the launcher wrote here.
+LAUNCHER_CARRIED_KEY = "launcher_carried"
 
-    The launcher writes into the record that was newest when it ran, so its entry starts
-    after that record did. One that starts before its record was carried in by an earlier
-    begin() and belongs to an earlier launch."""
+
+def _recent_launcher(launcher: Any, now: float, carried: Any = None) -> dict[str, Any] | None:
+    """The launcher's part of the last record when it is from this launch (it fell back to
+    this Python window): kept unchanged so the next record still says why. None otherwise,
+    and None for the entry an earlier begin() already carried (an earlier launch's)."""
     if not isinstance(launcher, dict):
         return None
     try:
         started = float(launcher.get("started") or 0.0)
-        record = float(record_started or 0.0)
     except (TypeError, ValueError):
         return None
-    if started < record:
+    if carried is not None and carried == launcher.get("started"):
         return None
     return dict(launcher) if 0.0 <= now - started <= LAUNCHER_CARRY_S else None
 
@@ -755,10 +757,13 @@ def begin(version: str) -> None:
         }
     )
     launcher = (
-        _recent_launcher(previous.get("launcher"), _state["started"], previous.get("started")) if previous else None
+        _recent_launcher(previous.get("launcher"), _state["started"], previous.get(LAUNCHER_CARRIED_KEY))
+        if previous
+        else None
     )
     if launcher:
         _state["launcher"] = launcher
+        _state[LAUNCHER_CARRIED_KEY] = launcher.get("started")
     _write_state()
     try:
         import faulthandler
