@@ -12,6 +12,12 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "agent-host":
 
     raise SystemExit(agent_host_main(sys.argv[2:]))
 
+if __name__ == "__main__" and "--backend" in sys.argv[1:]:
+    # Ducky-Launcher.exe's backend: no logo splash, low-memory prompt or window (no Tk, no webview).
+    from frontend.native_host.headless import main as backend_main
+
+    raise SystemExit(backend_main())
+
 from frontend.launcher import main
 
 if __name__ == "__main__":

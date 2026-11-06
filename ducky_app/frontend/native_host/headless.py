@@ -1,0 +1,368 @@
+"""``UEFN-Ducky.exe --backend``: the panel's server and API with no window, for Ducky-Launcher.exe.
+
+The launcher draws the window (WebView2) and talks to this process in JSON lines, one UTF-8
+object per line, at most 1 MB: stdout carries ``hello`` / ``result`` / ``event``, stdin
+carries ``call`` / ``bye``, and stdin's end means shut down. Same port, same paths and the
+same ``panel.pid`` as the window start. No pywebview and no Tk are imported here.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import sys
+import threading
+from typing import IO, Any, Callable
+from urllib.parse import urlparse
+
+BACKEND_FLAG = "--backend"
+AFTER_UPDATE_FLAG = "--after-update"
+PROTOCOL = 1
+MAX_LINE_BYTES = 1024 * 1024
+# As the window: the deferred startup work waits until the page had its first calls.
+BACKGROUND_AFTER_HELLO_S = 1.5
+# No hello was sent: the launcher reports its own code (23 no hello / 24 start error) and
+# starts the window the old way.
+EXIT_START_FAILED = 1
+EXIT_INSTANCE_BUSY = 3
+
+_log = logging.getLogger(__name__)
+
+
+def wants_backend(argv: list[str] | None = None) -> bool:
+    args = sys.argv if argv is None else argv
+    return BACKEND_FLAG in args[1:]
+
+
+def take_backend_flag(argv: list[str]) -> bool:
+    """Remove ``--backend`` from ``argv`` in place; True when it was there."""
+    found = False
+    while BACKEND_FLAG in argv[1:]:
+        del argv[argv.index(BACKEND_FLAG, 1)]
+        found = True
+    return found
+
+
+def take_after_update(argv: list[str]) -> int | None:
+    """Remove ``--after-update <pid>`` from ``argv`` in place; the pid, or None."""
+    if AFTER_UPDATE_FLAG not in argv[1:]:
+        return None
+    i = argv.index(AFTER_UPDATE_FLAG, 1)
+    pid_text = argv[i + 1] if i + 1 < len(argv) else ""
+    del argv[i : i + 2]
+    try:
+        return int(pid_text)
+    except ValueError:
+        return None
+
+
+def encode(message: dict[str, Any]) -> bytes:
+    """One protocol line. Raises ValueError over ``MAX_LINE_BYTES``."""
+    data = (json.dumps(message, ensure_ascii=False, separators=(",", ":"), default=str) + "\n").encode("utf-8")
+    if len(data) > MAX_LINE_BYTES:
+        raise ValueError(f"message over {MAX_LINE_BYTES} bytes")
+    return data
+
+
+class LineWriter:
+    """Thread-safe writer of protocol lines to the launcher (stdout)."""
+
+    def __init__(self, stream: IO[bytes]) -> None:
+        self._stream = stream
+        self._lock = threading.Lock()
+
+    def send(self, message: dict[str, Any]) -> bool:
+        try:
+            data = encode(message)
+        except (TypeError, ValueError) as exc:
+            if message.get("t") != "result":
+                _log.warning("backend message not sent: %s", exc)
+                return False
+            data = encode({"t": "result", "id": message.get("id"), "ok": False, "error": str(exc)})
+        with self._lock:
+            try:
+                self._stream.write(data)
+                self._stream.flush()
+            except (OSError, ValueError):
+                return False
+        return True
+
+    def event(self, name: str, data: dict[str, Any] | None = None) -> bool:
+        return self.send({"t": "event", "name": name, "data": dict(data or {})})
+
+
+def app_version() -> str:
+    try:
+        from frontend import __version__
+
+        return str(__version__)
+    except Exception:
+        return "0"
+
+
+def server_port(http_url: str) -> int:
+    return int(urlparse(http_url).port or 0)
+
+
+def hello_message(*, port: int, profile_dir: str | None, pid: int | None = None, **extra: Any) -> dict[str, Any]:
+    message: dict[str, Any] = {
+        "t": "hello",
+        "protocol": PROTOCOL,
+        "app_version": app_version(),
+        "port": int(port),
+        "origin": f"http://127.0.0.1:{int(port)}",
+        "profile_dir": profile_dir or "",
+        "pid": int(pid if pid is not None else os.getpid()),
+    }
+    message.update(extra)
+    return message
+
+
+def dispatch_call(api: Any, message: dict[str, Any]) -> dict[str, Any]:
+    """One ``call`` to its ``result``: the API's public methods, as the window's js_api has them."""
+    call_id = message.get("id")
+    name = message.get("name")
+    args = message.get("args")
+    if args is None:
+        args = []
+    if not isinstance(name, str) or not name or name.startswith("_"):
+        return {"t": "result", "id": call_id, "ok": False, "error": f"not a call: {name!r}"}
+    fn = getattr(api, name, None)
+    if not callable(fn):
+        return {"t": "result", "id": call_id, "ok": False, "error": f"no such call: {name}"}
+    if not isinstance(args, list):
+        return {"t": "result", "id": call_id, "ok": False, "error": "args must be a list"}
+    try:
+        value = fn(*args)
+    except Exception as exc:
+        return {"t": "result", "id": call_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"t": "result", "id": call_id, "ok": True, "value": value}
+
+
+def _std_binary(which: str) -> IO[bytes] | None:
+    """The real stdin/stdout as bytes. A windowed EXE may have no ``sys.stdout`` even though
+    the launcher gave it pipes, so fall back to the Windows standard handle."""
+    stream = getattr(sys, f"__{which}__", None) or getattr(sys, which, None)
+    buffer = getattr(stream, "buffer", None)
+    if buffer is not None:
+        return buffer
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        import msvcrt
+
+        handle = ctypes.windll.kernel32.GetStdHandle(-10 if which == "stdin" else -11)
+        if not handle or handle == -1:
+            return None
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY if which == "stdin" else os.O_WRONLY)
+        return os.fdopen(fd, "rb" if which == "stdin" else "wb", buffering=0)
+    except Exception:
+        return None
+
+
+def _dismiss_splash() -> None:
+    # Only when an entry already showed it: importing early_splash here would load Tk.
+    splash = sys.modules.get("frontend.early_splash")
+    if splash is None:
+        return
+    try:
+        splash.dismiss()
+    except Exception:
+        pass
+
+
+def _register_shell_integrations() -> None:
+    # Shortcuts, Open with and uefn-ducky:// keep pointing at UEFN-Ducky.exe (this EXE).
+    if os.environ.get("DUCKY_SANDBOX"):
+        return
+    try:
+        from frontend.autostart import apply_saved_setting
+        from frontend.open_files import register_windows_open_with, register_windows_url_protocol
+
+        register_windows_open_with()
+        register_windows_url_protocol()
+        apply_saved_setting()
+    except Exception:
+        _log.warning("shell integrations not registered", exc_info=True)
+
+
+def _bind_notifications(writer: LineWriter) -> None:
+    def _toast(title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
+        return writer.event("toast", {"title": str(title or ""), "message": str(message or "")})
+
+    try:
+        from frontend import notifications
+
+        notifications.bind_desktop(_toast, None)
+    except Exception:
+        _log.warning("desktop notifications did not bind", exc_info=True)
+
+
+def _bind_open_handlers(writer: LineWriter) -> None:
+    """A second launch's files and links go to the page's queue (the window shows them)."""
+    try:
+        from frontend.open_files import (
+            enqueue_deep_links,
+            enqueue_open_paths,
+            set_deep_link_handler,
+            set_open_files_handler,
+        )
+
+        set_open_files_handler(lambda paths: enqueue_open_paths(paths) if paths else None)
+        set_deep_link_handler(lambda links: enqueue_deep_links(links) if links else None)
+    except Exception:
+        _log.warning("open-files handlers not set", exc_info=True)
+
+
+def run_backend(
+    argv: list[str] | None = None,
+    *,
+    stdin: IO[bytes] | None = None,
+    stdout: IO[bytes] | None = None,
+) -> int:
+    """Start the panel's server and API, say hello, then serve the launcher until it is done."""
+    use_sys_argv = argv is None
+    args = list(sys.argv if argv is None else argv)
+    take_backend_flag(args)
+    from frontend.autostart import START_HIDDEN_ENV, take_background_flag
+
+    if take_background_flag(args):
+        os.environ[START_HIDDEN_ENV] = "1"
+    previous_pid = take_after_update(args)
+    if use_sys_argv:
+        sys.argv[:] = args
+    if previous_pid is not None:
+        try:
+            from frontend.app_versions import wait_for_exit
+
+            wait_for_exit(previous_pid)
+        except Exception:
+            pass
+    # Before panel_httpd reads the port, as the window start.
+    try:
+        from frontend.settings import pick_panel_port
+
+        pick_panel_port()
+    except Exception:
+        pass
+
+    out = stdout if stdout is not None else _std_binary("stdout")
+    inp = stdin if stdin is not None else _std_binary("stdin")
+    if out is None or inp is None:
+        _log.error("--backend needs the launcher's stdin and stdout pipes")
+        return EXIT_START_FAILED
+    writer = LineWriter(out)
+    if stdout is None:
+        sys.stdout = sys.stderr  # a stray print never lands in the protocol stream
+    _dismiss_splash()
+
+    from backend.store import db as store_db
+
+    store_db.allow_rebuild()
+    from frontend.open_files import cli_deep_links, cli_open_paths, enqueue_deep_links, enqueue_open_paths
+    from frontend.native_host import lifecycle
+    from frontend.ui_web import webview_app as panel
+
+    open_paths = cli_open_paths(args)
+    deep_links = cli_deep_links(args)
+    state, living_pid = lifecycle.second_instance(open_paths, deep_links)
+    if state == lifecycle.HANDED_OFF:
+        writer.send(hello_message(port=_living_port(), profile_dir=panel.webview_profile_dir(),
+                                  pid=living_pid, handoff=True))
+        writer.event("quit", {"reason": "handoff", "pid": living_pid})
+        return 0
+    if state == lifecycle.BUSY:
+        _log.warning("Ducky %s is running but did not take this launch", living_pid)
+        return EXIT_INSTANCE_BUSY
+
+    from frontend.bundle_root import is_packaged_runtime
+
+    if is_packaged_runtime():
+        from frontend.frozen_process import claim_panel_process
+
+        claim_panel_process()
+        threading.Thread(target=_register_shell_integrations, daemon=True, name="register-open-with").start()
+    enqueue_open_paths(open_paths)
+    enqueue_deep_links(deep_links)
+
+    api: Any = None
+    try:
+        from backend.workspace.diff_workers import enable as enable_diff_workers
+
+        enable_diff_workers()
+        start_background = panel.make_background_work()
+        api = panel.boot_panel_api()
+        panel.install_workspace_services()
+        api._tray = None
+        api._window_holder = {}
+        ending = lifecycle.Shutdown(api)
+
+        def _on_exit() -> None:
+            writer.event("quit", {"reason": "app"})
+            ending.run("app")
+
+        api.bind_window(None, on_hide=lambda: None, on_exit=_on_exit)
+        _bind_open_handlers(writer)
+        url, _web_debug, bundled_http = panel.start_panel_server()
+        _bind_notifications(writer)
+    except Exception:
+        _log.exception("--backend did not start")
+        return EXIT_START_FAILED
+
+    writer.send(hello_message(port=server_port(bundled_http), profile_dir=panel.webview_profile_dir(), url=url))
+    try:
+        from frontend.ui_web.web_dev import is_dev_panel
+
+        writer.event("title", {"title": "UEFN Ducky (Dev)" if is_dev_panel() else "UEFN Ducky"})
+    except Exception:
+        pass
+    try:
+        from frontend.app_versions import mark_ready
+
+        mark_ready(app_version())
+    except Exception:
+        pass
+    timer = threading.Timer(BACKGROUND_AFTER_HELLO_S, start_background)
+    timer.daemon = True
+    timer.start()
+
+    lifecycle.watch_parent(os.getppid(), lambda: ending.run("parent_exited"))
+
+    def _call(message: dict[str, Any]) -> None:
+        threading.Thread(
+            target=lambda: writer.send(dispatch_call(api, message)),
+            daemon=True,
+            name="backend-call",
+        ).start()
+
+    reason = lifecycle.serve(inp, on_call=_call)
+    ending.run(reason)
+    return 0
+
+
+def _living_port() -> int:
+    from frontend.ui_web.panel_httpd import PANEL_UI_HTTP_PORT
+
+    return int(PANEL_UI_HTTP_PORT)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """The whole ``--backend`` start for an entry that skipped ``frontend.launcher.main``."""
+    try:
+        from frontend.launcher import scrub_pyinstaller_boot_env
+
+        scrub_pyinstaller_boot_env()
+    except Exception:
+        pass
+    from frontend import ssl_boot
+
+    ssl_boot.inject_in_background()  # boot_panel_api waits for it
+    try:
+        from frontend import net_access
+
+        net_access.install()
+    except Exception:
+        pass
+    return run_backend(argv)

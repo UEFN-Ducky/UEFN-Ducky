@@ -383,20 +383,10 @@ def _start_later(start, delay_s: float) -> None:
     timer.start()
 
 
-def _run_panel(api_holder: dict[str, object]) -> None:
-    webview_warmup = _start_import_warmup() if sys.platform == "win32" else None
-    background_work: dict[str, object] = {"start": lambda: None}
-    from backend.workspace.diff_workers import enable as enable_diff_workers
-
-    enable_diff_workers()
-    # The WinForms UI thread runs Python callbacks (pywebview bridge, evaluate_js
-    # completions) and competes for the GIL with agent threads doing CPU-bound
-    # stream/JSON work. The default 5ms switch interval lets busy threads starve
-    # it for seconds (perf traces showed 14-18s evaluate_js waits with tiny
-    # payloads). A shorter interval keeps the UI thread responsive.
-    import sys as _sys
-
-    _sys.setswitchinterval(0.001)
+def make_background_work():
+    """Start the cheap settings/env setup now; return the run-once starter of the deferred
+    startup work. The window starts it after it shows; ``--backend`` after its hello.
+    Never raises: on a failure the starter does nothing."""
     try:
         try:
             from frontend.perf_trace import ensure_started
@@ -495,9 +485,97 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             threading.Thread(target=_startup_bg, daemon=True, name="panel-startup-bg").start()
             threading.Thread(target=_presence_bg, daemon=True, name="duckyos-presence-start").start()
 
-        background_work["start"] = _once(_start_background_work_now)
+        return _once(_start_background_work_now)
     except Exception:
-        pass
+        return lambda: None
+
+
+def boot_panel_api():
+    """The process's one PanelApi (window, HTTP, phone, website and MCP calls all use it)."""
+    t_import_api = time.perf_counter()
+    # The launcher set up SSL's Windows certificate store on a thread (frontend/ssl_boot.py):
+    # done before anything here can open an HTTPS connection.
+    from frontend.ssl_boot import wait as wait_for_ssl_boot
+
+    wait_for_ssl_boot()
+    from frontend.ui_web.panel_api import shared_panel_api
+
+    _boot_trace("import_panel_api", t_import_api)
+
+    t_api_init = time.perf_counter()
+    api = shared_panel_api()
+    _boot_trace("panel_api_init", t_api_init)
+    return api
+
+
+def install_workspace_services() -> None:
+    """Workspace adapters, the human-edit watch and the boot orphan close; never raises."""
+    try:
+        from frontend.ui_web.workspace_bootstrap import install as install_workspace_adapters
+
+        install_workspace_adapters()
+    except Exception:
+        logging.getLogger(__name__).warning("workspace adapters failed to install", exc_info=True)
+    try:
+        from backend.workspace.human_watch import start as start_human_watch
+
+        start_human_watch()
+    except Exception:
+        logging.getLogger(__name__).warning("human watch failed to start", exc_info=True)
+    try:
+        from frontend.ui_web.changesets_api import heal_orphans_in_background
+
+        heal_orphans_in_background()
+    except Exception:
+        logging.getLogger(__name__).warning("boot orphan close failed to start", exc_info=True)
+
+
+def start_panel_server() -> tuple[str, bool, str]:
+    """The panel's loopback HTTP server (or the Vite dev URL): ``(url, web_debug, bundled_http)``.
+
+    The window and ``--backend`` both serve the panel through this, on the same port."""
+    bundled_index = _web_root() / "index.html"
+    if not bundled_index.is_file():
+        raise FileNotFoundError(
+            "React build not found. Run: cd ducky_app/frontend/ui_web/web && npm ci && npm run build "
+            "or set UEFN_DUCKY_WEB_DEV=http://localhost:5173"
+        )
+    from frontend.ui_web.panel_httpd import start_panel_ui_server
+    from frontend.ui_web.web_dev import resolve_web_url
+
+    bundled_http = start_panel_ui_server(bundled_index.parent)
+    url, web_debug = resolve_web_url(
+        bundled_index_uri=bundled_index.as_uri(),
+        bundled_http_url=bundled_http,
+    )
+    return url, web_debug, bundled_http
+
+
+def webview_profile_dir() -> str | None:
+    """The one stable WebView2 profile (local storage, HTTP and V8 caches) beside our AppData."""
+    try:
+        from frontend.settings import default_app_data_dir
+
+        return str(default_app_data_dir() / "webview")
+    except Exception:
+        logging.getLogger(__name__).warning("webview storage path unavailable", exc_info=True)
+        return None
+
+
+def _run_panel(api_holder: dict[str, object]) -> None:
+    webview_warmup = _start_import_warmup() if sys.platform == "win32" else None
+    from backend.workspace.diff_workers import enable as enable_diff_workers
+
+    enable_diff_workers()
+    # The WinForms UI thread runs Python callbacks (pywebview bridge, evaluate_js
+    # completions) and competes for the GIL with agent threads doing CPU-bound
+    # stream/JSON work. The default 5ms switch interval lets busy threads starve
+    # it for seconds (perf traces showed 14-18s evaluate_js waits with tiny
+    # payloads). A shorter interval keeps the UI thread responsive.
+    import sys as _sys
+
+    _sys.setswitchinterval(0.001)
+    background_work: dict[str, object] = {"start": make_background_work()}
 
     # WebView2 paints this color for not-yet-rendered regions (e.g. area newly exposed while
     # resizing), instead of stark white. Must be set before the WebView2 environment is created;
@@ -518,20 +596,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # by converting that same splash root (avoids a second Tcl interpreter).
     # The panel API loads no webview/pythonnet, so it imports and starts here while the
     # warm-up thread is still loading .NET WinForms (~0.4-0.6 s), not after it.
-    t_import_api = time.perf_counter()
-    # The launcher set up SSL's Windows certificate store on a thread (frontend/ssl_boot.py):
-    # done before anything here can open an HTTPS connection.
-    from frontend.ssl_boot import wait as wait_for_ssl_boot
-
-    wait_for_ssl_boot()
-    from frontend.ui_web.panel_api import shared_panel_api
-
-    _boot_trace("import_panel_api", t_import_api)
-
-    t_api_init = time.perf_counter()
-    # The window's PanelApi also serves HTTP, phone, website and MCP calls in this process.
-    api = shared_panel_api()
-    _boot_trace("panel_api_init", t_api_init)
+    api = boot_panel_api()
 
     t_webview = time.perf_counter()
     if webview_warmup is not None:
@@ -561,24 +626,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         webview.settings["REMOTE_DEBUGGING_PORT"] = int(_dbg_port)
         logging.getLogger(__name__).warning("WebView2 remote debugging on port %s", _dbg_port)
     _boot_trace("webview_import_patches", t_webview)
-    try:
-        from frontend.ui_web.workspace_bootstrap import install as install_workspace_adapters
-
-        install_workspace_adapters()
-    except Exception:
-        logging.getLogger(__name__).warning("workspace adapters failed to install", exc_info=True)
-    try:
-        from backend.workspace.human_watch import start as start_human_watch
-
-        start_human_watch()
-    except Exception:
-        logging.getLogger(__name__).warning("human watch failed to start", exc_info=True)
-    try:
-        from frontend.ui_web.changesets_api import heal_orphans_in_background
-
-        heal_orphans_in_background()
-    except Exception:
-        logging.getLogger(__name__).warning("boot orphan close failed to start", exc_info=True)
+    install_workspace_services()
     api_holder["api"] = api
     api._tray = None  # type: ignore[attr-defined]
     window_holder: dict[str, object] = {}
@@ -666,22 +714,10 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     api.bind_window(None, on_hide=on_hide, on_exit=on_exit)
 
-    bundled_index = _web_root() / "index.html"
-    if not bundled_index.is_file():
-        raise FileNotFoundError(
-            "React build not found. Run: cd ducky_app/frontend/ui_web/web && npm ci && npm run build "
-            "or set UEFN_DUCKY_WEB_DEV=http://localhost:5173"
-        )
     t_httpd = time.perf_counter()
-    from frontend.ui_web.panel_httpd import start_panel_ui_server
-    from frontend.ui_web.web_dev import is_dev_panel, resolve_web_url
+    from frontend.ui_web.web_dev import is_dev_panel
 
-    web_root = bundled_index.parent
-    bundled_http = start_panel_ui_server(web_root)
-    url, web_debug = resolve_web_url(
-        bundled_index_uri=bundled_index.as_uri(),
-        bundled_http_url=bundled_http,
-    )
+    url, web_debug, _bundled_http = start_panel_server()
     _boot_trace("http_server", t_httpd)
     title = "UEFN Ducky (Dev)" if is_dev_panel() else "UEFN Ducky"
     from frontend.ui_web import window_bounds
@@ -921,13 +957,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # HTTP cache and no V8 code cache, so the panel bundle was re-fetched and
     # re-compiled each time. One stable profile beside the rest of our AppData
     # fixes both.
-    storage_path: str | None = None
-    try:
-        from frontend.settings import default_app_data_dir
-
-        storage_path = str(default_app_data_dir() / "webview")
-    except Exception:
-        logging.getLogger(__name__).warning("webview storage path unavailable", exc_info=True)
+    storage_path = webview_profile_dir()
     webview.start(
         _after_gui_start,
         debug=is_dev_panel(),
