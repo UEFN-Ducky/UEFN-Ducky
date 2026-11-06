@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import sys
+import threading
 import urllib.request
 
 import pytest
@@ -36,11 +37,22 @@ def processes(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 @pytest.fixture
 def connects(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
-    """Every TCP connect and urlopen made in the test, all refused (nothing listens)."""
+    """Every TCP connect and urlopen made in the test, all refused (nothing listens).
+
+    Threads already running when the test starts belong to earlier tests in this worker
+    (an 8-worker run once saw one connect to the session's panel port, 127.0.0.1:51487):
+    their connects are refused but not counted. This thread and any thread started during
+    the test are counted."""
     seen: list[tuple[str, int]] = []
+    me = threading.current_thread()
+    earlier = {t for t in threading.enumerate() if t is not me}  # objects: idents get reused
+
+    def _record(host: str, port: int) -> None:
+        if threading.current_thread() not in earlier:
+            seen.append((host, port))
 
     def _connect(address, *a, **k):
-        seen.append((str(address[0]), int(address[1])))
+        _record(str(address[0]), int(address[1]))
         raise ConnectionRefusedError(10061, "refused")
 
     def _urlopen(req, *a, **k):
@@ -48,7 +60,7 @@ def connects(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int]]:
         from urllib.parse import urlparse
 
         parsed = urlparse(url)
-        seen.append((parsed.hostname or "", parsed.port or 80))
+        _record(parsed.hostname or "", parsed.port or 80)
         raise urllib.error.URLError(ConnectionRefusedError(10061, "refused"))
 
     import urllib.error

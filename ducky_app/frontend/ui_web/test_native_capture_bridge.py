@@ -187,19 +187,28 @@ def test_a_60fps_stream_keeps_each_ui_thread_turn_under_2ms(monkeypatch):
 
 def test_a_ui_thread_blocked_for_1s_drops_frames_and_never_deadlocks(monkeypatch):
     ui = _FakeUi()
+    resumed = {}
 
-    def stall():
+    def stall_then_resume():
+        cap = bridge._views["desktop"].cap
         time.sleep(0.3)
         ui.block.clear()
-        threading.Timer(1.0, ui.block.set).start()
+        time.sleep(1.0)
+        resumed["at"] = cap.sent
+        ui.block.set()
+        # Count frames, not seconds: after the stall the rate restarts at MIN_FPS and climbs,
+        # so a fixed 0.7 s under a loaded 8-worker run gave exactly 30 sent (needed > 30).
+        deadline = time.monotonic() + 15.0
+        while cap.sent < resumed["at"] + 30 and time.monotonic() < deadline:
+            time.sleep(0.02)
 
     try:
-        core, v, stop_s = _stream(monkeypatch, ui, 2.0, during=stall)
+        core, v, stop_s = _stream(monkeypatch, ui, 0.0, during=stall_then_resume)
     finally:
         ui.close()
     assert ui.max_queued <= 2  # skipped while stalled, never queued up
     assert v.cap.skipped > 0
-    assert v.cap.sent > 30  # it went on streaming after the stall
+    assert v.cap.sent >= resumed["at"] + 30  # it went on streaming after the stall
     assert stop_s < 1.2
     seqs = [m["seq"] for m in core.messages if m["type"] == "native-frame"]
     assert seqs == sorted(seqs)

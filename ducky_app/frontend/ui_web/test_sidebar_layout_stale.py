@@ -20,6 +20,18 @@ from frontend.ui_web.chats import store as chat_store
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 
 
+@pytest.fixture(autouse=True)
+def _archive_stop_on_this_thread(monkeypatch) -> None:
+    """A delete starts an ``archive-stop`` thread that reads the chat's conversation.json.
+    Under a loaded 8-worker run it read the file while the delete's rmtree ran, Windows
+    refused the unlink, the delete swallowed it and the chat stayed. Run it inline here:
+    these tests are about layouts, and no thread outlives the test into a neighbour's."""
+    from frontend.ui_web.chats import archive_stop
+
+    real = archive_stop.stop_archived
+    monkeypatch.setattr(archive_stop, "stop_archived", lambda ids, **kw: real(ids, **{**kw, "wait": True}))
+
+
 @pytest.fixture(params=["db", "files"])
 def backend(request, monkeypatch) -> str:
     monkeypatch.setenv("DUCKY_STORE_BACKEND", request.param)
