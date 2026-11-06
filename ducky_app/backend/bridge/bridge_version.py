@@ -10,10 +10,12 @@ keeps connecting to the listener next to the new one. Here:
   with the running app's: an older bridge refuses the call and exits (the IDE starts
   the current EXE again on the next tool call)
 * the app (and the updater after an update) calls :func:`stop_old_bridges`: every
-  live process registered with an older version, and every ``UEFN-Ducky*.exe`` that
-  is older than the installed EXE (bridges from before this registry), is stopped
+  live process registered with an older version, and every Ducky tool bridge that is
+  older than the installed EXE (bridges from before this registry), is stopped
 
-Never stops this process, the app itself, or anything that is not a Ducky EXE.
+Never stops this process, the app itself, a Ducky window or agent host (any install,
+profile or test copy), or anything that is not a Ducky EXE. A test copy
+(``DUCKY_SANDBOX``) only stops bridges registered in its own profile.
 """
 
 from __future__ import annotations
@@ -261,7 +263,7 @@ def reset_for_tests() -> None:
 
 
 def _ducky_processes() -> Iterable[dict[str, Any]]:
-    """``{pid, exe, create_time}`` for each running ``UEFN-Ducky*.exe`` (Windows EXE only)."""
+    """``{pid, name, exe, cmdline, create_time}`` for each running ``UEFN-Ducky*.exe`` (Windows EXE only)."""
     try:
         import psutil
 
@@ -269,14 +271,29 @@ def _ducky_processes() -> Iterable[dict[str, Any]]:
     except Exception:
         return []
     out = []
-    for proc in psutil.process_iter(["pid", "name", "exe", "create_time"]):
+    for proc in psutil.process_iter(["pid", "name", "exe", "cmdline", "create_time"]):
         info = proc.info
         name = str(info.get("name") or "")
         if not name or not exe_name_matches(name) or "setup" in name.lower():
             continue
-        out.append({"pid": int(info["pid"]), "exe": str(info.get("exe") or ""),
+        out.append({"pid": int(info["pid"]), "name": name, "exe": str(info.get("exe") or ""),
+                    "cmdline": list(info.get("cmdline") or []),
                     "create_time": float(info.get("create_time") or 0.0)})
     return out
+
+
+def _is_bridge(proc: dict[str, Any]) -> bool:
+    """A Ducky tool bridge (``UEFN-Ducky-Bridge*.exe``, or the app EXE run as ``bridge``).
+
+    Anything else is a Ducky window or an agent host, maybe another install, profile or
+    test copy: never a stale bridge to stop. Nov 5 2026: a test copy started from another
+    folder ended the person's Ducky window and its agent hosts as "other file" bridges.
+    """
+    name = (str(proc.get("name") or "") or Path(str(proc.get("exe") or "")).name).lower()
+    if name.startswith("uefn-ducky-bridge"):
+        return True
+    cmdline = [str(a) for a in (proc.get("cmdline") or [])]
+    return len(cmdline) > 1 and cmdline[1].strip().lower() == "bridge"
 
 
 def _installed_at(exe: str) -> float:
@@ -346,11 +363,17 @@ def stop_old_bridges(
         packaged = bool(exe) and exe_name_matches(Path(exe).name)
     except Exception:
         packaged = processes is not None
+    # A test copy (sandbox_launch, launch timing, soak: DUCKY_SANDBOX) has its own registry and
+    # a fresh install time: every Ducky on the PC would look older or foreign to it.
+    if os.environ.get("DUCKY_SANDBOX"):
+        packaged = False
     if packaged:
         installed = _installed_at(exe)
         for proc in (processes or _ducky_processes)():
             pid = int(proc.get("pid") or 0)
             if pid in keep or pid in current or pid in stopped or pid <= 0:
+                continue
+            if not _is_bridge(proc):
                 continue
             other_file = bool(proc.get("exe")) and os.path.normcase(str(proc["exe"])) != os.path.normcase(exe)
             before_install = installed and float(proc.get("create_time") or 0.0) < installed

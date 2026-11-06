@@ -107,17 +107,21 @@ def test_a_reused_pid_is_not_mistaken_for_the_old_bridge(tmp_path, pids) -> None
     assert bv.stop_old_bridges(version=NEW, root=root, kill=lambda pid: pytest.fail("killed"), exe="") == []
 
 
-def test_bridges_from_before_the_registry_are_stopped_by_exe(tmp_path, pids) -> None:
+def test_bridges_from_before_the_registry_are_stopped_by_exe(tmp_path, pids, monkeypatch) -> None:
+    monkeypatch.delenv("DUCKY_SANDBOX", raising=False)
     root = tmp_path / "bridges"
     _app_running(root)
     exe = tmp_path / "install" / "UEFN-Ducky.exe"
     exe.parent.mkdir()
     exe.write_bytes(b"MZ")
     installed = bv._installed_at(str(exe))
+    old_exe = str(tmp_path / "old" / "UEFN-Ducky-1.2.467.exe")
     procs = [
-        {"pid": 201, "exe": str(tmp_path / "old" / "UEFN-Ducky-1.2.467.exe"), "create_time": installed + 60},
-        {"pid": 202, "exe": str(exe), "create_time": installed + 60},  # current bridge
-        {"pid": 203, "exe": str(exe), "create_time": installed - 3600},  # old binary, same path
+        {"pid": 201, "exe": old_exe, "cmdline": [old_exe, "bridge"], "create_time": installed + 60},
+        {"pid": 202, "exe": str(exe), "cmdline": [str(exe), "bridge"], "create_time": installed + 60},  # current
+        {"pid": 203, "exe": str(exe), "cmdline": [str(exe), "bridge"], "create_time": installed - 3600},  # old binary
+        {"pid": 204, "name": "UEFN-Ducky-Bridge.exe", "exe": str(tmp_path / "old" / "UEFN-Ducky-Bridge.exe"),
+         "cmdline": [], "create_time": installed + 60},  # old bridge EXE
         {"pid": os.getpid(), "exe": str(tmp_path / "x" / "UEFN-Ducky.exe"), "create_time": 0.0},  # the app
     ]
     killed: list[int] = []
@@ -126,7 +130,50 @@ def test_bridges_from_before_the_registry_are_stopped_by_exe(tmp_path, pids) -> 
         version=NEW, root=root, processes=lambda: procs, kill=lambda pid: killed.append(pid) or True, exe=str(exe)
     )
 
-    assert sorted(stopped) == [201, 203]
+    assert sorted(stopped) == [201, 203, 204]
+
+
+def test_another_ducky_window_or_agent_host_is_never_stopped(tmp_path, pids, monkeypatch) -> None:
+    # Nov 5 2026: a test copy started from the sandbox ended the person's Ducky (another file,
+    # started before the copy was made) and its agent hosts, with no crash trace.
+    monkeypatch.delenv("DUCKY_SANDBOX", raising=False)
+    root = tmp_path / "bridges"
+    _app_running(root)
+    exe = tmp_path / "copy" / "UEFN-Ducky.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ")
+    installed = bv._installed_at(str(exe))
+    live = str(tmp_path / "versions" / "app-1.2.470" / "UEFN-Ducky.exe")
+    procs = [
+        {"pid": 301, "exe": live, "cmdline": [live], "create_time": installed - 3600},  # the person's window
+        {"pid": 302, "exe": live, "cmdline": [live, "--background"], "create_time": installed - 60},
+        {"pid": 303, "exe": live, "cmdline": [live, "agent-host", "--conv", "x"], "create_time": installed - 60},
+        {"pid": 304, "exe": live, "cmdline": [live, "C:/proj/a.verse"], "create_time": installed - 60},
+        {"pid": 305, "exe": live, "cmdline": None, "create_time": installed - 60},  # cmdline unreadable
+    ]
+
+    stopped = bv.stop_old_bridges(
+        version=NEW, root=root, processes=lambda: procs, kill=lambda pid: pytest.fail(f"stopped {pid}"), exe=str(exe)
+    )
+
+    assert stopped == []
+
+
+def test_a_test_copy_never_sweeps_other_duckies(tmp_path, pids, monkeypatch) -> None:
+    monkeypatch.setenv("DUCKY_SANDBOX", str(tmp_path / "box"))
+    root = tmp_path / "bridges"
+    _app_running(root)
+    exe = tmp_path / "copy" / "UEFN-Ducky.exe"
+    exe.parent.mkdir()
+    exe.write_bytes(b"MZ")
+    other = str(tmp_path / "install" / "UEFN-Ducky.exe")
+    procs = [{"pid": 401, "exe": other, "cmdline": [other, "bridge"], "create_time": 1.0}]
+
+    stopped = bv.stop_old_bridges(
+        version=NEW, root=root, processes=lambda: procs, kill=lambda pid: pytest.fail(f"stopped {pid}"), exe=str(exe)
+    )
+
+    assert stopped == []
 
 
 def test_source_runs_never_touch_the_registry(monkeypatch, tmp_path) -> None:
