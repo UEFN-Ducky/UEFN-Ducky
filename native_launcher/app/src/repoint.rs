@@ -24,7 +24,10 @@ pub const NATIVE_CHILD_ENV: &str = "UEFN_DUCKY_NATIVE_CHILD";
 /// Set on every hop: the next launcher runs here (or the Python window), never hops again.
 pub const HOP_ENV: &str = "UEFN_DUCKY_LAUNCHER_HOP";
 /// `PanelSettings.native_launcher`'s default in `frontend/settings.py`.
-pub const DEFAULT_NATIVE_LAUNCHER: &str = "off";
+pub const DEFAULT_NATIVE_LAUNCHER: &str = "auto";
+/// Python's copy of the setting (`settings.LAUNCHER_SETTING_FILE`): the default store keeps
+/// settings in ducky.db, which this launcher doesn't read.
+pub const SETTING_FILE: &str = "launcher/native_launcher.json";
 /// `app_versions.VERSIONS_DIR_NAME` / `CURRENT_FILE`.
 pub const VERSIONS_DIR: &str = "versions";
 pub const CURRENT_FILE: &str = "current.json";
@@ -114,13 +117,16 @@ pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path, own_version: &st
     }
 }
 
-/// `native_launcher` from `panel_settings.json` as off | on | auto
-/// (`settings.normalize_native_launcher`; a missing file or key is the default).
+/// `native_launcher` as off | on | auto (`settings.normalize_native_launcher`): from
+/// [`SETTING_FILE`], else `panel_settings.json` (the files store); missing is the default.
 pub fn native_setting(app_data: &Path) -> String {
-    let raw = std::fs::read_to_string(app_data.join("panel_settings.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| v.get("native_launcher").cloned());
+    let read = |name: &str| {
+        std::fs::read_to_string(app_data.join(name))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| v.get("native_launcher").cloned())
+    };
+    let raw = read(SETTING_FILE).or_else(|| read("panel_settings.json"));
     let mode = match raw {
         None => DEFAULT_NATIVE_LAUNCHER.to_string(),
         Some(Value::String(s)) => s.trim().to_ascii_lowercase(),
@@ -414,6 +420,16 @@ mod tests {
             std::fs::write(d.join("panel_settings.json"), json).unwrap();
             assert_eq!(native_setting(&d), want, "{json}");
         }
+        // Python's mirror (the db store has no panel_settings.json) wins over the file.
+        std::fs::write(d.join("panel_settings.json"), r#"{"native_launcher":"on"}"#).unwrap();
+        std::fs::create_dir_all(d.join("launcher")).unwrap();
+        std::fs::write(d.join(SETTING_FILE), r#"{"native_launcher":"off"}"#).unwrap();
+        assert_eq!(native_setting(&d), "off");
+        std::fs::write(d.join(SETTING_FILE), r#"{"native_launcher":"auto"}"#).unwrap();
+        assert_eq!(native_setting(&d), "auto");
+        std::fs::remove_file(d.join("panel_settings.json")).unwrap();
+        std::fs::remove_file(d.join(SETTING_FILE)).unwrap();
+        assert_eq!(native_setting(&d), "auto", "no file at all: Python's default");
         let _ = std::fs::remove_dir_all(&d);
     }
 

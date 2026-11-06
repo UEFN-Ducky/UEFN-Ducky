@@ -107,6 +107,27 @@ def normalize_native_launcher(value: Any) -> str:
     mode = str(value or "").strip().lower() if isinstance(value, str) else ""
     return mode if mode in NATIVE_LAUNCHER_MODES else "off"
 
+# Ducky-Launcher.exe's copy of ``native_launcher`` (repoint.rs SETTING_FILE): a launcher
+# started from a shortcut decides before Python runs and can't read ducky.db.
+LAUNCHER_SETTING_FILE = ("launcher", "native_launcher.json")
+
+
+def mirror_native_launcher(mode: str) -> None:
+    """Write ``mode`` to the launcher's file when it differs; a missing file reads as auto."""
+    path = default_app_data_dir().joinpath(*LAUNCHER_SETTING_FILE)
+    text = json.dumps({"native_launcher": mode})
+    try:
+        if path.is_file() and path.read_text(encoding="utf-8") == text:
+            return
+        if mode == "auto" and not path.exists():
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass  # the launcher then reads panel_settings.json or its default
+
 _OLD_MEMORY_INDEX_DEFAULT_CHARS = 2_500
 
 
@@ -663,6 +684,7 @@ class PanelSettings:
     def save(self) -> None:
         to_store = replace(self, port=PANEL_LISTENER_PORT)
         to_store.validate()
+        mirror_native_launcher(to_store.native_launcher)
         if _settings_use_db():
             try:
                 from backend.store.importers import phase1
