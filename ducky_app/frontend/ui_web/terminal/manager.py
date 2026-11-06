@@ -10,6 +10,7 @@ import os
 import threading
 import time
 import uuid
+import weakref
 from typing import Any, Callable
 
 from frontend.settings import PanelSettings
@@ -76,6 +77,10 @@ _OVERDUE_NOTE = ("It is taking much longer than the {minutes:g} min you expected
                  "terminal with ducky_terminal_close.")
 _manager: "TerminalManager | None" = None
 _manager_lock = threading.Lock()
+# Every manager in this process. A console host one of them owns is never another's stray:
+# Nov 6 2026, a second manager's reaper ended a live terminal's conhost (its baseline and
+# sessions knew nothing of it), the shell died mid-command and reads said "session not found".
+_managers: "weakref.WeakSet[TerminalManager]" = weakref.WeakSet()
 
 
 def _default_cwd() -> str:
@@ -108,6 +113,7 @@ class TerminalManager:
         self._budget_ticker: threading.Thread | None = None
         # Console hosts Ducky had before its first terminal (its own console): never reaped.
         self._host_baseline: set[int] | None = None
+        _managers.add(self)
         # Terminals a running workflow still needs: never closed as idle until it lets go.
         self._held: set[str] = set()
         self._push: Callable[[dict[str, Any]], None] | None = None
@@ -302,11 +308,22 @@ class TerminalManager:
 
     def reap_console_hosts(self) -> list[int]:
         """End console hosts (conhost/OpenConsole) under Ducky that no open terminal owns: a
-        terminal that closed without releasing its ConPTY left one behind for good."""
+        terminal that closed without releasing its ConPTY left one behind for good. Hosts any
+        manager in this process owns, or had before its first terminal, are never stray.
+
+        ponytail: another manager's terminal mid-start (host up, session not yet listed) is
+        not seen; only this manager's start is locked out. One manager per app makes it moot."""
+        others: set[int] = set()
+        for mgr in list(_managers):
+            if mgr is self:
+                continue
+            others |= set(mgr._host_baseline or ())
+            for entry in list(mgr._sessions.values()):
+                others |= set(getattr(entry.session, "console_hosts", ()) or ())
         with self._lock:  # a terminal starting now records its host before this looks
             if self._host_baseline is None:
                 return []
-            owned: set[int] = set()
+            owned = set(others)
             for entry in self._sessions.values():
                 owned |= set(getattr(entry.session, "console_hosts", ()) or ())
             stray = console_hosts(_process_snapshot) - owned - self._host_baseline

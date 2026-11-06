@@ -331,6 +331,24 @@ def test_a_timed_out_command_still_running_gets_no_typed_commands(tmp_path):
         session.kill()
 
 
+def test_a_command_that_timed_out_before_its_program_started_still_counts_as_running(monkeypatch):
+    # Nov 6 2026: on a loaded PC Git Bash had not started `sleep` when the 1 s timeout hit, so
+    # nothing was recorded and the busy shell counted as free.
+    from frontend.ui_web.terminal import session as session_module
+
+    session = TerminalSession(shell="bash", cwd=".")
+    kids: dict[int, str] = {10: "bash.exe"}
+    monkeypatch.setattr(session, "_descendants", lambda snapshot=None: dict(kids))
+    killed: list[int] = []
+    monkeypatch.setattr(session_module, "kill_process_tree", killed.append)
+    session._timed_out_tag, session._timed_out_before = "abc12345", {10}
+    assert session.left_running() == "the timed-out command"  # nothing visible yet
+    kids[11] = "sleep.exe"  # its program starts late
+    assert session.left_running() == "sleep.exe"
+    assert session.stop_left_running() == "sleep.exe" and killed == [11]
+    assert session.left_running() == ""
+
+
 def _bash_session(tmp_path) -> TerminalSession:
     session = TerminalSession(shell="bash", cwd=str(tmp_path))
     try:
@@ -382,12 +400,18 @@ def test_a_program_git_bash_started_is_seen_after_a_timeout_and_its_late_marker_
     session = _bash_session(tmp_path)
     try:
         assert session.run_command("echo ready", timeout_s=60)["ok"]
-        slow = session.run_command("sleep 4; echo slow-done", timeout_s=1)
+        slow = session.run_command("sleep 15; echo slow-done", timeout_s=1)
         assert slow["error"] == "command timed out", slow
+        # A loaded PC forks Git Bash's subshell slowly: sleep.exe may start after the timeout.
+        deadline = time.time() + 12
+        while "sleep.exe" not in session.left_running() and time.time() < deadline:
+            time.sleep(0.2)
         assert "sleep.exe" in session.left_running()
         refused = session.run_command("echo next", timeout_s=10)
         assert not refused["ok"] and "sleep.exe" in refused["error"], refused
-        time.sleep(5)  # the slow command ends now and prints its done marker
+        deadline = time.time() + 90  # the slow command ends and prints its done marker
+        while session.left_running() and time.time() < deadline:
+            time.sleep(0.5)
         after = session.run_command("echo next", timeout_s=30)
         assert after["ok"] and after["output_tail"] == "next", after
     finally:

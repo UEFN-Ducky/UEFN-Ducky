@@ -496,3 +496,21 @@ def test_the_reaper_ends_orphaned_hosts_and_spares_live_ones(mgr, tmp_path, monk
     mgr.running[mine] = [700, 701, 702, 703]
     assert mgr.reap_console_hosts() == [701]
     assert ended == [701]
+
+
+def test_another_managers_reaper_never_ends_a_live_terminals_console_host(mgr, tmp_path, monkeypatch):
+    # Nov 6 2026: a second manager in the process (its baseline empty, its sessions fakes) took
+    # a live terminal's conhost for a stray and ended it; the shell died mid-command and the
+    # 60 s loopback test read "session not found" whenever it ran after other terminal tests.
+    import os as _os
+
+    names = {800: "conhost.exe", 801: "conhost.exe"}
+    monkeypatch.setattr(manager_module, "_process_snapshot", lambda: (mgr.running, names))
+    ended = _hosts(monkeypatch, mgr.running, names)
+    other = TerminalManager()
+    other._host_baseline = set()  # it opened a terminal before any of ours existed
+    live = mgr.get_session(_open(mgr, tmp_path)["session_id"])
+    live.console_hosts = {800}
+    mgr.running[_os.getpid()] = [800, 801]  # 801: a host no terminal owns
+    assert other.reap_console_hosts() == [801]
+    assert ended == [801]

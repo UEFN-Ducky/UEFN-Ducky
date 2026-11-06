@@ -425,6 +425,11 @@ class TerminalSession:
         self._bg_before: set[int] = set()
         # Processes a timed-out agent command started: {pid: exe name}.
         self._timed_out: dict[int, str] = {}
+        # The timed-out command's tag until its own done mark shows up, and the processes that
+        # were here before it. Nov 6 2026: on a loaded PC it timed out before Git Bash had even
+        # started its program, nothing was recorded, and the busy shell counted as free.
+        self._timed_out_tag = ""
+        self._timed_out_before: set[int] = set()
         # The person pressed Ctrl+C and the agent's command never reported done.
         self._stopped = False
         # The tag in the current agent command's markers.
@@ -529,6 +534,8 @@ class TerminalSession:
             scan = self._done_scan + text
             if self._ps_bg_tags:
                 self._ps_bg_tags -= {m.group(1) for m in _BG_DONE_RE.finditer(scan)}
+            if self._timed_out_tag and any(m.group(1) == self._timed_out_tag for m in _DONE_RE.finditer(scan)):
+                self._timed_out_tag = ""
             match = next((m for m in _DONE_RE.finditer(scan) if m.group(1) == self.run_tag), None)
             self._done_scan = "" if match else scan[-64:]
             if match and self._pending_done is not None:
@@ -585,6 +592,7 @@ class TerminalSession:
         if "\x03" in data:
             # Ctrl+C drops the rest of the line, a background run's end mark included.
             self._ps_bg_tags.clear()
+            self._timed_out_tag = ""
             self._interrupted()
 
     def _interrupted(self) -> None:
@@ -811,24 +819,29 @@ class TerminalSession:
 
     def left_running(self) -> str:
         """What a timed-out agent command left running here ('' when it has ended)."""
-        if not self._timed_out:
+        if not self._timed_out and not self._timed_out_tag:
             return ""
         alive = self._descendants()
-        left = sorted({name for pid, name in self._timed_out.items() if alive.get(pid) == name})
+        left = {name for pid, name in self._timed_out.items() if alive.get(pid) == name}
+        if self._timed_out_tag:  # still running: what it started since, or itself (a builtin)
+            left |= {name for pid, name in alive.items() if pid not in self._timed_out_before and name}
+            return ", ".join(sorted(left)) or "the timed-out command"
         if not left:
             self._timed_out = {}
-        return ", ".join(left)
+        return ", ".join(sorted(left))
 
     def stop_left_running(self) -> str:
         """End what a timed-out agent command left running here (only processes still under
         this shell with the same name); returns what that was, '' when nothing was left."""
         alive = self._descendants()
-        left = sorted({name for pid, name in self._timed_out.items() if alive.get(pid) == name})
-        for pid, name in self._timed_out.items():
-            if alive.get(pid) == name:
-                kill_process_tree(int(pid))
+        mine = {pid: name for pid, name in self._timed_out.items() if alive.get(pid) == name}
+        if self._timed_out_tag:  # also what it started after it timed out
+            mine.update({pid: name for pid, name in alive.items() if pid not in self._timed_out_before})
+        for pid in mine:
+            kill_process_tree(int(pid))
         self._timed_out = {}
-        return ", ".join(left)
+        self._timed_out_tag = ""
+        return ", ".join(sorted({name for name in mine.values() if name}))
 
     def run_command(
         self,
@@ -879,6 +892,10 @@ class TerminalSession:
         if not finished:
             self.set_busy(False)
             self._timed_out = {pid: name for pid, name in self._descendants().items() if pid not in before}
+            self._timed_out_tag, self._timed_out_before = self.run_tag, set(before)
+            tail = self.read_output_tail(4096)  # its done mark may have landed just now
+            if any(m.group(1) == self._timed_out_tag for m in _DONE_RE.finditer(tail)):
+                self._timed_out_tag = ""
             return {
                 "ok": False,
                 "error": "command timed out",
