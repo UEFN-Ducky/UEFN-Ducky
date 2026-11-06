@@ -313,6 +313,16 @@ def test_begin_drops_a_stale_launcher_entry(boot_dir: Path) -> None:
     assert "launcher" not in now
 
 
+def test_begin_drops_an_entry_already_carried_once(boot_dir: Path) -> None:
+    """A Python window that fell back carried the launcher's entry into its own record; the
+    next launch (whose launcher wrote nothing, e.g. killed) must not report it again."""
+    import time
+
+    carried = _fallback(time.time() - 40)  # the earlier launcher run
+    now = _begin(boot_dir, _record(state="closed", started=time.time() - 30, launcher=carried))
+    assert "launcher" not in now
+
+
 @pytest.mark.parametrize("launcher", ["garbage", [], {"started": "x"}, {"exit_code": 21}])
 def test_begin_ignores_odd_launcher_values(boot_dir: Path, launcher: Any) -> None:
     assert "launcher" not in _begin(boot_dir, _record(state="closed", launcher=launcher))
