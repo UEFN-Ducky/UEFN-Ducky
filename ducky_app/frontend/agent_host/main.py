@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import importlib
 import logging
 import os
 import sys
@@ -64,8 +65,8 @@ def _drop_caches() -> list[str]:
 
 
 def _trim_heap() -> bool:
-    try:
-        from frontend import heap_trim
+    try:  # sys.modules at call time; `from frontend import heap_trim` reads a stale package attribute
+        heap_trim = importlib.import_module("frontend.heap_trim")
     except ImportError:
         return False
     trim = getattr(heap_trim, "trim", None)
