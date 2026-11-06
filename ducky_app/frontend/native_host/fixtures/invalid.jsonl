@@ -1,0 +1,14 @@
+not json
+[1,2,3]
+{"t":"nope"}
+{"protocol":1}
+{"t":"hello","protocol":1,"app_version":"1.2.471","port":"51234","origin":"http://127.0.0.1:51234","profile_dir":"C:\\P","pid":1}
+{"t":"hello","protocol":true,"app_version":"1.2.471","port":51234,"origin":"http://127.0.0.1:51234","profile_dir":"C:\\P","pid":1}
+{"t":"result","ok":true,"value":1}
+{"t":"result","id":"c1","ok":false}
+{"t":"result","id":"c1","ok":"yes","value":1}
+{"t":"event","data":{}}
+{"t":"event","name":"toast","data":[1]}
+{"t":"call","id":"c1","args":[]}
+{"t":"call","id":"c1","name":"x","args":{"a":1}}
+{"t":"bye","reason":5}

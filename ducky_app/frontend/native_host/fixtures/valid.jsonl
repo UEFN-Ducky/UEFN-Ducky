@@ -1,0 +1,10 @@
+{"t":"hello","protocol":1,"app_version":"1.2.471","port":51234,"origin":"http://127.0.0.1:51234","profile_dir":"C:\\Profile\\UEFN-Ducky","pid":4242}
+{"t":"result","id":"c1","ok":true,"value":{"x":10,"y":20,"width":1280,"height":800}}
+{"t":"result","id":"c2","ok":true,"value":null}
+{"t":"result","id":"c3","ok":false,"error":"unknown"}
+{"t":"event","name":"toast","data":{"text":"Saved","level":"info"}}
+{"t":"event","name":"title","data":{"title":"UEFN Ducky — Héllo"}}
+{"t":"event","name":"quit","data":{}}
+{"t":"call","id":"c1","name":"get_window_bounds","args":[]}
+{"t":"call","id":"c4","name":"send_message","args":["conv-1","hi",{"files":[]}]}
+{"t":"bye","reason":"window closed"}

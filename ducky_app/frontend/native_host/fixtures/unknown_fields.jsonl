@@ -1,0 +1,10 @@
+{"t":"hello","protocol":1,"app_version":"1.2.471","port":51234,"origin":"http://127.0.0.1:51234","profile_dir":"C:\\Profile\\UEFN-Ducky","pid":4242,"future":{"a":1},"build":"x"}
+{"t":"result","id":"c1","ok":true,"value":{"x":10,"y":20,"width":1280,"height":800},"ms":3}
+{"t":"result","id":"c2","ok":true,"value":null,"trace":[1,2]}
+{"t":"result","id":"c3","ok":false,"error":"unknown","value":"dropped when ok is false"}
+{"t":"event","name":"toast","data":{"text":"Saved","level":"info"},"seq":7}
+{"t":"event","name":"title","data":{"title":"UEFN Ducky — Héllo"},"extra":true}
+{"t":"event","name":"quit","data":{},"why":"tray"}
+{"t":"call","id":"c1","name":"get_window_bounds","args":[],"wid":"main"}
+{"t":"call","id":"c4","name":"send_message","args":["conv-1","hi",{"files":[]}],"deadline_ms":5000}
+{"t":"bye","reason":"window closed","code":0}
