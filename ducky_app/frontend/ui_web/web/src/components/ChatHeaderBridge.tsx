@@ -116,8 +116,6 @@ export function ChatHeaderBridge({ activeFilePath, projectPath }: ChatHeaderBrid
     return { status, totals, files, scanProgress, fullScanActive, scanInProgress, fileCheckInProgress };
   }, [diagRev]);
 
-  const hasProject = !!projectPath.trim();
-
   useEffect(() => {
     setHeaderActions({
       save: showFileActions
@@ -127,8 +125,8 @@ export function ChatHeaderBridge({ activeFilePath, projectPath }: ChatHeaderBrid
             onSave: () => void handleSave(),
           }
         : null,
-      problems: hasProject
-        ? {
+      // Shown with or without a project open.
+      problems: {
             status: problemsData.status,
             errorCount: problemsData.totals.errors,
             warningCount: problemsData.totals.warnings,
@@ -142,8 +140,7 @@ export function ChatHeaderBridge({ activeFilePath, projectPath }: ChatHeaderBrid
             fullScanActive: problemsData.fullScanActive,
             scanInProgress: problemsData.scanInProgress,
             fileCheckInProgress: problemsData.fileCheckInProgress,
-          }
-        : null,
+          },
     });
   }, [
     activeFilePath,
@@ -151,7 +148,6 @@ export function ChatHeaderBridge({ activeFilePath, projectPath }: ChatHeaderBrid
     dirty,
     saving,
     handleSave,
-    hasProject,
     problemsData,
     handleNavigate,
     handleRefreshProblems,

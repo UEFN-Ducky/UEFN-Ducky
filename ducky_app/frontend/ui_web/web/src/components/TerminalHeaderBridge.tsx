@@ -50,8 +50,6 @@ interface TerminalHeaderBridgeProps {
 
 export function TerminalHeaderBridge({
 
-  projectPath,
-
   openTabs,
 
   parkedTabs = [],
@@ -78,7 +76,6 @@ export function TerminalHeaderBridge({
 
   const { setHeaderActions } = useRegisterAppHeaderActions();
 
-  const hasProject = !!projectPath.trim();
 
 
 
@@ -204,7 +201,7 @@ export function TerminalHeaderBridge({
 
   useEffect(() => {
 
-    if (!terminalsEnabled || !hasProject) {
+    if (!terminalsEnabled) { // no project needed: a terminal opens in the default folder
 
       setHeaderActions({ terminal: null });
 
@@ -235,8 +232,6 @@ export function TerminalHeaderBridge({
   }, [
 
     terminalsEnabled,
-
-    hasProject,
 
     terminals,
 

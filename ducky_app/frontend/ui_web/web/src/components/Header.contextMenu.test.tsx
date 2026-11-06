@@ -28,6 +28,17 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe("Header plugin buttons", () => {
+  it("show with no project open, so a fresh install shows them at once", () => {
+    const { container } = render(
+      <Header isOnline={false} layoutMode="full" cycleLayoutMode={() => {}} hasProject={false} />,
+    );
+    expect(screen.getByRole("button", { name: "Ducky Account" })).toBeTruthy();
+    fireEvent.contextMenu(container.querySelector("[data-header-menu]")!);
+    expect(screen.getByRole("menuitemcheckbox", { name: "Ducky Account" })).toBeTruthy();
+  });
+});
+
 describe("Header right-click menu", () => {
   it("hides a header button and shows it again", () => {
     const { container } = render(

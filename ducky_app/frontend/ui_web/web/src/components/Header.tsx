@@ -268,7 +268,6 @@ export function Header({
   project = { name: "", path: "", slug: "" },
   layoutMode,
   cycleLayoutMode,
-  hasProject,
   onProjectChanged,
   onCloseWindow,
   onProblemsOpenChange,
@@ -370,9 +369,11 @@ export function Header({
   const { isVisible: headerBtnVisible, setVisible: setHeaderBtnVisible } = useHeaderVisibility();
   const { hasUpdates: hasStoreUpdates } = useStoreUpdateBadge();
   const narrowHeader = useNarrowLayout();
+  // Plugin buttons show as soon as a plugin is installed, project or not: they were hidden
+  // until a project opened, so a fresh install showed none (Ducky Account included).
   const listedHeaderButtons = useMemo(
-    () => (!hasProject || isFocus ? [] : listedPluginHeaderButtons(pluginContrib.header_buttons)),
-    [hasProject, isFocus, pluginContrib.header_buttons],
+    () => (isFocus ? [] : listedPluginHeaderButtons(pluginContrib.header_buttons)),
+    [isFocus, pluginContrib.header_buttons],
   );
   const pluginHeaderButtons = useMemo(
     () =>
@@ -422,11 +423,11 @@ export function Header({
     ))
   );
   const saveAction = headerActions.save;
-  const workflowAction = hasProject ? headerActions.verseWorkflow : null;
-  const problemsAction = hasProject ? headerActions.problems : null;
-  const terminalAction = hasProject ? headerActions.terminal : null;
-  // The ledger is always reachable once a project is open, even with no other editor action.
-  const showChanges = hasProject;
+  // No open-project rule: every header button works with or without a project open.
+  const workflowAction = headerActions.verseWorkflow;
+  const problemsAction = headerActions.problems;
+  const terminalAction = headerActions.terminal;
+  const showChanges = true;
   const overlayLeftOpen = overlaySession.left;
   const overlayRightOpen = overlaySession.right;
   const leftRailShown = compactHeader
