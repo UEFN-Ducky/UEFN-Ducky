@@ -14,3 +14,4 @@ name = "Ducky-Launcher"
 path = "src/main.rs"
 
 [dependencies]
+ducky-instance = { path = "../crates/instance" }
