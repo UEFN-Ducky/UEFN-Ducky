@@ -154,42 +154,40 @@ def _extracted(tmp_path: Path, launcher: bool) -> Path:
     return app
 
 
-@pytest.mark.parametrize("required", [True, False])
-def test_launcher_without_its_dll_fails(tmp_path, required):
+def test_launcher_without_its_dll_fails(tmp_path):
     vip, app, run = _vip(), _extracted(tmp_path, True), _Ran("1.2.3")
     (app / "WebView2Loader.dll").unlink()
     with pytest.raises(RuntimeError, match="WebView2Loader.dll"):
-        vip.check_launcher(app, "1.2.3", signed=False, required=required, run=run)
+        vip.check_launcher(app, "1.2.3", signed=False, run=run)
     assert run.calls == []
 
 
 def test_launcher_present_signed_and_version_matches(tmp_path):
     vip, app, run = _vip(), _extracted(tmp_path, True), _Ran("1.2.3\r\n")
-    assert vip.check_launcher(app, "1.2.3", signed=True, required=True, run=run, signature=lambda p: "Valid")
+    vip.check_launcher(app, "1.2.3", signed=True, run=run, signature=lambda p: "Valid")
     assert run.calls == [[str(app / "Ducky-Launcher.exe"), "--version"]]
 
 
 def test_launcher_unsigned_fails_when_signing_is_expected(tmp_path):
     vip, app = _vip(), _extracted(tmp_path, True)
     with pytest.raises(RuntimeError, match="not signed"):
-        vip.check_launcher(app, "1.2.3", signed=True, required=True, run=_Ran("1.2.3"), signature=lambda p: "NotSigned")
+        vip.check_launcher(app, "1.2.3", signed=True, run=_Ran("1.2.3"), signature=lambda p: "NotSigned")
     # An unsigned release never asks for the signature.
-    assert vip.check_launcher(app, "1.2.3", signed=False, required=True, run=_Ran("1.2.3"), signature=None)
+    vip.check_launcher(app, "1.2.3", signed=False, run=_Ran("1.2.3"), signature=None)
 
 
 @pytest.mark.parametrize("stdout,code", [("1.2.2", 0), ("1.2.3", 1), ("", 0)])
 def test_launcher_wrong_version_or_exit_fails(tmp_path, stdout, code):
     vip, app = _vip(), _extracted(tmp_path, True)
     with pytest.raises(RuntimeError, match="--version"):
-        vip.check_launcher(app, "1.2.3", signed=False, required=True, run=_Ran(stdout, code))
+        vip.check_launcher(app, "1.2.3", signed=False, run=_Ran(stdout, code))
 
 
-def test_launcher_absent_is_skipped_unless_required(tmp_path):
+def test_launcher_absent_always_fails(tmp_path):
     vip, app, run = _vip(), _extracted(tmp_path, False), _Ran("1.2.3")
-    assert vip.check_launcher(app, "1.2.3", signed=True, required=False, run=run) is False
-    assert run.calls == []
     with pytest.raises(RuntimeError, match="missing"):
-        vip.check_launcher(app, "1.2.3", signed=True, required=True, run=run)
+        vip.check_launcher(app, "1.2.3", signed=False, run=run)
+    assert run.calls == []
 
 
 def test_fresh_settings_default_off():
@@ -200,48 +198,39 @@ def test_fresh_settings_default_off():
             vip.check_default_off(report)
 
 
-def _dist(tmp_path: Path, launcher: bool) -> Path:
-    dist_app = tmp_path / "dist" / "UEFN-Ducky-1.2.3"
-    _touch(dist_app / "UEFN-Ducky.exe")
-    if launcher:
-        _touch(dist_app / "Ducky-Launcher.exe")
-    return dist_app
-
-
-@pytest.mark.parametrize("built", [True, False])
-def test_launcher_required_exactly_when_the_build_made_one(tmp_path, built):
-    vip, app = _vip(), _extracted(tmp_path, False)
-    _, required = vip.expectations(app, _dist(tmp_path, built), signed=False, require_launcher=None)
-    assert required is built
-    if built:  # the payload lost it: fails
-        with pytest.raises(RuntimeError, match="missing"):
-            vip.check_launcher(app, "1.2.3", signed=False, required=required, run=_Ran("1.2.3"))
-
-
 @pytest.mark.parametrize("status,want", [("Valid", True), ("NotSigned", False), ("Unknown", False)])
 def test_signature_expected_exactly_when_the_app_exe_is_signed(tmp_path, status, want):
     vip, app = _vip(), _extracted(tmp_path, True)
     seen = []
-    signed, _ = vip.expectations(app, _dist(tmp_path, True), signed=None, require_launcher=None,
-                                 signature=lambda p: seen.append(p.name) or status)
-    assert signed is want and seen == ["UEFN-Ducky.exe"]
+    assert vip.expect_signed(app, None, signature=lambda p: seen.append(p.name) or status) is want
+    assert seen == ["UEFN-Ducky.exe"]
 
 
-def test_flags_override_the_auto_decisions(tmp_path):
-    vip, app = _vip(), _extracted(tmp_path, False)
+def test_signed_flag_overrides_the_auto_decision(tmp_path):
+    vip, app = _vip(), _extracted(tmp_path, True)
     never = lambda p: pytest.fail("signature probed despite the flag")  # noqa: E731
-    assert vip.expectations(app, _dist(tmp_path, True), signed=False, require_launcher=False, signature=never) == (False, False)
-    assert vip.expectations(app, _dist(tmp_path, False), signed=True, require_launcher=True, signature=never) == (True, True)
+    assert vip.expect_signed(app, False, signature=never) is False
+    assert vip.expect_signed(app, True, signature=never) is True
 
 
 def test_cli_passes_only_the_flags_given(tmp_path, monkeypatch):
     vip, got = _vip(), []
     monkeypatch.setattr(vip, "verify", lambda extractor, engine, **kw: got.append(kw))
     tool = str(tmp_path / "innoextract.exe")
-    for argv in ([], ["--no-expect-signed", "--require-launcher"]):
+    for argv in ([], ["--no-expect-signed"]):
         monkeypatch.setattr(sys, "argv", ["verify_installer_panel.py", "--extractor", tool, *argv])
         vip.main()
-    assert got == [{}, {"signed": False, "require_launcher": True}]
+    assert got == [{}, {"signed": False}]
+
+
+@pytest.mark.parametrize("flag", ["--no-require-launcher", "--require-launcher", "--allow-no-launcher"])
+def test_there_is_no_launcher_opt_out_flag(tmp_path, monkeypatch, flag):
+    vip = _vip()
+    monkeypatch.setattr(vip, "verify", lambda *a, **k: pytest.fail("ran despite an unknown flag"))
+    monkeypatch.setattr(sys, "argv", ["verify_installer_panel.py", "--extractor", str(tmp_path / "x.exe"), flag])
+    with pytest.raises(SystemExit) as stop:
+        vip.main()
+    assert stop.value.code == 2
 
 
 def test_app_version_reads_the_repo_init(tmp_path):

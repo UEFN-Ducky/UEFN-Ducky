@@ -1,5 +1,8 @@
 import importlib.util
+import sys
 from pathlib import Path
+
+import pytest
 
 spec = importlib.util.spec_from_file_location("build_exes_tested", Path(__file__).with_name("build_exes.py"))
 be = importlib.util.module_from_spec(spec)
@@ -135,27 +138,49 @@ def test_launcher_source_change_is_a_miss(tmp_path: Path) -> None:
     assert len(cargo.calls) == 2 and a != b
 
 
-def test_no_cargo_warns_and_builds_without_launcher(tmp_path: Path, monkeypatch, capsys) -> None:
+def _fails(fn, *args, **kwargs) -> str:
+    """The build stops non-zero with the rustup message."""
+    with pytest.raises(SystemExit) as stop:
+        fn(*args, **kwargs)
+    text = str(stop.value.code)
+    assert stop.value.code not in (None, 0) and be.RUST_REQUIRED in text
+    return text
+
+
+def test_no_cargo_fails_the_build(tmp_path: Path, monkeypatch) -> None:
     src = _launcher_src(tmp_path)
     monkeypatch.setattr(be.shutil, "which", lambda _name: None)
-    assert be.build_launcher(src, cache_root=tmp_path / "cache") is None
-    assert "WITHOUT Ducky-Launcher.exe" in capsys.readouterr().err
+    assert "cargo not found" in _fails(be.build_launcher, src, cache_root=tmp_path / "cache")
     app = tmp_path / "app"
     app.mkdir()
-    assert be.place_launcher(None, app) is None
-    assert not (app / be.LAUNCHER_EXE).exists()
+    _fails(be.place_launcher, None, app)
+    assert list(app.iterdir()) == []
 
 
-def test_failed_cargo_build_ships_without_launcher(tmp_path: Path, capsys) -> None:
+def test_failed_cargo_build_fails_the_build(tmp_path: Path) -> None:
     src = _launcher_src(tmp_path)
     cache = tmp_path / "cache"
-    assert be.build_launcher(src, cache_root=cache, cargo="cargo", run=_FakeCargo(rc=101)) is None
-    assert "WITHOUT" in capsys.readouterr().err
+    assert "rc=101" in _fails(be.build_launcher, src, cache_root=cache, cargo="cargo", run=_FakeCargo(rc=101))
     assert not (cache / be.launcher_source_hash(src)).exists()
 
 
-def test_missing_source_tree_is_skipped(tmp_path: Path) -> None:
-    assert be.build_launcher(tmp_path / "native_launcher", cache_root=tmp_path / "c", run=_FakeCargo()) is None
+def test_cargo_that_cannot_start_fails_the_build(tmp_path: Path) -> None:
+    def _oserror(*_a, **_k):
+        raise OSError("no such file")
+
+    _fails(be.build_launcher, _launcher_src(tmp_path), cache_root=tmp_path / "c", cargo="cargo", run=_oserror)
+
+
+def test_missing_source_tree_fails_the_build(tmp_path: Path) -> None:
+    _fails(be.build_launcher, tmp_path / "native_launcher", cache_root=tmp_path / "c", run=_FakeCargo())
+
+
+@pytest.mark.parametrize("flag", ["--allow-no-launcher", "--no-launcher", "--skip-launcher"])
+def test_there_is_no_opt_out_flag(monkeypatch, flag: str) -> None:
+    monkeypatch.setattr(sys, "argv", ["build_exes.py", flag])
+    with pytest.raises(SystemExit) as stop:
+        be._parse_args()
+    assert stop.value.code == 2  # argparse: unrecognized argument
 
 
 def test_launcher_is_placed_beside_the_app(tmp_path: Path) -> None:
@@ -171,14 +196,14 @@ def test_launcher_is_placed_beside_the_app(tmp_path: Path) -> None:
     assert (app / "WebView2Loader.dll").read_bytes() == b"MZ dll"
 
 
-def test_launcher_without_its_dll_is_not_placed(tmp_path: Path, capsys) -> None:
+def test_launcher_without_its_dll_fails_the_build(tmp_path: Path) -> None:
     exe = tmp_path / "cached" / be.LAUNCHER_EXE
     exe.parent.mkdir()
     exe.write_bytes(b"MZ")
     app = tmp_path / "app"
     app.mkdir()
-    assert be.place_launcher(exe, app) is None
-    assert list(app.iterdir()) == [] and "WITHOUT" in capsys.readouterr().err
+    assert "WebView2Loader.dll" in _fails(be.place_launcher, exe, app)
+    assert list(app.iterdir()) == []
 
 
 def test_cache_holds_the_x64_dll_next_to_the_exe(tmp_path: Path) -> None:
@@ -199,12 +224,19 @@ def test_cache_entry_without_the_dll_is_rebuilt(tmp_path: Path) -> None:
     assert len(cargo.calls) == 1 and (old.parent / be.LAUNCHER_DLL).is_file()
 
 
-def test_build_without_the_dll_ships_without_launcher(tmp_path: Path, capsys) -> None:
+def test_build_without_the_dll_fails_the_build(tmp_path: Path) -> None:
     src = _launcher_src(tmp_path)
     cache = tmp_path / "cache"
-    assert be.build_launcher(src, cache_root=cache, cargo="cargo", run=_FakeCargo(dll=False)) is None
-    assert "WebView2Loader.dll" in capsys.readouterr().err
+    assert "WebView2Loader.dll" in _fails(be.build_launcher, src, cache_root=cache, cargo="cargo", run=_FakeCargo(dll=False))
     assert not (cache / be.launcher_source_hash(src)).exists()
+
+
+def test_both_files_present_builds_and_places(tmp_path: Path) -> None:
+    exe = be.build_launcher(_launcher_src(tmp_path), cache_root=tmp_path / "cache", cargo="cargo", run=_FakeCargo())
+    app = tmp_path / "UEFN-Ducky-1.2.3"
+    app.mkdir()
+    assert be.place_launcher(exe, app) == app / be.LAUNCHER_EXE
+    assert sorted(p.name for p in app.iterdir()) == ["Ducky-Launcher.exe", "WebView2Loader.dll"]
 
 
 def test_cache_root_is_under_localappdata(tmp_path: Path, monkeypatch) -> None:

@@ -33,16 +33,13 @@ def _signature_status(path: Path) -> str:
     return str(signature_info(path).get("status") or "Unknown")
 
 
-def check_launcher(app: Path, version: str, *, signed: bool, required: bool,
-                   run=subprocess.run, signature=_signature_status) -> bool:
-    """The optional native launcher beside UEFN-Ducky.exe: signed when the release is, and
-    ``--version`` prints the app version. Absent is fine unless ``required``."""
+def check_launcher(app: Path, version: str, *, signed: bool,
+                   run=subprocess.run, signature=_signature_status) -> None:
+    """The native launcher and its dll beside UEFN-Ducky.exe, always (no build ships
+    without them): signed when the release is, and ``--version`` prints the app version."""
     exe = app / LAUNCHER
     if not exe.is_file():
-        if required:
-            raise RuntimeError(f"{LAUNCHER} missing from the installer payload")
-        print(f"NOTE: no {LAUNCHER} in this build (optional); skipped", flush=True)
-        return False
+        raise RuntimeError(f"{LAUNCHER} missing from the installer payload")
     if not (app / LOADER_DLL).is_file():
         raise RuntimeError(f"{LAUNCHER} ships without {LOADER_DLL} beside it")
     if signed and (status := signature(exe)) != "Valid":
@@ -51,8 +48,7 @@ def check_launcher(app: Path, version: str, *, signed: bool, required: bool,
     printed = (result.stdout or "").strip()
     if result.returncode != 0 or printed != version:
         raise RuntimeError(f"{LAUNCHER} --version: exit={result.returncode}, printed {printed!r}, want {version!r}")
-    print(f"PASS: {LAUNCHER} present{', signed' if signed else ''}, --version {version}", flush=True)
-    return True
+    print(f"PASS: {LAUNCHER} + {LOADER_DLL} present{', signed' if signed else ''}, --version {version}", flush=True)
 
 
 def check_default_off(report: dict) -> None:
@@ -65,15 +61,11 @@ def check_default_off(report: dict) -> None:
     print("PASS: fresh settings have native_launcher off", flush=True)
 
 
-def expectations(app: Path, dist_app: Path, *, signed: bool | None, require_launcher: bool | None,
-                 signature=_signature_status) -> tuple[bool, bool]:
-    """``(signed, require_launcher)``; None means decide from the build itself: the launcher is
-    required when the packed dist folder has one, and signed when the app EXE is signed."""
-    if require_launcher is None:
-        require_launcher = (dist_app / LAUNCHER).is_file()
+def expect_signed(app: Path, signed: bool | None, signature=_signature_status) -> bool:
+    """None means decide from the build: signed when the app EXE in the same install is."""
     if signed is None:
         signed = signature(app / "UEFN-Ducky.exe") == "Valid"
-    return signed, require_launcher
+    return signed
 
 
 def run_check(exe: Path, flag: str, output: Path, *, succeeds: bool, recovered=None):
@@ -86,10 +78,8 @@ def run_check(exe: Path, flag: str, output: Path, *, succeeds: bool, recovered=N
     return report
 
 
-def verify(extractor: Path, engine: Path, *, version: str = "", signed: bool | None = None,
-           require_launcher: bool | None = None) -> None:
+def verify(extractor: Path, engine: Path, *, version: str = "", signed: bool | None = None) -> None:
     version = version or app_version()
-    dist_app = engine.parent / f"UEFN-Ducky-{version}"
     with tempfile.TemporaryDirectory(prefix="ducky-installer-panel-proof-") as scratch:
         root = Path(scratch)
         subprocess.run(
@@ -103,8 +93,7 @@ def verify(extractor: Path, engine: Path, *, version: str = "", signed: bool | N
         run_check(exe, "--panel-recovery-smoke", output, succeeds=True, recovered=False)
         check_default_off(run_check(exe, "--runtime-smoke", output, succeeds=True))
         print("PASS: extracted installer, strict asset check and frozen runtime", flush=True)
-        signed, required = expectations(root / "app", dist_app, signed=signed, require_launcher=require_launcher)
-        check_launcher(root / "app", version, signed=signed, required=required)
+        check_launcher(root / "app", version, signed=expect_signed(root / "app", signed))
 
         index = panel / "index.html"
         match = re.search(r'(?:src|href)=["\'](?:\./|/)?(assets/[^"\']+\.js)["\']',
@@ -159,10 +148,9 @@ def main() -> None:
     parser.add_argument("--version", default="", help="app version the launcher must print (default: the repo's)")
     parser.add_argument("--expect-signed", action=argparse.BooleanOptionalAction, default=None,
                         help="launcher must be signed (default: when UEFN-Ducky.exe is)")
-    parser.add_argument("--require-launcher", action=argparse.BooleanOptionalAction, default=None,
-                        help="fail without a launcher (default: when dist/UEFN-Ducky-<v> has one)")
+    # No launcher opt-out flag on purpose: every install must carry Ducky-Launcher.exe.
     args = parser.parse_args()
-    opts = {"version": args.version or None, "signed": args.expect_signed, "require_launcher": args.require_launcher}
+    opts = {"version": args.version or None, "signed": args.expect_signed}
     # Unset options stay out, so verify() decides them from the build.
     verify(args.extractor.resolve(), args.engine.resolve(), **{k: v for k, v in opts.items() if v is not None})
 

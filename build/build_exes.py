@@ -309,21 +309,28 @@ def launcher_cache_root() -> Path:
     return Path(base) / "UEFN-Ducky" / "build_cache" / "launcher"
 
 
+RUST_REQUIRED = "Rust is required: install it with rustup, then build again."
+
+
+def launcher_missing(reason: str) -> SystemExit:
+    """The build stops: Ducky never builds or ships without the launcher (no opt-out)."""
+    return SystemExit(f"ERROR: {reason}; no build without {LAUNCHER_EXE}.\n{RUST_REQUIRED}")
+
+
 def build_launcher(
     src: Path,
     *,
     cache_root: Path | None = None,
     cargo: str | None = None,
     run=subprocess.run,
-) -> Path | None:
+) -> Path:
     """Return the cached ``Ducky-Launcher.exe`` for ``src``, running cargo only on a miss.
 
-    None (with a warning) when there is no launcher source, no cargo, or the build fails:
-    the launcher is optional, and Ducky ships without it.
+    No launcher source, no cargo, a failed build or no x64 WebView2Loader.dll stops the
+    build (SystemExit, non-zero).
     """
     if not (src / "Cargo.toml").is_file():
-        print(f"Note: no {src / 'Cargo.toml'}; building without {LAUNCHER_EXE}")
-        return None
+        raise launcher_missing(f"no {src / 'Cargo.toml'}")
     cache_root = cache_root or launcher_cache_root()
     digest = launcher_source_hash(src)
     cached = cache_root / digest / LAUNCHER_EXE
@@ -333,11 +340,7 @@ def build_launcher(
         return cached
     cargo = cargo or shutil.which("cargo")
     if not cargo:
-        print(
-            f"WARNING: cargo not found on PATH; this build ships WITHOUT {LAUNCHER_EXE}.",
-            file=sys.stderr,
-        )
-        return None
+        raise launcher_missing("cargo not found on PATH")
     # One shared target dir keeps incremental builds fast across source hashes.
     target_dir = cache_root / "target"
     cmd = [cargo, "build", "--release", "--manifest-path", str(src / "Cargo.toml"), "--target-dir", str(target_dir)]
@@ -346,24 +349,13 @@ def build_launcher(
     try:
         proc = run(cmd, cwd=str(src))
     except OSError as exc:
-        print(f"WARNING: cargo could not start ({exc}); this build ships WITHOUT {LAUNCHER_EXE}.", file=sys.stderr)
-        return None
+        raise launcher_missing(f"cargo could not start ({exc})") from exc
     built = target_dir / "release" / LAUNCHER_EXE
     if getattr(proc, "returncode", 1) != 0 or not built.is_file():
-        print(
-            f"WARNING: cargo build failed (rc={getattr(proc, 'returncode', '?')}); "
-            f"this build ships WITHOUT {LAUNCHER_EXE}.",
-            file=sys.stderr,
-        )
-        return None
+        raise launcher_missing(f"cargo build --release failed (rc={getattr(proc, 'returncode', '?')})")
     dll = find_loader_dll(target_dir)
     if dll is None:
-        print(
-            f"WARNING: cargo built no x64 {LAUNCHER_DLL} (webview2-com-sys-*/out/x64); "
-            f"this build ships WITHOUT {LAUNCHER_EXE}.",
-            file=sys.stderr,
-        )
-        return None
+        raise launcher_missing(f"cargo built no x64 {LAUNCHER_DLL} (webview2-com-sys-*/out/x64)")
     cached.parent.mkdir(parents=True, exist_ok=True)
     # The dll first: the EXE landing is what makes the entry a hit.
     for source, dest in ((dll, cached.parent / LAUNCHER_DLL), (built, cached)):
@@ -374,19 +366,18 @@ def build_launcher(
     return cached
 
 
-def place_launcher(launcher: Path | None, app_dir: Path) -> Path | None:
-    """Copy the launcher and its WebView2Loader.dll beside ``UEFN-Ducky.exe``; None when
-    there is none to ship (an EXE without its dll cannot start, so neither ships)."""
+def place_launcher(launcher: Path | None, app_dir: Path) -> Path:
+    """Copy the launcher and its WebView2Loader.dll beside ``UEFN-Ducky.exe``, both or
+    the build stops (an EXE without its dll cannot start)."""
     if launcher is None or not launcher.is_file():
-        return None
+        raise launcher_missing(f"{launcher or LAUNCHER_EXE} missing")
     dll = launcher.parent / LAUNCHER_DLL
     if not dll.is_file():
-        print(f"WARNING: {dll} missing; this build ships WITHOUT {LAUNCHER_EXE}.", file=sys.stderr)
-        return None
+        raise launcher_missing(f"{dll} missing")
     shutil.copy2(dll, app_dir / LAUNCHER_DLL)
     dest = app_dir / LAUNCHER_EXE
     shutil.copy2(launcher, dest)
-    print(f"Placed {dest}")
+    print(f"Placed {dest} + {LAUNCHER_DLL}")
     return dest
 
 
@@ -434,7 +425,8 @@ def main() -> int:
 
     ensure_search_model()
 
-    # Optional Rust launcher: cargo runs only when native_launcher/ changed.
+    # Required Rust launcher (stops the build when Rust is missing): cargo runs only when
+    # native_launcher/ changed. First, so a PC without Rust fails before the long freeze.
     launcher_exe = build_launcher(root / "native_launcher")
 
     _build_react_panel(root)
