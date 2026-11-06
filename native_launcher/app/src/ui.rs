@@ -166,10 +166,8 @@ impl Host for UiHost {
 
     fn open_window(&mut self, plan: &StartPlan) -> Result<(), String> {
         tray::win::set_process_aumid();
-        let msg_hwnd = create_msg_window().map_err(|e| e.to_string())?;
         let icon = unsafe { ExtractIconW(None, &HSTRING::from(backend_exe().as_os_str()), 0) };
         with(|u| {
-            u.msg_hwnd = msg_hwnd;
             u.splash = splash::Splash::new(plan.show_splash);
             u.tray_icon = icon.0 as _;
         });
@@ -183,20 +181,30 @@ impl Host for UiHost {
         Ok(())
     }
 
-    fn start_backend(&mut self, plan: &StartPlan) -> Result<Hello, StartError> {
-        let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
+    fn spawn_backend(&mut self, plan: &StartPlan) -> Result<(), String> {
+        // The wake target first: the supervisor thread posts to it from its first line on.
+        let msg_hwnd = create_msg_window().map_err(|e| e.to_string())?;
+        let app_data = with(|u| {
+            u.msg_hwnd = msg_hwnd;
+            u.app_data.clone()
+        })
+        .unwrap_or_default();
         let mut cfg = supervisor::Config::ducky(backend_exe(), &plan.argv[1..], app_data);
         cfg.env = plan.backend_env.clone();
         cfg.env.push((NATIVE_CHILD_ENV.to_string(), "1".to_string()));
         let (to_sup, sup_rx) = mpsc::channel();
         let (ui_tx, from_sup) = mpsc::channel();
-        let wake = with(|u| u.msg_hwnd.0 as isize).unwrap_or(0);
+        let wake = msg_hwnd.0 as isize;
         let handle = std::thread::spawn(move || supervise(cfg, sup_rx, ui_tx, wake));
         with(|u| {
             u.to_sup = Some(to_sup);
             u.from_sup = Some(from_sup);
             u.sup_thread = Some(handle);
         });
+        Ok(())
+    }
+
+    fn wait_hello(&mut self) -> Result<Hello, StartError> {
         // Pump the window (splash, drag, tray) until the hello or a start error arrives.
         let mut msg = MSG::default();
         loop {

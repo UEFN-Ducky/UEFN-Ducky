@@ -24,11 +24,13 @@ pub enum End {
 pub trait Host {
     /// A living Ducky took this launch's argv (or `--background` left it running).
     fn hand_off(&mut self) -> bool;
+    /// Start `--backend` without waiting: Python's ~1.8 s boot runs while the window opens.
+    fn spawn_backend(&mut self, plan: &StartPlan) -> Result<(), String>;
     fn webview2_ok(&mut self) -> bool;
     /// The window with the splash (hidden when the plan starts in the background).
     fn open_window(&mut self, plan: &StartPlan) -> Result<(), String>;
-    /// Spawn `--backend` and wait for its hello.
-    fn start_backend(&mut self, plan: &StartPlan) -> Result<Hello, StartError>;
+    /// Wait (pumping the window) for the backend's hello.
+    fn wait_hello(&mut self) -> Result<Hello, StartError>;
     /// Load the backend's page (or, started hidden, only report ready).
     fn navigate(&mut self, hello: &Hello) -> Result<(), String>;
     /// Page calls, tray, toasts and dialogs until the end.
@@ -59,6 +61,11 @@ fn steps(host: &mut impl Host, plan: &StartPlan) -> (u8, String) {
         return (exit::OK, String::new());
     }
     host.stage("instance");
+    if let Err(e) = host.spawn_backend(plan) {
+        return (exit::START_ERROR, format!("backend: {e}"));
+    }
+    host.stage("backend_spawned");
+    // A failure from here on stops the spawned backend in `finish`.
     if !host.webview2_ok() {
         return (exit::WEBVIEW2_MISSING, "WebView2 missing or too old".into());
     }
@@ -66,7 +73,7 @@ fn steps(host: &mut impl Host, plan: &StartPlan) -> (u8, String) {
         return (exit::START_ERROR, format!("window: {e}"));
     }
     host.stage("window");
-    let hello = match host.start_backend(plan) {
+    let hello = match host.wait_hello() {
         Ok(h) => h,
         Err(e) => return (contract_code(e.code), e.reason),
     };
@@ -141,8 +148,12 @@ mod tests {
             self.calls.push(format!("window(show={})", plan.show_window));
             if self.window_err { Err("no".into()) } else { Ok(()) }
         }
-        fn start_backend(&mut self, _plan: &StartPlan) -> Result<Hello, StartError> {
-            self.calls.push("backend".into());
+        fn spawn_backend(&mut self, _plan: &StartPlan) -> Result<(), String> {
+            self.calls.push("spawn".into());
+            Ok(())
+        }
+        fn wait_hello(&mut self) -> Result<Hello, StartError> {
+            self.calls.push("hello".into());
             self.backend.take().unwrap_or_else(|| Ok(hello(false)))
         }
         fn navigate(&mut self, _hello: &Hello) -> Result<(), String> {
@@ -179,8 +190,8 @@ mod tests {
         assert_eq!(
             m.calls,
             [
-                "hand_off", "stage:instance", "webview2", "window(show=true)", "stage:window", "backend",
-                "stage:hello", "navigate", "serve", "finish:0"
+                "hand_off", "stage:instance", "spawn", "stage:backend_spawned", "webview2", "window(show=true)",
+                "stage:window", "hello", "stage:hello", "navigate", "serve", "finish:0"
             ]
         );
     }
@@ -227,6 +238,27 @@ mod tests {
         launch(&mut m, &plan(&[]));
         assert!(!m.calls.iter().any(|c| c.starts_with("window")));
         assert_eq!(m.calls.last().unwrap(), "finish:20");
+    }
+
+    #[test]
+    fn backend_spawns_before_webview2_and_window() {
+        let mut m = Mock::default();
+        launch(&mut m, &plan(&[]));
+        let at = |name: &str| m.calls.iter().position(|c| c.starts_with(name)).unwrap();
+        assert!(at("spawn") < at("webview2"));
+        assert!(at("spawn") < at("window"));
+        assert!(at("window") < at("hello"));
+        // Handed off before anything starts: no backend at all.
+        let mut m = Mock { handed_off: true, ..Default::default() };
+        launch(&mut m, &plan(&[]));
+        assert!(!m.calls.iter().any(|c| c == "spawn"));
+    }
+
+    #[test]
+    fn no_hello_still_gives_23_after_an_early_spawn() {
+        let mut m = Mock { backend: err(supervisor::exit::NO_HELLO), ..Default::default() };
+        assert_eq!(launch(&mut m, &plan(&[])), 23);
+        assert!(!m.calls.iter().any(|c| c == "navigate"));
     }
 
     #[test]
