@@ -453,6 +453,11 @@ def why_summary(body: dict[str, Any]) -> str:
 def _send(body: dict[str, str], version: str) -> bool:
     import urllib.request
 
+    # HTTPS during launch: the Windows certificate store may still be loading on a thread.
+    from frontend.ssl_boot import wait as wait_for_ssl_boot
+
+    wait_for_ssl_boot()
+
     req = urllib.request.Request(
         COLLECT_URL,
         data=json.dumps(body).encode("utf-8"),

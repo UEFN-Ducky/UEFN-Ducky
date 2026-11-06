@@ -425,17 +425,22 @@ def main() -> None:
     # Before ANY subprocess can be spawned —
     # panel and bridge modes both fork children.
     scrub_pyinstaller_boot_env()
-    # OpenSSL can build a different chain than Windows from the same store and
-    # report "certificate has expired" on PCs where Edge connects fine.
-    try:
-        import truststore
+    _ensure_repo_on_path()
+    # Windows certificate store for SSL (frontend/ssl_boot.py). The window launch does the
+    # ~0.1 s import on a thread while it looks for a running Ducky; _run_panel waits for it
+    # before the panel API loads. Every other mode (agent host, bridge, db) does it now.
+    from frontend import ssl_boot
 
-        truststore.inject_into_ssl()
-    except Exception:
-        pass
+    gui_launch = not (
+        is_bridge_exe() or (len(sys.argv) > 1 and sys.argv[1] in ("agent-host", "bridge", "db"))
+    )
+    if gui_launch:
+        ssl_boot.inject_in_background()
+    else:
+        ssl_boot.inject_now()
     # Same idea for the route: the PC's proxy auto-config and a fast IPv4 fallback, as in Edge.
+    # Kept synchronous: the hand-off to a running Ducky is a loopback urllib call.
     try:
-        _ensure_repo_on_path()
         from frontend import net_access
 
         net_access.install()

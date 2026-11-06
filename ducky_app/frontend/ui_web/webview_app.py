@@ -519,6 +519,11 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # The panel API loads no webview/pythonnet, so it imports and starts here while the
     # warm-up thread is still loading .NET WinForms (~0.4-0.6 s), not after it.
     t_import_api = time.perf_counter()
+    # The launcher set up SSL's Windows certificate store on a thread (frontend/ssl_boot.py):
+    # done before anything here can open an HTTPS connection.
+    from frontend.ssl_boot import wait as wait_for_ssl_boot
+
+    wait_for_ssl_boot()
     from frontend.ui_web.panel_api import shared_panel_api
 
     _boot_trace("import_panel_api", t_import_api)
