@@ -270,11 +270,31 @@ def _vacuum_if_requested(path: Path) -> None:
         except OSError:
             pass
 
+    # This process's own WAL checkpoint thread opens the file for a moment: hold it off for
+    # the whole rebuild, or its handle reads as another process and the rebuild waits a
+    # start (as a staged restore does). A brief open by a scanner gets a few short retries.
+    with _ckpt_open:
+        _vacuum_now(path, marker, waits, failures, _note)
+
+
+def _held_elsewhere_settled(path: Path, tries: int = 3, pause_s: float = 0.05) -> bool:
+    """:func:`_held_elsewhere` that a handle open only for a moment (an antivirus or
+    indexer reading the file just written) does not trip: True only if every try finds
+    it held."""
+    for i in range(tries):
+        if not _held_elsewhere(path):
+            return False
+        if i + 1 < tries:
+            time.sleep(pause_s * (i + 1))
+    return True
+
+
+def _vacuum_now(path: Path, marker: Path, waits: int, failures: int, _note) -> None:
     try:
         if not path.is_file():
             marker.unlink(missing_ok=True)
             return
-        if _held_elsewhere(path):
+        if _held_elsewhere_settled(path):
             _note(waits=waits + 1)
             _log.info("ducky.db rebuild waits for a start with no other process holding it")
             return
@@ -683,7 +703,15 @@ def close_thread_connections() -> None:
 
 
 def reset_for_tests() -> None:
-    """Drop cached connections and the migrated-path memo (tests only)."""
+    """Drop cached connections, queued WAL checkpoints and the migrated-path memo (tests
+    only). A checkpoint in flight finishes first: a test may then move or rewrite the
+    file, with no handle of this process on it."""
+    global _ckpt_epoch
+    with _ckpt_cv:
+        _ckpt_due.clear()
+        _ckpt_epoch += 1
+    with _ckpt_open:
+        pass
     close_thread_connections()
     _reclaim_finished(None, keep=0)
     with _guard:
@@ -741,8 +769,11 @@ def write_txn(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 
 _ckpt_cv = threading.Condition()
-_ckpt_open = threading.Lock()  # held while the checkpoint thread has a file open
+# Held while the checkpoint thread has a file open (re-entrant: the loop holds it across
+# its epoch check and checkpoint_passive's own hold).
+_ckpt_open = threading.RLock()
 _ckpt_due: set[str] = set()
+_ckpt_epoch = 0  # reset_for_tests bumps it: checkpoints queued before then are dropped
 _ckpt_thread: threading.Thread | None = None
 
 
@@ -773,8 +804,12 @@ def _checkpoint_loop() -> None:
                 _ckpt_cv.wait()
             paths = list(_ckpt_due)
             _ckpt_due.clear()
+            epoch = _ckpt_epoch
         for path in paths:
-            checkpoint_passive(path)
+            with _ckpt_open:
+                if epoch != _ckpt_epoch:
+                    break
+                checkpoint_passive(path)
         time.sleep(CHECKPOINT_EVERY_S)
 
 
@@ -1053,12 +1088,14 @@ def restore_snapshot(root: Path | None = None) -> Path:
     reset_for_tests()
     dest = db_path(root)
     try:
-        with _first_open_lock(root):  # no other process may be mid-first-open while the file is swapped
+        # No other process may be mid-first-open while the file is swapped, and this
+        # process's wal-checkpoint thread would hold it mid-rename: both wait.
+        with _first_open_lock(root), _ckpt_open:
             moved: list[tuple[Path, Path]] = []
             for name in (DB_NAME, *SIDECAR_NAMES):
                 p = root / name
                 if p.exists():
-                    p.replace(root / (name + ".corrupt"))
+                    _replace_retrying(p, root / (name + ".corrupt"))
                     moved.append((root / (name + ".corrupt"), p))
             for src in plain:
                 try:
@@ -1075,6 +1112,19 @@ def restore_snapshot(root: Path | None = None) -> Path:
         if opened is not None:
             opened[0].unlink(missing_ok=True)
     raise StoreError("ducky.db failed its integrity check and no snapshot here can be opened")
+
+
+def _replace_retrying(src: Path, dst: Path, tries: int = 5, pause_s: float = 0.05) -> None:
+    """``src.replace(dst)`` that outlasts a handle open only for a moment (an antivirus or
+    indexer reading the file); the last failure is raised."""
+    for i in range(tries):
+        try:
+            src.replace(dst)
+            return
+        except PermissionError:
+            if i + 1 == tries:
+                raise
+            time.sleep(pause_s * (i + 1))
 
 
 def _open_sealed_snapshot(files: list[Path]) -> tuple[Path, Path] | None:

@@ -240,6 +240,46 @@ def test_one_rebuild_after_sealing_leaves_no_old_plaintext_in_the_file(who: _Who
     assert not marker.exists()
 
 
+def test_the_rebuild_never_waits_on_this_process_own_checkpoint_thread(monkeypatch) -> None:
+    """The wal-checkpoint thread's short-lived connection, open as the panel starts, is
+    this process, not another one: the rebuild still runs that start."""
+    import sqlite3
+    import threading
+
+    db.reset_for_tests()
+    db.connect()
+    db.request_vacuum()
+    marker = db.db_path().parent / db.VACUUM_PENDING_NAME
+    db.reset_for_tests()
+    monkeypatch.setattr(db, "_rebuild_here", True)
+    opened, done = threading.Event(), threading.Event()
+
+    def checkpoint_thread() -> None:
+        with db._ckpt_open:
+            conn = sqlite3.connect(str(db.db_path()))
+            opened.set()
+            time.sleep(0.3)
+            conn.close()
+        done.set()
+
+    worker = threading.Thread(target=checkpoint_thread)
+    worker.start()
+    assert opened.wait(5)
+    db.connect()
+    worker.join(5)
+    assert done.is_set()
+    assert not marker.exists(), "rebuilt this start, not counted as a wait"
+    db.reset_for_tests()
+
+
+def test_a_handle_open_only_for_a_moment_is_not_another_process(monkeypatch) -> None:
+    seen = iter([True, False])
+    monkeypatch.setattr(db, "_held_elsewhere", lambda _path: next(seen))
+    assert db._held_elsewhere_settled(db.db_path(), pause_s=0) is False
+    monkeypatch.setattr(db, "_held_elsewhere", lambda _path: True)
+    assert db._held_elsewhere_settled(db.db_path(), pause_s=0) is True
+
+
 def test_backups_from_before_are_sealed_for_the_account_the_rows_went_to(who: _Who, monkeypatch) -> None:
     from frontend import store_admin
 
@@ -460,3 +500,22 @@ def test_a_snapshot_sealed_for_one_account_keeps_none_of_anothers_records(who: _
     plain = snap.with_name("opened.db")
     sealed_files.open_to(snap, plain)
     assert b"otter" not in plain.read_bytes()
+
+
+def test_a_restore_swap_outlasts_a_handle_open_for_a_moment(tmp_path, monkeypatch) -> None:
+    src, dst = tmp_path / "a", tmp_path / "b"
+    src.write_text("x")
+    real, fails = type(src).replace, iter([True, True])
+
+    def flaky(self, target):
+        if next(fails, False):
+            raise PermissionError(32, "held by a scanner")
+        return real(self, target)
+
+    monkeypatch.setattr(type(src), "replace", flaky)
+    db._replace_retrying(src, dst, pause_s=0)
+    assert dst.read_text() == "x" and not src.exists()
+    src.write_text("y")
+    monkeypatch.setattr(type(src), "replace", lambda self, target: (_ for _ in ()).throw(PermissionError(32, "held")))
+    with pytest.raises(PermissionError):
+        db._replace_retrying(src, dst, pause_s=0)
