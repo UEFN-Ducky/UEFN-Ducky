@@ -17,6 +17,49 @@ from frontend.bundle_root import is_packaged_runtime
 
 # PyInstaller base name (``build/unified.spec``); release builds may be ``UEFN-Ducky-<version>.exe``.
 
+# The native launcher. Its name never starts with ``UEFN-Ducky`` so the sweeps in older
+# versions (``UEFN-Ducky*``) never match it.
+LAUNCHER_EXE = "Ducky-Launcher.exe"
+BACKEND_FLAG = "--backend"
+
+
+def is_launcher_name(name: str) -> bool:
+    """``Ducky-Launcher.exe`` (or its ``ProcessName`` without ``.exe``)."""
+    stem = Path(str(name or "")).name.lower()
+    if stem.endswith(".exe"):
+        stem = stem[:-4]
+    return stem == LAUNCHER_EXE[:-4].lower()
+
+
+def is_backend_cmdline(cmdline: list[str] | tuple[str, ...] | None) -> bool:
+    """``UEFN-Ducky.exe --backend ...``: the Python side of a launcher start."""
+    args = [str(a).strip().lower() for a in (cmdline or [])[1:]]
+    return BACKEND_FLAG in args
+
+
+def _process_identity(pid: int) -> tuple[str, list[str]] | None:
+    """``(name, cmdline)`` of ``pid``, or None when it can't be read."""
+    try:
+        import psutil
+
+        proc = psutil.Process(int(pid))
+        return str(proc.name() or ""), [str(a) for a in (proc.cmdline() or [])]
+    except Exception:
+        return None
+
+
+def is_launcher_side(pid: int) -> bool:
+    """``pid`` is ``Ducky-Launcher.exe`` or a ``UEFN-Ducky.exe --backend`` it started.
+
+    Neither is ever reclaimed: the launcher owns its backend's life (crash loop, exit
+    codes) and a new start hands off to it through ``panel.pid`` like to any window.
+    """
+    ident = _process_identity(pid)
+    if ident is None:
+        return False
+    name, cmdline = ident
+    return is_launcher_name(name) or is_backend_cmdline(cmdline)
+
 
 def is_uefn_ducky_executable(path: Path | str) -> bool:
     return exe_name_matches(Path(path).name)
@@ -137,6 +180,9 @@ def reclaim_stale_panel_process() -> bool:
         except OSError:
             pass
         return False
+    # A launcher start (or its backend) is alive and owns panel.pid: hand off, never kill.
+    if is_launcher_side(old_pid):
+        return False
     reclaimed = _kill_pid_tree(old_pid)
     try:
         path.unlink(missing_ok=True)
@@ -191,13 +237,19 @@ def reclaim_panel_port(port: int) -> bool:
             name = psutil.Process(pid).name().lower()
         except Exception:
             continue
+        if is_launcher_side(pid):
+            continue
         if name.startswith("uefn-ducky") and "setup" not in name:
             closed = _kill_pid_tree(pid) or closed
     return closed
 
 
 def claim_panel_process() -> None:
-    """Record this panel PID so the next launch can reclaim a zombie."""
+    """Record this panel PID so the next launch can hand off to it (or reclaim a zombie).
+
+    A plain integer in both modes (window or ``--backend``): every older version reads
+    ``int(panel.pid)``, so an old window hands off to a launcher's backend and back.
+    """
     if sys.platform != "win32":
         return
     try:

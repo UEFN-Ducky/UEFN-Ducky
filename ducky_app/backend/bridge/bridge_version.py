@@ -290,9 +290,15 @@ def _is_bridge(proc: dict[str, Any]) -> bool:
     folder ended the person's Ducky window and its agent hosts as "other file" bridges.
     """
     name = (str(proc.get("name") or "") or Path(str(proc.get("exe") or "")).name).lower()
+    cmdline = [str(a) for a in (proc.get("cmdline") or [])]
+    # The native launcher and the ``UEFN-Ducky.exe --backend`` it starts are a Ducky window.
+    exe_name = Path(str(proc.get("exe") or "")).name.lower()
+    if name.startswith("ducky-launcher") or exe_name.startswith("ducky-launcher"):
+        return False
+    if "--backend" in [a.strip().lower() for a in cmdline[1:]]:
+        return False
     if name.startswith("uefn-ducky-bridge"):
         return True
-    cmdline = [str(a) for a in (proc.get("cmdline") or [])]
     return len(cmdline) > 1 and cmdline[1].strip().lower() == "bridge"
 
 
