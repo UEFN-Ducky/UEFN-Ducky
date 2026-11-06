@@ -72,7 +72,7 @@ def apply_ide_bridges() -> dict[str, Any]:
     """Re-point every IDE's MCP config at the current bridge (merges, never clobbers uefn)."""
     from frontend.ide_apply import apply_all_ide_bridges
 
-    lines = apply_all_ide_bridges()
+    lines = apply_all_ide_bridges(auto=False)
     return {"ok": True, "applied": lines}
 
 

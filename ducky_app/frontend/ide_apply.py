@@ -63,16 +63,23 @@ def _active_ide_kinds() -> tuple[IdeKind, ...]:
     return ALL_IDES
 
 
-def apply_ide_bridge(kind: IdeKind, settings: Optional[PanelSettings] = None) -> str:
-    """Write the current bridge block into one IDE's config; returns the config path."""
+def apply_ide_bridge(kind: IdeKind, settings: Optional[PanelSettings] = None, *, auto: bool = False) -> str:
+    """Write the current bridge block into one IDE's config; returns the config path.
+
+    ``auto`` (boot, plugin load): Codex is only refreshed when the person already
+    hooked it up. Writing it unasked made their own Codex app start Ducky's bridge
+    on every launch and wait on it.
+    """
     from frontend.merge import uefn_block_matches
 
     s = settings or replace(PanelSettings.load(), port=PANEL_LISTENER_PORT)
     block = build_uefn_server_block(s)
     path = path_for_ide(kind, s.antigravity_config_path)
     if kind == IdeKind.CODEX:
-        from frontend.codex_mcp import codex_block_matches, merge_codex_config
+        from frontend.codex_mcp import codex_block_matches, has_uefn_server, merge_codex_config
 
+        if auto and not has_uefn_server(path):
+            return f"{path} (not hooked up, left alone)"
         ok, _detail = codex_block_matches(path, block)
         if ok:
             return str(path)
@@ -98,13 +105,13 @@ def apply_ide_bridge(kind: IdeKind, settings: Optional[PanelSettings] = None) ->
     return str(path)
 
 
-def apply_all_ide_bridges(log: Optional[Callable[[str], None]] = None) -> list[str]:
+def apply_all_ide_bridges(log: Optional[Callable[[str], None]] = None, *, auto: bool = True) -> list[str]:
     """Re-point every IDE at the current exe. Best-effort, never raises."""
     s = replace(PanelSettings.load(), port=PANEL_LISTENER_PORT)
     out: list[str] = []
     for kind in _active_ide_kinds():
         try:
-            path = apply_ide_bridge(kind, s)
+            path = apply_ide_bridge(kind, s, auto=auto)
             out.append(f"Bridge → {kind.value}: {path}")
         except Exception as exc:  # noqa: BLE001 - one bad IDE must not block the others
             out.append(f"{kind.value}: {exc}")

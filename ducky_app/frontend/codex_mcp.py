@@ -4,6 +4,9 @@ Codex does not read ``mcp.json``. The same marked block the OpenAI plugin
 rewrites on each ``codex exec`` launch is what Settings → Apply owns here.
 A live chat may append ``--ducky-run-id`` and extra ``DUCKY_*`` env; that
 still counts as up to date when command, bridge args, and base env match.
+
+The block never sets a top-level ``approval_policy``: that is the person's own
+Codex setting. Ducky's chats pass theirs per run with ``-c``.
 """
 
 from __future__ import annotations
@@ -15,7 +18,6 @@ from typing import Any
 _TOML_BEGIN = "# BEGIN UEFN-DUCKY"
 _TOML_END = "# END UEFN-DUCKY"
 _UEFN_TABLES = ("mcp_servers.uefn", "mcp_servers.uefn.env")
-_APPROVAL_TOML = 'approval_policy = "on-failure"'
 _MCP_APPROVE_TOML = 'default_tools_approval_mode = "approve"'
 
 
@@ -61,8 +63,6 @@ def render_codex_block(uefn_block: dict[str, Any]) -> str:
     args = [str(a) for a in (uefn_block.get("args") or [])]
     env = uefn_block.get("env") if isinstance(uefn_block.get("env"), dict) else {}
     lines = [
-        _APPROVAL_TOML,
-        "",
         "[mcp_servers.uefn]",
         f"command = {_toml_quote(command)}",
         f"args = [{', '.join(_toml_quote(a) for a in args)}]",
@@ -123,6 +123,15 @@ def _uefn_table(text: str) -> dict[str, Any] | None:
     return row if isinstance(row, dict) else None
 
 
+def has_uefn_server(config_path: Path) -> bool:
+    """True when Codex config already lists Ducky's server (the person hooked Codex up)."""
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return _uefn_table(text) is not None
+
+
 def codex_block_matches(config_path: Path, expected_block: dict[str, Any]) -> tuple[bool, str]:
     """True when Codex already points at this bridge.
 
@@ -138,6 +147,10 @@ def codex_block_matches(config_path: Path, expected_block: dict[str, Any]) -> tu
     actual = _uefn_table(text)
     if actual is None:
         return False, "uefn MCP server not configured"
+    _outside, block = _split_marked(text)
+    if block and "approval_policy" in block:
+        # Older Ducky forced approval_policy on every Codex session from its block.
+        return False, "Out of date — click Apply"
     timeout = actual.get("tool_timeout_sec")
     if not isinstance(timeout, (int, float)) or timeout < 1_000_000_000_000:
         return False, "Out of date — question waits need the updated bridge configuration"

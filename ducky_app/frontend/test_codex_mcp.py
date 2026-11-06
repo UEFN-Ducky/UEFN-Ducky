@@ -59,6 +59,42 @@ def test_unmarked_duplicate_table_is_dropped(tmp_path):
     assert "mcp_servers.keep" in text
 
 
+def test_block_leaves_persons_approval_policy_alone(tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        'approval_policy = "never"\n\n# BEGIN UEFN-DUCKY\napproval_policy = "on-failure"\n'
+        '[mcp_servers.uefn]\ncommand = "x"\n# END UEFN-DUCKY\n',
+        encoding="utf-8",
+    )
+    ok, detail = codex_block_matches(cfg, _block())
+    assert not ok and "Out of date" in detail
+    merge_codex_config(cfg, _block())
+    text = cfg.read_text(encoding="utf-8")
+    assert text.count("approval_policy") == 1 and text.startswith('approval_policy = "never"')
+    assert codex_block_matches(cfg, _block())[0]
+
+
+def test_auto_apply_never_hooks_up_codex_unasked(tmp_path, monkeypatch):
+    from frontend import ide_apply
+    from frontend.ide_paths import IdeKind
+
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(ide_apply, "path_for_ide", lambda kind, override="": cfg)
+    monkeypatch.setattr(ide_apply, "build_uefn_server_block", lambda s, *a: _block())
+    monkeypatch.setattr(ide_apply, "sync_skill_for_ide", lambda path: [])
+    settings = type("S", (), {"antigravity_config_path": ""})()
+    ide_apply.apply_ide_bridge(IdeKind.CODEX, settings, auto=True)
+    assert not cfg.exists()
+    cfg.write_text('model = "gpt-5"\n', encoding="utf-8")
+    ide_apply.apply_ide_bridge(IdeKind.CODEX, settings, auto=True)
+    assert cfg.read_text(encoding="utf-8") == 'model = "gpt-5"\n'
+    ide_apply.apply_ide_bridge(IdeKind.CODEX, settings)  # Settings → Apply
+    assert "[mcp_servers.uefn]" in cfg.read_text(encoding="utf-8")
+    cfg.write_text(cfg.read_text(encoding="utf-8").replace('"bridge"', '"old"'), encoding="utf-8")
+    ide_apply.apply_ide_bridge(IdeKind.CODEX, settings, auto=True)  # hooked up: kept current
+    assert '"bridge"' in cfg.read_text(encoding="utf-8")
+
+
 def test_old_question_timeout_requires_config_refresh(tmp_path):
     cfg = tmp_path / "config.toml"
     merge_codex_config(cfg, _block())

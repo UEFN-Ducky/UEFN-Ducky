@@ -129,7 +129,7 @@ def test_manual_apply_is_not_guarded(monkeypatch):
     applied: list[str] = []
     monkeypatch.setattr(ide_apply, "auto_apply_skip_reason", lambda: "panel port 4300 is not the default 4200")
     monkeypatch.setattr(ide_apply, "_active_ide_kinds", lambda: (ide_apply.IdeKind.CURSOR,))
-    monkeypatch.setattr(ide_apply, "apply_ide_bridge", lambda kind, _s=None: applied.append(kind.value) or "x")
+    monkeypatch.setattr(ide_apply, "apply_ide_bridge", lambda kind, _s=None, **_k: applied.append(kind.value) or "x")
     ide_apply.apply_all_ide_bridges()
     assert applied == ["cursor"]
 

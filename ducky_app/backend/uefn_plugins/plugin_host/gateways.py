@@ -302,7 +302,7 @@ def _ide_auto_apply_worker() -> None:
                     return
                 kind, log = _IDE_APPLY_PENDING.pop(0)
             try:
-                log(f"IDE auto-apply → {apply_ide_bridge(IdeKind(kind))}")
+                log(f"IDE auto-apply → {apply_ide_bridge(IdeKind(kind), auto=True)}")
             except Exception as exc:  # noqa: BLE001 — IDE may be absent
                 log(f"IDE auto-apply skipped ({kind}): {exc}")
     except Exception:  # noqa: BLE001 — never kill the app on a bad IDE import
