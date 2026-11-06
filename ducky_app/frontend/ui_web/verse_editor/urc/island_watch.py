@@ -529,9 +529,17 @@ def stop() -> None:
 
 
 def reset_for_tests() -> None:
-    global _misses, _known_island
+    """A fresh watch: no live thread, no stop left set by an earlier test (stop() or a test
+    setting ``_stop``), no misses, no known island."""
+    global _misses, _known_island, _thread
+    thread = _thread
+    if thread is not None and thread.is_alive():
+        stop()
+        thread.join(timeout=10)
     with _lock:
+        _thread = None
         _reset()
         _misses = 0
         _known_island = ""
+    _stop.clear()
     _wake.clear()

@@ -63,6 +63,14 @@ def test_watch_stops_itself_after_two_rounds_with_uefn_closed(health_gets) -> No
     assert len(health_gets) == before
 
 
+def test_a_stop_left_by_an_earlier_test_does_not_skip_the_rounds(health_gets) -> None:
+    # Full suite, same worker: test_island_watch sets _stop and never clears it; the reset must.
+    iw.stop()
+    iw.reset_for_tests()
+    iw.run_rounds(wait=FakeClock().wait)
+    assert len(health_gets) == iw.STOP_AFTER_MISSES
+
+
 def test_a_working_uefn_tool_call_starts_the_watch(monkeypatch) -> None:
     import asyncio
     from types import SimpleNamespace
