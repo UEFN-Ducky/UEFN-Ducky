@@ -24,30 +24,25 @@ use crate::{event_message, result_message, PageCall};
 pub const REFRESH_ID_PREFIX: &str = "cache-";
 
 /// Read-only js_api getters (names from `frontend/native_host/inventory.py`) the page
-/// makes before it paints. Never anything that writes, consumes or acts.
-// ponytail: fixed list; widen it from a measured start-up call trace when one exists.
+/// makes before it paints, limited to those whose stale value the page fully re-reads in
+/// place on `startup-refresh` (web `hooks/startupRefresh.ts` maps each one; a test checks).
+/// `get_version` needs no refresh: the file is keyed by app version. Anything else
+/// (settings, UI layout, project lists, profiles) waits for Python, or a value changed last
+/// session would look reverted for the whole session. Never anything that writes or acts.
 pub const CACHEABLE: &[&str] = &[
-    "get_settings",
-    "get_appearance",
     "get_version",
-    "get_header_visibility",
-    "get_workspace_dock",
-    "get_editor_workspace",
-    "get_restore_tabs",
+    "get_appearance",
     "get_models",
     "get_models_catalog",
-    "get_key_status",
     "has_any_api_key",
-    "list_conversations",
-    "list_all_conversations",
-    "list_folders",
-    "list_agent_profiles",
-    "list_ducky_catalog",
-    "list_recent_projects",
-    "list_known_projects",
     "list_uefn_plugins",
     "list_workflows",
+    "list_all_conversations",
+    "list_folders",
 ];
+
+/// The one cacheable getter with no refresh event (it cannot go stale).
+pub const NO_REFRESH_NEEDED: &[&str] = &["get_version"];
 
 pub fn is_cacheable(name: &str) -> bool {
     CACHEABLE.contains(&name)
@@ -216,15 +211,15 @@ mod tests {
     #[test]
     fn cached_getter_answers_before_hello_then_refreshes() {
         let p = tmp("hit");
-        write(&p, "1.2.9", json!({"get_settings[]": {"theme": "dark"}}));
+        write(&p, "1.2.9", json!({"get_appearance[]": {"theme": "dark"}}));
         let mut c = StartupCache::load(&p, "1.2.9");
-        let Intercept::Answered { page_msg, refresh_line } = c.intercept(&call("js-1", "get_settings")) else {
+        let Intercept::Answered { page_msg, refresh_line } = c.intercept(&call("js-1", "get_appearance")) else {
             panic!("not answered from cache")
         };
         let msg: Value = serde_json::from_str(&page_msg).unwrap();
         assert_eq!(msg, json!({"t":"result","id":"js-1","ok":true,"value":{"theme":"dark"}}));
         let line: Value = serde_json::from_str(&refresh_line).unwrap();
-        assert_eq!(line["name"], "get_settings");
+        assert_eq!(line["name"], "get_appearance");
         let rid = line["id"].as_str().unwrap().to_string();
         assert!(rid.starts_with(REFRESH_ID_PREFIX));
         assert!(crate::page_message_from_backend(&format!(r#"{{"t":"result","id":"{rid}","ok":true}}"#)).is_none());
@@ -234,11 +229,11 @@ mod tests {
             .on_backend_line(&json!({"t":"result","id":rid,"ok":true,"value":{"theme":"light"}}).to_string())
             .expect("stale value -> refresh event");
         let ev: Value = serde_json::from_str(&ev).unwrap();
-        assert_eq!(ev, json!({"t":"event","name":"startup-refresh","data":{"stale":["get_settings"]}}));
+        assert_eq!(ev, json!({"t":"event","name":"startup-refresh","data":{"stale":["get_appearance"]}}));
         // Saved from the live result; after hello nothing comes from the cache.
         let again = StartupCache::load(&p, "1.2.9");
-        assert_eq!(again.cached["get_settings[]"], json!({"theme":"light"}));
-        assert_eq!(c.intercept(&call("js-2", "get_settings")), Intercept::Pass);
+        assert_eq!(again.cached["get_appearance[]"], json!({"theme":"light"}));
+        assert_eq!(c.intercept(&call("js-2", "get_appearance")), Intercept::Pass);
     }
 
     #[test]
@@ -265,15 +260,40 @@ mod tests {
     }
 
     #[test]
+    fn getters_without_a_refresh_path_never_come_from_the_cache() {
+        let p = tmp("norefresh");
+        let names = [
+            "get_settings",
+            "get_header_visibility",
+            "get_workspace_dock",
+            "get_editor_workspace",
+            "get_restore_tabs",
+            "get_key_status",
+            "list_recent_projects",
+            "list_known_projects",
+            "list_ducky_catalog",
+            "list_agent_profiles",
+            "list_conversations",
+        ];
+        let results: serde_json::Map<String, Value> = names.iter().map(|n| (format!("{n}[]"), json!("old"))).collect();
+        write(&p, "1", Value::Object(results));
+        let mut c = StartupCache::load(&p, "1");
+        for name in names {
+            assert!(!is_cacheable(name), "{name}");
+            assert_eq!(c.intercept(&call("js-1", name)), Intercept::Pass, "{name}");
+        }
+    }
+
+    #[test]
     fn version_change_ignores_the_cache() {
         let p = tmp("ver");
-        write(&p, "1.2.8", json!({"get_settings[]": {"a": 1}}));
+        write(&p, "1.2.8", json!({"get_appearance[]": {"a": 1}}));
         let mut c = StartupCache::load(&p, "1.2.9");
-        assert_eq!(c.intercept(&call("js-1", "get_settings")), Intercept::Pass);
+        assert_eq!(c.intercept(&call("js-1", "get_appearance")), Intercept::Pass);
         // The live answer is written under the new version.
         c.on_backend_line(r#"{"t":"hello","protocol":1,"app_version":"1.2.9"}"#);
         assert!(c.on_backend_line(r#"{"t":"result","id":"js-1","ok":true,"value":{"a":2}}"#).is_none());
-        assert_eq!(StartupCache::load(&p, "1.2.9").cached["get_settings[]"], json!({"a":2}));
+        assert_eq!(StartupCache::load(&p, "1.2.9").cached["get_appearance[]"], json!({"a":2}));
     }
 
     #[test]
@@ -281,20 +301,19 @@ mod tests {
         let p = tmp("broken");
         std::fs::write(&p, "{not json").unwrap();
         let mut c = StartupCache::load(&p, "1");
-        assert_eq!(c.intercept(&call("js-1", "get_settings")), Intercept::Pass);
+        assert_eq!(c.intercept(&call("js-1", "get_appearance")), Intercept::Pass);
         let mut m = StartupCache::load(p.with_file_name("missing.json"), "1");
-        assert_eq!(m.intercept(&call("js-1", "get_settings")), Intercept::Pass);
+        assert_eq!(m.intercept(&call("js-1", "get_appearance")), Intercept::Pass);
     }
 
     #[test]
     fn args_are_part_of_the_key() {
         let p = tmp("args");
-        write(&p, "1", json!({"list_conversations[\"a\"]": [1]}));
+        write(&p, "1", json!({"list_all_conversations[true]": [1]}));
         let mut c = StartupCache::load(&p, "1");
-        let mut other = call("js-1", "list_conversations");
-        other.args = vec![json!("b")];
+        let mut other = call("js-1", "list_all_conversations");
         assert_eq!(c.intercept(&other), Intercept::Pass);
-        other.args = vec![json!("a")];
+        other.args = vec![json!(true)];
         assert!(matches!(c.intercept(&other), Intercept::Answered { .. }));
     }
 

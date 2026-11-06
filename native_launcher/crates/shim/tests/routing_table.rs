@@ -66,6 +66,27 @@ fn cacheable_names_are_python_getters_in_the_inventory() {
 }
 
 #[test]
+fn every_cacheable_name_has_an_in_place_refresh() {
+    let page = repo_file("ducky_app/frontend/ui_web/web/src/hooks/startupRefresh.ts");
+    // Keys of PANEL_PUSH / AGENT_EVENT: `  name: [`.
+    let mapped: Vec<&str> = page
+        .lines()
+        .filter_map(|l| l.strip_prefix("  ")?.split_once(": [").map(|(k, _)| k))
+        .filter(|k| k.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+        .collect();
+    assert!(mapped.len() >= 5, "parsed too few refresh entries: {mapped:?}");
+    for name in shim::cache::CACHEABLE {
+        if shim::cache::NO_REFRESH_NEEDED.contains(name) {
+            continue;
+        }
+        assert!(mapped.contains(name), "{name} is cached but startupRefresh.ts has no refresh for it");
+    }
+    for name in &mapped {
+        assert!(shim::cache::CACHEABLE.contains(name), "{name} is mapped but never cached");
+    }
+}
+
+#[test]
 fn shim_js_never_reloads_the_page() {
     for needle in ["reload(", "location.href =", "location.assign", "location.replace"] {
         assert!(!SHIM_JS.contains(needle), "shim.js must refresh in place, found {needle}");
