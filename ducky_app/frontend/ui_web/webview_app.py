@@ -453,6 +453,20 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     )
     _allow_screencast_without_gesture()
 
+    # Keep the early logo splash up through heavy imports — create the pump Tk later
+    # by converting that same splash root (avoids a second Tcl interpreter).
+    # The panel API loads no webview/pythonnet, so it imports and starts here while the
+    # warm-up thread is still loading .NET WinForms (~0.4-0.6 s), not after it.
+    t_import_api = time.perf_counter()
+    from frontend.ui_web.panel_api import shared_panel_api
+
+    _boot_trace("import_panel_api", t_import_api)
+
+    t_api_init = time.perf_counter()
+    # The window's PanelApi also serves HTTP, phone, website and MCP calls in this process.
+    api = shared_panel_api()
+    _boot_trace("panel_api_init", t_api_init)
+
     t_webview = time.perf_counter()
     if webview_warmup is not None:
         webview_warmup.join(timeout=30)
@@ -481,18 +495,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         webview.settings["REMOTE_DEBUGGING_PORT"] = int(_dbg_port)
         logging.getLogger(__name__).warning("WebView2 remote debugging on port %s", _dbg_port)
     _boot_trace("webview_import_patches", t_webview)
-
-    # Keep the early logo splash up through heavy imports — create the pump Tk later
-    # by converting that same splash root (avoids a second Tcl interpreter).
-    t_import_api = time.perf_counter()
-    from frontend.ui_web.panel_api import shared_panel_api
-
-    _boot_trace("import_panel_api", t_import_api)
-
-    t_api_init = time.perf_counter()
-    # The window's PanelApi also serves HTTP, phone, website and MCP calls in this process.
-    api = shared_panel_api()
-    _boot_trace("panel_api_init", t_api_init)
     try:
         from frontend.ui_web.workspace_bootstrap import install as install_workspace_adapters
 

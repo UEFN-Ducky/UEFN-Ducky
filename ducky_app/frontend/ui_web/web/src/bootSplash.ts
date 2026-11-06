@@ -1,9 +1,7 @@
 /** Dismiss the inline `#boot-splash` from index.html after the React shell has painted. */
 
 const SPLASH_ID = "boot-splash";
-const FADE_MS = 220;
-/** Minimum time the in-window logo splash stays up once HTML has painted (desktop). */
-const MIN_HOLD_MS = 1200;
+const FADE_MS = 160;
 
 export function dismissBootSplash(): void {
   const el = document.getElementById(SPLASH_ID);
@@ -18,20 +16,13 @@ export function dismissBootSplash(): void {
   }, FADE_MS);
 }
 
-/** The phone panel: the site's Remote View already shows its own loading screen. */
-function phonePanel(): boolean {
-  return new URLSearchParams(window.location.search).has("direct");
-}
-
 /**
- * Wait until the React shell has painted *and* (desktop only) the splash has been
- * visible for at least {@link MIN_HOLD_MS} since navigation, then fade it out.
+ * Fade the splash out as soon as the React shell has painted. The desktop showed the logo
+ * on its native splash since ~0.6 s already; a 1.2 s minimum hold here kept a drawn app
+ * hidden on every start.
  */
 export function dismissBootSplashAfterPaint(): void {
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const remaining = phonePanel() ? 0 : Math.max(0, MIN_HOLD_MS - performance.now());
-      window.setTimeout(() => dismissBootSplash(), remaining);
-    });
+    requestAnimationFrame(() => dismissBootSplash());
   });
 }

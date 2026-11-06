@@ -66,3 +66,30 @@ def test_warmup_is_joined_before_webview_is_imported():
     assert join_at < source.index("import webview\n")
     assert join_at < source.index("install_pywebview_chrome_patches()")
     assert source.index("_start_import_warmup()") < source.index("from backend.workspace.diff_workers")
+
+
+def test_panel_api_starts_while_webview_still_warms():
+    # The panel API (~0.2-0.35 s) needs no webview: it overlaps the .NET load instead of
+    # waiting behind the join.
+    source = inspect.getsource(webview_app._run_panel)
+    join_at = source.index("webview_warmup.join(")
+    assert source.index("from frontend.ui_web.panel_api import shared_panel_api") < join_at
+    assert source.index("api = shared_panel_api()") < join_at
+
+
+def test_panel_api_loads_no_webview():
+    import subprocess
+
+    code = (
+        "import sys; import frontend.ui_web.panel_api; "
+        "print(any(m in sys.modules for m in ('webview', 'clr', 'webview.platforms.winforms')))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        cwd=str(__import__("pathlib").Path(webview_app.__file__).resolve().parents[2]),
+        timeout=120,
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().splitlines()[-1] == "False"

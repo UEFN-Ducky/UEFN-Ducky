@@ -25,11 +25,18 @@ describe("boot splash", () => {
     expect(done()).toBe(true);
   });
 
-  it("on the desktop still holds the logo about 1.2 s", async () => {
+  it("on the desktop goes as soon as the app has painted, with no extra hold", async () => {
+    // The native splash already showed the logo; holding this one hid a drawn app ~1.2 s.
     dismissBootSplashAfterPaint();
     await vi.advanceTimersByTimeAsync(5);
-    expect(done()).toBe(false);
-    await vi.advanceTimersByTimeAsync(1100);
     expect(done()).toBe(true);
+  });
+
+  it("is removed from the page once its fade ends", async () => {
+    dismissBootSplashAfterPaint();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(document.getElementById("boot-splash")).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(document.getElementById("boot-splash")).toBeNull();
   });
 });
