@@ -442,3 +442,64 @@ def test_launcher_main_exits_when_native_painted(monkeypatch: pytest.MonkeyPatch
     src = (Path(ns.__file__).parent / "launcher.py").read_text(encoding="utf-8")
     hook = src.index("maybe_start_native(sys.argv, start_hidden=start_hidden)")
     assert src.index("_hand_off_to_newest(bridge=False)") < hook < src.index("from frontend.ui_web.run import run")
+
+
+# --- UEFN_DUCKY_NO_NATIVE: the launcher's own fallback never loops --------------------
+
+
+@pytest.fixture
+def no_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ns, "_no_native", False)
+    monkeypatch.setenv(ns.NO_NATIVE_ENV, "1")
+
+
+@pytest.mark.parametrize("setting", ["on", "auto"])
+def test_no_native_decides_python(no_native: None, setting: str) -> None:
+    assert ns.decide(setting, True, True, False) == "python"
+    assert ns.python_reason(setting, True, True, False) == "launcher_fallback"
+
+
+@pytest.mark.parametrize("setting", ["on", "auto"])
+def test_no_native_hook_runs_python_and_drops_the_env(no_native: None, launcher_present: Path,
+                                                    no_spawn: list, monkeypatch: pytest.MonkeyPatch,
+                                                    setting: str) -> None:
+    import os
+
+    rows = _sync_records(monkeypatch)
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting=setting) is False
+    assert ns.NO_NATIVE_ENV not in os.environ  # agent hosts, bridges: nothing to inherit
+    assert no_spawn == [] and rows == [("python", None, None, "launcher_fallback")]
+    # Still python after the env is gone, and not a crash-loop failure.
+    assert ns.decide(setting, True, True, False) == "python"
+    assert not ns.crash_loop_path().exists()
+
+
+def test_no_native_dropped_even_when_off(no_native: None, no_spawn: list) -> None:
+    import os
+
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="off") is False
+    assert ns.NO_NATIVE_ENV not in os.environ
+
+
+def test_child_env_has_no_no_native(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(ns, "_no_native", False)
+    monkeypatch.setenv(ns.NO_NATIVE_ENV, "1")
+    ns.take_no_native()
+    seen: list[dict] = []
+
+    def spawn(cmd, env):
+        seen.append(env)
+        raise OSError("no")
+
+    assert ns.run_native(["UEFN-Ducky.exe"], 0, spawn=spawn, exe=tmp_path / "x.exe") == ns.EXIT_START_ERROR
+    assert ns.NO_NATIVE_ENV not in seen[0]
+
+
+def test_without_no_native_nothing_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ns, "_no_native", False)
+    monkeypatch.delenv(ns.NO_NATIVE_ENV, raising=False)
+    assert ns.decide("on", True, True, False) == "native"
+    assert ns.decide("auto", True, True, False) == "native"
+    assert ns.python_reason("auto", True, True, True) == "crash_loop_active"
+    monkeypatch.setenv(ns.NO_NATIVE_ENV, "0")
+    assert ns.decide("on", True, True, False) == "native"

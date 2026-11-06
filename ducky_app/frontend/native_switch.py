@@ -35,6 +35,9 @@ LAUNCHER_EXE_ENV = "UEFN_DUCKY_NATIVE_LAUNCHER_EXE"
 NATIVE_CHILD_ENV = "UEFN_DUCKY_NATIVE_CHILD"
 # A hint for the launcher: the EXE to run with --backend (it also looks next to itself).
 BACKEND_EXE_ENV = "UEFN_DUCKY_BACKEND_EXE"
+# Set by Ducky-Launcher.exe when it falls back and starts UEFN-Ducky.exe itself: this launch
+# always runs the Python window, so on/auto never start the launcher again (no loop).
+NO_NATIVE_ENV = "UEFN_DUCKY_NO_NATIVE"
 
 EXIT_WEBVIEW2 = 20
 EXIT_PROTOCOL = 21
@@ -53,11 +56,12 @@ EXIT_REASONS = {
 # Every fallback_reason record_start keeps; anything else is "other".
 FALLBACK_REASONS = (
     "webview2", "protocol", "crash_loop", "no_hello", "start_error",
-    "timeout", "spawn_error", "no_exe", "crash_loop_active", "exit_other", "other",
+    "timeout", "spawn_error", "no_exe", "crash_loop_active", "launcher_fallback", "exit_other", "other",
 )
 # A start that says nothing about the launcher's health (no WebView2, no EXE, the 24 h
 # hold itself) is not a failure toward the crash loop.
-_NOT_A_FAILURE = frozenset({"webview2", "no_exe", "crash_loop_active"})
+# launcher_fallback: the launcher already counted its own failure.
+_NOT_A_FAILURE = frozenset({"webview2", "no_exe", "crash_loop_active", "launcher_fallback"})
 
 CRASH_LOOP_FAILURES = 3
 CRASH_LOOP_WINDOW_S = 10 * 60
@@ -66,6 +70,8 @@ STARTS_KEPT = 200
 _POLL_S = 0.02
 
 _lock = threading.Lock()
+# NO_NATIVE_ENV was set for this process (take_no_native moved it here off os.environ).
+_no_native = False
 # The ready file of the last run_native that returned None: {painted_ms, window_ms}.
 last_ready: dict[str, Any] = {}
 
@@ -190,12 +196,25 @@ def note_failure(now: float | None = None) -> bool:
 # --- the decision -----------------------------------------------------------------------
 
 
+def take_no_native() -> bool:
+    """Read NO_NATIVE_ENV once and drop it from os.environ, so agent hosts, bridges and other
+    children of this process never inherit it. True when this launch is a launcher fallback."""
+    global _no_native
+    if os.environ.pop(NO_NATIVE_ENV, "").strip() == "1":
+        _no_native = True
+    return _no_native
+
+
+def no_native() -> bool:
+    return _no_native or os.environ.get(NO_NATIVE_ENV, "").strip() == "1"
+
+
 def decide(setting: str, exe_present: bool, webview2_ok: bool, crash_loop_active: bool) -> str:
     """'native' or 'python' for this launch."""
     from frontend.settings import normalize_native_launcher
 
     mode = normalize_native_launcher(setting)
-    if mode == "off" or not exe_present or not webview2_ok:
+    if mode == "off" or no_native() or not exe_present or not webview2_ok:
         return "python"
     if mode == "auto" and crash_loop_active:
         return "python"
@@ -209,6 +228,8 @@ def python_reason(setting: str, exe_present: bool, webview2_ok: bool, crash_loop
     mode = normalize_native_launcher(setting)
     if mode == "off":
         return ""
+    if no_native():
+        return "launcher_fallback"
     if not exe_present:
         return "no_exe"
     if not webview2_ok:
@@ -309,8 +330,12 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
     from frontend.settings import normalize_native_launcher
 
     started = time.perf_counter()
+    fallback = take_no_native()  # first: off or not, children never inherit it
     mode = normalize_native_launcher(_setting() if setting is None else setting)
     if mode == "off" or start_hidden or os.environ.get(NATIVE_CHILD_ENV) or "--backend" in argv[1:]:
+        return False
+    if fallback:
+        record_start_soon("python", None, None, "launcher_fallback")
         return False
     exe = launcher_exe()
     present = exe.is_file()
