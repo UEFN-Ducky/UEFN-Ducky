@@ -61,9 +61,9 @@ async def _session(params: Any, url: str, calls: list[dict[str, Any]], list_tool
     stack = contextlib.AsyncExitStack()
     if url:
         from mcp.client.streamable_http import streamable_http_client
-        from mcp.shared._httpx_utils import create_mcp_http_client
+        from backend.mcp_plugins.client_pool import mcp_http_client
 
-        http = await stack.enter_async_context(create_mcp_http_client())
+        http = await stack.enter_async_context(mcp_http_client())
         transport = streamable_http_client(url, http_client=http)
     else:
         from mcp.client.stdio import stdio_client

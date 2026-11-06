@@ -108,7 +108,10 @@ def test_no_https_path_uses_openssl_alone():
     import re
 
     root = pathlib.Path(__file__).resolve().parents[1]
-    bad = re.compile(r"ssl\.create_default_context\(|urllib\.request\.HTTPSHandler\(")
+    bad = re.compile(
+        r"ssl\.create_default_context\(|urllib\.request\.HTTPSHandler\(|create_mcp_http_client"
+        r"|httpx\.(Async)?Client\((?!.*verify=)|\.(get|post|request|stream)\(.*httpx|requests\.(get|post|Session)\("
+    )
     hits = [
         f"{p.relative_to(root)}:{n}"
         for p in root.rglob("*.py")
@@ -117,6 +120,28 @@ def test_no_https_path_uses_openssl_alone():
         if bad.search(line)
     ]
     assert hits == []
+
+
+def test_mcp_http_clients_verify_with_windows():
+    import asyncio
+
+    import truststore
+
+    from backend.mcp_plugins import client_pool
+
+    assert client_pool._http_transport_kwargs({})["httpx_client_factory"] is client_pool.mcp_http_client
+
+    async def ctx_of_client():
+        async with client_pool.mcp_http_client() as client:
+            return client._transport._pool._ssl_context
+
+    assert isinstance(asyncio.run(ctx_of_client()), truststore.SSLContext)
+
+
+def test_packaged_smoke_refuses_an_exe_without_windows_https():
+    from frontend import runtime_smoke
+
+    assert "isinstance(https_context(), truststore.SSLContext)" in inspect.getsource(runtime_smoke._run)
 
 
 def test_window_launch_threads_it_and_every_https_user_waits():

@@ -8,6 +8,11 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "agent-host":
     # Before the launcher: no single-instance lock, window, IDE apply or skill sync.
+    # Its HTTPS still checks certificates with Windows, as the launcher sets up.
+    from frontend import net_access, ssl_boot
+
+    ssl_boot.inject_now()
+    net_access.install()
     from frontend.agent_host.main import main as agent_host_main
 
     raise SystemExit(agent_host_main(sys.argv[2:]))

@@ -59,12 +59,24 @@ def epic_not_found(text: str) -> bool:
     return bool(_EPIC_NOT_FOUND.match(str(text or "")))
 
 
+def mcp_http_client(headers: dict[str, Any] | None = None, timeout: Any = None, auth: Any = None) -> Any:
+    """The MCP SDK's client factory, with HTTPS verified by Windows (frontend/ssl_boot.py)."""
+    import httpx
+
+    from frontend.ssl_boot import https_context
+
+    if timeout is None:
+        timeout = httpx.Timeout(30.0, read=300.0)  # the SDK's defaults
+    return httpx.AsyncClient(headers=headers, timeout=timeout, auth=auth, verify=https_context())
+
+
 def _http_transport_kwargs(block: dict[str, Any]) -> dict[str, Any]:
     """Epic PlaceDevice / execute_tool_script regularly outlive the SDK 30s default."""
     return {
         "headers": block.get("headers") or None,
         "timeout": _TOOL_TIMEOUT_SEC,
         "sse_read_timeout": _TOOL_TIMEOUT_SEC,
+        "httpx_client_factory": mcp_http_client,
     }
 
 _T = TypeVar("_T")
@@ -289,9 +301,8 @@ class PluginClientPool:
                     if ttype == "http":
                         import httpx
                         from mcp.client.streamable_http import streamable_http_client
-                        from mcp.shared._httpx_utils import create_mcp_http_client
 
-                        client = await stack.enter_async_context(create_mcp_http_client(
+                        client = await stack.enter_async_context(mcp_http_client(
                             headers=block.get("headers") or None,
                             timeout=httpx.Timeout(_TOOL_TIMEOUT_SEC, read=_TOOL_TIMEOUT_SEC),
                         ))

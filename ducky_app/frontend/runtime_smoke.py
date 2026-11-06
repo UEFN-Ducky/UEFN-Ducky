@@ -164,6 +164,15 @@ def _run(output: str, report: dict) -> int:
     from frontend.bundle_root import packaged_data_root
     from frontend.ui_web.panel_assets import verify_bundled_panel
 
+    # An EXE without truststore checks HTTPS with OpenSSL alone: "certificate has expired"
+    # on PCs missing a newer root (Store downloads, updates). Never ship that.
+    import truststore
+
+    from frontend.ssl_boot import https_context
+
+    assert isinstance(https_context(), truststore.SSLContext), "HTTPS is not verified by Windows"
+    report["tls"] = {"truststore": truststore.__version__}
+
     data_root = packaged_data_root()
     if data_root is not None:
         panel = data_root / "frontend" / "ui_web"

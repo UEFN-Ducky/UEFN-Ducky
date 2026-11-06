@@ -299,6 +299,8 @@ a = Analysis(
     # Compiled plugin builds are disassembled before they ship (uefn_plugins/cpu_check.py).
     + collect_submodules("iced_x86")
     + list(_PLUGIN_HOST_CODING)
+    # HTTPS verified by Windows (frontend/ssl_boot.py); runtime smoke fails without it.
+    + collect_submodules("truststore")
     + [
         "frontend",
         "frontend.launcher",
