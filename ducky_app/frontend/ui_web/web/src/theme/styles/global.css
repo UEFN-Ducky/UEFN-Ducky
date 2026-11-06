@@ -877,7 +877,7 @@ body.native-caption-input-ready .app-header .drag-region {
 .app-header .choice-dropdown--light .choice-dropdown-light {
   display: none;
 }
-.app-header-center .plugin-header-menu {
+.app-header-center .plugin-header-overflow {
   flex-shrink: 0;
   width: auto;
   max-width: none;

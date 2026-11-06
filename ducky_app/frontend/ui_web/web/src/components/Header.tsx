@@ -228,7 +228,9 @@ function PluginHeaderMenu({ buttons }: { buttons: PluginHeaderButton[] }) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   if (!buttons.length) return null;
   return (
-    <div className="choice-dropdown choice-dropdown--compact choice-dropdown--icon choice-dropdown--light plugin-header-menu no-drag">
+    // Not "plugin-header-menu": that class is the header.menus page box (240 px tall), and on
+    // this button it pushed the Plugins icon out of the 34 px header, so every plugin vanished.
+    <div className="choice-dropdown choice-dropdown--compact choice-dropdown--icon choice-dropdown--light plugin-header-overflow no-drag">
       <button
         ref={anchorRef}
         type="button"
