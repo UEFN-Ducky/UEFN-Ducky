@@ -377,15 +377,15 @@ class TerminalManager:
         for session, chat in agents:
             quiet = now - float(getattr(session, "last_activity", now))
             done = not chat or chat not in running
-            # A done agent's dev server that just exited: its terminal closes on this tick.
-            had_background = bool(getattr(session, "ran_background", False))
+            # A done agent's background job that ended closes with the same 10 s quiet wait,
+            # counted from its last output: Nov 6 2026, closing it on the next tick lost that
+            # output to the agent reading it (the loopback test read "session not found").
             background = session.background_alive(snapshot)
-            server_ended = done and had_background and not background
             if session.id in asked:
                 kept[session.id] = "allow_card"
             elif session.id in held:
                 kept[session.id] = "held"
-            elif quiet < (_DONE_IDLE_CLOSE_S if done else _AGENT_IDLE_CLOSE_S) and not server_ended:
+            elif quiet < (_DONE_IDLE_CLOSE_S if done else _AGENT_IDLE_CLOSE_S):
                 kept[session.id] = "quiet<60s"
             elif session.is_busy() and not (done and quiet >= _AGENT_STALE_CLOSE_S):
                 kept[session.id] = "busy"

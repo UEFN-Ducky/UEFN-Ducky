@@ -267,7 +267,7 @@ def test_a_done_agents_quiet_terminal_closes_after_10_s_and_a_working_ones_after
     assert mgr.kept == {working: "quiet<60s"}
 
 
-def test_a_done_agents_dev_server_terminal_closes_on_the_tick_after_the_server_exits(mgr, tmp_path):
+def test_a_done_agents_dev_server_terminal_closes_10_s_after_its_last_output_once_it_exits(mgr, tmp_path):
     server = _open(mgr, tmp_path, "done-agent")["session_id"]
     shell = mgr.get_session(server)
     shell.ran_background = True
@@ -276,9 +276,22 @@ def test_a_done_agents_dev_server_terminal_closes_on_the_tick_after_the_server_e
     assert mgr.close_idle_agent_terminals(now=start + 1, running=set()) == []
     assert mgr.close_idle_agent_terminals(now=start + 1800, running=set()) == []
     assert mgr.kept == {server: "background"}  # quiet, but its server still runs
-    shell.last_activity = start + 2  # it printed its last line
+    shell.last_activity = start + 1800  # it printed its last line
     mgr.running.pop(shell._pty.pid)  # and exited
-    assert mgr.close_idle_agent_terminals(now=start + 3, running=set()) == [server]  # no quiet wait
+    # Nov 6 2026: closed on the very next tick, its last output was lost to the agent reading it.
+    assert mgr.close_idle_agent_terminals(now=start + 1801, running=set()) == []
+    assert mgr.close_idle_agent_terminals(now=start + 1810, running=set()) == [server]
+
+
+def test_a_done_agents_silent_server_exit_closes_on_the_next_tick(mgr, tmp_path):
+    server = _open(mgr, tmp_path, "done-agent")["session_id"]
+    shell = mgr.get_session(server)
+    shell.ran_background = True
+    mgr.running[shell._pty.pid] = [9998]
+    start = shell.last_activity
+    assert mgr.close_idle_agent_terminals(now=start + 1800, running=set()) == []
+    mgr.running.pop(shell._pty.pid)  # exits without printing: quiet long past 10 s
+    assert mgr.close_idle_agent_terminals(now=start + 1805, running=set()) == [server]
 
 
 def test_turn_end_closes_the_chats_terminals_at_once_and_keeps_the_rest(mgr, tmp_path):
