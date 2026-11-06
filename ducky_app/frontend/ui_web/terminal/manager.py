@@ -26,7 +26,7 @@ from frontend.ui_web.terminal.session import (
     console_hosts,
     terminate_pid,
 )
-from frontend.ui_web.terminal.shells import shell_label
+from frontend.ui_web.terminal.shells import agent_shell, shell_label
 
 _keep_log = logging.getLogger("terminal.keep")
 _APPROVAL_TIMEOUT_S = 120.0
@@ -155,6 +155,9 @@ class TerminalManager:
         ``from_agent``: an agent's tool call opened it. With no chat (``conv_id``) to own it,
         it still closes when idle, like a workflow run's; only the person's own stay."""
         shell_norm = shell_label(shell)
+        if (conv_id or from_agent) and not command:
+            shell_norm = agent_shell(shell)  # no Git Bash: light PowerShell, never an error
+        swapped = shell_norm != shell_label(shell)
         workdir = (cwd or _default_cwd()).strip() or "."
         if not os.path.isdir(workdir):
             workdir = os.getcwd()
@@ -217,7 +220,7 @@ class TerminalManager:
             session._on_output = on_output  # type: ignore[attr-defined]
             session._on_exit = on_exit  # type: ignore[attr-defined]
             session._on_busy = lambda busy, sid=session.id: self._busy_changed(sid, busy)  # type: ignore[attr-defined]
-            shell_fallback = False
+            shell_fallback = swapped
             if self._host_baseline is None:
                 self._host_baseline = console_hosts(_process_snapshot)
             try:

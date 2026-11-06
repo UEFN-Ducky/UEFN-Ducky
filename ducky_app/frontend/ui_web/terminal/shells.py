@@ -36,21 +36,36 @@ def resolve_shell(shell: str, agent: bool = False) -> tuple[str, list[str]]:
         # -NoExit keeps the interactive shell alive under ConPTY/pywinpty.
         return exe, [exe, "-NoLogo", "-NoExit", *(_PS_AGENT_ARGS if agent else ())]
 
-    exe = ""
-    for candidate in _BASH_CANDIDATES:
-        if Path(candidate).is_file():
-            exe = candidate
-            break
-    if not exe:
-        which_bash = shutil.which("bash")
-        if which_bash and "usr\\bin\\bash" not in which_bash.replace("/", "\\").lower():
-            exe = which_bash
+    exe = _git_bash()
     if not exe:
         raise FileNotFoundError(
             "Git Bash not found. Install Git for Windows or add bash.exe to PATH."
         )
-    # Login shell — plain -i can exit immediately under some ConPTY attach sequences.
-    return exe, [exe, "--login"]
+    # Login shell — plain -i can exit immediately under some ConPTY attach sequences. An
+    # agent's skips the profiles: Git's bash.exe wrapper sets PATH (usr/bin, mingw64) itself.
+    return exe, [exe, "--login", *(("--noprofile", "--norc") if agent else ())]
+
+
+def _git_bash() -> str:
+    for candidate in _BASH_CANDIDATES:
+        if Path(candidate).is_file():
+            return candidate
+    which_bash = shutil.which("bash")
+    if which_bash and "usr\\bin\\bash" not in which_bash.replace("/", "\\").lower():
+        return which_bash
+    return ""
+
+
+def agent_shell(shell: str) -> str:
+    """The shell an agent's terminal gets. PowerShell is on every Windows PC; Git Bash is
+    optional and never downloaded. Nov 6 2026 (this PC, after 20 commands): light Git Bash
+    15.6 MB private against light PowerShell 99.4 MB (test_shell_memory.py), so an agent that
+    asks for bash (ducky_terminal_open's default) gets it where installed, else PowerShell,
+    with no error. Asking for powershell always gets PowerShell."""
+    label = shell_label(shell)
+    if label == "bash" and not _git_bash():
+        return "powershell"
+    return label
 
 
 def shell_label(shell: str) -> str:
