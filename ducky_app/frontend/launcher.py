@@ -386,6 +386,21 @@ def _host_started_fine() -> None:
         pass
 
 
+def _hidden_by_hand_off(argv: list[str] | None = None) -> bool:
+    """A sign-in start that an older version handed to this one. Its hand-off took
+    ``--background`` out of argv but kept ``UEFN_DUCKY_START_HIDDEN=1`` in the environment it
+    passed on, along with ``UEFN_DUCKY_LAUNCHER_EXE``. A version switch (``--after-update``)
+    brings its own window state, so it never counts."""
+    from frontend.app_versions import AFTER_UPDATE_ARG, LAUNCHER_ENV, START_HIDDEN_ENV
+
+    args = sys.argv if argv is None else argv
+    return (
+        os.environ.get(START_HIDDEN_ENV) == "1"
+        and bool((os.environ.get(LAUNCHER_ENV) or "").strip())
+        and AFTER_UPDATE_ARG not in args[1:]
+    )
+
+
 def _wait_for_previous_version() -> None:
     """``--after-update <pid>``: the version that switched to this one is still closing."""
     if "--after-update" not in sys.argv:
@@ -477,7 +492,7 @@ def main() -> None:
         # Taken out of argv so it is never read as a file to open.
         from frontend.autostart import START_HIDDEN_ENV, take_background_flag
 
-        start_hidden = take_background_flag(sys.argv)
+        start_hidden = take_background_flag(sys.argv) or _hidden_by_hand_off()
         if start_hidden:
             os.environ[START_HIDDEN_ENV] = "1"
         else:

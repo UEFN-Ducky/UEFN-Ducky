@@ -204,6 +204,32 @@ def test_a_hidden_start_stays_hidden_through_the_hand_off(trees, starts, monkeyp
     assert starts == [(trees["install"] / "UEFN-Ducky.exe", [*_WAIT_FOR_ME, av.BACKGROUND_ARG])]
 
 
+def test_a_hidden_start_handed_off_by_an_older_version_stays_hidden(monkeypatch) -> None:
+    """1.2.470's hand-off drops --background but passes START_HIDDEN=1 and LAUNCHER_ENV on;
+    the receiving version must start hidden (the update drill saw a window at sign-in)."""
+    from frontend import launcher
+
+    monkeypatch.setenv(av.START_HIDDEN_ENV, "1")
+    monkeypatch.setenv(av.LAUNCHER_ENV, r"C:\Programs\UEFN Ducky\UEFN-Ducky.exe")
+    assert launcher._hidden_by_hand_off(["UEFN-Ducky.exe"]) is True
+    assert launcher._hidden_by_hand_off(["UEFN-Ducky.exe", "uefn-ducky://store/x"]) is True
+    # A version switch brings its own window state (handover), never this.
+    assert launcher._hidden_by_hand_off(["UEFN-Ducky.exe", "--after-update", "42"]) is False
+    monkeypatch.delenv(av.LAUNCHER_ENV)
+    assert launcher._hidden_by_hand_off(["UEFN-Ducky.exe"]) is False  # not a hand-off
+    monkeypatch.setenv(av.LAUNCHER_ENV, r"C:\Programs\UEFN Ducky\UEFN-Ducky.exe")
+    monkeypatch.setenv(av.START_HIDDEN_ENV, "0")
+    assert launcher._hidden_by_hand_off(["UEFN-Ducky.exe"]) is False
+
+
+def test_launcher_main_uses_the_hand_off_hidden_flag() -> None:
+    src = (Path(av.__file__).parent / "launcher.py").read_text(encoding="utf-8")
+    assert "start_hidden = take_background_flag(sys.argv) or _hidden_by_hand_off()" in src
+    main = src[src.index("def main()"):]
+    # Read before --after-update is taken out of argv.
+    assert main.index("_hidden_by_hand_off()") < main.index("_wait_for_previous_version()")
+
+
 def test_failed_while_starting_follows_record_start_and_mark_ready(trees) -> None:
     assert av.failed_while_starting(NEW) is False
     av.record_start(NEW)
