@@ -76,9 +76,16 @@ def apply_ide_bridge(kind: IdeKind, settings: Optional[PanelSettings] = None, *,
     block = build_uefn_server_block(s)
     path = path_for_ide(kind, s.antigravity_config_path)
     if kind == IdeKind.CODEX:
-        from frontend.codex_mcp import codex_block_matches, has_uefn_server, merge_codex_config
+        from frontend.codex_mcp import (
+            codex_block_matches,
+            merge_codex_config,
+            person_hooked_up,
+            remove_unasked_block,
+        )
 
-        if auto and not has_uefn_server(path):
+        if auto and not person_hooked_up(path):
+            if remove_unasked_block(path):
+                return f"{path} (removed the Ducky server older Ducky added unasked)"
             return f"{path} (not hooked up, left alone)"
         ok, _detail = codex_block_matches(path, block)
         if ok:

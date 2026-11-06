@@ -95,6 +95,29 @@ def test_auto_apply_never_hooks_up_codex_unasked(tmp_path, monkeypatch):
     assert '"bridge"' in cfg.read_text(encoding="utf-8")
 
 
+def test_startup_removes_the_block_older_ducky_wrote_unasked(tmp_path, monkeypatch):
+    from frontend import ide_apply
+    from frontend.ide_paths import IdeKind
+
+    cfg = tmp_path / "config.toml"
+    monkeypatch.setattr(ide_apply, "path_for_ide", lambda kind, override="": cfg)
+    monkeypatch.setattr(ide_apply, "build_uefn_server_block", lambda s, *a: _block())
+    monkeypatch.setattr(ide_apply, "sync_skill_for_ide", lambda path: [])
+    settings = type("S", (), {"antigravity_config_path": ""})()
+    persons = 'model = "gpt-5"\n\n[mcp_servers.mine]\ncommand = "mine.exe"\n'
+    cfg.write_text(
+        persons
+        + '\n[mcp_servers.uefn]\ncommand = "C:\\\\Ducky\\\\UEFN-Ducky.exe"\n\n'
+        + '# BEGIN UEFN-DUCKY\napproval_policy = "on-failure"\n\n[mcp_servers.uefn]\n'
+        + 'command = "C:\\\\Ducky\\\\UEFN-Ducky-Bridge.exe"\n# END UEFN-DUCKY\n',
+        encoding="utf-8",
+    )
+    ide_apply.apply_ide_bridge(IdeKind.CODEX, settings, auto=True)
+    assert cfg.read_text(encoding="utf-8") == persons
+    ide_apply.apply_ide_bridge(IdeKind.CODEX, settings, auto=True)  # nothing left to do
+    assert cfg.read_text(encoding="utf-8") == persons
+
+
 def test_old_question_timeout_requires_config_refresh(tmp_path):
     cfg = tmp_path / "config.toml"
     merge_codex_config(cfg, _block())

@@ -18,6 +18,9 @@ from typing import Any
 _TOML_BEGIN = "# BEGIN UEFN-DUCKY"
 _TOML_END = "# END UEFN-DUCKY"
 _UEFN_TABLES = ("mcp_servers.uefn", "mcp_servers.uefn.env")
+# Only blocks written by the person's Apply carry this. Older Ducky wrote the block
+# on every start unasked; those are removed (see remove_unasked_block).
+_OPT_IN = "# Added by Ducky Settings > Apply"
 _MCP_APPROVE_TOML = 'default_tools_approval_mode = "approve"'
 
 
@@ -84,7 +87,7 @@ def render_codex_block(uefn_block: dict[str, Any]) -> str:
 def merge_codex_config(config_path: Path, uefn_block: dict[str, Any]) -> bool:
     """Replace the marked UEFN block. Other Codex tables stay. Returns True if written."""
     body = render_codex_block(uefn_block)
-    block = f"{_TOML_BEGIN}\n{body.rstrip()}\n{_TOML_END}\n"
+    block = f"{_TOML_BEGIN}\n{_OPT_IN}\n{body.rstrip()}\n{_TOML_END}\n"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     existing = ""
     if config_path.is_file():
@@ -123,13 +126,41 @@ def _uefn_table(text: str) -> dict[str, Any] | None:
     return row if isinstance(row, dict) else None
 
 
-def has_uefn_server(config_path: Path) -> bool:
-    """True when Codex config already lists Ducky's server (the person hooked Codex up)."""
+def person_hooked_up(config_path: Path) -> bool:
+    """True when the person added Ducky to Codex themselves (Settings > Apply)."""
     try:
         text = config_path.read_text(encoding="utf-8")
     except OSError:
         return False
-    return _uefn_table(text) is not None
+    _outside, block = _split_marked(text)
+    return bool(block) and _OPT_IN in block
+
+
+def remove_unasked_block(config_path: Path) -> bool:
+    """Take out the Ducky server older Ducky wrote into Codex without being asked.
+
+    That block made the person's own Codex app and CLI start Ducky's bridge on
+    every launch and wait for it, and forced a global approval_policy. Removes
+    the marked block and any unmarked [mcp_servers.uefn] that runs a UEFN-Ducky
+    exe; the person's other settings stay. Returns True if the file changed.
+    """
+    if person_hooked_up(config_path):
+        return False
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    outside, block = _split_marked(text)
+    row = _uefn_table(outside) or {}
+    if "uefn-ducky" in str(row.get("command") or "").lower():
+        outside = _strip_toml_tables(outside, _UEFN_TABLES)
+    if block is None and outside == text:
+        return False
+    new = outside.strip() + "\n" if outside.strip() else ""
+    if new == text:
+        return False
+    config_path.write_text(new, encoding="utf-8")
+    return True
 
 
 def codex_block_matches(config_path: Path, expected_block: dict[str, Any]) -> tuple[bool, str]:
@@ -148,8 +179,8 @@ def codex_block_matches(config_path: Path, expected_block: dict[str, Any]) -> tu
     if actual is None:
         return False, "uefn MCP server not configured"
     _outside, block = _split_marked(text)
-    if block and "approval_policy" in block:
-        # Older Ducky forced approval_policy on every Codex session from its block.
+    if block and ("approval_policy" in block or _OPT_IN not in block):
+        # Older Ducky wrote this unasked (with a global approval_policy); startup removes it.
         return False, "Out of date — click Apply"
     timeout = actual.get("tool_timeout_sec")
     if not isinstance(timeout, (int, float)) or timeout < 1_000_000_000_000:
