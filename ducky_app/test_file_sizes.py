@@ -28,7 +28,7 @@ SPLITTING: dict[str, int] = {
     'frontend/ui_web/group_orchestrator.py': 1895,
     'frontend/ui_web/panel_api_settings.py': 2129,
     'frontend/ui_web/panel_api_store.py': 2199,
-    'frontend/ui_web/panel_httpd.py': 1589,
+    'frontend/ui_web/panel_httpd.py': 1519,
     'frontend/ui_web/project_files.py': 1659,
     'frontend/ui_web/win_frameless.py': 1506,
     'uefn_listener/listener/registry/worldgen.py': 1685,
