@@ -150,7 +150,7 @@ def test_trim_only_when_hidden_idle_big_and_not_too_soon():
     t = memory.TRIM_EVERY_S + 1
     assert memory.should_trim(big, active=False, now=t, last_at=0.0)
     assert not memory.should_trim(big, active=True, now=t, last_at=0.0)  # the person is looking
-    assert not memory.should_trim({**big, "webview_gb": 1.2}, active=False, now=t, last_at=0.0)
+    assert not memory.should_trim({**big, "webview_gb": 0.8}, active=False, now=t, last_at=0.0)
     assert not memory.should_trim(big, active=False, now=t, last_at=t - 60)  # trimmed a minute ago
     assert not memory.should_trim({"webview_gb": "?"}, active=False, now=t, last_at=0.0)
 
@@ -162,6 +162,45 @@ def test_an_open_window_nobody_uses_trims_past_the_open_cap():
     assert memory.should_trim({"webview_gb": 2.7, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
     assert not memory.should_trim({"webview_gb": 2.7, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=30)
     assert not memory.should_trim({"webview_gb": 1.2, "agents": 0}, active=True, now=t, last_at=0.0, idle_s=idle)
+
+
+def test_the_500_mb_budget_levels():
+    """Nov 5 2026: a 908 MB renderer sat under the 1.0 / 1.5 GB levels and set off nothing."""
+    t = memory.TRIM_EVERY_S + 1
+    assert memory.should_trim({"webview_gb": 0.95}, active=False, now=t, last_at=0.0)  # hidden past 0.9: reload
+    assert not memory.should_trim({"webview_gb": 0.85}, active=False, now=t, last_at=0.0)
+    # An open window in use is never reloaded, however big.
+    assert not memory.should_trim({"webview_gb": 0.95}, active=True, now=t, last_at=0.0, idle_s=5)
+    untouched = memory.SOFT_IDLE_S + 1
+    assert memory.soft_level({"webview_gb": 0.65}, active=True, idle_s=untouched, now=10.0, low_at=0.0) == "Low"
+    assert memory.soft_level({"webview_gb": 0.55}, active=True, idle_s=untouched, now=10.0, low_at=0.0) == ""
+    assert memory.soft_level({"webview_gb": 0.65}, active=True, idle_s=60, now=10.0, low_at=0.0) == ""  # used a minute ago
+
+
+def test_hidden_at_950_mb_reloads(window, monkeypatch):
+    from frontend import error_log
+    from frontend.ui_web import panel_api
+
+    queued, reloaded = [], []
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(memory, "input_idle_s", lambda: 5.0)
+    monkeypatch.setattr(panel_api, "mark_crash_reload", lambda: None)
+    monkeypatch.setattr(error_log, "record_activity", lambda src, msg: None)
+    window.native.BeginInvoke = queued.append
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    window.native.Visible = False
+    assert memory.trim_if_bloated(window, {"webview_gb": 0.95, "agents": 2})
+    queued.pop()()
+    assert reloaded == [1]
+
+
+def test_open_untouched_two_minutes_at_650_mb_goes_low(window, monkeypatch):
+    monkeypatch.setattr(memory, "input_idle_s", lambda: memory.SOFT_IDLE_S + 1)
+    monkeypatch.setattr(memory, "_last_trim", {"at": memory.time.monotonic()})  # no reload here
+    core = window.native.Controls[0].CoreWebView2
+    assert not memory.trim_if_bloated(window, {"webview_gb": 0.65, "agents": 1})
+    assert core.MemoryUsageTargetLevel == Level.Low
 
 
 def test_hidden_past_the_cap_reloads_even_with_agents_running(window, monkeypatch):
@@ -210,7 +249,7 @@ def test_idle_open_window_over_a_gb_goes_low_then_normal_on_input(window, monkey
 
 
 def test_soft_level_needs_a_gb_and_idle():
-    beat = {"webview_gb": 0.8}
+    beat = {"webview_gb": 0.5}
     assert memory.soft_level(beat, active=True, idle_s=999, now=10.0, low_at=0.0) == ""
     assert memory.soft_level({"webview_gb": 1.2}, active=True, idle_s=5, now=10.0, low_at=0.0) == ""
     assert memory.soft_level({"webview_gb": 1.2}, active=False, idle_s=999, now=10.0, low_at=0.0) == ""

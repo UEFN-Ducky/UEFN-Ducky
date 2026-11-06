@@ -74,9 +74,11 @@ def _set_level(control: Any, *, low: bool) -> bool:
 
 # Budget 500 MB. Nov 5 2026: the renderer held 978 MB plus 331 MB GPU during a team run, and the
 # old 2.0 / 2.5 GB reloads waited for 0 agent turns, so with agents always running they never fired.
-SOFT_GB = 1.0
+# Then 908 MB sat under the 1.0 / 1.5 GB levels and set off nothing: Low now starts at 0.6 GB
+# and a hidden window reloads past 0.9 GB.
+SOFT_GB = 0.6
 SOFT_IDLE_S = 2 * 60
-TRIM_GB = 1.5
+TRIM_GB = 0.9
 TRIM_EVERY_S = 30 * 60
 OPEN_TRIM_GB = 1.5
 OPEN_IDLE_S = 10 * 60
