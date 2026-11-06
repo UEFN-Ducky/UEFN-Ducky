@@ -451,10 +451,10 @@ class PanelSettings:
     _origin_version: int = field(default=-1, repr=False, compare=False)
     """Agent-opened files land in a tab group beside the chat."""
 
-    native_launcher: str = "off"
-    """Fast native window (Ducky-Launcher.exe): off | on | auto. Off runs today's Python
-    window; on and auto fall back to it on any launcher error (frontend/native_switch.py).
-    Any other value counts as off."""
+    native_launcher: str = "auto"
+    """Fast native window (Ducky-Launcher.exe): off | on | auto, default auto (a missing key
+    is auto; a saved off stays off). Off runs today's Python window; on and auto fall back to
+    it on any launcher error (frontend/native_switch.py). Any other value counts as off."""
 
     def validate(self) -> None:
         from backend.workspace.ai_ignore import normalize_rules
@@ -657,7 +657,7 @@ class PanelSettings:
             or self.follow_code_off_migrated
             or self.follow_code_speed != "normal"
             or not self.follow_code_split_beside_chat
-            or self.native_launcher != "off"
+            or self.native_launcher != "auto"
         )
 
     def save(self) -> None:

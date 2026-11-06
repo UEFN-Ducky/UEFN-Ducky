@@ -22,20 +22,36 @@ def files_backend(monkeypatch: pytest.MonkeyPatch) -> Path:
     return path
 
 
-def test_default_is_off() -> None:
-    assert PanelSettings().native_launcher == "off"
+def test_default_is_auto() -> None:
+    assert PanelSettings().native_launcher == "auto"
 
 
-def test_old_file_without_the_key_means_off(files_backend: Path) -> None:
+def test_old_file_without_the_key_means_auto(files_backend: Path) -> None:
     files_backend.write_text(json.dumps({"web_access": "on", "terminals_enabled": False}), encoding="utf-8")
+    assert PanelSettings.load().native_launcher == "auto"
+
+
+def test_saved_off_stays_off(files_backend: Path) -> None:
+    files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": "off"}), encoding="utf-8")
+    s = PanelSettings.load()
+    assert s.native_launcher == "off"
+    s.save()
     assert PanelSettings.load().native_launcher == "off"
+
+
+def test_decide_auto_all_checks_pass_is_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ns, "_no_native", False)
+    monkeypatch.delenv(ns.NO_NATIVE_ENV, raising=False)
+    assert ns.decide("auto", True, True, False) == "native"
+    assert ns.decide(PanelSettings().native_launcher, True, True, False) == "native"
 
 
 @pytest.mark.parametrize("raw", ["garbage", "", None, 1, True, ["on"], {"on": 1}, "ON ", "Auto"])
 def test_bad_value_counts_as_off_or_is_normalized(files_backend: Path, raw: object) -> None:
     files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": raw}), encoding="utf-8")
     got = PanelSettings.load().native_launcher
-    expected = {"ON ": "on", "Auto": "auto"}.get(raw if isinstance(raw, str) else "", "off")
+    # null reads like a missing key (the loader drops nulls): the default, auto.
+    expected = "auto" if raw is None else {"ON ": "on", "Auto": "auto"}.get(raw if isinstance(raw, str) else "", "off")
     assert got == expected
 
 
@@ -80,7 +96,7 @@ def test_schema_describes_the_setting() -> None:
     from frontend.settings_schema import settings_schema
 
     entry = settings_schema()["fields"]["native_launcher"]
-    assert entry["default"] == "off"
+    assert entry["default"] == "auto"
     assert entry["enum"] == ["off", "on", "auto"]
     assert entry["settable"] is False
 
@@ -251,7 +267,6 @@ def test_off_means_no_spawn_and_no_record(no_spawn: list, monkeypatch: pytest.Mo
     recorded: list = []
     monkeypatch.setattr(ns, "record_start", lambda *a: recorded.append(a))
     monkeypatch.setattr(ns, "record_start_soon", lambda *a: recorded.append(a))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False  # the saved default
     assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="off") is False
     assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="junk") is False
     assert no_spawn == [] and recorded == []

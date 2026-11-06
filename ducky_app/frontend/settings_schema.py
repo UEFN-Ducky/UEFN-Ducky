@@ -403,7 +403,7 @@ FIELD_META: dict[str, FieldMeta] = {
         "Fast native window", "General", settable=False,
         enum=("off", "on", "auto"), restart_required=True,
         description="Ducky-Launcher.exe draws the window; any launcher error falls back to the "
-        "Python window. Off by default. User-only setting.",
+        "Python window. Auto by default. User-only setting.",
     ),
 }
 

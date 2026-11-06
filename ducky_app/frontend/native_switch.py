@@ -1,6 +1,6 @@
 """Native launcher switch: start Ducky-Launcher.exe, or fall back to the Python window.
 
-The ``native_launcher`` setting (off | on | auto, default off) picks who draws the window.
+The ``native_launcher`` setting (off | on | auto, default auto; garbage is off) picks who draws the window.
 ``off`` never spawns anything: the launch runs today's Python window. ``on`` and ``auto``
 start ``Ducky-Launcher.exe`` (it starts ``UEFN-Ducky.exe --backend`` itself) and wait for
 ``launcher/ready-<launcher pid>.json``; any exit code, a timeout or a spawn error lets the
