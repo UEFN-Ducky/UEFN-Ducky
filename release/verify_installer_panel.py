@@ -9,8 +9,59 @@ import argparse
 import json
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+LAUNCHER = "Ducky-Launcher.exe"
+
+
+def app_version(root: Path = REPO) -> str:
+    init = (root / "ducky_app" / "frontend" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', init, re.M)
+    if match is None:
+        raise RuntimeError("no __version__ in ducky_app/frontend/__init__.py")
+    return match.group(1)
+
+
+def _signature_status(path: Path) -> str:
+    sys.path.insert(0, str(REPO / "release"))
+    from sign_windows import signature_info
+
+    return str(signature_info(path).get("status") or "Unknown")
+
+
+def check_launcher(app: Path, version: str, *, signed: bool, required: bool,
+                   run=subprocess.run, signature=_signature_status) -> bool:
+    """The optional native launcher beside UEFN-Ducky.exe: signed when the release is, and
+    ``--version`` prints the app version. Absent is fine unless ``required``."""
+    exe = app / LAUNCHER
+    if not exe.is_file():
+        if required:
+            raise RuntimeError(f"{LAUNCHER} missing from the installer payload")
+        print(f"NOTE: no {LAUNCHER} in this build (optional); skipped", flush=True)
+        return False
+    if signed and (status := signature(exe)) != "Valid":
+        raise RuntimeError(f"{LAUNCHER} is not signed (Authenticode status {status})")
+    result = run([str(exe), "--version"], capture_output=True, text=True, timeout=30, check=False)
+    printed = (result.stdout or "").strip()
+    if result.returncode != 0 or printed != version:
+        raise RuntimeError(f"{LAUNCHER} --version: exit={result.returncode}, printed {printed!r}, want {version!r}")
+    print(f"PASS: {LAUNCHER} present{', signed' if signed else ''}, --version {version}", flush=True)
+    return True
+
+
+def check_default_off(report: dict) -> None:
+    """Fresh settings keep the native launcher off (the runtime-smoke report's value)."""
+    mode = report.get("native_launcher")
+    if mode is None:
+        # ponytail: older smoke reports lack the key; make it required once runtime_smoke reports it.
+        print("NOTE: runtime-smoke does not report native_launcher; default-off not checked", flush=True)
+        return
+    if mode != "off":
+        raise RuntimeError(f"fresh settings have native_launcher={mode!r}, want 'off'")
+    print("PASS: fresh settings have native_launcher off", flush=True)
 
 
 def run_check(exe: Path, flag: str, output: Path, *, succeeds: bool, recovered=None):
@@ -23,7 +74,9 @@ def run_check(exe: Path, flag: str, output: Path, *, succeeds: bool, recovered=N
     return report
 
 
-def verify(extractor: Path, engine: Path) -> None:
+def verify(extractor: Path, engine: Path, *, version: str = "", signed: bool = False,
+           require_launcher: bool = False) -> None:
+    version = version or app_version()
     with tempfile.TemporaryDirectory(prefix="ducky-installer-panel-proof-") as scratch:
         root = Path(scratch)
         subprocess.run(
@@ -35,8 +88,9 @@ def verify(extractor: Path, engine: Path) -> None:
         output = root / "result.json"
         run_check(exe, "--verify-panel", output, succeeds=True)
         run_check(exe, "--panel-recovery-smoke", output, succeeds=True, recovered=False)
-        run_check(exe, "--runtime-smoke", output, succeeds=True)
+        check_default_off(run_check(exe, "--runtime-smoke", output, succeeds=True))
         print("PASS: extracted installer, strict asset check and frozen runtime", flush=True)
+        check_launcher(root / "app", version, signed=signed, required=require_launcher)
 
         index = panel / "index.html"
         match = re.search(r'(?:src|href)=["\'](?:\./|/)?(assets/[^"\']+\.js)["\']',
@@ -88,8 +142,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--extractor", type=Path, required=True)
     parser.add_argument("--engine", type=Path, default=Path("dist/Setup-engine.exe"))
+    parser.add_argument("--version", default="", help="app version the launcher must print (default: the repo's)")
+    parser.add_argument("--expect-signed", action="store_true", help="the launcher must carry a valid signature")
+    parser.add_argument("--require-launcher", action="store_true", help="fail when the build has no launcher")
     args = parser.parse_args()
-    verify(args.extractor.resolve(), args.engine.resolve())
+    opts = {"version": args.version, "signed": args.expect_signed, "require_launcher": args.require_launcher}
+    verify(args.extractor.resolve(), args.engine.resolve(), **{k: v for k, v in opts.items() if v})
 
 
 if __name__ == "__main__":

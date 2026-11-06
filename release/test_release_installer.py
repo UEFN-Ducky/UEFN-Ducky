@@ -7,6 +7,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 RELEASE = Path(__file__).resolve().parent
 ISS = (RELEASE / "installer" / "UEFN-Ducky.iss").read_text(encoding="utf-8")
 
@@ -119,3 +121,73 @@ def test_the_shipped_reader_accepts_a_manifest_with_the_optional_key(tmp_path):
     with zipfile.ZipFile(raw, "w") as bundle:
         bundle.writestr("manifest.json", json.dumps(manifest))
     assert app_stage.read_manifest(raw.getvalue(), version="1.2.3") == manifest
+
+
+# --- verify_installer_panel: the extracted launcher ----------------------------------
+
+def _vip():
+    spec = importlib.util.spec_from_file_location("vip_installer_test", RELEASE / "verify_installer_panel.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class _Ran:
+    def __init__(self, stdout: str, code: int = 0):
+        self.stdout, self.returncode, self.calls = stdout, code, []
+
+    def __call__(self, cmd, **kw):
+        self.calls.append(cmd)
+        return self
+
+
+def _extracted(tmp_path: Path, launcher: bool) -> Path:
+    app = tmp_path / "app"
+    _touch(app / "UEFN-Ducky.exe")
+    if launcher:
+        _touch(app / "Ducky-Launcher.exe")
+    return app
+
+
+def test_launcher_present_signed_and_version_matches(tmp_path):
+    vip, app, run = _vip(), _extracted(tmp_path, True), _Ran("1.2.3\r\n")
+    assert vip.check_launcher(app, "1.2.3", signed=True, required=True, run=run, signature=lambda p: "Valid")
+    assert run.calls == [[str(app / "Ducky-Launcher.exe"), "--version"]]
+
+
+def test_launcher_unsigned_fails_when_signing_is_expected(tmp_path):
+    vip, app = _vip(), _extracted(tmp_path, True)
+    with pytest.raises(RuntimeError, match="not signed"):
+        vip.check_launcher(app, "1.2.3", signed=True, required=True, run=_Ran("1.2.3"), signature=lambda p: "NotSigned")
+    # An unsigned release never asks for the signature.
+    assert vip.check_launcher(app, "1.2.3", signed=False, required=True, run=_Ran("1.2.3"), signature=None)
+
+
+@pytest.mark.parametrize("stdout,code", [("1.2.2", 0), ("1.2.3", 1), ("", 0)])
+def test_launcher_wrong_version_or_exit_fails(tmp_path, stdout, code):
+    vip, app = _vip(), _extracted(tmp_path, True)
+    with pytest.raises(RuntimeError, match="--version"):
+        vip.check_launcher(app, "1.2.3", signed=False, required=True, run=_Ran(stdout, code))
+
+
+def test_launcher_absent_is_skipped_unless_required(tmp_path):
+    vip, app, run = _vip(), _extracted(tmp_path, False), _Ran("1.2.3")
+    assert vip.check_launcher(app, "1.2.3", signed=True, required=False, run=run) is False
+    assert run.calls == []
+    with pytest.raises(RuntimeError, match="missing"):
+        vip.check_launcher(app, "1.2.3", signed=True, required=True, run=run)
+
+
+def test_fresh_settings_default_off():
+    vip = _vip()
+    vip.check_default_off({"ok": True, "native_launcher": "off"})
+    vip.check_default_off({"ok": True})  # older smoke report: noted, not failed
+    with pytest.raises(RuntimeError, match="native_launcher"):
+        vip.check_default_off({"ok": True, "native_launcher": "auto"})
+
+
+def test_app_version_reads_the_repo_init(tmp_path):
+    init = tmp_path / "ducky_app" / "frontend" / "__init__.py"
+    init.parent.mkdir(parents=True)
+    init.write_text('"""x"""\n__version__ = "1.2.471"\n', encoding="utf-8")
+    assert _vip().app_version(tmp_path) == "1.2.471"
