@@ -236,8 +236,11 @@ def register_windows_open_with(exe: Path | str | None = None) -> None:
 
     import winreg
 
+    from frontend.autostart import start_exe
+
+    # The key keeps UEFN-Ducky.exe's name; only the command may start the launcher.
     exe_name = target.name
-    command = f'"{target}" "%1"'
+    command = f'"{start_exe(target)}" "%1"'
     app_key = rf"Software\Classes\Applications\{exe_name}"
     try:
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, app_key) as key:
@@ -280,7 +283,9 @@ def register_windows_url_protocol(exe: Path | str | None = None) -> None:
 
     import winreg
 
-    command = f'"{target}" "%1"'
+    from frontend.autostart import start_exe
+
+    command = f'"{start_exe(target)}" "%1"'
     proto_key = r"Software\Classes\uefn-ducky"
     try:
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, proto_key) as key:

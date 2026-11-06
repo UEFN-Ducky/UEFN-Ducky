@@ -1,6 +1,7 @@
 """Start with Windows: Ducky opens hidden in the tray at sign-in, so clicking it later is instant.
 
-The entry is a per-user ``Run`` value pointing at the installed EXE with ``--background``.
+The entry is a per-user ``Run`` value pointing at the installed EXE with ``--background``
+(``Ducky-Launcher.exe`` beside it when ``native_launcher`` isn't off: :func:`start_exe`).
 Only the installed app manages it: a test copy (``DUCKY_SANDBOX``), a source checkout or
 any other EXE never writes or removes it, so it can never point at a throwaway copy.
 """
@@ -30,6 +31,25 @@ def started_in_background() -> bool:
 
 def command_for(exe: Path | str) -> str:
     return f'"{exe}" {BACKGROUND_FLAG}'
+
+
+def start_exe(stub: Path) -> Path:
+    """What Windows should start for the install root's ``UEFN-Ducky.exe`` (Run key, Open with,
+    ``uefn-ducky://``): ``Ducky-Launcher.exe`` next to it when it is there and
+    ``native_launcher`` isn't off, else ``stub`` itself. Every start re-registers, so a
+    change of setting or a removed launcher heals the commands on the next start."""
+    from frontend.native_switch import LAUNCHER_EXE_NAME
+
+    launcher = Path(stub).parent / LAUNCHER_EXE_NAME
+    if not launcher.is_file():
+        return Path(stub)
+    try:
+        from frontend.settings import PanelSettings, normalize_native_launcher
+
+        mode = normalize_native_launcher(PanelSettings.load().native_launcher)
+    except Exception:
+        return Path(stub)
+    return Path(stub) if mode == "off" else launcher
 
 
 def managed_exe() -> Path | None:
@@ -78,7 +98,7 @@ def apply(enabled: bool) -> bool:
     reg = _winreg()
     try:
         if enabled:
-            command = command_for(exe)
+            command = command_for(start_exe(exe))
             if registered_command() == command:
                 return True
             with reg.CreateKeyEx(reg.HKEY_CURRENT_USER, RUN_KEY, 0, reg.KEY_SET_VALUE) as key:

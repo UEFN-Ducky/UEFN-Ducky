@@ -1,8 +1,9 @@
 """Default off: an update that ships Ducky-Launcher.exe changes nothing until the setting says so.
 
 Pins what every older version and every Windows entry point relies on: the EXE names, the
-Run key, Open with and ``uefn-ducky://``, the uninstall key, the panel port, the panel.pid
-hand-off, and that ``native_launcher`` off (or absent) never spawns the launcher.
+Run key, Open with and ``uefn-ducky://`` (names unchanged; the command starts the launcher
+when it is present and the setting isn't off), the uninstall key, the panel port, the
+panel.pid hand-off, and that ``native_launcher`` off (or absent) never spawns the launcher.
 """
 
 from __future__ import annotations
@@ -91,6 +92,12 @@ def install_dir(tmp_path: Path) -> Path:
     return folder
 
 
+def _mode(monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
+    monkeypatch.setattr(
+        settings.PanelSettings, "load", classmethod(lambda cls, **_: settings.PanelSettings(native_launcher=mode))
+    )
+
+
 @pytest.fixture
 def files_backend(monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DUCKY_STORE_BACKEND", "files")
@@ -139,15 +146,32 @@ def _packaged(monkeypatch: pytest.MonkeyPatch, stable: Path) -> None:
     monkeypatch.setattr(app_versions, "stable_exe", lambda *a, **k: stable)
 
 
-def test_run_key_names_uefn_ducky_exe_never_the_launcher(
+def test_run_key_off_names_uefn_ducky_exe(
     monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path
 ) -> None:
     _packaged(monkeypatch, install_dir / "UEFN-Ducky.exe")
+    _mode(monkeypatch, "off")
     assert autostart.apply(True) is True
     command = fake_winreg.values[(autostart.RUN_KEY, "UEFN Ducky")]
     assert command == f'"{(install_dir / "UEFN-Ducky.exe").resolve()}" --background'
     assert LAUNCHER not in command
 
+
+@pytest.mark.parametrize("mode", ["on", "auto"])
+def test_run_key_on_starts_the_launcher_under_the_same_name(
+    monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str
+) -> None:
+    _packaged(monkeypatch, install_dir / "UEFN-Ducky.exe")
+    _mode(monkeypatch, mode)
+    assert autostart.apply(True) is True
+    assert fake_winreg.values == {
+        (autostart.RUN_KEY, "UEFN Ducky"): f'"{(install_dir / LAUNCHER).resolve()}" --background'
+    }
+
+
+def test_run_key_is_left_alone_when_stable_exe_is_the_launcher(
+    monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path
+) -> None:
     # Even if something resolved the stable EXE to the launcher, the entry is left alone.
     fake_winreg.values.clear()
     _packaged(monkeypatch, install_dir / LAUNCHER)
@@ -159,24 +183,33 @@ def test_run_key_names_uefn_ducky_exe_never_the_launcher(
 # --- 3. Open with and uefn-ducky:// -----------------------------------------------------
 
 
-def test_open_with_registers_uefn_ducky_exe(fake_winreg: _FakeWinreg, install_dir: Path) -> None:
+@pytest.mark.parametrize(("mode", "target"), [("off", "UEFN-Ducky.exe"), ("on", LAUNCHER), ("auto", LAUNCHER)])
+def test_open_with_keeps_uefn_ducky_exe_names(
+    monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str, target: str
+) -> None:
+    _mode(monkeypatch, mode)
     exe = (install_dir / "UEFN-Ducky.exe").resolve()
     open_files.register_windows_open_with(exe)
     app_key = r"Software\Classes\Applications\UEFN-Ducky.exe"
-    assert fake_winreg.values[(rf"{app_key}\shell\open\command", "")] == f'"{exe}" "%1"'
+    assert fake_winreg.values[(rf"{app_key}\shell\open\command", "")] == f'"{exe.parent / target}" "%1"'
+    assert fake_winreg.values[(rf"{app_key}\DefaultIcon", "")] == str(exe)
     assert fake_winreg.values[(app_key, "FriendlyAppName")] == "UEFN Ducky"
     assert fake_winreg.values[(rf"{app_key}\SupportedTypes", ".*")] == ""
     assert (r"Software\Classes\*\OpenWithList\UEFN-Ducky.exe", "") in fake_winreg.values
 
 
-def test_url_protocol_registers_uefn_ducky_exe(fake_winreg: _FakeWinreg, install_dir: Path) -> None:
+@pytest.mark.parametrize(("mode", "target"), [("off", "UEFN-Ducky.exe"), ("on", LAUNCHER), ("auto", LAUNCHER)])
+def test_url_protocol_keeps_the_uefn_ducky_key(
+    monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str, target: str
+) -> None:
+    _mode(monkeypatch, mode)
     exe = (install_dir / "UEFN-Ducky.exe").resolve()
     assert open_files.DEEP_LINK_PREFIX == "uefn-ducky://"
     open_files.register_windows_url_protocol(exe)
     key = r"Software\Classes\uefn-ducky"
     assert fake_winreg.values[(key, "")] == "URL:UEFN Ducky"
     assert fake_winreg.values[(key, "URL Protocol")] == ""
-    assert fake_winreg.values[(rf"{key}\shell\open\command", "")] == f'"{exe}" "%1"'
+    assert fake_winreg.values[(rf"{key}\shell\open\command", "")] == f'"{exe.parent / target}" "%1"'
 
 
 def test_launcher_exe_is_never_registered(fake_winreg: _FakeWinreg, install_dir: Path) -> None:

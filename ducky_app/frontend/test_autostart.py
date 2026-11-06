@@ -115,6 +115,62 @@ def test_setting_is_on_by_default():
     assert PanelSettings().start_with_windows is True
 
 
+def _launcher_mode(monkeypatch, mode):
+    from frontend.settings import PanelSettings
+
+    monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls, **_: PanelSettings(native_launcher=mode)))
+
+
+@pytest.mark.parametrize("mode", ["on", "auto"])
+def test_run_key_starts_the_launcher_when_present_and_not_off(monkeypatch, reg, mode):
+    launcher = reg.exe.parent / "Ducky-Launcher.exe"
+    launcher.write_bytes(b"MZ")
+    _launcher_mode(monkeypatch, mode)
+    assert autostart.start_exe(reg.exe) == launcher
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
+
+
+@pytest.mark.parametrize(("mode", "present"), [("off", True), ("on", False), ("auto", False)])
+def test_run_key_stays_on_the_stub_when_off_or_absent(monkeypatch, reg, mode, present):
+    if present:
+        (reg.exe.parent / "Ducky-Launcher.exe").write_bytes(b"MZ")
+    _launcher_mode(monkeypatch, mode)
+    assert autostart.start_exe(reg.exe) == reg.exe
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
+
+
+def test_unreadable_setting_keeps_the_stub(monkeypatch, reg):
+    from frontend.settings import PanelSettings
+
+    (reg.exe.parent / "Ducky-Launcher.exe").write_bytes(b"MZ")
+
+    def boom(cls, **_):
+        raise OSError("locked")
+
+    monkeypatch.setattr(PanelSettings, "load", classmethod(boom))
+    assert autostart.start_exe(reg.exe) == reg.exe
+
+
+def test_self_heal_rewrites_the_run_key_both_ways(monkeypatch, reg):
+    launcher = reg.exe.parent / "Ducky-Launcher.exe"
+    reg.values[autostart.VALUE_NAME] = f'"{reg.exe}" --background'  # an old install
+    launcher.write_bytes(b"MZ")
+    _launcher_mode(monkeypatch, "auto")
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
+    _launcher_mode(monkeypatch, "off")  # the person sets off
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
+    _launcher_mode(monkeypatch, "on")
+    autostart.apply(True)
+    launcher.unlink()  # the launcher is gone
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
+    assert list(reg.values) == [autostart.VALUE_NAME]
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows registry")
 def test_apply_saved_setting_follows_the_setting(monkeypatch, reg):
     from frontend.settings import PanelSettings
