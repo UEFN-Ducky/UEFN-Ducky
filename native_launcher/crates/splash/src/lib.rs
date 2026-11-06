@@ -5,6 +5,9 @@
 //! pre-scaled to 220 px and composited onto the theme colour at build time
 //! (`assets/logo_220.bgra`, top-down BGRA), so drawing it needs no image decoder.
 
+mod first_paint;
+pub use first_paint::{first_paint, FirstPaint};
+
 /// Theme background, the same `#0a0a0a` as `webview_app.py` / critical.css.
 pub const BACKGROUND_RGB: (u8, u8, u8) = (0x0A, 0x0A, 0x0A);
 /// Logo edge at 96 DPI, the same 220 px as `early_splash.py`.
