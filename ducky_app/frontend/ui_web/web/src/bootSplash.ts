@@ -1,5 +1,7 @@
 /** Dismiss the inline `#boot-splash` from index.html once the React shell is drawn. */
 
+import { onApiReady } from "./hooks/onApiReady";
+
 const SPLASH_ID = "boot-splash";
 /** Matches the `transition: opacity 0.05s` in index.html. */
 export const FADE_MS = 50;
@@ -36,11 +38,27 @@ function rootHasContent(): boolean {
  * (never while the root is still empty, so no blank flash). The desktop showed the logo
  * on its native splash already; holding this one longer only hides a drawn app.
  */
-export function dismissBootSplashAfterPaint(): void {
+/** When the logo went, in ms since the page started loading: Ducky's boot record keeps it as
+ *  ui_drawn, so the launch race can time "fully drawn" (not just the window). */
+type WhenReady = (cb: (api: { report_ui_perf?: (entries: Array<Record<string, unknown>>) => unknown }) => void) => unknown;
+
+export function reportDrawn(atMs: number, whenReady: WhenReady = onApiReady): void {
+  try {
+    whenReady((api) => {
+      void api.report_ui_perf?.([{ kind: "boot", name: "ui_drawn", duration_ms: Math.round(atMs) }]);
+    });
+  } catch {
+    /* no bridge (tests, phone panel): nothing to record */
+  }
+}
+
+export function dismissBootSplashAfterPaint(whenReady: WhenReady = onApiReady): void {
   const start = performance.now();
   const tick = () => {
-    if (rootHasContent() || performance.now() - start > MAX_WAIT_MS) dismissBootSplash();
-    else requestAnimationFrame(tick);
+    if (rootHasContent() || performance.now() - start > MAX_WAIT_MS) {
+      dismissBootSplash();
+      reportDrawn(performance.now(), whenReady);
+    } else requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 }

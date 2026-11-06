@@ -1056,6 +1056,10 @@ class PanelApi(
                     if k not in ("kind", "name", "duration_ms") and v is not None
                 }
                 trace(kind, name, duration_ms, **meta)
+                if kind == "boot" and name == "ui_drawn":  # the startup logo went: the app is drawn
+                    from frontend import boot_report
+
+                    boot_report.stage("ui_drawn")
             return True
         except Exception:
             return False

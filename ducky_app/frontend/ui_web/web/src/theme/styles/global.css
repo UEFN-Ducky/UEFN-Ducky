@@ -816,7 +816,10 @@ body.native-caption-input-ready .app-header .drag-region {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  flex: 1;
+  /* Its own icons first (basis auto), then an equal share of the rest with the left side.
+     flex: 1 (basis 0) gave it only half the free bar, so plugin icons folded into the
+     Plugins menu while the left side sat mostly empty. */
+  flex: 1 1 auto;
   min-width: 0;
   width: auto;
   /* Make blank space above and below the controls part of the caption too. */

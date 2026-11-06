@@ -3,6 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import indexHtml from "../index.html?raw";
 import { dismissBootSplashAfterPaint, FADE_MS } from "./bootSplash";
 
+describe("boot splash timing", () => {
+  it("reports ui_drawn once the logo goes, so the launch race can time a fully drawn app", async () => {
+    const reported: unknown[] = [];
+    document.body.innerHTML = '<div id="root"><div>app</div></div><div id="boot-splash"></div>';
+    dismissBootSplashAfterPaint((cb) => cb({ report_ui_perf: (entries) => reported.push(...entries) }));
+    expect(reported).toHaveLength(0); // not before the app has painted
+    await vi.advanceTimersByTimeAsync(5);
+    expect(reported).toEqual([{ kind: "boot", name: "ui_drawn", duration_ms: 100 }]);
+  });
+});
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("requestAnimationFrame", (fn: FrameRequestCallback) => setTimeout(() => fn(0), 0));
