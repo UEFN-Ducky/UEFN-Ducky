@@ -106,6 +106,35 @@ def test_the_memory_fix_team_ends_with_its_own_lead_as_its_only_leader(island):
     assert out["88390a68"]["joined"] == "0cadd26f" and out["88390a68"]["leader_changed"] is True
 
 
+def test_a_nested_group_dragged_to_the_top_level_leaves_its_outer_group(island):
+    # Nov 5 2026: the Rust launcher team was dragged out of Island Media Kit but kept it as parent.
+    island.chat("imk", "fIMK", "IMK")
+    island.chat("lead", "fRust", "RUST")
+    island.group("IMK", "fIMK", leader="imk", members=["imk"])
+    island.group("RUST", "fRust", parent_folder="", leader="lead", members=["lead"])
+    island.convs["RUST"].parent_conv_id = "IMK"
+
+    out = groups.sync_membership(None, ["RUST"])
+
+    assert island.convs["RUST"].parent_conv_id == ""
+    assert island.convs["RUST"].leader_conv_id == "lead" and island.members("RUST") == ["lead"]
+    assert island.convs["IMK"].leader_conv_id == "imk" and island.members("IMK") == ["imk"]
+    assert out["RUST"]["left"] == "IMK"
+
+
+def test_a_nested_group_dragged_into_another_group_points_at_it(island):
+    island.chat("a", "fA", "A")
+    island.chat("b", "fB", "B")
+    island.group("A", "fA", leader="a", members=["a"])
+    island.group("B", "fB", leader="b", members=["b"])
+    island.group("N", "fN", parent_folder="fB", members=[])
+    island.convs["N"].parent_conv_id = "A"
+
+    groups.sync_membership(None, ["N"])
+
+    assert island.convs["N"].parent_conv_id == "B"
+
+
 def test_a_chat_leading_its_own_group_from_the_top_level_keeps_it(island):
     island.chat("solo", "")
     island.chat("w", "fX", "X")

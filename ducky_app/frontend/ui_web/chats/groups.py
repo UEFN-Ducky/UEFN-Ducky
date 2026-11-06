@@ -422,6 +422,16 @@ def sync_membership(
         if prev_parent and prev_parent != new and prev_parent in hub_folder:
             left = prev_parent
         joined = ""
+        if getattr(conv, "is_group", False) and prev_parent != new and (
+            not prev_parent or prev_parent in hub_folder or not meta(prev_parent)
+        ):
+            # A nested group's parent is its outer group: dragged out (or into another group),
+            # it follows its folder. Nov 5 2026: the Rust launcher team, moved to the top level,
+            # still pointed at the Island Media Kit group whose lead had made it.
+            target = full(cid)
+            if target is not None:
+                target.parent_conv_id = new
+                _saves.save_conversation(target, root)
         if new:
             if not getattr(conv, "is_group", False) and cid not in {_member_id(r) for r in roster(new)}:
                 hub = full(new)
