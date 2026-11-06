@@ -1990,74 +1990,9 @@ class PanelApiSettingsMixin:
 
     def import_sound_file(self) -> dict[str, Any]:
         """Pick an audio file and copy it into AppData/sounds/. Returns stored filename."""
-        import shutil
-        import uuid
+        from frontend.ui_web.sound_import import import_sound_file
 
-        from backend.skills.discovery import appdata_dir
-
-        allowed = {".mp3", ".wav", ".ogg", ".m4a", ".webm"}
-        picked: str | None = None
-        win = self._window
-        if win is not None:
-            try:
-                import webview
-
-                try:
-                    open_type = webview.FileDialog.OPEN
-                except AttributeError:
-                    open_type = getattr(webview, "OPEN_DIALOG", 10)
-                result = win.create_file_dialog(
-                    open_type,
-                    file_types=(
-                        "Audio (*.mp3;*.wav;*.ogg;*.m4a;*.webm)",
-                        "All files (*.*)",
-                    ),
-                )
-                if result:
-                    picked = str(result[0])
-            except Exception:
-                picked = None
-        if not picked:
-            try:
-                import tkinter as tk
-                from tkinter import filedialog
-
-                root = tk.Tk()
-                root.withdraw()
-                try:
-                    picked = filedialog.askopenfilename(
-                        title="Choose sound file",
-                        parent=root,
-                        filetypes=[
-                            ("Audio", "*.mp3 *.wav *.ogg *.m4a *.webm"),
-                            ("All", "*.*"),
-                        ],
-                    ) or None
-                finally:
-                    root.destroy()
-            except Exception:
-                return {"ok": False, "error": "Could not open file dialog"}
-
-        if not picked:
-            return {"ok": False, "error": "cancelled"}
-
-        src = _pa.Path(picked)
-        if not src.is_file():
-            return {"ok": False, "error": "File not found"}
-        ext = src.suffix.lower()
-        if ext not in allowed:
-            return {"ok": False, "error": f"Unsupported audio type: {ext or '(none)'}"}
-
-        sounds_dir = appdata_dir() / "sounds"
-        sounds_dir.mkdir(parents=True, exist_ok=True)
-        safe_stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in src.stem)[:48] or "sound"
-        filename = f"{safe_stem}_{uuid.uuid4().hex[:8]}{ext}"
-        dest = sounds_dir / filename
-        try:
-            shutil.copy2(src, dest)
-        except OSError as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "filename": filename}
+        return import_sound_file(self._window)
 
     def get_log(self) -> list[str]:
         return _pa.format_entries(_pa.read_activity())
