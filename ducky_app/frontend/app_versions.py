@@ -38,6 +38,12 @@ LAUNCHER_ENV = "UEFN_DUCKY_LAUNCHER_EXE"
 NO_HOP_ENV = "UEFN_DUCKY_NO_VERSION_HOP"
 # A version started this many times without reaching ready is bad: starts skip it.
 MAX_UNREADY_STARTS = 2
+# The optional native window host. Never a saved path: shortcuts, the Run key, Open with
+# and uefn-ducky:// stay on UEFN-Ducky.exe, which decides per start whether to use it.
+NATIVE_LAUNCHER_EXE = "Ducky-Launcher.exe"
+APP_EXE = "UEFN-Ducky.exe"
+# Argument the launcher starts UEFN-Ducky.exe with: the window lives in the launcher.
+BACKEND_ARG = "--backend"
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _DIR_RE = re.compile(r"^app-(\d+\.\d+\.\d+)$")
@@ -169,10 +175,21 @@ def newest_usable(current: str) -> tuple[str, Path] | None:
     return None
 
 
+def backend_mode(argv: list[str] | None = None) -> bool:
+    """True when this process is the backend of Ducky-Launcher.exe (it owns our pipes)."""
+    return BACKEND_ARG in (sys.argv[1:] if argv is None else argv)
+
+
 def launcher_exe() -> Path:
-    """The EXE that was started before any hand-off (this one when nothing handed off)."""
+    """The EXE that was started before any hand-off (this one when nothing handed off).
+
+    Never ``Ducky-Launcher.exe``: when the native launcher started us, saved paths and
+    restarts name its sibling UEFN-Ducky.exe."""
     raw = (os.environ.get(LAUNCHER_ENV) or "").strip()
-    return Path(raw) if raw else Path(sys.executable)
+    exe = Path(raw) if raw else Path(sys.executable)
+    if exe.name.lower() == NATIVE_LAUNCHER_EXE.lower():
+        return exe.with_name(APP_EXE)
+    return exe
 
 
 def stable_exe(name: str | None = None) -> Path:
@@ -310,6 +327,10 @@ def hand_off(current: str, *, bridge: bool) -> None:
             raise SystemExit(run_attached(exe, sys.argv[1:]))
         if not record_start(version):
             continue  # failed to start before: try the next one down
+        if backend_mode():
+            # Ducky-Launcher.exe talks to us over stdin/stdout: the newer version must
+            # keep those pipes, so it runs attached instead of detached.
+            raise SystemExit(run_attached(exe, sys.argv[1:]))
         if start_detached(exe, sys.argv[1:]):
             os._exit(0)
         return
@@ -317,10 +338,16 @@ def hand_off(current: str, *, bridge: bool) -> None:
 
 def fall_back_after_failed_start(current: str, reason: str) -> bool:
     """A downloaded version crashed while starting: mark it bad and start the EXE that was
-    launched, which hands off to the next version down. True when the fallback started."""
+    launched, which hands off to the next version down. True when the fallback started.
+
+    A rollback never starts Ducky-Launcher.exe. As its backend, this only marks the
+    version bad: the launcher then exits with an error and the UEFN-Ducky.exe that
+    started it falls back on its own, so there is one window, not two."""
     if not running_from_versions():
         return False
     mark_bad(current, reason)
+    if backend_mode():
+        return False
     exe = launcher_exe()
     if not exe.is_file():
         return False

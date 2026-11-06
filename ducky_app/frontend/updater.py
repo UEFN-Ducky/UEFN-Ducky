@@ -175,6 +175,7 @@ def sweep_installer_cache(*, keep_newer_than: str | None = None) -> int:
         # Startup sweep of the (new) app. Not the old app's own sweep after Setup in
         # apply_update: that process is the old version and is about to exit.
         stop_old_bridges_after_update()
+        stop_replaced_launchers()
     cache_dir = installer_cache_dir()
     if not cache_dir.is_dir():
         return 0
@@ -206,6 +207,162 @@ def stop_old_bridges_after_update() -> list[int]:
             return []
         bridge_version.note_running_app(__version__)
         return bridge_version.stop_old_bridges(version=__version__)
+    except Exception:
+        return []
+
+
+# The native window host. Its name does not start with UEFN-Ducky, so the
+# kill_uefn_ducky_processes sweep (and old versions' sweeps) never reach it: a
+# launcher closes by itself when its backend's pipe closes.
+LAUNCHER_EXE_NAME = "Ducky-Launcher.exe"
+# How long a replaced version's launcher gets to close on its own before it is stopped.
+LAUNCHER_GRACE_S = 5.0
+
+
+def replaced_launcher_pids(
+    processes: list[tuple[int, str]],
+    *,
+    current_version: str,
+    versions_root: Path,
+    keep_pids: set[int],
+) -> list[int]:
+    """Pids of Ducky-Launcher.exe copies that belong to a replaced version.
+
+    Only a launcher whose EXE sits in ``versions\\app-<older than current_version>``
+    counts. The installed copy (Setup replaced it in place, so a running one is the
+    current version's), this version's own folder, any other folder and ``keep_pids``
+    (the launcher hosting this process) are never targeted."""
+    floor = parse_version_tuple(current_version)
+    found: list[int] = []
+    for pid, exe in processes:
+        if not pid or pid in keep_pids or not exe:
+            continue
+        path = Path(exe)
+        if path.name.lower() != LAUNCHER_EXE_NAME.lower():
+            continue
+        folder = path.parent
+        try:
+            if folder.parent.resolve() != versions_root.resolve():
+                continue
+        except OSError:
+            continue
+        if not folder.name.startswith("app-"):
+            continue
+        owner = parse_version_tuple(folder.name[4:])
+        if owner is None or floor is None or owner >= floor:
+            continue
+        found.append(int(pid))
+    return found
+
+
+def _launcher_processes() -> list[tuple[int, str]]:
+    """(pid, full EXE path) of every running Ducky-Launcher.exe; [] when unknown."""
+    if sys.platform != "win32":
+        return []
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {LAUNCHER_EXE_NAME}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            creationflags=flags,
+            timeout=10.0,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    pids: list[int] = []
+    for row in csv.reader((completed.stdout or "").splitlines()):
+        if len(row) > 1 and row[0].strip().lower() == LAUNCHER_EXE_NAME.lower():
+            try:
+                pids.append(int(row[1]))
+            except ValueError:
+                continue
+    return [(pid, path) for pid in pids if (path := _process_image_path(pid))]
+
+
+def _process_image_path(pid: int) -> str:
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+        handle = kernel32.OpenProcess(0x1000, False, int(pid))  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(32768)
+            size = wintypes.DWORD(len(buf))
+            if kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(handle), 0, buf, ctypes.byref(size)):
+                return buf.value
+        finally:
+            kernel32.CloseHandle(ctypes.c_void_p(handle))
+    except (OSError, AttributeError, ValueError):
+        pass
+    return ""
+
+
+def _pid_alive(pid: int) -> bool:
+    return any(p == pid for p, _ in _launcher_processes())
+
+
+def _terminate_pid(pid: int) -> None:
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        subprocess.run(["taskkill", "/PID", str(int(pid))], capture_output=True, creationflags=flags, timeout=10.0)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _own_launcher_pids() -> set[int]:
+    keep = {os.getpid()}
+    try:
+        keep.add(os.getppid())
+    except (OSError, AttributeError):
+        pass
+    return keep
+
+
+def stop_replaced_launchers(
+    *,
+    list_processes: Any = None,
+    is_alive: Any = None,
+    terminate: Any = None,
+    grace_s: float = LAUNCHER_GRACE_S,
+    sleep: Any = time.sleep,
+) -> list[int]:
+    """Stop launchers left by a replaced version, only after they had time to close.
+
+    A launcher closes by itself once its backend is gone (stdin EOF). Those still
+    running after ``grace_s`` are stopped; nothing else named Ducky-Launcher.exe is
+    touched. Returns the stopped pids; never raises."""
+    try:
+        from frontend import app_versions
+
+        listing = list_processes or _launcher_processes
+        alive = is_alive or _pid_alive
+        kill = terminate or _terminate_pid
+        targets = replaced_launcher_pids(
+            list(listing()),
+            current_version=__version__,
+            versions_root=app_versions.versions_dir(),
+            keep_pids=_own_launcher_pids(),
+        )
+        if not targets:
+            return []
+        deadline = time.monotonic() + max(0.0, float(grace_s))
+        waiting = list(targets)
+        while waiting and time.monotonic() < deadline:
+            waiting = [pid for pid in waiting if alive(pid)]
+            if waiting:
+                sleep(0.25)
+        stopped: list[int] = []
+        for pid in waiting:
+            if alive(pid):
+                kill(pid)
+                stopped.append(pid)
+        return stopped
     except Exception:
         return []
 
