@@ -473,6 +473,9 @@ def _hosts(monkeypatch, running: dict, names: dict) -> list[int]:
     monkeypatch.setattr(session_module, "_process_snapshot", lambda: (running, names))
     monkeypatch.setattr(session_module, "terminate_pid", ended.append)
     monkeypatch.setattr(manager_module, "terminate_pid", ended.append)
+    # Real sessions other tests in this worker left or are starting own real hosts, not these.
+    monkeypatch.setattr(session_module, "_live_hosts", {})
+    monkeypatch.setattr(session_module, "_spawning", 0)
     running.setdefault(_os.getpid(), [])
     return ended
 

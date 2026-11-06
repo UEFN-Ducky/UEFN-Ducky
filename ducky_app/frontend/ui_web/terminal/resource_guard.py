@@ -147,6 +147,23 @@ def split_mb(budget: int, jobs: int) -> int:
     return max(SHARE_FLOOR_MB, int(budget) // max(1, int(jobs)))
 
 
+def fill_mb(budget: int, used: list[int]) -> list[int]:
+    """Each job's cap: what it holds plus SHARE_FLOOR_MB to grow (smallest first, while the
+    budget lasts; past that an equal part of what is left), then what is still left split
+    equally; at least SHARE_FLOOR_MB. No job using anything: the equal split.
+
+    Nov 6 2026: the equal split gave each of ~8 agents' terminals 2.6 GB; idle 10 MB shells
+    held theirs while one agent's pytest -n 8 ran out at its own and its new shells died."""
+    n = len(used)
+    caps = [0] * n
+    left = max(0, int(budget))
+    order = sorted(range(n), key=lambda i: used[i])
+    for k, i in enumerate(order):
+        caps[i] = min(max(0, int(used[i])) + SHARE_FLOOR_MB, left // (n - k))
+        left -= caps[i]
+    return [max(SHARE_FLOOR_MB, cap + left // max(1, n)) for cap in caps]
+
+
 def measure(jobs: list[Any] | None = None) -> dict[str, int]:
     """The live numbers: budget_mb, uefn_mb, jobs. Empty when Windows can't say."""
     from backend.sandbox import jobs as job_mod
@@ -163,8 +180,9 @@ def measure(jobs: list[Any] | None = None) -> dict[str, int]:
 
 
 def rebalance(jobs: list[Any] | None = None, numbers: dict[str, int] | None = None) -> dict[str, int]:
-    """Split the budget across the live shared jobs and set each one's cap (a job's own
-    ceiling_mb, when set, stays its most). Returns the split; {} when nothing was measured."""
+    """Split the budget across the live shared jobs by what each holds (fill_mb) and set each
+    one's cap (a job's own ceiling_mb, when set, stays its most). Returns the split (share_mb:
+    the equal split, for hints); {} when nothing was measured."""
     from backend.sandbox import jobs as job_mod
 
     live = job_mod.shared_jobs() if jobs is None else list(jobs)
@@ -172,9 +190,10 @@ def rebalance(jobs: list[Any] | None = None, numbers: dict[str, int] | None = No
     if not numbers:
         return {}
     share = split_mb(numbers["budget_mb"], len(live))
-    for job in live:
+    used = [private_mb(job.pids()) if hasattr(job, "pids") else 0 for job in live]
+    for job, fill in zip(live, fill_mb(numbers["budget_mb"], used)):
         ceiling = int(getattr(job, "ceiling_mb", 0) or 0)
-        cap = min(share, ceiling) if ceiling else share
+        cap = min(fill, ceiling) if ceiling else fill
         if int(getattr(job, "memory_mb", 0) or 0) != cap:
             try:
                 job.set_memory_limit(cap)

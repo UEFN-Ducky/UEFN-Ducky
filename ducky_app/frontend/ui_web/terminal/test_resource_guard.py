@@ -139,6 +139,35 @@ def test_every_share_is_at_least_a_gigabyte() -> None:
     assert resource_guard.split_mb(0, 0) == resource_guard.SHARE_FLOOR_MB
 
 
+def test_idle_terminals_leave_their_share_to_a_busy_one() -> None:
+    # Nov 6 2026: 8 agents, 20 GB: the equal split held 2.5 GB for each idle 10 MB shell while
+    # one agent's pytest -n 8 ran out at its own 2.5 GB.
+    caps = resource_guard.fill_mb(20 * GB, [10] * 7 + [3 * GB])
+    assert sum(caps) <= 20 * GB
+    assert all(cap >= 10 + GB for cap in caps[:7])  # each idle one can still grow a gigabyte
+    assert caps[7] > 2 * resource_guard.split_mb(20 * GB, 8)
+    assert resource_guard.fill_mb(30 * GB, [0, 0, 0]) == [10 * GB] * 3  # nothing used: equal
+    assert resource_guard.fill_mb(4 * GB, [6 * GB, 6 * GB]) == [2 * GB, 2 * GB]  # all over: equal
+    assert resource_guard.fill_mb(500, [0, 0]) == [resource_guard.SHARE_FLOOR_MB] * 2
+
+
+def test_rebalance_gives_the_busy_job_what_idle_ones_leave(monkeypatch) -> None:
+    class _Held(_FakeJob):
+        def __init__(self, used: int) -> None:
+            super().__init__()
+            self.used = used
+
+        def pids(self) -> list[int]:
+            return [self.used]
+
+    monkeypatch.setattr(resource_guard, "private_mb", lambda pids: sum(pids))
+    idle, busy = _Held(10), _Held(3 * GB)
+    split = resource_guard.rebalance([idle, busy], numbers={"budget_mb": 8 * GB, "uefn_mb": 0})
+    assert split["share_mb"] == 4 * GB
+    assert idle.memory_mb + busy.memory_mb <= 8 * GB and idle.memory_mb >= 10 + GB
+    assert busy.memory_mb > 4 * GB
+
+
 def test_hint_names_the_budget_and_uefn() -> None:
     hint = resource_guard.cap_hint(3900, 4096, 65536, {"budget_mb": 20 * GB, "uefn_mb": 24 * GB, "jobs": 5})
     assert "20.0 GB across 5" in hint and "UEFN (24.0 GB)" in hint and "pytest -n 2" in hint

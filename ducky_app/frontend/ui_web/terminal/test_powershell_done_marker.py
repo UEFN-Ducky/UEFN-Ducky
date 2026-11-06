@@ -298,10 +298,31 @@ def test_ctrl_c_from_the_person_stops_the_command_and_ends_the_agents_wait(tmp_p
         pytest.skip(f"cannot start a {shell} terminal here: {exc}")
     try:
         assert session.run_command("echo ready", timeout_s=60)["ok"]
-        threading.Timer(3.0, lambda: session.write("\x03")).start()
-        started = time.time()
+        from frontend.ui_web.terminal.session import _BEGIN_RE, plain_terminal_text
+
+        pressed: list[float] = []
+        ready_tag = session.run_tag
+
+        def press_once_running() -> None:
+            # Nov 6 2026: a fixed 3 s came before a loaded PC had started ping; the Ctrl+C hit
+            # the prompt and ping ran its 60 s. Press it once the command is really running.
+            program = command.split()[0].lower() + ".exe"
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                text = plain_terminal_text(session.read_output_tail(65536))
+                tag = session.run_tag
+                begun = tag != ready_tag and any(m.group(1) == tag for m in _BEGIN_RE.finditer(text))
+                if begun and (command.startswith("Start-Sleep")
+                              or program in {n.lower() for n in session._descendants().values()}):
+                    break
+                time.sleep(0.1)
+            time.sleep(0.5)
+            pressed.append(time.time())
+            session.write("\x03")
+
+        threading.Thread(target=press_once_running, daemon=True).start()
         result = session.run_command(command, timeout_s=120)
-        assert time.time() - started < 15, result
+        assert pressed and time.time() - pressed[0] < 15, result
         stopped = not result["ok"] and "Ctrl+C" in result["error"]
         assert stopped or result.get("exit_code") not in (None, 0), result
         assert session.run_command("echo after", timeout_s=60)["output_tail"] == "after"
