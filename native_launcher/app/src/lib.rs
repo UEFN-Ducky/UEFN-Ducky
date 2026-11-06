@@ -33,16 +33,16 @@ pub fn run(args: Vec<OsString>) -> u8 {
     let instead = repoint::before_start(
         &exe,
         &args,
-        env_is(repoint::HOPPED_ENV, "1"),
+        env_is(repoint::HOP_ENV, "1"),
         native_child,
+        &app_data,
         || repoint::native_setting(&app_data),
         || supervisor::policy::CrashLoop::load(&app_data).active(supervisor::policy::unix_now()),
     );
     if let Some(spawn) = instead {
-        // A hop that can't start still gets the user a window through the stub beside us.
-        let started = spawn.start().or_else(|_| {
-            repoint::Spawn { exe: repoint::sibling_stub(&exe), args: args.clone(), env: Vec::new() }.start()
-        });
+        // A hop that can't start still gets the user a window: the Python one beside us.
+        let started =
+            spawn.start().or_else(|_| repoint::Spawn::python(repoint::sibling_stub(&exe), &args).start());
         return if started.is_ok() { exit::OK } else { exit::START_ERROR };
     }
     let mut host = ui::UiHost::new(args);

@@ -1,12 +1,14 @@
 //! Repoint: shortcuts start `<install root>/Ducky-Launcher.exe` directly, so the launcher
 //! does what the `UEFN-Ducky.exe` stub did before showing a window:
-//! - root mode: hop to the current version's own launcher (`versions/current.json`),
-//!   or to the root stub when that file is missing or broken;
+//! - root mode: hop to the current version's own launcher (`versions/current.json`), or,
+//!   when that pointer is missing or broken, once to the root stub with NO_NATIVE (the
+//!   Python window, which never starts a launcher again);
 //! - the `native_launcher` setting: `off` (or `auto` during a crash-loop hold) runs the
 //!   Python window instead;
 //! - a start that fails with 20–24 opens the Python window, so the user still gets one.
 //!
-//! Every hop passes argv through unchanged, in order.
+//! A launch started by `native_switch` (NATIVE_CHILD) never hops, and a hopped launch
+//! (HOP) never hops again: no chain is longer than one hop. Argv passes through unchanged.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -19,33 +21,45 @@ pub const STUB_EXE: &str = "UEFN-Ducky.exe";
 pub const NO_NATIVE_ENV: &str = "UEFN_DUCKY_NO_NATIVE";
 /// Set by `native_switch.run_native`: Python decided and handles any fallback itself.
 pub const NATIVE_CHILD_ENV: &str = "UEFN_DUCKY_NATIVE_CHILD";
-/// Set on the root hop so a version launcher never hops again (no exec loop).
-pub const HOPPED_ENV: &str = "UEFN_DUCKY_LAUNCHER_HOPPED";
+/// Set on every hop: the next launcher runs here (or the Python window), never hops again.
+pub const HOP_ENV: &str = "UEFN_DUCKY_LAUNCHER_HOP";
 /// `PanelSettings.native_launcher`'s default in `frontend/settings.py`.
 pub const DEFAULT_NATIVE_LAUNCHER: &str = "off";
+/// `app_versions.VERSIONS_DIR_NAME` / `CURRENT_FILE`.
+pub const VERSIONS_DIR: &str = "versions";
+pub const CURRENT_FILE: &str = "current.json";
 
 /// What a launch started from `exe` does first.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Root {
-    /// A version folder (or already hopped): start Ducky here.
+    /// A version folder, the current one, a dev build or already hopped: start Ducky here.
     RunHere,
-    /// The install root with a usable pointer: that version's launcher.
+    /// The install root and the pointer names another version: that version's launcher.
     Exec(PathBuf),
-    /// The install root without a usable pointer: today's stub.
+    /// The install root without a usable pointer: the stub, once, with NO_NATIVE.
     Stub(PathBuf),
 }
 
-/// `<root>/versions/current.json` → that version's `Ducky-Launcher.exe`, when it exists.
-/// `dir` is relative to the root (`versions/app-1.2.x`); an absolute one is used as is.
-pub fn current_launcher(root: &Path) -> Option<PathBuf> {
-    let text = std::fs::read_to_string(root.join("versions").join("current.json")).ok()?;
+/// The launcher in `current.json` at `file`, `dir` resolved against `base` (or absolute),
+/// when that EXE exists. `app_versions.write_current` writes `versions/app-<v>` (relative
+/// to `%LOCALAPPDATA%/UEFN-Ducky`) or the installed EXE's absolute folder.
+pub fn pointer_launcher(file: &Path, base: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(file).ok()?;
     let v: Value = serde_json::from_str(&text).ok()?;
     let dir = v.get("dir")?.as_str()?.trim();
     if dir.is_empty() {
         return None;
     }
-    let exe = root.join(dir).join(LAUNCHER_EXE);
+    // `join` keeps an absolute `dir` as it is.
+    let exe = base.join(dir).join(LAUNCHER_EXE);
     exe.is_file().then_some(exe)
+}
+
+/// `%LOCALAPPDATA%/UEFN-Ducky/versions/current.json` first (what Python writes), then
+/// `<root>/versions/current.json` (a portable/drill layout, `dir` relative to the root).
+pub fn current_launcher(app_data: &Path, root: &Path) -> Option<PathBuf> {
+    pointer_launcher(&app_data.join(VERSIONS_DIR).join(CURRENT_FILE), app_data)
+        .or_else(|| pointer_launcher(&root.join(VERSIONS_DIR).join(CURRENT_FILE), root))
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -55,17 +69,27 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Root mode is a launcher whose folder holds `versions/`.
-pub fn root_decision(exe: &Path, hopped: bool) -> Root {
+/// `…/versions/app-<v>/Ducky-Launcher.exe`: a version's own launcher.
+fn in_version_folder(exe: &Path) -> bool {
+    let Some(dir) = exe.parent() else { return false };
+    let named = |p: &Path, f: &dyn Fn(&str) -> bool| p.file_name().and_then(|n| n.to_str()).is_some_and(f);
+    named(dir, &|n| n.starts_with("app-")) && dir.parent().is_some_and(|v| named(v, &|n| n.eq_ignore_ascii_case(VERSIONS_DIR)))
+}
+
+/// Root mode: an installed root launcher (the stub beside it, not a version folder), not
+/// hopped. A dev build with no stub beside it always runs here.
+pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path) -> Root {
     let Some(root) = exe.parent() else {
         return Root::RunHere;
     };
-    if hopped || !root.join("versions").is_dir() {
+    if hopped || in_version_folder(exe) || !root.join(STUB_EXE).is_file() {
         return Root::RunHere;
     }
-    match current_launcher(root) {
-        Some(target) if !same_file(&target, exe) => Root::Exec(target),
-        _ => Root::Stub(root.join(STUB_EXE)),
+    match current_launcher(app_data, root) {
+        // The pointer names this very launcher (no update yet): it is the current one.
+        Some(target) if same_file(&target, exe) => Root::RunHere,
+        Some(target) => Root::Exec(target),
+        None => Root::Stub(root.join(STUB_EXE)),
     }
 }
 
@@ -112,12 +136,14 @@ pub struct Spawn {
 }
 
 impl Spawn {
+    /// To another version's launcher: it runs there, never hops again.
     pub fn hop(exe: PathBuf, args: &[OsString]) -> Spawn {
-        Spawn { exe, args: args.to_vec(), env: vec![(HOPPED_ENV.into(), "1".into())] }
+        Spawn { exe, args: args.to_vec(), env: vec![(HOP_ENV.into(), "1".into())] }
     }
 
+    /// To a stub as the Python window: NO_NATIVE, so it never starts a launcher again.
     pub fn python(exe: PathBuf, args: &[OsString]) -> Spawn {
-        Spawn { exe, args: args.to_vec(), env: vec![(NO_NATIVE_ENV.into(), "1".into())] }
+        Spawn { exe, args: args.to_vec(), env: vec![(NO_NATIVE_ENV.into(), "1".into()), (HOP_ENV.into(), "1".into())] }
     }
 
     /// Start it and let it run on its own (this launcher exits right after).
@@ -152,15 +178,12 @@ pub fn before_start(
     args: &[OsString],
     hopped: bool,
     native_child: bool,
+    app_data: &Path,
     setting: impl FnOnce() -> String,
     crash_loop_active: impl FnOnce() -> bool,
 ) -> Option<Spawn> {
-    match root_decision(exe, hopped) {
-        Root::Exec(target) => return Some(Spawn::hop(target, args)),
-        // The stub picks the version and the window itself, as before Repoint.
-        Root::Stub(stub) => return Some(Spawn { exe: stub, args: args.to_vec(), env: Vec::new() }),
-        Root::RunHere => {}
-    }
+    // First: Python started us and decided. Hopping from here is what looped (root stub →
+    // native_switch → root launcher → stub ...).
     if native_child {
         return None;
     }
@@ -169,7 +192,12 @@ pub fn before_start(
     if !wants_native(&mode, mode == "auto" && crash_loop_active()) {
         return Some(Spawn::python(sibling_stub(exe), args));
     }
-    None
+    match root_decision(exe, hopped, app_data) {
+        Root::RunHere => None,
+        Root::Exec(target) => Some(Spawn::hop(target, args)),
+        // No usable pointer: one Python window, never a launcher again.
+        Root::Stub(stub) => Some(Spawn::python(stub, args)),
+    }
 }
 
 #[cfg(test)]
@@ -188,48 +216,145 @@ mod tests {
         std::fs::write(p, b"").unwrap();
     }
 
-    fn install(name: &str, current: Option<&str>) -> (PathBuf, PathBuf) {
-        let root = scratch(name);
-        let exe = root.join(LAUNCHER_EXE);
-        touch(&exe);
-        touch(&root.join("versions/app-1.2.472").join(LAUNCHER_EXE));
-        if let Some(text) = current {
-            std::fs::write(root.join("versions/current.json"), text).unwrap();
+    /// An install root (stub + launcher) and an app data folder holding one version.
+    struct Layout {
+        root: PathBuf,
+        exe: PathBuf,
+        app_data: PathBuf,
+        version: PathBuf,
+    }
+
+    impl Layout {
+        fn new(name: &str) -> Layout {
+            let base = scratch(name);
+            let root = base.join("Programs/UEFN Ducky");
+            let exe = root.join(LAUNCHER_EXE);
+            touch(&exe);
+            touch(&root.join(STUB_EXE));
+            let app_data = base.join("UEFN-Ducky");
+            let version = app_data.join("versions/app-1.2.472").join(LAUNCHER_EXE);
+            touch(&version);
+            Layout { root, exe, app_data, version }
         }
-        (root, exe)
+
+        fn pointer(&self, text: &str) {
+            std::fs::write(self.app_data.join("versions/current.json"), text).unwrap();
+        }
+
+        fn decide(&self, hopped: bool) -> Root {
+            root_decision(&self.exe, hopped, &self.app_data)
+        }
+
+        fn start(&self, args: &[OsString], hopped: bool, native_child: bool, mode: &str) -> Option<Spawn> {
+            let mode = mode.to_string();
+            before_start(&self.exe, args, hopped, native_child, &self.app_data, move || mode, || false)
+        }
+
+        fn drop_all(self) {
+            let _ = std::fs::remove_dir_all(self.root.parent().unwrap().parent().unwrap());
+        }
+    }
+
+    fn args() -> Vec<OsString> {
+        ["uefn-ducky://a", "--background", "C:/a b.verse"].map(OsString::from).to_vec()
     }
 
     #[test]
-    fn root_mode_execs_the_version_launcher() {
-        let (root, exe) =
-            install("ok", Some(r#"{"version":"1.2.472","dir":"versions/app-1.2.472","written":1793942000.5}"#));
-        assert_eq!(root_decision(&exe, false), Root::Exec(root.join("versions/app-1.2.472").join(LAUNCHER_EXE)));
-        // Already hopped: never again.
-        assert_eq!(root_decision(&exe, true), Root::RunHere);
-        let _ = std::fs::remove_dir_all(&root);
+    fn localappdata_pointer_relative_and_absolute() {
+        let l = Layout::new("pointer");
+        l.pointer(r#"{"version":"1.2.472","dir":"versions/app-1.2.472","installed":"1.2.470","written":1.5}"#);
+        assert_eq!(l.decide(false), Root::Exec(l.version.clone()));
+        let other = l.app_data.join("elsewhere");
+        touch(&other.join(LAUNCHER_EXE));
+        l.pointer(&serde_json::json!({"version": "1.2.473", "dir": other.to_string_lossy()}).to_string());
+        assert_eq!(l.decide(false), Root::Exec(other.join(LAUNCHER_EXE)));
+        l.drop_all();
     }
 
     #[test]
-    fn broken_or_missing_pointer_goes_to_the_stub() {
+    fn pointer_at_the_install_root_runs_here() {
+        // `write_current` with no ready version: the installed EXE's own folder.
+        let l = Layout::new("self");
+        l.pointer(&serde_json::json!({"version": "1.2.470", "dir": l.root.to_string_lossy()}).to_string());
+        assert_eq!(l.decide(false), Root::RunHere);
+        assert!(l.start(&args(), false, false, "auto").is_none());
+        l.drop_all();
+    }
+
+    #[test]
+    fn root_layout_pointer_is_the_second_place() {
+        let l = Layout::new("rootlayout");
+        let v = l.root.join("versions/app-1.2.472").join(LAUNCHER_EXE);
+        touch(&v);
+        std::fs::write(l.root.join("versions/current.json"), r#"{"dir":"versions/app-1.2.472"}"#).unwrap();
+        assert_eq!(l.decide(false), Root::Exec(v));
+        // LOCALAPPDATA wins when both are there.
+        l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
+        assert_eq!(l.decide(false), Root::Exec(l.version.clone()));
+        l.drop_all();
+    }
+
+    #[test]
+    fn every_root_failure_is_one_python_window() {
         for (name, text) in [
             ("missing", None),
-            ("garbage", Some("{not json")),
+            ("broken", Some("{not json")),
             ("no_dir", Some(r#"{"version":"1.2.472"}"#)),
-            ("gone", Some(r#"{"version":"1.2.9","dir":"versions/app-1.2.9"}"#)),
-            ("self", Some(r#"{"version":"1.2.472","dir":"."}"#)),
+            ("missing_folder", Some(r#"{"version":"1.2.9","dir":"versions/app-1.2.9"}"#)),
         ] {
-            let (root, exe) = install(name, text);
-            assert_eq!(root_decision(&exe, false), Root::Stub(root.join(STUB_EXE)), "{name}");
-            let _ = std::fs::remove_dir_all(&root);
+            let l = Layout::new(name);
+            if let Some(t) = text {
+                l.pointer(t);
+            }
+            let s = l.start(&args(), false, false, "auto").expect(name);
+            assert_eq!(s, Spawn::python(l.root.join(STUB_EXE), &args()), "{name}");
+            assert!(s.env.contains(&(NO_NATIVE_ENV.to_string(), "1".to_string())), "{name}");
+            // Started again in the chain (by native_switch, or after a hop): runs here, no
+            // second stub start, so the old loop can't happen.
+            assert!(l.start(&args(), false, true, "auto").is_none(), "{name}");
+            assert!(l.start(&args(), true, false, "auto").is_none(), "{name}");
+            l.drop_all();
         }
+        // Setting off at the root: the Python window once, with NO_NATIVE.
+        let l = Layout::new("off");
+        l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
+        assert_eq!(l.start(&args(), false, false, "off"), Some(Spawn::python(l.root.join(STUB_EXE), &args())));
+        l.drop_all();
     }
 
     #[test]
-    fn a_version_folder_runs_here() {
-        let (root, _) = install("version", Some(r#"{"dir":"versions/app-1.2.472"}"#));
-        let version_exe = root.join("versions/app-1.2.472").join(LAUNCHER_EXE);
-        assert_eq!(root_decision(&version_exe, false), Root::RunHere);
-        let _ = std::fs::remove_dir_all(&root);
+    fn native_child_never_hops_and_reads_nothing() {
+        let l = Layout::new("child");
+        l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
+        let never = || -> String { panic!("setting read under run_native") };
+        assert!(before_start(&l.exe, &args(), false, true, &l.app_data, never, || panic!()).is_none());
+        l.drop_all();
+    }
+
+    #[test]
+    fn hop_guard_stops_a_second_hop() {
+        let l = Layout::new("guard");
+        l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
+        let s = l.start(&args(), false, false, "on").unwrap();
+        assert_eq!(s, Spawn::hop(l.version.clone(), &args()));
+        assert!(s.env.contains(&(HOP_ENV.to_string(), "1".to_string())));
+        // The hopped launcher (HOP=1) runs where it is, even at a root with a pointer.
+        assert_eq!(l.decide(true), Root::RunHere);
+        assert!(l.start(&args(), true, false, "on").is_none());
+        l.drop_all();
+    }
+
+    #[test]
+    fn version_folders_and_dev_builds_run_here() {
+        let l = Layout::new("version");
+        l.pointer(r#"{"dir":"versions/app-1.2.9"}"#);
+        touch(&l.version.with_file_name(STUB_EXE));
+        assert_eq!(root_decision(&l.version, false, &l.app_data), Root::RunHere);
+        // A cargo build with no stub beside it never hops into the installed app.
+        let dev = l.app_data.join("target/release").join(LAUNCHER_EXE);
+        touch(&dev);
+        assert_eq!(root_decision(&dev, false, &l.app_data), Root::RunHere);
+        l.drop_all();
     }
 
     #[test]
@@ -252,28 +377,16 @@ mod tests {
     }
 
     #[test]
-    fn before_start_paths() {
-        let args: Vec<OsString> = ["uefn-ducky://a", "--background"].map(OsString::from).to_vec();
-        let (root, exe) = install("before", Some(r#"{"dir":"versions/app-1.2.472"}"#));
-        let version = root.join("versions/app-1.2.472").join(LAUNCHER_EXE);
-        let never = || -> String { panic!("setting read in root mode") };
-        // Root: hop, whatever the setting.
-        let s = before_start(&exe, &args, false, false, never, || false).unwrap();
-        assert_eq!((s.exe, s.args), (version.clone(), args.clone()));
-        // Version folder, setting off: the Python window with NO_NATIVE, argv in order.
-        let s = before_start(&version, &args, true, false, || "off".into(), || false).unwrap();
-        assert_eq!(s, Spawn::python(sibling_stub(&version), &args));
-        // auto during a crash-loop hold: Python too; `on` ignores the hold.
-        assert!(before_start(&version, &args, true, false, || "auto".into(), || true).is_some());
-        assert!(before_start(&version, &args, true, false, || "auto".into(), || false).is_none());
-        assert!(before_start(&version, &args, true, false, || "on".into(), || true).is_none());
-        // Started by Python's run_native: it already decided.
-        assert!(before_start(&version, &args, true, true, || "off".into(), || true).is_none());
-        // Broken pointer at the root: the stub, no NO_NATIVE (it decides itself).
-        std::fs::write(root.join("versions/current.json"), "nope").unwrap();
-        let s = before_start(&exe, &args, false, false, never, || false).unwrap();
-        assert_eq!(s, Spawn { exe: root.join(STUB_EXE), args: args.clone(), env: vec![] });
-        let _ = std::fs::remove_dir_all(&root);
+    fn version_launcher_setting_and_hold() {
+        let l = Layout::new("hold");
+        let v = |mode: &'static str, hold: bool| {
+            before_start(&l.version, &args(), true, false, &l.app_data, move || mode.into(), move || hold)
+        };
+        assert_eq!(v("off", false), Some(Spawn::python(sibling_stub(&l.version), &args())));
+        assert!(v("auto", true).is_some());
+        assert!(v("auto", false).is_none());
+        assert!(v("on", true).is_none());
+        l.drop_all();
     }
 
     #[test]
@@ -296,10 +409,10 @@ mod tests {
             ["--background", "C:/a b.verse", "uefn-ducky://x?y=1", "--after-update", "42"].map(OsString::from).to_vec();
         let p = Spawn::python(PathBuf::from("C:/v/UEFN-Ducky.exe"), &args);
         assert_eq!(p.args, args);
-        assert_eq!(p.env, [(NO_NATIVE_ENV.to_string(), "1".to_string())]);
+        assert_eq!(p.env, [(NO_NATIVE_ENV.to_string(), "1".to_string()), (HOP_ENV.to_string(), "1".to_string())]);
         let h = Spawn::hop(PathBuf::from("C:/v/Ducky-Launcher.exe"), &args);
         assert_eq!(h.args, args);
-        assert_eq!(h.env, [(HOPPED_ENV.to_string(), "1".to_string())]);
+        assert_eq!(h.env, [(HOP_ENV.to_string(), "1".to_string())]);
         assert_eq!(sibling_stub(Path::new("C:/v/Ducky-Launcher.exe")), Path::new("C:/v").join(STUB_EXE));
     }
 }
