@@ -7,13 +7,22 @@ importlib.import_module / __import__ with a literal name. Names resolve the way 
 run: ducky_app/ and the repo root are both import roots, and release/ scripts import each
 other by bare name. Parsed imports are cached in .pytest_cache/impacted_graph.json by each
 file's mtime and size; resolution always runs fresh, so a new or deleted file is seen.
+
+impacted() turns that into the test files a change reaches through any chain of imports,
+plus an always-run set, and asks for the whole suite when the graph can't see the change
+(pytest config, requirements, the root conftest, or a module that loads code by path).
+CLI: py -3 ducky_app/impacted_tests.py <changed paths...>  prints one test path per line.
 """
 
 from __future__ import annotations
 
 import ast
+import fnmatch
 import json
 import os
+import sys
+from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
 SCAN_DIRS = ("ducky_app", "tests", "release")
@@ -21,7 +30,11 @@ SKIP_DIRS = {"node_modules", ".venv", "dist", "build", "__pycache__", ".git"}
 SKIP_PREFIXES = ("ducky_app/frontend/ui_web/web/",)
 IMPORT_ROOTS = ("ducky_app", "")
 CACHE_FILE = PurePosixPath(".pytest_cache/impacted_graph.json")
-CACHE_VERSION = 1
+CACHE_VERSION = 2
+ROOT_CONFTESTS = {"conftest.py", "ducky_app/conftest.py"}
+RUN_ALL_PATTERNS = ("pytest.ini", "requirements*.txt")
+ALWAYS_RUN = ("ducky_app/test_file_sizes.py",)
+ALWAYS_RUN_NAME_PARTS = ("import_boundar", "settings_schema")
 
 # One parsed import: [level, module, names]. level 0 = absolute; names = the `from` names.
 Entry = list
@@ -43,25 +56,36 @@ def py_files(root: Path) -> list[str]:
     return sorted(out)
 
 
-def parse_imports(source: bytes) -> list[Entry]:
+def parse_imports(source: bytes) -> tuple[list[Entry], bool]:
+    """The file's imports, and whether it loads code the graph can't follow (by path, runpy,
+    or import_module with a computed name)."""
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
-        return []
+        return [], False
     out: list[Entry] = []
+    dynamic = False
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             out.extend([0, alias.name, []] for alias in node.names)
+            dynamic |= any(alias.name == "runpy" for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             out.append([node.level, node.module or "", [a.name for a in node.names if a.name != "*"]])
-        elif isinstance(node, ast.Call) and node.args:
-            arg, func = node.args[0], node.func
+            dynamic |= node.module == "runpy"
+        elif isinstance(node, ast.Call):
+            func = node.func
             name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
-            if name in ("import_module", "__import__") and isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                literal = arg.value
-                level = len(literal) - len(literal.lstrip("."))
-                out.append([level, literal[level:], []])
-    return out
+            if name == "spec_from_file_location":
+                dynamic = True
+            elif name in ("import_module", "__import__") and node.args:
+                arg = node.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    literal = arg.value
+                    level = len(literal) - len(literal.lstrip("."))
+                    out.append([level, literal[level:], []])
+                else:
+                    dynamic = True
+    return out, dynamic
 
 
 class _Index:
@@ -116,49 +140,149 @@ class _Index:
         return found
 
 
-def _load_cache(path: Path) -> dict[str, list]:
+def _load_cache(path: Path) -> dict:
+    """{"files": {rel: [key, entries, dynamic]}, "graph": {rel: [deps]}} or {}."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(data, dict) or data.get("version") != CACHE_VERSION:
         return {}
-    files = data.get("files")
-    return files if isinstance(files, dict) else {}
+    if not isinstance(data.get("files"), dict) or not isinstance(data.get("graph"), dict):
+        return {}
+    return data
 
 
-def _save_cache(path: Path, files: dict[str, list]) -> None:
+def _save_cache(path: Path, files: dict[str, list], graph: dict[str, set[str]]) -> None:
+    data = {"version": CACHE_VERSION, "files": files, "graph": {k: sorted(v) for k, v in graph.items()}}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"version": CACHE_VERSION, "files": files}), encoding="utf-8")
+        tmp.write_text(json.dumps(data), encoding="utf-8")
         os.replace(tmp, path)
     except OSError:
         pass  # a read-only checkout just parses every time
 
 
-def build_graph(root: str | os.PathLike[str], use_cache: bool = True) -> dict[str, set[str]]:
-    """Repo-relative file -> the repo files it imports (directly)."""
-    root = Path(root)
+@dataclass
+class Graph:
+    imports: dict[str, set[str]]  # file -> repo files it imports directly
+    dynamic: set[str] = field(default_factory=set)  # files that load code by path or computed name
+
+
+def _build(root: Path, use_cache: bool) -> Graph:
     files = py_files(root)
     cache_path = root / CACHE_FILE
-    cached = _load_cache(cache_path) if use_cache else {}
+    cached = _load_cache(cache_path).get("files", {}) if use_cache else {}
     parsed: dict[str, list] = {}
     for rel in files:
         st = (root / rel).stat()
         key = [st.st_mtime_ns, st.st_size]
         hit = cached.get(rel)
-        if isinstance(hit, list) and len(hit) == 2 and hit[0] == key:
+        if isinstance(hit, list) and len(hit) == 3 and hit[0] == key:
             parsed[rel] = hit
         else:
-            parsed[rel] = [key, parse_imports((root / rel).read_bytes())]
-    if use_cache and parsed != cached:
-        _save_cache(cache_path, parsed)
+            parsed[rel] = [key, *parse_imports((root / rel).read_bytes())]
     index = _Index(files)
-    graph: dict[str, set[str]] = {}
-    for rel, (_key, entries) in parsed.items():
+    graph = Graph({})
+    for rel, (_key, entries, dynamic) in parsed.items():
         deps: set[str] = set()
         for entry in entries:
             deps |= index.resolve(rel, entry)
-        graph[rel] = deps
+        graph.imports[rel] = deps
+        if dynamic:
+            graph.dynamic.add(rel)
+    if use_cache:
+        _save_cache(cache_path, parsed, graph.imports)
     return graph
+
+
+def build_graph(root: str | os.PathLike[str], use_cache: bool = True) -> dict[str, set[str]]:
+    """Repo-relative file -> the repo files it imports (directly)."""
+    return _build(Path(root), use_cache).imports
+
+
+def is_test_file(rel: str) -> bool:
+    name = PurePosixPath(rel).name
+    return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
+
+
+@dataclass
+class Selection:
+    tests: list[str]
+    run_all: bool = False
+    reason: str = ""
+
+
+def _normalize(root: Path, path: str, known: set[str]) -> str:
+    p = Path(path)
+    if p.is_absolute():
+        try:
+            p = p.resolve().relative_to(root.resolve())
+        except ValueError:
+            pass
+    rel = PurePosixPath(p.as_posix()).as_posix()  # drops a leading ./
+    # `frontend/...` and `backend/...` are written relative to ducky_app/ as often as not.
+    if rel not in known and not (root / rel).exists():
+        if f"ducky_app/{rel}" in known or (root / "ducky_app" / rel).exists():
+            return f"ducky_app/{rel}"
+    return rel
+
+
+def impacted(root: str | os.PathLike[str], changed_paths: list[str], use_cache: bool = True) -> Selection:
+    """Every test file a change reaches through imports, plus the always-run checks; or the
+    whole suite (run_all) when the change is something the import graph can't see."""
+    root = Path(root)
+    before = _load_cache(root / CACHE_FILE).get("graph", {}) if use_cache else {}
+    graph = _build(root, use_cache)
+    all_tests = sorted(f for f in graph.imports if is_test_file(f))
+    known = set(graph.imports) | set(before)
+    changed = {_normalize(root, p, known) for p in changed_paths}
+
+    def everything(reason: str) -> Selection:
+        return Selection(all_tests, True, reason)
+
+    for rel in sorted(changed):
+        if rel in ROOT_CONFTESTS:
+            return everything(f"{rel} is the root conftest")
+        if any(fnmatch.fnmatch(PurePosixPath(rel).name, pat) for pat in RUN_ALL_PATTERNS) and "/" not in rel:
+            return everything(f"{rel} changes how every test runs")
+        if rel in graph.dynamic:
+            return everything(f"{rel} loads code by path, which the import graph can't follow")
+
+    reverse: dict[str, set[str]] = {}
+    for importer, deps in graph.imports.items():
+        for dep in deps:
+            reverse.setdefault(dep, set()).add(importer)
+    # A deleted or renamed file: whoever imported it before still depends on the change.
+    for rel in changed - set(graph.imports):
+        if not rel.endswith(".py"):
+            continue
+        if rel not in before and not any(rel in deps for deps in before.values()):
+            return everything(f"{rel} is gone and no cached graph says who imported it")
+        for importer, deps in before.items():
+            if rel in deps:
+                reverse.setdefault(rel, set()).add(importer)
+
+    reached: set[str] = set()
+    queue = deque(changed)
+    while queue:  # visited set, so import cycles end
+        rel = queue.popleft()
+        if rel in reached:
+            continue
+        reached.add(rel)
+        queue.extend(reverse.get(rel, ()))
+    selected = {f for f in reached if is_test_file(f) and f in graph.imports}
+    for rel in changed:
+        if PurePosixPath(rel).name == "conftest.py":
+            folder = f"{PurePosixPath(rel).parent.as_posix()}/"
+            selected |= {t for t in all_tests if t.startswith(folder)}
+    selected |= {t for t in ALWAYS_RUN if t in graph.imports}
+    selected |= {t for t in all_tests if any(part in PurePosixPath(t).name for part in ALWAYS_RUN_NAME_PARTS)}
+    return Selection(sorted(selected), False, f"{len(changed)} changed file(s) reach {len(selected)} test file(s)")
+
+
+if __name__ == "__main__":
+    sel = impacted(Path(__file__).resolve().parent.parent, sys.argv[1:])
+    print(f"# {'run all: ' if sel.run_all else ''}{sel.reason}", file=sys.stderr)
+    print("\n".join(sel.tests))
