@@ -85,6 +85,58 @@ log = logging.getLogger(__name__)
 
 from backend.agent.mcp_content import mcp_content_to_text as _content_to_text
 
+# Nov 6 2026: the first tool listing after a start launched every stdio server (REA, a
+# cmd /c ...mcp.bat) only to read the tools it gave last time. A stdio server's inventory is
+# saved with a hash of its settings; the first listing serves it and leaves the server off
+# until its first tool call. Changed settings list it live again.
+_INVENTORY_DIR = "mcp_tool_inventory"
+
+
+def _inventory_file(plugin_id: str, manifest: dict[str, Any]) -> tuple[Any, str] | None:
+    """(path, settings hash) for a stdio server's saved inventory; None for HTTP/SSE."""
+    import hashlib
+
+    from backend.mcp_plugins.store import _manifest_transport
+    from backend.skills.discovery import appdata_dir
+
+    if _manifest_transport(manifest) != "stdio":
+        return None  # nothing to start: listing an HTTP server costs no process
+    digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", plugin_id)
+    return appdata_dir() / _INVENTORY_DIR / f"{safe}.json", digest
+
+
+def _load_saved_inventory(plugin_id: str) -> list[Tool] | None:
+    try:
+        manifest = load_plugin_manifest(plugin_id)
+        spot = _inventory_file(plugin_id, manifest) if manifest else None
+        if spot is None:
+            return None
+        data = json.loads(spot[0].read_text(encoding="utf-8"))
+        if data.get("settings") != spot[1] or not isinstance(data.get("tools"), list):
+            return None
+        return [Tool.model_validate(row) for row in data["tools"]]
+    except Exception:  # noqa: BLE001 — no saved list only means listing it live
+        return None
+
+
+def _save_inventory(plugin_id: str, tools: list[Tool]) -> None:
+    import os
+
+    try:
+        manifest = load_plugin_manifest(plugin_id)
+        spot = _inventory_file(plugin_id, manifest) if manifest else None
+        if spot is None:
+            return
+        path, digest = spot
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [tool.model_dump(mode="json", exclude_none=True) for tool in tools]
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"settings": digest, "tools": rows}), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:  # noqa: BLE001
+        log.debug("could not save the tool list of %s", plugin_id, exc_info=True)
+
 
 def _pool_loop_bound(fn: Callable[..., Coroutine[Any, Any, _T]]) -> Callable[..., Coroutine[Any, Any, _T]]:
     """Run the method on this pool's owned loop when `own_loop=True`."""
@@ -536,6 +588,11 @@ class PluginClientPool:
             return [tool.model_copy(deep=True) for tool in self._tools_cache]
         out: list[Tool] = []
         for pid in ids:
+            if pid not in self._inventories and pid not in self._connections:
+                saved = await asyncio.to_thread(_load_saved_inventory, pid)
+                if saved is not None:  # serve last start's list; its first call starts it
+                    self._inventories[pid] = saved
+                    self._idle_closed.add(pid)
             # Listing must not start an idle-closed server again just to re-read
             # the tools it already gave us.
             idle = pid in self._idle_closed and pid in self._inventories
@@ -547,6 +604,8 @@ class PluginClientPool:
                     self._inventory_failures[pid] = failures
                     self._inventory_retry[pid] = now + min(2 ** failures, 30)
                 else:
+                    if self._inventories.get(pid) != tools:  # saved when it changes, not every 30 s
+                        await asyncio.to_thread(_save_inventory, pid, tools)
                     self._inventories[pid] = [tool.model_copy(deep=True) for tool in tools]
                     self._inventory_failures.pop(pid, None)
                     self._inventory_retry.pop(pid, None)
