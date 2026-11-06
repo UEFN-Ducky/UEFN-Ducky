@@ -88,16 +88,21 @@ def test_deploy_reads_ownership_once_per_pass(boot: dict) -> None:
 
 
 def test_unchanged_redeploy_fits_boot_budget(boot: dict) -> None:
+    # CPU time of this thread (sync_skill runs on it alone), median of 3: a full suite's
+    # other workers stretch the wall clock (0.93 s once) but not this thread's own work.
     sd.sync_skill()  # first deploy writes the folders
-    boot["listed"] = 0
-    ownership.invalidate()
-    started = time.perf_counter()
-    logs = sd.sync_skill()
-    elapsed = time.perf_counter() - started
-    assert boot["listed"] <= 1, f"list_plugin_owned_skills calls: {boot['listed']}"
-    assert not [ln for ln in logs if "Skill folder ->" in ln], logs
-    print(f"redeploy of {ROOTS}x{PACKS} packs: {elapsed:.3f}s")
-    assert elapsed < 0.5, f"redeploy of {ROOTS}x{PACKS} packs took {elapsed:.2f}s"
+    times = []
+    for _ in range(3):
+        boot["listed"] = 0
+        ownership.invalidate()
+        started = time.thread_time()
+        logs = sd.sync_skill()
+        times.append(time.thread_time() - started)
+        assert boot["listed"] <= 1, f"list_plugin_owned_skills calls: {boot['listed']}"
+        assert not [ln for ln in logs if "Skill folder ->" in ln], logs
+    elapsed = sorted(times)[1]
+    print(f"redeploy of {ROOTS}x{PACKS} packs: {elapsed:.3f}s CPU (median of {times})")
+    assert elapsed < 0.5, f"redeploy of {ROOTS}x{PACKS} packs took {elapsed:.2f}s CPU"
 
 
 def test_fast_path_still_restores_a_hand_edit(boot: dict) -> None:
