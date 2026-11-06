@@ -1,6 +1,7 @@
 """Setup over an old install, with and without Ducky-Launcher.exe.
 
-Shortcuts and the Run key keep naming UEFN-Ducky.exe, a build without the launcher
+Saved paths keep naming UEFN-Ducky.exe, the Run key keeps its name and args (its EXE
+follows the Repoint rule), a build without the launcher
 installs and starts as before, and the update sweep only ever stops a replaced
 version's launcher, after it had its chance to close. Processes and the registry are
 mocked: nothing is started or killed.
@@ -82,36 +83,61 @@ def packaged(monkeypatch):
 
 
 # --- 1. Shortcuts and the Run key are kept ---------------------------------------------
+# Repoint: the Run value keeps its name and --background, and names Ducky-Launcher.exe
+# beside UEFN-Ducky.exe when it is there and native_launcher isn't off, else UEFN-Ducky.exe.
 
 
-@pytest.mark.parametrize("with_launcher", [False, True])
-def test_the_run_key_keeps_naming_uefn_ducky_exe(packaged, monkeypatch, tmp_path, with_launcher) -> None:
+def _setting(monkeypatch, mode: str) -> None:
+    from types import SimpleNamespace
+
+    from frontend import settings
+
+    monkeypatch.setattr(settings.PanelSettings, "load", classmethod(lambda cls: SimpleNamespace(native_launcher=mode)))
+
+
+_RUN_CASES = [(False, "auto"), (False, "on"), (True, "off"), (True, "auto"), (True, "on")]
+
+
+def _run_target(root: Path, with_launcher: bool, mode: str) -> Path:
+    name = "Ducky-Launcher.exe" if with_launcher and mode != "off" else "UEFN-Ducky.exe"
+    return (root / name).resolve()
+
+
+@pytest.mark.parametrize("with_launcher, mode", _RUN_CASES)
+def test_setup_over_an_old_install_keeps_the_run_value(packaged, monkeypatch, tmp_path, with_launcher, mode) -> None:
     root = _install(tmp_path, with_launcher=with_launcher)
     exe = (root / "UEFN-Ducky.exe").resolve()
-    old_command = autostart.command_for(exe)
+    old_command = autostart.command_for(exe)  # what every old install wrote
     reg = _FakeWinreg({autostart.VALUE_NAME: old_command})
     monkeypatch.setattr(autostart, "_winreg", lambda: reg)
-    # Started through the launcher, or straight: the saved path is the same EXE.
+    _setting(monkeypatch, mode)
+    # Started through the launcher, or straight: the managed EXE is the same stub.
     started = root / ("Ducky-Launcher.exe" if with_launcher else "UEFN-Ducky.exe")
     monkeypatch.setenv(av.LAUNCHER_ENV, str(started))
 
     assert autostart.managed_exe() == exe
     assert autostart.apply(True) is True
-    # The old install's entry already matches: nothing rewritten, nothing removed.
-    assert reg.writes == [] and reg.deletes == []
-    assert reg.values[autostart.VALUE_NAME] == old_command
+    want = autostart.command_for(_run_target(root, with_launcher, mode))
+    assert want.endswith(f'" {autostart.BACKGROUND_FLAG}')
+    # Same value name, never removed; rewritten only when the target changed.
+    assert reg.deletes == []
+    assert reg.values[autostart.VALUE_NAME] == want
+    assert reg.writes == ([] if want == old_command else [(autostart.VALUE_NAME, want)])
+    # A second start finds it matching: nothing more written.
+    assert autostart.apply(True) is True
+    assert len(reg.writes) <= 1
 
 
-def test_a_missing_run_key_is_written_for_uefn_ducky_exe_not_the_launcher(packaged, monkeypatch, tmp_path) -> None:
-    root = _install(tmp_path, with_launcher=True)
+@pytest.mark.parametrize("with_launcher, mode", _RUN_CASES)
+def test_a_missing_run_key_is_written_for_the_start_exe(packaged, monkeypatch, tmp_path, with_launcher, mode) -> None:
+    root = _install(tmp_path, with_launcher=with_launcher)
     reg = _FakeWinreg({})
     monkeypatch.setattr(autostart, "_winreg", lambda: reg)
+    _setting(monkeypatch, mode)
     monkeypatch.setenv(av.LAUNCHER_ENV, str(root / "Ducky-Launcher.exe"))
 
     assert autostart.apply(True) is True
-    [(name, command)] = reg.writes
-    assert name == autostart.VALUE_NAME
-    assert "UEFN-Ducky.exe" in command and "Ducky-Launcher" not in command
+    assert reg.writes == [(autostart.VALUE_NAME, autostart.command_for(_run_target(root, with_launcher, mode)))]
 
 
 @pytest.mark.parametrize("started", ["UEFN-Ducky.exe", "Ducky-Launcher.exe"])
