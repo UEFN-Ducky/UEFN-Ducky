@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -27,6 +28,7 @@ from frontend.ui_web.terminal.session import (
 )
 from frontend.ui_web.terminal.shells import shell_label
 
+_keep_log = logging.getLogger("terminal.keep")
 _APPROVAL_TIMEOUT_S = 120.0
 # session.run_command's errors -> run_agent_command's "fail" kind (anything else: "error").
 _RUN_FAILS = {"command timed out": "timeout", "session busy": "busy"}
@@ -110,6 +112,11 @@ class TerminalManager:
         # Terminals each window shows (set_visible_terminals). Until one reports, every
         # terminal is treated as shown; the rest get one status frame a second.
         self._visible_terms: dict[str, set[str]] = {}
+        # Why each terminal the last close_idle_agent_terminals pass left open stayed:
+        # {session id: "quiet<60s" | "chat_running" | "busy" | "background" | "allow_card" |
+        # "held" | "not_agent"}. Logged at debug (terminal.keep) at most once a minute.
+        self.kept: dict[str, str] = {}
+        self._kept_logged_at = float("-inf")
 
     def set_push(self, push: Callable[[dict[str, Any]], None] | None) -> None:
         self._push = push
@@ -330,7 +337,7 @@ class TerminalManager:
         (a hung git, a pager) sits in it. Always kept: one waiting on an Allow card, held by a
         running workflow, running an agent command, or whose background command (a dev
         server) still runs; a person's own terminals (no chat, not opened by an agent or a
-        workflow run) are never closed."""
+        workflow run) are never closed. Why each open one stayed is left in :attr:`kept`."""
         now = time.time() if now is None else now
         if running is None:
             from frontend.ui_web.agent_turns.state import list_running_agents
@@ -338,23 +345,34 @@ class TerminalManager:
             running = set(list_running_agents())
         with self._lock:
             agents = [(e.session, e.chat) for e in self._sessions.values() if e.chat or e.run_owned]
+            kept = {sid: "not_agent" for sid, e in self._sessions.items() if not (e.chat or e.run_owned)}
             asked = {p.session_id for p in self._pending.values()}
             held = set(self._held)
         snapshot = functools.cache(_process_snapshot)
         closed: list[str] = []
         for session, chat in agents:
             quiet = now - float(getattr(session, "last_activity", now))
-            if quiet < _AGENT_IDLE_CLOSE_S or session.id in asked or session.id in held:
-                continue
             done = not chat or chat not in running
-            if session.is_busy() and not (done and quiet >= _AGENT_STALE_CLOSE_S):
-                continue
-            if session.background_alive(snapshot) and not (done and quiet >= _ORPHAN_BACKGROUND_CLOSE_S):
-                continue
-            if quiet < _AGENT_STALE_CLOSE_S and (chat in running or session.has_running_command(snapshot)):
-                continue
-            if self.kill(session.id).get("ok"):
+            if session.id in asked:
+                kept[session.id] = "allow_card"
+            elif session.id in held:
+                kept[session.id] = "held"
+            elif quiet < _AGENT_IDLE_CLOSE_S:
+                kept[session.id] = "quiet<60s"
+            elif session.is_busy() and not (done and quiet >= _AGENT_STALE_CLOSE_S):
+                kept[session.id] = "busy"
+            elif session.background_alive(snapshot) and not (done and quiet >= _ORPHAN_BACKGROUND_CLOSE_S):
+                kept[session.id] = "background"
+            elif quiet < _AGENT_STALE_CLOSE_S and chat in running:
+                kept[session.id] = "chat_running"
+            elif quiet < _AGENT_STALE_CLOSE_S and session.has_running_command(snapshot):
+                kept[session.id] = "busy"
+            elif self.kill(session.id).get("ok"):
                 closed.append(session.id)
+        self.kept = kept
+        if kept and now - self._kept_logged_at >= 60.0:
+            self._kept_logged_at = now
+            _keep_log.debug("kept agent terminals: %s", kept)
         return closed
 
     def close_chat_terminals(self, chat_ids: list[str] | set[str], *, now: float | None = None,

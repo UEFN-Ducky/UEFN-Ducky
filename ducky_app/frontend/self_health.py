@@ -718,6 +718,7 @@ def self_care(action: str, target: str = "") -> dict[str, Any]:
         # "now" pushed past the quiet time: every agent terminal that is done closes now;
         # running ones, ones waiting on a card and the person's own stay.
         done["closed"] = mgr.close_idle_agent_terminals(now=time.time() + 24 * 3600)
+        done["kept"] = dict(getattr(mgr, "kept", {}) or {})  # session id -> why it stays open
     elif act == "stop_orphan_bridges":
         done["stopped"] = [{"pid": r["pid"], "role": r["role"]} for r in _stop_orphan_bridges()]
     elif act == "trim_caches":

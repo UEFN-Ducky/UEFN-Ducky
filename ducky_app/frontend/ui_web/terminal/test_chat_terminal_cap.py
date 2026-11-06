@@ -212,6 +212,60 @@ def test_a_window_terminal_opened_for_a_chat_less_agent_closes_when_idle(mgr, tm
     assert mgr.close_idle_agent_terminals(now=later, running=set()) == [opened]
 
 
+def _keep_setup(mgr, tmp_path, reason):
+    """One terminal set up so close_idle_agent_terminals keeps it for ``reason``: (sid, now, running)."""
+    if reason == "not_agent":
+        sid = mgr.spawn(shell="powershell", cwd=str(tmp_path))["session_id"]  # the person's own
+    else:
+        sid = _open(mgr, tmp_path, "agent-a")["session_id"]
+    shell = mgr.get_session(sid)
+    now = shell.last_activity + manager_module._AGENT_IDLE_CLOSE_S + 1
+    running: set[str] = set()
+    if reason == "quiet<60s":
+        now = shell.last_activity + 5
+    elif reason == "chat_running":
+        running = {"agent-a"}
+    elif reason == "busy":
+        shell.set_busy(True)
+    elif reason == "background":
+        shell.ran_background = True
+        mgr.running[shell._pty.pid] = [9998]
+    elif reason == "allow_card":
+        mgr.request_command(sid, "npm test", conv_id="agent-a")
+    elif reason == "held":
+        mgr.hold(sid)
+    return sid, now, running
+
+
+@pytest.mark.parametrize("reason", ["quiet<60s", "chat_running", "busy", "background", "allow_card", "held", "not_agent"])
+def test_each_kept_terminal_says_why_it_stays_open(mgr, tmp_path, reason):
+    sid, now, running = _keep_setup(mgr, tmp_path, reason)
+    assert mgr.close_idle_agent_terminals(now=now, running=running) == []
+    assert mgr.kept == {sid: reason}
+
+
+def test_kept_reasons_are_logged_at_most_once_a_minute(mgr, tmp_path, caplog):
+    import logging
+
+    sid, now, running = _keep_setup(mgr, tmp_path, "chat_running")
+    with caplog.at_level(logging.DEBUG, logger="terminal.keep"):
+        for tick in range(4):  # the reaper's 15 s ticks
+            mgr.close_idle_agent_terminals(now=now + 15 * tick, running=running)
+    assert [r.getMessage() for r in caplog.records] == [f"kept agent terminals: {{'{sid}': 'chat_running'}}"]
+
+
+def test_self_care_reports_why_terminals_stay(mgr, tmp_path, monkeypatch):
+    from frontend import self_health
+    from frontend.ui_web import terminal
+
+    monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
+    sid, _now, _running = _keep_setup(mgr, tmp_path, "held")
+    mine, _n, _r = _keep_setup(mgr, tmp_path, "not_agent")
+    monkeypatch.setattr("frontend.ui_web.agent_turns.state.list_running_agents", lambda: [])
+    out = self_health.self_care("close_idle_terminals")
+    assert out["closed"] == [] and out["kept"] == {sid: "held", mine: "not_agent"}
+
+
 def test_a_running_leads_long_idle_shell_closes(mgr, tmp_path):
     lead = _open(mgr, tmp_path, "lead")["session_id"]
     stuck = _open(mgr, tmp_path, "member")["session_id"]

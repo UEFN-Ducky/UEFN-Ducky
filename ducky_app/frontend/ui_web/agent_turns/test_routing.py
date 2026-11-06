@@ -32,6 +32,30 @@ def test_with_the_host_on_a_coding_turn_runs_in_the_host(external_turns, monkeyp
     assert [e["reason"] for e in pushed if e["type"] == "agent_stopped"] == ["done"]
 
 
+def test_a_host_turn_counts_as_running_in_the_app_until_it_ends(external_turns, monkeypatch):  # noqa: F811
+    # The terminal reaper keeps a chat's terminal while list_running_agents() names the chat:
+    # a turn in the agent host must be named while it runs and dropped when it ends.
+    import threading
+
+    from frontend.agent_host import turns as host_turns
+
+    monkeypatch.setenv("DUCKY_AGENT_HOST", "1")
+    started, end = threading.Event(), threading.Event()
+
+    def in_host(conv_id, run_id, text, *, model, mode, push, cancel):
+        started.set()
+        end.wait(10)
+        return ""
+
+    monkeypatch.setattr(host_turns, "run_in_host", in_host)
+    external_turns.conv("hosted")
+    assert routing.run_message("hosted", "go", "agent", "", push=lambda e: None)
+    assert started.wait(10)
+    assert state.list_running_agents() == ["hosted"]
+    end.set()  # the host's turn_ended frame
+    assert _wait_for(lambda: state.list_running_agents() == [])
+
+
 def test_no_host_falls_back_and_a_host_error_stops_the_turn(external_turns, monkeypatch):  # noqa: F811
     from frontend.agent_host import turns as host_turns
 
