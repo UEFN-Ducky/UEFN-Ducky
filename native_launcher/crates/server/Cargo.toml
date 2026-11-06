@@ -1,0 +1,9 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Static UI files plus a holding proxy for /api and websockets on Ducky's UI port"
+
+[dependencies]
+serde_json = "1"
