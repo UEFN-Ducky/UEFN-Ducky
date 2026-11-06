@@ -242,6 +242,50 @@ def test_a_command_typed_into_the_caller_runs_in_the_called_workflow_without_ask
     assert asked == [("py -3 publish.py", True), ("py -3 publish.py --tag v1", False)]
 
 
+def test_a_typed_command_inside_a_repeat_two_calls_down_runs_without_asking(events, monkeypatch):
+    """Nov 6 2026 (run b9e7b5512e59): UEFN Ducky Release -> Release a site plugin -> Run until
+    it passes, whose Run the command sits in a Repeat until and reads cwd and fresh_from too."""
+    from types import SimpleNamespace
+    from backend.tools.panel import ducky_panel_terminal
+
+    asked: list[tuple[str, bool]] = []
+
+    def run_agent_command(session_id, command, **kw):
+        asked.append((command, kw["auto_approve"]))
+        return {"ok": True, "exit_code": 0, "output_tail": "STEP_RC_0"}
+
+    monkeypatch.setattr(ducky_panel_terminal, "_terminal_manager", lambda: SimpleNamespace(
+        run_agent_command=run_agent_command, get_session=lambda _sid: None))
+
+    def save(name: str, nodes: list, edges: list) -> str:
+        return str(store.save_workflow({"name": name, "graph": {"nodes": nodes, "edges": edges}})["id"])
+
+    main = lambda a, b, kind="main": {"source": a, "target": b, "kind": kind}  # noqa: E731
+    runs = save("Run until it passes", [
+        {"id": "in", "type": "flow.input", "config": {"inputs": [{"name": "cwd", "default": "x"},
+                                                                 {"name": "command", "default": "echo"},
+                                                                 {"name": "fresh_from", "default": ""},
+                                                                 {"name": "timeout_s", "default": 3600}]}},
+        {"id": "loop", "type": "flow.repeat", "config": {"expression": "true", "max": 3}},
+        _terminal_step("run", {"session_id": "t1", "command_timeout_s": "{{timeout_s}}",
+                               "command": "( cd \"{{cwd}}\" && [ -n \"{{fresh_from}}\" ] && {{command}} )"}),
+    ], [main("in", "loop"), main("loop", "run", "each")])
+    site = save("Release a site plugin", [
+        {"id": "in", "type": "flow.input", "config": {"inputs": [{"name": "plugin", "default": "p"}, {"name": "id", "default": "i"}]}},
+        {"id": "call", "type": "workflow.call", "config": {"workflow_id": runs, "args": {
+            "command": "cd plugins/{{plugin}} && release.sh --approve", "cwd": "C:/sandboxes/release-{{plugin}}",
+            "fresh_from": "C:/GitHub/DuckyOS", "timeout_s": 3600, "docker": "yes"}}},
+    ], [main("in", "call")])
+    top = save("UEFN Ducky Release", [
+        {"id": "s", "type": "start.manual", "config": {}},
+        {"id": "call", "type": "workflow.call", "config": {"workflow_id": site, "args": {"id": "uefn-ducky", "plugin": "plugin-uefn-ducky"}}},
+    ], [main("s", "call")])
+    monkeypatch.setattr(runner, "_calling_chat", lambda: "")
+    runner.run_workflow(top)
+    assert asked == [('( cd "C:/sandboxes/release-plugin-uefn-ducky" && [ -n "C:/GitHub/DuckyOS" ] && '
+                      'cd plugins/plugin-uefn-ducky && release.sh --approve )', True)]
+
+
 def test_a_run_started_by_a_chat_that_allows_everything_never_asks(events, monkeypatch):
     """Nov 6 2026: a release started from an Allow everything chat filled in its command
     while it ran; the card it asked had no chat to show in and timed out three times."""
