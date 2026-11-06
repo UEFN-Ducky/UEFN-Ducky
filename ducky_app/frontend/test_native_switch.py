@@ -364,6 +364,80 @@ def test_hook_auto_in_crash_loop_stays_python(launcher_present: Path, monkeypatc
     assert rows == [("python", None, None, "crash_loop_active")]
 
 
+
+# --- d4: rollout numbers ---------------------------------------------------------------
+
+
+@pytest.fixture
+def tracked(monkeypatch: pytest.MonkeyPatch) -> list:
+    from frontend import usage_stats
+
+    events: list = []
+    monkeypatch.setattr(usage_stats, "track", lambda name, **props: events.append((name, props)) or True)
+    return events
+
+
+def test_one_event_per_native_start(tracked: list) -> None:
+    row = ns.record_start("native", 95.4, 640, "")
+    assert row["mode"] == "native" and row["window_ms"] == 95 and row["painted_ms"] == 640
+    assert tracked == [("launcher.start", {"mode": "native", "fallback": "none", "painted_ms": 640, "window_ms": 95})]
+
+
+def test_fallback_start_sends_its_reason(tracked: list) -> None:
+    ns.record_start("python", None, None, "no_hello")
+    names = [n for n, _ in tracked]
+    assert names.count("launcher.start") == 1
+    assert tracked[0] == ("launcher.start", {"mode": "python", "fallback": "no_hello"})
+    code = [p for n, p in tracked if n == "error.code"]
+    assert len(code) == 1 and code[0]["code"] == "native_launcher_fallback" and code[0]["reason"] == "no_hello"
+
+
+def test_fallback_event_passes_the_existing_allowlist() -> None:
+    from frontend import usage_events as ev
+
+    cleaned = ev.validate("error.code", {"code": "native_launcher_fallback", "where": "ui", "reason": "no_hello"})
+    assert cleaned == {"code": "native_launcher_fallback", "where": "ui", "reason": "no_hello"}
+
+
+def test_free_text_reason_is_never_sent(tracked: list) -> None:
+    row = ns.record_start("python", "x", -5, "C:/Users/someone/secret path")
+    assert row["fallback"] == "other" and row["window_ms"] is None and row["painted_ms"] is None
+    assert all("secret" not in json.dumps(p) for _, p in tracked)
+
+
+def test_hook_records_exactly_one_start(launcher_present: Path, monkeypatch: pytest.MonkeyPatch,
+                                        tracked: list) -> None:
+    monkeypatch.setattr(ns, "record_start_soon", ns.record_start)
+    monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(8001, ready_after=0.0), []))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is True
+    monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(8002, exit_after=0.0, code=21), []))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert [n for n, _ in tracked].count("launcher.start") == 2
+    assert ns.start_summary()["starts"] == 2
+
+
+def test_summary_counts_fallbacks(tracked: list) -> None:
+    assert ns.start_summary()["starts"] == 0
+    for painted in (600, 800, 1000):
+        ns.record_start("native", 90, painted, "")
+    ns.record_start("python", None, None, "no_hello")
+    ns.record_start("python", None, None, "no_hello")
+    ns.record_start("python", None, None, "webview2")
+    s = ns.start_summary()
+    assert s["starts"] == 6 and s["native"] == 3 and s["python"] == 3
+    assert s["fallbacks"] == {"no_hello": 2, "webview2": 1}
+    # webview2 never tried the launcher: 2 failures out of 5 tries.
+    assert s["fallback_rate"] == 0.4
+    assert s["painted_ms_median"] == 800 and s["painted_ms_max"] == 1000
+    assert s["crash_loop_active"] is False
+
+
+def test_starts_file_keeps_the_last_200(tracked: list) -> None:
+    for _ in range(ns.STARTS_KEPT + 5):
+        ns.record_start("native", 1, 2, "")
+    assert ns.start_summary()["starts"] == ns.STARTS_KEPT
+
+
 def test_launcher_main_exits_when_native_painted(monkeypatch: pytest.MonkeyPatch) -> None:
     src = (Path(ns.__file__).parent / "launcher.py").read_text(encoding="utf-8")
     hook = src.index("maybe_start_native(sys.argv, start_hidden=start_hidden)")
