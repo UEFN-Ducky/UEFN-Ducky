@@ -62,8 +62,10 @@ def test_the_apps_rpc_starts_the_run_in_the_app(monkeypatch, tmp_path):
     monkeypatch.setattr(rpc, "_RPC_URL", f"http://127.0.0.1:{server.server_address[1]}/__panel_rpc")
     try:
         assert rpc.panel_rpc("workflow_start", {"workflow_id": "rel", "run_id": "r1", "caller": "lead",
-                                                "prompt": "go", "payload": {"x": 1}}) == {"ok": True}
-        assert started == [("rel", "r1", "lead", {"prompt": "go", "files": None, "payload": {"x": 1}, "trigger_id": ""})]
+                                                "prompt": "go", "payload": {"x": 1},
+                                                "started_by": "lead"}) == {"ok": True}
+        assert started == [("rel", "r1", "lead", {"prompt": "go", "files": None, "payload": {"x": 1},
+                                                  "trigger_id": "", "started_by": "lead"})]
     finally:
         server.shutdown()
         server.server_close()
@@ -76,3 +78,27 @@ def test_a_background_run_drops_person_fields_and_tells_its_chat(monkeypatch):
     pa.start_background_run("rel", "r1", "lead", payload={"_person_started": True, "x": 1}).join(5)
     assert seen["payload"] == {"x": 1} and seen["caller_conv_id"] == "lead" and seen["run_id"] == "r1"
     assert told == [("lead", "rel", {"ok": True, "id": "rel", "run": "r1"})]
+
+
+def test_the_app_run_carries_the_chat_that_started_it(monkeypatch):
+    """Nov 6 2026 (run b9e7b5512e59): the app thread had no chat, so run_chat() was empty and
+    the release's filled-in command waited on a card nobody saw, though the chat allowed
+    everything. The tool sends its own identity; the app run binds it."""
+    from backend.workspace.identity import RunContext, bind, reset
+
+    _quiet(monkeypatch)
+    asked: list[dict] = []
+    monkeypatch.setattr("backend.panel.rpc.panel_rpc",
+                        lambda method, params, timeout=30.0: asked.append(params) or {"ok": True})
+    token = bind(RunContext(conv_id="me"))
+    try:
+        # A chat named in the call is where results go, never who started it.
+        asyncio.run(pa.run_workflow("rel", caller_conv_id="someone-else"))
+    finally:
+        reset(token)
+    assert asked[0]["started_by"] == "me" and asked[0]["caller"] == "someone-else"
+    seen: list[str] = []
+    monkeypatch.setattr(runner, "run_workflow", lambda wid, **k: seen.append(runner._calling_chat()) or {"ok": True})
+    pa.start_background_run("rel", "r1", "someone-else", started_by="me").join(5)
+    pa.start_background_run("rel", "r2", "someone-else").join(5)
+    assert seen == ["me", ""]

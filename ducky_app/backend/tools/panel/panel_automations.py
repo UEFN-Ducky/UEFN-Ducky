@@ -776,7 +776,7 @@ async def _record_release_run(plugin: str, workflow_id: str, known: set[str], ru
 
 def start_background_run(workflow_id: str, run_id: str, caller: str, *, prompt: str = "",
                          files: list[Any] | None = None, payload: dict[str, Any] | None = None,
-                         trigger_id: str = "") -> threading.Thread:
+                         trigger_id: str = "", started_by: str = "") -> threading.Thread:
     """Run a workflow on its own thread in this process; the caller chat hears when it ends.
     The app calls this for agents (``workflow_start`` on ``/__panel_rpc``): a run inside the
     shared tool server died with it ("The process running this workflow ended") whenever that
@@ -785,11 +785,25 @@ def start_background_run(workflow_id: str, run_id: str, caller: str, *, prompt: 
     from backend.automations.runner import run_workflow as _run
 
     def work() -> None:
+        # The chat whose ducky called run_workflow (the tool server's own identity, never a
+        # chat named in the call): the run's commands go under its say-so. Without it the app
+        # thread had no chat, and a release's filled-in command waited on a card nobody saw
+        # (Nov 6 2026, run b9e7b5512e59).
+        token = None
+        if started_by:
+            from backend.workspace.identity import RunContext, bind
+
+            token = bind(RunContext(run_id=run_id, conv_id=started_by))
         try:
             out = _run(workflow_id, trigger_id=trigger_id, payload=public_payload(payload), prompt=prompt,
                        files=files, caller_conv_id=caller, run_id=run_id)
         except Exception as exc:
             out = {"ok": False, "error": str(exc), "id": workflow_id, "run": run_id}
+        finally:
+            if token is not None:
+                from backend.workspace.identity import reset
+
+                reset(token)
         _tell_caller(caller, workflow_id, out)
 
     thread = threading.Thread(target=contextvars.copy_context().run, args=(work,),
@@ -807,6 +821,7 @@ def _start_in_app(workflow_id: str, run_id: str, caller: str, *, prompt: str, fi
         out = panel_rpc("workflow_start", {
             "workflow_id": workflow_id, "run_id": run_id, "caller": caller, "prompt": prompt,
             "files": files or [], "payload": payload or {}, "trigger_id": trigger_id,
+            "started_by": _caller_chat(""),
         }, timeout=10.0)
     except Exception:
         return False

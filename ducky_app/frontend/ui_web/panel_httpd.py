@@ -1096,6 +1096,7 @@ def start_panel_ui_server(dist_root: Path, bind_port: int | None = None) -> str:
                             files=files if isinstance(files, list) else None,
                             payload=params.get("payload") if isinstance(params.get("payload"), dict) else None,
                             trigger_id=str(params.get("trigger_id") or ""),
+                            started_by=str(params.get("started_by") or ""),
                         )
                         self._send_json(200, {"result": {"ok": True}})
                         return
