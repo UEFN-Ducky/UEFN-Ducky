@@ -129,6 +129,17 @@ pub fn web_dist(backend_exe: &Path) -> Option<PathBuf> {
         .find(|d| d.join("index.html").is_file())
 }
 
+/// The page is up. Under `native_switch` (`native_child`): the ready file it waits for (it
+/// records the start itself). A direct start: no ready file (nobody reads it), its own
+/// `starts.json` row instead.
+pub fn on_ready(app_data: &Path, native_child: bool, launcher_pid: u32, window_ms: u64, painted_ms: u64) -> std::io::Result<()> {
+    if native_child {
+        write_ready(app_data, launcher_pid, window_ms, painted_ms)
+    } else {
+        crate::starts::record(app_data, true, Some(window_ms), Some(painted_ms), "")
+    }
+}
+
 /// `launcher/ready-<pid>.json`: `native_switch.run_native` waits for it, then exits.
 pub fn ready_path(app_data: &Path, launcher_pid: u32) -> PathBuf {
     app_data.join("launcher").join(format!("ready-{launcher_pid}.json"))
@@ -389,6 +400,25 @@ mod tests {
         assert_eq!(contract_code(3), 24);
         assert_eq!(contract_code(-1), 24);
         assert_eq!(contract_code(window::EXIT_WEBVIEW2), 20);
+    }
+
+    #[test]
+    fn direct_start_records_a_row_native_child_writes_the_ready_file() {
+        let dir = std::env::temp_dir().join(format!("ducky-onready-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        on_ready(&dir, false, 42, 40, 900).unwrap();
+        assert!(!ready_path(&dir, 42).exists(), "direct start: no ready file");
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("launcher/starts.json")).unwrap()).unwrap();
+        let rows = v["starts"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0]["mode"].as_str(), rows[0]["painted_ms"].as_u64()), (Some("native"), Some(900)));
+        on_ready(&dir, true, 43, 40, 900).unwrap();
+        assert!(ready_path(&dir, 43).is_file(), "native_switch still gets its ready file");
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("launcher/starts.json")).unwrap()).unwrap();
+        assert_eq!(v["starts"].as_array().unwrap().len(), 1, "native_switch records that start itself");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

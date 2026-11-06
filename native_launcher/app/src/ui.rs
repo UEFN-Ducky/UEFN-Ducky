@@ -329,6 +329,9 @@ impl Host for UiHost {
     }
 
     fn fallback(&mut self, code: u8) {
+        // The rollout numbers first, as `native_switch` does before its Python window.
+        let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
+        let _ = crate::starts::record(&app_data, false, None, None, crate::starts::exit_reason(code));
         let exe = std::env::current_exe().unwrap_or_default();
         let started = repoint::Spawn::python(repoint::sibling_stub(&exe), &self.args).start();
         with(|u| {
@@ -645,7 +648,7 @@ fn write_ready_once() {
         }
         u.ready_written = true;
         let painted = u.painted_ms.unwrap_or_else(|| ms_since(u.t0));
-        let _ = start::write_ready(&u.app_data, std::process::id(), u.window_ms, painted);
+        let _ = start::on_ready(&u.app_data, u.ready_needs_hello, std::process::id(), u.window_ms, painted);
     });
 }
 

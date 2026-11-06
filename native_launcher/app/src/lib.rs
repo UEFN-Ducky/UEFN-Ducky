@@ -8,6 +8,7 @@ pub mod exit;
 pub mod page;
 pub mod repoint;
 pub mod start;
+pub mod starts;
 #[cfg(windows)]
 mod ui;
 
@@ -31,6 +32,9 @@ pub fn run(args: Vec<OsString>) -> u8 {
     let exe = std::env::current_exe().unwrap_or_default();
     let app_data = ducky_instance::Config::from_env().map(|c| c.app_data).unwrap_or_default();
     let native_child = env_is(repoint::NATIVE_CHILD_ENV, "1");
+    // ponytail: a read_dir of the small launcher/ folder on the start path; move it to a
+    // thread if it ever shows in the timings.
+    starts::sweep_ready(&app_data, starts::READY_MAX_AGE);
     let instead = repoint::before_start(
         &exe,
         &args,
