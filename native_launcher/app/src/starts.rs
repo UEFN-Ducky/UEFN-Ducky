@@ -109,7 +109,8 @@ mod tests {
     #[test]
     fn rows_match_native_switch_record_start() {
         let mut native = row(true, Some(95), Some(640), "", 1.5);
-        assert_eq!(native.as_object().unwrap().keys().collect::<Vec<_>>(), ["fallback", "mode", "painted_ms", "ts", "window_ms"]);
+        // Python's record_start order (serde_json preserve_order keeps it).
+        assert_eq!(native.as_object().unwrap().keys().collect::<Vec<_>>(), ["ts", "mode", "window_ms", "painted_ms", "fallback"]);
         native["ts"] = json!(0);
         assert_eq!(native, json!({"ts": 0, "mode": "native", "window_ms": 95, "painted_ms": 640, "fallback": ""}));
         let fb = row(false, None, None, exit_reason(23), 2.0);

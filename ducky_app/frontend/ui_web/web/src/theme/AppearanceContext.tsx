@@ -33,6 +33,7 @@ import { onApiReady } from "../hooks/onApiReady";
 import { installPanelPushBus, isMainWindow, subscribePanelPush } from "../hooks/usePanelPushBus";
 import { UnsavedChangesModal } from "../components/UnsavedChangesModal";
 import { usePluginContributions } from "../hooks/usePluginContributions";
+import { stableJson } from "../utils/stableJson";
 import {
   isPluginProfileId,
   parsePluginProfileId,
@@ -423,7 +424,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       void api
         .get_appearance()
         .then((dto) => {
-          lastLivePushRef.current = JSON.stringify(dto);
+          lastLivePushRef.current = stableJson(dto);
           const loaded = toState(dto);
           setState(loaded);
           markPersisted(loaded);
@@ -437,7 +438,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     return subscribePanelPush((event: PanelPushEvent) => {
       if (event.type !== "appearance_changed") return;
       if (event.appearance) {
-        lastLivePushRef.current = JSON.stringify(event.appearance);
+        lastLivePushRef.current = stableJson(event.appearance);
         setState(toState(event.appearance));
         return;
       }
@@ -452,11 +453,13 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     const api = getApi();
     if (!api?.push_appearance_live) return;
     const dto = stateToDto(state);
-    const serialized = JSON.stringify(dto);
-    if (serialized === lastLivePushRef.current) return;
+    // Key order is not compared: a pushed appearance that came back with its keys in
+    // another order read as a change, and the page re-sent it ~10 times a second.
+    const key = stableJson(dto);
+    if (key === lastLivePushRef.current) return;
     const timer = window.setTimeout(() => {
-      lastLivePushRef.current = serialized;
-      void api.push_appearance_live(JSON.parse(serialized) as AppearanceDto);
+      lastLivePushRef.current = key;
+      void api.push_appearance_live(JSON.parse(JSON.stringify(dto)) as AppearanceDto);
     }, 80);
     return () => window.clearTimeout(timer);
   }, [state, appearanceReady]);

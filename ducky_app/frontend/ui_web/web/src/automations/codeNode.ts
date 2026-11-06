@@ -8,6 +8,7 @@ import type {
   PinDto,
   WorkflowNodeCodeDto,
 } from "../types/panel";
+import { stableJson } from "../utils/stableJson";
 import { cleanType, PIN_TYPE_LABELS, type NodePins } from "./pins";
 
 /** Custom code nodes: a step (or value) that runs the JavaScript in its config. One
@@ -104,14 +105,6 @@ export function withCheck(node: AutomationGraphNodeDto, check: CodeCheckDto): Au
 }
 
 /** JSON with object keys sorted, so the same value always reads the same. */
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).filter((key) => (value as Record<string, unknown>)[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value ?? null);
-}
-
 /** What the code declares that the canvas and the details draw (pins, settings, tools). */
 export function declarationKey(node: AutomationGraphNodeDto): string {
   const uses = (node.config.uses ?? {}) as { tools?: unknown; builtins?: unknown };

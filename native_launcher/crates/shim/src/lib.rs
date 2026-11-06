@@ -285,4 +285,14 @@ mod tests {
         assert!(page_message_from_backend(r#"{"t":"hello","protocol":1}"#).is_none());
         assert!(page_message_from_backend("garbage").is_none());
     }
+
+    #[test]
+    fn key_order_survives_both_ways() {
+        // The page compares what it sent with what comes back as text; sorted keys never matched.
+        let r = route_message(r##"{"t":"call","id":"js-12","name":"push_appearance_live","args":[{"foundation":{"text":"#fff","bg":"#000"},"active_profile_id":"p"}]}"##).unwrap();
+        let Route::Backend { line, .. } = r else { panic!("not backend") };
+        assert!(line.contains(r##"[{"foundation":{"text":"#fff","bg":"#000"},"active_profile_id":"p"}]"##), "{line}");
+        let back = page_message_from_backend(r#"{"t":"result","id":"js-13","ok":true,"value":{"z":1,"a":2}}"#).unwrap();
+        assert!(back.contains(r#""value":{"z":1,"a":2}"#), "{back}");
+    }
 }
