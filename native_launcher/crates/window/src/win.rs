@@ -232,11 +232,18 @@ pub fn set_hit_config(hit: HitConfig) {
 
 /// Hand a caption drag to the OS (`begin_native_drag` in `win_frameless.py`).
 pub fn begin_drag(hwnd: HWND) -> bool {
-    post_nc_button(hwnd, HTCAPTION)
+    post_nc_button(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, true)
 }
 
-/// Hand an edge resize to the OS; `edge` is n/s/e/w/nw/ne/sw/se.
-pub fn begin_resize(hwnd: HWND, edge: &str) -> bool {
+/// The caption's system menu at the cursor (`show_native_window_menu`): DefWindowProc
+/// opens it on WM_NCRBUTTONUP over HTCAPTION; posted so its modal loop never blocks.
+pub fn show_menu(hwnd: HWND) -> bool {
+    post_nc_button(hwnd, WM_NCRBUTTONUP, HTCAPTION, false)
+}
+
+/// Hand an edge resize to the OS; `edge` is n/s/e/w/nw/ne/sw/se. A double click on the
+/// edge does what a native border double click does (e.g. top: fill the height).
+pub fn begin_resize(hwnd: HWND, edge: &str, double_click: bool) -> bool {
     let wmsz = match edge.to_ascii_lowercase().as_str() {
         "w" => 1,
         "e" => 2,
@@ -251,18 +258,21 @@ pub fn begin_resize(hwnd: HWND, edge: &str) -> bool {
     if unsafe { IsZoomed(hwnd).as_bool() } {
         return false;
     }
-    post_nc_button(hwnd, HTLEFT + wmsz - 1)
+    let msg = if double_click { WM_NCLBUTTONDBLCLK } else { WM_NCLBUTTONDOWN };
+    post_nc_button(hwnd, msg, HTLEFT + wmsz - 1, true)
 }
 
-fn post_nc_button(hwnd: HWND, ht: u32) -> bool {
+fn post_nc_button(hwnd: HWND, msg: u32, ht: u32, release_capture: bool) -> bool {
     unsafe {
         let mut pt = POINT::default();
         if GetCursorPos(&mut pt).is_err() {
             return false;
         }
         let lparam = (((pt.y as u32) & 0xFFFF) << 16) | ((pt.x as u32) & 0xFFFF);
-        let _ = ReleaseCapture();
-        PostMessageW(Some(hwnd), WM_NCLBUTTONDOWN, WPARAM(ht as usize), LPARAM(lparam as isize)).is_ok()
+        if release_capture {
+            let _ = ReleaseCapture();
+        }
+        PostMessageW(Some(hwnd), msg, WPARAM(ht as usize), LPARAM(lparam as isize)).is_ok()
     }
 }
 

@@ -80,6 +80,20 @@
   window.pywebview.platform = "edgechromium";
   window.pywebview.native = true;
 
+  // pywebview's sync bridge: the page moves, resizes and opens the caption menu through
+  // it while the mouse button is still down (utils/windowDrag.ts, nativeWindowChrome.ts).
+  // Without it the window could not be dragged or resized from the top.
+  var bridge = {
+    uefnNativeWindowMove: function () { return ["begin_native_window_move", []]; },
+    uefnNativeWindowResize: function (p) { return ["begin_native_window_resize", [p[0], p[1] === true]]; },
+    uefnNativeWindowMenu: function () { return ["uefnNativeWindowMenu", []]; },
+  };
+  window.pywebview._jsApiCallback = function (funcName, params, _id) {
+    var p = Array.isArray(params) ? params : [];
+    var mapped = bridge[funcName] ? bridge[funcName](p) : [String(funcName), p];
+    call(mapped[0], mapped[1]).catch(function () {});
+  };
+
   function ready() { window.dispatchEvent(new CustomEvent("pywebviewready")); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", ready, { once: true });

@@ -538,7 +538,8 @@ fn native_op(op: NativeOp) -> Value {
             }
             NativeOp::UsesNativeWindowChrome => json!(true),
             NativeOp::BeginMove => json!(window::win::begin_drag(h)),
-            NativeOp::BeginResize { edge } => json!(window::win::begin_resize(h, &edge)),
+            NativeOp::BeginResize { edge, double_click } => json!(window::win::begin_resize(h, &edge, double_click)),
+            NativeOp::ShowMenu => json!(window::win::show_menu(h)),
             NativeOp::IsMaximized => json!(IsZoomed(h).as_bool()),
             NativeOp::ToggleMaximize => {
                 let _ = ShowWindow(h, if IsZoomed(h).as_bool() { SW_RESTORE } else { SW_MAXIMIZE });

@@ -41,7 +41,9 @@ pub enum NativeOp {
     SetWindowBounds { x: i32, y: i32, width: i32, height: i32 },
     UsesNativeWindowChrome,
     BeginMove,
-    BeginResize { edge: String },
+    BeginResize { edge: String, double_click: bool },
+    /// The caption's system menu (right-click on the page's title bar).
+    ShowMenu,
     IsMaximized,
     ToggleMaximize,
     Minimize,
@@ -125,9 +127,14 @@ pub fn native_op(name: &str, args: &[Value]) -> Option<Result<NativeOp, String>>
         "uses_native_window_chrome" => Ok(NativeOp::UsesNativeWindowChrome),
         "begin_native_window_move" => Ok(NativeOp::BeginMove),
         "begin_native_window_resize" => match args.first().and_then(Value::as_str) {
-            Some(edge) => Ok(NativeOp::BeginResize { edge: edge.to_string() }),
+            Some(edge) => Ok(NativeOp::BeginResize {
+                edge: edge.to_string(),
+                double_click: args.get(1).and_then(Value::as_bool) == Some(true),
+            }),
             None => Err("edge must be a string".to_string()),
         },
+        // pywebview's sync bridge only (`window.pywebview._jsApiCallback`), not a js_api method.
+        "uefnNativeWindowMenu" => Ok(NativeOp::ShowMenu),
         "is_window_maximized" => Ok(NativeOp::IsMaximized),
         "toggle_maximize" => Ok(NativeOp::ToggleMaximize),
         "minimize_window" => Ok(NativeOp::Minimize),
@@ -241,7 +248,15 @@ mod tests {
     #[test]
     fn resize_edge() {
         let r = route_message(r#"{"t":"call","id":"js-5","name":"begin_native_window_resize","args":["se"]}"#).unwrap();
-        assert_eq!(r, Route::Native { id: "js-5".into(), op: NativeOp::BeginResize { edge: "se".into() } });
+        assert_eq!(r, Route::Native { id: "js-5".into(), op: NativeOp::BeginResize { edge: "se".into(), double_click: false } });
+        let r = route_message(r#"{"t":"call","id":"js-10","name":"begin_native_window_resize","args":["n",true]}"#).unwrap();
+        assert_eq!(r, Route::Native { id: "js-10".into(), op: NativeOp::BeginResize { edge: "n".into(), double_click: true } });
+    }
+
+    #[test]
+    fn caption_menu_is_answered_natively() {
+        let r = route_message(r#"{"t":"call","id":"js-11","name":"uefnNativeWindowMenu","args":[]}"#).unwrap();
+        assert_eq!(r, Route::Native { id: "js-11".into(), op: NativeOp::ShowMenu });
     }
 
     #[test]

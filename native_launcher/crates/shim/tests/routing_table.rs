@@ -101,3 +101,29 @@ fn shim_js_exposes_pywebview_surface() {
         assert!(SHIM_JS.contains(needle), "shim.js lacks {needle}");
     }
 }
+
+#[test]
+fn shim_js_answers_every_sync_bridge_name_the_page_sends() {
+    // Nov 6 2026: 1.2.472 shipped without _jsApiCallback, so the header could not drag the
+    // window and the top edge could not resize it.
+    let sent: Vec<String> = [
+        "ducky_app/frontend/ui_web/web/src/utils/windowDrag.ts",
+        "ducky_app/frontend/ui_web/web/src/utils/nativeWindowChrome.ts",
+    ]
+    .iter()
+    .flat_map(|f| {
+        repo_file(f)
+            .split("_jsApiCallback(\"")
+            .skip(1)
+            .filter_map(|s| s.split('"').next().map(str::to_string))
+            .collect::<Vec<_>>()
+    })
+    .collect();
+    assert!(sent.len() >= 3, "parsed too few bridge calls: {sent:?}");
+    assert!(SHIM_JS.contains("window.pywebview._jsApiCallback"));
+    for name in &sent {
+        assert!(SHIM_JS.contains(&format!("{name}:")), "shim.js does not map {name}");
+    }
+    assert!(matches!(native_op("uefnNativeWindowMenu", &[]), Some(Ok(_))));
+    assert!(matches!(native_op("begin_native_window_resize", &[serde_json::json!("n"), serde_json::json!(true)]), Some(Ok(_))));
+}
