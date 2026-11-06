@@ -140,10 +140,15 @@ def ducky_terminal_run(
             if _RELEASE_SCRIPT.search(command or "") else "")
     if busy:
         return tool_json({"ok": False, "error": busy, "session_id": session_id.strip()}, pretty=pretty)
-    from backend.automations.runner import in_workflow, typed_command_approved
+    from backend.automations.runner import in_workflow, run_chat, typed_command_approved
     from backend.tools.panel.permission_prompt import allows_everything
 
-    auto = bool(chat and allows_everything(chat)) or typed_command_approved(command)
+    # A workflow started by a chat that allows everything runs its commands under that
+    # chat's say-so (Nov 6 2026: Release a site plugin's filled-in command asked a card
+    # tied to no chat, so nobody saw it and it timed out three times).
+    starter = run_chat() if in_workflow() else ""
+    auto = (bool(chat and allows_everything(chat)) or typed_command_approved(command)
+            or bool(starter and allows_everything(starter)))
     # The manager's steer check comes from conv_id (the chat's steer inbox), in this
     # process or in the window's: a person's message returns the run early.
     result = mgr.run_agent_command(
