@@ -55,6 +55,17 @@ fn backend_names_are_not_window_names() {
 }
 
 #[test]
+fn cacheable_names_are_python_getters_in_the_inventory() {
+    let inv = repo_file("ducky_app/frontend/native_host/inventory.py");
+    let tokens: std::collections::HashSet<&str> = inv.split_whitespace().collect();
+    for name in shim::cache::CACHEABLE {
+        assert!(tokens.contains(name), "{name} is not in native_host/inventory.py");
+        assert!(!is_window_name(name), "{name}");
+        assert!(!inv.contains(&format!("\"{name}\": \"")), "{name} is a launcher handler");
+    }
+}
+
+#[test]
 fn shim_js_exposes_pywebview_surface() {
     for needle in ["window.pywebview.api", "pywebviewready", "chrome.webview", "postMessage", "new Proxy", "\"js-\""] {
         assert!(SHIM_JS.contains(needle), "shim.js lacks {needle}");
