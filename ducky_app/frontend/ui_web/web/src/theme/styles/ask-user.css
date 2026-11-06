@@ -32,8 +32,8 @@
 .ask-user-top {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
+  gap: 7px;
+  min-height: 34px;
   margin: 0 -10px;
   padding: 0 6px 0 10px;
   border-bottom: 1px solid var(--border);
@@ -51,22 +51,22 @@
 }
 
 .ask-user-badge svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .ask-user-heading,
 .ask-user-author {
   overflow: hidden;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   letter-spacing: 0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .ask-user-author {
-  max-width: 40%;
+  max-width: 60%;
   color: var(--member-color, var(--accent));
 }
 
