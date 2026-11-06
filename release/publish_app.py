@@ -953,6 +953,32 @@ def pytest_workers(uefn: bool, cores: int | None = None) -> str:
     return str(max(2, count // 4 if uefn else count // 2))
 
 
+NATIVE_MANIFEST = ROOT / "native_launcher" / "Cargo.toml"
+# The full pytest run names its folders: pytest.ini's testpaths leaves out release/, whose
+# tests pin these release steps.
+PYTEST_PATHS = ("ducky_app", "tests", "release")
+
+
+def run_cargo_tests(manifest: Path | None = None) -> None:
+    """The Rust launcher's tests (cargo test over its workspace), after pytest and vitest.
+
+    A failure fails the test phase. No cargo on this PC is only a warning: the launcher
+    ships off by default and the release still builds without it.
+    """
+    manifest = NATIVE_MANIFEST if manifest is None else manifest
+    if not manifest.is_file():
+        print(f"=== cargo test: skipped, no {manifest} ===")
+        return
+    cargo = shutil.which("cargo")
+    if not cargo:
+        print("WARNING: cargo not found, so the native launcher's Rust tests did not run.")
+        return
+    print("=== cargo test (native launcher) ===")
+    proc = subprocess.run([cargo, "test", "--manifest-path", str(manifest)], cwd=str(ROOT))
+    if proc.returncode != 0:
+        raise SystemExit(f"cargo test failed (exit {proc.returncode})")
+
+
 def run_regression_tests() -> None:
     """Refuse to bump/upload unless pytest + panel vitest are green.
 
@@ -1001,6 +1027,7 @@ def run_regression_tests() -> None:
         if again.returncode != 0:
             retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or retry.targets)
             raise SystemExit(f"retry tests failed (exit {again.returncode})")
+        run_cargo_tests()
         retry_scope.clear(ROOT)
         print("regression tests ok (retry)")
         return
@@ -1012,7 +1039,7 @@ def run_regression_tests() -> None:
     print("=== pytest (required before Store publish) ===")
     full = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
-         "--timeout", "300", "--timeout-method", "thread"],
+         "--timeout", "300", "--timeout-method", "thread", *PYTEST_PATHS],
         cwd=str(ROOT),
     )
     if full.returncode != 0:
@@ -1034,6 +1061,7 @@ def run_regression_tests() -> None:
             retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or failed)
             raise SystemExit(f"{len(failed)} failed tests failed again on their own (exit {alone.returncode})")
         print("The failed tests passed on their own: they only fail inside the full suite (see above).")
+    run_cargo_tests()
     retry_scope.clear(ROOT)
     print("regression tests ok")
 
