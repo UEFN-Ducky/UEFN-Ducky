@@ -30,9 +30,11 @@ def stop_archived(
     cancel: Callable[[str], None] | None = None,
     close_terminals: Callable[[list[str]], list[str]] | None = None,
     wait: bool = False,
+    timeout: float | None = None,
 ) -> None:
     """Stop these just-archived chats' turns and close their terminals. Runs off the caller's
-    thread (a stop waits on the agent's process) unless ``wait``; never raises."""
+    thread (a stop waits on the agent's process) unless ``wait``; never raises. ``wait`` with a
+    ``timeout`` waits at most that long, then lets the stop finish on its own thread."""
     ids = sorted({str(c).strip() for c in conv_ids if str(c or "").strip()})
     if not ids:
         return
@@ -50,7 +52,10 @@ def stop_archived(
         except Exception:
             pass
 
-    if wait:
+    if wait and timeout is None:
         run()
-    else:
-        threading.Thread(target=run, name="archive-stop", daemon=True).start()
+        return
+    thread = threading.Thread(target=run, name="archive-stop", daemon=True)
+    thread.start()
+    if wait:
+        thread.join(timeout)

@@ -51,6 +51,107 @@ def test_deleting_a_chat_stops_it_and_its_sub_agents(monkeypatch, tmp_path) -> N
     assert conversations.load_conversation(lead.id, root) is None
 
 
+def test_a_stuck_stop_is_waited_for_only_up_to_the_timeout() -> None:
+    import threading
+    import time
+
+    release = threading.Event()
+    t0 = time.monotonic()
+    archive_stop.stop_archived(["seat"], cancel=lambda _c: release.wait(5), close_terminals=lambda ids: ids,
+                               wait=True, timeout=0.2)
+    took = time.monotonic() - t0
+    release.set()
+    assert 0.15 <= took < 2.0
+
+
+def _files_chat(monkeypatch, tmp_path, title: str = "Doomed"):
+    from frontend.ui_web.chats import conversations
+
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", "files")
+    root = str(tmp_path / "Island")
+    (tmp_path / "Island" / "Content").mkdir(parents=True)
+    conv = conversations.create_conversation(title=title, project_root=root)
+    meta = conversations._find_conversation_meta(conv.id, root)
+    assert meta is not None and meta.is_file()
+    return conversations, root, conv, meta
+
+
+def test_the_stop_finishes_before_the_chat_files_go(monkeypatch, tmp_path) -> None:
+    # Nov 6 2026: the stop ran on its own thread and read conversation.json while rmtree ran;
+    # Windows refused the unlink, the delete swallowed it, and the chat came back.
+    import threading
+
+    conversations, root, conv, meta = _files_chat(monkeypatch, tmp_path)
+    seen: list[tuple[bool, bool]] = []
+
+    def reading_cancel(conv_id: str) -> None:
+        with open(meta, encoding="utf-8"):  # holds the file the way the real stop's read does
+            threading.Event().wait(0.3)
+        seen.append((conv_id == conv.id, meta.is_file()))
+
+    monkeypatch.setattr(archive_stop, "_cancel", reading_cancel)
+    monkeypatch.setattr(archive_stop, "_close_terminals", lambda ids: [])
+    conversations.delete_conversation(conv.id, root)
+    assert seen == [(True, True)]  # stopped while the files were still there
+    assert conversations.load_conversation(conv.id, root) is None
+    assert not meta.parent.exists()
+
+
+def test_a_reader_that_lets_go_soon_never_keeps_the_chat(monkeypatch, tmp_path) -> None:
+    import threading
+
+    conversations, root, conv, meta = _files_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(archive_stop, "stop_archived", lambda ids, **kw: None)
+    held = open(meta, encoding="utf-8")
+    threading.Timer(0.2, held.close).start()
+    try:
+        conversations.delete_conversation(conv.id, root)
+    finally:
+        held.close()
+    assert conversations.load_conversation(conv.id, root) is None
+
+
+def test_a_delete_that_cannot_remove_the_chat_says_so(monkeypatch, tmp_path) -> None:
+    import shutil
+
+    import pytest
+
+    conversations, root, conv, meta = _files_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(archive_stop, "stop_archived", lambda ids, **kw: None)
+    monkeypatch.setattr(conversations, "_RMTREE_TRIES", 2)
+    tries: list[str] = []
+
+    def refused(path, *a, **k):
+        tries.append(str(path))
+        raise PermissionError(13, "in use", str(meta))
+
+    monkeypatch.setattr(shutil, "rmtree", refused)
+    with pytest.raises(OSError, match="Couldn't delete the chat"):
+        conversations.delete_conversation(conv.id, root)
+    assert len(tries) == 2  # retried before giving up
+    assert conversations.load_conversation(conv.id, root) is not None  # reported, not hidden
+
+
+def test_a_stale_layout_after_a_real_delete_never_brings_the_chat_back(monkeypatch, tmp_path) -> None:
+    # The product path of test_sidebar_layout_stale's deleted-chat case, with the real
+    # stop_archived (that file runs the stop inline for its layout tests).
+    from frontend.ui_web.chats import folders as chat_folders
+
+    conversations, root, conv, _meta = _files_chat(monkeypatch, tmp_path, "Gone")
+    folder = chat_folders.create_folder("Box", project_root=root)
+    stale = conversations.load_conversation(conv.id, root)
+    conversations.list_conversations(project_root=root)
+    conversations.delete_conversation(conv.id, root)
+    assert conversations.load_conversation(conv.id, root) is None
+
+    real_load = conversations._load_all_conversations
+    monkeypatch.setattr(conversations, "_load_all_conversations", lambda *a, **k: [*real_load(*a, **k), stale])
+    chat_folders.apply_sidebar_layout(
+        folders=[], chats=[{"id": conv.id, "folder_id": folder.id, "sort_order": 3}], project_root=root
+    )
+    assert conversations.load_conversation(conv.id, root) is None
+
+
 def test_a_running_agent_whose_chat_is_gone_can_still_be_stopped(monkeypatch) -> None:
     import json
 

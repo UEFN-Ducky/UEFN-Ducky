@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import time
@@ -786,7 +787,37 @@ def set_conversation_ducky_style(
         _saves.save_conversation(conv, project_root, touch_updated=False)
 
 
+_STOP_BEFORE_DELETE_S = 3.0
+_RMTREE_TRIES = 6  # 50 ms backoff, doubled: ~1.5 s for a reader to let go
+
+
+def _remove_chat_folder(conv_id: str, folder: Path) -> None:
+    """rmtree that outlasts a brief reader: Windows refuses to unlink a file another thread or
+    process has open (the archive-stop read conversation.json mid-delete, Nov 6 2026, and the
+    swallowed error left the chat in place). Raises when the chat would still load, so the
+    delete is reported instead of the chat silently coming back."""
+    delay = 0.05
+    for attempt in range(_RMTREE_TRIES):
+        try:
+            shutil.rmtree(folder)
+            return
+        except OSError as exc:
+            if not folder.exists():
+                return
+            if attempt + 1 < _RMTREE_TRIES:
+                time.sleep(delay)
+                delay *= 2
+                continue
+            if (folder / "conversation.json").exists():
+                logging.getLogger(__name__).error("chat %s not deleted: %s", conv_id, exc)
+                raise OSError(f"Couldn't delete the chat: a file in it is in use ({exc})") from exc
+            # Only leftovers (attachments) stayed: the chat itself is gone.
+            logging.getLogger(__name__).warning("chat %s deleted, folder left behind: %s", conv_id, exc)
+
+
 def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
+    """Delete a chat and its sub-agent chats. Raises OSError when a chat's files can't be
+    removed (the caller shows it); it never reports success with the chat still stored."""
     from frontend.ui_web.conversation_attachments import conversation_dir
 
     # A spawned chat is owned by its parent. Permanently deleting the parent must
@@ -794,9 +825,11 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
     ids = [conv_id, *_groups.conversation_descendant_ids(conv_id, project_root)]
     # A deleted chat's agent and terminals stop with it (Nov 5 2026: an archived seat deleted
     # by "Empty" kept its turn and sandbox terminal, and could no longer be stopped by id).
-    from frontend.ui_web.chats.archive_stop import stop_archived
+    # Stopped before the files go: the stop reads the chat, and a read during rmtree made
+    # Windows refuse the delete. Bounded: a stop stuck on a process finishes on its own.
+    from frontend.ui_web.chats import archive_stop
 
-    stop_archived(ids)
+    archive_stop.stop_archived(ids, wait=True, timeout=_STOP_BEFORE_DELETE_S)
     try:
         from backend.tools.panel.permission_prompt import forget_chat
     except Exception:
@@ -822,12 +855,11 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
             meta = _find_conversation_meta(target_id, project_root)
             if meta is not None:
                 conv_folder = meta.parent
-        if conv_folder.is_dir():
-            try:
-                shutil.rmtree(conv_folder)
-            except OSError:
-                pass
-        _store.release_conversation_lock(target_id)
+        try:
+            if conv_folder.is_dir():
+                _remove_chat_folder(target_id, conv_folder)
+        finally:
+            _store.release_conversation_lock(target_id)
 
 
 # The sidebar auto-numbers fresh duckies ("NewDucky1", "New ducky2"), so the
