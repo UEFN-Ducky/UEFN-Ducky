@@ -31,6 +31,28 @@ def retryable(exc: BaseException) -> bool:
                             http.client.IncompleteRead, http.client.RemoteDisconnected))
 
 
+def cert_failed(exc: BaseException) -> bool:
+    return isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError)
+
+
+def urlopen(req: urllib.request.Request, *, timeout: float, content_checked: bool = False) -> Any:
+    """``urllib.request.urlopen``; ``content_checked`` downloads still arrive when this PC
+    can't verify the server's certificate (a root Windows hasn't fetched, a wrong clock).
+
+    Only for files the caller checks byte for byte against a hash it got from a verified,
+    signed source (Store sha256, the update's signed manifest, the feed's installer
+    sha256): a tampered file fails that check exactly as it would have over verified TLS.
+    """
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        if not (content_checked and cert_failed(exc)):
+            raise
+    from frontend.net_access import content_checked_opener
+
+    return content_checked_opener().open(req, timeout=timeout)
+
+
 def retry_delay(attempt: int) -> float:
     return 0.5 * (attempt + 1)
 
@@ -56,6 +78,7 @@ def fetch_into(
     on_chunk: Callable[[int, int], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     on_open: Callable[[Any], None] | None = None,
+    content_checked: bool = False,
 ) -> None:
     """One GET that continues ``out`` from its current length with ``Range``.
 
@@ -69,7 +92,7 @@ def fetch_into(
         req_headers["Range"] = f"bytes={offset}-"
     req = urllib.request.Request(url, headers=req_headers)
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        resp = urlopen(req, timeout=timeout, content_checked=content_checked)
     except urllib.error.HTTPError as exc:
         if exc.code == 416 and offset:
             return  # nothing past what we have; callers check size and hash

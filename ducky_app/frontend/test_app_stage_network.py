@@ -240,3 +240,49 @@ def test_a_try_that_moved_forward_does_not_count_toward_setup(monkeypatch) -> No
     update_swap.check_and_stage()
     update_swap.check_and_stage()
     assert update_swap.status()["failures"] == 0
+
+
+@pytest.fixture()
+def untrusted_server(tmp_path, monkeypatch):
+    """A server this PC can't verify (like a root Windows hasn't fetched, or a wrong clock)."""
+    made: list[FlakyTls] = []
+
+    def make(files: dict[str, bytes]) -> FlakyTls:
+        server = FlakyTls(tmp_path, files, lambda n: "ok")
+        strict = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+        monkeypatch.setattr(urllib.request, "_opener", strict)
+        made.append(server)
+        return server
+
+    yield make
+    for server in made:
+        server.close()
+
+
+def test_an_unverifiable_certificate_still_downloads_hash_checked_files(untrusted_server) -> None:
+    import io
+
+    from frontend.update_network import fetch_into
+
+    server = untrusted_server({"/pack": BODY, "/manifest": BODY})
+    assert app_stage.fetch(server.url + "/manifest") == BODY
+    assert app_stage.fetch_range(server.url + "/pack", 5, 5000) == BODY[5:5000]
+    # Anything not checked against a hash still refuses the certificate.
+    with pytest.raises(urllib.error.URLError) as caught:
+        fetch_into(server.url + "/manifest", io.BytesIO())
+    assert isinstance(caught.value.reason, ssl.SSLCertVerificationError)
+
+
+def test_a_whole_update_stages_when_the_certificate_cant_be_verified(release, untrusted_server) -> None:
+    files = {"/pack": release["pack"].read_bytes(), "/manifest": release["manifest_zip"].read_bytes()}
+    server = untrusted_server(files)
+    folder = app_stage.stage(release["update"], base_url=server.url)
+    assert app_versions.is_ready(folder)
+
+
+def test_a_tampered_update_is_still_refused_without_certificate_checks(release, untrusted_server) -> None:
+    pack = bytearray(release["pack"].read_bytes())
+    pack[len(pack) // 2] ^= 0xFF
+    server = untrusted_server({"/pack": bytes(pack), "/manifest": release["manifest_zip"].read_bytes()})
+    with pytest.raises(app_stage.StageError):
+        app_stage.stage(release["update"], base_url=server.url)

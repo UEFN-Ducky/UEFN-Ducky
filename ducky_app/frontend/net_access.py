@@ -229,6 +229,19 @@ class WindowsTrustHTTPSHandler(urllib.request.HTTPSHandler):
         return self.do_open(http.client.HTTPSConnection, req, context=https_context())
 
 
+class _ContentCheckedHTTPSHandler(urllib.request.HTTPSHandler):
+    """Encrypted but unverified: only for update_network.urlopen(content_checked=True)."""
+
+    def https_open(self, req: urllib.request.Request) -> Any:
+        import ssl
+
+        return self.do_open(http.client.HTTPSConnection, req, context=ssl._create_unverified_context())
+
+
+def content_checked_opener() -> urllib.request.OpenerDirector:
+    return urllib.request.build_opener(proxy_handler(), _ContentCheckedHTTPSHandler())
+
+
 def build_opener(*handlers: Any) -> urllib.request.OpenerDirector:
     """urllib.request.build_opener with the PC's proxy and Windows certificate checks."""
     return urllib.request.build_opener(proxy_handler(), WindowsTrustHTTPSHandler(), *handlers)

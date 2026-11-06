@@ -2593,6 +2593,7 @@ def _fetch_store_zip_url(url: str, size: int, *, timeout: float = 120.0) -> byte
             headers={"User-Agent": _USER_AGENT, "Accept": "application/zip, application/octet-stream, */*"},
             timeout=timeout,
             on_chunk=check_cap,
+            content_checked=True,  # store_zip_bytes checks it against the Store's sha256
         )
     except urllib.error.HTTPError as exc:
         raise DuckyOSAccountError(f"Store download failed (HTTP {exc.code})", code="store_download") from exc

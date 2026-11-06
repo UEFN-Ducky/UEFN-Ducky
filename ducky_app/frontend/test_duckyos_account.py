@@ -1146,6 +1146,21 @@ def test_the_catalog_gets_a_minute_and_a_test_bed_keeps_it(tmp_path, monkeypatch
     assert len(calls) == 3 and again == first and again["items"][0]["slug"] == "openai"
 
 
+def test_store_zips_download_even_when_the_certificate_cant_be_verified(monkeypatch) -> None:
+    from frontend import duckyos_account as acc
+    from frontend import update_network
+
+    seen: dict = {}
+
+    def fake(url, out, **kwargs):
+        seen.update(kwargs)
+        out.write(b"zip")
+
+    monkeypatch.setattr(update_network, "download_resumable", fake)
+    assert acc._fetch_store_zip_url("https://bucket.example/p.zip", 3) == b"zip"
+    assert seen["content_checked"] is True  # store_zip_bytes checks the Store's sha256
+
+
 def test_a_certificate_failure_says_so_not_kept_dropping(monkeypatch) -> None:
     import ssl
     import urllib.error

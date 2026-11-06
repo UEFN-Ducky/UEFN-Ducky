@@ -99,15 +99,21 @@ def _request(url: str, *, start: int | None = None, end: int | None = None, time
     headers = {"User-Agent": f"UEFN-Ducky/{__version__}"}
     if start is not None and end is not None:
         headers["Range"] = f"bytes={start}-{end - 1}"
-    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout)
+    from frontend.update_network import urlopen
+
+    # Every byte is checked against the signed manifest (_inflate), so a PC that can't
+    # verify the certificate still updates.
+    return urlopen(urllib.request.Request(url, headers=headers), timeout=timeout, content_checked=True)
 
 
 def fetch(url: str) -> bytes:
-    """The whole of ``url``; a dropped connection continues where it stopped (Range)."""
+    """The whole of ``url``; a dropped connection continues where it stopped (Range).
+    Callers check it against the signed update (manifest sha256, per-file sha256)."""
     from frontend.update_network import backoff, download_resumable
 
     buf = io.BytesIO()
-    download_resumable(url, buf, headers={"User-Agent": f"UEFN-Ducky/{__version__}"}, timeout=60.0, delay=backoff)
+    download_resumable(url, buf, headers={"User-Agent": f"UEFN-Ducky/{__version__}"}, timeout=60.0, delay=backoff,
+                       content_checked=True)
     return buf.getvalue()
 
 

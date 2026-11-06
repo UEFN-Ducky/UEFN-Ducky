@@ -688,6 +688,7 @@ def _download_once(url: str, dest: Path, *, timeout: float) -> None:
             on_chunk=lambda done, total: _set_progress(downloaded_bytes=done, total_bytes=total),
             cancelled=_cancelled,
             on_open=_track_response,
+            content_checked=True,  # the installer must match the feed's installerSha256
         )
         out.flush()
         try:
