@@ -327,6 +327,12 @@ def run_backend(
         _bind_open_handlers(writer)
         ui_port = backend_ui_port()
         url, _web_debug, bundled_http = panel.start_panel_server(ui_port=ui_port)
+        # PanelApi._push drops every live chat event while no window is known
+        # (focus_windows.all_windows()); without this the page never saw turns end or
+        # question cards, and every chat sat on "Thinking about the next step".
+        from frontend.ui_web import focus_windows
+
+        focus_windows.configure(api=api, base_url=url.split("?")[0], main_window=window)
         port, extra = server_port(bundled_http), {}
         if ui_port is not None:
             # The launcher owns the public port (url, panel.pid, hand-off, IDE bridges keep it)

@@ -126,6 +126,16 @@ def test_backend_stdin_eof_runs_the_graceful_exit(stubbed_backend) -> None:
     assert stubbed_backend == ["stdin_eof"]
 
 
+def test_backend_registers_its_window_so_live_chat_events_reach_the_page(stubbed_backend, monkeypatch) -> None:
+    """Nov 6 2026 (1.2.472): with no window registered PanelApi._push dropped every live
+    chat event, so every chat in the launcher sat on "Thinking about the next step"."""
+    from frontend.ui_web import focus_windows
+
+    monkeypatch.setattr(focus_windows, "_main_window", None)
+    _run(io.BytesIO(b""))
+    assert [type(w) for w in focus_windows.all_windows()] == [lifecycle.BackendWindow]
+
+
 def test_backend_without_the_env_var_serves_todays_port(stubbed_backend, monkeypatch) -> None:
     from frontend.ui_web import webview_app
 
