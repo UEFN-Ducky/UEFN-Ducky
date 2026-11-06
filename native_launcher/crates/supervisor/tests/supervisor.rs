@@ -266,3 +266,69 @@ fn missing_exe_gives_24() {
     cfg.hello_timeout = Duration::from_secs(1);
     assert_eq!(Supervisor::start(cfg).err().unwrap().code, exit::START_ERROR);
 }
+
+// ---- cross-check against the Python side's fixtures ----
+
+fn python_fixture(name: &str) -> String {
+    // NATIVE_HOST_FIXTURES overrides; default is the repo's Python fixtures.
+    let dir = std::env::var_os("NATIVE_HOST_FIXTURES").map(PathBuf::from).unwrap_or_else(|| {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../ducky_app/frontend/native_host/fixtures")
+    });
+    std::fs::read_to_string(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+fn backend_msgs(name: &str) -> Vec<BackendMsg> {
+    // Launcher → backend lines (call, bye) in the fixtures are not the decoder's input.
+    python_fixture(name)
+        .lines()
+        .filter(|l| !l.contains(r#""t":"call""#) && !l.contains(r#""t":"bye""#))
+        .map(|l| parse_line(l).unwrap_or_else(|| panic!("did not decode: {l}")))
+        .collect()
+}
+
+#[test]
+fn python_valid_and_unknown_fields_decode_the_same() {
+    let valid = backend_msgs("valid.jsonl");
+    assert_eq!(valid, backend_msgs("unknown_fields.jsonl"));
+    match &valid[0] {
+        BackendMsg::Hello(h) => {
+            assert!(h.protocol_ok());
+            assert_eq!((h.port, h.pid, h.app_version.as_str()), (51234, 4242, "1.2.471"));
+            assert_eq!(h.origin, "http://127.0.0.1:51234");
+            assert_eq!(h.profile_dir, r"C:\Profile\UEFN-Ducky");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(valid[1], BackendMsg::Result { id: "c1".into(), result: Ok(json!({"x": 10, "y": 20, "width": 1280, "height": 800})) });
+    assert_eq!(valid[2], BackendMsg::Result { id: "c2".into(), result: Ok(Value::Null) });
+    assert_eq!(valid[3], BackendMsg::Result { id: "c3".into(), result: Err("unknown".into()) });
+    assert_eq!(valid[4], BackendMsg::Event { name: "toast".into(), data: json!({"text": "Saved", "level": "info"}) });
+    assert_eq!(valid[5], BackendMsg::Event { name: "title".into(), data: json!({"title": "UEFN Ducky — Héllo"}) });
+    assert_eq!(valid[6], BackendMsg::Event { name: "quit".into(), data: json!({}) });
+    // The Python encoder's call/bye lines round-trip through the Rust encoder byte-for-value.
+    for l in python_fixture("valid.jsonl").lines().filter(|l| l.contains(r#""t":"call""#)) {
+        let v: Value = serde_json::from_str(l).unwrap();
+        let args: Vec<Value> = v["args"].as_array().unwrap().clone();
+        let mine: Value = serde_json::from_str(encode_call(v["id"].as_str().unwrap(), v["name"].as_str().unwrap(), &args).trim()).unwrap();
+        assert_eq!(mine, v);
+    }
+}
+
+#[test]
+fn python_mismatch_hellos_are_mismatches() {
+    let msgs = backend_msgs("mismatch.jsonl");
+    assert_eq!(msgs.len(), 3);
+    for m in msgs {
+        assert!(matches!(m, BackendMsg::Hello(ref h) if !h.protocol_ok()), "{m:?}");
+    }
+}
+
+#[test]
+fn python_invalid_lines_never_give_a_usable_hello() {
+    // Rust is lenient where Python rejects; the line that matters is that none starts a window.
+    for l in python_fixture("invalid.jsonl").lines() {
+        if let Some(BackendMsg::Hello(h)) = parse_line(l) {
+            assert!(!h.protocol_ok() || h.port == 0, "usable hello from invalid line: {l}");
+        }
+    }
+}
