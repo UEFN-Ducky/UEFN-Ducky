@@ -79,8 +79,11 @@ class AgentSession:
                 # day, and Stop all walked every one of them. A follow-up already
                 # prepared on this session changed run_id and keeps it.
                 with _admission_lock:
-                    if self.conv_id and _sessions.get(self.conv_id) is self and self.run_id == run_id:
+                    last = self.run_id == run_id  # no follow-up prepared on this session
+                    if self.conv_id and _sessions.get(self.conv_id) is self and last:
                         _sessions.pop(self.conv_id, None)
+                if last:
+                    _close_turn_terminals(self.conv_id)
         worker = threading.Thread(target=run, daemon=True, name=f"agent-{run_id[:8]}")
         from frontend.ui_web.live_agent_runs import add_live_run_id, discard_live_run_id
 
@@ -106,6 +109,25 @@ class AgentSession:
         runner = self._runner
         if runner is not None:
             runner.cancel()
+
+
+def _close_turn_terminals(conv_id: str) -> None:
+    """Every turn (in the app or the agent host, done, error or stopped) ends here: its chat's
+    terminals close now. Not while an ask_user card waits: the turn is only paused."""
+    if not conv_id:
+        return
+    try:
+        from frontend.ui_web.terminal import manager as terminal_manager
+
+        mgr = terminal_manager._manager  # no terminal ever opened here: nothing to close
+        if mgr is None:
+            return
+        from frontend.ui_web import ui_rpc
+
+        if ui_rpc.pending_question(conv_id) is None:
+            mgr.close_for_turn_end(conv_id)
+    except Exception:  # noqa: BLE001 - a turn's end never fails on its terminals
+        pass
 
 
 _sessions: dict[str, AgentSession] = {}

@@ -254,6 +254,20 @@ def test_kept_reasons_are_logged_at_most_once_a_minute(mgr, tmp_path, caplog):
     assert [r.getMessage() for r in caplog.records] == [f"kept agent terminals: {{'{sid}': 'chat_running'}}"]
 
 
+def test_turn_end_closes_the_chats_terminals_at_once_and_keeps_the_rest(mgr, tmp_path):
+    mine = mgr.spawn(shell="powershell", cwd=str(tmp_path))["session_id"]  # the person's own
+    other = _open(mgr, tmp_path, "other-chat")["session_id"]
+    idle = _open(mgr, tmp_path, "agent-a")["session_id"]
+    hung = _open(mgr, tmp_path, "agent-a")["session_id"]
+    mgr.get_session(hung).set_busy(True)  # a timed-out command still counted as running
+    asking, _n, _r = _keep_setup(mgr, tmp_path, "allow_card")
+    held, _n, _r = _keep_setup(mgr, tmp_path, "held")
+    server, _n, _r = _keep_setup(mgr, tmp_path, "background")
+    assert sorted(mgr.close_for_turn_end("agent-a")) == sorted([idle, hung])  # no 60 s wait
+    assert set(mgr._sessions) == {mine, other, asking, held, server}
+    assert mgr.close_for_turn_end("") == []
+
+
 def test_self_care_reports_why_terminals_stay(mgr, tmp_path, monkeypatch):
     from frontend import self_health
     from frontend.ui_web import terminal

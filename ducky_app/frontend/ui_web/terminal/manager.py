@@ -404,6 +404,29 @@ class TerminalManager:
                 closed.append(session.id)
         return closed
 
+    def close_for_turn_end(self, conv_id: str) -> list[str]:
+        """The chat's turn ended: close its terminals now, hung children and all. Kept: one
+        waiting on an Allow card, one a workflow run holds, one whose background command (a
+        dev server) still runs; the idle reaper takes those later. Nov 5 2026 soak: terminals
+        waited 60-75 s after every turn (600 s while the chat counted as running), 6 x ~90 MB.
+
+        ponytail: chat-less agent terminals (a call with no identity) are left to the reaper;
+        nothing ties them to this turn."""
+        cid = (conv_id or "").strip()
+        if not cid:
+            return []
+        with self._lock:
+            mine = [e.session for e in self._sessions.values() if e.chat == cid]
+            keep = {p.session_id for p in self._pending.values()} | set(self._held)
+        snapshot = functools.cache(_process_snapshot)
+        closed: list[str] = []
+        for session in mine:
+            if session.id in keep or session.background_alive(snapshot):
+                continue
+            if self.kill(session.id).get("ok"):
+                closed.append(session.id)
+        return closed
+
     def _idle_session(self, reuse_key: tuple[str, ...]) -> TerminalSession | None:
         with self._lock:
             candidates = [e.session for e in self._sessions.values() if e.reuse_key == reuse_key]

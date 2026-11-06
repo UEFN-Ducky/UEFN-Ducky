@@ -56,6 +56,31 @@ def test_a_host_turn_counts_as_running_in_the_app_until_it_ends(external_turns, 
     assert _wait_for(lambda: state.list_running_agents() == [])
 
 
+def test_a_turn_end_closes_its_chats_terminals_unless_a_question_waits(external_turns, monkeypatch):  # noqa: F811
+    from frontend.agent_host import turns as host_turns
+    from frontend.ui_web import ui_rpc
+    from frontend.ui_web.terminal import manager as terminal_manager
+
+    monkeypatch.setenv("DUCKY_AGENT_HOST", "1")
+    monkeypatch.setattr(host_turns, "run_in_host", lambda *a, **kw: "")  # the host turn ended
+    closed: list[str] = []
+
+    class _Terminals:
+        def close_for_turn_end(self, conv_id):
+            closed.append(conv_id)
+
+    monkeypatch.setattr(terminal_manager, "_manager", _Terminals())
+    asking = {"q": None}
+    monkeypatch.setattr(ui_rpc, "pending_question", lambda cid: asking["q"])
+    external_turns.conv("hosted")
+    assert routing.run_message("hosted", "go", "agent", "", push=lambda e: None)
+    assert _wait_for(lambda: closed == ["hosted"])
+    asking["q"] = {"request_id": "r1", "text": "Which one?", "since": 0}  # paused on a question card
+    assert routing.run_message("hosted", "again", "agent", "", push=lambda e: None)
+    assert _wait_for(lambda: state.list_running_agents() == [])
+    assert closed == ["hosted"]
+
+
 def test_no_host_falls_back_and_a_host_error_stops_the_turn(external_turns, monkeypatch):  # noqa: F811
     from frontend.agent_host import turns as host_turns
 
