@@ -129,14 +129,14 @@ def test_an_agents_terminal_it_is_done_with_closes_by_itself(mgr, tmp_path):
     job.ran_background = True  # a background job it started still runs
     mgr.running[job._pty.pid] = [9998]
     start = mgr.get_session(done).last_activity
-    assert mgr.close_idle_agent_terminals(now=start + 30, running={"busy-agent"}) == []  # not quiet long enough
+    assert mgr.close_idle_agent_terminals(now=start + 5, running={"busy-agent"}) == []  # not quiet long enough
     later = start + manager_module._AGENT_IDLE_CLOSE_S + 1
     assert mgr.close_idle_agent_terminals(now=later, running={"busy-agent"}) == [done]
     assert {"type": "terminal_close", "session_id": done} in mgr.events  # its tab closes too
     assert set(mgr._sessions) == {mine, working, server, quiet_job}
     # Typing in it counts as use: a terminal someone is working in stays.
     mgr.get_session(working).last_activity = later
-    assert mgr.close_idle_agent_terminals(now=later + 30, running=set()) == []
+    assert mgr.close_idle_agent_terminals(now=later + 5, running=set()) == []
 
 
 def test_a_ducky_closes_its_terminal_a_minute_after_it_finishes_and_names_it(mgr, tmp_path, monkeypatch):
@@ -252,6 +252,33 @@ def test_kept_reasons_are_logged_at_most_once_a_minute(mgr, tmp_path, caplog):
         for tick in range(4):  # the reaper's 15 s ticks
             mgr.close_idle_agent_terminals(now=now + 15 * tick, running=running)
     assert [r.getMessage() for r in caplog.records] == [f"kept agent terminals: {{'{sid}': 'chat_running'}}"]
+
+
+def test_a_done_agents_quiet_terminal_closes_after_10_s_and_a_working_ones_after_60(mgr, tmp_path):
+    done = _open(mgr, tmp_path, "done-agent")["session_id"]
+    working = _open(mgr, tmp_path, "working-agent")["session_id"]
+    start = mgr.get_session(done).last_activity
+    mgr.get_session(working).last_activity = start
+    running = {"working-agent"}
+    assert manager_module._REAP_EVERY_S <= 5
+    assert mgr.close_idle_agent_terminals(now=start + 9, running=running) == []
+    assert mgr.close_idle_agent_terminals(now=start + 10, running=running) == [done]
+    assert mgr.close_idle_agent_terminals(now=start + 59, running=running) == []  # still working
+    assert mgr.kept == {working: "quiet<60s"}
+
+
+def test_a_done_agents_dev_server_terminal_closes_on_the_tick_after_the_server_exits(mgr, tmp_path):
+    server = _open(mgr, tmp_path, "done-agent")["session_id"]
+    shell = mgr.get_session(server)
+    shell.ran_background = True
+    mgr.running[shell._pty.pid] = [9998]  # the dev server
+    start = shell.last_activity
+    assert mgr.close_idle_agent_terminals(now=start + 1, running=set()) == []
+    assert mgr.close_idle_agent_terminals(now=start + 1800, running=set()) == []
+    assert mgr.kept == {server: "background"}  # quiet, but its server still runs
+    shell.last_activity = start + 2  # it printed its last line
+    mgr.running.pop(shell._pty.pid)  # and exited
+    assert mgr.close_idle_agent_terminals(now=start + 3, running=set()) == [server]  # no quiet wait
 
 
 def test_turn_end_closes_the_chats_terminals_at_once_and_keeps_the_rest(mgr, tmp_path):

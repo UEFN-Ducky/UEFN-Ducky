@@ -41,6 +41,10 @@ _MAX_CHAT_SHELLS = 6
 # Oct 22 2026: ten minutes still left a header full of finished duckies' shells; a ducky's
 # terminal now closes about a minute after it finishes.
 _AGENT_IDLE_CLOSE_S = 60.0
+# Nov 6 2026: once its agent is done (chat not running, or a run let go) the wait is this short.
+# Turn end closes a chat's terminals itself (close_for_turn_end); this catches a missed one (a
+# killed host, a workflow node with no turn) within a reaper tick or two.
+_DONE_IDLE_CLOSE_S = 10.0
 # Oct 24 2026: a lead that stays running, or a hung child (git, a pager), kept shells open all
 # day. Quiet this long with no agent command waiting, an agent's terminal closes anyway.
 _AGENT_STALE_CLOSE_S = 600.0
@@ -48,7 +52,7 @@ _AGENT_STALE_CLOSE_S = 600.0
 # as busy (hung, or queued behind another chat's test run) or a background command it started
 # still ran. Its agent done and the terminal quiet this long, it closes anyway, tree and all.
 _ORPHAN_BACKGROUND_CLOSE_S = 3600.0
-_REAP_EVERY_S = 15.0
+_REAP_EVERY_S = 5.0
 # How often agent terminals' and sandbox programs' memory caps follow the shared budget.
 _BUDGET_EVERY_S = 5.0
 # A waited command (or its Allow card) stops waiting when the person writes: checked after
@@ -353,15 +357,19 @@ class TerminalManager:
         for session, chat in agents:
             quiet = now - float(getattr(session, "last_activity", now))
             done = not chat or chat not in running
+            # A done agent's dev server that just exited: its terminal closes on this tick.
+            had_background = bool(getattr(session, "ran_background", False))
+            background = session.background_alive(snapshot)
+            server_ended = done and had_background and not background
             if session.id in asked:
                 kept[session.id] = "allow_card"
             elif session.id in held:
                 kept[session.id] = "held"
-            elif quiet < _AGENT_IDLE_CLOSE_S:
+            elif quiet < (_DONE_IDLE_CLOSE_S if done else _AGENT_IDLE_CLOSE_S) and not server_ended:
                 kept[session.id] = "quiet<60s"
             elif session.is_busy() and not (done and quiet >= _AGENT_STALE_CLOSE_S):
                 kept[session.id] = "busy"
-            elif session.background_alive(snapshot) and not (done and quiet >= _ORPHAN_BACKGROUND_CLOSE_S):
+            elif background and not (done and quiet >= _ORPHAN_BACKGROUND_CLOSE_S):
                 kept[session.id] = "background"
             elif quiet < _AGENT_STALE_CLOSE_S and chat in running:
                 kept[session.id] = "chat_running"
