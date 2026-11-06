@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -26,8 +27,30 @@ def _load():
 
 
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
-                   cwd=cwd, check=True, capture_output=True)
+    """git in the test repo only: no GIT_* variable or global config another test left behind
+    can point it at another repo or index."""
+    leaked = {k: v for k, v in os.environ.items() if k.startswith("GIT_")}
+    env = {k: v for k, v in os.environ.items() if k not in leaked}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_CEILING_DIRECTORIES=str(cwd.parent))
+    done = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                          cwd=cwd, env=env, capture_output=True, text=True)
+    assert done.returncode == 0, (
+        f"git {' '.join(args)} exited {done.returncode} in {cwd}\n"
+        f"stderr: {done.stderr.strip()}\nGIT_* in os.environ: {leaked}")
+
+
+def test_git_ignores_git_variables_another_test_left_behind(tmp_path: Path, monkeypatch) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("GIT_DIR", str(elsewhere / ".git"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(elsewhere / "index"))
+    work = tmp_path / "work"
+    work.mkdir()
+    _git(work, "init", "-q")
+    _write(work, "a.py")
+    _git(work, "add", "-A")
+    _git(work, "commit", "-q", "-m", "base")
+    assert (work / ".git").is_dir() and not (elsewhere / ".git").exists()
 
 
 def _write(root: Path, rel: str, text: str = "x = 1\n") -> None:
