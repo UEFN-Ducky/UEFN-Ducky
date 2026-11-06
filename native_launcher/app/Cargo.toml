@@ -1,0 +1,16 @@
+[package]
+name = "ducky-launcher"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[lib]
+name = "ducky_launcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "Ducky-Launcher"
+path = "src/main.rs"
+
+[dependencies]

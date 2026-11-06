@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["app", "crates/*"]
+
+[workspace.package]
+edition = "2021"
+publish = false
+
+[profile.release]
+lto = true
+opt-level = "s"
+panic = "abort"
+codegen-units = 1
+strip = true
