@@ -402,8 +402,9 @@ FIELD_META: dict[str, FieldMeta] = {
     "native_launcher": FieldMeta(
         "Fast native window", "General", settable=False,
         enum=("off", "on", "auto"), restart_required=True,
-        description="Ducky-Launcher.exe draws the window; any launcher error falls back to the "
-        "Python window. Auto by default. User-only setting.",
+        description="On: Ducky-Launcher.exe draws the window; any launcher error falls back to the "
+        "Python window. Auto (the default) runs the Python window until the launcher hosts Browser "
+        "tabs and focus windows. User-only setting.",
     ),
 }
 

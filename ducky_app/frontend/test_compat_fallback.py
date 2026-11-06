@@ -3,8 +3,8 @@
 For each fallback (20 WebView2 missing or old, 21 protocol mismatch, 22 crash loop,
 23 no hello) the launch hook returns False with argv untouched, so launcher.py goes on to
 the Python window with the same arguments, and nothing outside ``launcher/`` in app data
-changes: panel_settings.json, chats and the WebView2 profile stay byte for byte. The same
-holds for the default (no ``native_launcher`` key means ``auto``).
+changes: panel_settings.json, chats and the WebView2 profile stay byte for byte. The default
+(no ``native_launcher`` key means ``auto``) never starts the launcher at all.
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ def _falls_back(root: Path, argv: list[str]) -> None:
 # --- 20: WebView2 missing or old --------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["on", "auto"])
+@pytest.mark.parametrize("mode", ["on"])
 def test_webview2_missing_runs_python_without_starting_the_launcher(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -135,7 +135,7 @@ def test_webview2_missing_runs_python_without_starting_the_launcher(
     assert not ns.crash_loop_path().exists(), "no WebView2 is not a launcher failure"
 
 
-@pytest.mark.parametrize("mode", ["on", "auto"])
+@pytest.mark.parametrize("mode", ["on"])
 def test_webview2_old_exit_20_runs_python_with_the_same_argv(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -150,7 +150,7 @@ def test_webview2_old_exit_20_runs_python_with_the_same_argv(
 # --- 23: no hello -----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["on", "auto"])
+@pytest.mark.parametrize("mode", ["on"])
 def test_no_hello_exit_23_runs_python_with_the_same_argv(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -182,7 +182,7 @@ def test_launcher_that_never_paints_is_killed_and_python_runs(
     assert starts and starts[0][0] == "python" and starts[0][3] in ("no_hello", "timeout")
 
 
-# --- the default: no native_launcher key means auto -------------------------------------
+# --- the default: no native_launcher key means auto, and auto is the Python window -----------
 
 
 def _no_key() -> None:
@@ -191,66 +191,29 @@ def _no_key() -> None:
     assert PanelSettings.load().native_launcher == "auto"
 
 
-@pytest.mark.parametrize(
-    ("code", "reason"),
-    [(20, "webview2"), (21, "protocol"), (22, "crash_loop"), (23, "no_hello"), (24, "start_error")],
-)
-def test_missing_key_tries_the_launcher_and_every_failure_falls_back(
-    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, code: int, reason: str
+@pytest.mark.parametrize("marker", [None, json.dumps({"until": 9e18, "failures": [1, 2]})])
+def test_missing_key_runs_python_and_never_starts_the_launcher(
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, marker: str | None
 ) -> None:
+    """Auto waits until the launcher hosts Browser tabs, focus windows and capture: the
+    Browser tab showed 'no host window' under the launcher."""
     _no_key()
-    cmds = _spawn_exiting(monkeypatch, code)
-    _falls_back(appdata, list(ARGV))
-    assert cmds == [[str(ns.launcher_exe()), *ARGV[1:]]]
-    assert starts == [("python", None, None, reason)]
-
-
-def test_missing_key_without_webview2_runs_python_untried(
-    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _no_key()
-    monkeypatch.setattr(ns, "webview2_ok", lambda: False)
+    if marker is not None:
+        ns.crash_loop_path().parent.mkdir(parents=True, exist_ok=True)
+        ns.crash_loop_path().write_text(marker, encoding="utf-8")
     _no_spawn(monkeypatch)
     _falls_back(appdata, list(ARGV))
-    assert starts == [("python", None, None, "webview2")]
-
-
-def test_missing_key_spawn_error_falls_back(appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch) -> None:
-    _no_key()
-
-    def spawn(cmd: list[str], env: dict[str, str]) -> _Proc:
-        raise OSError("blocked by antivirus")
-
-    monkeypatch.setattr(ns, "_spawn", spawn)
-    _falls_back(appdata, list(ARGV))
-    assert starts == [("python", None, None, "start_error")]
-
-
-def test_missing_key_launcher_ready_means_exit(appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The success side of the default: a painted launcher ends this process, data untouched."""
-    _no_key()
-    monkeypatch.setattr(ns, "record_start", lambda *a: starts.append(a))
-
-    def spawn(cmd: list[str], env: dict[str, str]) -> _Proc:
-        ns._write_json(ns.ready_path(424242), {"painted_ms": 900, "window_ms": 40})
-        return _Proc(None)
-
-    monkeypatch.setattr(ns, "_spawn", spawn)
-    before = _snapshot(appdata)
-    assert ns.maybe_start_native(list(ARGV)) is True
-    assert _snapshot(appdata) == before
-    assert starts == [("native", 40, 900, "")]
+    assert starts == []
 
 
 # --- 21: protocol mismatch, 22: crash loop ----------------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["on", "auto"])
 @pytest.mark.parametrize(("code", "reason"), [(21, "protocol"), (22, "crash_loop")])
 def test_exit_21_and_22_run_python_with_the_same_argv(
-    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, mode: str, code: int, reason: str
+    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, code: int, reason: str
 ) -> None:
-    _setting(mode)
+    _setting("on")
     cmds = _spawn_exiting(monkeypatch, code)
     _falls_back(appdata, list(ARGV))
     assert cmds == [[str(ns.launcher_exe()), *ARGV[1:]]]
@@ -263,31 +226,6 @@ def test_exit_21_and_22_run_python_with_the_same_argv(
 
 def _at(monkeypatch: pytest.MonkeyPatch, when: float) -> None:
     monkeypatch.setattr(ns.time, "time", lambda: when)
-
-
-def test_three_failures_hold_auto_on_python_for_24_hours(
-    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _setting("auto")
-    t0 = 1_800_000_000.0
-    cmds = _spawn_exiting(monkeypatch, ns.EXIT_PROTOCOL)
-    for i in range(3):  # 3 failures within 10 min write the marker
-        _at(monkeypatch, t0 + i * 60)
-        _falls_back(appdata, list(ARGV))
-    assert len(cmds) == 3
-    marker = json.loads(ns.crash_loop_path().read_text(encoding="utf-8"))
-    assert marker["until"] == pytest.approx(t0 + 120 + 24 * 3600)
-    starts.clear()
-    for later in (121, 3600, 24 * 3600 + 119):  # held: no launcher at all
-        _at(monkeypatch, t0 + later)
-        _falls_back(appdata, list(ARGV))
-    assert len(cmds) == 3
-    assert [s[3] for s in starts] == ["crash_loop_active"] * 3
-    assert len(json.loads(ns.crash_loop_path().read_text(encoding="utf-8")).get("failures", [])) == 0
-    _at(monkeypatch, t0 + 24 * 3600 + 121)  # the hold is over: auto tries again
-    _falls_back(appdata, list(ARGV))
-    assert len(cmds) == 4
-
 
 def test_on_still_tries_the_launcher_during_the_hold(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch

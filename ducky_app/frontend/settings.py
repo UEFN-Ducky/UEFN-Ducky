@@ -474,8 +474,9 @@ class PanelSettings:
 
     native_launcher: str = "auto"
     """Fast native window (Ducky-Launcher.exe): off | on | auto, default auto (a missing key
-    is auto; a saved off stays off). Off runs today's Python window; on and auto fall back to
-    it on any launcher error (frontend/native_switch.py). Any other value counts as off."""
+    is auto; a saved off stays off). Off and auto run today's Python window (auto until the
+    launcher hosts Browser tabs and focus windows); on falls back to it on any launcher error
+    (frontend/native_switch.py). Any other value counts as off."""
 
     def validate(self) -> None:
         from backend.workspace.ai_ignore import normalize_rules

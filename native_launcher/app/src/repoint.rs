@@ -3,8 +3,8 @@
 //! - root mode: hop to the current version's own launcher (`versions/current.json`), or,
 //!   when that pointer is missing or broken, once to the root stub with NO_NATIVE (the
 //!   Python window, which never starts a launcher again);
-//! - the `native_launcher` setting: `off` (or `auto` during a crash-loop hold) runs the
-//!   Python window instead;
+//! - the `native_launcher` setting: `off` and `auto` run the Python window instead (auto
+//!   until this launcher hosts Browser tabs, focus windows, capture, snip and menus);
 //! - a start that fails with 20–24 opens the Python window, so the user still gets one.
 //!
 //! A launch started by `native_switch` (NATIVE_CHILD) never hops, and a hopped launch
@@ -153,12 +153,11 @@ pub fn native_setting(app_data: &Path) -> String {
 
 /// `native_switch.decide` without the EXE and WebView2 checks (the launcher is running,
 /// and a missing WebView2 exits 20, which falls back below).
-pub fn wants_native(setting: &str, crash_loop_active: bool) -> bool {
-    match setting {
-        "on" => true,
-        "auto" => !crash_loop_active,
-        _ => false,
-    }
+/// ponytail: `auto` is the Python window until the launcher hosts what Python's
+/// `inventory.NOT_LEAN_CUT` lists (Browser tabs showed "no host window"); flip it back
+/// here and in `native_switch.decide` together.
+pub fn wants_native(setting: &str, _crash_loop_active: bool) -> bool {
+    setting == "on"
 }
 
 /// A started-directly launch that ended with one of these opens the Python window.
@@ -285,10 +284,10 @@ mod tests {
         // Setup's version pinned in its versions folder: same as the root, no hop.
         l.pointer(&serde_json::json!({"version": OWN, "dir": "versions/app-1.2.472"}).to_string());
         assert_eq!(l.decide(false), Root::RunHere);
-        assert!(l.start(&args(), false, false, "auto").is_none());
+        assert!(l.start(&args(), false, false, "on").is_none());
         // An in-place update (or a rollback) to another version: one hop to its launcher.
         l.pointer(r#"{"version":"1.2.472","dir":"versions/app-1.2.472"}"#);
-        assert_eq!(l.start(&args(), false, false, "auto"), Some(Spawn::hop(l.version.clone(), &args())));
+        assert_eq!(l.start(&args(), false, false, "on"), Some(Spawn::hop(l.version.clone(), &args())));
         // No version in the pointer: it can't be the same, so hop as before.
         l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
         assert_eq!(l.decide(false), Root::Exec(l.version.clone()));
@@ -356,7 +355,7 @@ mod tests {
         let l = Layout::new("self");
         l.pointer(&serde_json::json!({"version": "1.2.470", "dir": l.root.to_string_lossy()}).to_string());
         assert_eq!(l.decide(false), Root::RunHere);
-        assert!(l.start(&args(), false, false, "auto").is_none());
+        assert!(l.start(&args(), false, false, "on").is_none());
         l.drop_all();
     }
 
@@ -385,13 +384,13 @@ mod tests {
             if let Some(t) = text {
                 l.pointer(t);
             }
-            let s = l.start(&args(), false, false, "auto").expect(name);
+            let s = l.start(&args(), false, false, "on").expect(name);
             assert_eq!(s, Spawn::python(l.root.join(STUB_EXE), &args()), "{name}");
             assert!(s.env.contains(&(NO_NATIVE_ENV.to_string(), "1".to_string())), "{name}");
             // Started again in the chain (by native_switch, or after a hop): runs here, no
             // second stub start, so the old loop can't happen.
-            assert!(l.start(&args(), false, true, "auto").is_none(), "{name}");
-            assert!(l.start(&args(), true, false, "auto").is_none(), "{name}");
+            assert!(l.start(&args(), false, true, "on").is_none(), "{name}");
+            assert!(l.start(&args(), true, false, "on").is_none(), "{name}");
             l.drop_all();
         }
         // Setting off at the root: the Python window once, with NO_NATIVE.
@@ -472,8 +471,8 @@ mod tests {
             before_start(&l.version, &args(), true, false, &l.app_data, OWN, move || mode.into(), move || hold)
         };
         assert_eq!(v("off", false), Some(Spawn::python(sibling_stub(&l.version), &args())));
+        assert_eq!(v("auto", false), Some(Spawn::python(sibling_stub(&l.version), &args())));
         assert!(v("auto", true).is_some());
-        assert!(v("auto", false).is_none());
         assert!(v("on", true).is_none());
         l.drop_all();
     }
@@ -482,7 +481,7 @@ mod tests {
     fn decide_like_native_switch() {
         assert!(!wants_native("off", false));
         assert!(wants_native("on", true));
-        assert!(wants_native("auto", false));
+        assert!(!wants_native("auto", false));
         assert!(!wants_native("auto", true));
     }
 
