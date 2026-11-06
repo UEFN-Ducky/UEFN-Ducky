@@ -142,7 +142,16 @@ def run(output: str) -> int:
         return 1
 
 
+def native_launcher_default() -> str:
+    """What a fresh install's settings pick (release/verify_installer_panel.py wants 'off')."""
+    from frontend.settings import PanelSettings
+
+    return PanelSettings().native_launcher
+
+
 def _run(output: str, report: dict) -> int:
+    # First, so a smoke that fails later still reports it.
+    report["native_launcher"] = native_launcher_default()
     # 1.2.133 shipped without backend.agent.prompt in the PYZ (SyntaxError during
     # freeze). Import these first so a missing module fails smoke, not the GUI.
     import backend.agent.hard_rules  # noqa: F401

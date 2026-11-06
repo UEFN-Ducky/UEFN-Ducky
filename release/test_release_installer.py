@@ -181,9 +181,53 @@ def test_launcher_absent_is_skipped_unless_required(tmp_path):
 def test_fresh_settings_default_off():
     vip = _vip()
     vip.check_default_off({"ok": True, "native_launcher": "off"})
-    vip.check_default_off({"ok": True})  # older smoke report: noted, not failed
-    with pytest.raises(RuntimeError, match="native_launcher"):
-        vip.check_default_off({"ok": True, "native_launcher": "auto"})
+    for report in ({"ok": True}, {"ok": True, "native_launcher": "auto"}):
+        with pytest.raises(RuntimeError, match="native_launcher"):
+            vip.check_default_off(report)
+
+
+def _dist(tmp_path: Path, launcher: bool) -> Path:
+    dist_app = tmp_path / "dist" / "UEFN-Ducky-1.2.3"
+    _touch(dist_app / "UEFN-Ducky.exe")
+    if launcher:
+        _touch(dist_app / "Ducky-Launcher.exe")
+    return dist_app
+
+
+@pytest.mark.parametrize("built", [True, False])
+def test_launcher_required_exactly_when_the_build_made_one(tmp_path, built):
+    vip, app = _vip(), _extracted(tmp_path, False)
+    _, required = vip.expectations(app, _dist(tmp_path, built), signed=False, require_launcher=None)
+    assert required is built
+    if built:  # the payload lost it: fails
+        with pytest.raises(RuntimeError, match="missing"):
+            vip.check_launcher(app, "1.2.3", signed=False, required=required, run=_Ran("1.2.3"))
+
+
+@pytest.mark.parametrize("status,want", [("Valid", True), ("NotSigned", False), ("Unknown", False)])
+def test_signature_expected_exactly_when_the_app_exe_is_signed(tmp_path, status, want):
+    vip, app = _vip(), _extracted(tmp_path, True)
+    seen = []
+    signed, _ = vip.expectations(app, _dist(tmp_path, True), signed=None, require_launcher=None,
+                                 signature=lambda p: seen.append(p.name) or status)
+    assert signed is want and seen == ["UEFN-Ducky.exe"]
+
+
+def test_flags_override_the_auto_decisions(tmp_path):
+    vip, app = _vip(), _extracted(tmp_path, False)
+    never = lambda p: pytest.fail("signature probed despite the flag")  # noqa: E731
+    assert vip.expectations(app, _dist(tmp_path, True), signed=False, require_launcher=False, signature=never) == (False, False)
+    assert vip.expectations(app, _dist(tmp_path, False), signed=True, require_launcher=True, signature=never) == (True, True)
+
+
+def test_cli_passes_only_the_flags_given(tmp_path, monkeypatch):
+    vip, got = _vip(), []
+    monkeypatch.setattr(vip, "verify", lambda extractor, engine, **kw: got.append(kw))
+    tool = str(tmp_path / "innoextract.exe")
+    for argv in ([], ["--no-expect-signed", "--require-launcher"]):
+        monkeypatch.setattr(sys, "argv", ["verify_installer_panel.py", "--extractor", tool, *argv])
+        vip.main()
+    assert got == [{}, {"signed": False, "require_launcher": True}]
 
 
 def test_app_version_reads_the_repo_init(tmp_path):
