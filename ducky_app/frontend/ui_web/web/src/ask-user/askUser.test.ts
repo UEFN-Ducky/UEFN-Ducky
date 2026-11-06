@@ -198,6 +198,17 @@ describe("ask-user sessions", () => {
 });
 
 
+it("Cancel settles a required question with cancelled=true", async () => {
+  const p = runAskUser([{ id: "must", prompt: "Choose" }], "Must", "cancel-chat");
+  const session = getAskUserSessionForConv("cancel-chat")!;
+  settleAskUser(
+    { ok: true, cancelled: true, skipped_all: true, answers: { must: { selected: [], text: "", skipped: true } } },
+    session.id,
+  );
+  await expect(p).resolves.toMatchObject({ cancelled: true, skipped_all: true });
+  expect(getAskUserSessionForConv("cancel-chat")).toBeNull();
+});
+
 it("keeps a required question pending through an invalid dismissal and a later ask", async () => {
   const first = runAskUser([{ id: "first", prompt: "Choose" }], "First", "same-chat");
   let answered = false;

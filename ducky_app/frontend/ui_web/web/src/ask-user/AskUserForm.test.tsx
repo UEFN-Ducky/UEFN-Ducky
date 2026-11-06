@@ -56,3 +56,17 @@ it("a typed answer is a textarea: Shift+Enter keeps typing, Enter sends", () => 
   fireEvent.keyDown(box, { key: "Enter" });
   expect(done).toHaveBeenCalledOnce();
 });
+
+it("Cancel closes a required question without an answer and has no Attach button", () => {
+  const done = vi.fn();
+  render(<AskUserForm questions={questions} title="" captureKeys={false} chatId="c1" onComplete={done} />);
+  fireEvent.click(screen.getByRole("radio", { name: /Snow/ }));
+  expect(screen.queryByRole("button", { name: /Attach/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(done).toHaveBeenCalledOnce();
+  expect(done.mock.calls[0][0]).toMatchObject({
+    cancelled: true,
+    skipped_all: true,
+    answers: { a: { skipped: true }, b: { skipped: true } },
+  });
+});

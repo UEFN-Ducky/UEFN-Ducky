@@ -29,6 +29,8 @@ export type AskUserResult = {
   skipped_all: boolean;
   /** The person typed a chat message instead of using the card: their own words. */
   free_text?: string;
+  /** The person pressed Cancel: they won't answer, so the agent stops instead of guessing. */
+  cancelled?: boolean;
 };
 
 /** A file attached to a written answer, already saved in the asking chat. */

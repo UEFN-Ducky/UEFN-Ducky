@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import {
   canSubmitQuestion,
@@ -6,13 +6,11 @@ import {
   emptyDraft,
   type AskUserAnswer,
   type AskUserDraft,
-  type AskUserFile,
   type AskUserQuestion,
   type AskUserResult,
 } from "./types";
 import type { MessageAuthorDto } from "../types/panel";
 import { Icons } from "../icons/Icons";
-import { getApi } from "../hooks/usePanelApi";
 
 type Props = {
   questions: AskUserQuestion[];
@@ -23,21 +21,12 @@ type Props = {
   captureKeys?: boolean;
   /** Inline chat card shows × (only when every question is optional). */
   showDismiss?: boolean;
-  /** The asking chat: files attached to a written answer are saved there for its agent. */
+  /** The asking chat (kept for callers; the card no longer attaches files). */
   chatId?: string;
   /** The asking agent's turn already ended: Submit sends the answer to its chat. */
   late?: boolean;
   onComplete: (result: AskUserResult) => void;
 };
-
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read the file"));
-    reader.readAsDataURL(file);
-  });
-}
 
 function OptionControl({
   multiple,
@@ -75,14 +64,10 @@ export const AskUserForm = memo(function AskUserForm({
   author,
   captureKeys = true,
   showDismiss = true,
-  chatId = "",
   late = false,
   onComplete,
 }: Props) {
   const [index, setIndex] = useState(0);
-  const [attaching, setAttaching] = useState(false);
-  const [attachError, setAttachError] = useState("");
-  const filePickerRef = useRef<HTMLInputElement>(null);
   const [drafts, setDrafts] = useState<AskUserDraft[]>(() => questions.map(() => emptyDraft()));
   /** Questions the user has explicitly Submitted (not just drafted). */
   const [committed, setCommitted] = useState<boolean[]>(() => questions.map(() => false));
@@ -188,6 +173,13 @@ export const AskUserForm = memo(function AskUserForm({
     finish(answers);
   };
 
+  /** Cancel: the person won't answer. Every question is skipped and the agent is told to stop. */
+  const handleCancel = () => {
+    const answers: Record<string, AskUserAnswer> = {};
+    for (const q of questions) answers[q.id] = { selected: [], text: "", skipped: true };
+    onComplete({ ok: true, answers, skipped_all: true, cancelled: true });
+  };
+
   const toggleOption = (optionId: string) => {
     if (!question) return;
     if (question.allow_multiple) {
@@ -241,53 +233,9 @@ export const AskUserForm = memo(function AskUserForm({
 
   const showOther = Boolean(question.allow_free_text && question.options.length > 0);
   const freeTextOnly = Boolean(!question.options.length && question.allow_free_text);
-  // A written answer can carry files: Ducky saves them in the asking chat and the answer
-  // tells the agent where, so nobody copies a file anywhere by hand.
-  const canAttach = Boolean(chatId && getApi()?.save_chat_file && (freeTextOnly || draft.other));
-
-  const attachFiles = async (files: FileList | File[] | null) => {
-    const list = Array.from(files ?? []);
-    const api = getApi();
-    if (!list.length || !api?.save_chat_file) return;
-    setAttaching(true);
-    setAttachError("");
-    const saved: AskUserFile[] = [];
-    try {
-      for (const file of list) {
-        const res = await api.save_chat_file(chatId, file.name, await readAsDataUrl(file));
-        if (!res?.ok || !res.path) {
-          setAttachError(res?.error || `Could not save ${file.name}`);
-          continue;
-        }
-        saved.push({ name: file.name, path: res.path, ...(res.readable_path ? { readablePath: res.readable_path } : {}) });
-      }
-    } catch (error) {
-      setAttachError(error instanceof Error ? error.message : "Could not save the file");
-    } finally {
-      setAttaching(false);
-    }
-    if (!saved.length) return;
-    const at = index;
-    setDrafts((prev) => {
-      const next = [...prev];
-      const cur = next[at] ?? emptyDraft();
-      next[at] = { ...cur, files: [...(cur.files ?? []), ...saved], ...(showOther ? { other: true, selected: [] } : {}) };
-      return next;
-    });
-  };
-  const removeFile = (path: string) => setDraft({ files: (draft.files ?? []).filter((f) => f.path !== path) });
-  const onDropFiles = (event: DragEvent<HTMLDivElement>) => {
-    if (!canAttach || !event.dataTransfer?.files?.length) return;
-    event.preventDefault();
-    void attachFiles(event.dataTransfer.files);
-  };
 
   return (
-    <div
-      className="ask-user-body"
-      onDragOver={canAttach ? (event) => event.preventDefault() : undefined}
-      onDrop={canAttach ? onDropFiles : undefined}
-    >
+    <div className="ask-user-body">
       <div className="ask-user-top">
         <span className="ask-user-badge" aria-hidden="true">
           <Icons.Help />
@@ -442,44 +390,6 @@ export const AskUserForm = memo(function AskUserForm({
             }}
           />
         ) : null}
-        {canAttach ? (
-          <div className="ask-user-attach">
-            <button
-              type="button"
-              className="settings-btn ask-user-attach-btn"
-              onClick={() => filePickerRef.current?.click()}
-              disabled={attaching}
-              title="Attach a file to your answer. Ducky saves it in this chat and tells the agent where it is."
-            >
-              <Icons.Paperclip />
-              {attaching ? "Saving…" : "Attach file"}
-            </button>
-            <input
-              ref={filePickerRef}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                void attachFiles(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            {(draft.files ?? []).map((f) => (
-              <span key={f.path} className="ask-user-attach-file" title={f.path}>
-                <Icons.Paperclip />
-                {f.name}
-                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.path)}>
-                  <Icons.Close />
-                </button>
-              </span>
-            ))}
-            {attachError ? (
-              <span className="ask-user-attach-error" role="alert">
-                {attachError}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
       </div>
       <div className="ask-user-footer">
         {total > 1 ? (
@@ -491,6 +401,14 @@ export const AskUserForm = memo(function AskUserForm({
           <span />
         )}
         <div className="ask-user-footer-right">
+          <button
+            type="button"
+            className="settings-btn ask-user-cancel"
+            onClick={handleCancel}
+            title="Don't answer: close this question and tell the agent to stop"
+          >
+            Cancel
+          </button>
           {canSkip ? (
             <button type="button" className="settings-btn" onClick={handleSkip}>
               Skip

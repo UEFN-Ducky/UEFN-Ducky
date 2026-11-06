@@ -712,6 +712,7 @@ def ducky_ask_user(
       }
     Omit options for free-text only. Returns
     {ok, answers:{id:{selected:[…], text, skipped}}, skipped_all, questions}.
+    cancelled=true: the person pressed Cancel and won't answer; stop and do not guess.
     Needs an open panel; UEFN may be offline.
     """
     cleaned = _normalize_ask_user_questions(questions if isinstance(questions, list) else [])

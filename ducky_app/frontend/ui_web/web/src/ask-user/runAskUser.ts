@@ -148,7 +148,7 @@ export function settleAskUser(
   if (!id) return;
   const current = sessions.get(id);
   if (!current) return;
-  if ("ok" in result && current.questions.some((q) => {
+  if ("ok" in result && !result.cancelled && current.questions.some((q) => {
     const answer = result.answers[q.id];
     return q.required && (!answer || answer.skipped || (!answer.selected.length && !answer.text.trim()));
   })) return;
