@@ -1,0 +1,9 @@
+[package]
+name = "shim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "window.pywebview.api in WebView2: the injected shim.js and the routing between native window calls and backend contract calls"
+
+[dependencies]
+serde_json = "1"
