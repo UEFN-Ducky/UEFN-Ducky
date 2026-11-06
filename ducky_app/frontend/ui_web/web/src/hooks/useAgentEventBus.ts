@@ -53,6 +53,13 @@ const MAX_EVENTS_PER_FRAME = 200;
 /** A frame stops delivering after this long; the rest waits for the next frame. */
 const FRAME_BUDGET_MS = 8;
 let deliveryScheduled = false;
+/** A hidden or minimized window paints no frames, so requestAnimationFrame never fires: the
+ *  queue kept every agent event until the window was shown again (hundreds of MB while Ducky
+ *  sat in the tray with agents running). A timer delivers when no frame came by then. */
+export const NO_FRAME_FALLBACK_MS = 250;
+/** No frame to keep smooth on the timer path; Chrome runs a hidden page's timers about once
+ *  a second (once a minute after 5 minutes hidden), so each run takes a bigger share. */
+const NO_FRAME_BUDGET_MS = 50;
 
 /** Joins each run's text/thinking deltas and keeps its latest status. Hundreds of agents
  *  interleave on one poll, so a run's deltas are rarely adjacent: they merge whenever no
@@ -95,25 +102,36 @@ function deliver(event: AgentEvent) {
 function scheduleDelivery() {
   if (deliveryScheduled) return;
   deliveryScheduled = true;
-  const schedule =
-    typeof window.requestAnimationFrame === "function"
-      ? window.requestAnimationFrame.bind(window)
-      : (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0);
-  schedule(() => {
+  const hasFrames = typeof window.requestAnimationFrame === "function";
+  let ran = false;
+  let fallback: ReturnType<typeof setTimeout> | undefined;
+  const run = (fromFrame: boolean) => {
+    if (ran) return; // the frame and the fallback timer both fire: only the first delivers
+    ran = true;
+    if (fallback !== undefined) window.clearTimeout(fallback);
     deliveryScheduled = false;
     const t0 = performance.now();
+    const budgetMs = fromFrame ? FRAME_BUDGET_MS : NO_FRAME_BUDGET_MS;
+    const maxEvents = fromFrame ? MAX_EVENTS_PER_FRAME : Infinity;
     // Coalesce everything waiting, then deliver within the frame's count and time budget.
     const batch = coalesceAgentEvents(pendingEvents.splice(0));
     let delivered = 0;
-    while (delivered < batch.length && delivered < MAX_EVENTS_PER_FRAME) {
+    while (delivered < batch.length && delivered < maxEvents) {
       deliver(batch[delivered++]);
-      if (performance.now() - t0 >= FRAME_BUDGET_MS) break;
+      if (performance.now() - t0 >= budgetMs) break;
     }
     if (delivered < batch.length) pendingEvents.unshift(...batch.slice(delivered));
     const deliveryMs = performance.now() - t0;
     noteFrameDelivery(deliveryMs, delivered, pendingEvents.length);
     if (pendingEvents.length > 0) scheduleDelivery();
-  });
+  };
+  if (hasFrames) window.requestAnimationFrame(() => run(true));
+  fallback = window.setTimeout(() => run(false), hasFrames ? NO_FRAME_FALLBACK_MS : 0);
+}
+
+/** Events waiting for delivery (tests and the memory check). */
+export function pendingAgentEventCount(): number {
+  return pendingEvents.length;
 }
 
 function fanOut(event: AgentEvent) {
