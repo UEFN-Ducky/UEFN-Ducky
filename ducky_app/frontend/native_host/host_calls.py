@@ -8,7 +8,7 @@ with a ``result`` message. Which names may run comes from inventory.INVENTORY:
 - ``handler == "python"``: run ``getattr(api, name)(*args)``.
 - launcher handlers (``window.*`` / ``dialog.*``): ``error: handled_by_launcher`` — the
   launcher owns its window, drag, maximize, close and dialogs and should never forward them.
-- not in the lean cut (focus windows, browser panes, capture): ``error: not_in_lean_cut``.
+- not in the lean cut (focus windows, capture): ``error: not_in_lean_cut``.
 - anything else: ``error: unknown``.
 """
 

@@ -104,3 +104,4 @@ def test_window_bounds_example():
     assert inventory.handled_by_launcher("minimize_window")
     assert not inventory.handled_by_launcher("send_message")
     assert not inventory.handled_by_launcher("browser_pane_open")
+    assert inventory.INVENTORY["browser_pane_open"]["handler"] == "python"

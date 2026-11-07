@@ -276,9 +276,6 @@ NOT_LEAN_CUT: frozenset[str] = frozenset(
     adopt_tab_into_this_focus_window raise_focus_window close_focus_window
     close_all_focus_windows restore_focus_windows dock_focus_window_beside_main
     return_tab_to_main
-    browser_pane_open browser_pane_set_bounds browser_pane_navigate browser_pane_command
-    browser_pane_state browser_pane_snapshot browser_pane_close browser_pane_list
-    browser_pane_hide_all
     native_capture_start native_capture_stop capture_list_shield
     window_input window_box window_text_focus
     snip_screen native_menu_pick
