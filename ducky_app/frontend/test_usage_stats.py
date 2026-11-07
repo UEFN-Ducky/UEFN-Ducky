@@ -751,6 +751,40 @@ def test_unclean_exit_carries_the_last_memory() -> None:
     assert mem.get("memory_mb", 1) > 0
 
 
+def test_a_heartbeat_between_webview_scans_does_no_process_scan(monkeypatch) -> None:
+    import sys
+    import types
+
+    scans: list[int] = []
+
+    class Proc:
+        def memory_info(self) -> Any:
+            return types.SimpleNamespace(rss=700 * 1048576, private=900 * 1048576)
+
+        def name(self) -> str:
+            return "msedgewebview2.exe"
+
+        def children(self, recursive: bool = False) -> list[Any]:
+            scans.append(1)
+            return [Proc()]
+
+    monkeypatch.setitem(sys.modules, "psutil", types.SimpleNamespace(Process=Proc))
+    monkeypatch.setattr(us, "_webview_scan", None)
+    assert us._memory_now() == {"memory_mb": 700, "webview_mb": 900} and len(scans) == 1
+    assert us._memory_now() == {"memory_mb": 700, "webview_mb": 900} and len(scans) == 1, "inside the window: no scan"
+    us._webview_scan = (time.monotonic() - us.WEBVIEW_SCAN_S - 1, 0)
+    us._memory_now()
+    assert len(scans) == 2
+
+
+def test_the_sampler_never_names_itself_the_hot_thread(monkeypatch) -> None:
+    import types
+
+    monkeypatch.setattr(us, "_thread", types.SimpleNamespace(native_id=4242))
+    assert us._hot_thread({4242: 0.0, 1: 0.0}, {4242: 0.5, 1: 0.1}) == "native"
+    assert us._hot_thread({4242: 0.0}, {4242: 0.5}) == ""
+
+
 def test_a_failed_tool_call_says_why(monkeypatch) -> None:
     # Oct 29 2026: a third of ducky_terminal_run calls counted as failed; most were a test's exit 1.
     from backend.bridge import shared_mcp

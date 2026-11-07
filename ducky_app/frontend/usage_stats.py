@@ -552,23 +552,34 @@ def _note_alive() -> None:
     _meta_set(META_LAST_SEEN, json.dumps(seen))
 
 
+# The WebView2 tree scan is a whole process-table walk (~70 ms CPU with 70 children, Nov 7
+# 2026): every 90 s heartbeat it made the usage thread the hot one on idle PCs. RSS stays live.
+WEBVIEW_SCAN_S = 900.0
+_webview_scan: tuple[float, int] | None = None  # (monotonic, bytes) of the last scan
+
+
 def _memory_now() -> dict[str, float]:
     """This app's RSS and its WebView2 processes' private memory, in MB: an unclean exit
     says whether the run was out of memory (webview_browser_exit_oom, Oct 29 2026)."""
+    global _webview_scan
     try:
         import psutil
 
         me = psutil.Process()
         out = {"memory_mb": round(me.memory_info().rss / 1048576)}
-        web = 0
-        for child in me.children(recursive=True):
-            try:
-                if child.name().lower() == "msedgewebview2.exe":
-                    web += getattr(child.memory_info(), "private", 0) or child.memory_info().rss
-            except Exception:
-                continue
-        if web:
-            out["webview_mb"] = round(web / 1048576)
+        now = time.monotonic()
+        scan = _webview_scan
+        if scan is None or now - scan[0] >= WEBVIEW_SCAN_S:
+            web = 0
+            for child in me.children(recursive=True):
+                try:
+                    if child.name().lower() == "msedgewebview2.exe":
+                        web += getattr(child.memory_info(), "private", 0) or child.memory_info().rss
+                except Exception:
+                    continue
+            scan = _webview_scan = (now, web)
+        if scan[1]:
+            out["webview_mb"] = round(scan[1] / 1048576)
         return out
     except Exception:
         return {}
@@ -1000,6 +1011,10 @@ def thread_slug(name: str) -> str:
 
 def _hot_thread(before: dict[int, float], after: dict[int, float]) -> str:
     """The thread that used the most CPU between two _thread_times; native when it runs no Python."""
+    # Never the sampler itself: its own threads() reads (~110 ms each) fall between the two
+    # snapshots, so on a quiet PC it named itself (3 of 5 idle samples over 5%, anf7q2w9e4r1t).
+    sampler = getattr(_thread, "native_id", None)
+    after = {t: v for t, v in after.items() if t != sampler}
     if not after:
         return ""
     tid = max(after, key=lambda t: after[t] - before.get(t, 0.0))
