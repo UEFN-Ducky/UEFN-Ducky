@@ -331,12 +331,22 @@ def _destroy_window(window: Any) -> None:
 
 
 def _create_focus_window(focus_id: str, title: str, display_title: str, wid: str) -> Any:
-    import webview
-
     from frontend.ui_web import window_bounds
 
     url = _focus_url(focus_id, title, wid)
     saved = window_bounds.get_bounds(f"focus:{focus_id}")
+    from frontend.native_host import launcher_windows
+
+    # Under Ducky-Launcher.exe (--backend) there is no pywebview: the launcher draws it.
+    send = launcher_windows.sender_of(_main_window) if launcher_windows.active() else None
+    if send is not None:
+        return launcher_windows.LauncherWindow(
+            send, wid, url, display_title,
+            saved["x"] if saved else None, saved["y"] if saved else None,
+            saved["width"] if saved else 720, saved["height"] if saved else 520,
+        )
+    import webview
+
     window = webview.create_window(
         display_title,
         url=url,

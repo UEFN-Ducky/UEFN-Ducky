@@ -272,10 +272,6 @@ LAUNCHER_HANDLERS: dict[str, str] = {
 NOT_LEAN_CUT: frozenset[str] = frozenset(
     """
     bind_tk_root bind_window
-    open_focus_window open_focus_window_at_point open_focus_window_group
-    adopt_tab_into_this_focus_window raise_focus_window close_focus_window
-    close_all_focus_windows restore_focus_windows dock_focus_window_beside_main
-    return_tab_to_main
     native_capture_start native_capture_stop capture_list_shield
     window_input window_box window_text_focus
     snip_screen native_menu_pick

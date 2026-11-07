@@ -34,7 +34,7 @@ class FakeApi:
     def minimize_window(self):
         raise AssertionError("launcher-owned names must never run in python")
 
-    def open_focus_window(self, *a):
+    def bind_window(self, *a):
         raise AssertionError("not in the lean cut")
 
     def browser_pane_open(self, pane_id):
@@ -66,7 +66,7 @@ def test_launcher_window_names_are_refused():
 
 def test_not_lean_cut_names_are_refused():
     host, _ = _host()
-    assert host.dispatch("c", "open_focus_window", ["p"]) == protocol.result_error("c", hc.ERR_NOT_IN_LEAN_CUT)
+    assert host.dispatch("c", "bind_window", ["p"]) == protocol.result_error("c", hc.ERR_NOT_IN_LEAN_CUT)
 
 
 def test_browser_panes_run_in_python():
