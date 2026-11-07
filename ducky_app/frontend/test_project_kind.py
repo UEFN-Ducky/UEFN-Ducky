@@ -217,7 +217,7 @@ def test_startup_deploy_skips_folders(tmp_path: Path, monkeypatch) -> None:
     deployed: list[str] = []
     monkeypatch.setattr(project_deploy, "known_project_roots", lambda rescan=False: [str(repo), str(island)])
     monkeypatch.setattr(
-        project_deploy, "deploy_listener", lambda root, _port, shared=True: deployed.append(str(root)) or []
+        project_deploy, "deploy_listener", lambda root, _port, **_kw: deployed.append(str(root)) or []
     )
     lines = project_deploy.deploy_all_recent_projects()
     assert deployed == [str(island.resolve())]

@@ -20,7 +20,11 @@ from frontend.ui_web.project_switch import mark_deployed
 
 
 def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> list[str]:
-    """Refresh listener hooks and quarantine island .py on every known island."""
+    """Refresh listener hooks and quarantine island .py on every known island.
+
+    Only the selected island gets the deep sweep (every folder); the others get the shallow
+    one (root, Content/Python, .ducky) and their deep sweep when the person switches to them.
+    """
     lines: list[str] = []
     paths: list[str] = []
     seen: set[str] = set()
@@ -39,7 +43,7 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
     for i, path in enumerate(paths):
         try:
             root = resolve_uefn_project_root(Path(path))
-            project_lines = deploy_listener(root, PANEL_LISTENER_PORT, shared=(i == 0))
+            project_lines = deploy_listener(root, PANEL_LISTENER_PORT, shared=(i == 0), deep_sweep=(path == current))
             mark_deployed(path)
             for ln in project_lines:
                 lines.append(ln)

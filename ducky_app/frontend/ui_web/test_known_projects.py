@@ -91,10 +91,29 @@ def test_the_boot_deploy_sets_up_every_discovered_island(docs: Path, monkeypatch
     islands = [_island(docs / "Fortnite Projects", n) for n in ("One", "Two", "Three")]
     deployed: list[str] = []
     monkeypatch.setattr(
-        project_deploy, "deploy_listener", lambda root, _port, shared=True: deployed.append(str(root)) or []
+        project_deploy, "deploy_listener", lambda root, _port, **_kw: deployed.append(str(root)) or []
     )
     project_deploy.deploy_all_recent_projects()
     assert sorted(deployed) == sorted(str(i) for i in islands)
+
+
+def test_the_boot_deploy_walks_only_the_selected_island_deep(docs: Path, monkeypatch) -> None:
+    """Every folder of every island at each boot held a core for two minutes: only the
+    selected one gets the deep sweep, the rest the shallow one."""
+    from types import SimpleNamespace
+
+    from frontend.ui_web import project_deploy
+
+    islands = [_island(docs / "Fortnite Projects", n) for n in ("One", "Two", "Three")]
+    deep: dict[str, bool] = {}
+    monkeypatch.setattr(
+        project_deploy, "deploy_listener",
+        lambda root, _port, shared=True, deep_sweep=True: deep.__setitem__(str(root), deep_sweep) or [],
+    )
+    monkeypatch.setattr(project_deploy.PanelSettings, "load",
+                        classmethod(lambda cls: SimpleNamespace(uefn_project_root=str(islands[1]))))
+    project_deploy.deploy_all_recent_projects()
+    assert deep == {str(islands[0]): False, str(islands[1]): True, str(islands[2]): False}
 
 
 def test_a_plugin_source_adds_a_tab_and_claims_its_folders(docs: Path, tmp_path: Path, monkeypatch) -> None:

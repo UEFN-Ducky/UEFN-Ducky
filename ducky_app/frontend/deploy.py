@@ -879,7 +879,7 @@ _shared_deploy_lock = threading.Lock()
 _shared_deploy_done = False
 
 
-def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = True) -> list[str]:
+def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = True, deep_sweep: bool = True) -> list[str]:
     """Write the island listener stub, then quarantine any other project ``.py``.
 
     Listener source is refreshed into ``%LOCALAPPDATA%/UEFN-Ducky/listener`` by
@@ -889,6 +889,10 @@ def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = Tr
     ``shared=False`` skips the once-per-process work (all-project init refresh,
     listener hint, skill sync). Startup can call this from both project-switch
     and ``deploy_all_recent_projects``; only the first shared call runs that block.
+
+    ``deep_sweep=False`` quarantines only the island root, ``Content/Python`` and ``.ducky``
+    (where UEFN runs Python from) instead of walking every folder: the boot pass over every
+    known island walked them all and held a core for two minutes after each launch.
 
     The island steps (init, quarantine, ``.uefnproject`` Python flag) each check for a
     real ``*.uefnproject`` themselves, so a folder project passes through untouched.
@@ -908,7 +912,7 @@ def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = Tr
             logs.extend(ensure_project_init(project_root))
         except Exception as exc:
             logs.append(f"init refresh failed for {project_root}: {exc}")
-    logs.extend(quarantine_project_python(project_root, deep=True))
+    logs.extend(quarantine_project_python(project_root, deep=deep_sweep))
     py_log = enable_uefn_project_python(project_root)
     if py_log:
         logs.append(py_log)
