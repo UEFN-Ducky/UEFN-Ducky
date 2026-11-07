@@ -194,6 +194,10 @@ def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
                 continue
             tmp = dst.with_name(name + ".new")
             shutil.copy2(src, tmp)
+            # A restart right after the rename kept the new name but not its bytes (an EXE
+            # of zeros: "This app can't run on your PC"), so the data is on disk first.
+            with open(tmp, "rb+") as fh:
+                os.fsync(fh.fileno())
             try:
                 os.replace(tmp, dst)
             except PermissionError:
