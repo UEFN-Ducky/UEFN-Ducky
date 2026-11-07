@@ -172,6 +172,11 @@ def _drop_store_updates(real: Path, changed: list[str]) -> list[str]:
 
     def store_update(path: str) -> bool:
         parts = Path(path).parts
+        if len(parts) > 2 and parts[:2] == ("uefn_plugins", ".compiled_quarantine"):
+            # The live panel's Store install parks a signed plugin's mapped .pyd here
+            # (release_locked_compiled_backends), even when the reinstall leaves the
+            # plugin folder's own files unchanged; a test's unsigned plugin isn't excused.
+            return parts[2] in signed
         return len(parts) > 1 and parts[0] == "uefn_plugins" and parts[1] in updated
 
     return [p for p in changed if not store_update(p)]
