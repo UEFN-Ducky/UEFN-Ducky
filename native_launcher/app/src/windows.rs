@@ -15,7 +15,10 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::*;
+
+use crate::trim;
 
 use super::{drain_backend, hook_page, ms_since, on_page_host, with, TITLE, WM_WAKE};
 
@@ -353,6 +356,7 @@ pub(super) fn create_main() -> windows::core::Result<HWND> {
         let b = bounds::initial_bounds(saved, &bounds::work_areas());
         let _ = SetWindowPos(hwnd, None, b.x, b.y, b.width, b.height, SWP_NOZORDER | SWP_NOACTIVATE);
         let prev = SetWindowLongPtrW(hwnd, GWLP_WNDPROC, main_proc as *const () as isize);
+        SetTimer(Some(hwnd), TRIM_TIMER, TRIM_EVERY_MS, None);
         let splash = if show_splash { create_splash(hwnd).ok() } else { None };
         with(|u| {
             u.main = Some(hwnd);
@@ -364,6 +368,42 @@ pub(super) fn create_main() -> windows::core::Result<HWND> {
     Ok(hwnd)
 }
 
+const TRIM_TIMER: usize = 0x7d1;
+const TRIM_EVERY_MS: u32 = 60_000;
+
+thread_local! {
+    /// The level WebView2 was last given, and the person's last input (tick) with when
+    /// it was first seen.
+    static TRIM: Cell<(trim::Level, u32, Option<std::time::Instant>)> = const { Cell::new((trim::Level::Normal, 0, None)) };
+}
+
+/// Give the main WebView2 the memory level for the window's state now (`hidden`: from
+/// WM_SHOWWINDOW, which comes before the change). An older WebView2 is left as it is.
+fn retrim(hwnd: HWND, hidden: Option<bool>) {
+    let (last, tick, since) = TRIM.get();
+    let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+    let now_tick = if unsafe { GetLastInputInfo(&mut info) }.as_bool() { info.dwTime } else { tick };
+    let since = match since {
+        Some(t) if now_tick == tick => t,
+        _ => std::time::Instant::now(),
+    };
+    let (minimized, hidden) = unsafe { (IsIconic(hwnd).as_bool(), hidden.unwrap_or(!IsWindowVisible(hwnd).as_bool())) };
+    let want = trim::level(minimized, hidden, since.elapsed().as_secs());
+    let mut applied = last;
+    if want != last {
+        if let Some(wv) = with(|u| u.webview.clone()).flatten().and_then(|w| w.cast::<ICoreWebView2_19>().ok()) {
+            let target = match want {
+                trim::Level::Low => COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+                trim::Level::Normal => COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+            };
+            if unsafe { wv.SetMemoryUsageTargetLevel(target) }.is_ok() {
+                applied = want;
+            }
+        }
+    }
+    TRIM.set((applied, now_tick, Some(since)));
+}
+
 unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_SIZE => {
@@ -372,7 +412,10 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
                 let _ = GetClientRect(hwnd, &mut rc);
                 let _ = MoveWindow(s, 0, 0, rc.right, rc.bottom, true);
             }
+            retrim(hwnd, None);
         }
+        WM_SHOWWINDOW => retrim(hwnd, Some(wp.0 == 0)),
+        WM_TIMER if wp.0 == TRIM_TIMER => retrim(hwnd, None),
         WM_CLOSE => save_bounds(hwnd),
         WM_DESTROY => {
             with(|u| {

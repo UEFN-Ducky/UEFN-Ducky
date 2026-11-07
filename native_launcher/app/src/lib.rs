@@ -9,6 +9,7 @@ pub mod page;
 pub mod repoint;
 pub mod start;
 pub mod starts;
+pub mod trim;
 #[cfg(windows)]
 mod ui;
 
