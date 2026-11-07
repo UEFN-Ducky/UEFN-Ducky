@@ -603,6 +603,10 @@ fn hook_page(webview: &ICoreWebView2, wid: Option<String>) -> windows::core::Res
         ));
         webview.add_NavigationStarting(&starting, &mut token)?;
     }
+    // A dev run (debug port set) keeps the browser menu, as the Python window does.
+    let dev = window::debug_port_from_env(std::env::var(window::config::DEBUG_PORT_ENV).ok().as_deref()).is_some();
+    // An older WebView2 without the event keeps its own menu.
+    let _ = wins::hook_menu(webview, !dev);
     Ok(())
 }
 

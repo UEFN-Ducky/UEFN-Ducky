@@ -1,13 +1,16 @@
 //! The launcher's own windows: the main window and its splash, the wake window, the
 //! backend's pop-out windows (`window_open` / `window_close` / `window_raise`), and the
-//! native window ops the page asks for. A child of `ui` (it reads the UI state).
+//! native window ops the page asks for, and the right-click menu over typed text. A child
+//! of `ui` (it reads the UI state).
 
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 use serde_json::{json, Value};
 use shim::NativeOp;
-use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
-use windows::core::{w, HSTRING, PCWSTR};
+use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use webview2_com::{take_pwstr, ContextMenuRequestedEventHandler, ExecuteScriptCompletedHandler};
+use windows::core::{w, Interface, BOOL, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -128,8 +131,147 @@ fn raise_extra(wid: &str) {
     }
 }
 
+// --- the right-click menu over typed text (webview_native_menu.py) ------------------------
+
+/// Browser-page commands that make no sense in Ducky's own text boxes.
+const MENU_DROP: &[&str] = &[
+    "back", "forward", "reload", "saveAs", "print", "createQrCode", "inspectElement",
+    "share", "webCapture", "openLinkInNewWindow", "saveLinkAs", "copyLinkLocation",
+];
+
+/// One row of WebView2's menu.
+enum MenuRow {
+    Command { name: String, label: String, id: i32, enabled: bool },
+    Separator,
+    Other,
+}
+
+/// The rows the page shows, in WebView2's order (`webview_native_menu.menu_items`):
+/// commands minus [`MENU_DROP`], `&` accelerators removed, separators between groups only.
+fn menu_rows(items: &[MenuRow]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for item in items {
+        match item {
+            MenuRow::Separator => {
+                if out.last().is_some_and(|r| r.get("separator").is_none()) {
+                    out.push(json!({"separator": true}));
+                }
+            }
+            MenuRow::Command { name, label, id, enabled } if !MENU_DROP.contains(&name.as_str()) => {
+                let label = label.replace("&&", "\0").replace('&', "").replace('\0', "&");
+                if !label.trim().is_empty() {
+                    out.push(json!({"id": id, "label": label, "enabled": enabled}));
+                }
+            }
+            _ => {}
+        }
+    }
+    while out.last().is_some_and(|r| r.get("separator").is_some()) {
+        out.pop();
+    }
+    out
+}
+
+thread_local! {
+    /// The one menu the page has open: its token, WebView2's event and its deferral.
+    static MENU: RefCell<Option<(String, ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Deferral)>> =
+        const { RefCell::new(None) };
+    static MENU_SEQ: Cell<u64> = const { Cell::new(0) };
+}
+
+unsafe fn read_menu(items: &ICoreWebView2ContextMenuItemCollection) -> windows::core::Result<Vec<MenuRow>> {
+    let mut n = 0u32;
+    items.Count(&mut n)?;
+    let mut out = Vec::new();
+    for i in 0..n {
+        let item = items.GetValueAtIndex(i)?;
+        let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND::default();
+        item.Kind(&mut kind)?;
+        out.push(match kind {
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR => MenuRow::Separator,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND => {
+                let (mut name, mut label) = (PWSTR::null(), PWSTR::null());
+                let (mut id, mut enabled) = (0i32, BOOL::default());
+                item.Name(&mut name)?;
+                item.Label(&mut label)?;
+                item.CommandId(&mut id)?;
+                item.IsEnabled(&mut enabled)?;
+                MenuRow::Command { name: take_pwstr(name), label: take_pwstr(label), id, enabled: enabled.as_bool() }
+            }
+            _ => MenuRow::Other,
+        });
+    }
+    Ok(out)
+}
+
+/// Right-click on text you can edit: WebView2's own menu goes to the page (Ducky's
+/// `NativeTextMenu`), the pick comes back as `native_menu_pick` ([`menu_pick`]).
+/// `hide_others`: no browser menu (Back, Reload, Inspect) anywhere else.
+/// ponytail: no spelling fixes (Python's win_spellcheck); add an ISpellChecker call if asked.
+pub(super) fn hook_menu(webview: &ICoreWebView2, hide_others: bool) -> windows::core::Result<()> {
+    let wv11: ICoreWebView2_11 = webview.cast()?;
+    let handler = ContextMenuRequestedEventHandler::create(Box::new(
+        move |sender: Option<ICoreWebView2>, args: Option<ICoreWebView2ContextMenuRequestedEventArgs>| {
+            let (Some(page), Some(args)) = (sender, args) else {
+                return Ok(());
+            };
+            unsafe {
+                let mut editable = BOOL::default();
+                args.ContextMenuTarget()?.IsEditable(&mut editable)?;
+                let rows = if editable.as_bool() { menu_rows(&read_menu(&args.MenuItems()?)?) } else { Vec::new() };
+                if !rows.iter().any(|r| r.get("id").is_some()) {
+                    if hide_others {
+                        args.SetHandled(true)?;
+                    }
+                    return Ok(());
+                }
+                let deferral = args.GetDeferral()?;
+                args.SetHandled(true)?;
+                let token = format!("m{}", MENU_SEQ.with(|s| s.replace(s.get() + 1)));
+                // One menu at a time: one left open gives WebView2 its event back.
+                if let Some((_, _, old)) = MENU.with(|m| m.borrow_mut().replace((token.clone(), args, deferral))) {
+                    let _ = old.Complete();
+                }
+                let payload = json!({"type": "native_menu", "token": token, "items": rows});
+                let js = format!("window.__uefnPanelPush && window.__uefnPanelPush({payload})");
+                let done = ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(())));
+                page.ExecuteScript(&HSTRING::from(js), &done)?;
+            }
+            Ok(())
+        },
+    ));
+    let mut token = Default::default();
+    unsafe { wv11.add_ContextMenuRequested(&handler, &mut token) }
+}
+
+/// The page's answer to menu `token`: run WebView2's `command_id` (Paste...) or nothing
+/// (-1). False when that menu is not the open one.
+fn menu_pick(token: &str, command_id: i32) -> bool {
+    let open = MENU.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.as_ref().is_some_and(|(t, ..)| t == token) {
+            m.take()
+        } else {
+            None
+        }
+    });
+    let Some((_, args, deferral)) = open else {
+        return false;
+    };
+    unsafe {
+        if command_id >= 0 {
+            let _ = args.SetSelectedCommandId(command_id);
+        }
+        let _ = deferral.Complete();
+    }
+    true
+}
+
 /// The window op on `h` (the main window or the pop-out that asked).
 pub(super) fn native_op(op: NativeOp, h: Option<HWND>) -> Value {
+    if let NativeOp::MenuPick { token, command_id } = &op {
+        return json!({"ok": menu_pick(token, *command_id)});
+    }
     let Some(h) = h else {
         return Value::Null;
     };
@@ -162,6 +304,7 @@ pub(super) fn native_op(op: NativeOp, h: Option<HWND>) -> Value {
                 let _ = ShowWindow(h, SW_HIDE);
                 Value::Null
             }
+            NativeOp::MenuPick { .. } => Value::Null,
         }
     }
 }
@@ -337,5 +480,40 @@ mod tests {
         assert!(r.remove("nope").is_none());
         assert_eq!(r.remove("f1").map(|e| e.hwnd), Some(HWND(2 as _)));
         assert!(r.remove("f1").is_none());
+    }
+
+    fn cmd(name: &str, label: &str, id: i32) -> MenuRow {
+        MenuRow::Command { name: name.into(), label: label.into(), id, enabled: true }
+    }
+
+    #[test]
+    fn menu_rows_match_python_menu_items() {
+        let rows = menu_rows(&[
+            MenuRow::Separator,
+            cmd("back", "&Back", 1),
+            cmd("cut", "Cu&t", 50151),
+            MenuRow::Separator,
+            MenuRow::Separator,
+            MenuRow::Other,
+            cmd("paste", "&Paste && go", 50153),
+            cmd("blank", "&", 9),
+            cmd("inspectElement", "Inspect", 2),
+            MenuRow::Separator,
+        ]);
+        assert_eq!(
+            Value::Array(rows),
+            json!([
+                {"id": 50151, "label": "Cut", "enabled": true},
+                {"separator": true},
+                {"id": 50153, "label": "Paste & go", "enabled": true},
+            ])
+        );
+        assert!(menu_rows(&[MenuRow::Separator, cmd("reload", "Reload", 3)]).is_empty());
+    }
+
+    #[test]
+    fn a_pick_for_no_open_menu_is_refused() {
+        assert!(!menu_pick("m0", 5));
+        assert_eq!(native_op(NativeOp::MenuPick { token: "nope".into(), command_id: -1 }, None), json!({"ok": false}));
     }
 }

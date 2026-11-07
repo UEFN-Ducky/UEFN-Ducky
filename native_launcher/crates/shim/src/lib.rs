@@ -32,6 +32,8 @@ pub const WINDOW_NAMES: &[&str] = &[
     "toggle_maximize",
     "minimize_window",
     "hide_window",
+    // The right-click menu over typed text answers the launcher's own WebView2 event.
+    "native_menu_pick",
 ];
 
 /// A window call the launcher runs itself.
@@ -48,6 +50,8 @@ pub enum NativeOp {
     ToggleMaximize,
     Minimize,
     Hide,
+    /// The page's pick in WebView2's menu `token`: its command id, or -1 for none.
+    MenuPick { token: String, command_id: i32 },
 }
 
 /// A page call, as posted by `shim.js`.
@@ -139,6 +143,11 @@ pub fn native_op(name: &str, args: &[Value]) -> Option<Result<NativeOp, String>>
         "toggle_maximize" => Ok(NativeOp::ToggleMaximize),
         "minimize_window" => Ok(NativeOp::Minimize),
         "hide_window" => Ok(NativeOp::Hide),
+        // Lenient like the Python method: a bad token or id picks nothing.
+        "native_menu_pick" => Ok(NativeOp::MenuPick {
+            token: args.first().and_then(Value::as_str).unwrap_or_default().to_string(),
+            command_id: arg_i32(args, 1, "command_id").unwrap_or(-1),
+        }),
         _ => return None,
     };
     Some(op)
@@ -271,6 +280,14 @@ mod tests {
     fn caption_menu_is_answered_natively() {
         let r = route_message(r#"{"t":"call","id":"js-11","name":"uefnNativeWindowMenu","args":[]}"#).unwrap();
         assert_eq!(r, Route::Native { id: "js-11".into(), op: NativeOp::ShowMenu });
+    }
+
+    #[test]
+    fn menu_pick_is_answered_natively() {
+        let r = route_message(r#"{"t":"call","id":"js-14","name":"native_menu_pick","args":["m3",50161]}"#).unwrap();
+        assert_eq!(r, Route::Native { id: "js-14".into(), op: NativeOp::MenuPick { token: "m3".into(), command_id: 50161 } });
+        let r = route_message(r#"{"t":"call","id":"js-15","name":"native_menu_pick","args":[]}"#).unwrap();
+        assert_eq!(r, Route::Native { id: "js-15".into(), op: NativeOp::MenuPick { token: String::new(), command_id: -1 } });
     }
 
     #[test]
