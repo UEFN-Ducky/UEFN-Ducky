@@ -501,7 +501,9 @@ def _project_slug_for_quarantine(project_root: Path) -> str:
 
 
 def _is_python_file(path: Path) -> bool:
-    return path.is_file() and path.suffix.lower() in _PY_FILE_SUFFIXES
+    # Suffix first: an island holds tens of thousands of .uasset files, and a stat on each
+    # one at every boot kept a core busy for minutes.
+    return path.suffix.lower() in _PY_FILE_SUFFIXES and path.is_file()
 
 
 def _walk_python_artifacts(base: Path, found: list[Path], project_root: Path) -> None:
