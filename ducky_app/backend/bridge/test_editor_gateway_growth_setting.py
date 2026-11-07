@@ -17,8 +17,6 @@ def uefn(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
     """A fake UEFN process (pid, start, private bytes) and 32 GB free on the PC."""
     state = {"proc": (100, 5.0, 21 * GB)}
     monkeypatch.setattr(editor_gateway, "_uefn_memory", lambda: state["proc"])
-    monkeypatch.setattr(editor_gateway, "_pc_free_bytes", lambda: 32 * GB)
-    monkeypatch.setattr(editor_gateway, "_pc_total_bytes", lambda: 64 * GB)
     monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
     monkeypatch.setattr(editor_gateway, "_lease_path", lambda: tmp_path / "editor_lease.json")
     import frontend.duckyos_account as account
@@ -45,28 +43,18 @@ def test_schema_lists_the_limit_as_a_settable_agent_float() -> None:
 
 
 @pytest.mark.parametrize("backend", ["db", "files"])
-def test_lowering_the_limit_refuses_the_next_heavy_call(uefn, monkeypatch, backend) -> None:
+def test_the_limit_is_reported_and_never_refuses_a_heavy_call(uefn, monkeypatch, backend) -> None:
     monkeypatch.setenv("DUCKY_STORE_BACKEND", backend)
     PanelSettings().save()
     assert editor_gateway.call("", "compile_verse", True, lambda: "built") == "built"  # baseline 21 GB
     uefn["proc"] = (100, 5.0, int(21.3 * GB))
-    assert editor_gateway.call("", "compile_verse", True, lambda: "built") == "built"  # 0.3 GB < 4 GB
 
     out = _set({"uefn_memory_growth_limit_gb": 0.1})
     assert "error" not in out, out
     assert out["after"] == {"uefn_memory_growth_limit_gb": 0.1}
 
-    ran: list[str] = []
-    with pytest.raises(
-        editor_gateway.EditorMemoryLow,
-        match=r"UEFN grew 0\.3 GB since the island loaded \(limit 0\.1 GB, RAM 32\.0 GB of 64 GB free\): save and restart UEFN",
-    ):
-        editor_gateway.call("", "compile_verse", True, lambda: ran.append("x"))
-    assert ran == []
+    assert editor_gateway.call("", "compile_verse", True, lambda: "built") == "built"  # over the limit, still runs
     assert editor_gateway.uefn_growth() == {"grown_gb": 0.3, "limit_gb": 0.1}
-
-    assert "error" not in _set({"uefn_memory_growth_limit_gb": 8})
-    assert editor_gateway.call("", "compile_verse", True, lambda: "built") == "built"
 
 
 @pytest.mark.parametrize("value", [0.0, 0.05, 65, "lots"])

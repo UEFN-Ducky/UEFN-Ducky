@@ -13,30 +13,19 @@ Rules:
 
 * **Editor lease** -- one chat drives UEFN at a time. A mutating call takes the lease
   for its chat and renews it; after :data:`LEASE_IDLE_SEC` without a call it lapses.
-  Another chat's mutating call is refused with :class:`EditorBusy`. Reads always pass,
-  and so do calls with no chat (the person, the panel). The lease lives in a file in
-  Ducky's app data because every agent can run in its own process.
+  Another chat's mutating call waits its turn (never refused) and runs once the lease is
+  free. Reads always pass, and so do calls with no chat (the person, the panel). The lease
+  lives in a file in Ducky's app data because every agent can run in its own process.
 * **Editor process** -- an agent's launch / close / restart of UEFN asks the person first
   (:func:`call_editor_process`); a no or a timeout cancels it. Each one, the person's
   own included, appends ``time, chat id, reason`` to the open project's memory entry
   :data:`CRASH_WATCH_ENTRY`, so a reopened editor is never mistaken for a crash.
-* **Memory guard** -- before a heavy call (:func:`is_heavy_op`: Verse compile/build, a
-  play session, an import, ``execute_python``, an unfiltered actor census) the gateway
-  reads UEFN's private bytes and the PC's free RAM. It refuses with
-  :class:`EditorMemoryLow` when UEFN grew more than ``uefn_memory_growth_limit_gb``
-  (default 4) since the island loaded, or the PC has under :data:`MIN_FREE_RAM_GB` free.
-  An island alone is ~21 GB, so the guard watches growth, not the total. The baseline
-  is UEFN's size at the first guarded call for that UEFN process (pid + start time),
-  kept in app data so every agent process shares it, and reset when UEFN restarts.
-  Memory is read only here, never polled, and never for other calls.
-* **Deadline** -- every :func:`acall` has a time limit: :data:`READ_TIMEOUT_SEC` for reads,
-  :data:`MUTATING_TIMEOUT_SEC` for mutating calls (``unreal__call_tool`` included) and
-  :data:`SLOW_TIMEOUT_SEC` for calls slow by design (Verse build, a play session, launch /
-  restart, a screenshot). A caller's own ``timeout`` wins; ``UEFN_DUCKY_EDITOR_CALL_TIMEOUT_S``
-  replaces the read / mutating defaults. On a timeout the lease is released and
-  :class:`EditorTimeout` raised; for :data:`HANG_COOLDOWN_SEC` after it, further ``acall``
-  calls fail fast with the same message instead of queuing behind the hung one. A successful
-  read (any :func:`call` or :func:`acall`) ends that early. UEFN is never killed from here.
+* **Memory** is never a reason to refuse: a heavy call (:func:`is_heavy_op`) only anchors
+  the baseline :func:`uefn_growth` measures from (UEFN's size at its first heavy call, per
+  UEFN process), which the status shows. Memory is read only here, never polled.
+* **No deadline** -- a UEFN call waits while UEFN works. It ends when UEFN answers, its
+  connection drops (UEFN closed), or the person presses Stop. Only a caller's own
+  ``timeout`` stops it early (:class:`EditorTimeout`). UEFN is never killed from here.
 """
 
 from __future__ import annotations
@@ -67,37 +56,20 @@ _PROCESS_VERBS = {
 }
 
 
-class EditorBusy(RuntimeError):
-    """Another chat holds the editor lease."""
-
-
 class EditorProcessRefused(RuntimeError):
     """The person said no to (or never answered) an agent's UEFN launch / close / restart."""
 
 
-class EditorMemoryLow(RuntimeError):
-    """UEFN grew too much since the island loaded, or the PC is low on free RAM."""
-
-
 class EditorTimeout(TimeoutError):
-    """UEFN did not answer an editor call within its deadline (or one just hung)."""
+    """UEFN did not answer within the caller's own ``timeout``."""
 
 
-READ_TIMEOUT_SEC = 60.0
-MUTATING_TIMEOUT_SEC = 180.0
-SLOW_TIMEOUT_SEC = 600.0
-HANG_COOLDOWN_SEC = 30.0
-TIMEOUT_ENV = "UEFN_DUCKY_EDITOR_CALL_TIMEOUT_S"
-# Name words of calls that are slow by design (op names are compared in snake_case).
-_SLOW_WORDS = ("compile", "build", "launch", "restart", "screenshot", "play", "session", "import")
-# Per process: the hang is about this process's queue of calls. Monotonic for the cooldown.
-_mono = time.monotonic
-_hang_lock = threading.Lock()
-_hang: dict[str, Any] = {}
+# How often a call waiting for another chat's lease looks again.
+LEASE_POLL_SEC = 0.5
+_sleep = time.sleep
 
 
 _GB = 1024 ** 3
-MIN_FREE_RAM_GB = 4.0
 DEFAULT_GROWTH_LIMIT_GB = 4.0
 BASELINE_FILE = "uefn_memory_baseline.json"
 # Name words of heavy editor calls (op names are compared in snake_case).
@@ -172,24 +144,27 @@ def lease_holder() -> dict[str, Any]:
     return lease
 
 
-def take_lease(chat_id: str, op: str) -> None:
-    """Take or renew the editor lease for ``chat_id``; raise :class:`EditorBusy` if another chat holds it."""
+def try_lease(chat_id: str, op: str) -> bool:
+    """Take or renew the editor lease for ``chat_id``; False while another chat holds it."""
     if not chat_id:
-        return
+        return True
     with _lease_lock:
         held = lease_holder()
         now = _now()
         if held and held.get("chat_id") != chat_id:
-            title = held.get("title") or held.get("chat_id")
-            seconds = int(now - float(held.get("since") or now))
-            raise EditorBusy(
-                f"editor busy: held by {title} ({seconds} s). `{op}` not sent: another chat is "
-                f"driving UEFN. Do other work and try again once it has been idle for "
-                f"{int(LEASE_IDLE_SEC)} s."
-            )
+            return False
         since = float(held.get("since") or now) if held else now
         title = held.get("title") if held else _chat_title(chat_id)
         _write_lease({"chat_id": chat_id, "title": title, "since": since, "at": now, "op": op})
+        return True
+
+
+def take_lease(chat_id: str, op: str) -> None:
+    """Take the editor lease for ``chat_id``, waiting while another chat holds it."""
+    # ponytail: polls the shared lease file, not a strict arrival-order queue; a ticket
+    # list in the lease file if two waiting chats ever need first-come-first-served.
+    while not try_lease(chat_id, op):
+        _sleep(LEASE_POLL_SEC)
 
 
 def release_lease(chat_id: str) -> None:
@@ -237,32 +212,6 @@ def _uefn_memory() -> tuple[int, float, int] | None:
         except Exception:
             continue
     return best
-
-
-def _pc_free_bytes() -> int | None:
-    try:
-        import psutil
-
-        return int(psutil.virtual_memory().available)
-    except Exception:
-        return None
-
-
-def _pc_total_bytes() -> int | None:
-    try:
-        import psutil
-
-        return int(psutil.virtual_memory().total)
-    except Exception:
-        return None
-
-
-def _ram_text(free_gb: float | None) -> str:
-    """'RAM 0.3 GB of 16 GB free' (the total left out when it can't be read)."""
-    if free_gb is None:
-        return "RAM free unknown"
-    total = _pc_total_bytes()
-    return f"RAM {free_gb:.1f} GB of {total / _GB:.0f} GB free" if total else f"RAM {free_gb:.1f} GB free"
 
 
 def _growth_limit_gb() -> float:
@@ -314,40 +263,20 @@ def uefn_growth() -> dict[str, float] | None:
         return None
 
 
-def check_memory(op: str) -> None:
-    """Raise :class:`EditorMemoryLow` when a heavy ``op`` would push UEFN or the PC too far."""
-    uefn = _uefn_memory()
-    free = _pc_free_bytes()
-    growth = 0.0
-    if uefn is not None:
-        pid, started, private = uefn
-        growth = (private - _baseline_for(pid, started, private)) / _GB
-    free_gb = free / _GB if free is not None else None
-    limit = _growth_limit_gb()
-    if growth > limit or (free_gb is not None and free_gb < MIN_FREE_RAM_GB):
-        raise EditorMemoryLow(
-            f"UEFN grew {growth:.1f} GB since the island loaded (limit {limit:g} GB, {_ram_text(free_gb)}): save and "
-            f"restart UEFN first (ask the person). `{op}` not sent; the limits are "
-            f"{limit:g} GB of growth and {MIN_FREE_RAM_GB:g} GB free RAM."
-        )
-
-
-def _check(chat_id: str, op: str, mutating: bool, heavy: bool | None = None) -> None:
-    if mutating:
-        take_lease(chat_id, op)
+def _note_heavy(op: str, heavy: bool | None) -> None:
+    """A heavy call anchors the growth baseline; never refuses."""
     if is_heavy_op(op) if heavy is None else heavy:
-        check_memory(op)
+        uefn_growth()
 
 
 def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T], *, heavy: bool | None = None) -> T:
-    """Run one editor call ``fn`` for ``chat_id`` once the gateway's rules let it through.
+    """Run one editor call ``fn`` for ``chat_id``; a mutating one waits for the lease first.
 
     ``heavy`` overrides :func:`is_heavy_op` (a caller that knows the call's arguments)."""
-    _check(chat_id, op, mutating, heavy)
-    result = fn()
-    if not mutating:
-        clear_hang()
-    return result
+    if mutating:
+        take_lease(chat_id, op)
+    _note_heavy(op, heavy)
+    return fn()
 
 
 def _ask_person(chat_id: str, verb: str, reason: str) -> bool:
@@ -415,48 +344,6 @@ def _timeout_message(op: str, seconds: float) -> str:
     )
 
 
-def _env_timeout() -> float | None:
-    try:
-        value = float(os.environ.get(TIMEOUT_ENV, "") or 0)
-    except ValueError:
-        return None
-    return value if value > 0 else None
-
-
-def call_timeout(op: str, mutating: bool, heavy: bool | None = None, timeout: float | None = None) -> float:
-    """The deadline in seconds for one :func:`acall`."""
-    if timeout is not None and timeout > 0:
-        return float(timeout)
-    name = _snake(op)
-    slow = bool(heavy) or any(word in name for word in _SLOW_WORDS)
-    override = _env_timeout()
-    if slow:
-        return max(SLOW_TIMEOUT_SEC, override or 0.0)
-    if override is not None:
-        return override
-    return MUTATING_TIMEOUT_SEC if mutating or name.endswith("call_tool") else READ_TIMEOUT_SEC
-
-
-def hang_state() -> dict[str, Any]:
-    """The live hang ``{op, seconds, message, until}``, or {} when no call hung recently."""
-    with _hang_lock:
-        if _hang and _mono() < float(_hang.get("until") or 0):
-            return dict(_hang)
-        _hang.clear()
-        return {}
-
-
-def clear_hang() -> None:
-    """End the fail-fast window (an editor call just succeeded)."""
-    with _hang_lock:
-        _hang.clear()
-
-
-def _mark_hang(op: str, seconds: float, message: str) -> None:
-    with _hang_lock:
-        _hang.update({"op": op, "seconds": seconds, "message": message, "until": _mono() + HANG_COOLDOWN_SEC})
-
-
 async def acall(
     chat_id: str,
     op: str,
@@ -466,24 +353,21 @@ async def acall(
     heavy: bool | None = None,
     timeout: float | None = None,
 ) -> Any:
-    """:func:`call` for a coroutine: ``fn()`` returns an awaitable, awaited within its deadline
-    (:func:`call_timeout`). Raises :class:`EditorTimeout` when UEFN does not answer in time,
-    and at once while an earlier call's hang is still fresh."""
-    hung = hang_state()
-    if hung:
-        raise EditorTimeout(hung["message"])
-    _check(chat_id, op, mutating, heavy)
+    """:func:`call` for a coroutine: waits for the lease without blocking the loop (Stop
+    cancels the wait), then awaits ``fn()`` until UEFN answers. Only the caller's own
+    ``timeout`` stops it early (:class:`EditorTimeout`)."""
+    if mutating:
+        while not try_lease(chat_id, op):
+            await asyncio.sleep(LEASE_POLL_SEC)
+    _note_heavy(op, heavy)
     result = fn()
     if inspect.isawaitable(result):
-        seconds = call_timeout(op, mutating, heavy, timeout)
+        if timeout is None or timeout <= 0:
+            return await result
         try:
-            result = await asyncio.wait_for(result, seconds)
+            result = await asyncio.wait_for(result, timeout)
         except asyncio.TimeoutError:
-            message = _timeout_message(op, seconds)
-            _mark_hang(op, seconds, message)
             if chat_id:
                 release_lease(chat_id)
-            raise EditorTimeout(message) from None
-    if not mutating:
-        clear_hang()
+            raise EditorTimeout(_timeout_message(op, timeout)) from None
     return result

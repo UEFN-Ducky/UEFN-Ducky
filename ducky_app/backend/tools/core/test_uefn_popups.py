@@ -303,7 +303,7 @@ def test_a_popup_with_a_choice_is_left_to_the_agent(uefn_popup) -> None:
     assert uefn_popup["clicks"] == [] and uefn_popup["up"] is not None
 
 
-def _epic_pool(monkeypatch, popup_state, *, timeout: float = 180.0, ducky_left_it: bool = True):
+def _epic_pool(monkeypatch, popup_state, *, look: float = 2.0, ducky_left_it: bool = True):
     """The plugin pool wired to a fake UEFN Epic MCP whose call runs on the Slate thread:
     it cannot answer while a popup is up. The popup is already up when the call starts;
     ``ducky_left_it`` says an earlier Ducky call opened it (else it is the person's)."""
@@ -317,7 +317,7 @@ def _epic_pool(monkeypatch, popup_state, *, timeout: float = 180.0, ducky_left_i
 
     rebuild_plugin_prefix_cache([{"id": epic.EPIC_MCP_SERVER_ID, "tool_prefix": "unreal"}])
     monkeypatch.setattr(client_pool, "ensure_plugin_prefix_cache", lambda: None)
-    monkeypatch.setattr(client_pool, "_TOOL_TIMEOUT_SEC", timeout)
+    monkeypatch.setattr(client_pool, "_EPIC_POPUP_LOOK_SEC", look)
     monkeypatch.setattr(epic, "probe_epic_mcp", lambda **_k: {"epic_mcp_online": True, "epic_mcp_editor": "uefn"})
     monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
     monkeypatch.setattr(uefn_modal, "_LONE_BUTTON_AFTER_SEC", 0.0)
@@ -366,16 +366,16 @@ def test_a_hung_epic_call_gets_the_unable_to_refresh_popup_pressed(uefn_popup, m
 
 def test_a_hung_epic_call_leaves_the_persons_popup_alone(uefn_popup, monkeypatch) -> None:
     uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")  # the person's own push said this
-    pool = _epic_pool(monkeypatch, uefn_popup, timeout=0.3, ducky_left_it=False)
+    pool = _epic_pool(monkeypatch, uefn_popup, look=0.1, ducky_left_it=False)
     with pytest.raises(RuntimeError) as err:
         asyncio.run(pool.call_tool("unreal__call_tool", _GET_SESSION_STATUS))
     assert uefn_popup["clicks"] == []
     assert "'Unable to Refresh'" in str(err.value)  # the agent is told, and may ask the person
 
 
-def test_a_timed_out_epic_call_tells_the_agent_to_look_and_press(uefn_popup, monkeypatch) -> None:
+def test_a_popup_blocked_epic_call_tells_the_agent_to_look_and_press(uefn_popup, monkeypatch) -> None:
     uefn_popup["show"]("Unable to Launch", "data_loss_warning")  # two buttons: not pressed for it
-    pool = _epic_pool(monkeypatch, uefn_popup, timeout=0.3)
+    pool = _epic_pool(monkeypatch, uefn_popup, look=0.1)
     with pytest.raises(RuntimeError) as err:
         asyncio.run(pool.call_tool("unreal__call_tool", _GET_SESSION_STATUS))
     text = str(err.value)

@@ -410,7 +410,7 @@ def _hanging_epic_pool(monkeypatch, reply_after: float) -> tuple[PluginClientPoo
     monkeypatch.setattr(cp, "ensure_plugin_prefix_cache", lambda: None)
     monkeypatch.setattr(epic, "probe_epic_mcp", lambda **_k: {"epic_mcp_online": True, "epic_mcp_editor": "unreal"})
     monkeypatch.setattr(uefn_popups, "blocked_call_hint", lambda: "POPUP HINT")
-    monkeypatch.setattr(cp, "_EPIC_QUICK_TIMEOUT_SEC", 0.05)
+    monkeypatch.setattr(cp, "_TOOL_TIMEOUT_SEC", 0.05)  # Epic must not use it
     sent: list[str] = []
 
     class Session:
@@ -433,30 +433,12 @@ def _hanging_epic_pool(monkeypatch, reply_after: float) -> tuple[PluginClientPoo
     return pool, sent
 
 
-def test_epic_call_after_a_timeout_fails_at_once(monkeypatch) -> None:
-    """Nov 3 2026: one hung Epic call made every later unreal__* call wait its own 180 s."""
-    pool, sent = _hanging_epic_pool(monkeypatch, reply_after=10)
+def test_a_slow_epic_call_waits_for_its_answer_and_the_next_one_is_sent(monkeypatch) -> None:
+    """No deadline and no refusal on UEFN calls: a call longer than the tool limit answers."""
+    pool, sent = _hanging_epic_pool(monkeypatch, reply_after=0.3)
 
-    async def run() -> None:
-        try:
-            await pool.call_tool("unreal__list_toolsets", {})
-            raise AssertionError("expected a timeout")
-        except RuntimeError as exc:
-            assert "timed out after 0s" in str(exc)
-        started = time.monotonic()
-        try:
-            await pool.call_tool("unreal__describe_toolset", {})
-            raise AssertionError("expected a fail-fast")
-        except RuntimeError as exc:
-            assert "not answering" in str(exc) and "POPUP HINT" in str(exc)
-        assert time.monotonic() - started < 1.0
+    async def run() -> tuple[str, str]:
+        return await pool.call_tool("unreal__call_tool", {}), await pool.call_tool("unreal__list_toolsets", {})
 
-    asyncio.run(run())
-    assert sent == ["list_toolsets"], "the call behind a timeout is never sent"
-
-
-def test_epic_answer_clears_the_unanswered_mark(monkeypatch) -> None:
-    pool, sent = _hanging_epic_pool(monkeypatch, reply_after=0)
-    pool._epic_unanswered_at = time.time() - 61
-    assert asyncio.run(pool.call_tool("unreal__list_toolsets", {})) == "ok"
-    assert pool._epic_unanswered_at == 0.0 and sent == ["list_toolsets"]
+    assert asyncio.run(run()) == ("ok", "ok")
+    assert sent == ["call_tool", "list_toolsets"]

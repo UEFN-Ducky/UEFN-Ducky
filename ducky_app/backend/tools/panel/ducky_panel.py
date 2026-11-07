@@ -525,13 +525,13 @@ def ducky_set_project(path: str = "", name: str = "", pretty: bool = False) -> s
 def _through_gateway(op: str, fn, reason: str = ""):
     """Run an editor-process call (launch / close / restart) through the editor gateway.
 
-    An agent's call waits for the person's yes; a no, a timeout or another chat's lease
-    comes back as ``{ok: false, cancelled: true, error}`` instead of an exception."""
+    An agent's call waits for the person's yes; a no or a timeout comes back as
+    ``{ok: false, cancelled: true, error}`` instead of an exception."""
     from backend.bridge import editor_gateway
 
     try:
         return editor_gateway.call_editor_process(editor_gateway.current_chat_id(), op, reason, fn)
-    except (editor_gateway.EditorProcessRefused, editor_gateway.EditorBusy) as e:
+    except editor_gateway.EditorProcessRefused as e:
         return {"ok": False, "cancelled": True, "error": str(e)}
 
 

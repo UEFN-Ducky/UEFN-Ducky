@@ -23,47 +23,25 @@ GB = 1024 ** 3
 
 @pytest.fixture(autouse=True)
 def memory(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
-    """Fake UEFN process and PC RAM; ``reads`` counts every memory read."""
-    state = {"uefn": None, "free": 32 * GB, "reads": 0}
+    """Fake UEFN process; ``reads`` counts every memory read."""
+    state = {"uefn": None, "reads": 0}
 
     def _uefn():
         state["reads"] += 1
         return state["uefn"]
 
-    def _free():
-        state["reads"] += 1
-        return state["free"]
-
     monkeypatch.setattr(editor_gateway, "_uefn_memory", _uefn)
-    monkeypatch.setattr(editor_gateway, "_pc_free_bytes", _free)
     monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
     monkeypatch.setattr(editor_gateway, "_growth_limit_gb", lambda: 4.0)
-    monkeypatch.setattr(editor_gateway, "_pc_total_bytes", lambda: 64 * GB)
     return state
 
 
-def test_growth_of_1_gb_since_load_passes(memory) -> None:
+def test_a_heavy_call_on_a_grown_uefn_still_runs(memory) -> None:
     memory["uefn"] = (100, 5.0, 21 * GB)
-    assert editor_gateway.call("", "execute_python", True, lambda: "first") == "first"  # baseline 21 GB
-    memory["uefn"] = (100, 5.0, 22 * GB)
-    assert editor_gateway.call("", "execute_python", True, lambda: "ok") == "ok"
-
-
-def test_growth_of_4_5_gb_since_load_refuses(memory) -> None:
-    memory["uefn"] = (100, 5.0, 21 * GB)
-    editor_gateway.call("", "import_asset", True, lambda: None)
-    memory["uefn"] = (100, 5.0, int(25.5 * GB))
-    ran: list[str] = []
-    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"UEFN grew 4\.5 GB since the island loaded \(limit 4 GB, RAM 32\.0 GB of 64 GB free\): save and restart UEFN first \(ask the person\)"):
-        editor_gateway.call("", "unreal__VerseToolset.Build", True, lambda: ran.append("x"))
-    assert ran == []
-
-
-def test_low_pc_free_ram_refuses(memory) -> None:
-    memory["uefn"] = (100, 5.0, 21 * GB)
-    memory["free"] = 3 * GB
-    with pytest.raises(editor_gateway.EditorMemoryLow, match=r"RAM 3\.0 GB of 64 GB free"):
-        editor_gateway.call("", "play_in_editor", True, lambda: None)
+    assert editor_gateway.call("", "import_asset", True, lambda: "first") == "first"  # baseline 21 GB
+    memory["uefn"] = (100, 5.0, 40 * GB)
+    assert editor_gateway.call("", "unreal__VerseToolset.Build", True, lambda: "built") == "built"
+    assert editor_gateway.uefn_growth() == {"grown_gb": 19.0, "limit_gb": 4.0}
 
 
 def test_a_new_uefn_pid_resets_the_baseline(memory) -> None:
@@ -72,12 +50,11 @@ def test_a_new_uefn_pid_resets_the_baseline(memory) -> None:
     memory["uefn"] = (200, 9.0, 26 * GB)  # UEFN restarted: 26 GB is its new baseline
     assert editor_gateway.call("", "execute_python", True, lambda: "ok") == "ok"
     memory["uefn"] = (200, 9.0, 27 * GB)
-    assert editor_gateway.call("", "execute_python", True, lambda: "ok") == "ok"
+    assert editor_gateway.uefn_growth()["grown_gb"] == 1.0
 
 
 def test_a_non_heavy_call_never_reads_memory(memory) -> None:
     memory["uefn"] = (100, 5.0, 60 * GB)
-    memory["free"] = 1 * GB
     assert editor_gateway.call("", "get_project_info", False, lambda: "info") == "info"
     assert editor_gateway.call("", "spawn_actor", True, lambda: "spawned") == "spawned"
     assert memory["reads"] == 0
@@ -127,17 +104,23 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     return now
 
 
-def test_other_chats_mutating_call_is_busy(clock) -> None:
+def test_another_chats_call_waits_its_turn_then_runs(clock, monkeypatch) -> None:
     assert editor_gateway.call("lead", "spawn_actor", True, lambda: "ok") == "ok"
-    clock[0] += 12
-    ran: list[str] = []
-    with pytest.raises(editor_gateway.EditorBusy, match=r"editor busy: held by Lead: Limo Ride \(12 s\)"):
-        editor_gateway.call("trio", "spawn_actor", True, lambda: ran.append("x"))
-    assert ran == []
+    waits: list[float] = []
+
+    def _sleep(seconds: float) -> None:  # lead finishes while trio waits
+        waits.append(seconds)
+        editor_gateway.release_lease("lead")
+
+    monkeypatch.setattr(editor_gateway, "_sleep", _sleep)
+    assert editor_gateway.call("trio", "spawn_actor", True, lambda: "trio ran") == "trio ran"
+    assert waits == [editor_gateway.LEASE_POLL_SEC]
+    assert editor_gateway.lease_holder()["chat_id"] == "trio"
 
 
-def test_reads_and_chatless_calls_always_pass(clock) -> None:
+def test_reads_and_chatless_calls_never_wait(clock, monkeypatch) -> None:
     editor_gateway.call("lead", "spawn_actor", True, lambda: None)
+    monkeypatch.setattr(editor_gateway, "_sleep", lambda s: pytest.fail("must not wait"))
     assert editor_gateway.call("trio", "get_all_actors", False, lambda: "read") == "read"
     assert editor_gateway.call("", "save_current_level", True, lambda: "person") == "person"
 
@@ -146,37 +129,28 @@ def test_lease_renews_on_each_call_and_lapses_after_idle(clock) -> None:
     editor_gateway.call("lead", "a", True, lambda: None)
     clock[0] += 50
     editor_gateway.call("lead", "b", True, lambda: None)  # renews
-    clock[0] += 50  # 100 s after taking it, 50 s idle
-    with pytest.raises(editor_gateway.EditorBusy, match=r"\(100 s\)"):
-        editor_gateway.call("trio", "c", True, lambda: None)
+    clock[0] += 50  # 50 s idle: still lead's
+    assert editor_gateway.try_lease("trio", "c") is False
     clock[0] += editor_gateway.LEASE_IDLE_SEC
     assert editor_gateway.call("trio", "c", True, lambda: "mine") == "mine"
     assert editor_gateway.lease_holder()["chat_id"] == "trio"
 
 
-def test_released_lease_lets_the_next_chat_in(clock) -> None:
+def test_acall_waits_for_the_lease_without_blocking_the_loop(clock, monkeypatch) -> None:
     editor_gateway.call("lead", "a", True, lambda: None)
-    editor_gateway.release_lease("lead")
-    assert editor_gateway.call("trio", "a", True, lambda: "ok") == "ok"
-
-
-def test_acall_is_refused_too(clock) -> None:
-    editor_gateway.call("lead", "a", True, lambda: None)
+    monkeypatch.setattr(editor_gateway, "LEASE_POLL_SEC", 0.01)
 
     async def _fn():
         return "sent"
 
-    with pytest.raises(editor_gateway.EditorBusy):
-        asyncio.run(editor_gateway.acall("trio", "unreal__call_tool", True, _fn))
+    async def _run():
+        task = asyncio.ensure_future(editor_gateway.acall("trio", "unreal__call_tool", True, _fn))
+        await asyncio.sleep(0.05)  # the loop keeps running while trio waits
+        assert not task.done()
+        editor_gateway.release_lease("lead")
+        return await task
 
-
-@pytest.fixture(autouse=True)
-def _no_hang(monkeypatch: pytest.MonkeyPatch):
-    """No test inherits another's hang window or the env deadline."""
-    monkeypatch.delenv(editor_gateway.TIMEOUT_ENV, raising=False)
-    editor_gateway.clear_hang()
-    yield
-    editor_gateway.clear_hang()
+    assert asyncio.run(_run()) == "sent"
 
 
 def _sleeper(seconds: float):
@@ -187,97 +161,19 @@ def _sleeper(seconds: float):
     return _fn
 
 
-def test_a_hung_call_times_out_near_its_deadline_and_frees_the_lease(clock) -> None:
-    import time
-
-    start = time.perf_counter()
-    with pytest.raises(editor_gateway.EditorTimeout, match=r"UEFN didn't answer unreal__call_tool in 0\.2s: a popup may be open \(uefn_popups\), or the editor is busy"):
-        asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _sleeper(5), timeout=0.2))
-    elapsed = time.perf_counter() - start
-    assert 0.18 <= elapsed < 1.0
-    assert editor_gateway.lease_holder() == {}
-    assert editor_gateway.call("trio", "spawn_actor", True, lambda: "ok") == "ok"
+def test_a_slow_call_has_no_deadline() -> None:
+    assert asyncio.run(editor_gateway.acall("c", "unreal__call_tool", True, _sleeper(0.3))) == "late"
 
 
-def test_calls_fail_fast_for_30_s_after_a_hang(monkeypatch) -> None:
-    import time
-
-    mono = [500.0]
-    monkeypatch.setattr(editor_gateway, "_mono", lambda: mono[0])
-    with pytest.raises(editor_gateway.EditorTimeout):
+def test_only_the_callers_own_timeout_stops_a_call(clock) -> None:
+    with pytest.raises(editor_gateway.EditorTimeout, match=r"UEFN didn't answer unreal__call_tool in 0\.05s"):
         asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _sleeper(5), timeout=0.05))
-    ran: list[str] = []
-
-    async def _fast():
-        ran.append("x")
-        return "ok"
-
-    start = time.perf_counter()
-    with pytest.raises(editor_gateway.EditorTimeout, match=r"didn't answer unreal__call_tool in 0\.05s"):
-        asyncio.run(editor_gateway.acall("lead", "unreal__list_toolsets", False, _fast))
-    assert time.perf_counter() - start < 0.05
-    assert ran == []
-    mono[0] += 29
-    with pytest.raises(editor_gateway.EditorTimeout):
-        asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _fast))
-    mono[0] += editor_gateway.HANG_COOLDOWN_SEC  # window over
-    assert asyncio.run(editor_gateway.acall("lead", "unreal__call_tool", True, _fast)) == "ok"
-    assert ran == ["x"]
-
-
-def test_a_successful_read_ends_the_hang_early() -> None:
-    with pytest.raises(editor_gateway.EditorTimeout):
-        asyncio.run(editor_gateway.acall("", "unreal__call_tool", True, _sleeper(5), timeout=0.05))
-    assert editor_gateway.hang_state()
-    assert editor_gateway.call("", "ping", False, lambda: "pong") == "pong"
-    assert editor_gateway.hang_state() == {}
+    assert editor_gateway.lease_holder() == {}
 
     async def _fn():
         return "sent"
 
-    assert asyncio.run(editor_gateway.acall("", "unreal__call_tool", True, _fn)) == "sent"
-
-
-def test_a_fast_call_is_unaffected_by_the_deadline() -> None:
-    async def _fn():
-        await asyncio.sleep(0.01)
-        return "quick"
-
-    assert asyncio.run(editor_gateway.acall("c", "unreal__call_tool", True, _fn, timeout=1)) == "quick"
-    assert editor_gateway.hang_state() == {}
-
-
-def test_an_explicit_caller_timeout_wins(monkeypatch) -> None:
-    monkeypatch.setenv(editor_gateway.TIMEOUT_ENV, "0.05")
-    # The env deadline alone would cut this read off; the caller's own 1 s lets it finish.
-    assert asyncio.run(editor_gateway.acall("c", "unreal__list_toolsets", False, _sleeper(0.2), timeout=1)) == "late"
-    assert editor_gateway.call_timeout("workspace_compile_verse", True, timeout=900) == 900
-
-
-@pytest.mark.parametrize(
-    ("op", "mutating", "heavy", "seconds"),
-    [
-        ("unreal__list_toolsets", False, False, 60.0),
-        ("unreal__call_tool", False, False, 180.0),
-        ("unreal__call_tool", True, False, 180.0),
-        ("spawn_actor", True, None, 180.0),
-        ("unreal__call_tool", True, True, 600.0),
-        ("ducky_restart_uefn", True, None, 600.0),
-        ("take_high_res_screenshot", False, None, 600.0),
-        ("VerseToolset.BuildVerse", True, None, 600.0),
-    ],
-)
-def test_default_deadlines(op, mutating, heavy, seconds) -> None:
-    assert editor_gateway.call_timeout(op, mutating, heavy) == seconds
-
-
-def test_env_override_replaces_read_and_mutating_defaults(monkeypatch) -> None:
-    monkeypatch.setenv(editor_gateway.TIMEOUT_ENV, "45")
-    assert editor_gateway.call_timeout("unreal__list_toolsets", False) == 45
-    assert editor_gateway.call_timeout("unreal__call_tool", True) == 45
-    assert editor_gateway.call_timeout("ducky_restart_uefn", True) == editor_gateway.SLOW_TIMEOUT_SEC
-    monkeypatch.setenv(editor_gateway.TIMEOUT_ENV, "nonsense")
-    assert editor_gateway.call_timeout("unreal__list_toolsets", False) == 60
+    assert asyncio.run(editor_gateway.acall("trio", "unreal__call_tool", True, _fn)) == "sent"
 
 
 @pytest.fixture

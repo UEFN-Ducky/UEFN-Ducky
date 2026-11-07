@@ -33,14 +33,28 @@ _CONNECT_TIMEOUT_SEC = 45.0
 _HTTP_CONNECT_TIMEOUT_SEC = 2.0
 _HTTP_FAIL_CACHE_SEC = 10.0
 _TOOL_TIMEOUT_SEC = 180.0
-# Epic runs every call on UEFN's game thread, one at a time: once a call hangs (a popup, a
-# long build) each later unreal__* call waited its own 180 s behind it (17 of 21 agent.stuck
-# on Nov 3 2026). Calls behind a call running this long, or this soon after one timed out
-# with no answer since, fail at once with the popup hint.
-_EPIC_UNANSWERED_SEC = 60.0
-# Listing Epic's toolsets is a read: it never needs the full tool limit.
-_EPIC_QUICK_TOOLS = frozenset({"list_toolsets", "describe_toolset"})
-_EPIC_QUICK_TIMEOUT_SEC = 45.0
+# Epic's UEFN MCP gets no call deadline: a call waits while UEFN works (a big island's
+# execute_python, a Verse build) and queues behind the one running (the session owner runs
+# them in order). It ends when UEFN answers, the connection drops (UEFN closed), Stop, or a
+# UEFN popup that blocks the editor stays up across two looks this far apart (the save
+# watchdog presses Save prompts first; a popup with a choice goes back to the agent).
+_EPIC_POPUP_LOOK_SEC = 2.0
+
+
+async def _blocking_popup_stays() -> None:
+    """Returns once a UEFN popup blocking the editor is seen on two looks in a row."""
+    from backend.tools.core.uefn_popups import list_popups
+
+    def _blocked() -> bool:
+        try:
+            return any(p.get("blocking") for p in list_popups())
+        except Exception:  # noqa: BLE001 — a failed look is not a popup
+            return False
+
+    seen = 0
+    while seen < 2:
+        await asyncio.sleep(_EPIC_POPUP_LOOK_SEC)
+        seen = seen + 1 if await asyncio.to_thread(_blocked) else 0
 _IDLE_EVICT_SEC = 15 * 60.0
 # How often a pool with its own loop closes sessions idle longer than _IDLE_EVICT_SEC.
 _EVICT_EVERY_SEC = 60.0
@@ -184,8 +198,6 @@ class PluginClientPool:
         # Lets the change journal tell a nested read from a nested mutation.
         self._tool_annotations: dict[str, Any] = {}
         self._failed_until: dict[str, float] = {}
-        # time.time() of the last Epic call that timed out; 0 once a later call answered.
-        self._epic_unanswered_at = 0.0
         # Servers closed for being idle. Listing serves their saved inventory
         # instead of starting them again; a tool call opens them as usual.
         self._idle_closed: set[str] = set()
@@ -354,9 +366,10 @@ class PluginClientPool:
                         import httpx
                         from mcp.client.streamable_http import streamable_http_client
 
+                        read = None if conn.plugin_id == EPIC_MCP_SERVER_ID else _TOOL_TIMEOUT_SEC
                         client = await stack.enter_async_context(mcp_http_client(
                             headers=block.get("headers") or None,
-                            timeout=httpx.Timeout(_TOOL_TIMEOUT_SEC, read=_TOOL_TIMEOUT_SEC),
+                            timeout=httpx.Timeout(_TOOL_TIMEOUT_SEC, read=read),
                         ))
                         transport = await stack.enter_async_context(
                             streamable_http_client(block["url"], http_client=client)
@@ -384,7 +397,8 @@ class PluginClientPool:
                 self._owners.add(owner)
                 owner._task.add_done_callback(lambda task: self._owners.discard(owner))
                 await owner.start()
-                conn.session = OwnedSession(owner, list_timeout=_CONNECT_TIMEOUT_SEC, tool_timeout=_TOOL_TIMEOUT_SEC)
+                tool_timeout = None if conn.plugin_id == EPIC_MCP_SERVER_ID else _TOOL_TIMEOUT_SEC
+                conn.session = OwnedSession(owner, list_timeout=_CONNECT_TIMEOUT_SEC, tool_timeout=tool_timeout)
                 conn.url = str(block.get("url") or "")
                 if epic.get("epic_mcp_note"):
                     await self._move_unreal_editor_port(conn.session)
@@ -661,21 +675,7 @@ class PluginClientPool:
                 f"dead MCP session — use the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from e
         uefn_call = epic_call and epic_editor != EDITOR_UNREAL
-        call_timeout = _EPIC_QUICK_TIMEOUT_SEC if epic_call and original_name in _EPIC_QUICK_TOOLS else _TOOL_TIMEOUT_SEC
-        if epic_call:
-            active_for = getattr(getattr(conn, "owner", None), "active_for", None)
-            running = active_for() if callable(active_for) else 0.0
-            since = time.time() - self._epic_unanswered_at
-            if running >= _EPIC_UNANSWERED_SEC or since < _EPIC_UNANSWERED_SEC:
-                from backend.tools.core.uefn_popups import blocked_call_hint
-
-                hint = await asyncio.to_thread(blocked_call_hint)
-                what = (f"an earlier call is still running after {running:.0f} s" if running >= _EPIC_UNANSWERED_SEC
-                        else f"its last call timed out {since:.0f} s ago")
-                raise RuntimeError(
-                    f"Epic MCP '{original_name}' not sent: UEFN is not answering ({what}). {hint} "
-                    f"Then try again, or use the Ducky fallback tool for this step."
-                )
+        call_timeout = None if epic_call else _TOOL_TIMEOUT_SEC
 
         def _watchdog():
             # Epic's MCP runs on UEFN's Slate thread: a Save prompt or message box
@@ -693,10 +693,20 @@ class PluginClientPool:
             sequence = expand_epic_call(original_name, args) if epic_call else [args]
             last = None
             for index, step in enumerate(sequence):
-                last = await asyncio.wait_for(
-                    session_obj.call_tool(original_name, step),
-                    timeout=call_timeout,
-                )
+                if uefn_call:
+                    call = asyncio.ensure_future(session_obj.call_tool(original_name, step))
+                    look = asyncio.ensure_future(_blocking_popup_stays())
+                    try:
+                        await asyncio.wait({call, look}, return_when=asyncio.FIRST_COMPLETED)
+                    finally:
+                        look.cancel()
+                        if not call.done():
+                            call.cancel()
+                    if not call.done() or call.cancelled():
+                        raise asyncio.TimeoutError
+                    last = call.result()
+                else:
+                    last = await asyncio.wait_for(session_obj.call_tool(original_name, step), timeout=call_timeout)
                 if index == len(sequence) - 1:
                     break
                 text = _content_to_text(getattr(last, "content", last))
@@ -713,8 +723,6 @@ class PluginClientPool:
             with _watchdog() as pressed:
                 raw = await _invoke(session)
         except asyncio.TimeoutError:
-            if epic_call:
-                self._epic_unanswered_at = time.time()
             popup = ""
             if uefn_call:
                 from backend.tools.core.uefn_popups import blocked_call_hint
@@ -722,9 +730,10 @@ class PluginClientPool:
                 popup = (await asyncio.to_thread(blocked_call_hint)) + " If no popup is up, use"
             else:
                 popup = "Use"
+            why = ("stopped: a UEFN popup is blocking the editor" if uefn_call else
+                   f"timed out after {call_timeout:.0f}s — server reachable but unresponsive")
             raise RuntimeError(
-                f"Nested MCP '{plugin_id}' tool '{original_name}' timed out after "
-                f"{call_timeout:.0f}s — server reachable but unresponsive.{_pressed_note(pressed)} "
+                f"Nested MCP '{plugin_id}' tool '{original_name}' {why}.{_pressed_note(pressed)} "
                 f"{popup} the Ducky fallback tool for this step; {_TOGGLE_HINT}"
             ) from None
         except Exception:
@@ -737,8 +746,6 @@ class PluginClientPool:
                 "execution may have occurred. Check the result before retrying."
             ) from None
         conn.last_used = time.time()
-        if epic_call:
-            self._epic_unanswered_at = 0.0
         text = _content_to_text(raw.content if hasattr(raw, "content") else raw)
         if epic_call and epic_not_found(text):
             # Fail loudly so callers fall back instead of treating "not found" as success.
