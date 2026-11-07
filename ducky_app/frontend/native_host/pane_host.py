@@ -108,11 +108,15 @@ def child_style(style: int) -> int:
 
 
 def shown_rects(controls: list[Any], form: Any) -> list[tuple[int, int, int, int]]:
-    """(x, y, w, h) of the controls on screen in ``form`` (what the form is clipped to)."""
+    """(x, y, w, h) of the controls on screen in ``form`` (what the form is clipped to).
+
+    ``==``, never ``is``: pythonnet wraps ``c.Parent`` in a new Python object on every read,
+    so ``is`` was always False, no pane counted as shown and the form sat under the page for
+    good (black Browser page, clicks to the page; only hover-card snapshots showed it)."""
     out = []
     for c in controls:
         try:
-            if bool(c.Visible) and c.Parent is form and int(c.Width) > 2 and int(c.Height) > 2:
+            if bool(c.Visible) and c.Parent == form and int(c.Width) > 2 and int(c.Height) > 2:
                 out.append((int(c.Left), int(c.Top), int(c.Width), int(c.Height)))
         except Exception:
             pass

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import subprocess
 import sys
 import time
+from ctypes import wintypes
 from types import SimpleNamespace
 
 import pytest
@@ -91,6 +93,28 @@ def test_pane_opens_inside_another_process_window(tmp_path, monkeypatch) -> None
         assert any(e.get("pane_id") == "t1" for e in pushed)
         size = bo._ui_sync(host, lambda: (int(pane.control.Width), int(pane.control.Height), bool(pane.control.Visible)))
         assert size == (200, 150, True)  # 1:1, the viewport given is the client size
+
+        # On screen = the form above the launcher's page, clipped to the pane; hidden (an
+        # overlay's snapshot stands in) = under it; shown again = back on top. pythonnet's
+        # fresh wrapper per read made shown_rects empty, so the form never came up.
+        def placed() -> tuple[bool, tuple[int, int, int, int]]:
+            time.sleep(0.5)
+            u, g = ph._user32(), ctypes.WinDLL("gdi32")
+            u.GetWindow.argtypes, u.GetWindow.restype = [wintypes.HWND, wintypes.UINT], wintypes.HWND
+            u.GetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN]
+            g.CreateRectRgn.restype = wintypes.HRGN
+            g.GetRgnBox.argtypes = [wintypes.HRGN, ctypes.POINTER(wintypes.RECT)]
+            rgn, rc = g.CreateRectRgn(0, 0, 0, 0), wintypes.RECT()
+            u.GetWindowRgn(host._hwnd, rgn)
+            g.GetRgnBox(rgn, ctypes.byref(rc))
+            g.DeleteObject(rgn)
+            return not u.GetWindow(host._hwnd, 3), (rc.left, rc.top, rc.right, rc.bottom)  # GW_HWNDPREV
+
+        assert placed() == (True, (10, 10, 210, 160))
+        bo.set_bounds("t1", 10, 10, 200, 150, cw, ch, False, "covered_by card")
+        assert placed()[0] is False
+        bo.set_bounds("t1", 10, 10, 200, 150, cw, ch, True)
+        assert placed() == (True, (10, 10, 210, 160))
     finally:
         try:
             bo.close_pane("t1")
