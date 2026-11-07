@@ -969,12 +969,28 @@ def start_heartbeat(agents: Callable[[], int] | None = None, every_s: float = HE
     _heartbeat["thread"].start()
 
 
+_stage_listeners: list[Callable[[str, int], None]] = []
+_T0 = time.time()  # an unarmed process (a hand-off) still times its stages from here
+
+
+def on_stage(fn: Callable[[str, int], None]) -> None:
+    """Call *fn(name, ms since start)* at every later stage(): the launcher's ``stage`` line,
+    so it can tell a slow backend from a dead one."""
+    _stage_listeners.append(fn)
+
+
 def stage(name: str) -> None:
     """Record one startup stage (cheap; never raises)."""
+    started = float(_state.get("started") or _T0)
+    offset = time.time() - started
+    for fn in list(_stage_listeners):
+        try:
+            fn(str(name), int(offset * 1000))
+        except Exception:
+            pass
     if not _state:
         return
-    started = float(_state.get("started") or time.time())
-    _state.setdefault("stages", []).append([str(name), round(time.time() - started, 2)])
+    _state.setdefault("stages", []).append([str(name), round(offset, 2)])
     del _state["stages"][:-60]
     _write_state()
 

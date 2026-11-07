@@ -271,6 +271,12 @@ def run_backend(
         _log.error("--backend needs the launcher's stdin and stdout pipes")
         return EXIT_START_FAILED
     writer = LineWriter(out)
+    try:
+        from frontend import boot_report  # stdlib only, already loaded by the launch
+
+        boot_report.on_stage(lambda name, ms: writer.event("stage", {"name": name, "ms": ms}))
+    except Exception:
+        pass
     if stdout is None:
         sys.stdout = sys.stderr  # a stray print never lands in the protocol stream
     _dismiss_splash()

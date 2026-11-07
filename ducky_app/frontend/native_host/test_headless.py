@@ -30,6 +30,11 @@ _BACKEND_PROBE = textwrap.dedent(
     from frontend.ui_web import webview_app
 
     class Api:
+        def __init__(self):
+            from frontend import boot_report
+
+            boot_report.stage("panel_api_init")
+
         def bind_window(self, window, *, on_hide, on_exit):
             self.bound = window
 
@@ -45,7 +50,8 @@ _BACKEND_PROBE = textwrap.dedent(
 
     marks = []
     boot_report.mark = lambda state, **k: marks.append(state)
-    boot_report.stage = lambda name: marks.append("stage:" + name)
+    real_stage = boot_report.stage
+    boot_report.stage = lambda name: (marks.append("stage:" + name), real_stage(name))
     lifecycle.second_instance = lambda paths, links: (lifecycle.FIRST, None)
     lifecycle.watch_parent = lambda pid, on_dead: None
     lifecycle.Shutdown = QuickShutdown
@@ -94,8 +100,7 @@ def test_backend_imports_no_webview_or_tk(backend_run) -> None:
 
 
 def test_hello_carries_the_panel_port(backend_run) -> None:
-    hello = backend_run["lines"][0]
-    assert hello["t"] == "hello"
+    hello = next(line for line in backend_run["lines"] if line["t"] == "hello")
     assert hello["protocol"] == 1
     assert hello["port"] == 4567
     assert hello["origin"] == "http://127.0.0.1:4567"
@@ -107,7 +112,18 @@ def test_hello_carries_the_panel_port(backend_run) -> None:
 
 def test_backend_marks_the_launch_started_after_hello(backend_run) -> None:
     """boot.json says ok once the launcher has its hello, as the window start does when shown."""
-    assert backend_run["marks"][:2] == ["stage:hello", "ok"]
+    marks = backend_run["marks"]
+    assert marks[marks.index("stage:hello") + 1] == "ok"
+
+
+def test_stage_lines_reach_the_launcher_in_order(backend_run) -> None:
+    """Each boot stage is one ``stage`` event; the ones before hello come before it."""
+    lines = backend_run["lines"]
+    kinds = [line.get("name") if line["t"] == "event" else line["t"] for line in lines]
+    stages = [line["data"] for line in lines if line.get("name") == "stage"]
+    assert [s["name"] for s in stages] == ["panel_api_init", "hello"]
+    assert all(isinstance(s["ms"], int) and s["ms"] >= 0 for s in stages)
+    assert kinds.index("stage") < kinds.index("hello") < len(kinds) - 1 - kinds[::-1].index("stage")
 
 
 def test_run_signatures_unchanged() -> None:
