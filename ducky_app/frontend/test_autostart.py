@@ -121,8 +121,9 @@ def _launcher_mode(monkeypatch, mode):
     monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls, **_: PanelSettings(native_launcher=mode)))
 
 
-@pytest.mark.parametrize("mode", ["on", "auto"])
-def test_run_key_starts_the_launcher_when_present_and_not_off(monkeypatch, reg, mode):
+@pytest.mark.parametrize("mode", ["on", "auto", "off", "garbage"])
+def test_run_key_starts_the_launcher_whenever_present(monkeypatch, reg, mode):
+    """No setting turns the launcher off: a saved off still gets the fast window."""
     launcher = reg.exe.parent / "Ducky-Launcher.exe"
     launcher.write_bytes(b"MZ")
     _launcher_mode(monkeypatch, mode)
@@ -131,40 +132,33 @@ def test_run_key_starts_the_launcher_when_present_and_not_off(monkeypatch, reg, 
     assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
 
 
-@pytest.mark.parametrize(("mode", "present"), [("off", True), ("on", False), ("auto", False)])
-def test_run_key_stays_on_the_stub_when_off_or_absent(monkeypatch, reg, mode, present):
-    if present:
-        (reg.exe.parent / "Ducky-Launcher.exe").write_bytes(b"MZ")
-    _launcher_mode(monkeypatch, mode)
+def test_run_key_stays_on_the_stub_only_without_a_launcher(monkeypatch, reg):
+    _launcher_mode(monkeypatch, "on")
     assert autostart.start_exe(reg.exe) == reg.exe
     assert autostart.apply(True) is True
     assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
 
 
-def test_unreadable_setting_keeps_the_stub(monkeypatch, reg):
+def test_an_unreadable_setting_still_starts_the_launcher(monkeypatch, reg):
     from frontend.settings import PanelSettings
 
-    (reg.exe.parent / "Ducky-Launcher.exe").write_bytes(b"MZ")
+    launcher = reg.exe.parent / "Ducky-Launcher.exe"
+    launcher.write_bytes(b"MZ")
 
     def boom(cls, **_):
         raise OSError("locked")
 
     monkeypatch.setattr(PanelSettings, "load", classmethod(boom))
-    assert autostart.start_exe(reg.exe) == reg.exe
+    assert autostart.start_exe(reg.exe) == launcher
 
 
-def test_self_heal_rewrites_the_run_key_both_ways(monkeypatch, reg):
+def test_self_heal_moves_an_old_run_key_to_the_launcher(monkeypatch, reg):
     launcher = reg.exe.parent / "Ducky-Launcher.exe"
     reg.values[autostart.VALUE_NAME] = f'"{reg.exe}" --background'  # an old install
     launcher.write_bytes(b"MZ")
-    _launcher_mode(monkeypatch, "auto")
+    _launcher_mode(monkeypatch, "off")  # even a saved off
     assert autostart.apply(True) is True
     assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
-    _launcher_mode(monkeypatch, "off")  # the person sets off
-    assert autostart.apply(True) is True
-    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
-    _launcher_mode(monkeypatch, "on")
-    autostart.apply(True)
     launcher.unlink()  # the launcher is gone
     assert autostart.apply(True) is True
     assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'

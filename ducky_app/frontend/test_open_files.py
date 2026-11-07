@@ -98,32 +98,27 @@ def _register(reg: _FakeWinreg, stub: Path) -> tuple[str, str]:
     return reg.values[(rf"{APP_KEY}\shell\open\command", "")], reg.values[(rf"{PROTO_KEY}\shell\open\command", "")]
 
 
-@pytest.mark.parametrize("mode", ["on", "auto"])
-def test_commands_start_the_launcher_when_present(install, monkeypatch, mode) -> None:
+@pytest.mark.parametrize("mode", ["on", "auto", "off"])
+def test_commands_start_the_launcher_whenever_present(install, monkeypatch, mode) -> None:
+    """No setting turns the launcher off: Open with and uefn-ducky:// always get the fast window."""
     reg, stub, launcher = install
     launcher.write_bytes(b"MZ")
     _mode(monkeypatch, mode)
     assert _register(reg, stub) == (f'"{launcher}" "%1"', f'"{launcher}" "%1"')
 
 
-@pytest.mark.parametrize(("mode", "present"), [("off", True), ("on", False), ("auto", False)])
-def test_commands_stay_on_the_stub_when_off_or_absent(install, monkeypatch, mode, present) -> None:
-    reg, stub, launcher = install
-    if present:
-        launcher.write_bytes(b"MZ")
-    _mode(monkeypatch, mode)
+def test_commands_stay_on_the_stub_only_without_a_launcher(install, monkeypatch) -> None:
+    reg, stub, _launcher = install
+    _mode(monkeypatch, "on")
     assert _register(reg, stub) == (f'"{stub}" "%1"', f'"{stub}" "%1"')
 
 
-def test_self_heal_rewrites_both_commands_both_ways(install, monkeypatch) -> None:
+def test_self_heal_moves_old_commands_to_the_launcher(install, monkeypatch) -> None:
     reg, stub, launcher = install
-    _mode(monkeypatch, "auto")
+    _mode(monkeypatch, "off")
     assert _register(reg, stub)[0] == f'"{stub}" "%1"'  # old install: no launcher yet
     launcher.write_bytes(b"MZ")  # an update ships it
     assert _register(reg, stub) == (f'"{launcher}" "%1"',) * 2
-    _mode(monkeypatch, "off")
-    assert _register(reg, stub) == (f'"{stub}" "%1"',) * 2
-    _mode(monkeypatch, "on")
     launcher.unlink()
     assert _register(reg, stub) == (f'"{stub}" "%1"',) * 2
 

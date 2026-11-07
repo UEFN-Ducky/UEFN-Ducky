@@ -149,21 +149,11 @@ def _packaged(monkeypatch: pytest.MonkeyPatch, stable: Path) -> None:
     monkeypatch.setattr(app_versions, "stable_exe", lambda *a, **k: stable)
 
 
-def test_run_key_off_names_uefn_ducky_exe(
-    monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path
-) -> None:
-    _packaged(monkeypatch, install_dir / "UEFN-Ducky.exe")
-    _mode(monkeypatch, "off")
-    assert autostart.apply(True) is True
-    command = fake_winreg.values[(autostart.RUN_KEY, "UEFN Ducky")]
-    assert command == f'"{(install_dir / "UEFN-Ducky.exe").resolve()}" --background'
-    assert LAUNCHER not in command
-
-
-@pytest.mark.parametrize("mode", ["on", "auto"])
-def test_run_key_on_starts_the_launcher_under_the_same_name(
+@pytest.mark.parametrize("mode", ["on", "auto", "off"])
+def test_run_key_starts_the_launcher_under_the_same_name(
     monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str
 ) -> None:
+    """Every setting value: no turning the launcher off."""
     _packaged(monkeypatch, install_dir / "UEFN-Ducky.exe")
     _mode(monkeypatch, mode)
     assert autostart.apply(True) is True
@@ -186,7 +176,7 @@ def test_run_key_is_left_alone_when_stable_exe_is_the_launcher(
 # --- 3. Open with and uefn-ducky:// -----------------------------------------------------
 
 
-@pytest.mark.parametrize(("mode", "target"), [("off", "UEFN-Ducky.exe"), ("on", LAUNCHER), ("auto", LAUNCHER)])
+@pytest.mark.parametrize(("mode", "target"), [("off", LAUNCHER), ("on", LAUNCHER), ("auto", LAUNCHER)])
 def test_open_with_keeps_uefn_ducky_exe_names(
     monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str, target: str
 ) -> None:
@@ -201,7 +191,7 @@ def test_open_with_keeps_uefn_ducky_exe_names(
     assert (r"Software\Classes\*\OpenWithList\UEFN-Ducky.exe", "") in fake_winreg.values
 
 
-@pytest.mark.parametrize(("mode", "target"), [("off", "UEFN-Ducky.exe"), ("on", LAUNCHER), ("auto", LAUNCHER)])
+@pytest.mark.parametrize(("mode", "target"), [("off", LAUNCHER), ("on", LAUNCHER), ("auto", LAUNCHER)])
 def test_url_protocol_keeps_the_uefn_ducky_key(
     monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str, target: str
 ) -> None:

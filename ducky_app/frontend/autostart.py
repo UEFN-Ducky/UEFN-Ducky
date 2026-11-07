@@ -1,7 +1,7 @@
 """Start with Windows: Ducky opens hidden in the tray at sign-in, so clicking it later is instant.
 
 The entry is a per-user ``Run`` value pointing at the installed EXE with ``--background``
-(``Ducky-Launcher.exe`` beside it when ``native_launcher`` isn't off: :func:`start_exe`).
+(``Ducky-Launcher.exe`` beside it whenever it is there: :func:`start_exe`).
 Only the installed app manages it: a test copy (``DUCKY_SANDBOX``), a source checkout or
 any other EXE never writes or removes it, so it can never point at a throwaway copy.
 """
@@ -35,21 +35,13 @@ def command_for(exe: Path | str) -> str:
 
 def start_exe(stub: Path) -> Path:
     """What Windows should start for the install root's ``UEFN-Ducky.exe`` (Run key, Open with,
-    ``uefn-ducky://``): ``Ducky-Launcher.exe`` next to it when it is there and
-    ``native_launcher`` isn't off, else ``stub`` itself. Every start re-registers, so a
-    change of setting or a removed launcher heals the commands on the next start."""
+    ``uefn-ducky://``): ``Ducky-Launcher.exe`` next to it whenever it is there (no setting
+    turns it off), else ``stub`` itself. Every start re-registers, so an old command naming
+    the stub heals to the launcher on the next start."""
     from frontend.native_switch import LAUNCHER_EXE_NAME
 
     launcher = Path(stub).parent / LAUNCHER_EXE_NAME
-    if not launcher.is_file():
-        return Path(stub)
-    try:
-        from frontend.settings import PanelSettings, normalize_native_launcher
-
-        mode = normalize_native_launcher(PanelSettings.load().native_launcher)
-    except Exception:
-        return Path(stub)
-    return Path(stub) if mode == "off" else launcher
+    return launcher if launcher.is_file() else Path(stub)
 
 
 def managed_exe() -> Path | None:

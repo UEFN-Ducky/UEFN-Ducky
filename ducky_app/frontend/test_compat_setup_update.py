@@ -99,7 +99,8 @@ _RUN_CASES = [(False, "auto"), (False, "on"), (True, "off"), (True, "auto"), (Tr
 
 
 def _run_target(root: Path, with_launcher: bool, mode: str) -> Path:
-    name = "Ducky-Launcher.exe" if with_launcher and mode != "off" else "UEFN-Ducky.exe"
+    # Always the launcher when the install has it, whatever ``mode`` is saved.
+    name = "Ducky-Launcher.exe" if with_launcher else "UEFN-Ducky.exe"
     return (root / name).resolve()
 
 
