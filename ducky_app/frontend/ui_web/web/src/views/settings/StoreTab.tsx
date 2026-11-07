@@ -1237,6 +1237,22 @@ export function StoreTab() {
               </div>
             ) : null}
 
+            {updateCandidates.length > 0 ? (
+              <div className="ds-app-update" role="status">
+                <div className="ds-app-update-copy">
+                  <strong>
+                    {updateCandidates.length} plugin update{updateCandidates.length === 1 ? "" : "s"} available
+                  </strong>
+                  <span className="ds-app-update-notes">
+                    {updateCandidates.map((i) => i.name || i.slug).join(", ")}
+                  </span>
+                </div>
+                <button type="button" className="ds-app-update-btn" onClick={updateAll}>
+                  Update all
+                </button>
+              </div>
+            ) : null}
+
             {filtering ? (
               gridGroups.some((group) => group.items.length || group.note) ? (
                 gridGroups.map((group) => (

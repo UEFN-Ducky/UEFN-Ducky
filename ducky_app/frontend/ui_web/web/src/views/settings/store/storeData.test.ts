@@ -66,9 +66,16 @@ const items: DuckyOSStoreItemDto[] = [
 ];
 
 describe("deriveSections", () => {
-  it("orders gateways first, then trending, installed, then other category rows", () => {
+  it("orders installed first, then gateways, trending, then other category rows", () => {
     const keys = deriveSections(items).map((s) => s.key);
-    expect(keys).toEqual(["gateways", "trending", "installed", "skills", "themes", "games"]);
+    expect(keys).toEqual(["installed", "gateways", "trending", "skills", "themes", "games"]);
+  });
+
+  it("puts items needing an update first in the installed row", () => {
+    const sections = deriveSections([...items].reverse());
+    expect(sections[0]!.key).toBe("installed");
+    expect(sections[0]!.items.map((i) => i.slug)).toEqual(["translation", "verse-tips"]);
+    expect(sections.filter((s) => s.key === "installed")).toHaveLength(1);
   });
 
   it("sorts trending by install count desc and skips zero-count items", () => {

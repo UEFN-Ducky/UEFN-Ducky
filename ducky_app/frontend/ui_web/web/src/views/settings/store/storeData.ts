@@ -142,8 +142,8 @@ export function patchItemFromLocalPlugin(
 
 /**
  * Derive the landing rows from the raw catalog:
- * Gateways first (everything is a plugin — no Plugins row), then
- * Trending → one row per audience of mine → Installed → other browse categories.
+ * Installed first (updates leading), then Gateways (everything is a plugin — no Plugins row),
+ * Trending → one row per audience of mine → other browse categories.
  */
 export function deriveSections(items: DuckyOSStoreItemDto[], sharedLabel = "Shared"): StoreSection[] {
   const sections: StoreSection[] = [];
@@ -159,6 +159,17 @@ export function deriveSections(items: DuckyOSStoreItemDto[], sharedLabel = "Shar
     }
   }
 
+  // Installed always leads, items that need an update first.
+  const installed = items.filter(isInstalled);
+  const needsUpdate = (i: DuckyOSStoreItemDto) => i.state === "update";
+  if (installed.length) {
+    sections.push({
+      key: "installed",
+      title: "Installed",
+      items: [...installed.filter(needsUpdate), ...installed.filter((i) => !needsUpdate(i))],
+    });
+  }
+
   // Gateways lead — LLM / coding-agent entry points before the rest of the catalog.
   const gateways = byCategory.get("gateways");
   if (gateways?.length) sections.push({ key: "gateways", title: "Gateways", items: gateways });
@@ -172,9 +183,6 @@ export function deriveSections(items: DuckyOSStoreItemDto[], sharedLabel = "Shar
   for (const group of groupByAudience(items.filter(isSharedItem))) {
     sections.push({ key: `shared:${group.key}`, title: `${sharedLabel} · ${group.label || sharedLabel}`, items: group.items });
   }
-
-  const installed = items.filter(isInstalled);
-  if (installed.length) sections.push({ key: "installed", title: "Installed", items: installed });
 
   const seen = new Set<string>(["gateways"]);
   for (const [key, title] of CATEGORY_ROWS) {
