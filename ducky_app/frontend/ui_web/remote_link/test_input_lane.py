@@ -70,7 +70,7 @@ def test_input_methods() -> None:
 def test_input_under_100ms_while_300_agent_calls_fill_the_pools(server) -> None:
     ex = ThreadPoolExecutor(max_workers=300)
     try:
-        busy = [ex.submit(_post, server, "/__panel_api/load_messages") for _ in range(300)]
+        busy = [ex.submit(_post, server, "/__panel_api/list_chats") for _ in range(300)]
         time.sleep(0.5)  # every normal worker held, the rest queued
         assert call_pools.http_pool("normal").thread_count() == call_pools.HTTP_POOL_SIZES["normal"]
         rtts = []

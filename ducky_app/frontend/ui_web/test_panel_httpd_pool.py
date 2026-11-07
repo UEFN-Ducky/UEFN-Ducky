@@ -36,7 +36,7 @@ class _Handler(httpd._PooledHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             self.rfile.read(length)
-        time.sleep(0.01)
+        time.sleep(3.0 if self.path.endswith("/slow_call") else 0.01)
         self._reply(threading.current_thread().name.encode())
 
 
@@ -69,7 +69,7 @@ def test_pool_kind_routes():
     assert httpd._pool_kind(b"GET /__panel_events?since=4 HTTP/1.1\r\n") == "long"
     assert httpd._pool_kind(b"POST /__panel_rpc HTTP/1.1\r\n") == "long"
     assert httpd._pool_kind(b"POST /__panel_api/pick_project_path HTTP/1.1\r\n") == "long"
-    assert httpd._pool_kind(b"POST /__panel_api/load_messages HTTP/1.1\r\n") == "normal"
+    assert httpd._pool_kind(b"POST /__panel_api/load_messages HTTP/1.1\r\n") == "chat"
     assert httpd._pool_kind(b"POST /__panel_api/window_input HTTP/1.1\r\n") == "input"
     assert httpd._pool_kind(b"GET /assets/app.js HTTP/1.1\r\n") == "normal"
     assert httpd._pool_kind(b"") == "normal"
@@ -77,7 +77,7 @@ def test_pool_kind_routes():
 
 def test_300_concurrent_posts_bounded_threads(server):
     with ThreadPoolExecutor(max_workers=60) as ex:
-        results = list(ex.map(lambda _i: _post(server), range(300)))
+        results = list(ex.map(lambda _i: _post(server, "/__panel_api/list_chats"), range(300)))
     assert all(status == 200 for status, _ in results)
     assert all(name.startswith("http-normal_") for _, name in results)
     # pools + the selector thread + the accept thread
@@ -95,11 +95,27 @@ def test_long_polls_do_not_delay_a_chat_load(server):
         _post(server)  # warm
         t0 = time.monotonic()
         status, name = _post(server)
-        assert status == 200 and name.startswith("http-normal_")
+        assert status == 200 and name.startswith("http-chat_")
         assert time.monotonic() - t0 < 0.1
     finally:
         for s in socks:
             s.close()
+
+
+def test_chat_load_answers_while_normal_pool_is_busy(server):
+    # 40 slow calls: 16 fill the normal workers, the rest queue behind them.
+    busy = ThreadPoolExecutor(max_workers=40)
+    futures = [busy.submit(_post, server, "/__panel_api/slow_call") for _ in range(40)]
+    try:
+        time.sleep(0.5)
+        t0 = time.monotonic()
+        status, name = _post(server)
+        assert status == 200 and name.startswith("http-chat_")
+        assert time.monotonic() - t0 < 1.0
+    finally:
+        for f in futures:
+            f.result()
+        busy.shutdown()
 
 
 def test_silent_client_does_not_block_new_connections(server):
@@ -120,12 +136,12 @@ def test_keep_alive_routes_each_request_again(server):
     try:
         conn.request("POST", "/__panel_api/load_messages", body=b"{}")
         r1 = conn.getresponse()
-        assert r1.read().decode().startswith("http-normal_")
+        assert r1.read().decode().startswith("http-chat_")
         conn.request("GET", "/__panel_events?since=0")
         r2 = conn.getresponse()
         assert r2.read().decode().startswith("http-long_")
         conn.request("POST", "/__panel_api/load_messages", body=b"{}")
         r3 = conn.getresponse()
-        assert r3.read().decode().startswith("http-normal_")
+        assert r3.read().decode().startswith("http-chat_")
     finally:
         conn.close()

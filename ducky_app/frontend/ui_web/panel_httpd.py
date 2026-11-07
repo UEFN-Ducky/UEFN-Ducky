@@ -107,10 +107,10 @@ class _PanelServer(ThreadingHTTPServer):
         from frontend.ui_web.call_pools import http_pool
 
         queued = time.monotonic()
-        if routing.quick_kind(request, handler) == "input":
-            # Remote input skips the normal pool even for routing: with every normal
-            # worker busy it would otherwise wait there before reaching its own lane.
-            return input_lane().submit(self._serve, request, client_address, handler, queued)
+        kind = routing.quick_kind(request, handler)
+        if kind in ("input", "chat"):  # never wait for a busy normal worker just to be routed
+            pool = input_lane() if kind == "input" else http_pool(kind)
+            return pool.submit(self._serve, request, client_address, handler, queued)
         http_pool("normal").submit(self._route, request, client_address, handler, queued)
 
     def _route(self, request: Any, client_address: Any, handler: Any, queued: float) -> None:
