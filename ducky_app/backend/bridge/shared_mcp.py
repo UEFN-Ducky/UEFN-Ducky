@@ -741,11 +741,7 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
                 done, _ = await asyncio.wait({work}, timeout=limit - first)
             if not done and limit is not None:
                 work.cancel()
-                raise _CallTimedOut(
-                    f"{inner} did not answer within {limit:.0f} s and was stopped. If this chat asked "
-                    "the person a question, tools wait for that answer first. Otherwise call it once "
-                    "more; if it stops again, carry on without it and tell the person."
-                )
+                raise _CallTimedOut(await asyncio.to_thread(call_limits.timed_out_message, inner, limit))
             if not done:
                 await asyncio.wait({work})
     except asyncio.CancelledError:

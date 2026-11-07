@@ -26,7 +26,7 @@ class WaitingMcp(FakeMcp):
         self.release = threading.Event()
 
     async def call_tool(self, name, arguments):
-        if name in ("ducky_ask_user", "ducky_get_plan"):
+        if name in ("ducky_ask_user", "ducky_get_plan", "unreal__call_tool"):
             await asyncio.to_thread(self.release.wait)
             return [{"type": "text", "text": f"{name}: answered"}]
         return await super().call_tool(name, arguments)
@@ -115,6 +115,23 @@ def test_a_quick_read_stuck_past_its_deadline_returns_an_error(daemon, monkeypat
         assert "did not answer within" in _text(frame)
         _call(sock, 2, "workspace_read_file")  # the connection still works
         assert _text(_answer(sock, 2)[0]).startswith("workspace_read_file:")
+    finally:
+        shared_mcp.close_handle(sock)
+
+
+def test_a_stuck_unreal_call_stops_at_its_limit_and_names_the_popup(daemon, monkeypatch) -> None:
+    # Nov 6 2026: 44 unreal__call_tool calls hung with no limit behind a UEFN popup.
+    monkeypatch.setattr(call_limits, "UNREAL_CALL_LIMIT_S", 0.3)
+    monkeypatch.setattr(call_limits, "_popup_titles", lambda: ["Save Changes?"])
+    sock = _hello("stuck-unreal")
+    try:
+        started = time.monotonic()
+        _call(sock, 1, "unreal__call_tool")
+        frame, _ = _answer(sock, 1, deadline_s=5.0)
+        assert time.monotonic() - started < 3.0
+        assert frame["result"]["isError"] is True
+        assert _text(frame).startswith("UEFN did not answer in 0 s")
+        assert "Open popup: Save Changes?" in _text(frame)
     finally:
         shared_mcp.close_handle(sock)
 
