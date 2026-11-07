@@ -13,7 +13,10 @@ interface ComposerAttachmentChipsProps {
 }
 
 function videoStatusLabel(att: Extract<ComposerAttachment, { kind: "video" }>): string {
-  if (att.status === "uploading") return "Uploading…";
+  if (att.status === "uploading") {
+    const up = Math.round((att.progress ?? 0) * 100);
+    return up > 0 ? `Uploading… ${up}%` : "Uploading…";
+  }
   if (att.status === "error") return att.error || "Error";
   if (att.status === "ready") return "Ready";
   const prep = att.prep;

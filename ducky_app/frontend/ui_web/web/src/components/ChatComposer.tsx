@@ -247,7 +247,10 @@ export function composerSend(
     });
     return;
   }
-  const apiAttachments = overrideText ? [] : ctx.toApiAttachments();
+  // A video that failed to upload has no staged copy: the message goes without it.
+  const apiAttachments = overrideText
+    ? []
+    : ctx.toApiAttachments().filter((a) => a.kind !== "video" || a.staged_id || a.abs_path);
   if (!text && apiAttachments.length === 0) return;
 
   // Busy / draining → queue (Cursor-like FIFO). Do NOT cancel the live run —

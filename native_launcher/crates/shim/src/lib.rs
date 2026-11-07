@@ -17,6 +17,10 @@ pub mod cache;
 /// Injected with `AddScriptToExecuteOnDocumentCreated`.
 pub const SHIM_JS: &str = include_str!("shim.js");
 
+/// The backend contract's line cap (`supervisor::protocol::MAX_LINE`): the backend drops a
+/// longer line unanswered, so the page would wait forever.
+pub const MAX_CALL_LINE: usize = 1024 * 1024;
+
 /// Call ids minted by `shim.js`. Backend results with this prefix belong to the page.
 pub const PAGE_ID_PREFIX: &str = "js-";
 
@@ -165,6 +169,10 @@ pub fn route(call: PageCall) -> Result<Route, ShimError> {
         Some(Err(error)) => Err(ShimError::BadArgs { id: call.id, error }),
         None => {
             let line = backend_call_line(&call);
+            if line.len() + 1 > MAX_CALL_LINE {
+                let error = format!("{} call is {} bytes, over the {} byte bridge limit", call.name, line.len(), MAX_CALL_LINE);
+                return Err(ShimError::BadArgs { id: call.id, error });
+            }
             Ok(Route::Backend { id: call.id, line })
         }
     }
@@ -266,6 +274,14 @@ mod tests {
         );
         let e = route_message(r#"{"t":"call","id":"js-4","name":"set_window_bounds","args":[1]}"#).unwrap_err();
         assert!(matches!(e, ShimError::BadArgs { ref id, .. } if id == "js-4"));
+    }
+
+    #[test]
+    fn oversize_call_is_answered_with_an_error() {
+        let big = "x".repeat(MAX_CALL_LINE);
+        let msg = json!({"t": "call", "id": "js-9", "name": "stage_video_attachment", "args": [big]}).to_string();
+        let e = route_message(&msg).unwrap_err();
+        assert!(matches!(e, ShimError::BadArgs { ref id, ref error } if id == "js-9" && error.contains("bridge limit")));
     }
 
     #[test]

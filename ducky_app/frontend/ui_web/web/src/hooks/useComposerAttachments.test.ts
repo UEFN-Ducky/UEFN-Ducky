@@ -5,8 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("./usePanelApi", () => ({
   getApi: vi.fn(),
 }));
+vi.mock("./panelHttp", () => ({
+  canCallOverHttp: vi.fn(() => false),
+}));
 
 import { getApi } from "./usePanelApi";
+import { canCallOverHttp } from "./panelHttp";
 import { composerAttachmentsFromDto, useComposerAttachments } from "./useComposerAttachments";
 import type { MessageAttachmentDto } from "../types/panel";
 
@@ -161,6 +165,43 @@ describe("video attachments", () => {
     ]);
   });
 
+  it("uploads over HTTP with progress in the desktop window (the bridge caps a call at 1 MB)", async () => {
+    const sid = "e".repeat(32) + ".mp4";
+    const sent: string[] = [];
+    class FakeXhr {
+      status = 0; responseText = ""; withCredentials = false;
+      upload: { onprogress?: (e: { lengthComputable: boolean; loaded: number; total: number }) => void } = {};
+      onload?: () => void; onerror?: () => void; onabort?: () => void;
+      url = "";
+      open(_m: string, url: string) { this.url = url; }
+      setRequestHeader() {}
+      send(body: string) {
+        sent.push(this.url, body);
+        this.upload.onprogress?.({ lengthComputable: true, loaded: 1, total: 2 });
+        setTimeout(() => {
+          this.status = 200;
+          this.responseText = JSON.stringify({ ok: true, result: { ok: true, staged_id: sid, size_bytes: 3, mime: "video/mp4" } });
+          this.onload?.();
+        }, 0);
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    vi.mocked(canCallOverHttp).mockReturnValue(true);
+    const bridge = vi.fn();
+    mockApi({ stage_video_attachment: bridge, get_video_settings: settingsOk() });
+    try {
+      const { result } = renderHook(() => useComposerAttachments([], { convId: "c1" }));
+      await act(async () => { await result.current.addFiles([new File([new Uint8Array([1, 2, 3])], "rec.mp4", { type: "video/mp4" })]); });
+      await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "ready", stagedId: sid }));
+      expect(bridge).not.toHaveBeenCalled();
+      expect(sent[0]).toBe("/__panel_api/stage_video_attachment");
+      expect(JSON.parse(sent[1])).toEqual({ args: ["c1", "rec.mp4", "video/mp4", "AQID"] });
+    } finally {
+      vi.mocked(canCallOverHttp).mockReturnValue(false);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects a video over the size limit before reading it", async () => {
     const stage = vi.fn();
     const settings = vi.fn().mockResolvedValue({ video_max_mb: 10, video_frames_per_video: 20, max_images_per_message: 40 });
@@ -225,7 +266,9 @@ describe("video attachments", () => {
     await act(async () => { await drop(result); });
     await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "error", error: "Cannot read video 'x'." }));
-    expect(result.current.hasPendingVideos).toBe(true);
+    // A failed video never blocks Send; its row carries no id, so the send drops it.
+    expect(result.current.hasPendingVideos).toBe(false);
+    expect(result.current.toApiAttachments()[0]).not.toHaveProperty("staged_id");
     act(() => result.current.retryVideo(result.current.attachments[0].id));
     expect(retry).toHaveBeenCalledWith(sid);
     await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "preparing" }));

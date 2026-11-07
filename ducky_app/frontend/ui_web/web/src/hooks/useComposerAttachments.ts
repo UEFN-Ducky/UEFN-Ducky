@@ -1,6 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ComposerAttachment, MessageAttachmentDto } from "../types/panel";
+import type { ComposerAttachment, MessageAttachmentDto, PanelApi } from "../types/panel";
 import { getApi } from "./usePanelApi";
+import { canCallOverHttp } from "./panelHttp";
+
+type StageResult = Awaited<ReturnType<NonNullable<PanelApi["stage_video_attachment"]>>>;
+
+/**
+ * stage_video_attachment over `/__panel_api`, with upload progress. A video is far over the
+ * launcher bridge's 1 MB line cap (the backend dropped it unanswered: "Uploading…" forever).
+ */
+export function stageVideoOverHttp(args: unknown[], onProgress: (fraction: number) => void): Promise<StageResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/__panel_api/stage_video_attachment");
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      let json: { ok?: boolean; result?: StageResult; error?: string } = {};
+      try { json = JSON.parse(xhr.responseText || "{}"); } catch { /* reported below */ }
+      if (xhr.status >= 200 && xhr.status < 300 && json.ok !== false && json.result) resolve(json.result);
+      else reject(new Error(json.error || `Video upload failed (HTTP ${xhr.status}).`));
+    };
+    xhr.onerror = () => reject(new Error("Video upload failed: connection lost."));
+    xhr.onabort = () => reject(new Error("Video upload was cancelled."));
+    xhr.send(JSON.stringify({ args }));
+  });
+}
 
 const DEFAULT_MAX_IMAGES = 40;
 const DEFAULT_VIDEO_MAX_MB = 100;
@@ -102,8 +128,10 @@ function toApiRow(a: ComposerAttachment): MessageAttachmentDto {
   }
   if (a.kind === "video") {
     const row: MessageAttachmentDto = { kind: "video", name: a.name, mime: a.mime, size_bytes: a.sizeBytes };
-    if (a.stagedId) row.staged_id = a.stagedId;
-    if (a.absPath) row.abs_path = a.absPath;
+    if (a.status !== "error") {
+      if (a.stagedId) row.staged_id = a.stagedId;
+      if (a.absPath) row.abs_path = a.absPath;
+    }
     return row;
   }
   return { kind: "file", name: a.name, mime: a.mime, text: a.text };
@@ -176,9 +204,10 @@ export function useComposerAttachments(
     patchVideo(id, { status: "uploading", error: undefined });
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      const res = await api.stage_video_attachment(
-        convIdRef.current, file.name, videoMime(file), dataUrl.replace(/^data:[^;]*;base64,/, ""),
-      );
+      const args = [convIdRef.current, file.name, videoMime(file), dataUrl.replace(/^data:[^;]*;base64,/, "")] as const;
+      const res = canCallOverHttp()
+        ? await stageVideoOverHttp([...args], (progress) => patchVideo(id, { progress }))
+        : await api.stage_video_attachment(...args);
       if (!res?.ok || !res.staged_id) {
         patchVideo(id, { status: "error", error: res?.error || "Video upload failed." });
         return;
@@ -246,7 +275,8 @@ export function useComposerAttachments(
     return () => window.clearInterval(timer);
   }, [preparing]);
 
-  const hasPendingVideos = attachments.some((a) => a.kind === "video" && a.status !== "ready" && !(a.status === "preparing" && a.prep?.sendable));
+  // A failed video never blocks Send: the message goes without it (toApiRow drops its id).
+  const hasPendingVideos = attachments.some((a) => a.kind === "video" && a.status !== "ready" && a.status !== "error" && !(a.status === "preparing" && a.prep?.sendable));
 
   /** Revoke blob previews and forget the staged File of dropped video attachments. */
   const releaseVideos = useCallback((dropped: ComposerAttachment[]) => {
