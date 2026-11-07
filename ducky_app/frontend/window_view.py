@@ -947,7 +947,7 @@ def _enum_windows() -> list[dict[str, Any]]:
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]
     user32.EnumWindows.restype = wintypes.BOOL
-    me = os.getpid()
+    mine = _our_pids()
     out: list[dict[str, Any]] = []
 
     def _text(hwnd: int) -> str:
@@ -968,7 +968,7 @@ def _enum_windows() -> list[dict[str, Any]]:
             return True
         pid = wintypes.DWORD(0)
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        if int(pid.value) == me:
+        if int(pid.value) in mine:
             return True
         exe = _exe_name(int(pid.value))
         title = _text(hwnd)
@@ -1171,9 +1171,17 @@ def _hwnd_pid(hwnd: int) -> int:
     return int(pid.value)
 
 
+def _our_pids() -> frozenset[int]:
+    """This process, plus Ducky-Launcher.exe (our parent) under ``--backend``: its windows
+    are the panel's then, and they were watched, typed into and listed as a stranger's."""
+    if os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1":
+        return frozenset((os.getpid(), os.getppid()))
+    return frozenset((os.getpid(),))
+
+
 def _is_our_hwnd(hwnd: int) -> bool:
     try:
-        return _hwnd_pid(hwnd) == os.getpid()
+        return _hwnd_pid(hwnd) in _our_pids()
     except Exception:
         return True
 
@@ -1266,12 +1274,12 @@ def _our_titled_windows() -> list[tuple[int, str]]:
 
     user32 = _user32()
     proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
-    me = os.getpid()
+    mine = _our_pids()
     out: list[tuple[int, str]] = []
 
     def _cb(hwnd, _lparam):
         h = int(hwnd or 0)
-        if h and user32.IsWindowVisible(h) and _hwnd_pid(h) == me:
+        if h and user32.IsWindowVisible(h) and _hwnd_pid(h) in mine:
             title = _window_title(h)
             if title:
                 out.append((h, title))

@@ -267,14 +267,10 @@ LAUNCHER_HANDLERS: dict[str, str] = {
     "pick_workflow_folder": "dialog.folder",
 }
 
-# Not in the lean first cut: second windows, child HWNDs, capture and native menus.
-# With the launcher on, the page gets an error for these and Ducky keeps the python path.
+# Not in the lean cut: the Python window binds these itself; the page never calls them.
 NOT_LEAN_CUT: frozenset[str] = frozenset(
     """
     bind_tk_root bind_window
-    native_capture_start native_capture_stop capture_list_shield
-    window_input window_box window_text_focus
-    snip_screen native_menu_pick
     """.split()
 )
 

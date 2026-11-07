@@ -81,6 +81,15 @@ def serve(
                         reply({"t": "result", "id": message.get("id"), "ok": True, "value": found})
                     except Exception:
                         pass
+            elif kind == "call" and message.get("name") == "__menu_result":
+                from frontend.native_host.launcher_windows import answer_menu
+
+                found = answer_menu(message.get("args"))
+                if reply is not None:
+                    try:
+                        reply({"t": "result", "id": message.get("id"), "ok": True, "value": found})
+                    except Exception:
+                        pass
             elif kind == "call":
                 try:
                     on_call(message)

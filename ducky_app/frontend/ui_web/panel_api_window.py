@@ -684,7 +684,15 @@ class PanelApiWindowMixin:
             cid = int(command_id)
         except (TypeError, ValueError):
             cid = -1
-        return {"ok": pick(str(token or ""), cid)}
+        ok = pick(str(token or ""), cid)
+        if not ok and cid >= 0:
+            # Under Ducky-Launcher.exe the WebView2 (and its menu) is the launcher's.
+            from frontend.native_host import launcher_windows
+
+            send = launcher_windows.sender_of(getattr(self, "_window", None)) if launcher_windows.active() else None
+            if send is not None:
+                ok = launcher_windows.ask_menu(send, str(token or ""), [cid]) is not None
+        return {"ok": ok}
 
     def open_devtools(self) -> dict[str, Any]:
         """Open WebView2 DevTools (Inspector) even in production builds."""
