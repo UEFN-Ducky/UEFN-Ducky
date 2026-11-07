@@ -182,7 +182,7 @@ def test_launcher_that_never_paints_is_killed_and_python_runs(
     assert starts and starts[0][0] == "python" and starts[0][3] in ("no_hello", "timeout")
 
 
-# --- the default: no native_launcher key means auto, and auto is the Python window -----------
+# --- the default: no native_launcher key still starts the launcher ---------------------------
 
 
 def _no_key() -> None:
@@ -192,18 +192,17 @@ def _no_key() -> None:
 
 
 @pytest.mark.parametrize("marker", [None, json.dumps({"until": 9e18, "failures": [1, 2]})])
-def test_missing_key_runs_python_and_never_starts_the_launcher(
+def test_missing_key_still_starts_the_launcher(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, marker: str | None
 ) -> None:
-    """Auto waits until the launcher hosts Browser tabs, focus windows and capture: the
-    Browser tab showed 'no host window' under the launcher."""
+    """Always the launcher (its window is up in ~0.1 s): no setting or hold keeps it off."""
     _no_key()
     if marker is not None:
         ns.crash_loop_path().parent.mkdir(parents=True, exist_ok=True)
         ns.crash_loop_path().write_text(marker, encoding="utf-8")
-    _no_spawn(monkeypatch)
+    cmds = _spawn_exiting(monkeypatch, ns.EXIT_PROTOCOL)
     _falls_back(appdata, list(ARGV))
-    assert starts == []
+    assert len(cmds) == 1 and starts == [("python", None, None, "protocol")]
 
 
 # --- 21: protocol mismatch, 22: crash loop ----------------------------------------------
@@ -239,25 +238,9 @@ def test_on_still_tries_the_launcher_during_the_hold(
     assert len(cmds) == 1 and starts == [("python", None, None, "protocol")]
 
 
-@pytest.mark.parametrize("marker", [None, "{not json", json.dumps({"until": 9e18, "failures": [1, 2]})])
-def test_off_never_reads_the_marker(
-    appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, marker: str | None
-) -> None:
+def test_a_saved_off_still_starts_the_launcher(appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    """There is no turning the launcher off: an old saved off is ignored."""
     _setting("off")
-    if marker is not None:
-        ns.crash_loop_path().parent.mkdir(parents=True, exist_ok=True)
-        ns.crash_loop_path().write_text(marker, encoding="utf-8")
-    before = ns.crash_loop_path().read_bytes() if marker is not None else None
-
-    def boom(*_a: object) -> None:
-        raise AssertionError("off read launcher state")
-
-    for name in ("crash_loop_active", "_crash_loop_state", "_read_json", "webview2_ok", "launcher_exe"):
-        monkeypatch.setattr(ns, name, boom)
-    _no_spawn(monkeypatch)
+    cmds = _spawn_exiting(monkeypatch, ns.EXIT_PROTOCOL)
     _falls_back(appdata, list(ARGV))
-    assert starts == []
-    if before is None:
-        assert not ns.crash_loop_path().exists()
-    else:
-        assert ns.crash_loop_path().read_bytes() == before
+    assert len(cmds) == 1 and starts == [("python", None, None, "protocol")]

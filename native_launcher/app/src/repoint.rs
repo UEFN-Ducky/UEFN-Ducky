@@ -153,11 +153,11 @@ pub fn native_setting(app_data: &Path) -> String {
 
 /// `native_switch.decide` without the EXE and WebView2 checks (the launcher is running,
 /// and a missing WebView2 exits 20, which falls back below).
-/// ponytail: `auto` is the Python window until the launcher hosts what Python's
-/// `inventory.NOT_LEAN_CUT` lists (Browser tabs showed "no host window"); flip it back
-/// here and in `native_switch.decide` together.
-pub fn wants_native(setting: &str, _crash_loop_active: bool) -> bool {
-    setting == "on"
+/// Always: the launcher's window is up in ~0.1 s, the Python window in 1-2 s, and the
+/// setting no longer turns it off (same rule as `native_switch.decide`). A start that
+/// fails with 20–24 still opens the Python window.
+pub fn wants_native(_setting: &str, _crash_loop_active: bool) -> bool {
+    true
 }
 
 /// A started-directly launch that ended with one of these opens the Python window.
@@ -393,10 +393,10 @@ mod tests {
             assert!(l.start(&args(), true, false, "on").is_none(), "{name}");
             l.drop_all();
         }
-        // Setting off at the root: the Python window once, with NO_NATIVE.
+        // A saved off is ignored at the root too: the pointer's launcher, one hop.
         let l = Layout::new("off");
         l.pointer(r#"{"dir":"versions/app-1.2.472"}"#);
-        assert_eq!(l.start(&args(), false, false, "off"), Some(Spawn::python(l.root.join(STUB_EXE), &args())));
+        assert_eq!(l.start(&args(), false, false, "off"), Some(Spawn::hop(l.version.clone(), &args())));
         l.drop_all();
     }
 
@@ -465,24 +465,24 @@ mod tests {
     }
 
     #[test]
-    fn version_launcher_setting_and_hold() {
+    fn version_launcher_runs_here_whatever_the_setting() {
         let l = Layout::new("hold");
         let v = |mode: &'static str, hold: bool| {
             before_start(&l.version, &args(), true, false, &l.app_data, OWN, move || mode.into(), move || hold)
         };
-        assert_eq!(v("off", false), Some(Spawn::python(sibling_stub(&l.version), &args())));
-        assert_eq!(v("auto", false), Some(Spawn::python(sibling_stub(&l.version), &args())));
-        assert!(v("auto", true).is_some());
-        assert!(v("on", true).is_none());
+        for mode in ["off", "auto", "on", "garbage"] {
+            assert!(v(mode, false).is_none(), "{mode}");
+            assert!(v(mode, true).is_none(), "{mode} during a hold");
+        }
         l.drop_all();
     }
 
     #[test]
-    fn decide_like_native_switch() {
-        assert!(!wants_native("off", false));
-        assert!(wants_native("on", true));
-        assert!(!wants_native("auto", false));
-        assert!(!wants_native("auto", true));
+    fn always_native() {
+        for mode in ["off", "on", "auto", ""] {
+            assert!(wants_native(mode, false), "{mode}");
+            assert!(wants_native(mode, true), "{mode} during a hold");
+        }
     }
 
     #[test]

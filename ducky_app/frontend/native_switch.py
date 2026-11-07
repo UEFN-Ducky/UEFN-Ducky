@@ -1,11 +1,8 @@
 """Native launcher switch: start Ducky-Launcher.exe, or fall back to the Python window.
 
-The ``native_launcher`` setting (off | on | auto, default auto; garbage is off) picks who draws the window.
-``off`` and ``auto`` never spawn anything: the launch runs today's Python window (auto waits until
-the launcher hosts Browser tabs, focus windows, capture, snip and native menus:
-``native_host.inventory.NOT_LEAN_CUT``). ``on``
-starts ``Ducky-Launcher.exe`` (it starts ``UEFN-Ducky.exe --backend`` itself) and wait for
-``launcher/ready-<launcher pid>.json``; any exit code, a timeout or a spawn error lets the
+Every window launch starts ``Ducky-Launcher.exe`` (the ``native_launcher`` setting is ignored:
+there is no turning it off). It starts ``UEFN-Ducky.exe --backend`` itself; this waits for
+``launcher/ready-<launcher pid>.json``, and any exit code, a timeout or a spawn error lets the
 Python window start in this same process with the same argv.
 
 Launcher exit codes: 0 ok · 20 WebView2 missing or old · 21 protocol mismatch · 22 crash
@@ -217,23 +214,18 @@ def no_native() -> bool:
 
 def decide(setting: str, exe_present: bool, webview2_ok: bool, crash_loop_active: bool) -> str:
     """'native' or 'python' for this launch."""
-    from frontend.settings import normalize_native_launcher
-
-    mode = normalize_native_launcher(setting)
-    # ponytail: auto = Python window until the launcher hosts what NOT_LEAN_CUT lists (the Browser
-    # tab said "no host window"). Flip auto back here and in repoint.rs wants_native together.
-    if mode != "on" or no_native() or not exe_present or not webview2_ok:
+    # Always the launcher (its window is up in ~0.1 s, the Python window in 1-2 s): the
+    # setting no longer turns it off. Python only when the launcher can't run at all.
+    # Same rule in repoint.rs wants_native.
+    del setting, crash_loop_active
+    if no_native() or not exe_present or not webview2_ok:
         return "python"
     return "native"
 
 
 def python_reason(setting: str, exe_present: bool, webview2_ok: bool, crash_loop_active: bool) -> str:
-    """Why a launch that is not off ran in Python ("" when it would be native or is off)."""
-    from frontend.settings import normalize_native_launcher
-
-    mode = normalize_native_launcher(setting)
-    if mode != "on":
-        return ""
+    """Why a launch ran in Python ("" when it would be native)."""
+    del setting, crash_loop_active
     if no_native():
         return "launcher_fallback"
     if not exe_present:
@@ -329,14 +321,11 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
     """The launch hook (frontend/launcher.py). True: the launcher painted the window, exit now.
     False: run the Python window in this process, with the same argv.
 
-    Off and auto read the setting and nothing else: no file checks, no subprocess.
+    Always tries the launcher; the setting is ignored (``setting`` is kept for callers).
     """
-    from frontend.settings import normalize_native_launcher
-
     started = time.perf_counter()
-    fallback = take_no_native()  # first: off or not, children never inherit it
-    mode = normalize_native_launcher(_setting() if setting is None else setting)
-    if mode != "on" or start_hidden or os.environ.get(NATIVE_CHILD_ENV) or "--backend" in argv[1:]:
+    fallback = take_no_native()  # first: children never inherit it
+    if start_hidden or os.environ.get(NATIVE_CHILD_ENV) or "--backend" in argv[1:]:
         return False
     if fallback:
         record_start_soon("python", None, None, "launcher_fallback")
@@ -345,8 +334,8 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
     present = exe.is_file()
     wv2 = webview2_ok() if present else False
     held = crash_loop_active()
-    if decide(mode, present, wv2, held) == "python":
-        record_start_soon("python", None, None, python_reason(mode, present, wv2, held))
+    if decide("on", present, wv2, held) == "python":
+        record_start_soon("python", None, None, python_reason("on", present, wv2, held))
         return False
     timeout_s = NATIVE_WAIT_S
     code = run_native(argv, timeout_s, exe=exe)
