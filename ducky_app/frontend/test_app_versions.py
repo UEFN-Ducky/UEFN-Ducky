@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -53,6 +54,15 @@ def test_saved_paths_name_the_started_exe(monkeypatch, tmp_path) -> None:
     assert av.hand_off_env()[av.LAUNCHER_ENV] == str(installed)
     monkeypatch.delenv(av.LAUNCHER_ENV)
     assert av.launcher_exe() == Path(sys.executable)
+
+
+def test_a_hand_off_lets_the_newer_version_pick_its_window(monkeypatch) -> None:
+    """1.2.475's root launcher ran the Python window with UEFN_DUCKY_NO_NATIVE=1; handed on,
+    it kept the updated version off the fast launcher. The newer version decides for itself."""
+    monkeypatch.setenv("UEFN_DUCKY_NO_NATIVE", "1")
+    env = av.hand_off_env()
+    assert "UEFN_DUCKY_NO_NATIVE" not in env
+    assert os.environ["UEFN_DUCKY_NO_NATIVE"] == "1"  # this process keeps its own
 
 
 def test_a_version_started_directly_names_the_install(monkeypatch, tmp_path) -> None:

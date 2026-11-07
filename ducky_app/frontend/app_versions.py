@@ -275,6 +275,11 @@ def running_from_versions() -> bool:
 def hand_off_env() -> dict[str, str]:
     env = dict(os.environ)
     env[LAUNCHER_ENV] = str(launcher_exe())
+    # The newer version picks its own window. An older install's root launcher sets
+    # UEFN_DUCKY_NO_NATIVE under its own rules (1.2.475: auto = Python window); passed on, it
+    # kept every updated Ducky off the fast launcher. No loop: the newer version's own
+    # launcher falls back to its sibling EXE, which is the newest and hands off nowhere.
+    env.pop("UEFN_DUCKY_NO_NATIVE", None)
     return env
 
 
