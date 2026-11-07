@@ -889,11 +889,23 @@ def apply_update() -> dict[str, Any]:
 
 
 def launch_uninstall() -> dict[str, Any]:
-    """Run the registered quiet uninstaller and exit the app."""
+    """Open UEFN Ducky's own uninstaller (why, keep or delete data, progress).
+
+    It can still answer "Keep UEFN Ducky", and Inno's uninstaller closes the app when the
+    person goes on, so the app stays open. Only a copy without it (an all-users install
+    from before it shipped) falls back to the registered uninstall command and exits.
+    """
+    from frontend.uninstaller_link import EXE_NAME
+
     info = get_install_info()
     if not info["installed"]:
         return _result(ok=False, error="This copy is portable — nothing to uninstall.", stage="check")
-    command = info["quiet_uninstall_command"] or info["uninstall_command"]
+    own = Path(str(info.get("install_location") or "")) / EXE_NAME
+    if info.get("install_location") and own.is_file():
+        command, own_window = f'"{own}"', True
+    else:
+        # Never the quiet command first: that is Inno's silent uninstall with no window.
+        command, own_window = info["uninstall_command"] or info["quiet_uninstall_command"], False
     if not command:
         return _result(ok=False, error="No uninstall command registered.", stage="check")
 
@@ -904,5 +916,7 @@ def launch_uninstall() -> dict[str, Any]:
     except OSError as exc:
         return _result(ok=False, error=str(exc), stage="launch")
 
+    if own_window:
+        return _result(ok=True, error=None, stage="opened")
     _shutdown_after_delay()
     return _result(ok=True, error=None, stage="uninstalling")

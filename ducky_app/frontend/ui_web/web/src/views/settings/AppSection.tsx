@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
-import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import type { AppUpdateStatus, AutoUpdateStatus, DuckyOSStorePatchNote, NetworkTest } from "../../types/panel";
 import {
   getAppUpdateState,
@@ -96,7 +95,6 @@ export function AppSection() {
   const [netTest, setNetTest] = useState<NetworkTest | "running" | null>(null);
   const [updateState, setUpdateState] = useState<AppUpdateState>(() => getAppUpdateState());
   const [auto, setAuto] = useState<AutoUpdateStatus | null>(null);
-  const { confirm } = useConfirmModal();
 
   useEffect(() => subscribeAppUpdate(setUpdateState), []);
 
@@ -225,17 +223,11 @@ export function AppSection() {
     }
   };
 
+  // Opens UEFN Ducky's own uninstaller: it asks why, keep or delete your data, and has
+  // "Keep UEFN Ducky", so no extra confirm here.
   const handleUninstall = async () => {
     const api = getApi();
     if (!api) return;
-    const confirmed = await confirm({
-      title: "Uninstall UEFN Ducky",
-      message:
-        "This removes the app from Windows. The uninstaller will then ask whether to also delete your chats, settings, and project data — choose No there to keep them for a future install.",
-      confirmLabel: "Uninstall",
-      danger: true,
-    });
-    if (!confirmed) return;
     setPhase("uninstalling");
     setErrorText(null);
     try {
@@ -243,6 +235,8 @@ export function AppSection() {
       if (!result.ok) {
         setPhase("idle");
         setErrorText(result.error ?? `Uninstall failed (${result.stage}).`);
+      } else if (result.stage === "opened") {
+        setPhase("idle");
       }
     } catch {
       setPhase("idle");
@@ -380,11 +374,11 @@ export function AppSection() {
               </button>
               <button
                 type="button"
-                className="settings-btn"
+                className="settings-btn general-tab-btn-quiet"
                 disabled={busy}
                 onClick={() => void handleUninstall()}
               >
-                {phase === "uninstalling" ? "Uninstalling…" : "Uninstall"}
+                {phase === "uninstalling" ? "Opening…" : "Uninstall"}
               </button>
             </div>
           ) : null}

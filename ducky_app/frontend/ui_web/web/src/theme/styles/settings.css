@@ -1316,6 +1316,19 @@
   border-color: color-mix(in srgb, var(--warn) 85%, black);
 }
 
+/* Uninstall: there when you look for it, quiet otherwise; red only on hover. */
+.settings-btn.general-tab-btn-quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.settings-btn.general-tab-btn-quiet:hover:not(:disabled) {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  color: var(--red);
+}
+
 .general-tab-btn-danger {
   background: var(--red);
   border-color: var(--red);
