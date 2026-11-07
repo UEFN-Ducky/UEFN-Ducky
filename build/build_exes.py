@@ -259,6 +259,22 @@ def duplicate_ffmpeg_dlls(app_dir: Path) -> list[str]:
 SEARCH_MODEL_FILES = ("embeddings.f16.npy", "tokenizer.json", "config.json")
 
 
+# Same list as frontend/webview2_repair.DLLS: what pywebview's edgechromium backend loads.
+WEBVIEW_DLLS = (
+    "Microsoft.Web.WebView2.Core.dll",
+    "Microsoft.Web.WebView2.WinForms.dll",
+    "runtimes/win-x64/native/WebView2Loader.dll",
+    "runtimes/win-arm64/native/WebView2Loader.dll",
+    "runtimes/win-x86/native/WebView2Loader.dll",
+)
+
+
+def missing_webview_dlls(app_dir: Path) -> list[str]:
+    """WebView2 DLLs the built app lacks in _internal/webview/lib (the window could not start)."""
+    lib = app_dir / "_internal" / "webview" / "lib"
+    return [name for name in WEBVIEW_DLLS if not (lib / name).is_file()]
+
+
 def missing_search_model_files(app_dir: Path) -> list[str]:
     """Search model files the built app lacks (skill search would run on keywords only)."""
     folder = app_dir / "_internal" / "models" / "search"
@@ -609,6 +625,11 @@ def main() -> int:
     missing_model = missing_search_model_files(wrote)
     if missing_model:
         print(f"ERROR: search model files missing from _internal/models/search: {', '.join(missing_model)}", file=sys.stderr)
+        return 1
+
+    missing_webview = missing_webview_dlls(wrote)
+    if missing_webview:
+        print(f"ERROR: WebView2 DLLs missing from _internal/webview/lib: {', '.join(missing_webview)}", file=sys.stderr)
         return 1
 
     smoke_exe = wrote / f"{exe_stem}.exe"

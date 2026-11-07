@@ -55,6 +55,23 @@ def test_search_model_missing_is_reported(tmp_path: Path) -> None:
     assert be.missing_search_model_files(tmp_path) == list(be.SEARCH_MODEL_FILES)
 
 
+def test_webview_dlls_missing_from_the_build_are_reported(tmp_path: Path) -> None:
+    lib = tmp_path / "_internal" / "webview" / "lib"
+    for name in be.WEBVIEW_DLLS[1:]:
+        (lib / name).parent.mkdir(parents=True, exist_ok=True)
+        (lib / name).write_bytes(b"x")
+    assert be.missing_webview_dlls(tmp_path) == ["Microsoft.Web.WebView2.Core.dll"]
+    (lib / be.WEBVIEW_DLLS[0]).write_bytes(b"x")
+    assert be.missing_webview_dlls(tmp_path) == []
+
+
+def test_webview_dll_list_matches_the_start_repair() -> None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ducky_app"))
+    from frontend import webview2_repair
+
+    assert be.WEBVIEW_DLLS == webview2_repair.DLLS
+
+
 def _launcher_src(tmp_path: Path) -> Path:
     src = tmp_path / "native_launcher"
     (src / "app" / "src").mkdir(parents=True)

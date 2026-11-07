@@ -980,6 +980,9 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # re-compiled each time. One stable profile beside the rest of our AppData
     # fixes both.
     storage_path = webview_profile_dir()
+    from frontend.webview2_repair import ensure as _ensure_webview2_dlls
+
+    _ensure_webview2_dlls()  # an interrupted Setup can leave webview/lib without its DLLs
     webview.start(
         _after_gui_start,
         debug=is_dev_panel(),
