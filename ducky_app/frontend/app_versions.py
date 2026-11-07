@@ -105,7 +105,10 @@ def ready_versions() -> list[tuple[str, Path]]:
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(data))
+        fh.flush()
+        os.fsync(fh.fileno())  # current.json must not come back empty after a restart
     os.replace(tmp, path)
 
 

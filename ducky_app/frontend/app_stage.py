@@ -232,6 +232,7 @@ def _place_local(entry: dict[str, Any], dest: Path, sources: list[Path]) -> bool
             pass
         try:
             shutil.copy2(src, dest)
+            _fsync(dest)
             return True
         except OSError:
             continue
@@ -251,10 +252,20 @@ def _inflate(entry: dict[str, Any], raw: bytes) -> bytes:
     return body
 
 
+def _fsync(path: Path) -> None:
+    """Put a written file's bytes on disk: a restart right after an update kept the files'
+    names but not their bytes (EXEs of zeros: "This app can't run on your PC")."""
+    with open(path, "rb+") as fh:
+        os.fsync(fh.fileno())
+
+
 def _write(dest: Path, body: bytes) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part")
-    tmp.write_bytes(body)
+    with open(tmp, "wb") as fh:
+        fh.write(body)
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp, dest)
 
 
@@ -350,9 +361,9 @@ def stage(update: dict[str, Any], *, base_url: str, progress: Progress | None = 
         for exe in sorted(partial.glob("*.exe")):
             if not authenticode_ok(exe):
                 raise StageError(f"{exe.name} is not signed by {SIGNER}")
-    (partial / READY_MARKER).write_text(
-        json.dumps({"version": version, "files": len(wanted), "downloaded": total, "at": time.time()}),
-        encoding="utf-8",
+    _write(
+        partial / READY_MARKER,
+        json.dumps({"version": version, "files": len(wanted), "downloaded": total, "at": time.time()}).encode("utf-8"),
     )
     if final.exists():
         shutil.rmtree(final, ignore_errors=True)
