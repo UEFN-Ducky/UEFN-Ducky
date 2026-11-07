@@ -119,6 +119,13 @@ pub fn should_navigate(page_host_ready: bool, navigated: bool, early_page: bool,
         && splash::first_paint(early_page, backend_ready) == splash::FirstPaint::Navigate
 }
 
+/// Cancel this navigation? The WebView2 starts on about:blank (so the shim is in before
+/// the page), which leaves it as the first history entry: Back (mouse button, Alt+Left)
+/// past the app's first page would land there and drop the whole UI.
+pub fn blocks_navigation(navigated: bool, uri: &str) -> bool {
+    navigated && uri.trim().to_ascii_lowercase().starts_with("about:blank")
+}
+
 /// The panel's built web UI for a backend EXE, as `webview_app._web_root` finds it: the
 /// PyInstaller `_internal` folder, a flat (Nuitka) layout, or a source checkout.
 pub fn web_dist(backend_exe: &Path) -> Option<PathBuf> {
@@ -375,6 +382,16 @@ mod tests {
         // No static UI here: wait for hello, as before.
         assert!(!should_navigate(true, false, false, false));
         assert!(should_navigate(true, false, false, true));
+    }
+
+    #[test]
+    fn back_never_returns_to_about_blank() {
+        // The first about:blank load (the page host) goes through.
+        assert!(!blocks_navigation(false, "about:blank"));
+        // Once the app loaded, history back to it is cancelled; the app's own pages are not.
+        assert!(blocks_navigation(true, "about:blank"));
+        assert!(blocks_navigation(true, "About:Blank#x"));
+        assert!(!blocks_navigation(true, "http://127.0.0.1:4199/"));
     }
 
     #[test]

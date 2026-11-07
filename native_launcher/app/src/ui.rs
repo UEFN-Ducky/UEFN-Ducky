@@ -19,7 +19,7 @@ use supervisor::{StartError, Step, Supervisor};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler, NavigationCompletedEventHandler,
-    WebMessageReceivedEventHandler,
+    NavigationStartingEventHandler, WebMessageReceivedEventHandler,
 };
 use windows::core::{w, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -581,6 +581,19 @@ fn on_page_host(webview: ICoreWebView2) -> windows::core::Result<()> {
             Ok(())
         }));
         webview.add_NavigationCompleted(&nav, &mut token)?;
+        let starting = NavigationStartingEventHandler::create(Box::new(
+            |_, args: Option<ICoreWebView2NavigationStartingEventArgs>| {
+                if let Some(a) = args {
+                    let mut p = PWSTR::null();
+                    let navigated = with(|u| u.navigated).unwrap_or(false);
+                    if a.Uri(&mut p).is_ok() && start::blocks_navigation(navigated, &take_pwstr(p)) {
+                        a.SetCancel(true)?;
+                    }
+                }
+                Ok(())
+            },
+        ));
+        webview.add_NavigationStarting(&starting, &mut token)?;
     }
     let splash = with(|u| {
         u.webview = Some(webview);
