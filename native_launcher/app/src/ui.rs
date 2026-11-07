@@ -189,10 +189,10 @@ impl Host for UiHost {
         if std::env::var_os(WEB_DEV_ENV).is_some_and(|v| !v.is_empty()) {
             return false;
         }
-        let Some(dist) = start::web_dist(&backend_exe()) else {
+        let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
+        let Some(dist) = start::ui_dist(&backend_exe(), &app_data) else {
             return false;
         };
-        let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
         let port = server::port::pick_panel_port(&app_data).ui_port();
         // Taken (another Ducky or an old window): the backend keeps the port, as before.
         let Ok(srv) = server::Server::bind(port, dist, server::DEFAULT_HOLD) else {
@@ -209,7 +209,12 @@ impl Host for UiHost {
         let released = with(|u| {
             u.hello_seen = true;
             u.bridge.on_hello(hello);
-            u.server.as_ref().map(|s| s.release_origin(&hello.origin))
+            let srv = u.server.as_ref()?;
+            // A version newer than current.json (downloaded since): serve its own UI first.
+            if let Some(dist) = start::hello_dist(&u.app_data, &hello.app_version) {
+                srv.prefer_root(dist);
+            }
+            Some(srv.release_origin(&hello.origin))
         })
         .flatten();
         match released {

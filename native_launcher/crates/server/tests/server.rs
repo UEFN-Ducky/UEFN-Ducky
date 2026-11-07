@@ -99,6 +99,31 @@ fn paths_without_a_file_here_go_to_the_backend() {
     assert!(get(srv.addr(), "GET /index.html HTTP/1.1\r\n\r\n").contains("fixture"));
 }
 
+#[test]
+fn preferred_root_serves_index_and_old_root_keeps_its_chunks() {
+    // The launcher started on the install root's (older) UI; hello names the version the
+    // backend runs: its build comes first, and a page already loaded keeps its chunks.
+    let base = std::env::temp_dir().join(format!("ducky-roots-{}", std::process::id()));
+    let (old, new) = (base.join("old"), base.join("new"));
+    for (d, idx, chunk) in [(&old, "old-index", "View-Old.js"), (&new, "new-index", "View-New.js")] {
+        std::fs::create_dir_all(d.join("assets")).unwrap();
+        std::fs::write(d.join("index.html"), idx).unwrap();
+        std::fs::write(d.join("assets").join(chunk), "export{}").unwrap();
+    }
+    let srv = Server::bind(0, &old, Duration::from_secs(30)).unwrap();
+    srv.gate().close();
+    assert!(get(srv.addr(), "GET / HTTP/1.1\r\n\r\n").ends_with("old-index"));
+    srv.prefer_root(&new);
+    let idx = get(srv.addr(), "GET / HTTP/1.1\r\n\r\n");
+    assert!(idx.ends_with("new-index") && idx.contains("Cache-Control: no-cache"), "{idx}");
+    for chunk in ["View-New.js", "View-Old.js"] {
+        let r = get(srv.addr(), &format!("GET /assets/{chunk} HTTP/1.1\r\n\r\n"));
+        assert!(r.starts_with("HTTP/1.1 200") && r.contains("Content-Type: text/javascript"), "{chunk}: {r}");
+    }
+    assert!(get(srv.addr(), "GET /assets/View-Gone.js HTTP/1.1\r\n\r\n").starts_with("HTTP/1.1 404"));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// A fake backend that answers one request with its own path, echoing the request bytes.
 fn fake_backend() -> (std::net::SocketAddr, thread::JoinHandle<Vec<u8>>) {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();

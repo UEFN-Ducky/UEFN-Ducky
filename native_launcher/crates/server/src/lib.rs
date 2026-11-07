@@ -83,11 +83,17 @@ pub fn origin_addr(origin: &str) -> Option<SocketAddr> {
     host.to_socket_addrs().ok()?.find(|a| a.is_ipv4()).or_else(|| host.to_socket_addrs().ok()?.next())
 }
 
+/// Folders static files come from, first match wins (index.html from the first). Hashed
+/// asset names are unique per build, so a page loaded from an older root keeps finding its
+/// chunks after [`Server::prefer_root`] puts the backend's own build first.
+type Roots = Arc<Mutex<Vec<PathBuf>>>;
+
 /// A running UI server.
 pub struct Server {
     addr: SocketAddr,
     gate: Arc<Gate>,
     stop: Arc<AtomicBool>,
+    roots: Roots,
 }
 
 impl Server {
@@ -101,21 +107,31 @@ impl Server {
         let addr = listener.local_addr().expect("local addr");
         let gate = Arc::new(Gate::new(hold));
         let stop = Arc::new(AtomicBool::new(false));
-        let (g, s, root) = (gate.clone(), stop.clone(), Arc::new(root));
+        let roots: Roots = Arc::new(Mutex::new(vec![root]));
+        let (g, s, r) = (gate.clone(), stop.clone(), roots.clone());
         thread::spawn(move || {
             for conn in listener.incoming() {
                 if s.load(Ordering::SeqCst) {
                     break;
                 }
                 if let Ok(stream) = conn {
-                    let (g, root) = (g.clone(), root.clone());
+                    let (g, roots) = (g.clone(), r.lock().unwrap().clone());
                     thread::spawn(move || {
-                        let _ = handle(stream, &root, &g);
+                        let _ = handle(stream, &roots, &g);
                     });
                 }
             }
         });
-        Server { addr, gate, stop }
+        Server { addr, gate, stop, roots }
+    }
+
+    /// Serve `root` first from now on (the build the backend runs); earlier roots stay as
+    /// fallbacks for pages already loaded from them.
+    pub fn prefer_root(&self, root: impl Into<PathBuf>) {
+        let root = root.into();
+        let mut roots = self.roots.lock().unwrap();
+        roots.retain(|r| r != &root);
+        roots.insert(0, root);
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -179,7 +195,7 @@ pub fn is_backend(head: &Head) -> bool {
     head.websocket || head.path == "/api" || head.path.starts_with("/api/") || head.path.starts_with("/__")
 }
 
-fn handle(mut client: TcpStream, root: &Path, gate: &Gate) -> io::Result<()> {
+fn handle(mut client: TcpStream, roots: &[PathBuf], gate: &Gate) -> io::Result<()> {
     client.set_read_timeout(Some(Duration::from_secs(30)))?;
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
@@ -204,14 +220,14 @@ fn handle(mut client: TcpStream, root: &Path, gate: &Gate) -> io::Result<()> {
     let backend = is_backend(&head);
     // The Python server answers more than /api and /__ (plugin panels' kit CSS/JS sat on 404:
     // every plugin drew as bare HTML), so anything without a file here is the backend's.
-    if backend || !resolve_static(root, &head.path).is_some_and(|f| f.is_file()) {
-        match gate.wait() {
+    let root = roots.iter().find(|r| resolve_static(r, &head.path).is_some_and(|f| f.is_file()));
+    match root {
+        Some(root) if !backend => serve_static(&mut client, root, &head),
+        _ => match gate.wait() {
             Some(addr) => tunnel(client, addr, &buf),
             None if backend => respond(&mut client, 503, "text/plain", b"Ducky backend not ready", false),
             None => respond(&mut client, 404, "text/plain", b"not found", false),
-        }
-    } else {
-        serve_static(&mut client, root, &head)
+        },
     }
 }
 

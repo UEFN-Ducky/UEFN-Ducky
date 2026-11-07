@@ -48,6 +48,33 @@ function openExternal(url: string): void {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+const STALE_CHUNK_RE =
+  /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i;
+const STALE_CHUNK_KEY = "ducky.staleChunkReloadAt";
+/** Reloads closer together than this are a loop: show the error instead. */
+const STALE_CHUNK_GAP_MS = 60_000;
+
+/** A lazy view whose chunk no longer loads (the page came from another build than the one
+ * served now): reload the page once instead of showing the crash. False = no reload. */
+export function reloadForStaleChunk(
+  error: unknown,
+  storage: Pick<Storage, "getItem" | "setItem"> | null = typeof sessionStorage !== "undefined" ? sessionStorage : null,
+  reload: () => void = () => window.location.reload(),
+  now: number = Date.now(),
+): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (!storage || !STALE_CHUNK_RE.test(message)) return false;
+  try {
+    const last = Number(storage.getItem(STALE_CHUNK_KEY) || 0);
+    if (now - last < STALE_CHUNK_GAP_MS) return false;
+    storage.setItem(STALE_CHUNK_KEY, String(now));
+  } catch {
+    return false;
+  }
+  reload();
+  return true;
+}
+
 /** Catches render/lifecycle throws in a subtree so one bad component can't blank the whole app.
  * Without this, an uncaught throw unmounts the entire React root to a blank screen. */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -65,6 +92,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    if (reloadForStaleChunk(error)) return;
     const componentStack = info.componentStack || "";
     console.error(`[ErrorBoundary${this.props.label ? ` · ${this.props.label}` : ""}]`, error, info);
     this.setState({ componentStack });

@@ -136,6 +136,34 @@ pub fn web_dist(backend_exe: &Path) -> Option<PathBuf> {
         .find(|d| d.join("index.html").is_file())
 }
 
+/// `versions/app-<v>` under app data: a downloaded version's folder.
+fn version_folder(app_data: &Path, version: &str) -> PathBuf {
+    app_data.join(crate::repoint::VERSIONS_DIR).join(format!("app-{}", version.trim()))
+}
+
+/// The UI to serve before hello. The root stub hands off to the version in
+/// `versions/current.json`, and `app_versions.refresh_root_launcher` copies that version's
+/// launcher into the root, so the root install's own `_internal` UI is an older build than
+/// the backend that runs (1.2.478 drew 1.2.47x's UI, and its lazy chunks 404'd). An install
+/// root (`_internal` beside the stub) serves the pointer's folder; anything else its own.
+pub fn ui_dist(backend_exe: &Path, app_data: &Path) -> Option<PathBuf> {
+    let dir = backend_exe.parent()?;
+    let pointed = || {
+        let p = crate::repoint::current_launcher(app_data, dir)?;
+        web_dist(&p.exe.with_file_name(crate::repoint::STUB_EXE))
+    };
+    let install_root = dir.join("_internal").is_dir() && !dir.starts_with(app_data.join(crate::repoint::VERSIONS_DIR));
+    install_root.then(pointed).flatten().or_else(|| web_dist(backend_exe))
+}
+
+/// The UI of the version that said hello (`versions/app-<v>`), when that folder has one.
+pub fn hello_dist(app_data: &Path, app_version: &str) -> Option<PathBuf> {
+    if app_version.trim().is_empty() {
+        return None;
+    }
+    web_dist(&version_folder(app_data, app_version).join(crate::repoint::STUB_EXE))
+}
+
 /// The page is up. Under `native_switch` (`native_child`): the ready file it waits for (it
 /// records the start itself). A direct start: no ready file (nobody reads it), its own
 /// `starts.json` row instead.
@@ -407,6 +435,37 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&base);
         assert_eq!(web_dist(&base.join("UEFN-Ducky.exe")), None);
+    }
+
+    #[test]
+    fn ui_dist_follows_the_version_the_root_hands_off_to() {
+        let base = std::env::temp_dir().join(format!("ducky-uidist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let rel = Path::new("_internal/frontend/ui_web/web/dist");
+        let (root, app_data) = (base.join("Programs/UEFN Ducky"), base.join("UEFN-Ducky"));
+        let ver = version_folder(&app_data, "1.2.478");
+        for d in [&root, &ver] {
+            std::fs::create_dir_all(d.join(rel)).unwrap();
+            std::fs::write(d.join(rel).join("index.html"), "<html>").unwrap();
+            std::fs::write(d.join(crate::repoint::LAUNCHER_EXE), "").unwrap();
+        }
+        let stub = root.join(crate::repoint::STUB_EXE);
+        // No pointer: the root's own UI.
+        assert_eq!(ui_dist(&stub, &app_data), Some(root.join(rel)));
+        std::fs::write(
+            app_data.join("versions/current.json"),
+            r#"{"version":"1.2.478","dir":"versions/app-1.2.478"}"#,
+        )
+        .unwrap();
+        assert_eq!(ui_dist(&stub, &app_data), Some(ver.join(rel)));
+        // A backend in a version folder is that version: its own UI.
+        let vstub = ver.join(crate::repoint::STUB_EXE);
+        assert_eq!(ui_dist(&vstub, &app_data), Some(ver.join(rel)));
+        // Hello's version picks its folder; unknown versions pick nothing.
+        assert_eq!(hello_dist(&app_data, "1.2.478"), Some(ver.join(rel)));
+        assert_eq!(hello_dist(&app_data, "1.2.999"), None);
+        assert_eq!(hello_dist(&app_data, ""), None);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
