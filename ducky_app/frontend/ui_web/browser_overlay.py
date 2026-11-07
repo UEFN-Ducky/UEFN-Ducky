@@ -860,7 +860,6 @@ def _state_dict(pane: _Pane) -> dict[str, Any]:
 
 
 def _push_page(window: Any, event: dict[str, Any]) -> None:
-    """One ``__uefnPanelPush`` event to the page hosting ``window``."""
     import json
 
     from frontend.ui_web.ui_dispatch import schedule_evaluate_js
@@ -912,8 +911,7 @@ def _apply_bounds(pane: _Pane) -> None:
             sy = host.ClientSize.Height / vh
             sx, sy = sane_scale(sx, sy)
             ox, oy = int(host.Left), int(host.Top)
-        elif launcher_size and vw > 1 and vh > 1:
-            # Ducky-Launcher.exe: the page fills the launcher's client area, as the form does.
+        elif launcher_size and vw > 1 and vh > 1:  # Ducky-Launcher.exe: page = launcher client area
             sx, sy = sane_scale(launcher_size[0] / vw, launcher_size[1] / vh)
             ox = oy = 0
         else:
@@ -934,10 +932,7 @@ def _apply_bounds(pane: _Pane) -> None:
             # pane draws full size under Ducky's own page instead, never on top or focused.
             bw, bh = pane.last_size
             if min(bw, bh) <= 2:
-                if host is not None:
-                    bw, bh = int(host.ClientSize.Width), int(host.ClientSize.Height)
-                else:
-                    bw, bh = launcher_size or (1280, 800)
+                bw, bh = (int(host.ClientSize.Width), int(host.ClientSize.Height)) if host is not None else (launcher_size or (1280, 800))
             control.Location = Point(ox, oy)
             control.Size = Size(max(bw, 320), max(bh, 240))
         control.Visible = shown or behind
@@ -962,9 +957,7 @@ def _apply_bounds(pane: _Pane) -> None:
             except Exception:
                 pass
         if launcher_size is not None:
-            with _lock:
-                controls = [p.control for p in _panes.values() if p.window is pane.window and p.control is not None]
-            pane.window.after_bounds(controls)
+            pane.window.after_bounds(list(_pane_controls()))
     except Exception:
         _log.exception("browser pane bounds failed")
 
