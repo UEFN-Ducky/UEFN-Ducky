@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -158,9 +159,64 @@ def record_start(version: str) -> bool:
     return ok
 
 
+def refresh_root_launcher() -> None:
+    """Put this version's Ducky-Launcher.exe in the install folder (shortcuts, the Run key and
+    uefn-ducky:// start that one, and updates only ever add version folders): an old root
+    launcher keeps its old rules, e.g. 1.2.475 ran every start in the slow Python window.
+    Only from a version folder that reached ready; never raises."""
+    if not getattr(sys, "frozen", False) or os.environ.get(NO_HOP_ENV) or not running_from_versions():
+        return
+    root = _installed_exe()
+    if root is not None:
+        copy_launcher_files(Path(sys.executable).parent, root.parent)
+
+
+# The launcher and the one DLL it loads. Only files the install already has are replaced.
+LAUNCHER_FILES = (NATIVE_LAUNCHER_EXE, "WebView2Loader.dll")
+
+
+def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
+    """Replace each of :data:`LAUNCHER_FILES` in ``dst_dir`` that differs from ``src_dir``'s.
+    A running (locked) EXE is renamed aside first, Windows allows that, and removed next time.
+    Returns the names replaced; a failure leaves that file as it was."""
+    done: list[str] = []
+    for name in LAUNCHER_FILES:
+        src, dst = src_dir / name, dst_dir / name
+        old = dst.with_name(name + ".old")
+        try:
+            old.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            if not src.is_file() or not dst.is_file():
+                continue
+            if src.stat().st_size == dst.stat().st_size and src.read_bytes() == dst.read_bytes():
+                continue
+            tmp = dst.with_name(name + ".new")
+            shutil.copy2(src, tmp)
+            try:
+                os.replace(tmp, dst)
+            except PermissionError:
+                os.replace(dst, old)
+                os.replace(tmp, dst)
+            done.append(name)
+        except OSError:
+            _log.warning("could not refresh %s in %s", name, dst_dir, exc_info=True)
+            try:
+                dst.with_name(name + ".new").unlink(missing_ok=True)
+            except OSError:
+                pass
+    return done
+
+
 def mark_ready(version: str) -> None:
-    """The panel of ``version`` came up: its failed-start count goes back to zero."""
+    """The panel of ``version`` came up: its failed-start count goes back to zero, and the
+    install's root launcher becomes this version's (:func:`refresh_root_launcher`)."""
     write_current(version)
+    try:
+        refresh_root_launcher()
+    except Exception:
+        _log.warning("root launcher refresh failed", exc_info=True)
     boot = read_boot()
     row = _boot_row(boot, version)
     if not row.get("starts"):

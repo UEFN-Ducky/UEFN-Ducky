@@ -65,6 +65,62 @@ def test_a_hand_off_lets_the_newer_version_pick_its_window(monkeypatch) -> None:
     assert os.environ["UEFN_DUCKY_NO_NATIVE"] == "1"  # this process keeps its own
 
 
+def _launcher_dirs(tmp_path: Path) -> tuple[Path, Path]:
+    new, root = tmp_path / "versions" / "app-1.2.478", tmp_path / "Programs" / "UEFN Ducky"
+    new.mkdir(parents=True)
+    root.mkdir(parents=True)
+    (new / "Ducky-Launcher.exe").write_bytes(b"MZ new launcher")
+    (new / "WebView2Loader.dll").write_bytes(b"dll")
+    (root / "Ducky-Launcher.exe").write_bytes(b"MZ 1.2.475 launcher")
+    (root / "WebView2Loader.dll").write_bytes(b"dll")
+    return new, root
+
+
+def test_the_root_launcher_becomes_the_newer_versions(tmp_path) -> None:
+    """Shortcuts start the install's root launcher, which updates never touched: 1.2.475's
+    kept every updated Ducky in the slow Python window."""
+    new, root = _launcher_dirs(tmp_path)
+    assert av.copy_launcher_files(new, root) == ["Ducky-Launcher.exe"]  # the same DLL stays
+    assert (root / "Ducky-Launcher.exe").read_bytes() == b"MZ new launcher"
+    assert av.copy_launcher_files(new, root) == []  # already current: nothing written
+    assert sorted(p.name for p in root.iterdir()) == ["Ducky-Launcher.exe", "WebView2Loader.dll"]
+
+
+def test_a_running_root_launcher_is_renamed_aside_then_cleaned(tmp_path, monkeypatch) -> None:
+    new, root = _launcher_dirs(tmp_path)
+    real = os.replace
+    calls: list[tuple[str, str]] = []
+
+    def locked_once(src, dst):
+        calls.append((Path(src).name, Path(dst).name))
+        if len(calls) == 1:
+            raise PermissionError("in use")
+        return real(src, dst)
+
+    monkeypatch.setattr(av.os, "replace", locked_once)
+    assert av.copy_launcher_files(new, root) == ["Ducky-Launcher.exe"]
+    assert (root / "Ducky-Launcher.exe").read_bytes() == b"MZ new launcher"
+    assert (root / "Ducky-Launcher.exe.old").read_bytes() == b"MZ 1.2.475 launcher"
+    monkeypatch.setattr(av.os, "replace", real)
+    av.copy_launcher_files(new, root)
+    assert not (root / "Ducky-Launcher.exe.old").exists()
+
+
+def test_the_root_launcher_is_never_added_or_touched_outside_a_frozen_version(tmp_path, monkeypatch) -> None:
+    new, root = _launcher_dirs(tmp_path)
+    (root / "Ducky-Launcher.exe").unlink()
+    assert av.copy_launcher_files(new, root) == []  # an install without one never gets one
+    assert not (root / "Ducky-Launcher.exe").exists()
+    called: list[object] = []
+    monkeypatch.setattr(av, "copy_launcher_files", lambda *a: called.append(a))
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    av.refresh_root_launcher()  # dev run
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setenv(av.NO_HOP_ENV, "1")
+    av.refresh_root_launcher()  # sandboxed test build
+    assert called == []
+
+
 def test_a_version_started_directly_names_the_install(monkeypatch, tmp_path) -> None:
     """A Run key pinned in versions/ (or a launcher hop with no env) started 1.2.472 there:
     it called itself portable and never updated. The install is the start."""
