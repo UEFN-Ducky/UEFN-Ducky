@@ -90,6 +90,8 @@ struct Ui {
     sup_thread: Option<JoinHandle<()>>,
     started: Option<Result<(Hello, Option<u32>), StartError>>,
     end: Option<End>,
+    /// The backend's pop-out windows (`window_open`).
+    extras: wins::Registry,
 }
 
 thread_local! {
@@ -154,6 +156,7 @@ impl UiHost {
                 sup_thread: None,
                 started: None,
                 end: None,
+                extras: Default::default(),
             })
         });
         UiHost { args, lock: None }
@@ -477,6 +480,7 @@ fn on_event(name: &str, data: Value) {
                 send_call(id, "__dialog_result".into(), vec![value]);
             }
         }
+        "window_open" | "window_close" | "window_raise" => wins::on_window_event(name, &data),
         _ => post_page(&shim::event_message(name, &data)),
     }
 }
@@ -497,8 +501,17 @@ fn post_page(json_text: &str) {
     }
 }
 
-fn on_page_message(text: &str) {
-    let actions = with(|u| u.bridge.on_page_message(text)).unwrap_or_default();
+/// To the pop-out window `wid`; gone or not loaded yet: dropped.
+fn post_to(wid: &str, json_text: &str) {
+    if let Some(wv) = with(|u| u.extras.get(wid).and_then(|e| e.webview.clone())).flatten() {
+        unsafe {
+            let _ = wv.PostWebMessageAsJson(&HSTRING::from(json_text));
+        }
+    }
+}
+
+fn on_page_message(wid: Option<&str>, text: &str) {
+    let actions = with(|u| u.bridge.on_page_message_from(wid, text)).unwrap_or_default();
     run_actions(actions);
 }
 
@@ -507,10 +520,17 @@ fn run_actions(actions: Vec<Action>) {
     for action in actions {
         match action {
             Action::Page(msg) => post_page(&msg),
-            Action::Native { id, op } => {
-                let value = native_op(op);
-                post_page(&shim::result_message(&id, Ok(value)));
-            }
+            Action::PageTo { wid, msg } => post_to(&wid, &msg),
+            Action::Native { id, op } => match shim::untag_id(&id) {
+                (Some(wid), orig) => {
+                    let value = native_op(op, with(|u| u.extras.get(wid).map(|e| e.hwnd)).flatten());
+                    post_to(wid, &shim::result_message(orig, Ok(value)));
+                }
+                (None, _) => {
+                    let value = native_op(op, with(|u| u.main).flatten());
+                    post_page(&shim::result_message(&id, Ok(value)));
+                }
+            },
             Action::Backend { id, name, args } => {
                 let page_call = id.starts_with(shim::PAGE_ID_PREFIX);
                 if !send_call(id.clone(), name, args) && page_call {
@@ -524,40 +544,14 @@ fn run_actions(actions: Vec<Action>) {
 /// The first (about:blank) navigation finished: install the shim and the page handlers,
 /// lift the splash above the WebView, then load the backend's page once it is known.
 fn on_page_host(webview: ICoreWebView2) -> windows::core::Result<()> {
+    hook_page(&webview, None)?;
     unsafe {
-        let done = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|_, _| Ok(())));
-        webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(shim::SHIM_JS), &done)?;
         let mut token = Default::default();
-        let msg = WebMessageReceivedEventHandler::create(Box::new(
-            |_, args: Option<ICoreWebView2WebMessageReceivedEventArgs>| {
-                if let Some(a) = args {
-                    let mut p = PWSTR::null();
-                    if a.TryGetWebMessageAsString(&mut p).is_ok() {
-                        on_page_message(&take_pwstr(p));
-                    }
-                }
-                Ok(())
-            },
-        ));
-        webview.add_WebMessageReceived(&msg, &mut token)?;
         let nav = NavigationCompletedEventHandler::create(Box::new(|_, _| {
             on_page_painted();
             Ok(())
         }));
         webview.add_NavigationCompleted(&nav, &mut token)?;
-        let starting = NavigationStartingEventHandler::create(Box::new(
-            |_, args: Option<ICoreWebView2NavigationStartingEventArgs>| {
-                if let Some(a) = args {
-                    let mut p = PWSTR::null();
-                    let navigated = with(|u| u.navigated).unwrap_or(false);
-                    if a.Uri(&mut p).is_ok() && start::blocks_navigation(navigated, &take_pwstr(p)) {
-                        a.SetCancel(true)?;
-                    }
-                }
-                Ok(())
-            },
-        ));
-        webview.add_NavigationStarting(&starting, &mut token)?;
     }
     let splash = with(|u| {
         u.webview = Some(webview);
@@ -571,6 +565,44 @@ fn on_page_host(webview: ICoreWebView2) -> windows::core::Result<()> {
         }
     }
     navigate_when_ready();
+    Ok(())
+}
+
+/// The shim, page calls and the Back-to-about:blank guard on a window's WebView2: the
+/// main window (`wid` None) or a pop-out, whose page loads right after this.
+fn hook_page(webview: &ICoreWebView2, wid: Option<String>) -> windows::core::Result<()> {
+    unsafe {
+        let done = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|_, _| Ok(())));
+        webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(shim::SHIM_JS), &done)?;
+        let mut token = Default::default();
+        let msg_wid = wid.clone();
+        let msg = WebMessageReceivedEventHandler::create(Box::new(
+            move |_, args: Option<ICoreWebView2WebMessageReceivedEventArgs>| {
+                if let Some(a) = args {
+                    let mut p = PWSTR::null();
+                    if a.TryGetWebMessageAsString(&mut p).is_ok() {
+                        on_page_message(msg_wid.as_deref(), &take_pwstr(p));
+                    }
+                }
+                Ok(())
+            },
+        ));
+        webview.add_WebMessageReceived(&msg, &mut token)?;
+        let popout = wid.is_some();
+        let starting = NavigationStartingEventHandler::create(Box::new(
+            move |_, args: Option<ICoreWebView2NavigationStartingEventArgs>| {
+                if let Some(a) = args {
+                    let mut p = PWSTR::null();
+                    let navigated = popout || with(|u| u.navigated).unwrap_or(false);
+                    if a.Uri(&mut p).is_ok() && start::blocks_navigation(navigated, &take_pwstr(p)) {
+                        a.SetCancel(true)?;
+                    }
+                }
+                Ok(())
+            },
+        ));
+        webview.add_NavigationStarting(&starting, &mut token)?;
+    }
     Ok(())
 }
 

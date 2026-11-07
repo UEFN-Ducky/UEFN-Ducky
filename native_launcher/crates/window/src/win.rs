@@ -4,6 +4,7 @@
 //! minimum track size, and the dark #0a0a0a background until the page paints.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -38,27 +39,31 @@ pub struct WindowOptions {
     pub url: String,
     pub debug_port: Option<u16>,
     pub hit: HitConfig,
-    /// The page finished its first navigation (ok = it loaded).
-    pub on_painted: Option<Box<dyn FnOnce(bool)>>,
+    /// The page finished its first navigation (ok = it loaded; the window it is in).
+    pub on_painted: Option<Box<dyn FnOnce(bool, HWND)>>,
     /// WebView2 could not start (the launcher maps this to a start error).
     pub on_webview_error: Option<Box<dyn FnOnce(windows::core::Error)>>,
+    /// Closing this window ends the message loop (the main window; not a pop-out).
+    pub quit_on_close: bool,
 }
 
 struct State {
     hit: HitConfig,
     controller: Option<ICoreWebView2Controller>,
     webview: Option<ICoreWebView2>,
-    on_painted: Option<Box<dyn FnOnce(bool)>>,
+    on_painted: Option<Box<dyn FnOnce(bool, HWND)>>,
     /// Last WM_SIZE kind, to re-frame only on maximize/restore changes.
     size_kind: u32,
+    quit_on_close: bool,
 }
 
 thread_local! {
-    static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+    /// One per window on this thread, by HWND.
+    static STATE: RefCell<HashMap<isize, State>> = RefCell::new(HashMap::new());
 }
 
-fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
-    STATE.with(|s| s.borrow_mut().as_mut().map(f))
+fn with_state<R>(hwnd: HWND, f: impl FnOnce(&mut State) -> R) -> Option<R> {
+    STATE.with(|s| s.borrow_mut().get_mut(&(hwnd.0 as isize)).map(f))
 }
 
 /// Set the env defaults `webview_app.py` sets, only where the variable is unset.
@@ -104,16 +109,6 @@ pub fn create(mut opts: WindowOptions) -> windows::core::Result<HWND> {
         let x = work.left + ((work.right - work.left - w) / 2).max(0);
         let y = work.top + ((work.bottom - work.top - h) / 2).max(0);
 
-        STATE.with(|s| {
-            *s.borrow_mut() = Some(State {
-                hit: opts.hit,
-                controller: None,
-                webview: None,
-                on_painted: opts.on_painted.take(),
-                size_kind: SIZE_RESTORED,
-            })
-        });
-
         let title = HSTRING::from(opts.title.as_str());
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -129,6 +124,20 @@ pub fn create(mut opts: WindowOptions) -> windows::core::Result<HWND> {
             Some(instance),
             None,
         )?;
+        // Messages sent inside CreateWindowExW saw no state (default hit config).
+        STATE.with(|s| {
+            s.borrow_mut().insert(
+                hwnd.0 as isize,
+                State {
+                    hit: opts.hit,
+                    controller: None,
+                    webview: None,
+                    on_painted: opts.on_painted.take(),
+                    size_kind: SIZE_RESTORED,
+                    quit_on_close: opts.quit_on_close,
+                },
+            )
+        });
         let none = DWMWA_COLOR_NONE;
         for attr in [DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR] {
             let _ = DwmSetWindowAttribute(
@@ -193,8 +202,8 @@ fn attach_controller(hwnd: HWND, ctrl: ICoreWebView2Controller, url: &str) -> wi
                 if let Some(a) = args {
                     let _ = a.IsSuccess(&mut ok);
                 }
-                if let Some(Some(cb)) = with_state(|s| s.on_painted.take()) {
-                    cb(ok.as_bool());
+                if let Some(Some(cb)) = with_state(hwnd, |s| s.on_painted.take()) {
+                    cb(ok.as_bool(), hwnd);
                 }
                 Ok(())
             },
@@ -202,7 +211,7 @@ fn attach_controller(hwnd: HWND, ctrl: ICoreWebView2Controller, url: &str) -> wi
         let mut token = Default::default();
         webview.add_NavigationCompleted(&nav, &mut token)?;
         webview.Navigate(&HSTRING::from(url))?;
-        with_state(|s| {
+        with_state(hwnd, |s| {
             s.controller = Some(ctrl);
             s.webview = Some(webview);
         });
@@ -222,14 +231,14 @@ pub fn run_message_loop() -> i32 {
     msg.wParam.0 as i32
 }
 
-/// The page's WebView2, once created (for the bridge and ExecuteScript).
-pub fn webview() -> Option<ICoreWebView2> {
-    with_state(|s| s.webview.clone()).flatten()
+/// The WebView2 of `hwnd`, once created (for the bridge and ExecuteScript).
+pub fn webview(hwnd: HWND) -> Option<ICoreWebView2> {
+    with_state(hwnd, |s| s.webview.clone()).flatten()
 }
 
-/// Change the hit-test regions (e.g. the page reports its caption / max button).
-pub fn set_hit_config(hit: HitConfig) {
-    with_state(|s| s.hit = hit);
+/// Change the hit-test regions of `hwnd` (e.g. the page reports its caption / max button).
+pub fn set_hit_config(hwnd: HWND, hit: HitConfig) {
+    with_state(hwnd, |s| s.hit = hit);
 }
 
 /// Hand a caption drag to the OS (`begin_native_drag` in `win_frameless.py`).
@@ -301,7 +310,7 @@ fn resize_webview(hwnd: HWND) {
     unsafe {
         let _ = GetClientRect(hwnd, &mut rc);
     }
-    with_state(|s| {
+    with_state(hwnd, |s| {
         if let Some(c) = &s.controller {
             unsafe {
                 let _ = c.SetBounds(rc);
@@ -334,7 +343,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             let sy = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
             let mut wr = RECT::default();
             if GetWindowRect(hwnd, &mut wr).is_ok() {
-                let mut hit = with_state(|s| s.hit).unwrap_or_default();
+                let mut hit = with_state(hwnd, |s| s.hit).unwrap_or_default();
                 hit.dpi = dpi_of(hwnd);
                 hit.maximized = IsZoomed(hwnd).as_bool();
                 let ht = hit_test(sx - wr.left, sy - wr.top, wr.right - wr.left, wr.bottom - wr.top, &hit);
@@ -371,7 +380,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 resize_webview(hwnd);
             }
             let kind = wparam.0 as u32;
-            let prev = with_state(|s| std::mem::replace(&mut s.size_kind, kind)).unwrap_or(kind);
+            let prev = with_state(hwnd, |s| std::mem::replace(&mut s.size_kind, kind)).unwrap_or(kind);
             if prev != kind && (kind == SIZE_MAXIMIZED || kind == SIZE_RESTORED) {
                 // Re-run WM_NCCALCSIZE after maximize/restore.
                 force_frame_changed(hwnd);
@@ -379,20 +388,20 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             return LRESULT(0);
         }
         WM_MOVE | WM_MOVING => {
-            with_state(|s| {
+            with_state(hwnd, |s| {
                 if let Some(c) = &s.controller {
                     let _ = c.NotifyParentWindowPositionChanged();
                 }
             });
         }
         WM_DESTROY => {
-            with_state(|s| {
-                if let Some(c) = s.controller.take() {
-                    let _ = c.Close();
-                }
-                s.webview = None;
-            });
-            PostQuitMessage(0);
+            let state = STATE.with(|s| s.borrow_mut().remove(&(hwnd.0 as isize)));
+            if let Some(c) = state.as_ref().and_then(|s| s.controller.as_ref()) {
+                let _ = c.Close();
+            }
+            if state.is_none_or(|s| s.quit_on_close) {
+                PostQuitMessage(0);
+            }
             return LRESULT(0);
         }
         _ => {}

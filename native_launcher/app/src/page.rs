@@ -12,10 +12,21 @@ use supervisor::protocol::{BackendMsg, Hello};
 pub enum Action {
     /// `PostWebMessageAsJson` this to the page.
     Page(String),
+    /// The same, to the pop-out window `wid` (see `shim::tag_id`).
+    PageTo { wid: String, msg: String },
     /// A contract `call` to the backend (queued until hello by the supervisor thread).
     Backend { id: String, name: String, args: Vec<Value> },
     /// A window call the launcher answers itself, then `Page(result_message(id, ..))`.
+    /// A pop-out's id is tagged: `shim::untag_id` names its window.
     Native { id: String, op: NativeOp },
+}
+
+/// A call's answer, to the window that made it.
+fn result_action(id: &str, outcome: Result<Value, String>) -> Action {
+    match shim::untag_id(id) {
+        (Some(wid), orig) => Action::PageTo { wid: wid.to_string(), msg: shim::result_message(orig, outcome) },
+        (None, _) => Action::Page(shim::result_message(id, outcome)),
+    }
 }
 
 pub struct Bridge {
@@ -30,11 +41,19 @@ impl Bridge {
 
     /// One `postMessage` payload from `shim.js`.
     pub fn on_page_message(&mut self, text: &str) -> Vec<Action> {
-        let call = match shim::parse_page_message(text) {
+        self.on_page_message_from(None, text)
+    }
+
+    /// One `postMessage` payload from the main window (`wid` None) or a pop-out window.
+    pub fn on_page_message_from(&mut self, wid: Option<&str>, text: &str) -> Vec<Action> {
+        let mut call = match shim::parse_page_message(text) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
         };
-        if let Some(cache) = self.cache.as_mut() {
+        if let Some(wid) = wid {
+            // Pop-outs open after hello: the cache has nothing for them.
+            call.id = shim::tag_id(wid, &call.id);
+        } else if let Some(cache) = self.cache.as_mut() {
             if let Intercept::Answered { page_msg, refresh_line } = cache.intercept(&call) {
                 let mut out = vec![Action::Page(page_msg)];
                 out.extend(call_from_line(&refresh_line));
@@ -44,7 +63,7 @@ impl Bridge {
         match shim::route(call.clone()) {
             Ok(Route::Native { id, op }) => vec![Action::Native { id, op }],
             Ok(Route::Backend { .. }) => vec![Action::Backend { id: call.id, name: call.name, args: call.args }],
-            Err(ShimError::BadArgs { id, error }) => vec![Action::Page(shim::result_message(&id, Err(error)))],
+            Err(ShimError::BadArgs { id, error }) => vec![result_action(&id, Err(error))],
             Err(ShimError::BadMessage(_)) => Vec::new(),
         }
     }
@@ -62,7 +81,7 @@ impl Bridge {
     pub fn on_result(&mut self, id: &str, result: &Result<Value, String>) -> Vec<Action> {
         let mut out = Vec::new();
         if id.starts_with(shim::PAGE_ID_PREFIX) {
-            out.push(Action::Page(shim::result_message(id, result.clone())));
+            out.push(result_action(id, result.clone()));
         }
         if let Some(cache) = self.cache.as_mut() {
             let line = match result {
@@ -189,5 +208,27 @@ mod tests {
         assert!(b.on_page_message("not json").is_empty());
         // Results for launcher-only ids never reach the page.
         assert!(b.on_result("cache-7", &Ok(Value::Null)).is_empty());
+    }
+
+    #[test]
+    fn pop_out_calls_answer_their_own_window() {
+        let path = cache_file("popout", json!({"get_appearance[]": {"theme": "dark"}}));
+        let mut b = Bridge::new(Some(StartupCache::load(&path, VERSION)));
+        // Same `js-1` as the main window would mint; it goes on tagged, never from the cache.
+        let out = b.on_page_message_from(Some("f1"), &call("js-1", "get_appearance"));
+        let [Action::Backend { id, name, .. }] = &out[..] else { panic!("{out:?}") };
+        assert_eq!(name, "get_appearance");
+        assert_eq!(shim::untag_id(id), (Some("f1"), "js-1"));
+        // Its answer goes to f1 under the page's own id.
+        let out = b.on_result(id, &Ok(json!(1)));
+        let [Action::PageTo { wid, msg }] = &out[..] else { panic!("{out:?}") };
+        assert_eq!(wid, "f1");
+        assert_eq!(serde_json::from_str::<Value>(msg).unwrap(), json!({"t": "result", "id": "js-1", "ok": true, "value": 1}));
+        // Window calls are tagged too, so the launcher acts on f1's window.
+        let out = b.on_page_message_from(Some("f1"), &call("js-2", "toggle_maximize"));
+        assert!(matches!(&out[..], [Action::Native { id, .. }] if shim::untag_id(id) == (Some("f1"), "js-2")));
+        let bad = json!({"t": "call", "id": "js-3", "name": "set_window_bounds", "args": ["x"]}).to_string();
+        assert!(matches!(&b.on_page_message_from(Some("f1"), &bad)[..], [Action::PageTo { wid, .. }] if wid == "f1"));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

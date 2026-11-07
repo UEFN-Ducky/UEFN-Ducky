@@ -103,6 +103,23 @@ fn shim_js_exposes_pywebview_surface() {
 }
 
 #[test]
+fn pop_out_window_calls_keep_their_window() {
+    // A pop-out's `js-1` must not settle the main window's `js-1`.
+    let tagged = shim::tag_id("f1", "js-1");
+    assert!(tagged.starts_with(shim::PAGE_ID_PREFIX));
+    assert_ne!(tagged, "js-1");
+    assert_eq!(shim::untag_id(&tagged), (Some("f1"), "js-1"));
+    assert_eq!(shim::untag_id("js-1"), (None, "js-1"));
+    assert_eq!(shim::untag_id("cache-3"), (None, "cache-3"));
+    // The focus-window calls carry their window id from the page itself (WINDOW_ID), so
+    // the launcher adds no `wid` argument.
+    let page = repo_file("ducky_app/frontend/ui_web/web/src/hooks/useFocusWindowTabs.ts");
+    assert!(page.contains("return_tab_to_main(tabId, closing.name, WINDOW_ID)"));
+    let api = repo_file("ducky_app/frontend/ui_web/panel_api_window.py");
+    assert!(api.contains("def return_tab_to_main(self, focus_id: str, title: str, wid: str = \"\")"));
+}
+
+#[test]
 fn shim_js_answers_every_sync_bridge_name_the_page_sends() {
     // Nov 6 2026: 1.2.472 shipped without _jsApiCallback, so the header could not drag the
     // window and the top edge could not resize it.

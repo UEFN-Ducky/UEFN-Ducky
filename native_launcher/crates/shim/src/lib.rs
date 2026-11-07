@@ -166,6 +166,20 @@ pub fn route_message(text: &str) -> Result<Route, ShimError> {
     route(parse_page_message(text)?)
 }
 
+/// Every window's shim mints the same `js-N` ids, so a pop-out window's call goes on
+/// under `js-@<wid>@<id>` (still a page id) and its answer comes back to that window.
+pub fn tag_id(wid: &str, id: &str) -> String {
+    format!("{PAGE_ID_PREFIX}@{wid}@{id}")
+}
+
+/// `(Some(wid), id)` for a [`tag_id`] id, else `(None, id)` (the main window's own).
+pub fn untag_id(id: &str) -> (Option<&str>, &str) {
+    id.strip_prefix(PAGE_ID_PREFIX)
+        .and_then(|rest| rest.strip_prefix('@'))
+        .and_then(|rest| rest.split_once('@'))
+        .map_or((None, id), |(wid, orig)| (Some(wid), orig))
+}
+
 /// The JSON posted back to the page for a finished call (`PostWebMessageAsJson`).
 pub fn result_message(id: &str, outcome: Result<Value, String>) -> String {
     match outcome {
