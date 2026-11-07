@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({ browser_pane_set_bounds: vi.fn(async () => ({ ok: true })) }));
 vi.mock("../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 
-import { beginBrowserPaneMount, pushBrowserPaneBounds } from "./bridge";
+import { beginBrowserPaneMount, paneCoverer, pushBrowserPaneBounds } from "./bridge";
 
 const TAB = "plugin:browser:main";
 /** The long fake-timer loops below get room to finish on a busy PC (their checks are counts). */
@@ -56,6 +56,20 @@ it("a plugin tab with no browser pane does not resend every frame", async () => 
   api.browser_pane_set_bounds.mockImplementation(async () => ({ ok: true }));
   expect(api.browser_pane_set_bounds.mock.calls.length).toBeLessThan(3);
 }, LOOP_TIMEOUT_MS);
+
+it("the split line's grab strip over the pane's edge does not cover it", () => {
+  // Nov 7 2026: grabbing the line beside a Browser tab hid the pane (black) for the whole drag.
+  const el = frame();
+  const line = document.createElement("div");
+  line.setAttribute("role", "separator");
+  document.body.appendChild(line);
+  document.elementFromPoint = (x: number) => (x < rect.x + 4 ? line : el);
+  expect(paneCoverer(el, rect.x, rect.y, rect.width, rect.height)).toBe("");
+  const card = document.createElement("div");
+  document.body.appendChild(card);
+  document.elementFromPoint = (x: number) => (x < rect.x + 4 ? card : el);
+  expect(paneCoverer(el, rect.x, rect.y, rect.width, rect.height)).toBe("div");
+});
 
 it("a sub-pixel jitter sends nothing; a moved pane sends once", async () => {
   const el = frame();

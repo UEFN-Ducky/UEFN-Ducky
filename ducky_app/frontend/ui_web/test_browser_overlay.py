@@ -348,9 +348,8 @@ def test_devtools_refuses_sites_the_person_uses(monkeypatch) -> None:
         bo._panes.pop("ev", None)
 
 
-def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> None:
-    """An agent's pane whose tab is off screen draws full size under Ducky's own page, never on
-    top and never focused, and hides again when its time is up."""
+def _fake_pane(monkeypatch):
+    """A pane on a fake WinForms form (no pythonnet): its control records focus / front / back."""
     import sys
     import types
     from types import SimpleNamespace
@@ -365,8 +364,6 @@ def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> No
     for name, module in {"System": types.ModuleType("System"), "System.Drawing": drawing,
                          "System.Windows": types.ModuleType("System.Windows"), "System.Windows.Forms": forms}.items():
         monkeypatch.setitem(sys.modules, name, module)
-    timers: list[float] = []
-    monkeypatch.setattr(bo.threading, "Timer", lambda s, fn: SimpleNamespace(daemon=True, start=lambda: timers.append(s)))
 
     class _Control:
         def __init__(self) -> None:
@@ -391,7 +388,19 @@ def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> No
     control = _Control()
     host = SimpleNamespace(ClientSize=SimpleNamespace(Width=1600, Height=900), Left=0, Top=0)
     form = SimpleNamespace(webview=host, Visible=True, WindowState="Normal", Controls=_Controls([host, control]))
-    pane = bo._Pane(pane_id="p", window=SimpleNamespace(native=form), control=control, ready=True)
+    return bo._Pane(pane_id="p", window=SimpleNamespace(native=form), control=control, ready=True), control
+
+
+def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> None:
+    """An agent's pane whose tab is off screen draws full size under Ducky's own page, never on
+    top and never focused, and hides again when its time is up."""
+    from types import SimpleNamespace
+
+    import frontend.ui_web.browser_overlay as bo
+
+    timers: list[float] = []
+    monkeypatch.setattr(bo.threading, "Timer", lambda s, fn: SimpleNamespace(daemon=True, start=lambda: timers.append(s)))
+    pane, control = _fake_pane(monkeypatch)
     pane.visible, pane.css_bounds, pane.last_size = False, (0.0, 0.0, 0.0, 0.0), (1200, 700)
     bo._panes["p"] = pane
     try:
@@ -407,5 +416,30 @@ def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> No
         bo._apply_bounds(pane)  # the person shows the tab: on top as before
         assert control.Visible is True and control.calls[-2:] == ["front", "focus"] and pane.last_size == (800, 600)
         assert bo.render_behind("missing")["ok"] is False
+    finally:
+        bo._panes.pop("p", None)
+
+
+def test_split_drag_and_cover_lift_never_take_focus(monkeypatch) -> None:
+    """Nov 7 2026: dragging the split line beside a Browser tab stopped at once. Every frame of
+    the drag moved the pane, each move focused it, the page blurred and pointerResize ended the
+    drag on blur. Focus comes only with a new pane or its tab shown again."""
+    import frontend.ui_web.browser_overlay as bo
+
+    pane, control = _fake_pane(monkeypatch)
+    bo._panes["p"] = pane
+    try:
+        bo.set_bounds("p", 10, 10, 800, 600, 1600, 900)
+        assert control.calls.count("focus") == 1  # a new pane on screen
+        for x in range(12, 400, 7):  # the drag, both ways
+            bo.set_bounds("p", x, 10, 800 - x, 600, 1600, 900)
+        for x in range(400, 12, -7):
+            bo.set_bounds("p", x, 10, 800 - x, 600, 1600, 900)
+        bo.set_bounds("p", 10, 10, 800, 600, 1600, 900, False, "covered_by div[role=tooltip]")
+        bo.set_bounds("p", 10, 10, 800, 600, 1600, 900)  # the hover card went away
+        assert control.Visible is True and control.calls.count("focus") == 1
+        bo.set_bounds("p", 10, 10, 800, 600, 1600, 900, False, "panel_hidden")
+        bo.set_bounds("p", 10, 10, 800, 600, 1600, 900)  # the person opened the tab again
+        assert control.calls.count("focus") == 2
     finally:
         bo._panes.pop("p", None)

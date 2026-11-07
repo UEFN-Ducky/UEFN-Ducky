@@ -314,6 +314,9 @@ export function paneCoverer(
   for (const px of [x + 3, x + w * 0.25, x + w / 2, x + w * 0.75, x + w - 3]) {
     for (const py of [y + 3, y + h / 2, y + h - 3]) {
       const hit = document.elementFromPoint(px, py);
+      // A split line's grab strip reaches 4 px over the pane's edge: grabbing it hid the pane
+      // (black) for the whole drag (Nov 7 2026). It draws nothing over the page.
+      if (hit?.closest('[role="separator"]')) continue;
       if (hit && hit !== iframe && !hit.contains(iframe) && painted(hit)) return coverName(hit);
     }
   }

@@ -79,6 +79,8 @@ class _Pane:
     last_size: tuple[int, int] = (0, 0)
     # Why the app last asked to hide it (ui_cover, panel_hidden, covered_by <element>, ...).
     hidden_why: str = ""
+    # Focus on the next show (new pane, tab back), never a move or cover lift (blur ended split drags).
+    take_focus: bool = True
     # Keep delegate refs alive for the lifetime of the control (pythonnet GC).
     _handlers: list[Any] = field(default_factory=list)
 
@@ -835,8 +837,6 @@ def _connection_kind(url: str, cert_error: str = "") -> str:
         return "secure"
     if u.startswith("http://"):
         return "not_secure"
-    if u.startswith("about:"):
-        return "neutral"
     return "neutral"
 
 
@@ -952,10 +952,9 @@ def _apply_bounds(pane: _Pane) -> None:
             except Exception:
                 pass
             control.BringToFront()
-            try:
+            if pane.take_focus:
+                pane.take_focus = False
                 control.Focus()
-            except Exception:
-                pass
         if launcher_size is not None:
             pane.window.after_bounds(list(_pane_controls()))
     except Exception:
@@ -1321,6 +1320,7 @@ def set_bounds(
         return {"ok": False, "error": "pane not open"}
     show = bool(visible)
     was_visible = bool(pane.visible)
+    pane.take_focus = pane.take_focus or (show and not was_visible and not pane.hidden_why.startswith(("covered_by", "ui_cover")))
     pane.hidden_why = "" if show else (why or "hidden")
     pane.css_bounds = (float(x), float(y), float(width), float(height))
     pane.css_viewport = (float(viewport_w or 0.0), float(viewport_h or 0.0))
