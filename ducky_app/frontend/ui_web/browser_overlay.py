@@ -89,7 +89,7 @@ def configure(*, main_window: Any) -> None:
 
 
 def _window_for_wid(wid: str) -> Any:
-    if not wid or wid == "main":
+    if not wid or wid == "main" or getattr(_main_window, "is_launcher_host", False):
         return _main_window
     try:
         from frontend.ui_web import focus_windows
@@ -859,18 +859,24 @@ def _state_dict(pane: _Pane) -> dict[str, Any]:
     }
 
 
-def _push_state(pane: _Pane) -> None:
+def _push_page(window: Any, event: dict[str, Any]) -> None:
+    """One ``__uefnPanelPush`` event to the page hosting ``window``."""
     import json
 
     from frontend.ui_web.ui_dispatch import schedule_evaluate_js
 
     try:
-        payload = json.dumps(_state_dict(pane), ensure_ascii=False)
-        schedule_evaluate_js(
-            pane.window, f"window.__uefnPanelPush && window.__uefnPanelPush({payload})"
-        )
+        if getattr(window, "is_launcher_host", False):
+            window.push_event(event)  # Ducky-Launcher.exe: the panel event stream
+            return
+        payload = json.dumps(event, ensure_ascii=False)
+        schedule_evaluate_js(window, f"window.__uefnPanelPush && window.__uefnPanelPush({payload})")
     except Exception:
         pass
+
+
+def _push_state(pane: _Pane) -> None:
+    _push_page(pane.window, _state_dict(pane))
 
 
 def _block_self_embed(pane: _Pane, url: str) -> bool:
@@ -900,11 +906,16 @@ def _apply_bounds(pane: _Pane) -> None:
         host = _host_webview(form, control)
         x, y, w, h = pane.css_bounds
         vw, vh = pane.css_viewport
+        launcher_size = pane.window.client_size() if getattr(pane.window, "is_launcher_host", False) else None
         if host is not None and vw > 1 and vh > 1:
             sx = host.ClientSize.Width / vw
             sy = host.ClientSize.Height / vh
             sx, sy = sane_scale(sx, sy)
             ox, oy = int(host.Left), int(host.Top)
+        elif launcher_size and vw > 1 and vh > 1:
+            # Ducky-Launcher.exe: the page fills the launcher's client area, as the form does.
+            sx, sy = sane_scale(launcher_size[0] / vw, launcher_size[1] / vh)
+            ox = oy = 0
         else:
             sx = sy = 1.0
             ox = oy = 0
@@ -923,7 +934,10 @@ def _apply_bounds(pane: _Pane) -> None:
             # pane draws full size under Ducky's own page instead, never on top or focused.
             bw, bh = pane.last_size
             if min(bw, bh) <= 2:
-                bw, bh = (int(host.ClientSize.Width), int(host.ClientSize.Height)) if host is not None else (1280, 800)
+                if host is not None:
+                    bw, bh = int(host.ClientSize.Width), int(host.ClientSize.Height)
+                else:
+                    bw, bh = launcher_size or (1280, 800)
             control.Location = Point(ox, oy)
             control.Size = Size(max(bw, 320), max(bh, 240))
         control.Visible = shown or behind
@@ -947,6 +961,10 @@ def _apply_bounds(pane: _Pane) -> None:
                 control.Focus()
             except Exception:
                 pass
+        if launcher_size is not None:
+            with _lock:
+                controls = [p.control for p in _panes.values() if p.window is pane.window and p.control is not None]
+            pane.window.after_bounds(controls)
     except Exception:
         _log.exception("browser pane bounds failed")
 
@@ -1140,18 +1158,7 @@ def _create_control(pane: _Pane) -> None:
                 uri = str(args.Uri or "")
                 if not _is_allowed_url(uri):
                     return
-                import json
-
-                from frontend.ui_web.ui_dispatch import schedule_evaluate_js
-
-                payload = json.dumps(
-                    {"type": "browser_pane_new_window", "pane_id": pane.pane_id, "url": uri},
-                    ensure_ascii=False,
-                )
-                schedule_evaluate_js(
-                    pane.window,
-                    f"window.__uefnPanelPush && window.__uefnPanelPush({payload})",
-                )
+                _push_page(pane.window, {"type": "browser_pane_new_window", "pane_id": pane.pane_id, "url": uri})
             except Exception:
                 pass
 
