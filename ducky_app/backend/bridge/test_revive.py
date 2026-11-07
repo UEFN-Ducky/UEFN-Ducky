@@ -189,3 +189,42 @@ def test_auto_revive_error_code_names_the_step(monkeypatch) -> None:
 def test_auto_revive_idle_while_listener_online() -> None:
     auto = revive.AutoRevive(grace_sec=0)
     assert not auto.observe({"online": True, "epic_mcp_online": True}, 4200, now=1)
+
+
+@pytest.mark.parametrize("deaths, action", [(1, "listener_started"), (2, "python_already_on")])
+def test_boot_script_on_dead_session_restarts_it_once(monkeypatch, deaths, action) -> None:
+    """A TaskGroup death (not 'session unavailable') still gets one fresh session, then fails."""
+    from backend.mcp_plugins import client_pool
+
+    tries: list[str] = []
+    forgot: list[str] = []
+    booted = {"ok": False}
+
+    class _Pool:
+        def call_tool(self, name, args):
+            tool = args["tool_name"]
+            tries.append(tool)
+            if tool == "IsPythonReadyForMainProject":
+                return '{"result":"{\\"returnValue\\":true}"}'
+            if tries.count(tool) <= deaths:
+                raise ExceptionGroup("unhandled errors in a TaskGroup", [ConnectionError("closed")])
+            booted["ok"] = True
+            return "started"
+
+        def run_sync(self, value, timeout):
+            return value
+
+        def forget(self, plugin_id):
+            forgot.append(plugin_id)
+
+    monkeypatch.setattr(client_pool, "get_plugin_pool", lambda: _Pool())
+    monkeypatch.setattr(revive, "_SESSION_RETRY_SEC", 0)
+    monkeypatch.setattr(revive, "_BOOT_WAIT_SEC", 0)
+    monkeypatch.setattr(revive, "_refresh_boot_hooks", lambda: None)
+    monkeypatch.setattr(revive, "_port_held_by_uefn", lambda port: False)
+    monkeypatch.setattr("backend.mcp_plugins.epic.probe_epic_mcp", lambda **_: {"epic_mcp_online": True})
+    monkeypatch.setattr("backend.mcp_plugins.epic.invalidate_epic_mcp_probe", lambda: None)
+    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port: {"status": "ok"} if booted["ok"] else None)
+    out = revive.revive_listener(4200)
+    assert out["action"] == action
+    assert tries.count("execute_python") == 2 and len(forgot) == 1

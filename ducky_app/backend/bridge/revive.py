@@ -37,16 +37,19 @@ def _call_epic_tool(tool_name: str, toolset: str = _PYTHON_TOOLSET, arguments: d
 
     A pooled session can be dead while Epic MCP answers TCP (UEFN switched island under
     it): "Could not enable Python ... session unavailable" was most auto restart errors
-    (Oct 26-27 2026). Drop that session and try once more on a fresh one."""
+    (Oct 26-27 2026). Drop that session and try once more on a fresh one. A dead session
+    also surfaces as a TaskGroup / "session closed" error, not always a RuntimeError: every
+    message the error report files as session_dead gets the retry (anp3j8r5t2v6c)."""
     from backend.mcp_plugins.client_pool import get_plugin_pool
     from backend.mcp_plugins.epic import EPIC_MCP_SERVER_ID
+    from frontend.usage_events import kind_of
 
     args = {"toolset_name": toolset, "tool_name": tool_name, "arguments": arguments or {}}
     pool = get_plugin_pool()
     try:
         return str(pool.run_sync(pool.call_tool("unreal__call_tool", args), timeout=_EPIC_CALL_TIMEOUT_SEC) or "")
-    except RuntimeError as exc:
-        if "session unavailable" not in str(exc):
+    except Exception as exc:
+        if kind_of(f"{type(exc).__name__}: {exc}") != "session_dead":
             raise
     pool.forget(EPIC_MCP_SERVER_ID)
     time.sleep(_SESSION_RETRY_SEC)
