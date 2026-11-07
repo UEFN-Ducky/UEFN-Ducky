@@ -23,6 +23,8 @@ from frontend.bundle_root import is_packaged_runtime
 UPDATE_BASE_URL_ENV = "DUCKY_UPDATE_BASE_URL"
 # net_access.NET_STAGES word for the last failed feed request ("" after a success).
 last_net_stage = ""
+# "dns" | "tls" when the last feed request only got through on the fallback try ("" otherwise).
+last_fallback = ""
 
 
 def update_base_url() -> str:
@@ -191,7 +193,12 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
     """Return ``(payload, error)`` for the Store app-version collect endpoint.
 
     ``attempts`` 0 = update_network.ATTEMPTS (background); the on-screen check passes 2.
+    A dns or tls failure gets one more try through net_access.build_opener: the PC's proxy
+    (PAC too, which resolves names the PC's DNS can't) and a Windows certificate store context
+    per connection (antivirus HTTPS scanning roots, a truststore patch that never finished).
     """
+    global last_net_stage, last_fallback
+    last_fallback = ""
     base = update_base_url()
     url = f"{base}/api/v1/plugins/uefn-ducky-store/collect/app-version"
     # Collect endpoints require Origin to match Host (same as duckyos_account.api_request).
@@ -206,21 +213,33 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
         },
         method="POST",
     )
-    from frontend.update_network import ATTEMPTS, retryable, retry_delay
+    from frontend.net_access import build_opener, stage_of
+    from frontend.update_network import ATTEMPTS, cert_failed, retryable, retry_delay
 
     tries = attempts or ATTEMPTS
+    fell_back = False
     for attempt in range(tries):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
             break
-        except (OSError, ValueError, http.client.HTTPException) as exc:
-            if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
+        except (OSError, ValueError, http.client.HTTPException) as first:
+            exc: BaseException = first
+            stage = stage_of(exc)
+            if not fell_back and stage in ("dns", "tls"):
+                fell_back = True
+                try:
+                    with build_opener().open(req, timeout=timeout) as resp:
+                        body = resp.read().decode("utf-8", errors="replace")
+                    last_fallback = stage
+                    break
+                except (OSError, ValueError, http.client.HTTPException) as again:
+                    exc = again
+            if cert_failed(exc):
                 return None, clock_skew_message(base) or str(exc)
             if attempt + 1 == tries or not retryable(exc):
                 from frontend.net_access import explain, proxy_mode
 
-                global last_net_stage
                 last_net_stage, text = explain(exc, urlsplit(base).hostname or base)
                 try:
                     from frontend import usage_stats
@@ -322,6 +341,8 @@ def _app_update_status() -> dict[str, Any]:
 
     # Someone is looking at the button: answer in ~10 s, not 5 tries x 8 s.
     payload, error = fetch_remote_payload(timeout=5.0, attempts=2)
+    if last_fallback:
+        result["fallback"] = last_fallback
     if payload:
         result["versions"] = extract_release_versions(payload)
         result["release_notes"] = _extract_str(payload, "releaseNotes") or _extract_str(

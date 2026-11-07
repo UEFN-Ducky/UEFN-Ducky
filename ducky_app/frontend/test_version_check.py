@@ -129,6 +129,71 @@ def test_update_channel_dev_blocks_store() -> None:
     assert update_channel(installed=False) in ("portable", "dev")
 
 
+def _patch_net(monkeypatch, first_error: BaseException, fallback_error: BaseException | None = None) -> list:
+    import io
+    import urllib.request
+
+    from frontend import net_access, version_check
+
+    monkeypatch.setenv(version_check.UPDATE_BASE_URL_ENV, "https://feed.test")
+    monkeypatch.setattr(version_check, "clock_skew_message", lambda base: None)
+    monkeypatch.setattr(version_check.time, "sleep", lambda s: None)
+
+    def direct(req, timeout):
+        raise first_error
+
+    opens = []
+
+    class Opener:
+        def open(self, req, timeout):
+            opens.append(req.full_url)
+            if fallback_error is not None:
+                raise fallback_error
+            return io.BytesIO(b'{"payload": {"currentVersion": "9.9.9"}}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", direct)
+    monkeypatch.setattr(net_access, "build_opener", lambda *h: Opener())
+    return opens
+
+
+def test_tls_failure_gets_through_on_the_windows_store_retry(monkeypatch) -> None:
+    """Antivirus HTTPS scanning: OpenSSL refuses its root, the Windows store has it."""
+    import ssl
+    import urllib.error
+
+    from frontend import version_check
+
+    opens = _patch_net(monkeypatch, urllib.error.URLError(ssl.SSLCertVerificationError("unable to get local issuer")))
+    payload, error = version_check.fetch_remote_payload(attempts=2)
+    assert error is None and payload == {"currentVersion": "9.9.9"}
+    assert version_check.last_fallback == "tls" and len(opens) == 1
+
+
+def test_dns_failure_gets_through_on_the_proxy_retry(monkeypatch) -> None:
+    import socket
+    import urllib.error
+
+    from frontend import version_check
+
+    opens = _patch_net(monkeypatch, urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed")))
+    payload, error = version_check.fetch_remote_payload(attempts=2)
+    assert error is None and payload["currentVersion"] == "9.9.9"
+    assert version_check.last_fallback == "dns" and len(opens) == 1
+
+
+def test_failed_fallback_still_explains_the_first_stage(monkeypatch) -> None:
+    import socket
+    import urllib.error
+
+    from frontend import version_check
+
+    dns = urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+    opens = _patch_net(monkeypatch, dns, fallback_error=dns)
+    payload, error = version_check.fetch_remote_payload(attempts=2)
+    assert payload is None and "DNS" in (error or "")
+    assert version_check.last_net_stage == "dns" and version_check.last_fallback == "" and len(opens) == 1
+
+
 if __name__ == "__main__":
     test_parse_version_tuple()
     test_is_remote_newer()
