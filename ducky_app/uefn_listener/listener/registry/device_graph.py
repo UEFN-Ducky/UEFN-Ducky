@@ -171,9 +171,12 @@ def device_graph_snapshot(
     partial = False
 
     for d in devices:
-        in_time = time.monotonic() < deadline
-        if not in_time and (include_editables or include_events):
+        # Out of time: stop here and answer with what was read. Even the per-device
+        # locate costs a game-thread call, and on a 9000-actor island the walk past the
+        # budget alone overran the host's 12 s wait (anp3j8r5t2v6c).
+        if time.monotonic() >= deadline:
             partial = True
+            break
         path = str(d.get("path") or "")
         label = str(d.get("label") or "")
         kind = str(d.get("kind") or "actor")
@@ -196,7 +199,7 @@ def device_graph_snapshot(
         except Exception as exc:
             errors.append({"label": label, "stage": "locate", "error": str(exc)[:200]})
 
-        if in_time and include_editables and kind == "verse_script" and path and deep_verse < _MAX_DEEP_VERSE:
+        if include_editables and kind == "verse_script" and path and deep_verse < _MAX_DEEP_VERSE:
             try:
                 info = get_verse_editables(path, include_wiring_hints=True)
                 node["editables"] = info.get("editables") or {}
@@ -208,7 +211,7 @@ def device_graph_snapshot(
             except Exception as exc:
                 errors.append({"label": label, "stage": "verse_editables", "error": str(exc)[:200]})
 
-        if in_time and include_events and kind == "creative_device" and path and deep_creative < _MAX_DEEP_CREATIVE:
+        if include_events and kind == "creative_device" and path and deep_creative < _MAX_DEEP_CREATIVE:
             try:
                 info = get_device_settings(path, include_events=True)
                 settings = info.get("settings") or {}
@@ -246,9 +249,11 @@ def device_graph_snapshot(
         "edge_count": len(edges),
         "errors": errors,
         "truncated": len(devices) >= cap,
-        # Out of time: later nodes have no editables or settings (and so no edges). Narrow
-        # with label_filter / class_filter for those.
+        # Out of time: only the first `read` of `total` devices are in. Narrow with
+        # label_filter / class_filter for the rest.
         "partial": partial,
+        "read": len(nodes),
+        "total": int(listed.get("total") or len(devices)),
     }
 
 
