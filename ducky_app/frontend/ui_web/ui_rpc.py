@@ -75,16 +75,39 @@ def _restore_questions_locked() -> None:
     saved = json.loads(kv.meta_get("ui_rpc:questions") or "{}")
     restored = {}
     for rid, params in saved.items():
+        params = dict(params)
+        # ponytail: entries saved before asked_at was kept count as asked at 0 (any later turn drops them)
+        asked_at = float(params.pop("_asked_at", 0.0) or 0.0)
         restored[rid] = _Pending(str(params.get("conv_id") or ""), "ask_user", params)
+        restored[rid].asked_at = asked_at
     _pending.clear()
     _pending.update(restored)
     _restored_store = key
+    if _drop_stale_locked():
+        _save_questions_locked()
+
+
+def _drop_stale_locked() -> list[str]:
+    """Remove questions whose chat is gone or has a newer turn (ui_rpc_stale)."""
+    from frontend.ui_web import ui_rpc_stale
+
+    gone = ui_rpc_stale.stale_ids(_pending)
+    for rid in gone:
+        _finish_locked(rid, {"ok": False, "stale": True, "error": "The chat moved past this question."})
+    return gone
+
+
+def _finish_locked(rid: str, result: dict[str, Any]) -> None:
+    slot = _pending.pop(rid, None)
+    if slot is not None:
+        slot.result = result
+        slot.event.set()
 
 
 def _save_questions_locked(exclude: str = "") -> None:
     from backend.store.repos import kv
 
-    saved = {rid: slot.params for rid, slot in _pending.items()
+    saved = {rid: {**slot.params, "_asked_at": slot.asked_at} for rid, slot in _pending.items()
              if rid != exclude and slot.method == "ask_user" and not slot.event.is_set()}
     kv.meta_set("ui_rpc:questions", json.dumps(saved, ensure_ascii=False))
 
@@ -284,6 +307,21 @@ def cancel(request_id: str) -> None:
         _pending.pop(request_id, None)
 
 
+def drop_for_conv(conv_id: str) -> list[str]:
+    """The person stopped this chat: its open questions end (callers wake 'stopped')."""
+    with _lock:
+        _restore_questions_locked()
+        rids = [rid for rid, slot in _pending.items()
+                if slot.conv_id == conv_id and slot.method == "ask_user" and not slot.event.is_set()]
+        for rid in rids:
+            _finish_locked(rid, {"ok": False, "stopped": True, "error": "Stopped by the person."})
+        if rids:
+            _save_questions_locked()
+    if rids:
+        _tell_host(conv_id)
+    return rids
+
+
 def wait_for_answers(conv_id: str, cancel_event: Any | None = None) -> None:
     """Suspend continuation until every question in this chat has a real answer."""
     while True:
@@ -343,6 +381,8 @@ def pending_questions() -> list[dict[str, Any]]:
     """Replay unanswered questions when a panel reconnects or reloads."""
     with _lock:
         _restore_questions_locked()
+        if _drop_stale_locked():
+            _save_questions_locked()
         return [
             {"type": "ui_rpc_request", "request_id": rid, "method": slot.method, "params": dict(slot.params)}
             for rid, slot in _pending.items()

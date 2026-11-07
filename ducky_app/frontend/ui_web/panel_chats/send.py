@@ -216,6 +216,13 @@ def cancel_agent(self, conv_id: str = "") -> bool:
 
     if conv_id:
         cancel_group_run(conv_id)
+        from frontend.ui_web import ui_rpc
+        from frontend.ui_web.agent_turns.push import get_panel_push
+
+        push = get_panel_push()
+        for rid in ui_rpc.drop_for_conv(conv_id):  # Stop ends its open question cards too
+            if push is not None:
+                push({"type": "ui_rpc_settled", "request_id": rid})
     else:
         for gid in list_group_running_ids():
             cancel_group_run(gid)
