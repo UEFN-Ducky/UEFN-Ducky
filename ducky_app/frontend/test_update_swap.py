@@ -44,7 +44,8 @@ def test_idle_when_nothing_runs_and_nobody_used_ducky_for_a_while() -> None:
 
 
 def test_each_kind_of_work_holds_the_switch(monkeypatch, _quiet) -> None:
-    # A plain chat carries over (the switch stops it, the new version continues it); a team chat can't.
+    # Running chats hold the automatic switch (stopping one cut off its tool calls); a team
+    # chat holds Update now too, since it can't be continued.
     patch_turns(monkeypatch, "list_running_agents", lambda: ["a", "team"])
     monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation_meta", lambda cid, root=None: SimpleNamespace(is_group=cid == "team"))
     monkeypatch.setattr("backend.automations.live_runs.runs", lambda workflow_id="": [{"state": "started"}])
@@ -60,6 +61,7 @@ def test_each_kind_of_work_holds_the_switch(monkeypatch, _quiet) -> None:
         "1 terminal open",
         "3 unsaved files",
         "Render trailer",
+        "1 chat running",
         "Daily island check starting soon",
         "a phone or another PC connected",
     ]
@@ -72,6 +74,16 @@ def test_right_after_a_start_using_ducky_does_not_hold_it(monkeypatch, _quiet) -
     # Real work still holds it.
     _quiet.sessions = [{"id": "t1"}]
     assert us.idle_reasons() == ["1 terminal open"]
+
+
+def test_a_running_chat_holds_the_automatic_switch_even_right_after_a_start(monkeypatch) -> None:
+    # Nov 2026: the switch stopped a chat mid-turn and its in-flight reads came back Cancelled.
+    monkeypatch.setattr(us, "_started_at", time.time())
+    patch_turns(monkeypatch, "list_running_agents", lambda: ["c1"])
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation_meta", lambda cid, root=None: SimpleNamespace(is_group=False))
+    assert us.idle_reasons() == ["1 chat running"]
+    patch_turns(monkeypatch, "list_running_agents", lambda: [])
+    assert us.idle_reasons() == []
 
 
 def test_repeated_download_failures_bring_back_setup(monkeypatch) -> None:

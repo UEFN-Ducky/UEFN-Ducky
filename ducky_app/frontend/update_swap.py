@@ -5,8 +5,9 @@ every 30 minutes, gets a newer version ready (``frontend.app_stage``, only the c
 files), then waits until switching can't interrupt anything: no workflow or team chat
 running or due within 5 minutes, no terminal open, no unsaved editor change, no plugin
 job, no phone or other PC connected, and either nobody has used Ducky for a while or every
-window is hidden. A running chat doesn't hold it: the switch stops it and the new version
-continues its turn. The switch closes this version without stopping the IDE bridges and
+window is hidden. A running chat holds the automatic switch too: stopping it cut off its
+tool calls mid-run (Nov 2026: reads came back Cancelled right after an update). Only the
+person's Update now stops running chats, and the new version continues their turns. The switch closes this version without stopping the IDE bridges and
 starts the new one where the window was; nothing is forced, so if that moment never
 comes the next start runs the new version (``frontend.app_versions``).
 """
@@ -182,6 +183,12 @@ def idle_reasons(now: float | None = None) -> list[str]:
     """Why Ducky isn't idle yet (empty: it may switch now)."""
     now = time.time() if now is None else now
     reasons = work_reasons()
+    try:
+        carried, _ = _running_chats()
+        if carried:
+            reasons.append(f"{_plural(len(carried), 'chat')} running")
+    except Exception:
+        reasons.append("chats (can't tell if one is running)")
     try:
         from backend.automations.scheduler import due_within
 

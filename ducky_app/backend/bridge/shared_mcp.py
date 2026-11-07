@@ -766,7 +766,10 @@ def _await_chain(work: Any) -> list[str]:
     return lines
 
 
-_LOOP_FILES = (f"{os.sep}asyncio{os.sep}", f"{os.sep}selectors.py")
+# A frozen app names stdlib files relative ('File "asyncio\windows_events.py"'), with no
+# folder before them: matching only "\asyncio\" missed every Nov 2026 report in the
+# installed app, so each showed the idle loop instead of where the call waited.
+_LOOP_FILES = (f"{os.sep}asyncio{os.sep}", f'"asyncio{os.sep}', f"{os.sep}selectors.py", '"selectors.py')
 
 
 def _idle_in_loop(lines: list[str]) -> bool:
@@ -1224,9 +1227,11 @@ def _idle_expired(gen: int) -> None:
 
 
 def _stuck_idle(now: float | None = None) -> bool:
-    """No tool call for ``_STUCK_IDLE_S`` and no workflow run here, whatever the open connections say."""
+    """No tool call for ``_STUCK_IDLE_S``, none still running and no workflow run here,
+    whatever the open connections say. A call still running is never cut off by this:
+    a UEFN call has no deadline (it waits while UEFN works)."""
     now = time.monotonic() if now is None else now
-    return now - _last_traffic >= _STUCK_IDLE_S and not _runs_here()
+    return now - _last_traffic >= _STUCK_IDLE_S and not _inflight and not _runs_here()
 
 
 def _watch_stuck() -> None:

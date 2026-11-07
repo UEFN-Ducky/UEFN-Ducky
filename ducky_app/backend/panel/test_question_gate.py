@@ -42,6 +42,35 @@ def test_dispatch_waits_before_tool_body(monkeypatch):
         ui_rpc.cancel(request_id)
 
 
+def test_a_read_answers_while_a_question_is_open_and_the_app_cannot_be_reached(monkeypatch):
+    # Nov 6-7 2026: ducky_get_status and workspace_* reads waited in the gate until the 30 s
+    # read limit stopped them. A read changes nothing, so it never waits for the person.
+    import time
+
+    server = ProtectedFastMCP("read-skips-gate")
+
+    @server.tool()
+    def ducky_get_status() -> str:
+        return "status"
+
+    def never_answers(*_args, **_kwargs):
+        raise AssertionError("a read asked the question gate")
+
+    monkeypatch.setattr(ai_ignore, "require_safe_tool", lambda _name: None)
+    monkeypatch.setattr(rpc, "wait_for_question_answers", never_answers)
+    monkeypatch.setattr(rpc, "take_steer_messages", lambda _conv_id: ("", []))
+    from backend.agent import chat_title
+    monkeypatch.setattr(chat_title, "require_self_name", lambda *_args: None)
+    token = identity.bind(identity.RunContext(run_id="run", conv_id="asking"))
+    try:
+        started = time.perf_counter()
+        result = asyncio.run(server.call_tool("ducky_get_status", {}))
+        assert time.perf_counter() - started < 2
+    finally:
+        identity.reset(token)
+    assert "status" in str(result)
+
+
 def test_dispatch_fails_closed_when_panel_cannot_confirm_answers(monkeypatch):
     import pytest
 

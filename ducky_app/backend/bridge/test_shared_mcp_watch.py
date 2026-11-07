@@ -190,3 +190,22 @@ def test_a_daemon_with_stuck_connections_and_no_tool_call_for_hours_stops(monkey
     assert shared_mcp._stuck_idle(1000.0 + shared_mcp._STUCK_IDLE_S)
     monkeypatch.setattr(shared_mcp, "_runs_here", lambda: True)  # a workflow run keeps it
     assert not shared_mcp._stuck_idle(1000.0 + shared_mcp._STUCK_IDLE_S)
+
+
+def test_a_call_still_running_keeps_the_daemon_past_the_stuck_idle_window(monkeypatch) -> None:
+    # A UEFN call has no deadline: stopping the daemon under it cut the call off.
+    monkeypatch.setattr(shared_mcp, "_last_traffic", 1000.0)
+    monkeypatch.setattr(shared_mcp, "_runs_here", lambda: False)
+    monkeypatch.setattr(shared_mcp, "_inflight", {(1, "7"): object()})
+    assert not shared_mcp._stuck_idle(1000.0 + shared_mcp._STUCK_IDLE_S)
+
+
+def test_a_frozen_apps_idle_loop_stack_is_seen_as_idle() -> None:
+    # The installed app names stdlib files relative: every Nov 2026 tool_stuck row ended in
+    # this frame, so the report never showed where the call really waited.
+    frozen = ['  File "asyncio\\windows_events.py", line 775, in _poll\n'.replace("\\", shared_mcp.os.sep)]
+    source = [f'  File "C:{shared_mcp.os.sep}Py{shared_mcp.os.sep}asyncio{shared_mcp.os.sep}windows_events.py", line 775, in _poll\n']
+    busy = ['  File "backend\\tools\\panel\\ducky_panel.py", line 470, in ducky_get_status\n']
+    assert shared_mcp._idle_in_loop(frozen)
+    assert shared_mcp._idle_in_loop(source)
+    assert not shared_mcp._idle_in_loop(busy)

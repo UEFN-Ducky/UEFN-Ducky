@@ -192,16 +192,23 @@ class ProtectedFastMCP(FastMCP):
         import threading
         from backend.panel.rpc import bind_gate_stop, unbind_gate_stop, wait_for_question_answers
 
+        from backend.bridge.call_limits import QUICK_READS
+
         ctx = resolve_context()
         if ctx is not None and ctx.conv_id:
-            # A cancelled call can't stop its thread; the set event ends the gate's polling.
-            stop = threading.Event()
-            token = bind_gate_stop(stop)
-            try:
-                await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
-            finally:
-                stop.set()
-                unbind_gate_stop(token)
+            # A read changes nothing, so it never waits for the person's answer or for the app
+            # to confirm there is none: on Nov 6-7 2026 every read (ducky_get_status,
+            # workspace_*, project_memory_get) of a chat with an open question, or whose app
+            # was restarting, sat in this gate until the 30 s read limit stopped it.
+            if name not in QUICK_READS:
+                # A cancelled call can't stop its thread; the set event ends the gate's polling.
+                stop = threading.Event()
+                token = bind_gate_stop(stop)
+                try:
+                    await asyncio.to_thread(wait_for_question_answers, ctx.conv_id)
+                finally:
+                    stop.set()
+                    unbind_gate_stop(token)
             effective = (arguments or {}).get("name", name) if name == "ducky_call_tool" else name
             require_self_name(effective, ctx.conv_id)
         try:
