@@ -67,6 +67,22 @@ def test_shutdown_runs_the_app_exit_once(monkeypatch) -> None:
     assert exits == [{"api": api, "tk_root": None, "window_holder": {}}]
 
 
+def test_shutdown_marks_the_run_closed_when_the_exit_path_fails(monkeypatch) -> None:
+    from frontend import usage_stats
+
+    closed: list[int] = []
+    monkeypatch.setattr(usage_stats, "app_closing", lambda: closed.append(1))
+
+    def broken(**_kw):
+        raise RuntimeError("no exit")
+
+    assert lifecycle.Shutdown(object(), exit_fn=broken, wait_s=0).run("app") is True
+    assert closed == [1]
+    # The normal path marks it itself (abort_and_quit): never twice.
+    assert lifecycle.Shutdown(object(), exit_fn=lambda **_kw: None, wait_s=0).run("app") is True
+    assert closed == [1]
+
+
 # --- the whole backend, in process, with the panel API and server stubbed ----------------
 
 

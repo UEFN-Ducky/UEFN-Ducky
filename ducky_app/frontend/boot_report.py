@@ -408,6 +408,19 @@ def _recent_launcher(launcher: Any, now: float, carried: Any = None) -> dict[str
     return dict(launcher) if 0.0 <= now - started <= LAUNCHER_CARRY_S else None
 
 
+def _launcher_exited_clean(previous: dict[str, Any]) -> bool:
+    """The launcher wrote exit 0 for this launch's backend (its window closed on purpose).
+    A launcher entry begin() carried from an earlier launch, or one for another backend,
+    says nothing about this one."""
+    launcher = previous.get("launcher")
+    if not isinstance(launcher, dict) or launcher.get("exit_code") != 0:
+        return False
+    if launcher.get("started") is not None and launcher.get("started") == previous.get(LAUNCHER_CARRIED_KEY):
+        return False
+    backend = launcher.get("backend_pid")
+    return backend is None or backend == previous.get("pid")
+
+
 def build_report(
     previous: dict[str, Any],
     native: str,
@@ -429,6 +442,8 @@ def build_report(
         return None
     if state == "ok" and not native and restarted:
         return None
+    if state == "ok" and not native and not dumps and _launcher_exited_clean(previous):
+        return None  # tray Exit under Ducky-Launcher.exe: the launcher said exit 0
     if state == "stuck" and previous.get("reported") and not native:
         return None  # the pop-up already asked while that launch was open
     started = float(previous.get("started") or 0.0)

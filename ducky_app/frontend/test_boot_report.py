@@ -74,6 +74,31 @@ def test_a_running_ducky_that_vanished_without_a_trace_is_reported(crash) -> Non
     assert boot_report.NO_TRACE in boot_report.why_summary(body)
 
 
+def _launcher_exit(code: int, backend_pid: int) -> None:
+    """What Ducky-Launcher.exe adds to boot.json when its window closes."""
+    path = boot_report._boot_path()
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["launcher"] = {"pid": 1, "started": record["started"], "stages": [["launch", 0.0]],
+                          "backend_pid": backend_pid, "exit_code": code, "exit_reason": "ok"}
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_a_clean_launcher_exit_is_not_closed_by_itself(crash) -> None:
+    # fbw0jae8hq2uo group C: tray Exit under the launcher ('Launcher: exit 0 ok') still
+    # asked for a crash report on the next start.
+    _crashed_launch("hello")
+    boot_report.mark("ok")
+    _launcher_exit(0, os.getpid())
+    boot_report.begin("1.2.360")
+    assert crash["asked"] == []
+    # Exit 0 for some other backend says nothing about this one.
+    boot_report.stage("hello")
+    boot_report.mark("ok")
+    _launcher_exit(0, os.getpid() + 1)
+    boot_report.begin("1.2.360")
+    assert len(crash["asked"]) == 1
+
+
 def test_a_ducky_stopped_by_pid_on_purpose_is_not_a_crash(crash, tmp_path: Path) -> None:
     # Oct 25 2026: the speed test ended each sandboxed 1.2.430 by PID between scenarios and
     # the next start in the same profile said "closed by itself" (no dump, no trace).

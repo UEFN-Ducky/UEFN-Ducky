@@ -261,6 +261,13 @@ class Shutdown:
             self._exit_fn(api=self._api, tk_root=None, window_holder={})
         except Exception:
             _log.warning("backend exit path failed", exc_info=True)
+            # The exit path marks the run closed itself (abort_and_quit); it failed first.
+            try:
+                from frontend import usage_stats
+
+                usage_stats.app_closing()
+            except Exception:
+                pass
         if self._wait_s > 0:
             time.sleep(self._wait_s)
         return True
