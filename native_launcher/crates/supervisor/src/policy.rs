@@ -18,6 +18,12 @@ pub const LOOP_WINDOW_S: f64 = 600.0;
 pub const LOOP_BACKOFF_S: f64 = 24.0 * 3600.0;
 pub const CRASH_LOOP_FILE: &str = "crash_loop.json";
 
+/// When the hello wait gives up: `silence` after the last backend line, never past `cap`
+/// after the spawn. A slow PC that keeps sending `stage` lines keeps the launcher.
+pub fn hello_deadline(spawned: Instant, last_line: Instant, silence: Duration, cap: Duration) -> Instant {
+    (last_line + silence).min(spawned + cap)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
     Restart,

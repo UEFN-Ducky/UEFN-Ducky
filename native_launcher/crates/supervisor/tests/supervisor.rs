@@ -2,13 +2,14 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use supervisor::policy::{CrashLoop, Decision, RestartPolicy, LOOP_BACKOFF_S};
+use supervisor::policy::{hello_deadline, CrashLoop, Decision, RestartPolicy, LOOP_BACKOFF_S};
 use supervisor::protocol::{encode_bye, encode_call, parse_line, BackendMsg};
-use supervisor::{exit, Config, Step, Supervisor};
+use supervisor::{exit, Config, Step, Supervisor, HELLO_CAP, HELLO_SILENCE};
 
 const MODE_ENV: &str = "FAKE_BACKEND_MODE";
 const SPAWNS_ENV: &str = "FAKE_BACKEND_SPAWNS";
 const EOF_ENV: &str = "FAKE_BACKEND_EOF";
+const DELAY_ENV: &str = "UEFN_DUCKY_TEST_HELLO_DELAY_S";
 
 // ---- contract JSON ----
 
@@ -97,6 +98,20 @@ fn crash_loop_file_round_trip() {
     assert_eq!(v, json!({"failures": [1.5, 2.5], "until": 99.0}));
 }
 
+#[test]
+fn hello_deadline_follows_stages_up_to_the_cap() {
+    let t0 = Instant::now();
+    let s = |n: u64| t0 + Duration::from_secs(n);
+    // Stages every 10 s for 40 s: the wait is still open 20 s after the last one.
+    assert_eq!(hello_deadline(t0, s(40), HELLO_SILENCE, HELLO_CAP), s(60));
+    // Silent from the start: 20 s.
+    assert_eq!(hello_deadline(t0, t0, HELLO_SILENCE, HELLO_CAP), s(20));
+    // Stages at 8/30/78 s, hello at 96 s is inside the 98 s deadline.
+    assert!(hello_deadline(t0, s(78), HELLO_SILENCE, HELLO_CAP) > s(96));
+    // Lines never push it past 180 s.
+    assert_eq!(hello_deadline(t0, s(175), HELLO_SILENCE, HELLO_CAP), s(180));
+}
+
 // ---- real processes: this test binary re-runs itself as a fake backend ----
 
 fn scratch(name: &str) -> PathBuf {
@@ -106,7 +121,11 @@ fn scratch(name: &str) -> PathBuf {
     d
 }
 
-fn fake(mode: &str, dir: &Path, hello_timeout: Duration) -> Config {
+fn fake(mode: &str, dir: &Path, hello_silence: Duration) -> Config {
+    fake_slow(mode, dir, hello_silence, Duration::from_secs(60), 0.0)
+}
+
+fn fake_slow(mode: &str, dir: &Path, hello_silence: Duration, hello_cap: Duration, delay_s: f64) -> Config {
     Config {
         exe: std::env::current_exe().unwrap(),
         args: ["--exact", "fake_backend_entry", "--nocapture", "--test-threads=1"].map(String::from).to_vec(),
@@ -114,8 +133,10 @@ fn fake(mode: &str, dir: &Path, hello_timeout: Duration) -> Config {
             (MODE_ENV.into(), mode.into()),
             (SPAWNS_ENV.into(), dir.join("spawns.txt").display().to_string()),
             (EOF_ENV.into(), dir.join("stdin_eof.txt").display().to_string()),
+            (DELAY_ENV.into(), delay_s.to_string()),
         ],
-        hello_timeout,
+        hello_silence,
+        hello_cap,
         app_data: dir.to_path_buf(),
     }
 }
@@ -147,6 +168,21 @@ fn fake_backend_entry() {
         // Not 3: that is the backend's BUSY exit, a start error rather than a crash.
         "crash" => std::process::exit(4),
         "silent" => std::thread::sleep(Duration::from_secs(30)),
+        // A slow PC: a stage line every 0.3 s until the delay, then hello.
+        "stages" => {
+            let delay: f64 = std::env::var(DELAY_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let started = Instant::now();
+            while started.elapsed().as_secs_f64() < delay {
+                say(json!({"t": "event", "name": "stage", "data": {"name": "panel_api_init", "ms": started.elapsed().as_millis() as u64}}));
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            say(hello(1));
+            std::thread::sleep(Duration::from_secs(30));
+        }
+        "stall" => {
+            say(json!({"t": "event", "name": "stage", "data": {"name": "panel_api_init", "ms": 5}}));
+            std::thread::sleep(Duration::from_secs(30));
+        }
         "badproto" => {
             say(hello(2));
             std::thread::sleep(Duration::from_secs(30));
@@ -251,6 +287,31 @@ fn no_hello_in_time_gives_23() {
 }
 
 #[test]
+fn stages_keep_the_hello_wait_open_past_the_silence() {
+    let dir = scratch("stages_ok");
+    let mut sup = Supervisor::start(fake_slow("stages", &dir, Duration::from_secs(1), Duration::from_secs(30), 3.0)).unwrap();
+    assert!(sup.hello().unwrap().protocol_ok());
+    sup.shutdown("test done");
+}
+
+#[test]
+fn silence_after_a_stage_gives_23_naming_it() {
+    let dir = scratch("stall");
+    let err = Supervisor::start(fake("stall", &dir, Duration::from_secs(1))).err().unwrap();
+    assert_eq!(err.code, exit::NO_HELLO);
+    assert!(err.reason.starts_with("no hello, last stage panel_api_init after "), "{}", err.reason);
+}
+
+#[test]
+fn stages_never_outlast_the_cap() {
+    let dir = scratch("stages_cap");
+    let started = Instant::now();
+    let err = Supervisor::start(fake_slow("stages", &dir, Duration::from_secs(1), Duration::from_secs(2), 30.0)).err().unwrap();
+    assert_eq!(err.code, exit::NO_HELLO);
+    assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
 fn protocol_mismatch_gives_21() {
     let dir = scratch("badproto");
     let err = Supervisor::start(fake("badproto", &dir, Duration::from_secs(15))).err().unwrap();
@@ -263,7 +324,8 @@ fn missing_exe_gives_24() {
     let dir = scratch("missing");
     let mut cfg = Config::ducky(dir.join("nope").join("UEFN-Ducky.exe"), &["--x".into()], &dir);
     assert_eq!(cfg.args, vec!["--backend".to_string(), "--x".to_string()]);
-    cfg.hello_timeout = Duration::from_secs(1);
+    assert_eq!((cfg.hello_silence, cfg.hello_cap), (HELLO_SILENCE, HELLO_CAP));
+    cfg.hello_silence = Duration::from_secs(1);
     assert_eq!(Supervisor::start(cfg).err().unwrap().code, exit::START_ERROR);
 }
 

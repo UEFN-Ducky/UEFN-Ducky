@@ -1,6 +1,6 @@
 //! Runs `UEFN-Ducky.exe --backend [argv]` and keeps it alive.
 //!
-//! Start: spawn, wait for hello (15 s, else exit 23; a protocol mismatch is 21; spawn failure
+//! Start: spawn, wait for hello (20 s of silence or 180 s in all, else exit 23; a protocol mismatch is 21; spawn failure
 //! is 24). A backend that dies (non-zero exit, no `quit` event) is restarted up to 2 times in
 //! 60 s; the third crash records a failure in `launcher/crash_loop.json` and gives 22.
 //! Stdin is closed on shutdown, which is the backend's signal to quit.
@@ -8,7 +8,7 @@
 pub mod policy;
 pub mod protocol;
 
-use policy::{record_crash_loop_failure, Decision, RestartPolicy};
+use policy::{hello_deadline, record_crash_loop_failure, Decision, RestartPolicy};
 use protocol::{encode_bye, encode_call, parse_line, BackendMsg, Hello, MAX_LINE};
 use serde_json::Value;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -28,7 +28,10 @@ pub mod exit {
     pub const START_ERROR: i32 = 24;
 }
 
-pub const HELLO_TIMEOUT: Duration = Duration::from_secs(15);
+/// Hello wait: gives up after this long with no backend line (any line resets it)...
+pub const HELLO_SILENCE: Duration = Duration::from_secs(20);
+/// ...or this long after the spawn, whatever the backend says.
+pub const HELLO_CAP: Duration = Duration::from_secs(180);
 /// `headless.EXIT_INSTANCE_BUSY`: a living Ducky did not take this launch. Not a crash.
 pub const BACKEND_EXIT_BUSY: i32 = 3;
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
@@ -39,7 +42,8 @@ pub struct Config {
     /// Full argument list (use [`Config::ducky`] for `--backend` + passthrough argv).
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
-    pub hello_timeout: Duration,
+    pub hello_silence: Duration,
+    pub hello_cap: Duration,
     /// `%LOCALAPPDATA%/UEFN-Ducky`; `crash_loop.json` goes in its `launcher/` folder.
     pub app_data: PathBuf,
 }
@@ -49,7 +53,7 @@ impl Config {
     pub fn ducky(exe: impl Into<PathBuf>, argv: &[String], app_data: impl Into<PathBuf>) -> Config {
         let mut args = vec!["--backend".to_string()];
         args.extend(argv.iter().cloned());
-        Config { exe: exe.into(), args, env: Vec::new(), hello_timeout: HELLO_TIMEOUT, app_data: app_data.into() }
+        Config { exe: exe.into(), args, env: Vec::new(), hello_silence: HELLO_SILENCE, hello_cap: HELLO_CAP, app_data: app_data.into() }
     }
 }
 
@@ -172,10 +176,15 @@ impl Backend {
         let stdin = child.stdin.take();
         let (tx, rx) = mpsc::channel();
         read_lines(child.stdout.take().expect("piped stdout"), tx);
-        let deadline = Instant::now() + cfg.hello_timeout;
+        let spawned = Instant::now();
+        let mut last_line = spawned;
+        let mut stage: Option<String> = None;
         loop {
+            let deadline = hello_deadline(spawned, last_line, cfg.hello_silence, cfg.hello_cap);
             let left = deadline.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left) {
+            let got = rx.recv_timeout(left);
+            last_line = Instant::now();
+            match got {
                 Ok(Line::Msg(BackendMsg::Hello(hello))) => {
                     if !hello.protocol_ok() {
                         drop(stdin);
@@ -186,6 +195,9 @@ impl Backend {
                         )));
                     }
                     return Ok(Backend { child, stdin, rx, hello });
+                }
+                Ok(Line::Msg(BackendMsg::Event { name, data })) if name == "stage" => {
+                    stage = data["name"].as_str().map(String::from).or(stage);
                 }
                 Ok(Line::Msg(_)) => continue,
                 Ok(Line::Eof) | Err(RecvTimeoutError::Disconnected) => {
@@ -198,7 +210,11 @@ impl Backend {
                     kill(&mut child);
                     return Err(SpawnFailure::Fatal(StartError::new(
                         exit::NO_HELLO,
-                        format!("no hello within {} s", cfg.hello_timeout.as_secs_f32()),
+                        format!(
+                            "no hello, last stage {} after {} s",
+                            stage.as_deref().unwrap_or("none"),
+                            spawned.elapsed().as_secs()
+                        ),
                     )));
                 }
             }
