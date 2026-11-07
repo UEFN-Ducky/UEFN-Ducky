@@ -14,7 +14,7 @@ import { unwrapCodingAgentTool } from "../../utils/unwrapCodingAgentTool";
 import type { ActivityItem } from "../../utils/chatMessageGroups";
 import { MediaLightbox, type LightboxItem } from "../MediaLightbox";
 import { RichBlockList } from "../rich-content/RichBlockList";
-import { bareToolName, hasViewContent, toolViewSpec, type ToolViewSpec } from "./toolView";
+import { bareToolName, toolViewSpec, type ToolViewSpec } from "./toolView";
 
 export type OpenTarget = { key: string; name: string; label: string; title: string; icon: ReactNode; open: () => void };
 
@@ -188,11 +188,9 @@ function callsOf(items: ActivityItem[]): ToolCall[] {
   return out;
 }
 
-const STRIP_VIEWS = 3;
-
 /**
  * Under a folded tools group: one Open button per plugin the agent used (spinning while
- * one of its calls runs) and what the latest calls made, so nothing needs unfolding.
+ * one of its calls runs). Pictures and videos stay inside the unfolded tool cards.
  */
 export function ToolViewStrip({ items }: { items: ActivityItem[] }) {
   const calls = useMemo(() => callsOf(items), [items]);
@@ -219,11 +217,7 @@ export function ToolViewStrip({ items }: { items: ActivityItem[] }) {
     }
     return out;
   }, [specs, owners, contrib]);
-  const views = useMemo(
-    () => specs.filter(({ spec }) => hasViewContent(spec)).slice(-STRIP_VIEWS),
-    [specs],
-  );
-  if (!chips.length && !views.length) return null;
+  if (!chips.length) return null;
   return (
     <div className="tool-view-strip">
       {chips.length ? (
@@ -238,9 +232,6 @@ export function ToolViewStrip({ items }: { items: ActivityItem[] }) {
           ))}
         </div>
       ) : null}
-      {views.map(({ call, spec }) =>
-        spec ? <ToolInlineView key={call.id} spec={spec} owner={owners[call.name] ?? null} /> : null,
-      )}
     </div>
   );
 }

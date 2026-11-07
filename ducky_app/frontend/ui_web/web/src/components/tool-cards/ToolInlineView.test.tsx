@@ -60,7 +60,7 @@ describe("tool results in the chat", () => {
     expect(toolViewSpec("ducky_ui_navigate", { route: "workflows" }, '{"ok":true,"route":"workflows"}')).toBeNull(); // an older app moved the tab itself
   });
 
-  it("a folded group shows the plugin's Open button and plays what the calls made", async () => {
+  it("a folded group shows the plugin's Open button but no pictures or videos outside the list", async () => {
     const items = [
       call("1", "mcp__uefn__imk_timeline_get", {}, { ok: true }),
       call("2", "ducky_call_tool", { name: "imk_export_sequence", arguments: {} }, { ok: true, path: "C:\\Videos\\Trailer 2.mp4", cover: "C:\\Videos\\cover.png" }),
@@ -69,11 +69,8 @@ describe("tool results in the chat", () => {
     const open = await screen.findByRole("button", { name: /Open Island Media Kit/ });
     fireEvent.click(open);
     expect(openTab).toHaveBeenCalledWith("island-media-kit", "main", "Media Kit");
-    await waitFor(() => expect(document.querySelector("video")?.getAttribute("src")).toContain("Trailer 2.mp4"));
-    expect(chatToolView).toHaveBeenCalledTimes(1); // one call for the whole group
-    fireEvent.click(screen.getByTitle(/cover\.png · open big/));
-    expect(await screen.findByRole("dialog")).toBeTruthy();
-    expect(screen.getByRole("dialog").querySelector("img")?.getAttribute("src")).toContain("cover.png");
+    expect(document.querySelector("video")).toBeNull();
+    expect(document.querySelector("img")).toBeNull();
   });
 
   it("says the plugin is working while its call runs, and Open goes to navigate's place", async () => {
