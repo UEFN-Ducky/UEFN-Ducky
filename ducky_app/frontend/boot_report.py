@@ -833,8 +833,12 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
         if me is not None:
             beat.update(app_gb=round(me.private / gb, 2), threads=me.threads)
             mine = proc_table.tree(procs, me.pid)
+            web = mine
+            if os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1" and me.ppid in procs:
+                # Under Ducky-Launcher.exe the window's WebView2 is the launcher's child, not ours.
+                web = proc_table.tree(procs, me.ppid)
             beat["webview_gb"] = round(
-                sum(procs[p].private for p in mine if procs[p].name.lower() == WEBVIEW_EXE) / gb, 2
+                sum(procs[p].private for p in web if procs[p].name.lower() == WEBVIEW_EXE) / gb, 2
             )
             beat.update(process_census(procs, me.pid, mine))
     except Exception:

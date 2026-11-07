@@ -98,6 +98,32 @@ def test_a_clean_launcher_exit_is_not_closed_by_itself(crash) -> None:
     boot_report.begin("1.2.360")
     assert len(crash["asked"]) == 1
 
+def test_heartbeat_counts_the_launchers_webview2(monkeypatch) -> None:
+    # Launcher runs reported 'WebView2 0.0 GB': its WebView2 is the launcher's child, not the backend's.
+    from backend.util import proc_table
+
+    gb = 1024**3
+    me, launcher = os.getpid(), 900001
+
+    def proc(pid, ppid, name, private):
+        return proc_table.Proc(pid, ppid, name, 0, private, 1, 0, 0.0, 1.0)
+
+    procs = {
+        launcher: proc(launcher, 4, "Ducky-Launcher.exe", gb // 10),
+        me: proc(me, launcher, "UEFN-Ducky.exe", gb),
+        900002: proc(900002, launcher, "msedgewebview2.exe", int(0.4 * gb)),
+        900003: proc(900003, 900002, "msedgewebview2.exe", int(0.2 * gb)),
+        900004: proc(900004, 4, "msedgewebview2.exe", 5 * gb),  # someone else's
+    }
+    monkeypatch.setattr(proc_table, "table", lambda: procs)
+    monkeypatch.delenv("UEFN_DUCKY_NATIVE_CHILD", raising=False)
+    assert boot_report._memory_sample(None)["webview_gb"] == 0.0
+    monkeypatch.setenv("UEFN_DUCKY_NATIVE_CHILD", "1")
+    beat = boot_report._memory_sample(None)
+    assert beat["webview_gb"] == 0.6 and beat["app_gb"] == 1.0
+    assert "WebView2 0.6 GB" in boot_report._heartbeat_lines(beat, None)[0]
+
+
 
 def test_a_ducky_stopped_by_pid_on_purpose_is_not_a_crash(crash, tmp_path: Path) -> None:
     # Oct 25 2026: the speed test ended each sandboxed 1.2.430 by PID between scenarios and
