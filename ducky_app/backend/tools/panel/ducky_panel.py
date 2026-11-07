@@ -32,6 +32,7 @@ _SUBAGENT_HANDOFF_PROMPT = (
     "Be exhaustive and concrete. Do not start new work — only the handoff."
 )
 from backend.util.json_util import tool_json
+from backend.tools.panel import team_waits
 from backend.tools.panel.archive_tree import archive_tree
 from backend.bridge.status import ListenerStatusState, fetch_listener_status
 from backend.server import mcp
@@ -1678,6 +1679,7 @@ def _owed_reply(me: str, target: str) -> str:
 
 
 @mcp.tool()
+@team_waits.bounded(team_waits.AGENT_SEND_S, team_waits.AGENT_SEND_LATE)
 def ducky_agent_send(
     to: str,
     message: str,
@@ -2129,7 +2131,8 @@ def ducky_recycle_member(
 
     kept_starter = str(approvals_of(old_id).get("started_by") or "")
     mode_norm = (mode or "agent").lower()
-    handoff_timeout = max(30.0, min(float(timeout_sec), 600.0))
+    budget = team_waits.Budget()
+    handoff_timeout = budget.handoff(timeout_sec)
     handoff_outcome = run_message_and_wait(
         old_id,
         _SUBAGENT_HANDOFF_PROMPT,
@@ -2150,11 +2153,7 @@ def ducky_recycle_member(
     # The handoff turn's reply lands before its run is marked idle (it runs in another
     # process), and the session reset refuses a running chat: every recycle failed with
     # "agent is working" after writing a handoff (Oct 25). Wait for idle first.
-    from frontend.ui_web.agent_turns.state import is_agent_running
-
-    idle_by = time.monotonic() + handoff_timeout
-    while is_agent_running(old_id) and time.monotonic() < idle_by:
-        time.sleep(0.5)
+    team_waits.wait_idle(old_id, budget.left())
     # Session reset refuses a still-running handoff; history is never discarded.
     reset_context(old_id, ["session"], project_root=root)
     old_title = old.title
@@ -2176,13 +2175,12 @@ def ducky_recycle_member(
         "model": member.model or "",
     }
     if wait_for_reply:
-        is_external = str(base.get("coding_agent") or "ducky") != "ducky"
         outcome = run_message_and_wait(
             member.id,
             spawn_text,
             mode_norm,
-            # External CLIs: wait until done (0 = no wall-clock limit).
-            timeout_sec=0.0 if is_external else max(5.0, min(float(timeout_sec), 900.0)),
+            # Whatever the hand-off left of the call's budget; the member keeps working after.
+            timeout_sec=budget.reply(timeout_sec),
             cancel_on_timeout=False,
             parent=parent_id,
             started_by=kept_starter,

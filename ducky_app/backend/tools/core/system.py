@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from backend.bridge import resolve_workspace_path, send_command
 from backend.util.json_util import tool_json
 from backend.server import mcp
+from backend.tools.panel import team_waits
 from backend.workspace.paths import (  # noqa: F401 - re-exported for existing importers
     WRITE_OUTSIDE_CONTENT_FORBIDDEN,
     WRITE_PYTHON_IN_PROJECT_FORBIDDEN,
@@ -110,6 +111,7 @@ def uefn_window_key(hwnd: int, key: str, pretty: bool = False) -> str:
 
 
 @mcp.tool()
+@team_waits.bounded(team_waits.POPUPS_S, team_waits.POPUPS_LATE)
 def uefn_popups(pretty: bool = False) -> str:
     """UEFN popups on screen now (any window besides the main editor), each captured into
     this chat with its buttons boxed and numbered 1, 2, 3… left to right.
@@ -126,7 +128,13 @@ def uefn_popups(pretty: bool = False) -> str:
     """
     from backend.tools.core.uefn_popups import describe_popup, list_popups
 
-    popups = [describe_popup(p) for p in list_popups()]
+    # The capture asks UEFN's window to draw itself (PrintWindow), which waits on a busy
+    # editor thread: past a few seconds the popup is listed without its capture.
+    def uncaptured(popup: dict[str, Any]) -> Callable[[], dict[str, Any]]:
+        return lambda: {**popup, "capture": "timed out: UEFN is not drawing (editor thread busy)"}
+
+    popups = [team_waits.call_within(team_waits.POPUP_CAPTURE_S, describe_popup, p, fallback=uncaptured(p))
+              for p in list_popups()]
     return tool_json({"ok": True, "popups": popups, "count": len(popups)}, pretty=pretty)
 
 
