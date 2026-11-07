@@ -52,6 +52,21 @@ def test_add_rename_reorder_remove(store, tmp_path):
         accounts.add_account("openai", "x", "token")
 
 
+def test_base_url_per_key_account(store):
+    a = accounts.add_account("openai", "Proxy", "key")
+    accounts.set_account_key("openai", a, "sk-proxy")
+    accounts.set_account_key("openai", "default", "sk-plain")
+    accounts.set_account_base_url("openai", a, " https://proxy.example/v1/ ")
+    assert accounts.account_base_url("openai", a) == "https://proxy.example/v1"
+    assert accounts.list_accounts("openai")[1]["base_url"] == "https://proxy.example/v1"
+    assert accounts.base_url_for_key("openai", "sk-proxy") == "https://proxy.example/v1"
+    assert accounts.base_url_for_key("openai", "sk-plain") == ""
+    with pytest.raises(ValueError):
+        accounts.set_account_base_url("openai", a, "file:///etc")
+    accounts.set_account_base_url("openai", a, "")
+    assert accounts.base_url_for_key("openai", "sk-proxy") == ""
+
+
 def test_keys_stored_under_right_names(store):
     a = accounts.add_account("openai", "Work", "key")
     accounts.set_account_key("openai", "default", "sk-default")

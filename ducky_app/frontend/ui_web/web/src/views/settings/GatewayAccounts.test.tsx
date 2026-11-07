@@ -114,8 +114,39 @@ it("Add API key adds a row and saves the key on it", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-new" } });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "new1", "sk-new"));
+  await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "new1", "sk-new", ""));
   expect(api.add_gateway_account).toHaveBeenCalledWith("anthropic", "Key 4", "key");
+  expect(runBridgeJob).toHaveBeenCalledWith("test_key", ["anthropic", "sk-new", "", true], 300_000);
+});
+
+it("a key with a base URL is tested against it and saved with it", async () => {
+  render(<GatewayAccounts provider="anthropic" kind="key" />);
+  await screen.findByText("Team");
+  fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-proxy" } });
+  fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://proxy.example/v1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "new1", "sk-proxy", "https://proxy.example/v1"));
+  expect(runBridgeJob).toHaveBeenCalledWith("test_key", ["anthropic", "sk-proxy", "https://proxy.example/v1", true], 300_000);
+});
+
+it("Set base URL saves only the URL and shows it on the row", async () => {
+  api.list_gateway_accounts.mockImplementation(async () => ({
+    ok: true, auto_switch: true, default: "k1",
+    accounts: keys.map((k) => (k.id === "k1" ? { ...k, base_url: "https://old.example/v1" } : k)),
+  }));
+  render(<GatewayAccounts provider="anthropic" kind="key" />);
+  await screen.findByText("sk-…a1b2 · https://old.example/v1");
+  fireEvent.click(screen.getByRole("button", { name: "More for Team" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Set base URL" }));
+  expect(screen.queryByLabelText("API key")).toBeNull();
+  const url = screen.getByLabelText("Base URL") as HTMLInputElement;
+  expect(url.value).toBe("https://old.example/v1");
+  fireEvent.change(url, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "k1", "", ""));
+  expect(runBridgeJob).not.toHaveBeenCalled();
 });
 
 it("Log in another account adds a login and starts its sign-in", async () => {

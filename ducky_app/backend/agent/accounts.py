@@ -88,6 +88,7 @@ def list_accounts(provider: str) -> list[dict]:
             "kind": a.get("kind") or "key",
             "active": a["id"] == active,
             "exhausted_until": _until(p, a["id"], now),
+            "base_url": a.get("base_url") or "",
         }
         for a in p["accounts"]
     ]
@@ -253,6 +254,51 @@ def set_account_key(provider: str, account_id: str, value: str) -> None:
     with _LOCK:
         _find(_provider(_load(), provider), account_id)
     _secrets.set_key(_secret_name(provider, account_id), value)
+
+
+def account_base_url(provider: str, account_id: str) -> str:
+    """The API base URL this key account calls instead of the vendor's (a proxy,
+    regional or self-hosted endpoint); "" = the gateway's own."""
+    with _LOCK:
+        p = _provider(_load(), provider)
+    try:
+        return str(_find(p, account_id).get("base_url") or "")
+    except KeyError:
+        return ""
+
+
+def set_account_base_url(provider: str, account_id: str, url: str) -> None:
+    """Save the account's base URL (http/https only); "" clears it."""
+    url = (url or "").strip().rstrip("/")
+    if url and not url.lower().startswith(("https://", "http://")):
+        raise ValueError("Base URL must start with https:// or http://")
+    with _LOCK:
+        data = _load()
+        row = _find(_provider(data, provider), account_id)
+        if url:
+            row["base_url"] = url
+        else:
+            row.pop("base_url", None)
+        _save(data)
+
+
+def save_key_account(provider: str, account_id: str, key: str = "", base_url: str | None = None) -> None:
+    """The Accounts table's save: a key ("" keeps the saved one) and/or a base URL
+    (None keeps it, "" clears it)."""
+    if base_url is not None:
+        set_account_base_url(provider, account_id, base_url)
+    if key:
+        set_account_key(provider, account_id, key)
+
+
+def base_url_for_key(provider: str, api_key: str) -> str:
+    """The base URL of the account that holds ``api_key`` ("" when none or unset)."""
+    if not api_key:
+        return ""
+    for a in list_accounts(provider):
+        if a["base_url"] and account_key(provider, a["id"]) == api_key:
+            return a["base_url"]
+    return ""
 
 
 def _account_dir(provider: str, account_id: str) -> Path:

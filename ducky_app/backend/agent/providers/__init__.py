@@ -291,7 +291,10 @@ def make_provider(
     *,
     thinking_effort: str = "off",
     conv_id: str = "",
+    base_url: str = "",
 ) -> LLMProvider:
+    """``base_url``: the endpoint for ``api_key`` (a key test before it is saved); else
+    the base URL of the account that holds the key, else the gateway's own."""
     name = (name or "").strip().lower()
     model = (model or "").strip()
     if not name:
@@ -316,7 +319,22 @@ def make_provider(
         )
     factory = reg["factory"]
 
+    given = (base_url or "").strip()
+
     def build(key: str) -> Any:
+        base_url = given if key == api_key and given else ""
+        if not base_url:
+            try:
+                from backend.agent import accounts
+
+                base_url = accounts.base_url_for_key(name, key)
+            except Exception:
+                base_url = ""
+        if base_url:  # the key's own endpoint (a proxy or self-hosted gateway)
+            try:
+                return factory(key, model, thinking_effort=thinking_effort, base_url=base_url)
+            except TypeError:
+                pass  # a gateway built before base URLs: today's call
         try:
             return factory(key, model, thinking_effort=thinking_effort)
         except TypeError:

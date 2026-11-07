@@ -104,8 +104,18 @@ def _cache_provider_models(provider: str, models: list[ModelInfo]) -> None:
         _cache_put(_CAPABILITY_CACHE, (prov, m.id), m)
 
 
-def fetch_models(provider: str, api_key: str, *, verify_openai: bool = False) -> list[ModelInfo]:
-    """Return model metadata from the provider API for the given key."""
+def _key_base_url(provider: str, key: str) -> str:
+    try:
+        from backend.agent import accounts
+
+        return accounts.base_url_for_key(provider, key)
+    except Exception:
+        return ""
+
+
+def fetch_models(provider: str, api_key: str, *, verify_openai: bool = False, base_url: str = "") -> list[ModelInfo]:
+    """Return model metadata from the provider API for the given key.
+    ``base_url``: the endpoint to ask (else the key's account's, else the gateway's own)."""
     name = (provider or "").strip().lower()
     key = (api_key or "").strip()
     models: list[ModelInfo] = []
@@ -122,7 +132,14 @@ def fetch_models(provider: str, api_key: str, *, verify_openai: bool = False) ->
         if not key and not reg.get("key_optional"):
             return []
         fetch_fn = reg.get("fetch_models")
-        if callable(fetch_fn):
+        base = (base_url or "").strip() or _key_base_url(name, key)
+        fetched = False
+        if callable(fetch_fn) and base:
+            try:
+                models, fetched = list(fetch_fn(key, verify=verify_openai, base_url=base)), True
+            except TypeError:
+                pass  # a gateway built before base URLs: today's call
+        if callable(fetch_fn) and not fetched:
             try:
                 models = list(fetch_fn(key, verify=verify_openai))
             except TypeError:

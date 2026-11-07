@@ -21,8 +21,8 @@ function loginText(s: GatewayAccountStatusDto | null | undefined): string {
 }
 
 function keyText(a: GatewayAccountDto): string {
-  if (a.id === "default") return "Uses the key above";
-  return a.key_hint || (a.has_key ? "Key saved" : "No key yet");
+  const key = a.id === "default" ? "Uses the key above" : a.key_hint || (a.has_key ? "Key saved" : "No key yet");
+  return a.base_url ? `${key} · ${a.base_url}` : key;
 }
 
 /** ★ Default, Full until …, Logged out or No key: the one thing to know about a row. */
@@ -74,6 +74,10 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   // Row whose key is being typed: "new" = the Add API key row.
   const [keyFor, setKeyFor] = useState("");
   const [keyValue, setKeyValue] = useState("");
+  // The key's own endpoint (a proxy or self-hosted gateway); "" = the provider's.
+  const [baseUrl, setBaseUrl] = useState("");
+  // Editing only the base URL of a row whose key stays as it is.
+  const [urlOnly, setUrlOnly] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -153,26 +157,37 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     setRenaming(null);
     if (label.trim()) void run(() => api()?.rename_gateway_account?.(provider, id, label.trim()));
   };
-  /** Tests the pasted key, then stores it on the row (a new row first for "new"). */
+  const openKeyRow = (id: string, onlyUrl = false) => {
+    setKeyValue("");
+    setBaseUrl(accounts.find((a) => a.id === id)?.base_url || "");
+    setUrlOnly(onlyUrl);
+    setKeyFor(id);
+  };
+  /** Tests the pasted key (against its base URL), then stores both on the row (a new row
+   *  first for "new"). Base URL only: saved as is, the key stays. */
   const saveKey = async () => {
     const value = keyValue.trim();
-    if (!value) return;
+    const url = baseUrl.trim();
+    if (!value && !urlOnly) return;
     setBusy(true);
-    setNote("Testing…");
+    setNote(value ? "Testing…" : "");
     try {
-      const test = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>("test_key", [provider, value], 300_000);
-      if (!test.ok) throw new Error(test.detail || test.error || "Key test failed");
+      if (value) {
+        const test = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
+          "test_key", [provider, value, url, true], 300_000);
+        if (!test.ok) throw new Error(test.detail || test.error || "Key test failed");
+      }
       let id = keyFor;
       if (id === "new") {
         const added = await api()?.add_gateway_account?.(provider, `Key ${accounts.length + 1}`, "key");
         if (!added?.ok) throw new Error(added && !added.ok ? added.error : "Could not add the key");
         id = added.id;
       }
-      const saved = await api()?.set_gateway_account_key?.(provider, id, value);
+      const saved = await api()?.set_gateway_account_key?.(provider, id, value, url);
       if (!saved?.ok) throw new Error(saved && !saved.ok ? saved.error : "Could not save the key");
       setKeyFor("");
       setKeyValue("");
-      setNote("Key saved.");
+      setNote(value ? "Key saved." : "Base URL saved.");
       await load();
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
@@ -181,22 +196,36 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     }
   };
 
+  const keys = (e: { key: string }) => {
+    if (e.key === "Enter") void saveKey();
+    if (e.key === "Escape") setKeyFor("");
+  };
   const keyRow = (
     <div className="gateway-accounts-keyrow">
+      {urlOnly ? null : (
+        <input
+          className="settings-input llms-provider-input"
+          type="password"
+          autoFocus
+          aria-label="API key"
+          placeholder="Paste API key"
+          value={keyValue}
+          onChange={(e) => setKeyValue(e.target.value)}
+          onKeyDown={keys}
+        />
+      )}
       <input
         className="settings-input llms-provider-input"
-        type="password"
-        autoFocus
-        aria-label="API key"
-        placeholder="Paste API key"
-        value={keyValue}
-        onChange={(e) => setKeyValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void saveKey();
-          if (e.key === "Escape") setKeyFor("");
-        }}
+        type="url"
+        autoFocus={urlOnly}
+        aria-label="Base URL"
+        placeholder="Base URL (optional), e.g. https://proxy.example.com/v1"
+        title="Leave empty to use the provider's own API. Set it for a proxy, regional or self-hosted endpoint."
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        onKeyDown={keys}
       />
-      <button type="button" className="settings-btn" disabled={busy || !keyValue.trim()} onClick={() => void saveKey()}>
+      <button type="button" className="settings-btn" disabled={busy || (!urlOnly && !keyValue.trim())} onClick={() => void saveKey()}>
         Save
       </button>
       <button type="button" className="settings-btn" disabled={busy} onClick={() => setKeyFor("")}>
@@ -208,8 +237,9 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   const menuItems = (a: GatewayAccountDto, i: number): ContextMenuItem[] => [
     { id: "rename", label: "Rename", onClick: () => setRenaming({ id: a.id, label: a.label }) },
     ...(a.kind === "key" && a.id !== "default"
-      ? [{ id: "key", label: "Replace key", onClick: () => { setKeyValue(""); setKeyFor(a.id); } }]
+      ? [{ id: "key", label: "Replace key", onClick: () => openKeyRow(a.id) }]
       : []),
+    ...(a.kind === "key" ? [{ id: "url", label: "Set base URL", onClick: () => openKeyRow(a.id, true) }] : []),
     ...(i > 0 ? [{ id: "up", label: "Move up", onClick: () => move(i, -1) }] : []),
     ...(i < accounts.length - 1 ? [{ id: "down", label: "Move down", onClick: () => move(i, 1) }] : []),
     ...(a.id !== "default" ? [{ id: "remove", label: "Remove", danger: true, onClick: () => void remove(a) }] : []),
@@ -232,10 +262,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           disabled={busy}
           onClick={() => {
             if (kind === "login") void addLogin();
-            else {
-              setKeyValue("");
-              setKeyFor("new");
-            }
+            else openKeyRow("new");
           }}
         >
           {kind === "login" ? "Log in another account" : "Add API key"}

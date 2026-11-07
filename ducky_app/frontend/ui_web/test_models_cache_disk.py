@@ -252,6 +252,37 @@ def test_custom_test_key_kicks_refresh(monkeypatch):
     assert detects == ["detect"]
 
 
+def test_account_key_test_uses_its_base_url_and_keeps_the_default_key(monkeypatch):
+    from frontend.ui_web.panel_api_settings import PanelApiSettingsMixin
+
+    class Api(PanelApiSettingsMixin):
+        def _push_panel(self, event):
+            pass
+
+    class Provider:
+        async def test_connection(self):
+            return True, "OK"
+
+    built: list = []
+    fetched: list = []
+    saved: list = []
+    patch_host(monkeypatch, "get_contributions", lambda: {"llm_providers": [{"id": "openai"}]})
+    patch_host(monkeypatch, "get_llm_provider_registration", lambda _p: {"factory": object()})
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda _p: None)
+    monkeypatch.setattr("backend.agent.providers.gateway_providers", lambda: ("openai",))
+    monkeypatch.setattr("backend.agent.providers.make_provider",
+                        lambda *a, **k: built.append(k.get("base_url")) or Provider())
+    monkeypatch.setattr("backend.agent.model_fetch.fetch_models",
+                        lambda *a, **k: fetched.append(k.get("base_url")) or [ModelInfo(id="proxy-model")])
+    monkeypatch.setattr("backend.agent.model_fetch.clear_model_cache", lambda *_a: None)
+    monkeypatch.setattr("backend.agent.secrets.set_key", lambda _p, key: saved.append(key))
+    monkeypatch.setattr("backend.agent.coding_agents.base.invalidate_detect_cache", lambda: None)
+    result = Api().test_key("openai", "sk-proxy", "https://proxy.example/v1", True)
+    assert result["ok"] is True
+    assert built == ["https://proxy.example/v1"] and fetched[0] == "https://proxy.example/v1"
+    assert saved == []  # the account row keeps it; the default account's key is untouched
+
+
 def _wait_refresh_done(timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

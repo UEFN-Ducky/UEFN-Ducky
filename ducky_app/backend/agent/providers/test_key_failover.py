@@ -100,6 +100,17 @@ def test_auto_switch_off_no_retry(env):
     assert calls == ["sk-a"]
 
 
+def test_base_url_goes_to_the_gateway_only_when_saved(env):
+    plan, calls, b, reg = env
+    accounts.set_account_base_url("kimi", b, "https://proxy.example/v1")
+    assert texts(run("sk-b")) == ["from sk-b"]  # an old (key, model) factory still works
+    got: list = []
+    reg["factory"] = lambda key, model, **kw: got.append(kw.get("base_url")) or Fake(key, plan, calls)
+    run("sk-b")
+    run("sk-a")
+    assert got == ["https://proxy.example/v1", None]
+
+
 def test_typed_key_and_plugin_quota_check(env):
     plan, calls, _, reg = env
     plan["sk-x"] = ["err"]

@@ -94,6 +94,8 @@ export interface GatewayAccountDto {
   status?: GatewayAccountStatusDto | null;
   /** Keys: a key is stored for this account. */
   has_key?: boolean;
+  /** Keys: the endpoint this key calls instead of the provider's ("" = the provider's). */
+  base_url?: string;
   /** Keys: masked key, e.g. `sk-…a1b2`, when the backend sends one. */
   key_hint?: string;
 }
@@ -3913,7 +3915,8 @@ export interface PanelApi {
   remove_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
   reorder_gateway_accounts?(provider: string, ids: string[]): Promise<GatewayAccountResult>;
   set_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
-  set_gateway_account_key?(provider: string, account: string, key: string): Promise<GatewayAccountResult>;
+  /** key "" keeps the saved key; base_url "" clears it, left out keeps it. */
+  set_gateway_account_key?(provider: string, account: string, key: string, base_url?: string): Promise<GatewayAccountResult>;
   set_gateway_auto_switch?(provider: string, on: boolean): Promise<GatewayAccountResult>;
   login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id: string }>>;
   logout_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;

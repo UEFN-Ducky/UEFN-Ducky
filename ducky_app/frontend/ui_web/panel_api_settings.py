@@ -1114,10 +1114,11 @@ class PanelApiSettingsMixin:
 
         return _accounts_call(get, provider)
 
-    def set_gateway_account_key(self, provider: str, account: str, key: str = "") -> dict[str, Any]:
+    def set_gateway_account_key(self, provider: str, account: str, key: str = "", base_url: str | None = None) -> dict[str, Any]:
+        """``key`` "" keeps the saved key; ``base_url`` None keeps the saved URL, "" clears it."""
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.set_account_key(p, account, str(key or "")), provider)
+        return _accounts_call(lambda p: accounts.save_key_account(p, account, str(key or ""), base_url), provider)
 
     def set_gateway_auto_switch(self, provider: str, on: bool = True) -> dict[str, Any]:
         from backend.agent import accounts
@@ -1704,7 +1705,10 @@ class PanelApiSettingsMixin:
         ]
         return {"ok": True, "plan": plan, "progress": todo_progress(plan), "outline": outline}
 
-    def test_key(self, provider: str, key: str = "") -> dict[str, Any]:
+    def test_key(self, provider: str, key: str = "", base_url: str = "", for_account: bool = False) -> dict[str, Any]:
+        """``base_url``: test the key against this endpoint (a proxy). ``for_account``: the
+        Accounts table saves the key on its own row, so a passing test never overwrites
+        the default account's key."""
         import asyncio
 
         from backend.agent.coding_agents.base import invalidate_detect_cache
@@ -1717,22 +1721,12 @@ class PanelApiSettingsMixin:
         prov = (provider or "").strip().lower()
         draft = (key or "").strip()
 
-        contrib_rows = get_contributions().get("llm_providers") or []
-        contrib = next(
-            (
-                row
-                for row in contrib_rows
-                if isinstance(row, dict) and str(row.get("id") or "").strip().lower() == prov
-            ),
-            None,
-        )
+        contrib = next((row for row in get_contributions().get("llm_providers") or []
+                        if isinstance(row, dict) and str(row.get("id") or "").strip().lower() == prov), None)
         prov_reg = get_llm_provider_registration(prov)
         agent_reg = get_coding_agent_registration(prov)
         if contrib is None and prov_reg is None and agent_reg is None:
-            result = {
-                "ok": False,
-                "detail": "Gateway is not installed or enabled — Settings → Store → Gateways",
-            }
+            result = {"ok": False, "detail": "Gateway is not installed or enabled — Settings → Store → Gateways"}
             self._push_panel({"type": "key_test_done", "provider": prov, **result})
             return result
 
@@ -1749,7 +1743,8 @@ class PanelApiSettingsMixin:
             except Exception as exc:
                 result = {"ok": False, "detail": str(exc)}
             if result.get("ok") and api_key:
-                set_key(prov, str(api_key).strip())
+                if not for_account:
+                    set_key(prov, str(api_key).strip())
                 invalidate_detect_cache()
                 from backend.agent.coding_agents.base import kick_detect_refresh
 
@@ -1832,17 +1827,17 @@ class PanelApiSettingsMixin:
                 or _pa._TEST_KEY_MODELS.get(prov)
                 or (saved.strip() if saved else "")
             )
-            if not test_model:
+            if not test_model or base_url:  # a proxy may not carry the gateway's test model
                 try:
-                    models = fetch_models(prov, api_key)
-                    test_model = models[0].id if models else ""
+                    models = fetch_models(prov, api_key, base_url=base_url)
+                    test_model = models[0].id if models else test_model
                 except Exception:
                     test_model = ""
             if not test_model:
                 return {"ok": False, "detail": "No models for this gateway"}
 
         try:
-            p = make_provider(prov, api_key, test_model)
+            p = make_provider(prov, api_key, test_model, base_url=base_url)
             ok, detail = asyncio.run(p.test_connection())
             if ok:
                 # Hosted providers resolve a different secret (device key). Do not
@@ -1850,14 +1845,14 @@ class PanelApiSettingsMixin:
                 persist = kind == "url" or bool(draft and draft != "••••••••") or not callable(
                     (prov_reg or {}).get("normalize_secret")
                 )
-                if persist:
+                if persist and not for_account:
                     set_key(prov, api_key)
                 clear_model_cache(prov)
                 invalidate_detect_cache()
 
                 def _cache_models() -> None:
                     try:
-                        models = fetch_models(prov, api_key)
+                        models = fetch_models(prov, api_key, base_url=base_url)
                         if models:
                             _pa._model_cache[prov] = list(models)
                             _pa._save_model_cache_to_disk()
