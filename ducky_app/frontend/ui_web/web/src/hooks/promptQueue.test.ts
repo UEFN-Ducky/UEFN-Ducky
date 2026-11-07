@@ -14,9 +14,30 @@ import {
   releasePromptDrainLock,
   isPromptDrainLocked,
   getPromptQueue,
+  queuedPromptStillOwed,
   _resetPromptQueuesForTests,
   type QueuedPrompt,
 } from "./promptQueue";
+
+describe("queuedPromptStillOwed", () => {
+  it("skips a queued prompt the stopped turn already took in, after that turn is idle", async () => {
+    const calls: string[] = [];
+    const api = {
+      wait_for_agent_idle: async () => {
+        calls.push("idle");
+        return true;
+      },
+      steer_message: async (_c: string, id: string, text: string) => {
+        calls.push(`steer:${id}:${text}`);
+        return { ok: false, delivered: id === "taken" };
+      },
+    };
+    expect(await queuedPromptStillOwed(api, "c1", "taken")).toBe(false);
+    expect(await queuedPromptStillOwed(api, "c1", "fresh")).toBe(true);
+    expect(calls).toEqual(["idle", "steer:taken:", "idle", "steer:fresh:"]);
+    expect(await queuedPromptStillOwed({}, "c1", "old-backend")).toBe(true);
+  });
+});
 
 function q(text: string, id: string): QueuedPrompt {
   return makeQueuedPrompt(text, { mode: "agent", model: "m", id })!;

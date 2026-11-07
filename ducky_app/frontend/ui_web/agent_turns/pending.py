@@ -248,13 +248,13 @@ def _drop_steered_pending(conv_id: str) -> None:
         return
     from frontend.ui_web import steer
 
-    # ponytail: reads steer's inbox directly; a steer.pending_ids() helper if steer grows more callers.
-    with steer._lock:
-        waiting = {m["id"] for m in steer._inbox.get(conv_id) or []}
+    # Only what a tool call really took: an agent-host turn's inbox lives in the host, so
+    # "not in the app's inbox" said nothing (host chats dropped untaken sends).
+    taken = {sid for sid in offered if steer.was_delivered(conv_id, sid)}
     with _pending_lock:
         box = _pending_agent_messages.get(conv_id) or []
         for sid, body in offered.items():
-            if sid not in waiting and body in box:
+            if sid in taken and body in box:
                 box.remove(body)
         if not box:
             _pending_agent_messages.pop(conv_id, None)

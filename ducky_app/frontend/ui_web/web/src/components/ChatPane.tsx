@@ -36,6 +36,7 @@ import {
   takeNextPromptForDrain,
   releasePromptDrainLock,
   takePromptForEdit,
+  queuedPromptStillOwed,
   type QueuedPrompt,
 } from "../hooks/promptQueue";
 import { PromptQueueBar } from "./PromptQueueBar";
@@ -752,7 +753,9 @@ export function ChatPane({
     }
   }, [selectedModel, heldForModel]);
 
-  // Drain queue one turn at a time when the agent goes idle.
+  // Drain queue one turn at a time when the agent goes idle. A prompt the ended turn already
+  // took in (Stop right after a tool call handed it over) is skipped: it shows there once.
+  const [drainTick, setDrainTick] = useState(0);
   useEffect(() => {
     if (agentRunning) {
       releasePromptDrainLock(chat.id);
@@ -760,8 +763,17 @@ export function ChatPane({
     }
     const next = takeNextPromptForDrain(chat.id);
     if (!next) return;
-    dispatchSend(next.text, next.attachments, next.mode, next.model, next.codingAgent);
-  }, [agentRunning, chat.id, promptQueue.length, dispatchSend]);
+    const api = getApi();
+    if (!api) return;
+    void queuedPromptStillOwed(api, chat.id, next.id).then((owed) => {
+      if (owed) {
+        dispatchSend(next.text, next.attachments, next.mode, next.model, next.codingAgent);
+        return;
+      }
+      releasePromptDrainLock(chat.id);
+      setDrainTick((n) => n + 1); // the next queued prompt, if any
+    });
+  }, [agentRunning, chat.id, promptQueue.length, dispatchSend, drainTick]);
 
   const { handleOpenPlanTab, handleStopTrackingPlan } = useChatPlanActions({
     chatId: chat.id,

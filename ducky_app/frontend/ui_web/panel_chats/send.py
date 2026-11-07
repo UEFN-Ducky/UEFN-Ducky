@@ -232,10 +232,11 @@ def cancel_agent(self, conv_id: str = "") -> bool:
 
 def steer_message(self, conv_id: str, steer_id: str, text: str) -> dict[str, Any]:
     """Send now on a queued message: the running turn takes it at its next tool call
-    (frontend/ui_web/steer.py). ok False: no turn runs, send it as a normal message."""
+    (frontend/ui_web/steer.py). ok False: no turn runs, send it as a normal message.
+    delivered True: a turn already took this queued message in, so it must not be sent again."""
     from frontend.ui_web import steer
 
-    return {"ok": steer.post(conv_id, steer_id, text)}
+    return {"ok": steer.post(conv_id, steer_id, text), "delivered": steer.was_delivered(conv_id, steer_id)}
 
 
 def list_running_agents(self) -> list[str]:

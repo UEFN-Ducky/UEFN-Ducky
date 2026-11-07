@@ -27,7 +27,27 @@ _inbox: dict[str, list[dict[str, Any]]] = {}
 _run_push: dict[str, PushFn] = {}
 # App side, per chat whose turn runs in an agent host: {steer id: text} sent there, not attached yet.
 _forwarded: dict[str, dict[str, str]] = {}
+# Per chat, the steer ids a turn took in (newest last): a queued prompt the turn already
+# showed must not run again as the next turn (Stop right after a tool call took it).
+_delivered: dict[str, list[str]] = {}
+KEEP_DELIVERED = 64  # ponytail: ids are unique per prompt; a bounded tail is plenty
 _now = time.monotonic
+
+
+def _mark_delivered(conv_id: str, steer_id: str) -> None:
+    """Call under ``_lock``."""
+    if not steer_id:
+        return
+    ids = _delivered.setdefault(conv_id, [])
+    if steer_id not in ids:
+        ids.append(steer_id)
+        del ids[:-KEEP_DELIVERED]
+
+
+def was_delivered(conv_id: str, steer_id: str) -> bool:
+    """Whether a turn took this queued message in (it shows there; never send it again)."""
+    with _lock:
+        return str(steer_id or "").strip() in _delivered.get(str(conv_id or "").strip(), [])
 
 
 def _expire(box: list[dict[str, Any]]) -> None:
@@ -85,6 +105,7 @@ def delivered(conv_id: str, steer_id: str) -> None:
     """The host attached a forwarded message (its ``user_steered`` event reached the app)."""
     with _lock:
         _forwarded.get(conv_id, {}).pop(steer_id, None)
+        _mark_delivered(conv_id, steer_id)
 
 
 def host_turn_ended(conv_id: str, *, reclaim: bool = False) -> None:
@@ -140,6 +161,8 @@ def ack(conv_id: str, lease_id: str) -> list[str]:
         done = [m for m in box if m["lease"] == lid]
         if done:
             _inbox[cid] = [m for m in box if m["lease"] != lid]
+        for m in done:
+            _mark_delivered(cid, m["id"])
         push = _run_push.get(cid)
     if not done:
         return []

@@ -91,6 +91,24 @@ def test_taken_back_drops_leased_copy(monkeypatch):
         steer.end_run("c")
 
 
+def test_stop_after_a_tool_took_the_queued_prompt_says_delivered(monkeypatch):
+    import frontend.ui_web.panel_api  # noqa: F401 - loads panel_chats the way the app does
+    from frontend.ui_web.panel_chats.send import steer_message
+
+    _clock(monkeypatch)
+    steer.bind_run("stop", lambda e: None)
+    steer.post("stop", "q1", "tahst aboe 30kthat uefn allows")
+    steer.post("stop", "q2", "never taken")
+    lease = steer.take("stop")
+    steer.post("stop", "q2", "")  # q2 was edited back out; only q1 rode on the tool result
+    steer.ack("stop", lease["lease_id"])
+    steer.end_run("stop")  # Stop: the turn is gone, the composer drains its queue
+    assert steer_message(None, "stop", "q1", "") == {"ok": False, "delivered": True}
+    assert steer_message(None, "stop", "q2", "") == {"ok": False, "delivered": False}
+    steer.delivered("stop", "h1")  # an agent host's user_steered event reached the app
+    assert steer.was_delivered("stop", "h1") and not steer.was_delivered("other", "q1")
+
+
 def test_steer_note_rides_on_every_result_shape():
     from mcp.types import CallToolResult, TextContent
 

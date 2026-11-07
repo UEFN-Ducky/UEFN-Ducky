@@ -4557,8 +4557,9 @@ export interface PanelApi {
   restore_context(conv_id: string, segments: string[], mode?: AgentMode, model?: string): Promise<ContextControlResult>;
   get_session_files(conv_id: string): Promise<SessionFile[]>;
   cancel_agent(conv_id?: string): Promise<boolean>;
-  /** Send now while a turn runs: it takes the message at its next tool call. ok false = no turn runs. */
-  steer_message?(conv_id: string, steer_id: string, text: string): Promise<{ ok?: boolean }>;
+  /** Send now while a turn runs: it takes the message at its next tool call. ok false = no turn runs.
+   *  Empty text takes it back; delivered true = a turn already took it in (never send it again). */
+  steer_message?(conv_id: string, steer_id: string, text: string): Promise<{ ok?: boolean; delivered?: boolean }>;
   /** Wait until the agent thread for this chat is gone (e.g. after Stop). */
   wait_for_agent_idle?(conv_id: string, timeout?: number): Promise<boolean>;
   report_ui_perf(entries: Array<Record<string, unknown>>): Promise<boolean>;

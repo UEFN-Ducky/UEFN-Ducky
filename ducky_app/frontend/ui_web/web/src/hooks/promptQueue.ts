@@ -128,6 +128,32 @@ export function isPromptDrainLocked(chatId: string): boolean {
   return drainLocks.has(chatId);
 }
 
+/** The api calls {@link queuedPromptStillOwed} needs (PanelApi's, narrowed for tests). */
+export interface QueuedPromptCheckApi {
+  wait_for_agent_idle?(conv_id: string, timeout?: number): Promise<boolean>;
+  steer_message?(conv_id: string, steer_id: string, text: string): Promise<{ ok?: boolean; delivered?: boolean }>;
+}
+
+/**
+ * Whether a queued prompt still has to run as its own turn. Text queued mid-turn is also
+ * offered to that turn (steer); a tool call may take it in just as Stop ends the turn, and
+ * the turn then shows it. So once the old turn is gone, take the offer back and ask the
+ * backend: delivered = already in the chat, never send it again (one bubble, one run).
+ */
+export async function queuedPromptStillOwed(
+  api: QueuedPromptCheckApi,
+  chatId: string,
+  id: string,
+): Promise<boolean> {
+  try {
+    await api.wait_for_agent_idle?.(chatId, 15.0);
+  } catch {
+    /* ignore: check anyway */
+  }
+  const res = await Promise.resolve(api.steer_message?.(chatId, id, "")).catch(() => null);
+  return !res?.delivered;
+}
+
 export function subscribePromptQueue(chatId: string, listener: () => void): () => void {
   let set = listeners.get(chatId);
   if (!set) {
