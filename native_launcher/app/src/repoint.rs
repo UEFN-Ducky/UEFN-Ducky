@@ -65,7 +65,15 @@ pub fn pointer_launcher(file: &Path, base: &Path) -> Option<Pointer> {
     // `join` keeps an absolute `dir` as it is.
     let exe = base.join(dir).join(LAUNCHER_EXE);
     let version = v.get("version").and_then(Value::as_str).unwrap_or("").trim().to_string();
-    exe.is_file().then_some(Pointer { exe, version })
+    (exe.is_file() && looks_like_exe(&exe)).then_some(Pointer { exe, version })
+}
+
+/// A zero-filled or cut-short EXE makes Windows say "This app can't run on your PC": never
+/// hop to one, the root's own stub (the Python window) starts instead.
+fn looks_like_exe(p: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 2];
+    std::fs::File::open(p).and_then(|mut f| f.read_exact(&mut head)).is_ok() && &head == b"MZ"
 }
 
 /// `%LOCALAPPDATA%/UEFN-Ducky/versions/current.json` first (what Python writes), then
@@ -260,7 +268,7 @@ mod tests {
 
     fn touch(p: &Path) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, b"").unwrap();
+        std::fs::write(p, b"MZ").unwrap();
     }
 
     /// The test launcher's own version: older than every pointer below, unless on purpose.
@@ -335,6 +343,15 @@ mod tests {
 
     fn args() -> Vec<OsString> {
         ["uefn-ducky://a", "--background", "C:/a b.verse"].map(OsString::from).to_vec()
+    }
+
+    #[test]
+    fn a_broken_version_launcher_is_never_started() {
+        let l = Layout::new("zeros");
+        l.pointer(r#"{"version":"1.2.472","dir":"versions/app-1.2.472"}"#);
+        std::fs::write(&l.version, [0u8; 64]).unwrap();
+        assert_eq!(l.decide(false), Root::Stub(l.root.join(STUB_EXE)));
+        l.drop_all();
     }
 
     #[test]

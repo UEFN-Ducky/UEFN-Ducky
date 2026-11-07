@@ -447,7 +447,7 @@ mod tests {
         for d in [&root, &ver] {
             std::fs::create_dir_all(d.join(rel)).unwrap();
             std::fs::write(d.join(rel).join("index.html"), "<html>").unwrap();
-            std::fs::write(d.join(crate::repoint::LAUNCHER_EXE), "").unwrap();
+            std::fs::write(d.join(crate::repoint::LAUNCHER_EXE), "MZ").unwrap();
         }
         let stub = root.join(crate::repoint::STUB_EXE);
         // No pointer: the root's own UI.

@@ -376,12 +376,14 @@ def _host_started_fine() -> None:
     """1.2.431 and older have no agent-host branch: their hosts hop here through the GUI
     hand-off, which counts a start that never reaches the panel. Two chats and this
     version was marked bad ('isn't ready'), so the update never applied. A host that got
-    this far started fine: clear the count."""
+    this far started fine: clear the count. Only that: mark_ready here ran the root
+    launcher refresh in every host at once (and an older version's host repointed
+    current.json and the root launcher back to itself)."""
     try:
         from frontend import __version__
-        from frontend.app_versions import mark_ready
+        from frontend.app_versions import clear_starts
 
-        mark_ready(str(__version__))
+        clear_starts(str(__version__))
     except Exception:
         pass
 

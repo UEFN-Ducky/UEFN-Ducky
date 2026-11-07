@@ -181,11 +181,17 @@ LAUNCHER_FILES = (NATIVE_LAUNCHER_EXE, "WebView2Loader.dll")
 def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
     """Replace each of :data:`LAUNCHER_FILES` in ``dst_dir`` that differs from ``src_dir``'s.
     A running (locked) EXE is renamed aside first, Windows allows that, and removed next time.
-    Returns the names replaced; a failure leaves that file as it was."""
+    Returns the names replaced; a failure leaves that file as it was.
+
+    Every agent host used to run this at once: one shared ``.new`` name let one process
+    rename another's half-written copy into place, a root launcher Windows refused ("This
+    app can't run on your PC"). So each process copies to its own name, and only a copy
+    that reads back identical to a source starting with MZ is swapped in."""
     done: list[str] = []
     for name in LAUNCHER_FILES:
         src, dst = src_dir / name, dst_dir / name
         old = dst.with_name(name + ".old")
+        tmp = dst.with_name(f"{name}.{os.getpid()}.new")
         try:
             old.unlink(missing_ok=True)
         except OSError:
@@ -193,14 +199,19 @@ def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
         try:
             if not src.is_file() or not dst.is_file():
                 continue
-            if src.stat().st_size == dst.stat().st_size and src.read_bytes() == dst.read_bytes():
+            data = src.read_bytes()
+            if name.endswith(".exe") and data[:2] != b"MZ":
+                _log.warning("not refreshing %s: %s is not a Windows program", name, src)
                 continue
-            tmp = dst.with_name(name + ".new")
+            if len(data) == dst.stat().st_size and data == dst.read_bytes():
+                continue
             shutil.copy2(src, tmp)
             # A restart right after the rename kept the new name but not its bytes (an EXE
             # of zeros: "This app can't run on your PC"), so the data is on disk first.
             with open(tmp, "rb+") as fh:
                 os.fsync(fh.fileno())
+            if tmp.read_bytes() != data:
+                raise OSError(f"{tmp.name} does not match {src}")
             try:
                 os.replace(tmp, dst)
             except PermissionError:
@@ -210,7 +221,7 @@ def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
         except OSError:
             _log.warning("could not refresh %s in %s", name, dst_dir, exc_info=True)
             try:
-                dst.with_name(name + ".new").unlink(missing_ok=True)
+                tmp.unlink(missing_ok=True)
             except OSError:
                 pass
     return done
@@ -224,6 +235,13 @@ def mark_ready(version: str) -> None:
         refresh_root_launcher()
     except Exception:
         _log.warning("root launcher refresh failed", exc_info=True)
+    clear_starts(version)
+
+
+def clear_starts(version: str) -> None:
+    """``version`` started fine: its failed-start count goes back to zero. Nothing else, so
+    agent hosts (one per agent turn, maybe an older version's) never repoint current.json
+    or rewrite the root launcher."""
     boot = read_boot()
     row = _boot_row(boot, version)
     if not row.get("starts"):

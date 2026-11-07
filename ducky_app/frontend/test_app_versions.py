@@ -106,6 +106,34 @@ def test_a_running_root_launcher_is_renamed_aside_then_cleaned(tmp_path, monkeyp
     assert not (root / "Ducky-Launcher.exe.old").exists()
 
 
+def test_a_bad_copy_or_a_bad_source_never_replaces_the_root_launcher(tmp_path, monkeypatch) -> None:
+    """A copy another process cut short (or zeros) was renamed over the root launcher, and
+    every start from shortcuts and the Run key said "This app can't run on your PC"."""
+    new, root = _launcher_dirs(tmp_path)
+    real_copy = av.shutil.copy2
+    monkeypatch.setattr(av.shutil, "copy2", lambda s, d: Path(d).write_bytes(b"\0" * 15))
+    assert av.copy_launcher_files(new, root) == []
+    assert (root / "Ducky-Launcher.exe").read_bytes() == b"MZ 1.2.475 launcher"
+    assert sorted(p.name for p in root.iterdir()) == ["Ducky-Launcher.exe", "WebView2Loader.dll"]
+    monkeypatch.setattr(av.shutil, "copy2", real_copy)
+    (new / "Ducky-Launcher.exe").write_bytes(b"\0" * 15)  # a broken version folder
+    assert av.copy_launcher_files(new, root) == []
+    assert (root / "Ducky-Launcher.exe").read_bytes() == b"MZ 1.2.475 launcher"
+
+
+def test_agent_hosts_only_clear_their_start_count(monkeypatch) -> None:
+    """One host per agent turn ran mark_ready: all of them rewrote the root launcher at once,
+    and an older version's host repointed current.json back to itself."""
+    from frontend import launcher
+
+    calls: list[str] = []
+    monkeypatch.setattr(av, "refresh_root_launcher", lambda: calls.append("refresh"))
+    monkeypatch.setattr(av, "write_current", lambda *a, **k: calls.append("current"))
+    monkeypatch.setattr(av, "clear_starts", lambda v: calls.append(f"clear {v}"))
+    launcher._host_started_fine()
+    assert len(calls) == 1 and calls[0].startswith("clear ")
+
+
 def test_the_root_launcher_is_never_added_or_touched_outside_a_frozen_version(tmp_path, monkeypatch) -> None:
     new, root = _launcher_dirs(tmp_path)
     (root / "Ducky-Launcher.exe").unlink()
