@@ -13,6 +13,7 @@ const fake = vi.hoisted(() => {
     markTourCompleted: vi.fn(),
     reportFirstRunSetup: vi.fn(),
     welcomeAfterSetup: vi.fn(),
+    submitFeedback: vi.fn(() => Promise.resolve({ ok: true })),
   };
 });
 
@@ -29,6 +30,7 @@ vi.mock("../hooks/usePanelApi", () => ({
     list_coding_agents: () => Promise.resolve({ agents: [] }),
     get_settings: () => Promise.resolve({}),
     get_ide_statuses: () => Promise.resolve({}),
+    submit_feedback: fake.submitFeedback,
   }),
 }));
 vi.mock("../hooks/usePanelPushBus", () => ({
@@ -188,7 +190,9 @@ describe("GatewaySetupNotice", () => {
     expect(fake.reportFirstRunSetup).toHaveBeenLastCalledWith(true);
     fireEvent.click(screen.getByRole("radio", { name: "4 stars" }));
     expect(screen.getByText("4 of 5 · Great")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Any suggestions/), { target: { value: "More examples" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(fake.submitFeedback).toHaveBeenCalledWith({ message: "Setup rating: 4/5\n\nMore examples" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(fake.welcomeAfterSetup).toHaveBeenCalledOnce();
     // The app's own tours keep waiting until the welcome has run.

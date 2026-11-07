@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { createPortal } from "react-dom";
 import { Icons } from "../icons/Icons";
 import { onApiReady } from "../hooks/onApiReady";
+import { getApi } from "../hooks/usePanelApi";
 import {
   beginStoreInstall,
   clearStoreJobLater,
@@ -281,8 +282,14 @@ export function GatewaySetupNotice() {
     setRating(true);
   }, []);
 
-  const rated = useCallback((stars: number) => {
+  const rated = useCallback((stars: number, suggestion = "") => {
     usageTrack("setup.rating", { stars: String(stars) });
+    // A typed suggestion goes the way Settings > Feedback sends; never holds up the welcome.
+    if (suggestion) {
+      void getApi()
+        ?.submit_feedback?.({ message: `Setup rating: ${stars}/5\n\n${suggestion}` })
+        ?.catch(() => {});
+    }
     setRating(false);
     setWelcoming(true);
     void welcomeAfterSetup().finally(() => setWelcoming(false));

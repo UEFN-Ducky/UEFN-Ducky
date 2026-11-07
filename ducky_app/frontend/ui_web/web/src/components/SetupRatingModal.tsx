@@ -1,11 +1,13 @@
 /**
  * Shown once, right after the first-run setup is finished: "How was getting started?" with
- * 0–5 stars. Submit is the only way on, and it hands over to the welcome ducky.
+ * 1–5 stars. Picking a star opens an optional suggestions box below it. Submit (enabled once a
+ * star is picked) is the only way on, and it hands over to the welcome ducky.
  */
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
-const WORDS = ["No stars", "Not good", "Okay", "Good", "Great", "Loved it"];
+const WORDS = ["Pick 1 to 5 stars", "Not good", "Okay", "Good", "Great", "Loved it"];
+export const SUGGESTION_MAX = 2000;
 
 function Star({ on }: { on: boolean }) {
   return (
@@ -18,23 +20,31 @@ function Star({ on }: { on: boolean }) {
   );
 }
 
-export function SetupRatingModal({ onSubmit }: { onSubmit: (stars: number) => void }) {
+export function SetupRatingModal({ onSubmit }: { onSubmit: (stars: number, suggestion: string) => void }) {
   const [stars, setStars] = useState(0);
   const [hover, setHover] = useState(0);
+  const [suggestion, setSuggestion] = useState("");
   const group = useRef<HTMLDivElement>(null);
+  const more = useRef<HTMLDivElement>(null);
   const shown = hover || stars;
+  const picked = stars > 0;
 
   useEffect(() => {
     group.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, []);
 
+  // The suggestions box slides open under the stars the first time one is picked.
+  useEffect(() => {
+    if (picked) more.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }, [picked]);
+
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const step = e.key === "ArrowRight" || e.key === "ArrowUp" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowDown" ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const next = Math.max(0, Math.min(5, stars + step));
+    const next = Math.max(1, Math.min(5, stars + step));
     setStars(next);
-    group.current?.querySelectorAll<HTMLButtonElement>("button")[Math.max(0, next - 1)]?.focus();
+    group.current?.querySelectorAll<HTMLButtonElement>("button")[next - 1]?.focus();
   };
 
   return createPortal(
@@ -59,22 +69,45 @@ export function SetupRatingModal({ onSubmit }: { onSubmit: (stars: number) => vo
                 role="radio"
                 aria-checked={stars === n}
                 aria-label={`${n} star${n === 1 ? "" : "s"}`}
-                tabIndex={stars === n || (stars === 0 && n === 1) ? 0 : -1}
+                tabIndex={stars === n || (!picked && n === 1) ? 0 : -1}
                 className="setup-rating-btn"
                 onMouseEnter={() => setHover(n)}
-                onClick={() => setStars(stars === n ? 0 : n)}
+                onClick={() => setStars(n)}
               >
                 <Star on={n <= shown} />
               </button>
             ))}
           </div>
           <p className="setup-rating-word" aria-live="polite">
-            {shown} of 5 · {WORDS[shown]}
+            {shown ? `${shown} of 5 · ` : ""}
+            {WORDS[shown]}
           </p>
+          {picked && (
+            <div ref={more} className="setup-rating-more">
+              <label htmlFor="setup-rating-suggestion">
+                Any suggestions? <span className="setup-rating-optional">Optional</span>
+              </label>
+              <textarea
+                id="setup-rating-suggestion"
+                className="setup-rating-text"
+                rows={4}
+                maxLength={SUGGESTION_MAX}
+                placeholder="What would have made getting started better?"
+                value={suggestion}
+                onChange={(e) => setSuggestion(e.target.value)}
+              />
+            </div>
+          )}
         </div>
         <footer className="setup-wizard-foot">
           <span />
-          <button type="button" className="setup-wizard-btn is-primary" onClick={() => onSubmit(stars)}>
+          <button
+            type="button"
+            className="setup-wizard-btn is-primary"
+            disabled={!picked}
+            title={picked ? undefined : "Pick 1 to 5 stars first"}
+            onClick={() => picked && onSubmit(stars, suggestion.trim())}
+          >
             Submit
           </button>
         </footer>
