@@ -161,6 +161,21 @@ def test_switch_starts_the_new_version_and_leaves_without_stopping_bridges(monke
     assert handover["chats"] == [{"conv_id": "c1", "mode": "agent", "model": "ducky-ai"}]
 
 
+def test_switch_marks_the_run_closed_before_it_exits(monkeypatch) -> None:
+    # A switch that left usage.running at "1" read as "closed by itself" in the next version.
+    folder = app_versions.version_dir("1.2.413")
+    folder.mkdir(parents=True)
+    (folder / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    (folder / app_versions.READY_MARKER).write_text("{}", encoding="utf-8")
+    order: list[str] = []
+    monkeypatch.setattr(us, "_stop_chats", lambda: [])
+    monkeypatch.setattr(app_versions, "start_detached", lambda exe, args, env=None: order.append("start") or True)
+    monkeypatch.setattr("frontend.usage_stats.app_closing", lambda: order.append("closed"))
+    monkeypatch.setattr("frontend.ui_web.shutdown.hard_exit", lambda api=None, keep_others=False: order.append("exit"))
+    assert us.switch("1.2.413") == {"ok": True}
+    assert order == ["start", "closed", "exit"]
+
+
 def test_the_new_version_continues_the_chats_the_switch_stopped(monkeypatch) -> None:
     ran = []
     patch_turns(monkeypatch, "get_panel_push", lambda: print)

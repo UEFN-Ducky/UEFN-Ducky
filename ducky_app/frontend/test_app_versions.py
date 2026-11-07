@@ -187,6 +187,26 @@ def test_panel_hands_off_to_the_newest_and_leaves(monkeypatch) -> None:
     assert av.read_boot()["1.2.412"]["starts"] == 1
 
 
+def test_a_start_hand_off_leaves_the_last_runs_crash_flag_alone(monkeypatch) -> None:
+    # The hop runs before app_opened: marking the run closed here would hide a real crash
+    # of the run before from the version it hands to.
+    from frontend import usage_stats
+
+    _version("1.2.412")
+    touched: list = []
+    monkeypatch.setattr(usage_stats, "app_closing", lambda: touched.append("app_closing"))
+    monkeypatch.setattr(usage_stats, "_meta_set", lambda k, v: touched.append((k, v)))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.delenv(av.NO_HOP_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(Path("C:/Programs/UEFN Ducky/UEFN-Ducky.exe")))
+    monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe"])
+    monkeypatch.setattr(av, "start_detached", lambda exe, args, **k: True)
+    left: list = []
+    monkeypatch.setattr(av.os, "_exit", lambda code: left.append(code))
+    av.hand_off("1.2.410", bridge=False)
+    assert left == [0] and touched == []
+
+
 def test_bridge_runs_the_newest_on_its_own_stdio(monkeypatch) -> None:
     folder = _version("1.2.412")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
