@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from backend.bridge import shared_mcp
+from backend.bridge import call_limits, shared_mcp
 from backend.bridge.test_shared_mcp import FakeMcp, _hello, serve
 
 
@@ -104,7 +104,7 @@ def test_quick_reads_answer_while_six_clients_hold_more_waits_than_the_old_pool(
 
 
 def test_a_quick_read_stuck_past_its_deadline_returns_an_error(daemon, monkeypatch) -> None:
-    monkeypatch.setattr(shared_mcp, "QUICK_READ_LIMIT_S", 0.3)
+    monkeypatch.setattr(call_limits, "QUICK_READ_LIMIT_S", 0.3)
     sock = _hello("stuck-read")
     try:
         started = time.monotonic()

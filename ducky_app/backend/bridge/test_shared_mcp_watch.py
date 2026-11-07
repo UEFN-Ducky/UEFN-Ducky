@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.bridge import shared_mcp
+from backend.bridge import call_limits, shared_mcp
 
 
 class WatchMcp:
@@ -69,7 +69,7 @@ def _text(result: dict) -> str:
 
 @pytest.fixture
 def quick(monkeypatch):
-    monkeypatch.setattr(shared_mcp, "QUICK_TOOL_LIMIT_S", 0.3)
+    monkeypatch.setattr(call_limits, "QUICK_TOOL_LIMIT_S", 0.3)
     monkeypatch.setattr(shared_mcp, "STUCK_REPORT_S", 0.3)
 
 
@@ -88,7 +88,7 @@ def test_a_quick_tool_that_never_answers_is_stopped_and_says_where_it_waited(qui
 
 
 def test_a_plugin_tool_behind_ducky_call_tool_is_stopped_at_its_limit(quick, monkeypatch) -> None:
-    monkeypatch.setattr(shared_mcp, "PLUGIN_CALL_LIMIT_S", 0.6)
+    monkeypatch.setattr(call_limits, "PLUGIN_CALL_LIMIT_S", 0.6)
     mcp = WatchMcp(sync=set())
     hung = {"name": "roblox_call", "arguments": {"seconds": 30}}
     started = time.monotonic()
@@ -120,7 +120,7 @@ def test_a_wait_by_design_is_recorded_but_not_counted_as_stuck(quick, monkeypatc
     mcp = WatchMcp(sync=set())
     asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 0.6}, _ident()))
     assert len(counted) == 1 and counted[0][1] == "slow_render"  # the stat names the call that hung
-    monkeypatch.setattr(shared_mcp, "WAITS_BY_DESIGN", frozenset({"slow_render"}))
+    monkeypatch.setattr(call_limits, "WAITS_BY_DESIGN", frozenset({"slow_render"}))
     asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 0.6}, _ident()))
     assert len(counted) == 1  # a question or a test suite is not a hang
     assert [r["source"] for r in events.newest("tool_stuck", limit=5)][:2] == ["slow_render", "slow_render"]

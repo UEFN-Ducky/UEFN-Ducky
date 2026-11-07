@@ -25,6 +25,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from backend.bridge import call_limits
+from backend.bridge.call_limits import (  # noqa: F401 — re-exported for readers
+    PLUGIN_CALL_LIMIT_S, QUICK_READ_LIMIT_S, QUICK_READS, QUICK_TOOL_LIMIT_S, QUICK_TOOLS, WAITS_BY_DESIGN,
+)
+
 _ENV = "UEFN_DUCKY_SHARED_MCP"
 # Set by the supervisor on each agent host: its agents, their adapters and its daemon all
 # read and write this host's own state file.
@@ -65,21 +70,7 @@ _inflight: dict[tuple[int, str], asyncio.Future[Any]] = {}
 _shared_serving = False
 _embedded = False  # served inside an agent host: it never idles out on its own
 _listen_sock: socket.socket | None = None
-# Answered from Ducky's own tool catalog and skill index: a call past this never answers,
-# so it is stopped and the agent hears why. Oct 18 2026: a user's agent sat 29 minutes on
-# ducky_find_tools; agents (Claude Code) wait on an MCP call with no limit of their own.
-QUICK_TOOLS = frozenset({"ducky_get_tools", "ducky_find_tools", "skill_search", "skill_read_subskill"})
-QUICK_TOOL_LIMIT_S = 60.0
-# Reads that answer in milliseconds. Nov 4 2026: 13 of these hung until Claude Code's
-# 1800 s abort; past this limit the agent hears why instead of waiting half an hour.
-QUICK_READS = frozenset({
-    "ducky_get_plan", "ducky_health", "ducky_get_status", "ducky_agent_list", "ducky_agent_transcript",
-    "ducky_agent_inbox", "ducky_list_chats", "ducky_read_chat", "ducky_terminal_read_output",
-    "ducky_terminal_list", "ducky_get_errors", "workspace_read_file", "workspace_read_files",
-    "workspace_search", "workspace_find", "workspace_file_outline", "workspace_list_dir", "workspace_tree",
-    "workspace_git", "project_memory_list", "project_memory_get",
-})
-QUICK_READ_LIMIT_S = 30.0
+# Call time limits (QUICK_*, *_LIMIT_S, WAITS_BY_DESIGN) live in call_limits.py.
 # A call still running sends MCP notifications/progress this often (when the client gave a
 # progressToken). Claude Code aborts a call with "no response or progress for 1800s": on
 # Nov 4 2026 five ducky_ask_user calls died that way while the person was still deciding.
@@ -91,18 +82,6 @@ _QUICK_THREADS = 8
 # Any other call still running this long: where it waits is recorded (events kind
 # "tool_stuck") and it keeps running, since workflows, renders and questions take minutes.
 STUCK_REPORT_S = 120.0
-# A Store plugin or nested MCP tool run through ducky_call_tool: Codex waits on an MCP call
-# forever, and 9 of 15 stuck calls on Oct 31 2026 were these. Long enough for a render or
-# a 3D generation; a tool that waits by design (WAITS_BY_DESIGN) has no limit.
-# ponytail: one limit for every plugin tool; a per-tool limit if a real tool needs longer.
-PLUGIN_CALL_LIMIT_S = 900.0
-# Calls that wait by design (on the person, or a command / workflow / window with its own
-# timeout): still recorded where they wait, but not counted as an anonymous agent.stuck,
-# which said "stuck" 117 times a day for questions and test suites (Oct 25 2026).
-WAITS_BY_DESIGN = frozenset({
-    "ducky_ask_user", "ducky_terminal_run", "sandbox_run", "run_workflow", "run_workflow_node",
-    "ducky_wait_uefn_ready", "uefn_wait_window", "uefn_logs_wait", "fortnite_client_wait", "playtester_wait",
-})
 
 
 def enabled(settings: Any | None = None) -> bool:
@@ -743,27 +722,16 @@ def _in_own_thread(fn: Any, thread: dict[str, Any], name: str) -> asyncio.Future
     return fut
 
 
-def _call_limit(name: str, inner: str) -> float | None:
-    """Seconds a call may take before it is stopped; None = no limit (it may wait by design)."""
-    if inner in QUICK_READS:
-        return QUICK_READ_LIMIT_S
-    if inner in QUICK_TOOLS:
-        return QUICK_TOOL_LIMIT_S
-    if name == "ducky_call_tool" and inner != name and inner not in WAITS_BY_DESIGN:
-        return PLUGIN_CALL_LIMIT_S
-    return None
-
-
 async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any], ident: Any,
                    waits: dict[str, Any] | None = None, arguments: dict[str, Any] | None = None) -> Any:
-    """Await one tool call. A quick tool past :data:`QUICK_TOOL_LIMIT_S` is stopped and
+    """Await one tool call. A call past its :func:`call_limits.call_limit` is stopped and
     raises :class:`_CallTimedOut`; any call past the first check is recorded where it waits."""
     inner = name
     if name == "ducky_call_tool":
         from backend.agent.toolsets import effective_tool_name
 
         inner = effective_tool_name(name, arguments if isinstance(arguments, dict) else {})
-    limit = _call_limit(name, inner)
+    limit = call_limits.call_limit(name, inner)
     first = min(limit, STUCK_REPORT_S) if limit is not None else STUCK_REPORT_S
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
@@ -876,7 +844,7 @@ def _report_stuck(name: str, seconds: float, work: Any, thread: dict[str, Any], 
                    else f"{name} still running after {seconds:.0f} s")
         events.insert("tool_stuck", ts=now, source=name, message=message, payload=payload)
         events.trim("tool_stuck", older_than=now - 30 * 86400, keep=200)
-        if name in WAITS_BY_DESIGN or waiting.get("panel_rpc") == "ask_user":
+        if name in call_limits.WAITS_BY_DESIGN or waiting.get("panel_rpc") == "ask_user":
             return
         from frontend import usage_stats
 
