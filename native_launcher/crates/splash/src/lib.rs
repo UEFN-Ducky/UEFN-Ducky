@@ -1,9 +1,8 @@
-//! The launcher's splash: the duck logo centred on the theme background, painted in the
-//! main window's client area from the first frame until the page has painted.
+//! The launcher's splash: the theme background, painted in the main window's client area
+//! from the first frame until the page has painted (the page then shows the app's outline).
 //!
-//! The logo is `assets/OnlineMCPIcon.png` (the one `frontend/early_splash.py` shows),
-//! pre-scaled to 220 px and composited onto the theme colour at build time
-//! (`assets/logo_220.bgra`, top-down BGRA), so drawing it needs no image decoder.
+//! `paint` draws no logo any more; `LOGO_BGRA` / `logo_rect` stay for the floating-duck
+//! asset checks only.
 
 mod first_paint;
 pub use first_paint::{first_paint, FirstPaint};
@@ -89,56 +88,20 @@ impl Splash {
     }
 }
 
-/// Paint the splash into a window DC: theme background plus the logo. Call from
-/// WM_PAINT (between BeginPaint/EndPaint) while `Splash::visible()`.
+/// Paint the splash into a window DC: the theme background only, no logo, so the window
+/// reads as Ducky's own (dark, like the page about to cover it) instead of a logo screen.
+/// Call from WM_PAINT (between BeginPaint/EndPaint) while `Splash::visible()`.
 ///
 /// # Safety
 /// `hdc` must be a valid device context for the window being painted.
 #[cfg(windows)]
-pub unsafe fn paint(hdc: windows_sys::Win32::Graphics::Gdi::HDC, client_w: i32, client_h: i32, dpi: u32) {
+pub unsafe fn paint(hdc: windows_sys::Win32::Graphics::Gdi::HDC, client_w: i32, client_h: i32, _dpi: u32) {
     use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{
-        CreateSolidBrush, DeleteObject, FillRect, SetBrushOrgEx, SetStretchBltMode, StretchDIBits, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HALFTONE, SRCCOPY,
-    };
+    use windows_sys::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, FillRect};
 
     let (r, g, b) = BACKGROUND_RGB;
     let brush = CreateSolidBrush(r as u32 | (g as u32) << 8 | (b as u32) << 16);
     let all = RECT { left: 0, top: 0, right: client_w, bottom: client_h };
     FillRect(hdc, &all, brush);
     DeleteObject(brush);
-
-    let dst = logo_rect(client_w, client_h, dpi);
-    if dst.width() <= 0 || LOGO_BGRA.len() != (LOGO_PX * LOGO_PX * 4) as usize {
-        return;
-    }
-    let mut bmi: BITMAPINFO = std::mem::zeroed();
-    bmi.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: LOGO_PX,
-        biHeight: -LOGO_PX, // top-down
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB,
-        ..std::mem::zeroed()
-    };
-    if dst.width() != LOGO_PX {
-        SetStretchBltMode(hdc, HALFTONE);
-        SetBrushOrgEx(hdc, 0, 0, std::ptr::null_mut());
-    }
-    StretchDIBits(
-        hdc,
-        dst.left,
-        dst.top,
-        dst.width(),
-        dst.height(),
-        0,
-        0,
-        LOGO_PX,
-        LOGO_PX,
-        LOGO_BGRA.as_ptr().cast(),
-        &bmi,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
 }

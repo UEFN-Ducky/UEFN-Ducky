@@ -67,16 +67,12 @@ fn paint_draws_into_a_memory_dc() {
         paint(dc, 920, 640, 96);
         let corner = GetPixel(dc, 0, 0);
         assert_eq!(corner, 0x000A0A0A, "background is the theme colour");
-        let r = logo_rect(920, 640, 96);
-        let mut differs = false;
-        for y in (r.top..r.bottom).step_by(4) {
-            for x in (r.left..r.right).step_by(4) {
-                if GetPixel(dc, x, y) != 0x000A0A0A {
-                    differs = true;
-                }
+        // No logo: the whole window, centre included, is the theme background.
+        for y in (0..640).step_by(16) {
+            for x in (0..920).step_by(16) {
+                assert_eq!(GetPixel(dc, x, y), 0x000A0A0A, "no logo at {x},{y}");
             }
         }
-        assert!(differs, "logo was drawn");
         SelectObject(dc, old);
         DeleteObject(bmp);
         DeleteDC(dc);
