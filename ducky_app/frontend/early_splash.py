@@ -1,6 +1,8 @@
-"""Native splash shown before heavy panel imports (so double-click is never a blank wait).
+"""Native first frame shown before heavy panel imports (so double-click is never a blank wait).
 
-Floating duck only — no black box, no "Starting…" text. Press-and-hold to drag.
+The app's own outline, not a logo: a dark frame with its top bar, exactly where the main
+window opens (its saved bounds), so the window seems to open at once and the real one
+replaces it in place. Press-and-hold to drag.
 """
 
 from __future__ import annotations
@@ -9,34 +11,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Color-keyed away so only the duck (or fallback text) is visible.
-_KEY = "#0a0a0a"
-_KEY_RGB = (0x0A, 0x0A, 0x0A)
-# Soft PNG edges composite onto the key and leave a dark halo that is *not*
-# exact #0a0a0a, so -transparentcolor cannot punch them out. Binary-matte first.
-_ALPHA_CUTOFF = 40
-_DUCK_PX = 220
-_PAD = 10
+# The theme background and border (critical.css --bg / --border), the header's height.
+_BG = "#0a0a0a"
+_BORDER = "#262626"
+_HEADER_PX = 34
+# webview_app.py's first-run size.
+_DEFAULT_W, _DEFAULT_H = 920, 640
 
 _splash: Any | None = None
-_photo: Any | None = None  # keep PhotoImage alive
 _drag: dict[str, int] = {"x": 0, "y": 0}
-
-
-def _matte_for_colorkey(img: Any) -> Any:
-    """Hard-matte RGBA for Win32 ``-transparentcolor`` (no fringe / fake shadow)."""
-    rgba = img.convert("RGBA")
-    kr, kg, kb = _KEY_RGB
-    out: list[tuple[int, int, int, int]] = []
-    for r, g, b, a in rgba.get_flattened_data():  # getdata() goes away in Pillow 14
-        if int(a) < _ALPHA_CUTOFF:
-            out.append((kr, kg, kb, 255))
-            continue
-        if (int(r), int(g), int(b)) == (kr, kg, kb):
-            r = min(255, int(r) + 1)
-        out.append((int(r), int(g), int(b), 255))
-    rgba.putdata(out)
-    return rgba
 
 
 def _logo_png() -> Path | None:
@@ -63,6 +46,23 @@ def _logo_png() -> Path | None:
     return None
 
 
+def frame_rect(saved: dict[str, int] | None, screen_w: int, screen_h: int) -> tuple[int, int, int, int]:
+    """Where the main window will open: its saved bounds, or the first-run size centred."""
+    if saved and saved.get("width", 0) >= 200 and saved.get("height", 0) >= 150:
+        return saved["x"], saved["y"], saved["width"], saved["height"]
+    w, h = _DEFAULT_W, _DEFAULT_H
+    return max(0, (screen_w - w) // 2), max(0, (screen_h - h) // 2), w, h
+
+
+def _saved_bounds() -> dict[str, int] | None:
+    try:
+        from frontend.ui_web.window_bounds import get_bounds
+
+        return get_bounds("main")
+    except Exception:
+        return None
+
+
 def _bind_drag(widget: Any, root: Any) -> None:
     def on_press(event: Any) -> None:
         _drag["x"] = int(event.x_root) - int(root.winfo_x())
@@ -78,8 +78,8 @@ def _bind_drag(widget: Any, root: Any) -> None:
 
 
 def show() -> Any | None:
-    """Paint a topmost floating duck immediately. Call from the main thread only."""
-    global _splash, _photo
+    """Paint the app's outline where its window opens. Call from the main thread only."""
+    global _splash
     if sys.platform != "win32":
         return None
     if _splash is not None:
@@ -91,56 +91,19 @@ def show() -> Any | None:
 
     root = tk.Tk()
     root.overrideredirect(True)
-    root.configure(bg=_KEY)
-    width = height = _DUCK_PX + _PAD * 2
+    root.configure(bg=_BG)
     try:
-        sw = root.winfo_screenwidth()
-        sh = root.winfo_screenheight()
-        x = max(0, (sw - width) // 2)
-        y = max(0, (sh - height) // 2)
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     except Exception:
-        x, y = 200, 160
-    root.geometry(f"{width}x{height}+{x}+{y}")
-    try:
-        root.attributes("-topmost", True)
-    except Exception:
-        pass
-    try:
-        root.attributes("-transparentcolor", _KEY)
-    except Exception:
-        pass
+        sw, sh = _DEFAULT_W + 400, _DEFAULT_H + 320
+    x, y, w, h = frame_rect(_saved_bounds(), sw, sh)
+    root.geometry(f"{w}x{h}+{x}+{y}")
 
-    frame = tk.Frame(root, bg=_KEY, borderwidth=0, highlightthickness=0)
-    frame.place(relx=0.5, rely=0.5, anchor="center")
-
-    logo = _logo_png()
-    label: Any | None = None
-    if logo is not None:
-        try:
-            from frontend.tray_icon import open_png
-            from PIL import Image, ImageTk
-
-            img = open_png(logo).convert("RGBA").resize((_DUCK_PX, _DUCK_PX), Image.Resampling.LANCZOS)
-            img = _matte_for_colorkey(img)
-            _photo = ImageTk.PhotoImage(img)
-            label = tk.Label(frame, image=_photo, bg=_KEY, borderwidth=0, highlightthickness=0)
-            label.pack()
-        except Exception:
-            label = None
-    if label is None:
-        label = tk.Label(
-            frame,
-            text="UEFN Ducky",
-            fg="#ededed",
-            bg=_KEY,
-            font=("Segoe UI", 18, "bold"),
-            borderwidth=0,
-            highlightthickness=0,
-        )
-        label.pack()
-
-    _bind_drag(label, root)
-    _bind_drag(frame, root)
+    bar = tk.Frame(root, bg=_BG, height=_HEADER_PX, borderwidth=0, highlightthickness=0)
+    bar.pack(side="top", fill="x")
+    line = tk.Frame(root, bg=_BORDER, height=1, borderwidth=0, highlightthickness=0)
+    line.pack(side="top", fill="x")
+    _bind_drag(bar, root)
     _bind_drag(root, root)
 
     try:
@@ -153,13 +116,11 @@ def show() -> Any | None:
     return root
 
 
-
 def dismiss() -> None:
     """Close the early splash (idempotent). Call from the same thread as show()."""
-    global _splash, _photo
+    global _splash
     root = _splash
     _splash = None
-    _photo = None
     if root is None:
         return
     try:
@@ -169,7 +130,7 @@ def dismiss() -> None:
 
 
 if __name__ == "__main__":
-    # Demo: floating duck for 5s — drag it around, then exit.
+    # Demo: the outline for 5s — drag it around, then exit.
     import time
 
     show()

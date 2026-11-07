@@ -13,15 +13,15 @@ def test_logo_png_resolves_in_dev_tree() -> None:
     assert path.name == "OnlineMCPIcon.png"
 
 
-def test_matte_for_colorkey_kills_soft_edges() -> None:
-    from PIL import Image
-
-    img = Image.new("RGBA", (2, 1), (0, 0, 0, 0))
-    img.putpixel((0, 0), (255, 200, 0, 20))  # soft fringe → key
-    img.putpixel((1, 0), (255, 200, 0, 200))  # duck → opaque
-    out = early_splash._matte_for_colorkey(img)
-    assert out.getpixel((0, 0)) == (*early_splash._KEY_RGB, 255)
-    assert out.getpixel((1, 0)) == (255, 200, 0, 255)
+def test_the_first_frame_opens_where_the_window_will() -> None:
+    """The outline sits on the main window's saved bounds, so the real window replaces it in place."""
+    saved = {"x": 100, "y": 50, "width": 1400, "height": 900}
+    assert early_splash.frame_rect(saved, 2560, 1440) == (100, 50, 1400, 900)
+    # First run (or junk bounds): webview_app's 920x640, centred.
+    assert early_splash.frame_rect(None, 1920, 1080) == (500, 220, 920, 640)
+    assert early_splash.frame_rect({"x": 0, "y": 0, "width": 10, "height": 10}, 1920, 1080) == (500, 220, 920, 640)
+    # A screen smaller than the window never puts it off the top-left.
+    assert early_splash.frame_rect(None, 800, 600)[:2] == (0, 0)
 
 
 def test_open_png_skips_avif_codec() -> None:
@@ -52,7 +52,7 @@ def test_handoff_defaults_are_short() -> None:
 
 if __name__ == "__main__":
     test_logo_png_resolves_in_dev_tree()
-    test_matte_for_colorkey_kills_soft_edges()
+    test_the_first_frame_opens_where_the_window_will()
     test_open_png_skips_avif_codec()
     test_handoff_defaults_are_short()
     print("ok")
