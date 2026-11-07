@@ -22,7 +22,9 @@ Rules:
   :data:`CRASH_WATCH_ENTRY`, so a reopened editor is never mistaken for a crash.
 * **Memory** is never a reason to refuse: a heavy call (:func:`is_heavy_op`) only anchors
   the baseline :func:`uefn_growth` measures from (UEFN's size at its first heavy call, per
-  UEFN process), which the status shows. Memory is read only here, never polled.
+  UEFN process), which the status shows. Memory is read only here, never polled. After a
+  heavy call answers on a UEFN grown past the limit, :func:`free_uefn_memory` runs once in
+  the background (one at a time, at most every :data:`FREE_GAP_SEC`); it never delays a call.
 * **No deadline** -- a UEFN call waits while UEFN works. It ends when UEFN answers, its
   connection drops (UEFN closed), or the person presses Stop. Only a caller's own
   ``timeout`` stops it early (:class:`EditorTimeout`). UEFN is never killed from here.
@@ -269,6 +271,137 @@ def _note_heavy(op: str, heavy: bool | None) -> None:
         uefn_growth()
 
 
+# Measured on a 25.6 GB UEFN (27k actors): EmptyWorkingSet gave the PC 4-8 GB of RAM back;
+# collect_garbage, Mem.Trim and TRANSACTION RESET freed under 0.2 GB, so none of them run.
+FREED_FILE = "uefn_memory_freed.json"
+FREE_GAP_SEC = 60.0
+_free_lock = threading.Lock()
+_FREE_NOTE = (
+    "Moved UEFN's idle memory out of RAM (Windows EmptyWorkingSet): the PC gets that RAM back, "
+    "UEFN pages back in what it touches. UEFN's private bytes stay the same; only reopening UEFN "
+    "lowers them. Garbage collection and the undo-buffer reset free under 0.2 GB, so they are not "
+    "run and the undo history is left as it is."
+)
+
+
+def _working_set(pid: int) -> int:
+    import psutil
+
+    return int(psutil.Process(pid).memory_info().rss)
+
+
+def _empty_working_set(pid: int) -> bool:
+    """Windows EmptyWorkingSet on ``pid``: its pages leave RAM, its memory stays intact."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32, psapi = ctypes.WinDLL("kernel32"), ctypes.WinDLL("psapi")
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    psapi.EmptyWorkingSet.argtypes = (wintypes.HANDLE,)
+    handle = kernel32.OpenProcess(0x0400 | 0x0100, False, pid)  # QUERY_INFORMATION | SET_QUOTA
+    if not handle:
+        return False
+    try:
+        return bool(psapi.EmptyWorkingSet(handle))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _freed_path() -> Path:
+    from frontend.settings import default_app_data_dir
+
+    return Path(default_app_data_dir()) / FREED_FILE
+
+
+def last_freed() -> dict[str, Any]:
+    """The last :func:`free_uefn_memory` result ``{freed_gb, at, pid, why}``, or {}."""
+    try:
+        data = json.loads(_freed_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def free_uefn_memory(why: str = "on request") -> dict[str, Any]:
+    """Give the PC back the RAM UEFN holds but isn't using; reports the GB freed. Never
+    touches UEFN's objects, level or undo history, so it is safe while UEFN works."""
+    uefn = _uefn_memory()
+    if uefn is None:
+        return {"ok": False, "error": "UEFN isn't running."}
+    pid, _started, private = uefn
+    before = _working_set(pid)
+    if not _empty_working_set(pid):
+        return {"ok": False, "error": "Windows refused to trim UEFN's memory."}
+    after = _working_set(pid)
+    record = {
+        "freed_gb": round(max(0, before - after) / _GB, 1),
+        "at": _now(),
+        "pid": pid,
+        "why": why,
+    }
+    try:
+        path = _freed_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record), encoding="utf-8")
+    except OSError:
+        pass
+    return {
+        "ok": True,
+        **record,
+        "working_set_gb": {"before": round(before / _GB, 1), "after": round(after / _GB, 1)},
+        "private_gb": round(private / _GB, 1),
+        "note": _FREE_NOTE,
+    }
+
+
+def _spawn(fn: Callable[[], None]) -> None:
+    threading.Thread(target=fn, name="uefn-free-memory", daemon=True).start()
+
+
+def _after_heavy(op: str, heavy: bool | None) -> None:
+    """After a heavy call answered: free UEFN's idle RAM in the background when UEFN grew
+    past the limit. One at a time, at most every FREE_GAP_SEC; never raises."""
+    try:
+        if not (is_heavy_op(op) if heavy is None else heavy):
+            return
+        growth = uefn_growth()
+        if not growth or growth["grown_gb"] <= growth["limit_gb"]:
+            return
+        if _now() - float(last_freed().get("at") or 0) < FREE_GAP_SEC:
+            return
+        if not _free_lock.acquire(blocking=False):
+            return
+    except Exception:
+        return
+
+    def _run() -> None:
+        try:
+            free_uefn_memory("after the last heavy call")
+        except Exception:
+            pass
+        finally:
+            _free_lock.release()
+
+    _spawn(_run)
+
+
+def uefn_memory_status() -> dict[str, Any] | None:
+    """Growth plus the last free for ``ducky_get_status``; None when UEFN isn't running."""
+    growth = uefn_growth()
+    if growth is None:
+        return None
+    out: dict[str, Any] = dict(growth)
+    line = f"UEFN +{growth['grown_gb']} GB since load"
+    freed = last_freed()
+    uefn = _uefn_memory()
+    if freed and uefn and freed.get("pid") == uefn[0]:
+        out["last_freed"] = freed
+        line += f", freed {freed.get('freed_gb')} GB RAM {freed.get('why') or ''}".rstrip()
+    out["line"] = line
+    return out
+
+
 def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T], *, heavy: bool | None = None) -> T:
     """Run one editor call ``fn`` for ``chat_id``; a mutating one waits for the lease first.
 
@@ -276,7 +409,9 @@ def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T], *, heavy: b
     if mutating:
         take_lease(chat_id, op)
     _note_heavy(op, heavy)
-    return fn()
+    result = fn()
+    _after_heavy(op, heavy)
+    return result
 
 
 def _ask_person(chat_id: str, verb: str, reason: str) -> bool:
@@ -363,11 +498,13 @@ async def acall(
     result = fn()
     if inspect.isawaitable(result):
         if timeout is None or timeout <= 0:
-            return await result
-        try:
-            result = await asyncio.wait_for(result, timeout)
-        except asyncio.TimeoutError:
-            if chat_id:
-                release_lease(chat_id)
-            raise EditorTimeout(_timeout_message(op, timeout)) from None
+            result = await result
+        else:
+            try:
+                result = await asyncio.wait_for(result, timeout)
+            except asyncio.TimeoutError:
+                if chat_id:
+                    release_lease(chat_id)
+                raise EditorTimeout(_timeout_message(op, timeout)) from None
+    _after_heavy(op, heavy)
     return result

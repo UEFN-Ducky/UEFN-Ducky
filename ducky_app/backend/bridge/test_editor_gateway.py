@@ -33,6 +33,9 @@ def memory(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
     monkeypatch.setattr(editor_gateway, "_uefn_memory", _uefn)
     monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
     monkeypatch.setattr(editor_gateway, "_growth_limit_gb", lambda: 4.0)
+    monkeypatch.setattr(editor_gateway, "_freed_path", lambda: tmp_path / "uefn_memory_freed.json")
+    monkeypatch.setattr(editor_gateway, "_spawn", lambda fn: None)  # never trims a real process
+    monkeypatch.setattr(editor_gateway, "_free_lock", __import__("threading").Lock())
     return state
 
 

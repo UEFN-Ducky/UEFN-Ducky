@@ -469,6 +469,14 @@ def ducky_get_status(pretty: bool = False) -> str:
     except Exception:
         result["plugin_connections"] = []
     try:
+        from backend.bridge.editor_gateway import uefn_memory_status
+
+        memory = uefn_memory_status()
+        if memory:
+            result["uefn_memory"] = memory
+    except Exception:
+        pass
+    try:
         from frontend.ui_web.verse_editor.urc.island_watch import for_agents, locks_for_agents
 
         updates = for_agents()

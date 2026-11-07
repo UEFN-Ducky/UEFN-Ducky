@@ -48,6 +48,7 @@ def ducky_self_care(action: str, target: str = "", pretty: bool = False) -> str:
     """Fix what ducky_health found. action: stop_sandbox (target = a chat id, or all),
     close_idle_terminals (agent terminals that are done; never the person's or running ones),
     stop_orphan_bridges (Ducky tool servers whose IDE or agent is gone), trim_caches (video
-    downloads), prune_sandboxes (old ones and deleted chats'), collect_garbage. Returns what it
-    did and the app's memory before and after."""
+    downloads), prune_sandboxes (old ones and deleted chats'), collect_garbage, free_uefn_memory
+    (gives the PC back the RAM UEFN holds but isn't using: freed_gb; safe while UEFN works, its
+    undo history is kept). Returns what it did and the app's memory before and after."""
     return tool_json(_in_window("ducky_self_care_run", {"action": action, "target": target}), pretty=pretty)

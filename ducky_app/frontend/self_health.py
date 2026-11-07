@@ -699,7 +699,7 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
 
 
 ACTIONS = ("stop_sandbox", "close_idle_terminals", "stop_orphan_bridges", "trim_caches", "prune_sandboxes", "collect_garbage",
-           "free_ducky_memory")
+           "free_ducky_memory", "free_uefn_memory")
 
 
 def self_care(action: str, target: str = "") -> dict[str, Any]:
@@ -736,6 +736,10 @@ def self_care(action: str, target: str = "") -> dict[str, Any]:
         done["objects_freed"] = gc.collect()
     elif act == "free_ducky_memory":
         done.update(free_ducky_memory())
+    elif act == "free_uefn_memory":
+        from backend.bridge.editor_gateway import free_uefn_memory
+
+        done.update(free_uefn_memory())
     else:
         return {"ok": False, "error": f"action must be one of: {', '.join(ACTIONS)}."}
     after = psutil.Process(os.getpid()).memory_info().rss

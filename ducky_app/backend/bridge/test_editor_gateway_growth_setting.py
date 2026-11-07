@@ -19,6 +19,9 @@ def uefn(monkeypatch: pytest.MonkeyPatch, tmp_path) -> dict:
     monkeypatch.setattr(editor_gateway, "_uefn_memory", lambda: state["proc"])
     monkeypatch.setattr(editor_gateway, "_baseline_path", lambda: tmp_path / "uefn_memory_baseline.json")
     monkeypatch.setattr(editor_gateway, "_lease_path", lambda: tmp_path / "editor_lease.json")
+    monkeypatch.setattr(editor_gateway, "_freed_path", lambda: tmp_path / "uefn_memory_freed.json")
+    monkeypatch.setattr(editor_gateway, "_spawn", lambda fn: None)  # never trims a real process
+    monkeypatch.setattr(editor_gateway, "_free_lock", __import__("threading").Lock())
     import frontend.duckyos_account as account
 
     monkeypatch.setattr(account, "effective_allow_settings_write", lambda value: True)
