@@ -207,6 +207,36 @@ def test_the_setup_stays_open_until_finish_then_makes_the_welcome_ducky_once(iso
     assert opened == [made["id"]]
 
 
+def test_a_restart_resumes_the_setup_step_then_the_first_run_tour_step_until_it_ends(isolated_appdata, monkeypatch) -> None:
+    from frontend.starter_llm_gateways import save_setup_progress
+
+    assert starter_setup_status()["setup_step"] == "welcome"  # a fresh install
+    for step in ("plugins", "ai", "defaults", "rating"):
+        assert save_setup_progress(step) is True
+        status = starter_setup_status()  # what the next start reads back
+        assert status["pending_first_run"] is True and status["setup_step"] == step
+    assert save_setup_progress("3") is False  # no tour while the setup is open
+
+    api, _opened = _welcome_api(monkeypatch)
+    made = api.finish_first_run_setup()  # the rating was submitted
+    status = starter_setup_status()
+    assert status["pending_first_run"] is False and "setup_step" not in status
+    assert status["first_run_tour"] == {"step": 0, "chat_id": made["id"]}
+    assert save_setup_progress("plugins") is False  # the setup never comes back
+    assert save_setup_progress("4") is True
+    assert starter_setup_status()["first_run_tour"] == {"step": 4, "chat_id": made["id"]}
+
+    from frontend.settings import PanelSettings
+
+    s = PanelSettings.load()  # finished or skipped: the walkthrough's own completion flag
+    s.walkthrough_completed = {**(s.walkthrough_completed or {}), "first.run": True}
+    s.save()
+    status = starter_setup_status()
+    assert status["pending_first_run"] is False and "first_run_tour" not in status
+    assert save_setup_progress("welcome") is False and save_setup_progress("2") is False
+    assert starter_setup_status()["pending_first_run"] is False
+
+
 def test_an_install_that_already_used_ducky_gets_no_setup_and_no_welcome_ducky(isolated_appdata, monkeypatch) -> None:
     _write_plugin(isolated_appdata, "uefn")
     assert starter_setup_status()["pending_first_run"] is False

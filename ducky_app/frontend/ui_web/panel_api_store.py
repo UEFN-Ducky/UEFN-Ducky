@@ -480,6 +480,15 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "pending_first_run": False, "gateway_ids": [], "error": str(exc)}
 
+    def save_first_run_progress(self, step: str) -> dict[str, Any]:
+        """Where a new user is in the setup or its first-run tour, so a restart resumes there."""
+        from frontend.starter_llm_gateways import save_setup_progress
+
+        try:
+            return {"ok": save_setup_progress(step)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def ensure_starter_llm_gateways(self, force: bool = False) -> dict[str, Any]:
         from frontend.starter_llm_gateways import ensure_popular_plugins
 

@@ -194,8 +194,8 @@ async function runOnEnter(index: number): Promise<void> {
   }
 }
 
-/** Start a tour. No-ops if already active on the same id, or def missing. */
-export async function startTour(tourId: string, opts?: { force?: boolean }): Promise<boolean> {
+/** Start a tour (on step `at`, 0-based, to resume it). No-ops if already active on the same id, or def missing. */
+export async function startTour(tourId: string, opts?: { force?: boolean; at?: number }): Promise<boolean> {
   const def = defs.get(tourId);
   if (!def) return false;
   if (!opts?.force && isCompleted(tourId)) return false;
@@ -207,11 +207,11 @@ export async function startTour(tourId: string, opts?: { force?: boolean }): Pro
     const resolved = def.resolveSteps?.() ?? def.steps;
     if (!resolved.length) return false;
     activeTourId = tourId;
-    stepIndex = 0;
+    stepIndex = Math.min(Math.max(0, Math.floor(opts?.at ?? 0)), resolved.length - 1);
     entered = false;
     activeResolvedSteps = resolved;
     emit();
-    await enterStep(0);
+    await enterStep(stepIndex);
     emit();
     return true;
   } finally {

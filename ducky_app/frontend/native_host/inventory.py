@@ -139,7 +139,7 @@ _JS_API: dict[str, str] = {
         plugin_translate_batch_start plugin_tts_poll plugin_tts_start plugin_tts_voices_poll
         plugin_tts_voices_start prompt_save_skill_pack_export reload_uefn_plugin
         remote_set_enabled remote_sign_out_all remote_status reset_skill reset_skill_pack
-        save_mcp_server_connection save_pack_manifest save_skill save_skill_file
+        save_first_run_progress save_mcp_server_connection save_pack_manifest save_skill save_skill_file
         save_skill_layout save_skill_node save_subskill set_chat_mcp_plugins set_mcp_config
         set_mcp_plugin_enabled set_mcp_server_enabled set_skill_pack_enabled
         set_uefn_plugin_allowed_models set_uefn_plugin_enabled set_uefn_plugin_secret

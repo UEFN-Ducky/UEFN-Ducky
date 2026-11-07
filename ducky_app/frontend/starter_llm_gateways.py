@@ -175,9 +175,14 @@ WELCOME_DUCKY_TEXT = (
 )
 
 
-def setup_open() -> bool:
-    """Whether the first-run setup must show. A fresh install opens it once and it stays open
-    across restarts until Finish; an install that already used Ducky never sees it."""
+# The setup's screens, in order; a restart reopens the one a new user was on.
+SETUP_STEPS: tuple[str, ...] = ("welcome", "plugins", "ai", "defaults", "rating")
+
+
+def _setup_open_state() -> str:
+    """``first_run_setup`` after the fresh-install check: "" never needed, "open" / "open:<step>"
+    the setup on that step, "tour:<n>:<chat id>" the first-run tour on step n in the welcome
+    ducky, "done" finished."""
     from frontend.settings import PanelSettings
 
     fresh = bool(starter_llm_onboard_pending().get("pending"))
@@ -186,23 +191,78 @@ def setup_open() -> bool:
         if settings.first_run_setup == "" and fresh:
             settings.first_run_setup = "open"
             settings.save()
-        return settings.first_run_setup == "open"
+        if settings.first_run_setup.startswith("tour:") and (settings.walkthrough_completed or {}).get("first.run"):
+            # The tour ends (finished or skipped) with its completion flag: one write, so no
+            # second save can race it (save_agent_settings is load-change-save).
+            settings.first_run_setup = "done"
+            settings.save()
+        return settings.first_run_setup
+
+
+def setup_open() -> bool:
+    """Whether the first-run setup must show. A fresh install opens it once and it stays open
+    across restarts until Finish; an install that already used Ducky never sees it."""
+    return _setup_open_state().startswith("open")
+
+
+def setup_resume() -> dict[str, Any]:
+    """Where a new user left off: the setup step on screen, or the first-run tour's step and chat."""
+    state = _setup_open_state()
+    if state.startswith("open"):
+        step = state.partition(":")[2]
+        return {"setup_step": step if step in SETUP_STEPS else "welcome"}
+    if state.startswith("tour:"):
+        _, n, chat_id = (state.split(":", 2) + ["", ""])[:3]
+        return {"first_run_tour": {"step": int(n) if n.isdigit() else 0, "chat_id": chat_id}}
+    return {}
+
+
+def save_setup_progress(step: str) -> bool:
+    """Remember where a new user is: a setup step while the setup is open, the first-run
+    tour's step (a number) while it runs (its completion flag ends it). Never moves a
+    finished setup back; False when the step does not fit where the setup is."""
+    from frontend.settings import PanelSettings
+
+    step = str(step or "").strip()
+    with _STATE:
+        settings = PanelSettings.load()
+        cur = settings.first_run_setup
+        if cur.startswith("open") and step in SETUP_STEPS:
+            nxt = "open" if step == "welcome" else f"open:{step}"
+        elif cur.startswith("tour:") and step.isdigit():
+            nxt = f"tour:{int(step)}:{cur.split(':', 2)[2] if cur.count(':') >= 2 else ''}"
+        else:
+            return False
+        if nxt != cur:
+            settings.first_run_setup = nxt
+            settings.save()
+    return True
 
 
 def finish_setup() -> bool:
     """Close the first-run setup for good. True once, when it was open and the welcome
-    ducky is still to make: the caller makes it."""
+    ducky is still to make: the caller makes it, then ``start_first_run_tour``."""
     from frontend.settings import PanelSettings
 
     with _STATE:
         settings = PanelSettings.load()
-        was_open = settings.first_run_setup == "open"
+        was_open = settings.first_run_setup.startswith("open")
         make_welcome = was_open and not settings.welcome_ducky_offered
         settings.first_run_setup = "done"
         if make_welcome:
             settings.welcome_ducky_offered = True
         settings.save()
     return make_welcome
+
+
+def start_first_run_tour(chat_id: str) -> None:
+    """The welcome ducky is made: its first-run tour is what a restart resumes until it ends."""
+    from frontend.settings import PanelSettings
+
+    with _STATE:
+        settings = PanelSettings.load()
+        settings.first_run_setup = f"tour:0:{chat_id}"
+        settings.save()
 
 
 def _group(slug: str) -> str:
@@ -230,9 +290,11 @@ def starter_plugins() -> list[dict[str, Any]]:
 
 def starter_setup_status() -> dict[str, Any]:
     """Whether the first-run setup is open, which gateway plugins exist, and the bundle."""
+    resume = setup_resume()
     return {
         "ok": True,
-        "pending_first_run": setup_open(),
+        "pending_first_run": "setup_step" in resume,
+        **resume,
         "gateway_ids": installed_gateway_ids(),
         "plugins": starter_plugins(),
     }

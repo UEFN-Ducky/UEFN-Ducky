@@ -448,8 +448,9 @@ class PanelSettings:
     """The first start decided on the welcome ducky (made on a fresh install): never again."""
 
     first_run_setup: str = ""
-    """First-run setup: "" never needed, "open" a fresh install's setup until Finish (it
-    reopens after a restart), "done" finished."""
+    """First-run setup: "" never needed, "open" / "open:<step>" a fresh install's setup on that
+    step until Finish (a restart reopens that step), "tour:<n>:<chat id>" its first-run tour on
+    step n in the welcome ducky (a restart resumes it), "done" finished."""
 
     shared_mcp: bool = True
     """One FastMCP daemon for every IDE adapter; env UEFN_DUCKY_SHARED_MCP wins. On by default: Nov 4 2026

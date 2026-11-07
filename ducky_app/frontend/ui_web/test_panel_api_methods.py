@@ -564,6 +564,7 @@ _PUBLIC_METHODS = frozenset({
     'start_verse_lsp',
     'starter_llm_onboard_pending',
     'starter_setup_status',
+    'save_first_run_progress',
     'stage_video_attachment',
     'stat_project_file',
     'steer_message',

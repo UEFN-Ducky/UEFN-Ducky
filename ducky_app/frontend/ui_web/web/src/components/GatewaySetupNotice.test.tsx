@@ -13,6 +13,8 @@ const fake = vi.hoisted(() => {
     markTourCompleted: vi.fn(),
     reportFirstRunSetup: vi.fn(),
     welcomeAfterSetup: vi.fn(),
+    resumeFirstRunTour: vi.fn(),
+    saveFirstRunProgress: vi.fn(),
     submitFeedback: vi.fn(() => Promise.resolve({ ok: true })),
   };
 });
@@ -67,7 +69,11 @@ vi.mock("../walkthrough/starterLlmGateways", () => ({
   ensurePopularPlugins: fake.ensurePopularPlugins,
   markStarterPluginToursCompleted: fake.markStarterPluginToursCompleted,
 }));
-vi.mock("../walkthrough/welcomeDucky", () => ({ welcomeAfterSetup: fake.welcomeAfterSetup }));
+vi.mock("../walkthrough/welcomeDucky", () => ({
+  welcomeAfterSetup: fake.welcomeAfterSetup,
+  resumeFirstRunTour: fake.resumeFirstRunTour,
+  saveFirstRunProgress: fake.saveFirstRunProgress,
+}));
 vi.mock("../walkthrough/WalkthroughService", () => ({ markTourCompleted: fake.markTourCompleted }));
 
 const { GatewaySetupNotice, SetupReminder, mergeRows, rowForPhase } = await import("./GatewaySetupNotice");
@@ -92,6 +98,7 @@ beforeEach(() => {
   fake.status.mockResolvedValue({ pending_first_run: true, gateway_ids: [], plugins: BUNDLE });
   fake.ensurePopularPlugins.mockResolvedValue(undefined);
   fake.welcomeAfterSetup.mockResolvedValue(undefined);
+  fake.resumeFirstRunTour.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -115,6 +122,57 @@ describe("GatewaySetupNotice", () => {
     });
     render(<GatewaySetupNotice />);
     expect(await screen.findByRole("dialog", { name: "Welcome to UEFN Ducky" })).toBeTruthy();
+  });
+
+  it("reopens the step a new user closed Ducky on, with installed plugins kept", async () => {
+    fake.status.mockResolvedValue({
+      pending_first_run: true,
+      setup_step: "ai",
+      gateway_ids: ["openai"],
+      plugins: [{ ...BUNDLE[0]!, installed: true }, BUNDLE[1]!],
+    });
+    render(<GatewaySetupNotice />);
+    expect(await screen.findByRole("dialog", { name: "Connect your AI" })).toBeTruthy();
+    expect(fake.reportFirstRunSetup).toHaveBeenCalledWith(true);
+    pause();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("dialog", { name: "Starter plugins" })).toBeTruthy();
+    expect(document.querySelector(".setup-wizard-plugin.is-installed")?.textContent).toContain("OpenAI");
+  });
+
+  it("saves each step it shows so a restart can reopen it", async () => {
+    render(<GatewaySetupNotice />);
+    fireEvent.click(await screen.findByRole("button", { name: /Get started/ }));
+    await waitFor(() => expect(fake.saveFirstRunProgress).toHaveBeenLastCalledWith("plugins"));
+    expect(fake.saveFirstRunProgress).toHaveBeenCalledWith("welcome");
+  });
+
+  it("reopens the rating when Ducky closed on it", async () => {
+    fake.status.mockResolvedValue({ pending_first_run: true, setup_step: "rating", gateway_ids: ["openai"], plugins: BUNDLE });
+    render(<GatewaySetupNotice />);
+    expect(await screen.findByRole("dialog", { name: "How was getting started?" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Welcome to UEFN Ducky" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "5 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    expect(fake.welcomeAfterSetup).toHaveBeenCalledOnce();
+  });
+
+  it("resumes the first-run tour in the welcome ducky instead of any setup", async () => {
+    let resumed: () => void = () => {};
+    fake.resumeFirstRunTour.mockReturnValue(new Promise<void>((r) => (resumed = r)));
+    fake.status.mockResolvedValue({
+      pending_first_run: false,
+      first_run_tour: { step: 3, chat_id: "welcome-1" },
+      gateway_ids: ["openai"],
+      plugins: BUNDLE,
+    });
+    render(<GatewaySetupNotice />);
+    await waitFor(() => expect(fake.resumeFirstRunTour).toHaveBeenCalledWith("welcome-1", 3));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The app's own tours (app.shell) wait: this session's first tour is the resumed one.
+    expect(fake.reportFirstRunSetup).toHaveBeenLastCalledWith(true);
+    await act(async () => resumed());
+    await waitFor(() => expect(fake.reportFirstRunSetup).toHaveBeenLastCalledWith(false));
   });
 
   it("lets an existing install through: corner card, no setup, no hold; reopened, it still can't close", async () => {

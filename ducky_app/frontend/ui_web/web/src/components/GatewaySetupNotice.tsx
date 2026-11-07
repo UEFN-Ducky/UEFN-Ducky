@@ -19,7 +19,7 @@ import { usageTrack } from "../hooks/usageTrack";
 import type { StarterPluginDto } from "../types/panel";
 import { reportFirstRunSetup } from "../walkthrough/firstRunSetup";
 import { ensurePopularPlugins, markStarterPluginToursCompleted } from "../walkthrough/starterLlmGateways";
-import { welcomeAfterSetup } from "../walkthrough/welcomeDucky";
+import { resumeFirstRunTour, saveFirstRunProgress, welcomeAfterSetup } from "../walkthrough/welcomeDucky";
 import { markTourCompleted } from "../walkthrough/WalkthroughService";
 import { SetupRatingModal } from "./SetupRatingModal";
 import { SetupWizard, type InstallRow, type SetupStep } from "./SetupWizard";
@@ -27,11 +27,16 @@ import "./gateway-setup.css";
 
 type SetupStatus = {
   pending_first_run?: boolean;
+  /** The setup step a new user was on (welcome, plugins, ai, defaults, rating). */
+  setup_step?: string;
+  /** The first-run tour was running: its step and the welcome ducky's chat. */
+  first_run_tour?: { step?: number; chat_id?: string };
   gateway_ids?: string[];
   plugins?: StarterPluginDto[];
 };
 
 const PILL_HIDDEN_KEY = "ducky.setupPill.hidden";
+const STEPS: SetupStep[] = ["welcome", "plugins", "ai", "defaults"];
 
 function readPillHidden(): boolean {
   try {
@@ -168,6 +173,13 @@ export function GatewaySetupNotice() {
     if (!wizard) return;
     usageTrack("setup.step", { step: wizard === "ai" ? "connect_ai" : wizard });
   }, [wizard]);
+  // The step on screen is kept on the backend: closing Ducky part way reopens it there.
+  // Only a first run's setup takes it (the backend ignores a setup opened again later).
+  useEffect(() => {
+    if (!decided.current) return;
+    if (wizard) saveFirstRunProgress(wizard);
+    else if (rating) saveFirstRunProgress("rating");
+  }, [wizard, rating]);
 
   const applyStatus = useCallback((status: SetupStatus | undefined) => {
     const gateways = status?.gateway_ids || [];
@@ -178,9 +190,16 @@ export function GatewaySetupNotice() {
     setReady(true);
     if (!decided.current) {
       decided.current = true;
-      // A new install's setup, open until Finish (a restart part way through opens it again).
-      const open = !!status?.pending_first_run;
-      if (open) setWizard("welcome");
+      // A new install's setup, open until Finish: a restart part way reopens the step it was on.
+      const tour = status?.first_run_tour;
+      const step = status?.setup_step || "welcome";
+      const open = !!status?.pending_first_run || !!tour;
+      if (tour) {
+        // Closed during the first-run tour: it goes on at that step in the welcome ducky.
+        setWelcoming(true);
+        void resumeFirstRunTour(tour.chat_id || "", tour.step || 0).finally(() => setWelcoming(false));
+      } else if (open && step === "rating") setRating(true);
+      else if (open) setWizard(STEPS.includes(step as SetupStep) ? (step as SetupStep) : "welcome");
       reportFirstRunSetup(open);
     }
   }, []);

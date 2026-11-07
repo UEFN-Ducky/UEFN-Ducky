@@ -3650,10 +3650,16 @@ export interface PanelApi {
     title?: string;
     error?: string;
   }>;
+  /** Where a new user is: a setup step, or the first-run tour's step number. */
+  save_first_run_progress?(step: string): Promise<{ ok?: boolean; error?: string }>;
   starter_setup_status?(): Promise<{
     ok?: boolean;
     /** The first-run setup is open: a fresh install's, until Finish. */
     pending_first_run?: boolean;
+    /** The setup step a new user was on when Ducky closed (welcome, plugins, ai, defaults, rating). */
+    setup_step?: string;
+    /** Ducky closed during the first-run tour: its step (0-based) and the welcome ducky's chat. */
+    first_run_tour?: { step?: number; chat_id?: string };
     gateway_ids?: string[];
     /** The first-run bundle, in install order, with what is on disk now. */
     plugins?: StarterPluginDto[];

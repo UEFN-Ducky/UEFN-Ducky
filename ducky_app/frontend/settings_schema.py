@@ -391,7 +391,7 @@ FIELD_META: dict[str, FieldMeta] = {
     ),
     "first_run_setup": FieldMeta(
         "First-run setup", "internal",
-        description='"open" while a fresh install\'s setup is not finished, "done" after Finish.',
+        description='"open[:step]" while a fresh install\'s setup is not finished, "tour:<n>:<chat>" during its first tour, "done" after.',
     ),
     "shared_mcp": FieldMeta(
         "Shared MCP backend",

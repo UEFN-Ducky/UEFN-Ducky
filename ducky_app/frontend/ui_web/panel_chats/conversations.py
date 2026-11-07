@@ -57,6 +57,7 @@ def finish_first_run_setup(self) -> dict[str, Any]:
         WELCOME_DUCKY_TITLE,
         WELCOME_DUCKY_TOURS,
         finish_setup,
+        start_first_run_tour,
     )
     from frontend.ui_web.chats.saves import append_message
 
@@ -73,6 +74,7 @@ def finish_first_run_setup(self) -> dict[str, Any]:
                 "ts": time.time(),
             },
         )
+        start_first_run_tour(conv.id)
     except Exception as exc:
         return {"ok": False, "created": False, "error": str(exc)}
     # Announced only now, so the tab never opens on an empty chat.
