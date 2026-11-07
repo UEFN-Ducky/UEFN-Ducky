@@ -19,6 +19,28 @@ def test_snapshot_has_every_part_and_findings():
     json.dumps(snap, default=str)
 
 
+def test_checks_at_the_same_time_share_one_folder_walk(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    walks: list[str] = []
+
+    def slow_walk(path):
+        walks.append(path.name)
+        time.sleep(0.05)
+        return 1.0
+
+    monkeypatch.setattr(self_health, "_app_dir", lambda: tmp_path)
+    monkeypatch.setattr(self_health, "_folder_mb", slow_walk)
+    monkeypatch.setattr(self_health, "_storage_seen", {"at": 0.0, "folders": {}})
+    threads = [threading.Thread(target=self_health._storage) for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(walks) == 6  # chats, sandboxes, cache, perf, logs, tools: once, not three times
+
+
 def _base() -> dict:
     return {"app": {"cpu_percent": 1, "memory_mb": 300, "private_mb": 280, "handles": 900},
             "pc": {"cpus": 8, "memory_used_percent": 40, "memory_total_gb": 64, "top_apps": []},

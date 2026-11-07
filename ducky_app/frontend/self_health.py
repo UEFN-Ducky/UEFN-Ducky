@@ -510,6 +510,9 @@ def _running_agents() -> dict[str, Any]:
 
 _STORAGE_TTL_S = 600.0
 _storage_seen: dict[str, Any] = {"at": 0.0, "folders": {}}
+# Checks that arrive together share one walk: three at once each walked ~10 GB of
+# sandboxes and tools and held three cores for seconds while Ducky was starting.
+_storage_lock = threading.Lock()
 
 
 def _storage() -> dict[str, Any]:
@@ -517,11 +520,12 @@ def _storage() -> dict[str, Any]:
     seconds on a busy disk) and the database files (one stat each, always fresh)."""
     base = _app_dir()
     now = time.monotonic()
-    if not _storage_seen["folders"] or now - _storage_seen["at"] > _STORAGE_TTL_S:
-        _storage_seen["folders"] = {f"{name}_mb": _folder_mb(base / name)
-                                    for name in ("chats", "sandboxes", "cache", "perf", "logs", "tools")}
-        _storage_seen["at"] = now
-    out: dict[str, Any] = dict(_storage_seen["folders"])
+    with _storage_lock:
+        if not _storage_seen["folders"] or now - _storage_seen["at"] > _STORAGE_TTL_S:
+            _storage_seen["folders"] = {f"{name}_mb": _folder_mb(base / name)
+                                        for name in ("chats", "sandboxes", "cache", "perf", "logs", "tools")}
+            _storage_seen["at"] = time.monotonic()
+        out: dict[str, Any] = dict(_storage_seen["folders"])
     for name in ("ducky.db", "ducky.db-wal"):
         try:
             out[name.replace(".", "_").replace("-", "_") + "_mb"] = _mb((base / name).stat().st_size)
