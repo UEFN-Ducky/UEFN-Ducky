@@ -1,12 +1,12 @@
-"""An update that ships Ducky-Launcher.exe keeps every entry point; explicit off changes nothing.
+"""An update that ships Ducky-Launcher.exe keeps every entry point.
 
-The default is ``auto`` (a missing key tries the launcher, with the fallback in
-test_compat_fallback.py); a saved ``off`` or a bad value runs today's Python window only.
+Every launch tries the launcher (fallback in test_compat_fallback.py): the ``native_launcher``
+setting no longer turns it off, so a saved ``off`` or a bad value starts it too.
 
 Pins what every older version and every Windows entry point relies on: the EXE names, the
 Run key, Open with and ``uefn-ducky://`` (names unchanged; the command starts the launcher
 when it is present and the setting isn't off), the uninstall key, the panel port, the
-panel.pid hand-off, and that ``native_launcher`` off (or a bad value) never spawns the launcher.
+panel.pid hand-off, and that every ``native_launcher`` value starts the launcher.
 """
 
 from __future__ import annotations
@@ -276,29 +276,24 @@ def test_panel_pid_path_and_handoff_read() -> None:
     assert not (resolve_app_data_dir() / "launcher").exists()
 
 
-# --- 7. the default is auto; explicit off never spawns Ducky-Launcher.exe ---------------
+# --- 7. the default is auto; every value starts Ducky-Launcher.exe -----------------------
+# There is no turning the launcher off (its window is up in ~0.1 s, the Python window in
+# 1-2 s): a saved off or a bad value still starts it. Python only when it can't run.
 
 
 @pytest.fixture
-def no_spawn(monkeypatch: pytest.MonkeyPatch, install_dir: Path) -> list[object]:
-    """Every way the switch could start a process or look at the disk fails the test."""
-    spawned: list[object] = []
-
-    def boom(*args: object, **kwargs: object) -> None:
-        spawned.append(args)
-        raise AssertionError("off must not spawn or probe anything")
-
-    monkeypatch.setenv(native_switch.LAUNCHER_EXE_ENV, str(install_dir / LAUNCHER))
+def launcher_ready(monkeypatch: pytest.MonkeyPatch, install_dir: Path) -> list[object]:
+    """The launcher is present and paints: each start is recorded here instead of spawned."""
+    started: list[object] = []
+    exe = install_dir / LAUNCHER
+    exe.write_bytes(b"MZ")
+    monkeypatch.setenv(native_switch.LAUNCHER_EXE_ENV, str(exe))
     monkeypatch.delenv(native_switch.NATIVE_CHILD_ENV, raising=False)
-    monkeypatch.setattr(subprocess, "Popen", boom)
-    monkeypatch.setattr(native_switch, "_spawn", boom)
-    monkeypatch.setattr(native_switch, "run_native", boom)
-    monkeypatch.setattr(native_switch, "webview2_ok", boom)
-    monkeypatch.setattr(native_switch, "crash_loop_active", boom)
-    monkeypatch.setattr(native_switch, "launcher_exe", boom)
-    monkeypatch.setattr(native_switch, "record_start", boom)
-    monkeypatch.setattr(native_switch, "record_start_soon", boom)
-    return spawned
+    monkeypatch.setattr(native_switch, "webview2_ok", lambda: True)
+    monkeypatch.setattr(native_switch, "run_native", lambda argv, timeout_s, exe=None: started.append(argv))
+    monkeypatch.setattr(native_switch, "record_start", lambda *a: None)
+    monkeypatch.setattr(native_switch, "record_start_soon", lambda *a: None)
+    return started
 
 
 ARGV = ["UEFN-Ducky.exe", "uefn-ducky://store/install?id=x"]
@@ -331,22 +326,20 @@ def test_saved_off_survives_a_reload(files_backend: Path) -> None:
 
 
 @pytest.mark.parametrize("raw", ["off", "OFF", "garbage", "", 0])
-def test_off_or_bad_value_never_spawns(files_backend: Path, no_spawn: list[object], raw: object) -> None:
+def test_off_or_bad_value_still_starts_the_launcher(
+    files_backend: Path, launcher_ready: list[object], raw: object
+) -> None:
     files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": raw}), encoding="utf-8")
-    assert native_switch.maybe_start_native(list(ARGV)) is False
-    assert no_spawn == []
+    assert native_switch.maybe_start_native(list(ARGV)) is True
+    assert launcher_ready == [list(ARGV)]
 
 
-def test_off_never_writes_launcher_state(files_backend: Path, no_spawn: list[object]) -> None:
-    native_switch.maybe_start_native(list(ARGV), setting="off")
-    assert not (resolve_app_data_dir() / "launcher").exists()
-
-
-def test_decide_off_is_python_whatever_else_is_true() -> None:
-    for exe in (True, False):
-        for wv2 in (True, False):
-            for held in (True, False):
-                assert native_switch.decide("off", exe, wv2, held) == "python"
+def test_decide_is_python_only_when_the_launcher_cannot_run() -> None:
+    for setting in ("off", "auto", "on"):
+        for held in (True, False):
+            assert native_switch.decide(setting, True, True, held) == "native"
+            assert native_switch.decide(setting, False, True, held) == "python"
+            assert native_switch.decide(setting, True, False, held) == "python"
 
 
 def test_launcher_py_runs_the_hook_before_the_python_window() -> None:
