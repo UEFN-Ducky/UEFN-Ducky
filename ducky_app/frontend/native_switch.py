@@ -396,8 +396,9 @@ def record_start(mode: str, window_ms: Any, painted_ms: Any, fallback_reason: st
         if row["window_ms"] is not None:
             props["window_ms"] = row["window_ms"]
         usage_stats.track("launcher.start", **props)
-        if row["fallback"]:
+        if row["fallback"] and row["fallback"] not in _NOT_A_FAILURE:
             # error.code is already on the Store's list, so fallbacks count from day one.
+            # Expected fallbacks (no exe, no WebView2, held, asked for) stay in starts.json only.
             usage_stats.track("error.code", code="native_launcher_fallback", where="ui",
                               reason=row["fallback"], version=usage_stats._app_version())
     except Exception:

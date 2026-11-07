@@ -422,6 +422,19 @@ def test_fallback_start_sends_its_reason(tracked: list) -> None:
     assert len(code) == 1 and code[0]["code"] == "native_launcher_fallback" and code[0]["reason"] == "no_hello"
 
 
+@pytest.mark.parametrize("reason", sorted(ns._NOT_A_FAILURE))
+def test_expected_fallback_is_not_an_error(tracked: list, reason: str) -> None:
+    ns.record_start("python", None, None, reason)
+    assert [n for n, _ in tracked] == ["launcher.start"]
+    assert tracked[0][1]["fallback"] == reason
+
+
+def test_timeout_fallback_still_sends_its_error(tracked: list) -> None:
+    ns.record_start("python", None, None, "timeout")
+    code = [p for n, p in tracked if n == "error.code"]
+    assert len(code) == 1 and code[0]["reason"] == "timeout"
+
+
 def test_fallback_event_passes_the_existing_allowlist() -> None:
     from frontend import usage_events as ev
 
