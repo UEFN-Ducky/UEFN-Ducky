@@ -212,16 +212,13 @@ export function useComposerAttachments(
         patchVideo(id, { status: "error", error: res?.error || "Video upload failed." });
         return;
       }
-      const prep = res.prep;
-      const status = !prep || prep.state === "ready" ? "ready" : prep.state === "error" ? "error" : "preparing";
+      // Saved is ready: a video is only referenced, nothing is prepared (frames come on request).
       patchVideo(id, {
         stagedId: res.staged_id,
         mime: res.mime || file.type,
         sizeBytes: res.size_bytes ?? file.size,
-        status,
-        progress: res.ffmpeg?.progress ?? 0,
-        prep,
-        error: status === "error" ? prep?.error : undefined,
+        status: "ready",
+        progress: 1,
       });
     } catch (e) {
       patchVideo(id, { status: "error", error: e instanceof Error ? e.message : "Video upload failed." });
@@ -229,54 +226,12 @@ export function useComposerAttachments(
   }, [patchVideo]);
 
   const retryVideo = useCallback((id: string) => {
-    const att = attachments.find((a) => a.id === id);
-    if (!att || att.kind !== "video") return;
-    if (att.stagedId) {
-      patchVideo(id, { status: "preparing", error: undefined, progress: 0, prep: undefined });
-      const api = getApi();
-      if (!api?.retry_video_prep) {
-        void api?.install_ffmpeg?.();
-        return;
-      }
-      void api.retry_video_prep(att.stagedId).then((r) => {
-        if (r?.prep) patchVideo(id, { prep: r.prep });
-      }).catch(() => undefined);
-      return;
-    }
     const file = filesRef.current.get(id);
     if (file) void stageVideo(id, file);
-  }, [attachments, patchVideo, stageVideo]);
-
-  const preparing = attachments.some((a) => a.kind === "video" && a.status === "preparing" && a.stagedId);
-  useEffect(() => {
-    if (!preparing) return;
-    const timer = window.setInterval(() => {
-      const api = getApi();
-      const ids = attachmentsRef.current
-        .flatMap((a) => (a.kind === "video" && a.status === "preparing" && a.stagedId ? [a.stagedId] : []));
-      if (ids.length === 0 || !api?.get_video_prep_status) return;
-      void api.get_video_prep_status(ids).then(async (res) => {
-        const map = res?.prep;
-        if (!map) return;
-        const queued = ids.some((sid) => !map[sid] || map[sid].state === "queued" || map[sid].state === "preparing_ffmpeg");
-        const ff = queued ? await api.get_ffmpeg_status?.().catch(() => undefined) : undefined;
-        setAttachments((prev) => prev.map((a) => {
-          if (a.kind !== "video" || a.status !== "preparing" || !a.stagedId) return a;
-          const prep = map[a.stagedId];
-          if (!prep) return a;
-          if (prep.state === "ready") return { ...a, status: "ready", prep, progress: 1 };
-          if (prep.state === "error") {
-            return { ...a, status: "error", prep, error: prep.error || "Could not prepare the video." };
-          }
-          return { ...a, prep, ...((prep.state === "queued" || prep.state === "preparing_ffmpeg") && ff ? { progress: ff.progress } : {}) };
-        }));
-      }).catch(() => undefined);
-    }, 700);
-    return () => window.clearInterval(timer);
-  }, [preparing]);
+  }, [stageVideo]);
 
   // A failed video never blocks Send: the message goes without it (toApiRow drops its id).
-  const hasPendingVideos = attachments.some((a) => a.kind === "video" && a.status !== "ready" && a.status !== "error" && !(a.status === "preparing" && a.prep?.sendable));
+  const hasPendingVideos = attachments.some((a) => a.kind === "video" && a.status !== "ready" && a.status !== "error");
 
   /** Revoke blob previews and forget the staged File of dropped video attachments. */
   const releaseVideos = useCallback((dropped: ComposerAttachment[]) => {

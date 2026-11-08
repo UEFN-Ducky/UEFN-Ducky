@@ -239,8 +239,8 @@ _JS_API: dict[str, str] = {
         workflow_run_snapshot workflow_sync
     """,
     "PanelApiVideoMixin": """
-        get_ffmpeg_status get_video_prep_status get_video_settings install_ffmpeg remove_ffmpeg
-        retry_video_prep set_video_settings stage_video_attachment
+        get_ffmpeg_status get_video_settings install_ffmpeg remove_ffmpeg
+        set_video_settings stage_video_attachment
     """,
     "PanelApiVoiceLaneMixin": "save_voice_lane_settings voice_lane_settings voice_lane_turn",
     "PanelApiPlanProgressMixin": "plan_progress",

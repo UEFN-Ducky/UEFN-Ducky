@@ -215,93 +215,20 @@ describe("video attachments", () => {
     expect(result.current.error).toBe("big.mp4 exceeds the 10MB video limit.");
   });
 
-  const PREP_BASE = { frames_done: 0, frames_total: 20, transcript: "skipped", transcript_note: "", error: "" };
   const settingsOk = () => vi.fn().mockResolvedValue({ video_max_mb: 100, video_frames_per_video: 20, max_images_per_message: 40 });
-  const ffReady = () => vi.fn().mockResolvedValue({ state: "ready", progress: 1, error: "", version: "v" });
-  const stageRes = (sid: string) => ({
-    ok: true, staged_id: sid, size_bytes: 1, mime: "video/mp4", needs_ffmpeg: true,
-    ffmpeg: { state: "ready", progress: 1, error: "", version: "v" }, prep: { ...PREP_BASE, state: "queued" },
-  });
-  const drop = (r: { current: ReturnType<typeof useComposerAttachments> }) =>
-    r.current.addFiles([new File([new Uint8Array([1])], "x.mp4", { type: "video/mp4" })]);
 
-  it("polls prep status until ready and maps progress", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it("a saved video is ready at once: nothing is prepared, frames come only on request", async () => {
     const sid = "b".repeat(32) + ".mp4";
-    const prepStatus = vi.fn()
-      .mockResolvedValueOnce({ ok: true, prep: { [sid]: { ...PREP_BASE, state: "extracting", frames_done: 7 } } })
-      .mockResolvedValueOnce({ ok: true, prep: { [sid]: { ...PREP_BASE, state: "transcribing", frames_done: 20, sendable: true } } })
-      .mockResolvedValue({ ok: true, prep: { [sid]: { ...PREP_BASE, state: "ready", frames_done: 20, transcript: "none", transcript_note: "No audio track" } } });
+    const install = vi.fn();
     mockApi({
-      stage_video_attachment: vi.fn().mockResolvedValue(stageRes(sid)),
-      get_video_prep_status: prepStatus, get_ffmpeg_status: ffReady(), get_video_settings: settingsOk(),
+      stage_video_attachment: vi.fn().mockResolvedValue({ ok: true, staged_id: sid, size_bytes: 1, mime: "video/mp4" }),
+      install_ffmpeg: install, get_video_settings: settingsOk(),
     });
     const { result } = renderHook(() => useComposerAttachments([], { convId: "c1" }));
-    await act(async () => { await drop(result); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "preparing", prep: { state: "queued" } }));
-    expect(result.current.hasPendingVideos).toBe(true);
-    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ prep: { state: "extracting", frames_done: 7 } }));
-    expect(prepStatus).toHaveBeenCalledWith([sid]);
-    expect(result.current.hasPendingVideos).toBe(true);
-    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "preparing", prep: { state: "transcribing" } }));
-    expect(result.current.hasPendingVideos).toBe(false); // sendable while the transcript runs
-    await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "ready" }));
+    await act(async () => { await result.current.addFiles([new File([new Uint8Array([1])], "x.mp4", { type: "video/mp4" })]); });
+    expect(result.current.attachments[0]).toMatchObject({ status: "ready", stagedId: sid });
     expect(result.current.hasPendingVideos).toBe(false);
-    expect(result.current.attachments[0]).toMatchObject({ status: "ready", prep: { transcript_note: "No audio track" } });
-  });
-
-  it("turns a failed prep into an error and retry restarts the job", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sid = "d".repeat(32) + ".mp4";
-    const retry = vi.fn().mockResolvedValue({ ok: true, prep: { ...PREP_BASE, state: "queued" } });
-    mockApi({
-      stage_video_attachment: vi.fn().mockResolvedValue(stageRes(sid)),
-      get_video_prep_status: vi.fn().mockResolvedValue({ ok: true, prep: { [sid]: { ...PREP_BASE, state: "error", error: "Cannot read video 'x'." } } }),
-      get_ffmpeg_status: ffReady(), retry_video_prep: retry, get_video_settings: settingsOk(),
-    });
-    const { result } = renderHook(() => useComposerAttachments([], { convId: "c1" }));
-    await act(async () => { await drop(result); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "error", error: "Cannot read video 'x'." }));
-    // A failed video never blocks Send; its row carries no id, so the send drops it.
-    expect(result.current.hasPendingVideos).toBe(false);
-    expect(result.current.toApiAttachments()[0]).not.toHaveProperty("staged_id");
-    act(() => result.current.retryVideo(result.current.attachments[0].id));
-    expect(retry).toHaveBeenCalledWith(sid);
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ status: "preparing" }));
-  });
-
-  it("shows ffmpeg install progress while prep is preparing_ffmpeg", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sid = "f".repeat(32) + ".mp4";
-    mockApi({
-      stage_video_attachment: vi.fn().mockResolvedValue(stageRes(sid)),
-      get_video_prep_status: vi.fn().mockResolvedValue({ ok: true, prep: { [sid]: { ...PREP_BASE, state: "preparing_ffmpeg" } } }),
-      get_ffmpeg_status: vi.fn().mockResolvedValue({ state: "installing", progress: 0.4, error: "", version: "v" }),
-      get_video_settings: settingsOk(),
-    });
-    const { result } = renderHook(() => useComposerAttachments([], { convId: "c1" }));
-    await act(async () => { await drop(result); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ progress: 0.4, prep: { state: "preparing_ffmpeg" } }));
-  });
-
-  it("shows ffmpeg install progress while prep is queued", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const sid = "e".repeat(32) + ".mp4";
-    mockApi({
-      stage_video_attachment: vi.fn().mockResolvedValue(stageRes(sid)),
-      get_video_prep_status: vi.fn().mockResolvedValue({ ok: true, prep: { [sid]: { ...PREP_BASE, state: "queued" } } }),
-      get_ffmpeg_status: vi.fn().mockResolvedValue({ state: "installing", progress: 0.5, error: "", version: "v" }),
-      get_video_settings: settingsOk(),
-    });
-    const { result } = renderHook(() => useComposerAttachments([], { convId: "c1" }));
-    await act(async () => { await drop(result); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
-    await vi.waitFor(() => expect(result.current.attachments[0]).toMatchObject({ progress: 0.5 }));
+    expect(install).not.toHaveBeenCalled();
   });
 
   it("restores a queued video from its DTO", () => {

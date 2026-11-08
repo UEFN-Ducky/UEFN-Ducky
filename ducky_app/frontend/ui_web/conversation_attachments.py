@@ -8,7 +8,6 @@ import shutil
 import time
 import unicodedata
 import uuid
-from glob import escape as glob_escape
 from pathlib import Path
 from typing import Any
 
@@ -38,38 +37,6 @@ def conversation_attachments_dir(conv_id: str, project_root: str | None, convers
 
 def conversation_meta_path(conv_id: str, conversations_dir: Path) -> Path:
     return conversations_dir / conv_id / "conversation.json"
-
-
-def _copy_prep_siblings(src: Path, dest: Path) -> bool:
-    """Carry cached frames/transcript files over (renamed to the persisted video's name).
-
-    Best-effort: they are only a cache; the send path re-extracts when they are missing.
-    Returns True when the transcript is still being produced (the sender must not start a second one)."""
-    from backend.agent.video import prep
-    from backend.workspace.ai_ignore import current_policy
-
-    policy = current_policy()
-    policy.require(str(src))
-    policy.require(str(dest))
-    st = prep.prep_status(src.name)
-    if not st.get("sendable") and st["state"] not in ("ready", "error"):
-        return False  # frames still being written: the send path extracts for itself
-    try:
-        siblings = list(src.parent.glob(glob_escape(src.name) + ".*"))
-    except OSError:
-        return False
-    for sib in siblings:
-        suffix = sib.name[len(src.name):]
-        if not suffix or suffix.endswith((".audio.mp3", ".part.jpg", ".part")):
-            continue
-        target = dest.with_name(dest.name + suffix)
-        if policy.denied(str(sib)) or policy.denied(str(target)):
-            continue
-        try:
-            shutil.copyfile(sib, target)
-        except OSError:
-            pass
-    return st["state"] == "transcribing"
 
 
 def persist_message_attachments(
@@ -120,7 +87,6 @@ def persist_message_attachments(
                 shutil.copyfile(att.file_path, full)
             except OSError as exc:
                 raise ValueError(f"Could not save video {att.name!r}: {exc}") from exc
-            transcribing = _copy_prep_siblings(Path(att.file_path), full)
             video_row: dict[str, Any] = {
                 "kind": "video",
                 "name": att.name,
@@ -130,8 +96,6 @@ def persist_message_attachments(
             }
             if att.transcript:
                 video_row["transcript"] = att.transcript
-            elif transcribing:
-                video_row["transcript_note"] = "Transcript not ready when sent"
             out.append(video_row)
         elif att.kind == "file":
             from backend.agent.attached_files import readable_copy_needed, readable_copy_path, readable_text

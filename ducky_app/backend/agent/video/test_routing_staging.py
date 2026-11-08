@@ -8,7 +8,7 @@ import pytest
 
 from backend.agent.video import staging
 from backend.agent.video.frames import VideoError
-from backend.agent.video.routing import gemini_inline_mime, needs_frames
+from backend.agent.video.routing import gemini_inline_mime
 from frontend.app_paths import resolve_app_data_dir
 
 MB = 1024 * 1024
@@ -19,14 +19,6 @@ def test_gemini_inline_only_small_supported_types():
     assert gemini_inline_mime("video/quicktime", 5 * MB) == "video/mov"
     assert gemini_inline_mime("video/x-matroska", 5 * MB) is None
     assert gemini_inline_mime("video/mp4", 21 * MB) is None
-
-
-def test_needs_frames_rules():
-    assert needs_frames("video/mp4", MB, provider="gemini", external=False) is False
-    assert needs_frames("video/mp4", MB, provider="GEMINI", external=False) is False
-    assert needs_frames("video/mp4", MB, provider="anthropic", external=False) is True
-    assert needs_frames("video/mp4", MB, provider="gemini", external=True) is True
-    assert needs_frames("video/mp4", 30 * MB, provider="gemini", external=False) is True
 
 
 def test_normalize_mime_falls_back_to_extension():

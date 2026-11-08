@@ -480,12 +480,10 @@ def test_history_media_uses_original_name_before_renamed_cache(protected, monkey
     row = {"kind": "video", "name": "private.mp4", "mime": "video/mp4",
            "path": "attachments/123_private.mp4", "size_bytes": 1,
            "frames": [{"path": "attachments/cached.jpg"}]}
-    monkeypatch.setattr(send, "transcribe_video", lambda _: pytest.fail("ignored history must not be transcribed"))
-    monkeypatch.setattr(send, "extract_frames", lambda *args: pytest.fail("ignored history must not be extracted"))
-    assert not send.backfill_history_frames([{"role": "user", "attachments": [row]}],
-                                           conv_dir=protected, provider="anthropic", external=False)
     with pytest.raises(send.VideoError, match="AI_FILE_IGNORED"):
-        send.prepare_video_frames([row], conv_dir=protected, provider="anthropic", external=False)
+        send.external_video_hint(row, protected)
+    with pytest.raises(send.VideoError, match="AI_FILE_IGNORED"):
+        send.runtime_video_dict(row, protected)
 
 
 def test_attachment_persistence_cannot_rename_ignored_input(protected):

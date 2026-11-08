@@ -24,17 +24,6 @@ class PanelApiVideoMixin:
         return {"ok": True, **staged, "needs_ffmpeg": False, "ffmpeg": ffmpeg_install.status(),
                 "prep": dict(_READY_PREP)}
 
-    def get_video_prep_status(self, staged_ids: list[str] | None = None) -> dict[str, Any]:
-        from backend.agent.video import prep
-
-        ids = [str(i) for i in (staged_ids or []) if str(i).strip()]
-        return {"ok": True, "prep": {sid: prep.prep_status(sid) for sid in ids}}
-
-    def retry_video_prep(self, staged_id: str = "") -> dict[str, Any]:
-        from backend.agent.video import prep
-
-        return {"ok": True, "prep": prep.retry_prep(str(staged_id or "").strip())}
-
     def get_video_settings(self, conv_id: str = "", model: str = "", coding_agent: str = "") -> dict[str, Any]:
         from backend.agent.video import ffmpeg_install
         from backend.agent.video import limits as L

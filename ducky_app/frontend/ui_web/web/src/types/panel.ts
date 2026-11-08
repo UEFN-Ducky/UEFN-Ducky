@@ -3390,8 +3390,6 @@ export interface PanelApi {
     ffmpeg?: FfmpegStatusDto;
     prep?: VideoPrepStatusDto;
   }>;
-  get_video_prep_status?(stagedIds?: string[]): Promise<{ ok: boolean; prep: Record<string, VideoPrepStatusDto> }>;
-  retry_video_prep?(stagedId: string): Promise<{ ok: boolean; prep: VideoPrepStatusDto }>;
   get_video_settings?(convId?: string, model?: string, codingAgent?: string): Promise<VideoSettingsDto>;
   set_video_settings?(patch: Partial<Omit<VideoSettingsDto, "ffmpeg" | "ok">>): Promise<VideoSettingsDto>;
   get_ffmpeg_status?(): Promise<FfmpegStatusDto>;

@@ -18,7 +18,6 @@ def test_a_dropped_video_is_only_saved_never_broken_down(monkeypatch):
     # Nov 7 2026: a dropped video is referenced; frames are cut only when an agent asks.
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.start_install", lambda: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.status", lambda: {"state": "missing"})
-    monkeypatch.setattr("backend.agent.video.prep.start_prep", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     res = PanelApi().stage_video_attachment("c1", "a.mp4", "video/mp4", base64.b64encode(b"x").decode())
     assert res["ok"] and res["needs_ffmpeg"] is False
     assert res["prep"]["state"] == "ready" and res["prep"]["transcript"] == "skipped"
@@ -91,18 +90,6 @@ def test_pasted_file_text_is_capped_whatever_the_window():
     assert inline_token_budget(1_000_000) == INLINE_MAX_TOKENS == 8_000
     assert inline_token_budget(50_000) == 5_000
     assert inline_token_budget(0) == 0
-
-
-def test_video_prep_status_and_retry(monkeypatch):
-    monkeypatch.setattr("backend.agent.video.prep.prep_status", lambda sid: {"state": "extracting", "id": sid})
-    monkeypatch.setattr("backend.agent.video.prep.retry_prep", lambda sid: {"state": "queued", "id": sid})
-    api = PanelApi()
-    assert api.get_video_prep_status(["a.mp4", "b.mp4"])["prep"] == {
-        "a.mp4": {"state": "extracting", "id": "a.mp4"},
-        "b.mp4": {"state": "extracting", "id": "b.mp4"},
-    }
-    assert api.get_video_prep_status() == {"ok": True, "prep": {}}
-    assert api.retry_video_prep("a.mp4") == {"ok": True, "prep": {"state": "queued", "id": "a.mp4"}}
 
 
 def test_a_file_attached_to_an_answer_is_saved_in_that_chat(monkeypatch, tmp_path):

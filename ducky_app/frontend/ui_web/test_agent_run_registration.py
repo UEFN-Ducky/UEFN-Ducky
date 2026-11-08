@@ -74,10 +74,15 @@ def test_a_follow_up_prepared_before_the_old_turn_ends_keeps_its_session(monkeyp
     session.prepare_run("old")
     session.start(lambda: release.wait(5), "old")
     old = session._thread
-    session.prepare_run("follow-up")  # the old turn has not finished yet
-    release.set()
-    _join([old])
-    assert state._sessions == {"chat": session}
+    try:
+        session.prepare_run("follow-up")  # the old turn has not finished yet
+        release.set()
+        _join([old])
+        assert state._sessions == {"chat": session}
+    finally:
+        # prepare_run registers the follow-up as live and no start() ends it here: a leftover
+        # id made every later "stop agents first" check in the run fail (test_ai_ignore).
+        discard_live_run_id("follow-up")
 
 
 @pytest.fixture

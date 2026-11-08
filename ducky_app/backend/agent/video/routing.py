@@ -1,4 +1,4 @@
-"""Decide whether a recipient gets the raw video (Gemini) or extracted frames."""
+"""Gemini's inline video rules (used by the request budget)."""
 
 from __future__ import annotations
 
@@ -24,12 +24,3 @@ def model_accepts_video(provider: str, model: str = "") -> bool:
     info = get_model_info(provider, model)
     return getattr(info, "supports_video", None) is not False
 
-
-def needs_frames(mime: str, size_bytes: int, *, provider: str, external: bool, model: str = "") -> bool:
-    if external:
-        return True
-    if (provider or "").strip().lower() != GEMINI_PROVIDER:
-        return True
-    if gemini_inline_mime(mime, size_bytes) is None:
-        return True
-    return not model_accepts_video(provider, model)
