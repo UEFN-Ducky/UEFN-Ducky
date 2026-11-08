@@ -258,8 +258,11 @@ def _start_background(mgr: Any, box: Path, conv_id: str, command: str, shell: st
                 result = _stop_leftovers(mgr, session, result)
         except Exception as exc:  # noqa: BLE001 - the run's failure is the agent's to read
             result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
-        entry["result"] = result if isinstance(result, dict) else {"ok": False, "error": "no result"}
-        _background_done(mgr, box, session, entry)
+        result = result if isinstance(result, dict) else {"ok": False, "error": "no result"}
+        try:
+            _background_done(mgr, box, session, entry, result)
+        finally:
+            entry["result"] = result  # set last; a failed cleanup never leaves it "running"
 
     threading.Thread(target=work, daemon=True, name=f"sandbox-run-{session}").start()
     paths.touch(box)
@@ -273,12 +276,13 @@ def _took(secs: float) -> str:
     return f"{secs // 60} m {secs % 60} s" if secs >= 60 else f"{secs} s"
 
 
-def _background_done(mgr: Any, box: Path, session_id: str, entry: dict[str, Any]) -> None:
+def _background_done(mgr: Any, box: Path, session_id: str, entry: dict[str, Any], result: dict[str, Any]) -> None:
     """One line in the sandbox's record, then the run's terminal closes: its output is kept
     here for ``output``. Nov 6 2026: every background run opened its own terminal and, while
     its chat kept working, each finished one stayed open up to 10 minutes and piled up.
-    ponytail: no hook posts a finished background run into its chat; sandbox_output is it."""
-    result = entry["result"] or {}
+    ponytail: no hook posts a finished background run into its chat; sandbox_output is it.
+    The caller publishes ``result`` after this: ``output`` reports the run finished only once
+    its note, kept output and closed terminal are in place."""
     code = result.get("exit_code")
     line = (f"sandbox run finished, exit {code if code is not None else '?'}, "
             f"{_took(time.monotonic() - entry['started'])}")

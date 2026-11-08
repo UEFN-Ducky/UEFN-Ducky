@@ -28,6 +28,7 @@ def test_run_message_queues_follow_up_instead_of_cancelling_live_run():
         turns_patched("load_conversation", return_value=conv) as load,
         turns_patched("_pending_agent_messages", {}),
         turns_patched("_pending_steered", {}),
+        turns_patched("_deliver_when_idle") as deliver,  # its idle wait runs on its own thread
         patch.object(a2a_broker, "_retry_queue_later", lambda cid: None),
     ):
         try:
@@ -39,5 +40,6 @@ def test_run_message_queues_follow_up_instead_of_cancelling_live_run():
             steer.end_run("chat-1")
 
     assert not cancel.called and not wait.called
+    deliver.assert_called_once_with("chat-1")  # the parked send runs once the turn is idle
     assert not load.called  # no second turn started over the live one
     assert not any("already running" in str(e.get("text")) for e in pushes)
