@@ -3605,7 +3605,7 @@ export interface PanelApi {
   /** Open another of your UEFN Duckies in its own window here: its whole app, chats included (at `chat_id`). */
   ducky_link_open?(key_id: string, name?: string, chat_id?: string): Promise<{ ok?: boolean; error?: string }>;
   /** Your other UEFN Duckies' chats as copied here by sync (no rows). */
-  ducky_sync_list?(): Promise<{ ok?: boolean; error?: string; duckies?: DuckySyncPeer[] }>;
+  ducky_sync_list?(): Promise<{ ok?: boolean; error?: string; duckies?: DuckySyncPeer[]; errors?: Record<string, string> }>;
   /** Answer the right-click menu over typed text: run WebView2's command (a spelling fix...) or -1 for none. */
   native_menu_pick?(token: string, command_id: number): Promise<{ ok?: boolean }>;
   /** Remove another UEFN Ducky: signs that PC out of the account and drops its copies here. */

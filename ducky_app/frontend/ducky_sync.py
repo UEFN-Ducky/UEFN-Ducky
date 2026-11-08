@@ -130,15 +130,15 @@ def sync_with(peer: dict[str, Any]) -> dict[str, Any]:
     key, name = str(peer.get("keyId") or ""), str(peer.get("name") or "UEFN Ducky")
     account = _account()
     if not key or not account:
-        return {"ok": False, "error": "signed out"}
-    out: dict[str, Any] = {"ok": True, "ducky": name, "duckies": 0, "chats": 0}
+        return {"ok": False, "key": key, "error": "signed out"}
+    out: dict[str, Any] = {"ok": True, "key": key, "ducky": name, "duckies": 0, "chats": 0}
     got = call(key, "ducky_sync_duckies", {})
-    if not got.get("ok"):
-        return {"ok": False, "ducky": name, "error": got.get("error")}
-    out["duckies"] = apply_duckies(got.get("result"), account)
+    # An older Ducky without duckies sync still shares its chats.
+    if got.get("ok"):
+        out["duckies"] = apply_duckies(got.get("result"), account)
     listed = call(key, "ducky_sync_chats", {})
     if not listed.get("ok"):
-        return {**out, "ok": False, "error": listed.get("error")}
+        return {**out, "ok": False, "error": listed.get("error") or got.get("error")}
     need: list[tuple[float, str]] = []
     seen: set[str] = set()
     for row in listed.get("result") or []:
@@ -166,12 +166,35 @@ def sync_round() -> list[dict[str, Any]]:
 
     if not _account():
         return []
-    devices = list_duckies().get("devices") or []
-    results = [sync_with(d) for d in devices if isinstance(d, dict) and d.get("live") and not d.get("mine")]
+    listed = list_duckies()
+    devices = [d for d in listed.get("devices") or [] if isinstance(d, dict)]
+    prune_removed(devices)
+    results = [sync_with(d) for d in devices if d.get("live") and not d.get("mine")]
     with _lock:
         _last.clear()
         _last.update({"results": results})
     return results
+
+
+def prune_removed(devices: list[dict[str, Any]]) -> int:
+    """Drop the copies of Duckies no longer on the account (removed on the site or
+    another PC). Only trusts a full list: one that names this Ducky too."""
+    from backend.store.repos import ducky_mirrors as mirrors
+
+    account = _account()
+    keys = {str(d.get("keyId") or "") for d in devices}
+    if not account or not any(d.get("mine") for d in devices):
+        return 0
+    gone = [p["ducky"] for p in mirrors.peers(account) if p["ducky"] not in keys]
+    for key in gone:
+        mirrors.forget_peer(account, key)
+    return len(gone)
+
+
+def last_errors() -> dict[str, str]:
+    """Why the last round couldn't sync a Ducky, by its key."""
+    with _lock:
+        return {str(r.get("key")): str(r.get("error") or "didn't answer") for r in _last.get("results") or [] if not r.get("ok") and r.get("key")}
 
 
 def _loop() -> None:

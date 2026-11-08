@@ -118,7 +118,7 @@ def _pulled(p: _Peer) -> list[str]:
 
 def test_a_round_copies_the_duckies_and_the_changed_chats(peer: _Peer) -> None:
     out = ducky_sync.sync_with(LAPTOP)
-    assert out == {"ok": True, "ducky": "Laptop", "duckies": 1, "chats": 2}
+    assert out == {"ok": True, "key": "k2", "ducky": "Laptop", "duckies": 1, "chats": 2}
     assert repo.get("c8")["data"] == {"name": "From laptop"}
     assert _pulled(peer) == ["x2", "x1"], "newest first"
     [laptop] = ducky_sync.mirror_list()
@@ -147,6 +147,37 @@ def test_forget_drops_that_duckys_copies_only(peer: _Peer) -> None:
     assert ducky_sync.forget("k2") == 2
     assert [p["ducky"] for p in ducky_sync.mirror_list()] == ["k3"]
     assert ducky_sync.mirror_rows("k2", "x1") is None
+
+
+def test_an_older_ducky_without_duckies_sync_still_shares_its_chats(peer: _Peer, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = peer.call
+    monkeypatch.setattr(
+        "frontend.ducky_link.call",
+        lambda to, method, args=None, **kw: {"ok": False, "error": "unknown method"}
+        if method == "ducky_sync_duckies" else real(to, method, args),
+    )
+    out = ducky_sync.sync_with(LAPTOP)
+    assert out["ok"] and out["duckies"] == 0 and out["chats"] == 2
+
+
+def test_a_round_drops_duckies_removed_from_the_account(peer: _Peer) -> None:
+    ducky_sync.sync_with(LAPTOP)
+    mirrors.note_peer(ACCOUNT, "old", "Old PC")
+    mirrors.note_chat(ACCOUNT, "old", "o1", "Old chat", 1.0)
+    # A list that doesn't name this PC (a failed load) is never trusted.
+    assert ducky_sync.prune_removed([LAPTOP]) == 0
+    assert ducky_sync.prune_removed([{"keyId": "me", "mine": True}, LAPTOP]) == 1
+    assert [p["ducky"] for p in ducky_sync.mirror_list()] == ["k2"]
+
+
+def test_last_errors_names_the_duckies_that_failed() -> None:
+    with ducky_sync._lock:
+        ducky_sync._last["results"] = [{"ok": True, "key": "k2"}, {"ok": False, "key": "k3", "error": "timed out"}]
+    try:
+        assert ducky_sync.last_errors() == {"k3": "timed out"}
+    finally:
+        with ducky_sync._lock:
+            ducky_sync._last.clear()
 
 
 def test_a_failed_pull_is_tried_again_next_round(peer: _Peer) -> None:

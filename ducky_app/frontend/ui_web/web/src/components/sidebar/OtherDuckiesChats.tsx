@@ -44,12 +44,38 @@ export function agoText(secs: number, now = Date.now() / 1000): string {
   return `${Math.floor(d / 86400)} d ago`;
 }
 
-/** Peers with chats, live ones first, each with its live flag from the account's list. */
-export function withLive(peers: DuckySyncPeer[], live: Record<string, boolean>): Array<DuckySyncPeer & { live: boolean }> {
-  return peers
-    .filter((p) => p.chats.length)
-    .map((p) => ({ ...p, live: !!live[p.ducky] }))
+export type AccountDevice = { keyId?: string; name?: string; live?: boolean; mine?: boolean };
+type ShownPeer = DuckySyncPeer & { live: boolean; error: string };
+
+/**
+ * The other Duckies to list, live ones first. With the account's device list
+ * (``devices``), every other PC on it shows, even before any chat is copied, and a PC
+ * removed from the account drops out. Without it (offline), the copies with chats show.
+ */
+export function withLive(
+  peers: DuckySyncPeer[],
+  devices: AccountDevice[] | null,
+  errors: Record<string, string> = {},
+): ShownPeer[] {
+  const live: Record<string, boolean> = {};
+  for (const d of devices ?? []) if (d.keyId) live[d.keyId] = !!d.live;
+  const rows = peers.filter((p) => (devices ? p.ducky in live : p.chats.length > 0));
+  for (const d of devices ?? []) {
+    if (d.mine || !d.keyId || rows.some((p) => p.ducky === d.keyId)) continue;
+    rows.push({ ducky: d.keyId, name: d.name || "UEFN Ducky", synced: 0, chats: [] });
+  }
+  return rows
+    .filter((p) => !devices?.some((d) => d.mine && d.keyId === p.ducky))
+    .map((p) => ({ ...p, live: !!live[p.ducky], error: errors[p.ducky] || "" }))
     .sort((a, b) => Number(b.live) - Number(a.live) || a.name.localeCompare(b.name));
+}
+
+/** The status on a PC's row, and its tooltip. */
+export function peerMeta(peer: ShownPeer): { text: string; title: string } {
+  if (peer.live && peer.error) return { text: "couldn't sync", title: peer.error };
+  if (peer.live) return { text: "online", title: peer.chats.length ? "Online now" : "Online: its chats copy here within a few minutes" };
+  if (peer.synced) return { text: `synced ${agoText(peer.synced)}`, title: "Offline: open UEFN Ducky there with Remote access on to sync" };
+  return { text: "offline", title: "Never synced: open UEFN Ducky there with Remote access on" };
 }
 
 type CopyView = {
@@ -67,7 +93,8 @@ type CopyView = {
  */
 export function OtherDuckiesChats() {
   const [peers, setPeers] = useState<DuckySyncPeer[]>([]);
-  const [live, setLive] = useState<Record<string, boolean>>({});
+  const [devices, setDevices] = useState<AccountDevice[] | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [copy, setCopy] = useState<CopyView | null>(null);
   const [collapsed, setCollapsed] = useState(() => readStored(COLLAPSED_KEY) === "1");
@@ -76,17 +103,20 @@ export function OtherDuckiesChats() {
   const dragRef = useRef({ start: height, delta: 0, max: 600 });
   const rootRef = useRef<HTMLDivElement>(null);
   const { confirm, alert } = useConfirmModal();
-  const { menu, open: openMenu, close: closeMenu } = useContextMenuState<DuckySyncPeer & { live: boolean }>();
+  const { menu, open: openMenu, close: closeMenu } = useContextMenuState<ShownPeer>();
 
   const load = useCallback(async () => {
     const api = getApi();
     if (!api?.ducky_sync_list) return;
     try {
       const [list, link] = await Promise.all([api.ducky_sync_list(), api.ducky_link_list?.()]);
-      if (list?.ok !== false) setPeers(list?.duckies ?? []);
-      const flags: Record<string, boolean> = {};
-      for (const d of link?.devices ?? []) if (d.keyId) flags[d.keyId] = !!d.live;
-      setLive(flags);
+      if (list?.ok !== false) {
+        setPeers(list?.duckies ?? []);
+        setErrors(list?.errors ?? {});
+      }
+      // Only a list that names this PC is the whole account (an error returns none).
+      const all = link?.ok !== false && (link?.devices ?? []).some((d) => d.mine);
+      setDevices(all ? link?.devices ?? [] : null);
     } catch {
       /* signed out or offline: keep what's shown */
     }
@@ -98,7 +128,7 @@ export function OtherDuckiesChats() {
     return () => window.clearInterval(t);
   }, [load]);
 
-  const shown = withLive(peers, live);
+  const shown = withLive(peers, devices, errors);
   if (!shown.length) return null;
   const anyLive = shown.some((p) => p.live);
 
@@ -109,7 +139,7 @@ export function OtherDuckiesChats() {
     });
   };
 
-  const removePeer = async (peer: DuckySyncPeer & { live: boolean }) => {
+  const removePeer = async (peer: ShownPeer) => {
     const ok = await confirm({
       title: "Remove UEFN Ducky",
       message: `Remove "${peer.name}"? It is signed out of your account and its chat copies here are deleted. Its own chats stay on that PC; sign in there again to bring it back.`,
@@ -131,7 +161,7 @@ export function OtherDuckiesChats() {
     }
   };
 
-  const openChat = async (peer: DuckySyncPeer & { live: boolean }, chat: DuckySyncPeer["chats"][number]) => {
+  const openChat = async (peer: ShownPeer, chat: DuckySyncPeer["chats"][number]) => {
     const api = getApi();
     if (peer.live && api?.ducky_link_open) {
       void api.ducky_link_open(peer.ducky, peer.name, chat.conv_id);
@@ -200,7 +230,9 @@ export function OtherDuckiesChats() {
           onClick={(e) => {
             e.stopPropagation();
             void getApi()?.ducky_sync_now?.();
-            window.setTimeout(() => void load(), 8_000);
+            void load();
+            // A round copies up to 8 chats per PC: look again while it runs.
+            for (const ms of [5_000, 20_000, 45_000]) window.setTimeout(() => void load(), ms);
           }}
         >
           <Icons.Refresh />
@@ -211,6 +243,7 @@ export function OtherDuckiesChats() {
       <div className="other-duckies__body" style={{ height }}>
       {shown.map((peer) => {
         const expanded = !!open[peer.ducky];
+        const meta = peerMeta(peer);
         return (
           <div key={peer.ducky} className="other-duckies__peer">
             <button
@@ -226,10 +259,11 @@ export function OtherDuckiesChats() {
               </span>
               <span className={`other-duckies__dot${peer.live ? " is-live" : ""}`} aria-hidden="true" />
               <span className="other-duckies__name">{peer.name}</span>
-              <span className="other-duckies__meta">{peer.live ? "online" : `synced ${agoText(peer.synced)}`}</span>
+              <span className="other-duckies__meta" title={meta.title}>{meta.text}</span>
             </button>
             <div className={`other-duckies__clip${expanded ? " is-open" : ""}`} aria-hidden={!expanded || undefined}>
               <div className="other-duckies__clip-inner">
+                {!peer.chats.length ? <div className="other-duckies__chat">{meta.title}</div> : null}
                 {peer.chats.map((chat) => (
                   <button
                     key={chat.conv_id}

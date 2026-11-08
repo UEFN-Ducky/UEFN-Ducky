@@ -279,10 +279,10 @@ class PanelApiStoreMixin:
 
     def ducky_sync_list(self) -> dict[str, Any]:
         """Your other UEFN Duckies' chats as copied here (no rows), for the sidebar."""
-        from frontend.ducky_sync import mirror_list
+        from frontend.ducky_sync import last_errors, mirror_list
 
         try:
-            return {"ok": True, "duckies": mirror_list()}
+            return {"ok": True, "duckies": mirror_list(), "errors": last_errors()}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "duckies": []}
 

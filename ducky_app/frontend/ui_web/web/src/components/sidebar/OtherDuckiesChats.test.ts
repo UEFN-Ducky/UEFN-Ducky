@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agoText, resizedHeight, withLive } from "./OtherDuckiesChats";
+import { agoText, peerMeta, resizedHeight, withLive } from "./OtherDuckiesChats";
 import { groupInsideCount } from "../../utils/sidebarTree";
 import type { FolderItem } from "../../types/panel";
 
@@ -34,17 +34,32 @@ describe("agoText", () => {
 });
 
 describe("withLive", () => {
-  it("shows only Duckies with chats, the reachable ones first", () => {
-    const chat = { conv_id: "c1", title: "Lobby", updated: 1, synced: 1 };
-    const peers = [
-      { ducky: "k3", name: "Zed", synced: 1, chats: [chat] },
-      { ducky: "k2", name: "Laptop", synced: 1, chats: [chat] },
-      { ducky: "k4", name: "Empty", synced: 1, chats: [] },
-    ];
-    const shown = withLive(peers, { k3: true });
-    expect(shown.map((p) => [p.ducky, p.live])).toEqual([
-      ["k3", true],
+  const chat = { conv_id: "c1", title: "Lobby", updated: 1, synced: 1 };
+  const peers = [
+    { ducky: "k3", name: "Zed", synced: 1, chats: [chat] },
+    { ducky: "k2", name: "Laptop", synced: 1, chats: [chat] },
+    { ducky: "k4", name: "Empty", synced: 1, chats: [] },
+  ];
+
+  it("offline from the account: shows the copies with chats, by name", () => {
+    expect(withLive(peers, null).map((p) => [p.ducky, p.live])).toEqual([
       ["k2", false],
+      ["k3", false],
     ]);
+  });
+
+  it("lists every other PC on the account, drops removed ones, and carries sync errors", () => {
+    const devices = [
+      { keyId: "me", name: "This PC", live: true, mine: true },
+      { keyId: "k3", name: "Zed", live: true },
+      { keyId: "new", name: "New PC", live: true },
+    ];
+    const shown = withLive(peers, devices, { new: "timed out" });
+    expect(shown.map((p) => [p.ducky, p.live, p.chats.length, p.error])).toEqual([
+      ["new", true, 0, "timed out"],
+      ["k3", true, 1, ""],
+    ]);
+    expect(peerMeta(shown[0]).text).toBe("couldn't sync");
+    expect(peerMeta({ ...shown[0], live: false, synced: 0 }).text).toBe("offline");
   });
 });
