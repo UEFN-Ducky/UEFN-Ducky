@@ -75,6 +75,40 @@ def test_own_notice_does_not_reset_the_silence():
     assert notice.text().startswith("Waiting for the model · 1m 10s")
 
 
+def test_setup_step_is_named_then_stopped_once():
+    clock = Clock()
+    seen: list[dict] = []
+    stuck: list[str] = []
+    notice = StallNotice("conv-1", "run-1", clock=clock, is_alive=lambda: False,
+                         step_after_s=15, stuck_after_s=120, on_stuck=stuck.append)
+    notice.wrap(seen.append)
+    notice.set_step("finding Codex")
+    clock.now += 14
+    assert notice.tick() == ""
+    clock.now += 6
+    assert notice.tick() == "Still starting · finding Codex · 20s"
+    clock.now += 100
+    notice.tick()
+    notice.tick()
+    assert stuck == ["finding Codex"]
+
+
+def test_login_step_is_never_stopped_and_cleared_step_waits_for_model():
+    clock = Clock()
+    stuck: list[str] = []
+    notice = StallNotice("conv-1", clock=clock, is_alive=lambda: True, on_stuck=stuck.append)
+    notice.wrap(lambda _e: None)
+    notice.set_step("checking the Codex login", can_stop=False)
+    clock.now += 600
+    notice.tick()
+    assert stuck == []
+    notice.set_step("")
+    clock.now += 30
+    assert notice.text() == ""  # the CLI gets the normal 60 s before a notice
+    clock.now += 30
+    assert notice.text().startswith("Waiting for the model · 1m 00s")
+
+
 def test_thread_pushes_and_stops():
     seen: list[dict] = []
     notice = StallNotice("conv-2", after_s=0, every_s=0.02, is_alive=lambda: True)

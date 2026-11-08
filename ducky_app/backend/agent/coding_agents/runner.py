@@ -830,13 +830,32 @@ def run_coding_agent_message(
             return {"ok": False, "error": error, "run_id": rid,
                     "requested_mode": mode, "effective_mode": ""}
         add_live_run_id(rid)
+    from backend.agent.coding_agents.stall_notice import StallNotice
+
+    # Setup (agent detect, plugin login check, prompt build) once hung with no event at all:
+    # the chat sat on "Starting" forever. The notice names the step and stops a stuck one.
+    stop_event = cancel if cancel is not None else threading.Event()
+
+    def stuck(step: str) -> None:
+        detail = (f"Ducky stopped this turn: it was stuck on \"{step}\" for "
+                  f"{int(stall.stuck_after_s)}s before the agent started. Send your message again.")
+        push({"type": "error", "text": detail, "conv_id": conv.id, "run_id": rid})
+        push({"type": "agent_stopped", "reason": "error", "detail": detail,
+              "conv_id": conv.id, "run_id": rid})
+        stop_event.set()
+
+    stall = StallNotice(conv.id, rid, on_stuck=stuck)
+    stall.set_step("getting ready")
+    push = stall.wrap(push)
+    stall.start()
     try:
         outcome = _run_coding_agent_message(
             conv, user_text, model=model, push=push, run_id=rid,
-            timeout_s=timeout_s, cancel=cancel, mode=mode,
+            timeout_s=timeout_s, cancel=stop_event, mode=mode, stall=stall,
         )
         return {"effective_mode": "", **outcome, "requested_mode": mode}
     finally:
+        stall.stop()
         discard_live_run_id(rid)
 
 
@@ -850,6 +869,7 @@ def _run_coding_agent_message(
     timeout_s: float = 0.0,
     cancel: threading.Event | None = None,
     mode: str = "agent",
+    stall: Any = None,
 ) -> dict[str, Any]:
     """Execute one external coding-agent turn; persist assistant reply on conv.
 
@@ -864,6 +884,11 @@ def _run_coding_agent_message(
     adapter = get_adapter(agent_id)
     if adapter is None:
         return {"ok": False, "error": f"unknown coding agent: {agent_id}"}
+    if stall is None:
+        from backend.agent.coding_agents.stall_notice import StallNotice
+
+        stall = StallNotice(conv.id, run_id)
+    stall.label = adapter.label
 
     try:
         mode_kwargs = coding_mode_launch_kwargs(adapter, mode)
@@ -880,6 +905,7 @@ def _run_coding_agent_message(
         push({"type": "error", "text": f"{adapter.label} is disabled in Settings → LLMs", "conv_id": conv.id})
         return {"ok": False, "error": "disabled"}
 
+    stall.set_step(f"finding {adapter.label}")
     info = adapter.detect(settings)
     if not info.available:
         push({"type": "error", "text": info.status, "conv_id": conv.id})
@@ -918,6 +944,8 @@ def _run_coding_agent_message(
     prompt_text = user_text
     before_launch = reg.get("before_launch")
     if callable(before_launch):
+        # A login can wait on the person: shown, never auto-stopped.
+        stall.set_step(f"checking the {adapter.label} login", can_stop=False)
         auth_result = before_launch(
             conv=conv,
             user_text=user_text,
@@ -941,6 +969,7 @@ def _run_coding_agent_message(
         elif auth_result is not None:
             return {**auth_result, "requested_mode": mode, "effective_mode": effective_mode}
 
+    stall.set_step("loading the chat session")
     # A team chat whose session re-read millions of tokens per turn starts this one fresh.
     fresh_handoff = ""
     if adapter.capabilities.resume:
@@ -975,6 +1004,7 @@ def _run_coding_agent_message(
 
     from backend.agent.coding_agents.mcp_inject import deployed_skill_packs
 
+    stall.set_step("building the system prompt")
     skills_dir, skill_names = deployed_skill_packs(agent_id)
     system_prompt = bootstrap_system_prompt(
         project_root=project_root,
@@ -1037,12 +1067,8 @@ def _run_coding_agent_message(
                **_account_env(agent_id, conv.id)},
         identity=run_ctx,
     )
-    from backend.agent.coding_agents.stall_notice import StallNotice
-
-    # A quiet stream reads as "Thinking" in the window: name what the turn waits on.
-    stall = StallNotice(conv.id, rid, label=adapter.label)
-    push = stall.wrap(push)
-    stall.start()
+    # The CLI is next: from here a quiet stream is the model or a tool, never a stuck setup.
+    stall.set_step("")
 
     try:
         launch_model = _normalize_launch_model(
@@ -1113,7 +1139,6 @@ def _run_coding_agent_message(
         from backend.agent.coding_agents import proc_exec
 
         proc_exec.set_stop_requester(conv.id, None)
-        stall.stop()
         ckpt.close()
         steer.end_run(conv.id)
         file_changes.close("done" if "result" in locals() and getattr(result, "ok", False) else "error")

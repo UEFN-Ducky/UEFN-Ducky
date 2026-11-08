@@ -168,3 +168,32 @@ def test_the_bridge_asks_the_panel_which_chats_run_and_stops_them_there(monkeypa
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_a_picture_send_parked_behind_a_stopped_turn_runs_once_idle(monkeypatch) -> None:
+    # "Send now" on a queued picture presses Stop; the send reached a turn still shutting
+    # down, was parked, and Stop blocked its only trigger: the bubble never ran.
+    from backend.agent import a2a_broker as broker
+
+    monkeypatch.setattr(broker, "_retry_queue_later", lambda cid: None)
+    monkeypatch.setattr(broker, "_cooldowns", {}, raising=False)
+    monkeypatch.setattr(broker, "_stopped", {"pic"}, raising=False)
+    running = {"on": True}
+    started: list[tuple[str, str, dict]] = []
+    patch_turns(monkeypatch, "is_agent_running", lambda cid: running["on"])
+    patch_turns(monkeypatch, "wait_for_idle", lambda cid, timeout=None: not running["on"])
+    patch_turns(monkeypatch, "_pending_agent_messages", {})
+    patch_turns(monkeypatch, "_pending_person_sends", {})
+    patch_turns(monkeypatch, "run_message", lambda cid, text, mode, model, **kw: started.append((cid, text, kw)) or "run")
+    picture = [{"kind": "image", "path": "attachments/a.png"}]
+
+    assert pending._queue_person_send("pic", "make foam", "agent", {"attachments": picture}) == "queued"
+    time.sleep(0.2)
+    assert started == []  # still waits behind the turn
+    running["on"] = False
+    deadline = time.time() + 5
+    while not started and time.time() < deadline:
+        time.sleep(0.02)
+    assert started and started[0][:2] == ("pic", "make foam")
+    assert started[0][2]["attachments"] == picture
+    assert "pic" not in broker._stopped  # the person's send clears Stop, as a direct send does

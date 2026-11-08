@@ -4,6 +4,7 @@ model, sends into a busy chat (queued, offered as a steer) and delivering them a
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from functools import wraps
 from typing import Any
@@ -227,10 +228,12 @@ def _queue_person_send(conv_id: str, text: str, mode: str, kwargs: dict[str, Any
                 {"text": body, "mode": mode or "agent", "attachments": attachments})
         from backend.agent.a2a_broker import _retry_queue_later
         _retry_queue_later(conv_id)
+        _deliver_when_idle(conv_id)
         return "queued"
     if not body.strip():  # a resume or an empty send: the running turn already covers it
         return ""
     _queue_pending(conv_id, body)
+    _deliver_when_idle(conv_id)
     from frontend.ui_web import steer
 
     sid = "send-" + uuid.uuid4().hex
@@ -238,6 +241,31 @@ def _queue_person_send(conv_id: str, text: str, mode: str, kwargs: dict[str, Any
         with _pending_lock:
             _pending_steered.setdefault(conv_id, {})[sid] = body
     return "queued"
+
+
+PERSON_SEND_WAIT_S = 600.0
+
+
+def _deliver_when_idle(conv_id: str) -> None:
+    """Run a person's send parked behind a running or stopping turn once the chat is idle.
+
+    The turn's ``agent_stopped`` was its only trigger, and that one returns while Stop is
+    set: "Send now" on a queued picture presses Stop, the send arrived while the old turn
+    was still shutting down, and it sat parked forever behind a bubble that never ran.
+    """
+
+    def _worker() -> None:
+        deadline = time.monotonic() + PERSON_SEND_WAIT_S
+        while not wait_for_idle(conv_id, 1.0) or is_agent_running(conv_id):
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.5)
+        from backend.agent.a2a_broker import resume_by_user
+
+        resume_by_user(conv_id)  # the person's own send continues the chat, as a direct send does
+        _deliver_pending_agent_messages(conv_id)
+
+    threading.Thread(target=_worker, daemon=True, name=f"person-send-{conv_id[:8]}").start()
 
 
 def _drop_steered_pending(conv_id: str) -> None:
