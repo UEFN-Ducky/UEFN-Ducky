@@ -1676,6 +1676,13 @@ body.native-caption-input-ready .app-header .drag-region {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
+.remote-trackpad-buttons .remote-trackpad-talk {
+  border-color: var(--accent);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
 .remote-trackpad-typing form {
   display: flex;
   gap: 8px;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { getDirectTransport } from "../remote/directTransport";
+import { useDictation } from "../voice/useDictation";
 import {
   HOLD_MS,
   motionToCursor,
@@ -57,10 +58,19 @@ export function RemoteTrackpad() {
   const pending = useRef({ x: 0, y: 0 });
   const frame = useRef(0);
   const muteMotionUntil = useRef(0);
+  const talking = useRef(false);
+  const micStarted = useRef<Promise<void>>(Promise.resolve());
+  const [interim, setInterim] = useState("");
 
   const send = useCallback((payload: Payload) => {
     if (!pausedRef.current) getDirectTransport()?.sendInput({ view: "desktop", ...payload });
   }, []);
+
+  // Words land wherever the PC's text cursor is. The space keeps one phrase off the next.
+  const dictation = useDictation({
+    onInterim: setInterim,
+    onFinal: (words) => send({ type: "text", text: `${words} ` }),
+  });
 
   const queueMove = useCallback(
     (dx: number, dy: number) => {
@@ -135,7 +145,8 @@ export function RemoteTrackpad() {
       const dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
       last = now;
       const fingerOnPad = !!pad.current && !pad.current.touch.dragging;
-      if (fingerOnPad || scroll.current || now < muteMotionUntil.current) return;
+      // Talking freezes the air mouse, so the cursor stays on the box being typed into.
+      if (fingerOnPad || scroll.current || talking.current || now < muteMotionUntil.current) return;
       const g = event.accelerationIncludingGravity;
       const tune = settingsRef.current;
       const move = motionToCursor(
@@ -176,9 +187,29 @@ export function RemoteTrackpad() {
   };
 
   const togglePause = () => {
-    if (!paused) releasePad();
+    if (!paused) {
+      releasePad();
+      talking.current = false;
+      dictation.abort();
+    }
     pausedRef.current = !paused;
     setPaused(!paused);
+  };
+
+  const onTalkDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (pausedRef.current || talking.current || dictation.status === "transcribing") return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    talking.current = true;
+    micStarted.current = dictation.start();
+  };
+
+  /** Waits for the mic to finish starting: letting go during startup must still end it. */
+  const onTalkUp = () => {
+    if (!talking.current) return;
+    talking.current = false;
+    void micStarted.current.then(() => {
+      if (!talking.current) void dictation.stop();
+    });
   };
 
   const onPadDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -268,7 +299,7 @@ export function RemoteTrackpad() {
             onPointerUp={onPadUp}
             onPointerCancel={releasePad}
           >
-            <span>{hint}</span>
+            <span>{interim || hint}</span>
           </div>
           <div
             className="remote-trackpad-scroll"
@@ -282,6 +313,7 @@ export function RemoteTrackpad() {
           </div>
         </div>
         {motionError ? <div className="remote-trackpad-error">{motionError}</div> : null}
+        {dictation.notice ? <div className="remote-trackpad-error">{dictation.notice.message}</div> : null}
         <div className="remote-trackpad-buttons">
           <button type="button" onClick={() => click(2)}>
             Right click
@@ -297,6 +329,17 @@ export function RemoteTrackpad() {
           </button>
           <button type="button" aria-pressed={typing} className={typing ? "is-on" : ""} onClick={() => setTyping(!typing)}>
             Keyboard
+          </button>
+          <button
+            type="button"
+            className={`remote-trackpad-talk${dictation.isRecording ? " is-on" : ""}`}
+            aria-label="Hold to talk"
+            onPointerDown={onTalkDown}
+            onPointerUp={onTalkUp}
+            onPointerCancel={onTalkUp}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {dictation.isRecording ? "Listening…" : dictation.status === "transcribing" ? "Typing…" : "Hold to talk"}
           </button>
         </div>
         {typing ? (

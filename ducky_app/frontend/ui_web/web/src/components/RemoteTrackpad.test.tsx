@@ -2,7 +2,36 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const { sent } = vi.hoisted(() => ({ sent: [] as Record<string, unknown>[] }));
+const { sent, dictation } = vi.hoisted(() => ({
+  sent: [] as Record<string, unknown>[],
+  dictation: {
+    opts: null as null | { onFinal: (words: string) => void; onInterim: (words: string) => void },
+    calls: [] as string[],
+    finishStart: () => {},
+    startDelayed: false,
+  },
+}));
+
+vi.mock("../voice/useDictation", () => ({
+  useDictation: (opts: typeof dictation.opts) => {
+    dictation.opts = opts;
+    return {
+      status: "idle",
+      notice: null,
+      isRecording: false,
+      start: () => {
+        dictation.calls.push("start");
+        return dictation.startDelayed
+          ? new Promise<void>((resolve) => {
+              dictation.finishStart = resolve;
+            })
+          : Promise.resolve();
+      },
+      stop: async () => void dictation.calls.push("stop"),
+      abort: () => void dictation.calls.push("abort"),
+    };
+  },
+}));
 
 vi.mock("../remote/directTransport", () => ({
   getDirectTransport: () => ({
@@ -29,6 +58,8 @@ function motionEvent(alpha: number) {
 
 beforeEach(() => {
   sent.length = 0;
+  dictation.calls.length = 0;
+  dictation.startDelayed = false;
   localStorage.clear();
   class TestPointerEvent extends MouseEvent {
     pointerId: number;
@@ -119,6 +150,53 @@ it("Motion moves the cursor from the gyro, only while it is on", async () => {
   expect(sent).toHaveLength(1);
   expect(sent[0]).toMatchObject({ view: "desktop", type: "move", dy: 0 });
   expect(sent[0].dx as number).toBeGreaterThan(0);
+});
+
+it("holding talk records, letting go stops, and the words are typed at the PC's cursor", async () => {
+  render(<RemoteTrackpad />);
+  const talk = screen.getByLabelText("Hold to talk");
+  fireEvent.pointerDown(talk);
+  expect(dictation.calls).toEqual(["start"]);
+  fireEvent.pointerUp(talk);
+  await wait(0);
+  expect(dictation.calls).toEqual(["start", "stop"]);
+  act(() => dictation.opts?.onFinal("hello there"));
+  expect(sent).toEqual([{ view: "desktop", type: "text", text: "hello there " }]);
+});
+
+it("letting go while the mic is still starting ends it once started", async () => {
+  dictation.startDelayed = true;
+  render(<RemoteTrackpad />);
+  const talk = screen.getByLabelText("Hold to talk");
+  fireEvent.pointerDown(talk);
+  fireEvent.pointerUp(talk);
+  await wait(0);
+  expect(dictation.calls).toEqual(["start"]);
+  dictation.finishStart();
+  await wait(0);
+  expect(dictation.calls).toEqual(["start", "stop"]);
+});
+
+it("talking freezes the air mouse", async () => {
+  render(<RemoteTrackpad />);
+  await act(async () => void fireEvent.click(screen.getByText("Motion")));
+  await wait(240);
+  fireEvent.pointerDown(screen.getByLabelText("Hold to talk"));
+  await wait(240);
+  motionEvent(-100);
+  await wait(40);
+  motionEvent(-100);
+  await wait(40);
+  expect(sent).toEqual([]);
+});
+
+it("pause cancels a recording and its words are not typed", () => {
+  render(<RemoteTrackpad />);
+  fireEvent.pointerDown(screen.getByLabelText("Hold to talk"));
+  fireEvent.click(screen.getByText("Pause"));
+  expect(dictation.calls).toEqual(["start", "abort"]);
+  act(() => dictation.opts?.onFinal("too late"));
+  expect(sent).toEqual([]);
 });
 
 it("the keyboard sends typed text and named keys", async () => {
