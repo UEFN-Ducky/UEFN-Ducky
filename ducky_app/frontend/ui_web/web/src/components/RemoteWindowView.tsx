@@ -1287,12 +1287,14 @@ function statsLabel(s: Stats): string {
   return parts.join(" · ");
 }
 
-function UefnStickPad({
+export function UefnStickPad({
   className,
   onChange,
+  testId,
 }: {
   className: string;
   onChange: (nx: number, ny: number, active: boolean) => void;
+  testId?: string;
 }) {
   const padRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLSpanElement>(null);
@@ -1327,6 +1329,7 @@ function UefnStickPad({
     <div
       ref={padRef}
       className={className}
+      data-testid={testId}
       onPointerDown={(ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -1360,19 +1363,21 @@ function tapChord(send: SendFn, keys: string[]) {
   for (const ev of chordTap(keys)) send(ev);
 }
 
-function StickBtn({
+export function StickBtn({
   label,
   onDown,
   onUp,
+  className,
 }: {
   label: string;
   onDown: () => void;
   onUp?: () => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
-      className="remote-stick-btn"
+      className={`remote-stick-btn${className ? ` ${className}` : ""}`}
       onPointerDown={(ev) => {
         ev.preventDefault();
         ev.stopPropagation();

@@ -199,6 +199,84 @@ it("pause cancels a recording and its words are not typed", () => {
   expect(sent).toEqual([]);
 });
 
+function openController() {
+  HTMLElement.prototype.setPointerCapture = () => {};
+  HTMLElement.prototype.hasPointerCapture = () => true;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}),
+  } as DOMRect);
+  render(<RemoteTrackpad />);
+  fireEvent.click(screen.getByRole("tab", { name: "Controller" }));
+}
+
+it("the Controller tab swaps the trackpad for two sticks, and back", () => {
+  openController();
+  expect(screen.queryByTestId("trackpad-pad")).toBeNull();
+  expect(screen.getByTestId("controller-move")).toBeTruthy();
+  expect(screen.getByTestId("controller-look")).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Mouse" }));
+  expect(screen.getByTestId("trackpad-pad")).toBeTruthy();
+  expect(screen.queryByTestId("controller-move")).toBeNull();
+  vi.restoreAllMocks();
+});
+
+it("the left stick holds movement keys and lets them go", () => {
+  openController();
+  const stick = screen.getByTestId("controller-move");
+  fireEvent.pointerDown(stick, { clientX: 100, clientY: 50 });
+  expect(sent).toEqual([{ view: "desktop", type: "keydown", key: "d" }]);
+  sent.length = 0;
+  fireEvent.pointerUp(stick, { clientX: 100, clientY: 50 });
+  expect(sent).toEqual([{ view: "desktop", type: "keyup", key: "d" }]);
+  vi.restoreAllMocks();
+});
+
+it("the right stick looks with plain mouse movement and never presses a button", async () => {
+  openController();
+  fireEvent.pointerDown(screen.getByTestId("controller-look"), { clientX: 100, clientY: 50 });
+  await wait(60);
+  expect(sent.length).toBeGreaterThan(0);
+  expect(sent.every((event) => event.type === "move" && (event.dx as number) > 0 && !("pad" in event))).toBe(true);
+  vi.restoreAllMocks();
+});
+
+it("Fire and Jump hold while pressed", () => {
+  openController();
+  fireEvent.pointerDown(screen.getByText("Fire"));
+  expect(sent).toEqual([{ view: "desktop", type: "down", button: 0 }]);
+  fireEvent.pointerUp(screen.getByText("Fire"));
+  expect(sent[1]).toEqual({ view: "desktop", type: "up", button: 0 });
+  sent.length = 0;
+  fireEvent.pointerDown(screen.getByText("Jump"));
+  expect(sent).toEqual([{ view: "desktop", type: "keydown", key: " " }]);
+  fireEvent.pointerUp(screen.getByText("Jump"));
+  vi.restoreAllMocks();
+});
+
+it("leaving the controller releases everything still held", () => {
+  openController();
+  fireEvent.pointerDown(screen.getByTestId("controller-move"), { clientX: 50, clientY: 0 });
+  fireEvent.pointerDown(screen.getByText("Aim"));
+  sent.length = 0;
+  fireEvent.click(screen.getByRole("tab", { name: "Mouse" }));
+  expect(sent).toContainEqual({ view: "desktop", type: "keyup", key: "w" });
+  expect(sent).toContainEqual({ view: "desktop", type: "up", button: 2 });
+  vi.restoreAllMocks();
+});
+
+it("the air mouse stays still on the Controller tab", async () => {
+  openController();
+  fireEvent.click(screen.getByRole("tab", { name: "Mouse" }));
+  await act(async () => void fireEvent.click(screen.getByText("Motion")));
+  fireEvent.click(screen.getByRole("tab", { name: "Controller" }));
+  motionEvent(-100);
+  await wait(40);
+  motionEvent(-100);
+  await wait(40);
+  expect(sent).toEqual([]);
+  vi.restoreAllMocks();
+});
+
 it("the keyboard sends typed text and named keys", async () => {
   render(<RemoteTrackpad />);
   fireEvent.click(screen.getByText("Keyboard"));

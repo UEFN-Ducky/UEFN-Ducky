@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { getDirectTransport } from "../remote/directTransport";
 import { useDictation } from "../voice/useDictation";
+import { RemoteController } from "./RemoteController";
 import {
   HOLD_MS,
   motionToCursor,
@@ -25,8 +26,8 @@ const KEYS: { key: string; label: string }[] = [
   { key: "Escape", label: "Esc" },
 ];
 
-type Settings = { speed: number; motionSpeed: number; invertX: boolean; invertY: boolean };
-const DEFAULT_SETTINGS: Settings = { speed: 2, motionSpeed: 1, invertX: false, invertY: false };
+type Settings = { speed: number; motionSpeed: number; lookSpeed: number; invertX: boolean; invertY: boolean };
+const DEFAULT_SETTINGS: Settings = { speed: 2, motionSpeed: 1, lookSpeed: 1, invertX: false, invertY: false };
 
 function loadSettings(): Settings {
   try {
@@ -48,6 +49,7 @@ export function RemoteTrackpad() {
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState("");
   const [linked, setLinked] = useState(true);
+  const [tab, setTab] = useState<"mouse" | "controller">("mouse");
 
   const pausedRef = useRef(false);
   const settingsRef = useRef(settings);
@@ -133,7 +135,7 @@ export function RemoteTrackpad() {
   }, []);
 
   useEffect(() => {
-    if (!motion || paused) return;
+    if (!motion || paused || tab === "controller") return;
     let last = 0;
     let seen = false;
     const onMotion = (event: DeviceMotionEvent) => {
@@ -165,7 +167,7 @@ export function RemoteTrackpad() {
       window.removeEventListener("devicemotion", onMotion);
       window.clearTimeout(noData);
     };
-  }, [motion, paused, queueMove]);
+  }, [motion, paused, queueMove, tab]);
 
   const toggleMotion = async () => {
     if (motion) {
@@ -194,6 +196,16 @@ export function RemoteTrackpad() {
     }
     pausedRef.current = !paused;
     setPaused(!paused);
+  };
+
+  const switchTab = (next: "mouse" | "controller") => {
+    if (next === tab) return;
+    releasePad();
+    talking.current = false;
+    dictation.abort();
+    pausedRef.current = false;
+    setPaused(false);
+    setTab(next);
   };
 
   const onTalkDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -290,6 +302,18 @@ export function RemoteTrackpad() {
         <div className="remote-trackpad-status" role="status">
           {linked ? "Connected to this PC's mouse" : "Reconnecting to the PC…"}
         </div>
+        <div className="remote-trackpad-tabs" role="tablist" aria-label="Control mode">
+          <button type="button" role="tab" aria-selected={tab === "mouse"} onClick={() => switchTab("mouse")}>
+            Mouse
+          </button>
+          <button type="button" role="tab" aria-selected={tab === "controller"} onClick={() => switchTab("controller")}>
+            Controller
+          </button>
+        </div>
+        {tab === "controller" ? (
+          <RemoteController send={send} lookSpeed={settings.lookSpeed} />
+        ) : (
+          <>
         <div className="remote-trackpad-surfaces">
           <div
             className={`remote-trackpad-pad${dragging ? " is-dragging" : ""}`}
@@ -378,6 +402,12 @@ export function RemoteTrackpad() {
             </span>
             <input type="range" min={0.2} max={4} step={0.1} value={settings.motionSpeed} onChange={(e) => patchSettings({ motionSpeed: Number(e.target.value) })} />
           </label>
+          <label className="remote-control-slider">
+            <span>
+              Controller look speed <b>{settings.lookSpeed.toFixed(1)}</b>
+            </span>
+            <input type="range" min={0.2} max={4} step={0.1} value={settings.lookSpeed} onChange={(e) => patchSettings({ lookSpeed: Number(e.target.value) })} />
+          </label>
           <label className="remote-trackpad-check">
             <input type="checkbox" checked={settings.invertX} onChange={(e) => patchSettings({ invertX: e.target.checked })} /> Invert motion left/right
           </label>
@@ -385,6 +415,8 @@ export function RemoteTrackpad() {
             <input type="checkbox" checked={settings.invertY} onChange={(e) => patchSettings({ invertY: e.target.checked })} /> Invert motion up/down
           </label>
         </details>
+          </>
+        )}
       </div>
     </div>
   );
