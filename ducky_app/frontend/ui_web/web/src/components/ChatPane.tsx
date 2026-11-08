@@ -16,6 +16,7 @@ import type {
   SessionFile,
 } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
+import { canCallOverHttp, sendWithPicturesOverHttp } from "../hooks/panelHttp";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { useFocusWindow } from "../hooks/useFocusWindow";
 import { useLinkedAgents } from "../hooks/useLinkedAgents";
@@ -669,7 +670,13 @@ export function ChatPane({
         } catch {
           /* ignore */
         }
-        const res = await api.send_message(chat.id, text, mode, model, contextFilePath, apiAttachments, agent);
+        const args = [chat.id, text, mode, model, contextFilePath, apiAttachments, agent] as const;
+        let res: { run_id?: string } | undefined;
+        const http = apiAttachments.some((a) => a.kind === "image") && canCallOverHttp()
+          ? await sendWithPicturesOverHttp([...args])
+          : null;
+        if (http?.ok) res = http.result as { run_id?: string } | undefined;
+        else if (!http?.timedOut) res = await api.send_message(...args);
         if (res?.run_id) {
           setActiveRunId(res.run_id);
         } else {

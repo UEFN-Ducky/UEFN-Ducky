@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("../remote/directTransport", () => ({ getDirectTransport: () => null, isRemoteDuckyWindow: () => false }));
 
-import { callOverHttp } from "./panelHttp";
+import { callOverHttp, sendWithPicturesOverHttp } from "./panelHttp";
 import { getApi } from "./usePanelApi";
 
 const fetchMock = vi.fn();
@@ -50,6 +50,24 @@ it("a routed method through getApi() goes over HTTP, and to the bridge on a 500"
   fetchMock.mockResolvedValueOnce(reply(500, {}));
   bridge.get_skill_info.mockResolvedValue("over-bridge");
   await expect(api.get_skill_info()).resolves.toBe("over-bridge");
+});
+
+it("a picture send goes over HTTP and retries a timeout once under the same request id", async () => {
+  vi.useFakeTimers();
+  // First try hangs until its timeout aborts it; the retry answers.
+  fetchMock.mockImplementationOnce((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+    init.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+  }));
+  fetchMock.mockResolvedValueOnce(reply(200, { ok: true, result: { run_id: "r1" } }));
+  const sent = sendWithPicturesOverHttp(["c1", "look"]);
+  await vi.advanceTimersByTimeAsync(45_000);
+  await expect(sent).resolves.toEqual({ ok: true, result: { run_id: "r1" } });
+  vi.useRealTimers();
+  const headers = fetchMock.mock.calls.map(([, init]) => (init as RequestInit).headers as Record<string, string>);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[0][0]).toBe("/__panel_api/send_message");
+  expect(headers[0]["X-Ducky-Request-Id"]).toMatch(/^send-/);
+  expect(headers[1]["X-Ducky-Request-Id"]).toBe(headers[0]["X-Ducky-Request-Id"]);
 });
 
 it("a method that is not routed stays on the bridge", async () => {
