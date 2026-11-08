@@ -36,7 +36,6 @@ def public(monkeypatch, tmp_path, unrestricted_tools):
     patch_turns(monkeypatch, "is_agent_running", lambda _: False)
     patch_turns(monkeypatch, "_note_run_starter", lambda *a: None)
     patch_turns(monkeypatch, "_make_broker_tap", lambda push, _: push)
-    patch_turns(monkeypatch, "_backfill_video_frames", lambda *a: None)
     patch_turns(monkeypatch, "get_active_conv_id", lambda: None)
     patch_turns(monkeypatch, "apply_workspace_env", lambda *_: None)
     patch_turns(monkeypatch, "close_changeset_run", lambda *a, **kw: None)
