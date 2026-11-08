@@ -523,6 +523,20 @@ def test_trackpad_scroll_and_buttons_leave_the_cursor_where_it_is(monkeypatch) -
     assert sent == [[(0, 0, -240, 0x0800)], [(5, -3, 0, 0x0001)], [(0, 0, 0, 0x0008)]]
 
 
+def test_only_trackpad_moves_show_the_big_pointer(monkeypatch) -> None:
+    import frontend.window_view as wv
+    from frontend.ui_web import trackpad_cursor
+
+    monkeypatch.setattr(wv.sys, "platform", "win32")
+    monkeypatch.setattr(wv, "_send_mice", lambda _events: None)
+    nudges: list[int] = []
+    monkeypatch.setattr(trackpad_cursor, "nudge", lambda: nudges.append(1))
+    handle_stream_message("desktop", b'{"type":"move","dx":5,"dy":-3}')
+    assert nudges == []
+    handle_stream_message("desktop", b'{"type":"move","dx":5,"dy":-3,"pad":true}')
+    assert nudges == [1]
+
+
 def test_uefnproject_path_finds_file(tmp_path) -> None:
     island = tmp_path / "Island.uefnproject"
     island.write_text("{}", encoding="utf-8")

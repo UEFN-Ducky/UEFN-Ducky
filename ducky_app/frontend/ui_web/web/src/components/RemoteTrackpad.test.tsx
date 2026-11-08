@@ -92,7 +92,7 @@ it("a slide sends a relative move and no click", async () => {
   fireEvent.pointerMove(pad, { clientX: 20, clientY: 0 });
   fireEvent.pointerUp(pad, { clientX: 20, clientY: 0 });
   await wait(90);
-  expect(sent).toEqual([{ view: "desktop", type: "move", dx: 40, dy: 0 }]);
+  expect(sent).toEqual([{ view: "desktop", type: "move", dx: 40, dy: 0, pad: true }]);
 });
 
 it("a hold presses the button and lifting drops it", async () => {

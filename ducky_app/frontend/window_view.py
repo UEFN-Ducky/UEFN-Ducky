@@ -897,6 +897,10 @@ def handle_stream_message(view: object, payload: bytes) -> None:
         if hid:
             fit_window(hid, int(event.get("w") or 0), int(event.get("h") or 0))
         return
+    if kind == "move" and event.get("pad"):
+        from frontend.ui_web.trackpad_cursor import nudge
+
+        nudge()
     if kind in ("down", "up", "move", "wheel", "dblclick"):
         rel = "dx" in event
         has_xy = "x" in event

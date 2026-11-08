@@ -81,7 +81,7 @@ export function RemoteTrackpad() {
         frame.current = 0;
         const whole = takeWhole(pending.current.x, pending.current.y);
         pending.current = { x: whole.restX, y: whole.restY };
-        if (whole.dx || whole.dy) send({ type: "move", dx: whole.dx, dy: whole.dy });
+        if (whole.dx || whole.dy) send({ type: "move", dx: whole.dx, dy: whole.dy, pad: true });
       });
     },
     [send],
