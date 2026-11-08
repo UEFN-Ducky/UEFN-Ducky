@@ -671,20 +671,39 @@ def _api_json(
 
 
 UPLOAD_TRIES = 3
+UPLOAD_DROP_TRIES = 5
+UPLOAD_DROP_WAIT_S = 15
+
+
+class UploadDropped(Exception):
+    """The connection died while the file was being sent; nothing was stored."""
 
 
 def upload_app_release(base: str, api_key: str, exe_path: Path) -> dict:
     """Upload the Setup, the update pack or its manifest. A slow PUT can outlive its
     upload ticket (core's TICKET_TTL_SECS, 5 minutes: "ticket expired" at complete); a
     fresh ticket usually goes through (1.2.418's first pack and 1.2.419's first Setup didn't)."""
-    for attempt in range(UPLOAD_TRIES):
+    expired = 0
+    drops = 0
+    while True:
         try:
             return _upload_app_release_once(base, api_key, exe_path)
+        except UploadDropped as exc:
+            # Each try gets a fresh ticket and sends the whole file again.
+            drops += 1
+            if drops >= UPLOAD_DROP_TRIES:
+                raise SystemExit(
+                    f"{exe_path.name}: the connection dropped {drops} times while uploading ({exc}). "
+                    "Run 'UEFN Ducky Release - finish after a failed upload' to send this build again."
+                ) from exc
+            wait = UPLOAD_DROP_WAIT_S * drops
+            print(f"  {exe_path.name}: connection dropped ({exc}), try {drops + 1} of {UPLOAD_DROP_TRIES} in {wait}s")
+            time.sleep(wait)
         except SystemExit as exc:
-            if "ticket expired" not in str(exc) or attempt == UPLOAD_TRIES - 1:
+            expired += 1
+            if "ticket expired" not in str(exc) or expired >= UPLOAD_TRIES:
                 raise
             print(f"  {exe_path.name}: the upload ticket expired, trying again with a new one")
-    raise AssertionError("unreachable")
 
 
 def _upload_app_release_once(base: str, api_key: str, exe_path: Path) -> dict:
@@ -706,7 +725,11 @@ def _upload_app_release_once(base: str, api_key: str, exe_path: Path) -> dict:
         return _upload_app_release_multipart(base, api_key, exe_path)
 
     print(f"  ticket ok — streaming {size} bytes direct to object storage")
-    _presigned_put_file(upload_url, exe_path, size)
+    # Only the send is retried: past this point the server may already have the file.
+    try:
+        _presigned_put_file(upload_url, exe_path, size)
+    except (OSError, http.client.HTTPException) as exc:
+        raise UploadDropped(str(exc) or type(exc).__name__) from exc
 
     complete = _api_json(
         base,

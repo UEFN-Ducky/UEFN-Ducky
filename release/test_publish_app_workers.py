@@ -84,3 +84,79 @@ def test_pytest_gets_the_ffmpeg_bundle_when_it_exists(tmp_path, monkeypatch) -> 
     assert pa.pytest_env(tmp_path)["DUCKY_FFMPEG_DIR"] == str(bundle)
     monkeypatch.setenv("DUCKY_FFMPEG_DIR", "C:/mine")
     assert pa.pytest_env(tmp_path)["DUCKY_FFMPEG_DIR"] == "C:/mine"  # never overridden
+
+
+def _flaky_upload(pa, monkeypatch, failures: list) -> list:
+    """Each call raises the next failure; returns ok when they run out. Gives the waits made."""
+    waits: list = []
+    monkeypatch.setattr(pa.time, "sleep", waits.append)
+
+    def once(_base, _key, _path):
+        if failures:
+            raise failures.pop(0)
+        return {"ok": True}
+
+    monkeypatch.setattr(pa, "_upload_app_release_once", once)
+    return waits
+
+
+def test_a_dropped_connection_waits_and_tries_again(monkeypatch) -> None:
+    pa = _load()
+    failures = [pa.UploadDropped("reset"), pa.UploadDropped("reset")]
+    waits = _flaky_upload(pa, monkeypatch, failures)
+    assert pa.upload_app_release("https://x", "k", Path("Setup.exe")) == {"ok": True}
+    assert waits == [pa.UPLOAD_DROP_WAIT_S, pa.UPLOAD_DROP_WAIT_S * 2]
+
+
+def test_a_connection_that_keeps_dropping_stops_with_a_clear_message(monkeypatch) -> None:
+    pa = _load()
+    failures = [pa.UploadDropped("reset") for _ in range(pa.UPLOAD_DROP_TRIES)]
+    _flaky_upload(pa, monkeypatch, failures)
+    try:
+        pa.upload_app_release("https://x", "k", Path("Setup.exe"))
+    except SystemExit as exc:
+        assert "dropped 5 times" in str(exc) and "finish after a failed upload" in str(exc)
+    else:
+        raise AssertionError("expected it to give up")
+    assert failures == []
+
+
+def test_an_expired_ticket_still_gets_three_tries_and_other_errors_none(monkeypatch) -> None:
+    pa = _load()
+    failures = [SystemExit("ticket expired") for _ in range(pa.UPLOAD_TRIES + 1)]
+    _flaky_upload(pa, monkeypatch, failures)
+    try:
+        pa.upload_app_release("https://x", "k", Path("Setup.exe"))
+    except SystemExit:
+        pass
+    assert len(failures) == 1
+    failures[:] = [SystemExit("Presigned PUT HTTP 403: no"), SystemExit("never reached")]
+    try:
+        pa.upload_app_release("https://x", "k", Path("Setup.exe"))
+    except SystemExit as exc:
+        assert "403" in str(exc)
+    assert len(failures) == 1
+
+
+def test_a_reset_during_the_send_is_a_drop_and_never_completes(tmp_path, monkeypatch) -> None:
+    pa = _load()
+    setup = tmp_path / "Setup.exe"
+    setup.write_bytes(b"x")
+    calls: list = []
+
+    def api(_base, _key, method, path, body=None, timeout=120):
+        calls.append(path)
+        return {"uploadUrl": "https://store/put", "ticket": "t"}
+
+    def reset(*_args):
+        raise ConnectionResetError(10054, "closed by the remote host")
+
+    monkeypatch.setattr(pa, "_api_json", api)
+    monkeypatch.setattr(pa, "_presigned_put_file", reset)
+    try:
+        pa._upload_app_release_once("https://x", "k", setup)
+    except pa.UploadDropped as exc:
+        assert "closed by the remote host" in str(exc)
+    else:
+        raise AssertionError("expected a drop")
+    assert calls == ["/api/v1/files/app-release/ticket"]
