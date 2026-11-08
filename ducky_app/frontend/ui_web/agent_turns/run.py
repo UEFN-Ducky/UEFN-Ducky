@@ -418,37 +418,6 @@ def _note_run_starter(conv_id: str, parent: str, started_by: str | None) -> None
         pass
 
 
-def _backfill_video_frames(
-    conv: Any, conv_id: str, provider: str, external: bool, push: Any, project_root: Any, model: str = ""
-) -> None:
-    """Give earlier videos frames when the current recipient can't take them natively."""
-    if external:
-        return  # coding agents only ever get the latest message's files, never history frames
-    if not any(
-        isinstance(m, dict)
-        and m.get("role") == "user"
-        and any(isinstance(r, dict) and r.get("kind") == "video" for r in m.get("attachments") or [])
-        for m in conv.messages
-    ):
-        return
-    from backend.agent.video.send import backfill_history_frames
-    from frontend.ui_web.chats.store import get_conversations_dir
-
-    changed = backfill_history_frames(
-        conv.messages,
-        conv_dir=get_conversations_dir(project_root) / conv_id,
-        provider=provider,
-        external=external,
-        push_status=lambda text: push({"type": "status", "text": text, "conv_id": conv_id}),
-        model=model,
-    )
-    if changed:
-        try:
-            save_conversation(conv)
-        except Exception:
-            pass
-
-
 def clear_last_interrupt(conv) -> bool:
     """Drop the interrupt footer. Keep partial text, thinking, ts, usage, blocks.
 

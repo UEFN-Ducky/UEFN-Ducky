@@ -37,9 +37,13 @@ def test_openai_gets_labelled_frames(tmp_path):
     assert parts[1]["image_url"]["url"] == "data:image/jpeg;base64," + base64.b64encode(b"J0").decode()
 
 
-def test_video_without_frames_becomes_a_note(tmp_path):
-    blocks = build_anthropic_user_content("x", [_video(tmp_path, frames=0)])
-    assert blocks[-1] == {"type": "text", "text": '[Video "bug.mp4" attached but could not be analyzed]'}
+def test_video_without_frames_is_only_referenced(tmp_path):
+    v = _video(tmp_path, frames=0)
+    blocks = build_anthropic_user_content("x", [v])
+    note = blocks[-1]["text"]
+    assert note.startswith(f'[Video "bug.mp4" attached: {v.file_path} (not sent to you).')
+    assert f'web_video(url="{v.file_path}", overview=8)' in note
+    assert not any(b.get("type") == "image" for b in blocks)
 
 
 def _fake_genai(monkeypatch):
@@ -64,11 +68,11 @@ def _fake_genai(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.genai", genai)
 
 
-def test_gemini_small_video_goes_native(tmp_path, monkeypatch):
+def test_gemini_never_gets_the_video_file_itself(tmp_path, monkeypatch):
     _fake_genai(monkeypatch)
-    parts = build_gemini_user_parts("q", [_video(tmp_path, mime="video/quicktime")])
-    assert parts[1].kw == {"data": b"VIDEO", "mime_type": "video/mov"}
-    assert len(parts) == 2
+    parts = build_gemini_user_parts("q", [_video(tmp_path, frames=0, mime="video/quicktime")])
+    assert len(parts) == 2 and parts[1].kw["text"].startswith('[Video "bug.mp4" attached:')
+    assert not any(p.kw.get("data") == b"VIDEO" for p in parts)
 
 
 def test_gemini_big_video_falls_back_to_frames(tmp_path, monkeypatch):
@@ -130,5 +134,3 @@ def test_gemini_transcript_for_frames_not_native(tmp_path, monkeypatch):
     _fake_genai(monkeypatch)
     parts = build_gemini_user_parts("q", [_tv(tmp_path, size=10**9)])
     assert parts[1].kw == {"text": 'Transcript of video "bug.mp4":\nsaid hi'}
-    native = build_gemini_user_parts("q", [_tv(tmp_path)])
-    assert not any("Transcript" in p.kw.get("text", "") for p in native)

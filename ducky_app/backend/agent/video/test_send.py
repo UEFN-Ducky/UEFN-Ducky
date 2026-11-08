@@ -215,7 +215,9 @@ def test_external_hint_includes_transcript(tmp_path):
     hint = send.external_video_hint(row, tmp_path)
     assert hint.startswith(f"Video file: {tmp_path / 'attachments/v.mp4'}")
     assert hint.splitlines()[1:] == ['Transcript of video:', 'say cheese']
-    assert send.external_video_hint({"kind": "video", "path": "a.mp4"}, tmp_path) == f"Video file: {tmp_path / 'a.mp4'}"
+    bare = send.external_video_hint({"kind": "video", "path": "a.mp4"}, tmp_path)
+    assert bare.startswith(f"Video file: {tmp_path / 'a.mp4'} (referenced, not sent to you).")
+    assert f'web_video(url="{tmp_path / "a.mp4"}", overview=8)' in bare and "\n" not in bare
 
 
 def test_row_with_not_ready_note_starts_no_transcription(tmp_path, monkeypatch):

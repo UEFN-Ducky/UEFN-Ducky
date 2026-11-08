@@ -43,7 +43,10 @@ def _video_frames(att: MessageAttachment) -> list[tuple[str, bytes]]:
 
 
 def _video_note(att: MessageAttachment) -> str:
-    return f'[Video "{att.name}" attached but could not be analyzed]'
+    """A video is referenced, not sent: the agent looks inside only when the request needs it."""
+    return (f'[Video "{att.name}" attached: {att.file_path} (not sent to you). Only if the request '
+            f'needs what is in it: web_video(url="{att.file_path}", overview=8) for contact sheets, '
+            '8 frames per picture, or frames=[seconds].]')
 
 
 def _transcript_text(att: MessageAttachment) -> str:
@@ -123,8 +126,6 @@ def build_openai_user_content(text: str, attachments: list[MessageAttachment]) -
 def build_gemini_user_parts(text: str, attachments: list[MessageAttachment]) -> list[Any]:
     from google.genai import types
 
-    from backend.agent.video.routing import gemini_inline_mime
-
     parts: list[Any] = []
     if text:
         parts.append(types.Part.from_text(text=text))
@@ -136,15 +137,6 @@ def build_gemini_user_parts(text: str, attachments: list[MessageAttachment]) -> 
         if att.omitted:
             parts.append(types.Part.from_text(text=_omitted_note(att)))
             continue
-        native = gemini_inline_mime(att.mime, att.size_bytes) if att.inline_ok else None
-        if native:
-            try:
-                from backend.workspace.ai_ignore import require_ai_access
-                require_ai_access(att.file_path)
-                parts.append(types.Part.from_bytes(data=Path(att.file_path).read_bytes(), mime_type=native))
-                continue
-            except OSError:
-                pass
         frames = _video_frames(att)
         if att.transcript:
             parts.append(types.Part.from_text(text=_transcript_text(att)))

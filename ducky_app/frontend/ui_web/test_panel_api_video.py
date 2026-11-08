@@ -14,27 +14,8 @@ def test_video_settings_roundtrip_and_clamp(monkeypatch):
     assert out["ffmpeg"] == {"state": "missing"}
 
 
-def test_stage_unknown_conv_starts_ffmpeg(monkeypatch):
-    started, preps = [], []
-    monkeypatch.setattr("backend.agent.video.ffmpeg_install.start_install", lambda: started.append(1) or {"state": "installing"})
-    monkeypatch.setattr(
-        "backend.agent.video.prep.start_prep",
-        lambda sid, *, frames, transcribe: preps.append((sid, frames, transcribe)) or {"state": "queued"},
-    )
-    res = PanelApi().stage_video_attachment("nope", "a.mp4", "video/mp4", base64.b64encode(b"x").decode())
-    assert res["ok"] and res["needs_ffmpeg"] and started == [1]
-    assert res["ffmpeg"] == {"state": "installing"}
-    assert res["prep"] == {"state": "queued"}
-    assert preps == [(res["staged_id"], 20, True)]
-
-
-def test_stage_gemini_conv_skips_ffmpeg(monkeypatch):
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(
-        "frontend.ui_web.chats.conversations.load_conversation",
-        lambda cid, project_root=None: SimpleNamespace(is_group=False, coding_agent="ducky", provider="gemini"),
-    )
+def test_a_dropped_video_is_only_saved_never_broken_down(monkeypatch):
+    # Nov 7 2026: a dropped video is referenced; frames are cut only when an agent asks.
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.start_install", lambda: (_ for _ in ()).throw(AssertionError))
     monkeypatch.setattr("backend.agent.video.ffmpeg_install.status", lambda: {"state": "missing"})
     monkeypatch.setattr("backend.agent.video.prep.start_prep", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
@@ -110,27 +91,6 @@ def test_pasted_file_text_is_capped_whatever_the_window():
     assert inline_token_budget(1_000_000) == INLINE_MAX_TOKENS == 8_000
     assert inline_token_budget(50_000) == 5_000
     assert inline_token_budget(0) == 0
-
-
-def test_stage_prep_uses_model_frames(monkeypatch):
-    from types import SimpleNamespace
-
-    monkeypatch.setattr("backend.agent.video.ffmpeg_install.start_install", lambda: {"state": "ready"})
-    monkeypatch.setattr("backend.agent.model_fetch.get_model_info", lambda p, m: None)
-    monkeypatch.setattr(
-        "frontend.ui_web.chats.conversations.load_conversation",
-        lambda cid, project_root=None: SimpleNamespace(
-            is_group=False, coding_agent="ducky", provider="mistral", model="m"
-        ),
-    )
-    got = []
-    monkeypatch.setattr(
-        "backend.agent.video.prep.start_prep",
-        lambda sid, *, frames, transcribe: got.append(frames) or {"state": "queued"},
-    )
-    PanelApi().set_video_settings({"video_frames_per_video": 0})
-    PanelApi().stage_video_attachment("c1", "a.mp4", "video/mp4", base64.b64encode(b"x").decode())
-    assert got == [20]  # Auto: min(20, request max 20 for unknown provider)
 
 
 def test_video_prep_status_and_retry(monkeypatch):

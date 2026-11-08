@@ -116,7 +116,6 @@ def external_turns(monkeypatch, tmp_path):
         uefn_project_root="", agent_provider="", prompt_dedupe_exact_blocks=False)))
     patch_turns(monkeypatch, "apply_workspace_env", lambda root: None)
     patch_turns(monkeypatch, "parse_attachment_dicts", lambda *a, **kw: [])
-    patch_turns(monkeypatch, "_backfill_video_frames", lambda *a, **kw: None)
     patch_turns(monkeypatch, "get_active_conv_id", lambda: parent["id"])
     patch_turns(monkeypatch, "notify_chats_changed", lambda *a, **kw: None)
     patch_turns(monkeypatch, "close_changeset_run", lambda run_id, reason: None)

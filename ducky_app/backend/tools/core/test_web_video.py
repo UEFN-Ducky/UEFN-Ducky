@@ -353,6 +353,47 @@ def test_frames_come_from_single_segments_and_later_ones_go_to_the_browser(monke
     assert out["stream"]["quality"] == "720p"
 
 
+def test_an_attached_video_is_cut_only_on_request_eight_frames_per_sheet(monkeypatch, tmp_path):
+    import backend.agent.video.ffmpeg_install as ff
+    import backend.agent.video.frames as video_frames
+    import backend.agent.video.staging as staging
+    import frontend.ui_web.conversation_attachments as ca
+
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"VIDEO")
+    chat_dir = tmp_path / "attachments"
+    chat_dir.mkdir()
+    monkeypatch.setattr(staging, "safe_media_path", lambda p, suffixes: clip if Path(p) == clip else None)
+    monkeypatch.setattr(ff, "ensure_installed", lambda: (Path("ffmpeg.exe"), Path("ffprobe.exe")))
+    monkeypatch.setattr(video_frames, "probe_duration", lambda probe, video: 100.0)
+    monkeypatch.setattr(video_frames, "require_media_access", lambda *paths: None)
+    monkeypatch.setattr(ca, "chat_attachments_dir", lambda cid, create=False: chat_dir)
+    monkeypatch.setattr(ca, "build_chat_attachment_url", lambda cid, name: f"u/{name}")
+    monkeypatch.setattr(wv, "_ffmpeg", lambda: Path("ffmpeg.exe"))
+    tiles: list[str] = []
+
+    def fake_ffmpeg(args, timeout=60.0):
+        if "-vf" in args and "tile=" in args[args.index("-vf") + 1]:
+            tiles.append(args[args.index("-vf") + 1])
+        Path(args[-1]).write_bytes(b"JPEG")
+        return True
+
+    monkeypatch.setattr(wv, "_run_ffmpeg", fake_ffmpeg)
+    web_asked = []
+    monkeypatch.setattr(wv, "permission_block", lambda *a, **k: web_asked.append(1))
+
+    info = wv.run_video(str(clip), conv=_Conv(), mode="ask")
+    assert info["ok"] and info["length_s"] == 100.0 and "overview=8" in info["next"]
+    assert not list(chat_dir.iterdir())  # nothing is cut until asked
+
+    out = wv.run_video(str(clip), overview=10, conv=_Conv(), mode="ask")
+    assert out["ok"] and out["kind"] == "video_frames" and len(out["frames"]) == 10
+    assert [len(s["times"]) for s in out["sheets"]] == [8, 2]
+    assert tiles == ["scale=320:-2,tile=4x2:padding=4", "scale=320:-2,tile=2x1:padding=4"]
+    assert web_asked == []  # a local file never asks for web access
+    assert wv.run_video(str(tmp_path / "other.txt"), conv=_Conv(), mode="ask")["ok"] is False
+
+
 def test_frames_all_past_the_first_minute_say_where_to_get_them(monkeypatch, tmp_path):
     data, fmt = _dash_stream()
     monkeypatch.setattr(web_http, "_sender", _Web(players=[_player(formats=[fmt])], stream=data,

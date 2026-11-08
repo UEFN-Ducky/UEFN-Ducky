@@ -84,7 +84,10 @@ def _ensure_transcript(
 
 def external_video_hint(row: dict[str, Any], conv_dir: Path) -> str:
     _require_video_row(row, conv_dir)
-    hint = f"Video file: {conv_dir / str(row['path'])}"
+    path = conv_dir / str(row["path"])
+    hint = (f"Video file: {path} (referenced, not sent to you). Only if the request needs what is in "
+            f'it: web_video(url="{path}", overview=8) for contact sheets, 8 frames per picture, or '
+            "frames=[seconds].")
     transcript = str(row.get("transcript") or "")
     if transcript:
         hint += f"\nTranscript of video:\n{transcript}"

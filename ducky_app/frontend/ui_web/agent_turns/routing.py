@@ -31,7 +31,6 @@ from frontend.ui_web.agent_turns.push import (
     notify_chats_changed,
 )
 from frontend.ui_web.agent_turns.run import (
-    _backfill_video_frames,
     _last_assistant_text,
     _note_run_starter,
     _run_agent_loop,
@@ -408,9 +407,6 @@ def run_message(
             save_conversation(conv)
         except Exception:
             pass
-        _backfill_video_frames(
-            conv, conv_id, provider_name or "", external, push, settings.uefn_project_root, turn_model
-        )
         history = list(conv.messages)
     else:
         try:
@@ -464,32 +460,22 @@ def run_message(
             content, attachments_parsed, stored_attachments, conv_dir_path,
             provider=provider_name or "", model=turn_model, coding_agent=coding_agent,
         )
-        from backend.agent.video.send import (
-            external_video_hint,
-            prepare_video_frames,
-            runtime_video_dict,
-        )
+        from backend.agent.video.send import external_video_hint, runtime_video_dict
 
-        if any(r.get("kind") == "video" for r in stored_attachments):
+        # A video is only referenced: no frames or transcript are made at send (Nov 7 2026,
+        # 20 frames went to the model for a clip the person only pointed at). The agent looks
+        # inside with web_video(path) when the request needs it.
+        if external and any(r.get("kind") == "video" for r in stored_attachments):
             try:
-                prepare_video_frames(
-                    stored_attachments,
-                    conv_dir=conv_dir_path,
-                    provider=provider_name or "",
-                    external=external,
-                    push_status=lambda text: push({"type": "status", "text": text, "conv_id": conv_id}),
-                    model=turn_model,
-                )
-            except ValueError as e:
-                push({"type": "error", "text": str(e), "conv_id": conv_id})
-                return ""
-            if external:
                 hints = [
                     external_video_hint(r, conv_dir_path)
                     for r in stored_attachments
                     if r.get("kind") == "video"
                 ]
-                content = (content + "\n\n" if content else "") + "\n".join(hints)
+            except ValueError as e:
+                push({"type": "error", "text": str(e), "conv_id": conv_id})
+                return ""
+            content = (content + "\n\n" if content else "") + "\n".join(hints)
         current_user_attachments = [
             {
                 "kind": a.kind,
@@ -515,9 +501,6 @@ def run_message(
             from backend.agent.chat_title import start_auto_title
 
             start_auto_title(conv, user_text or content, push=push)
-        _backfill_video_frames(
-            conv, conv_id, provider_name or "", external, push, settings.uefn_project_root, turn_model
-        )
         history = list(conv.messages[:-1])
 
     from frontend.ui_web.context_omit import context_omit_set
