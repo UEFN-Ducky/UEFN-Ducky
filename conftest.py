@@ -143,6 +143,11 @@ def _tree_signature(root: Path, live_panel: bool = False) -> dict[str, tuple[int
         if top in _APP_NOISE_DIRS or (live_panel and top and top not in _LEAK_STORE_DIRS):
             dirnames[:] = []
             continue
+        if rel_dir.parts[:2] == ("uefn_plugins", ".loading"):
+            # Plugin-load markers come only from the running app's processes
+            # (crash_guard writes them when is_app()); a test never does.
+            dirnames[:] = []
+            continue
         for name in filenames:
             if name in _APP_NOISE_FILES or ".bak." in name or name.endswith(".tmp"):
                 continue
