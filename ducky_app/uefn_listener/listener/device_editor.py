@@ -381,6 +381,16 @@ def _apply_device_settings(actor: unreal.Actor, comp: unreal.ActorComponent, pro
     return results
 
 
+def hide_verse_device(actor: unreal.Actor) -> bool:
+    """Turn Visible in Game off on a placed Verse device; other actors are left alone."""
+    if actor.get_class().get_name() != "VerseDevice_C":
+        return False
+    comp = _get_toy_options(actor)
+    if comp is None:
+        return False
+    return _apply_device_settings(actor, comp, {"VisibleInGame": False})["VisibleInGame"]["ok"]
+
+
 def set_device_settings(
     actor_path: str,
     properties: Dict[str, Any],

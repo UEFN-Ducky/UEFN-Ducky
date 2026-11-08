@@ -153,6 +153,11 @@ def cmd_spawn_actor(
     # Same-tick organize-as-you-place (avoids 2–3 extra heavy commands).
     _organize(actor, label, folder, tags)
 
+    # A Verse device is logic: it never shows in the level during play.
+    from listener.device_editor import hide_verse_device
+
+    hide_verse_device(actor)
+
     # The level changed; drop the per-tick index so later lookups see this actor.
     lookup.invalidate()
     # Only on request: selecting would replace whatever the person had selected.

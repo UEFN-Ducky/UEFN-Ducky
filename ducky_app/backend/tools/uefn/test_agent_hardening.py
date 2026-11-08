@@ -122,6 +122,11 @@ def test_agents_clean_their_own_scratch_and_commit_as_they_go() -> None:
     assert "never spawn or scatter" not in AGENT_HARD_RULES
 
 
+def test_hard_rules_verse_devices_stay_hidden():
+    assert "Verse devices stay hidden" in AGENT_HARD_RULES
+    assert "`VisibleInGame`" in AGENT_HARD_RULES
+
+
 def test_hard_rules_never_scale_fortnite_devices():
     assert "Never scale Fortnite Creative devices" in AGENT_HARD_RULES
     assert "SetDeviceProperty" in AGENT_HARD_RULES
