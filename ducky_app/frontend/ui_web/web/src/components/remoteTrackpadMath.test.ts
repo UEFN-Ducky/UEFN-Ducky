@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { motionToCursor, padDown, padHoldStartsDrag, padMove, padUp, scrollSteps, takeWhole } from "./remoteTrackpadMath";
+import { initialRemoteView, motionToCursor, padDown, padHoldStartsDrag, padMove, padUp, scrollSteps, takeWhole } from "./remoteTrackpadMath";
 
 const TUNE = { sensitivity: 1, invertX: false, invertY: false };
+
+describe("opening on the trackpad", () => {
+  it("only the trackpad can be asked for by URL, never a window", () => {
+    expect(initialRemoteView("?direct=1&view=trackpad")).toBe("trackpad");
+    expect(initialRemoteView("?direct=1")).toBe("");
+    expect(initialRemoteView("?view=12345")).toBe("");
+  });
+});
 
 describe("pad gestures", () => {
   it("a still touch is a click and moves nothing", () => {

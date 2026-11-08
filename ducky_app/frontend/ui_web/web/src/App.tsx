@@ -23,7 +23,7 @@ import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsCon
 import { Header } from "./components/Header";
 import { RemoteWindowLaunching, RemoteWindowOverlay, useUeFnLaunching } from "./components/RemoteWindowView";
 import { RemoteTrackpad } from "./components/RemoteTrackpad";
-import { REMOTE_TRACKPAD_ID } from "./components/remoteTrackpadMath";
+import { initialRemoteView, REMOTE_TRACKPAD_ID } from "./components/remoteTrackpadMath";
 import { RemoteWindowSender } from "./components/RemoteWindowSender";
 import { installDirectPeerOnDesktop } from "./remote/directPeer";
 import { installLivePeerHostOnDesktop } from "./rtc/peerHost";
@@ -150,7 +150,8 @@ export default function App() {
       </>
     );
   }
-  const [watchWindowId, setWatchWindowId] = useState("");
+  // The site's Ducky Mouse button opens the panel straight on the trackpad.
+  const [watchWindowId, setWatchWindowId] = useState(() => (isRemote() ? initialRemoteView(window.location.search) : ""));
   const uefnLaunching = useUeFnLaunching();
   // Desktop only: answer direct (tunnel-free) Remote View offers.
   useEffect(() => installDirectPeerOnDesktop(), []);

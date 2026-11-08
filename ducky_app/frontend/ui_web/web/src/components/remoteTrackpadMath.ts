@@ -3,6 +3,11 @@
 /** View-menu id for the trackpad; never a window id. */
 export const REMOTE_TRACKPAD_ID = "trackpad";
 
+/** The view the page URL asks to open on; only the trackpad can be asked for. */
+export function initialRemoteView(search: string): string {
+  return new URLSearchParams(search).get("view") === REMOTE_TRACKPAD_ID ? REMOTE_TRACKPAD_ID : "";
+}
+
 export const HOLD_MS = 350;
 export const SLOP_PX = 8;
 export const SCROLL_STEP_PX = 24;
