@@ -1713,6 +1713,54 @@ body.native-caption-input-ready .app-header .drag-region {
   color: var(--fg-dim);
   font-size: 12px;
 }
+.remote-trackpad-pad,
+.remote-trackpad-scroll {
+  border: 2px solid #fbb53b;
+  background: radial-gradient(circle at 50% 45%, #24242a 0%, #111114 78%);
+  box-shadow: 0 0 18px #fbb53b2e;
+}
+.remote-trackpad-scroll {
+  border-color: #fbb53b66;
+  box-shadow: none;
+}
+.remote-trackpad-pad.is-dragging {
+  border-color: #ffd76a;
+  background: radial-gradient(circle at 50% 45%, #fbb53b38 0%, #111114 78%);
+}
+.remote-trackpad-buttons button {
+  border-color: #fbb53b66;
+  background: #16161a;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+.remote-trackpad-buttons button:active,
+.remote-trackpad-buttons button.is-on {
+  border-color: #111;
+  background: #fbb53b;
+  color: #111;
+}
+.remote-trackpad-buttons .remote-trackpad-talk {
+  border-color: #111;
+  background: #fbb53b;
+  color: #111;
+  font-weight: 800;
+}
+.remote-trackpad-buttons .remote-trackpad-talk.is-on {
+  background: #ffd76a;
+}
+.remote-trackpad-typing input {
+  border-color: #fbb53b66;
+  background: #16161a;
+}
+.remote-trackpad-typing form button {
+  border-color: #111;
+  background: #fbb53b;
+  color: #111;
+  font-weight: 700;
+}
+.remote-trackpad-settings .remote-control-slider input {
+  accent-color: #fbb53b;
+}
 .remote-trackpad-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
