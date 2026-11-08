@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +22,22 @@ for _p in (_ROOT, _ROOT / "ducky_app"):
 from backend.agent.video import ffmpeg_install as fi  # noqa: E402
 
 DEFAULT_DEST = Path(__file__).resolve().parent / "ffmpeg-bundle"
+DOWNLOAD_TRIES = 5
+DOWNLOAD_WAIT_S = 20
+
+
+def _download_with_retries(part: Path) -> None:
+    """One GitHub 504 must not end a release build. Every try checks the SHA-256 again."""
+    for attempt in range(1, DOWNLOAD_TRIES + 1):
+        try:
+            fi.download_verified(fi.FFMPEG_URL, fi.FFMPEG_SHA256, part)
+            return
+        except (fi.FfmpegInstallError, OSError) as exc:
+            if attempt == DOWNLOAD_TRIES:
+                raise fi.FfmpegInstallError(f"ffmpeg download failed {attempt} times: {exc}") from exc
+            wait = DOWNLOAD_WAIT_S * attempt
+            print(f"ffmpeg download failed ({exc}), try {attempt + 1} of {DOWNLOAD_TRIES} in {wait}s")
+            time.sleep(wait)
 
 
 def _up_to_date(dest: Path) -> bool:
@@ -52,7 +69,7 @@ def ensure_bundle(dest: Path = DEFAULT_DEST) -> Path:
                 raise fi.FfmpegInstallError("DUCKY_FFMPEG_ZIP checksum mismatch.")
         else:
             print(f"Downloading {fi.FFMPEG_URL}")
-            fi.download_verified(fi.FFMPEG_URL, fi.FFMPEG_SHA256, part)
+            _download_with_retries(part)
             zip_path = part
         fi.extract_members(zip_path, staging)
         shutil.rmtree(dest, ignore_errors=True)

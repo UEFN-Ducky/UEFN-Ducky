@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import io
 import sys
+import urllib.error
 import zipfile
 from pathlib import Path
 
@@ -16,6 +17,14 @@ spec = importlib.util.spec_from_file_location("fetch_ffmpeg_tested", Path(__file
 ff = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ff)
 fi = ff.fi
+
+
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    """Retry waits are recorded, never slept."""
+    made = []
+    monkeypatch.setattr(ff.time, "sleep", made.append)
+    return made
 
 
 def _zip_bytes() -> bytes:
@@ -84,3 +93,29 @@ def test_local_zip_with_wrong_sha_rejected(monkeypatch, tmp_path):
     monkeypatch.setenv("DUCKY_FFMPEG_ZIP", str(z))
     with pytest.raises(fi.FfmpegInstallError):
         ff.ensure_bundle(tmp_path / "b")
+
+
+def test_a_504_waits_and_the_next_try_builds_the_bundle(monkeypatch, tmp_path, waits):
+    data = _zip_bytes()
+    _serve(monkeypatch, data)
+    answers = [urllib.error.HTTPError(fi.FFMPEG_URL, 504, "Gateway Timeout", {}, None), ConnectionResetError("reset")]
+
+    def flaky(_req, timeout=0):
+        if answers:
+            raise answers.pop(0)
+        return _Resp(data)
+
+    monkeypatch.setattr(fi, "_urlopen", flaky)
+    assert (ff.ensure_bundle(tmp_path / "b") / "ffmpeg.exe").is_file()
+    assert waits == [ff.DOWNLOAD_WAIT_S, ff.DOWNLOAD_WAIT_S * 2]
+
+
+def test_a_download_that_keeps_failing_stops_with_a_clear_error(monkeypatch, tmp_path, waits):
+    def down(_req, timeout=0):
+        raise urllib.error.HTTPError(fi.FFMPEG_URL, 504, "Gateway Timeout", {}, None)
+
+    _serve(monkeypatch, b"")
+    monkeypatch.setattr(fi, "_urlopen", down)
+    with pytest.raises(fi.FfmpegInstallError, match="failed 5 times"):
+        ff.ensure_bundle(tmp_path / "b")
+    assert len(waits) == ff.DOWNLOAD_TRIES - 1
