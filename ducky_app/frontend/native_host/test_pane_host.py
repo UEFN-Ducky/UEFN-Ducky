@@ -35,11 +35,13 @@ def test_launcher_host_takes_every_wid_and_pushes_events() -> None:
     from frontend.ui_web import browser_overlay as bo
 
     pushed: list[dict] = []
+    other = object()
     host = SimpleNamespace(is_launcher_host=True, push_event=pushed.append)
+    host.for_wid = lambda wid: other if wid else host
     old = bo._main_window
     try:
         bo.configure(main_window=host)
-        assert bo._window_for_wid("") is host and bo._window_for_wid("focus-7") is host
+        assert bo._window_for_wid("") is host and bo._window_for_wid("focus-7") is other
         bo._push_page(host, {"type": "browser_pane_state", "pane_id": "p"})
         assert pushed == [{"type": "browser_pane_state", "pane_id": "p"}]
     finally:
@@ -57,6 +59,38 @@ def poll():
     r.destroy() if done.is_set() else r.after(100, poll)
 print('up', flush=True); poll(); r.mainloop()
 """
+
+
+def test_each_launcher_window_gets_its_own_host() -> None:
+    """Nov 8 2026: a tab popped out kept its page in the main window, on top of everything."""
+    from frontend.native_host import pane_host as ph
+
+    assert (ph.wid_mark(""), ph.wid_mark("main"), ph.wid_mark("nope")) == (0, 0, 0)
+    assert ph.wid_mark("focus-00ff") == 255
+    host = ph.PaneHost(1)
+    assert host.for_wid("") is host and host.for_wid("main") is host
+    assert host.for_wid("focus-00ff") is host.for_wid("focus-00ff") is not host
+
+
+def test_a_popout_is_found_by_its_mark_and_never_taken_for_the_main_window() -> None:
+    """The first window of the class in z-order was taken: a focus window in front got the panes."""
+    from frontend.native_host import pane_host as ph
+
+    proc = subprocess.Popen([sys.executable, "-c", _FAKE_LAUNCHER], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline().strip() == "up"
+        hwnd = ph.find_launcher_window(proc.pid, "TkTopLevel")
+        assert hwnd
+        u = ctypes.WinDLL("user32")
+        u.SetPropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.HANDLE]
+        assert u.SetPropW(hwnd, ph.WID_PROP, 255)
+        assert ph.find_launcher_window(proc.pid, "TkTopLevel", 255) == hwnd
+        assert ph.find_launcher_window(proc.pid, "TkTopLevel") == 0
+    finally:
+        proc.stdin.write("\n")
+        proc.stdin.flush()
+        proc.wait(10)
 
 
 def test_pane_opens_inside_another_process_window(tmp_path, monkeypatch) -> None:

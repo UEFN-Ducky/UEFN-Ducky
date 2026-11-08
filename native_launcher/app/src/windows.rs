@@ -122,6 +122,12 @@ fn open_extra(wid: &str, data: &Value) {
             let _ = SetWindowPos(hwnd, None, x.unwrap_or(0), y.unwrap_or(0), w, h, flags);
         }
     }
+    // The backend finds this window by this number (pane_host.wid_mark) to put browser panes in it.
+    if let Some(mark) = wid.rsplit('-').next().and_then(|hex| isize::from_str_radix(hex, 16).ok()) {
+        unsafe {
+            let _ = SetPropW(hwnd, w!("DuckyPopoutWid"), Some(HANDLE(mark as *mut _)));
+        }
+    }
     with(|u| u.extras.insert(wid, Extra { hwnd, webview: None }));
 }
 

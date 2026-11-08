@@ -9,9 +9,12 @@ pane is on screen the form sits above the page, clipped to the panes (the page s
 takes clicks everywhere else); otherwise it sits under the page. Pane state goes to the
 page through the panel event stream.
 
+Each launcher window (the main one, every focus window) has its own form: ``for_wid``.
+
 ponytail: the form lives as long as the launcher window it was put in; a window the
 launcher makes again (closed to the tray, then opened) gets a new form on the next pane
-open, and panes opened before that are gone (the page opens them again).
+open, and panes opened before that are gone (the page opens them again). A closed focus
+window leaves its form's idle thread until exit; end it when windows churn enough to matter.
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ from typing import Any, Callable
 _log = logging.getLogger(__name__)
 
 LAUNCHER_CLASS = "DuckyLauncherWindow"
+# The launcher marks each pop-out with this property (native_launcher windows.rs open_extra).
+WID_PROP = "DuckyPopoutWid"
 _GWL_STYLE = -16
 _WS_CHILD = 0x40000000
 _WS_POPUP = 0x80000000
@@ -52,6 +57,8 @@ def _user32() -> Any:
     u.EnumWindows.argtypes = [_ENUM_PROC, wintypes.LPARAM]
     u.GetWindowThreadProcessId.argtypes = [H, ctypes.POINTER(wintypes.DWORD)]
     u.GetClassNameW.argtypes = [H, wintypes.LPWSTR, Int]
+    u.GetPropW.argtypes = [H, wintypes.LPCWSTR]
+    u.GetPropW.restype = ctypes.c_ssize_t
     u.IsWindow.argtypes = [H]
     u.GetClientRect.argtypes = [H, ctypes.POINTER(wintypes.RECT)]
     u.GetWindowLongPtrW.argtypes = [H, Int]
@@ -80,8 +87,17 @@ def _gdi32() -> Any:
     return g
 
 
-def find_launcher_window(pid: int, class_name: str = LAUNCHER_CLASS) -> int:
-    """The top-level window of class ``class_name`` that process ``pid`` owns, or 0."""
+def wid_mark(wid: str) -> int:
+    """The number a pop-out ``focus-<hex>`` carries in ``WID_PROP``; 0 = the main window."""
+    try:
+        return int(wid.rsplit("-", 1)[-1], 16) if wid and wid != "main" else 0
+    except ValueError:
+        return 0
+
+
+def find_launcher_window(pid: int, class_name: str = LAUNCHER_CLASS, mark: int = 0) -> int:
+    """The top-level window of class ``class_name`` that process ``pid`` owns and whose
+    ``WID_PROP`` is ``mark`` (0, no property: the main window, whatever is in front), or 0."""
     user32 = _user32()
     found: list[int] = []
 
@@ -92,7 +108,7 @@ def find_launcher_window(pid: int, class_name: str = LAUNCHER_CLASS) -> int:
             return True
         buf = ctypes.create_unicode_buffer(64)
         user32.GetClassNameW(hwnd, buf, 64)
-        if buf.value == class_name:
+        if buf.value == class_name and user32.GetPropW(hwnd, WID_PROP) == mark:
             found.append(int(hwnd))
             return False
         return True
@@ -130,14 +146,26 @@ class PaneHost:
     is_launcher_host = True
 
     def __init__(self, launcher_pid: int, *, class_name: str = LAUNCHER_CLASS,
-                 push: Callable[[dict[str, Any]], None] | None = None) -> None:
+                 push: Callable[[dict[str, Any]], None] | None = None, mark: int = 0) -> None:
         self._pid = int(launcher_pid)
         self._class = class_name
         self._push = push
+        self._mark = mark
+        self._others: dict[int, PaneHost] = {}
         self._lock = threading.Lock()
         self._form: Any = None
         self._hwnd = 0
         self._parent = 0
+
+    def for_wid(self, wid: str) -> PaneHost:
+        """The host of launcher window ``wid`` (this one for the main window); called on the
+        main host, always the same object per window."""
+        mark = wid_mark(wid)
+        if not mark:
+            return self
+        with self._lock:
+            return self._others.setdefault(
+                mark, PaneHost(self._pid, class_name=self._class, push=self._push, mark=mark))
 
     @property
     def native(self) -> Any:
@@ -146,7 +174,7 @@ class PaneHost:
             if self._form is not None and _user32().IsWindow(self._parent) and _user32().IsWindow(self._hwnd):
                 return self._form
             self._form, self._hwnd, self._parent = None, 0, 0
-            parent = find_launcher_window(self._pid, self._class)
+            parent = find_launcher_window(self._pid, self._class, self._mark)
             if parent:
                 self._start_form(parent)
             return self._form

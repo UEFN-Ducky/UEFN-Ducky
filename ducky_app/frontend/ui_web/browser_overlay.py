@@ -91,7 +91,9 @@ def configure(*, main_window: Any) -> None:
 
 
 def _window_for_wid(wid: str) -> Any:
-    if not wid or wid == "main" or getattr(_main_window, "is_launcher_host", False):
+    if getattr(_main_window, "is_launcher_host", False):
+        return _main_window.for_wid(wid)
+    if not wid or wid == "main":
         return _main_window
     try:
         from frontend.ui_web import focus_windows
@@ -1429,15 +1431,13 @@ def _destroy_pane_control(pane: _Pane) -> None:
         return
 
     def op() -> None:
-        try:
-            form = window.native
-            form.Controls.Remove(control)
-        except Exception:
-            pass
-        try:
-            control.Dispose()
-        except Exception:
-            pass
+        # Last step, launcher only: a closed pane must not leave its form on top, clipped to it.
+        for step in (lambda: window.native.Controls.Remove(control), control.Dispose,
+                     lambda: window.after_bounds(list(_pane_controls()))):
+            try:
+                step()
+            except Exception:
+                pass
 
     _ui(window, op)
     pane.control = None

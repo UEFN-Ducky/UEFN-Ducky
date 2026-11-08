@@ -420,6 +420,25 @@ def test_render_behind_draws_a_hidden_pane_under_the_app_page(monkeypatch) -> No
         bo._panes.pop("p", None)
 
 
+def test_closing_a_pane_restacks_the_launcher_form(monkeypatch) -> None:
+    """Nov 8 2026: a closed Browser tab left the launcher's form on top, clipped to the pane:
+    a dark rectangle over the app that nothing removed."""
+    import frontend.ui_web.browser_overlay as bo
+
+    pane, control = _fake_pane(monkeypatch)
+    control.Dispose = lambda: control.calls.append("dispose")
+    form = pane.window.native
+    form.Controls.Remove = None  # a failing step must not skip the restack
+    left: list[list] = []
+    pane.window.after_bounds = left.append
+    bo._panes["p"] = pane
+    try:
+        assert bo.close_pane("p") == {"ok": True, "closed": True}
+        assert control.calls == ["dispose"] and left == [[]]
+    finally:
+        bo._panes.pop("p", None)
+
+
 def test_split_drag_and_cover_lift_never_take_focus(monkeypatch) -> None:
     """Nov 7 2026: dragging the split line beside a Browser tab stopped at once. Every frame of
     the drag moved the pane, each move focused it, the page blurred and pointerResize ended the
