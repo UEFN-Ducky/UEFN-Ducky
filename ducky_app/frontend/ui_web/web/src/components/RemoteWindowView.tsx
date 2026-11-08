@@ -28,6 +28,7 @@ import {
   withinSlop,
   type ViewPanZoom,
 } from "./remoteWindowMath";
+import { REMOTE_TRACKPAD_ID } from "./remoteTrackpadMath";
 import { getDirectTransport } from "../remote/directTransport";
 import { setRemotePicture } from "../remote/remotePicture";
 import { setVisibleInterval } from "../utils/visibleInterval";
@@ -437,7 +438,8 @@ export function RemoteWindowSelect({
         rows: next,
         seenIds: seenUeFn.current,
         pending: pendingUeFn.current,
-        selectedId: value,
+        // The trackpad is no window, so it is never "gone from the list".
+        selectedId: value === REMOTE_TRACKPAD_ID ? "" : value,
       });
       if (nextId !== undefined) {
         if (pendingUeFn.current && nextId) stopWaiting();
@@ -645,7 +647,8 @@ function ViewMenu({
   const uefnRows = rows.filter((row) => row.kind === "uefn");
   const screenRows = rows.filter((row) => row.kind === "desktop" || row.kind === "monitor");
   const windowRows = rows.filter((row) => row.kind !== "uefn" && row.kind !== "desktop" && row.kind !== "monitor");
-  const current = value ? rows.find((row) => row.id === value)?.title || "a window" : "Ducky";
+  const current =
+    value === REMOTE_TRACKPAD_ID ? "Trackpad" : value ? rows.find((row) => row.id === value)?.title || "a window" : "Ducky";
 
   const close = () => {
     setOpen(false);
@@ -728,6 +731,14 @@ function ViewMenu({
             subtitle="Chats, workflows and the editor"
             selected={!value}
             onPick={() => pick("")}
+          />
+
+          <ViewMenuItem
+            icon={<Icons.Hand />}
+            title="Trackpad"
+            subtitle="Use this phone as the PC's mouse"
+            selected={value === REMOTE_TRACKPAD_ID}
+            onPick={() => pick(REMOTE_TRACKPAD_ID)}
           />
 
           <section className="view-menu-section" aria-label="UEFN">

@@ -274,10 +274,12 @@ export async function onInput(ch: Pick<RTCDataChannel, "readyState" | "send">, h
   } catch {
     return;
   }
-  const { seq, ...input } = msg;
-  if (hwnd !== undefined) {
+  const { seq, view, ...input } = msg;
+  // The trackpad names a whole screen itself: it controls the PC with no stream running.
+  const target = typeof view === "string" && /^(desktop|monitor:\d+)$/.test(view) ? view : hwnd;
+  if (target !== undefined) {
     try {
-      await getApi()?.window_input?.(hwnd, input);
+      await getApi()?.window_input?.(target, input);
     } catch {
       /* ignore */
     }

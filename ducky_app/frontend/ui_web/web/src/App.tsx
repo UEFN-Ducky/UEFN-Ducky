@@ -22,6 +22,8 @@ import { TerminalsSettingsProvider } from "./contexts/TerminalsSettingsContext";
 import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsContext";
 import { Header } from "./components/Header";
 import { RemoteWindowLaunching, RemoteWindowOverlay, useUeFnLaunching } from "./components/RemoteWindowView";
+import { RemoteTrackpad } from "./components/RemoteTrackpad";
+import { REMOTE_TRACKPAD_ID } from "./components/remoteTrackpadMath";
 import { RemoteWindowSender } from "./components/RemoteWindowSender";
 import { installDirectPeerOnDesktop } from "./remote/directPeer";
 import { installLivePeerHostOnDesktop } from "./rtc/peerHost";
@@ -282,7 +284,9 @@ export default function App() {
 
         <main className="app-main">{mainContent}</main>
         {!isRemote() ? <RemoteWindowSender /> : null}
-        {watchWindowId ? (
+        {watchWindowId === REMOTE_TRACKPAD_ID ? (
+          <RemoteTrackpad />
+        ) : watchWindowId ? (
           <RemoteWindowOverlay hwnd={watchWindowId} />
         ) : uefnLaunching ? (
           <RemoteWindowLaunching label={uefnLaunching} />

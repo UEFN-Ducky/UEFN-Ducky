@@ -43,6 +43,7 @@ import { targetRef, useUiTarget } from "../ui-targets/registry";
 import { ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
 import { RemoteTypeToggle, RemoteWindowSelect } from "./RemoteWindowView";
+import { REMOTE_TRACKPAD_ID } from "./remoteTrackpadMath";
 import type { PluginHeaderButton } from "../hooks/usePluginContributions";
 
 interface HeaderProps {
@@ -774,7 +775,7 @@ export function Header({
         </>
         )}
 
-        {isRemote() && onWatchWindowId && watchWindowId ? <RemoteTypeToggle /> : null}
+        {isRemote() && onWatchWindowId && watchWindowId && watchWindowId !== REMOTE_TRACKPAD_ID ? <RemoteTypeToggle /> : null}
         {isRemote() && onWatchWindowId ? (
           <RemoteWindowSelect
             value={watchWindowId}

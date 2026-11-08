@@ -103,7 +103,9 @@ Reply header (text), then binary chunks in order, then done (text):
 ### `input`
 
 Unchanged from the tunnel design: `{type: down|up|move|wheel|keydown|keyup|size, ...}`.
-Desktop passes it to `window_input` for the watched HWND.
+Desktop passes it to `window_input` for the watched HWND. A message with
+`view: "desktop"` or `view: "monitor:<n>"` targets that screen instead, with no
+stream running (the trackpad).
 
 ### `stream:<id>`
 

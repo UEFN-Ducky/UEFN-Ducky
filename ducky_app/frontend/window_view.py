@@ -765,6 +765,9 @@ def _pointer_on_box(
     if kind in ("down", "up") and box is None:
         _send_mice([(0, 0, 0, down if kind == "down" else up)])
         return
+    if kind == "wheel" and box is None:
+        _send_mice([(0, 0, int(delta) * 120, 0x0800)])
+        return
     if not box:
         return
     ax, ay = _abs_xy(*map_norm_to_screen(box, nx, ny))
@@ -908,8 +911,8 @@ def handle_stream_message(view: object, payload: bytes) -> None:
         if screen:
             if sys.platform != "win32":
                 return
-            if not has_xy and kind in ("down", "up"):
-                _pointer_on_box(None, kind, 0.0, 0.0, button=button)
+            if not has_xy and kind in ("down", "up", "wheel"):
+                _pointer_on_box(None, kind, 0.0, 0.0, button=button, delta=delta)
                 return
             box = _view_rect(
                 str(view).strip(),

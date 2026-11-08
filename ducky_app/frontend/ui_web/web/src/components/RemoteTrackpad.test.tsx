@@ -1,0 +1,138 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+
+const { sent } = vi.hoisted(() => ({ sent: [] as Record<string, unknown>[] }));
+
+vi.mock("../remote/directTransport", () => ({
+  getDirectTransport: () => ({
+    sendInput: (payload: Record<string, unknown>) => {
+      sent.push(payload);
+      return true;
+    },
+    onStatus: (fn: (s: { state: string }) => void) => {
+      fn({ state: "live" });
+      return () => {};
+    },
+  }),
+}));
+
+import { RemoteTrackpad } from "./RemoteTrackpad";
+
+const wait = (ms: number) => act(() => new Promise<void>((resolve) => window.setTimeout(resolve, ms)));
+
+function motionEvent(alpha: number) {
+  const event = new Event("devicemotion");
+  Object.assign(event, { rotationRate: { alpha, beta: 0, gamma: 0 }, accelerationIncludingGravity: { x: 0, y: 0, z: 9.8 } });
+  act(() => void window.dispatchEvent(event));
+}
+
+beforeEach(() => {
+  sent.length = 0;
+  localStorage.clear();
+  class TestPointerEvent extends MouseEvent {
+    pointerId: number;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 1;
+    }
+  }
+  window.PointerEvent = TestPointerEvent as unknown as typeof PointerEvent;
+});
+
+afterEach(cleanup);
+
+it("a tap is a left click at the cursor", async () => {
+  render(<RemoteTrackpad />);
+  const pad = screen.getByTestId("trackpad-pad");
+  fireEvent.pointerDown(pad, { clientX: 10, clientY: 10 });
+  fireEvent.pointerUp(pad, { clientX: 10, clientY: 10 });
+  await wait(90);
+  expect(sent).toEqual([
+    { view: "desktop", type: "down", button: 0 },
+    { view: "desktop", type: "up", button: 0 },
+  ]);
+});
+
+it("a slide sends a relative move and no click", async () => {
+  render(<RemoteTrackpad />);
+  const pad = screen.getByTestId("trackpad-pad");
+  fireEvent.pointerDown(pad, { clientX: 0, clientY: 0 });
+  fireEvent.pointerMove(pad, { clientX: 20, clientY: 0 });
+  fireEvent.pointerUp(pad, { clientX: 20, clientY: 0 });
+  await wait(90);
+  expect(sent).toEqual([{ view: "desktop", type: "move", dx: 40, dy: 0 }]);
+});
+
+it("a hold presses the button and lifting drops it", async () => {
+  render(<RemoteTrackpad />);
+  const pad = screen.getByTestId("trackpad-pad");
+  fireEvent.pointerDown(pad, { clientX: 0, clientY: 0 });
+  await wait(400);
+  expect(sent).toEqual([{ view: "desktop", type: "down", button: 0 }]);
+  fireEvent.pointerUp(pad, { clientX: 0, clientY: 0 });
+  expect(sent[1]).toEqual({ view: "desktop", type: "up", button: 0 });
+});
+
+it("pausing mid-drag lets go of the button, then sends nothing", async () => {
+  render(<RemoteTrackpad />);
+  fireEvent.pointerDown(screen.getByTestId("trackpad-pad"), { clientX: 0, clientY: 0 });
+  await wait(400);
+  fireEvent.click(screen.getByText("Pause"));
+  expect(sent.at(-1)).toEqual({ view: "desktop", type: "up", button: 0 });
+  const count = sent.length;
+  fireEvent.click(screen.getByText("Right click"));
+  await wait(90);
+  expect(sent).toHaveLength(count);
+});
+
+it("right click, Center, and the scroll strip send the right events", async () => {
+  render(<RemoteTrackpad />);
+  fireEvent.click(screen.getByText("Right click"));
+  await wait(90);
+  expect(sent).toEqual([
+    { view: "desktop", type: "down", button: 2 },
+    { view: "desktop", type: "up", button: 2 },
+  ]);
+  sent.length = 0;
+  fireEvent.click(screen.getByText("Center"));
+  expect(sent).toEqual([{ view: "monitor:0", type: "move", x: 0.5, y: 0.5 }]);
+  sent.length = 0;
+  const strip = screen.getByTestId("trackpad-scroll");
+  fireEvent.pointerDown(strip, { clientY: 0 });
+  fireEvent.pointerMove(strip, { clientY: 50 });
+  expect(sent).toEqual([{ view: "desktop", type: "wheel", delta: 2 }]);
+});
+
+it("Motion moves the cursor from the gyro, only while it is on", async () => {
+  render(<RemoteTrackpad />);
+  motionEvent(-100);
+  await wait(40);
+  motionEvent(-100);
+  await wait(40);
+  expect(sent).toEqual([]);
+  await act(async () => void fireEvent.click(screen.getByText("Motion")));
+  motionEvent(-100);
+  await wait(40);
+  motionEvent(-100);
+  await wait(40);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ view: "desktop", type: "move", dy: 0 });
+  expect(sent[0].dx as number).toBeGreaterThan(0);
+});
+
+it("the keyboard sends typed text and named keys", async () => {
+  render(<RemoteTrackpad />);
+  fireEvent.click(screen.getByText("Keyboard"));
+  const box = screen.getByLabelText("Text to type on the PC");
+  fireEvent.change(box, { target: { value: "hi" } });
+  fireEvent.submit(box);
+  expect(sent).toEqual([{ view: "desktop", type: "text", text: "hi" }]);
+  sent.length = 0;
+  fireEvent.click(screen.getByText("Esc"));
+  await wait(90);
+  expect(sent).toEqual([
+    { view: "desktop", type: "keydown", key: "Escape" },
+    { view: "desktop", type: "keyup", key: "Escape" },
+  ]);
+});

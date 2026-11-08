@@ -1606,6 +1606,106 @@ body.native-caption-input-ready .app-header .drag-region {
   width: 100%;
   accent-color: var(--accent);
 }
+.remote-trackpad {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--fg);
+}
+.remote-trackpad-status {
+  color: var(--fg-dim);
+  font-size: 12px;
+  text-align: center;
+}
+.remote-trackpad-surfaces {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 8px;
+  min-height: 220px;
+}
+.remote-trackpad-pad,
+.remote-trackpad-scroll {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg-dim);
+  font-size: 13px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.remote-trackpad-pad {
+  flex: 1 1 auto;
+}
+.remote-trackpad-pad.is-dragging {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.remote-trackpad-scroll {
+  flex: 0 0 56px;
+}
+.remote-trackpad-error {
+  color: var(--red);
+  font-size: 12px;
+}
+.remote-trackpad-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.remote-trackpad-buttons button,
+.remote-trackpad-typing form button {
+  min-height: 48px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+.remote-trackpad-buttons button.is-on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.remote-trackpad-typing form {
+  display: flex;
+  gap: 8px;
+}
+.remote-trackpad-typing input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+}
+.remote-trackpad-typing form button {
+  padding: 0 16px;
+}
+.remote-trackpad-settings summary {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+.remote-trackpad-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
 .remote-sticks {
   --stick-left: 128px;
   --stick-right: 128px;

@@ -102,6 +102,19 @@ describe("onInput", () => {
     expect(ch.sent).toEqual([JSON.stringify({ echo: 42 })]);
   });
 
+  it("lets the trackpad name a whole screen with no stream, but never a window", async () => {
+    const applied: unknown[] = [];
+    (api as { window_input?: unknown }).window_input = (hwnd: unknown, ev: unknown) => {
+      applied.push([hwnd, ev]);
+      return Promise.resolve();
+    };
+    const ch = { readyState: "open" as RTCDataChannelState, send() {} };
+    await onInput(ch, undefined, JSON.stringify({ type: "move", dx: 1, view: "desktop" }));
+    await onInput(ch, undefined, JSON.stringify({ type: "move", x: 0.5, view: "monitor:0" }));
+    await onInput(ch, undefined, JSON.stringify({ type: "move", dx: 2, view: "12345" }));
+    expect(applied).toEqual([["desktop", { type: "move", dx: 1 }], ["monitor:0", { type: "move", x: 0.5 }]]);
+  });
+
   it("still echoes a probe when no window is watched, so the phone does not count it lost", async () => {
     const ch = { readyState: "open" as RTCDataChannelState, sent: [] as string[], send(s: string) {
       this.sent.push(s);
