@@ -176,6 +176,32 @@ def test_appends_to_a_5000_message_chat_save_by_delta(tmp_path, monkeypatch) -> 
     assert repo.messages_get(conv.id) == conv.messages
 
 
+def test_delta_saves_count_like_a_recount(tmp_path) -> None:
+    from backend.store.repos import chats as repo
+    from frontend.ui_web.chats import saves as chat_saves
+    from frontend.ui_web.session_files import session_stats_from_messages
+
+    def assert_counts_match() -> None:
+        chat_saves.save_conversation(conv, root, wait=True)
+        stored = repo.conv_get(conv.id, with_messages=False)
+        want = session_stats_from_messages(conv.messages)
+        assert (stored["tool_call_count"], stored["file_count"]) == (want["tool_call_count"], want["file_count"])
+
+    root = str(tmp_path)
+    conv = _big_chat(root, 50)
+    conv.messages[11] = {"role": "assistant", "content": "no tools now", "ts": 11}  # the only row naming f11
+    conv.mark_dirty(11)
+    assert_counts_match()
+    tool = {"type": "tool_call", "id": "new", "name": "workspace_write_file", "status": "success",
+            "arguments": {"path": "Content/new.verse"}, "result": {}}
+    conv.messages.append({"role": "assistant", "content": "wrote", "ts": 50, "blocks": [tool]})
+    conv.mark_dirty(len(conv.messages) - 1)
+    assert_counts_match()
+    conv.messages[-1] = {"role": "assistant", "content": "redone", "ts": 50}  # the tail loses its file again
+    conv.mark_dirty(len(conv.messages) - 1)
+    assert_counts_match()
+
+
 def test_reply_streamed_in_place_is_saved_without_marking(tmp_path, monkeypatch) -> None:
     from backend.store.repos import chats as repo
     from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves

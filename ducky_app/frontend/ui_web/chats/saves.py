@@ -7,7 +7,7 @@ import json
 import logging
 import threading
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from concurrent.futures import Future
 from copy import copy as _shallow
 from operator import is_
@@ -126,14 +126,54 @@ def _stats_for(messages: list[Any]) -> dict[str, int]:
     return session_stats_from_messages(messages)
 
 
-# conv id -> (msg_rev after the save, row hash per seq, {row hash: (tool calls, file paths)}).
+# conv id -> (msg_rev after the save, row hash per seq, {row hash: (tool calls, file paths)},
+# running totals (tool calls, {path: rows naming it}), built by the first delta save).
 # A save scanned every message of the chat for these counts (55% of a 5,000-message
 # save); now only rows it has not seen. Keyed on the row hash, so rows another writer (an
 # agent host) changed are rescanned. A delta save reuses the hashes below its start only
 # when the rev says nobody wrote since.
-_ROW_STATS: OrderedDict[str, tuple[int | None, list[str], dict[str, tuple[int, frozenset[str]]]]] = OrderedDict()
+_ROW_STATS: OrderedDict[str, tuple[int | None, list[str], dict[str, tuple[int, frozenset[str]]], tuple[int, Counter[str]] | None]] = OrderedDict()
 _ROW_STATS_CHATS = 32
 _row_stats_lock = threading.Lock()
+
+
+def _delta_stats(
+    conv_id: str,
+    messages: list[Any],
+    entry: tuple[Any, ...],
+    hashes: list[str],
+    hashes_from: int,
+    rev_after: int | None,
+    dirty_hashes: dict[int, str],
+) -> dict[str, int]:
+    """The counts after a delta save, in O(rows it wrote): take the replaced rows out of
+    the running totals and add the new ones."""
+    from frontend.ui_web.session_files import message_stats
+
+    _, stored, rows, totals = entry
+    if totals is None:  # the first delta since a whole save
+        totals = sum(rows[h][0] for h in stored), Counter(p for h in stored for p in rows[h][1])
+    count, path_rows = totals
+    listed = {seq: h for seq, h in dirty_hashes.items() if seq < hashes_from}
+    for old in [*(stored[seq] for seq in listed), *stored[hashes_from:]]:
+        count -= rows[old][0]
+        for path in rows[old][1]:
+            path_rows[path] -= 1
+            if not path_rows[path]:
+                del path_rows[path]
+    del stored[hashes_from:]
+    stored.extend(hashes)
+    for seq, h in [*listed.items(), *enumerate(hashes, hashes_from)]:
+        stored[seq] = h
+        # ponytail: replaced hashes stay in rows until the turn-end full save rebuilds it.
+        stat = rows[h] = rows.get(h) or message_stats(messages[seq])
+        count += stat[0]
+        path_rows.update(stat[1])
+    with _row_stats_lock:
+        _ROW_STATS[conv_id] = (rev_after, stored, rows, (count, path_rows))
+        while len(_ROW_STATS) > _ROW_STATS_CHATS:
+            _ROW_STATS.popitem(last=False)
+    return {"tool_call_count": count, "file_count": len(path_rows)}
 
 
 def _stats_by_hash(
@@ -156,10 +196,9 @@ def _stats_by_hash(
     if hashes_from:
         if entry is None or entry[0] is None or entry[0] != rev_before or len(entry[1]) < hashes_from:
             return None
-        hashes = entry[1][:hashes_from] + list(hashes)
-        for seq, h in (dirty_hashes or {}).items():
-            if seq < hashes_from:
-                hashes[seq] = h
+        if hashes_from + len(hashes) == len(messages):
+            return _delta_stats(conv_id, messages, entry, hashes, hashes_from, rev_after, dirty_hashes or {})
+        return _stats_for(messages)
     if len(hashes) != len(messages):
         return _stats_for(messages)
     rows: dict[str, tuple[int, frozenset[str]]] = {}
@@ -173,7 +212,7 @@ def _stats_by_hash(
         count += stat[0]
         paths |= stat[1]
     with _row_stats_lock:
-        _ROW_STATS[conv_id] = (rev_after, list(hashes), rows)
+        _ROW_STATS[conv_id] = (rev_after, list(hashes), rows, None)
         while len(_ROW_STATS) > _ROW_STATS_CHATS:
             _ROW_STATS.popitem(last=False)
     return {"tool_call_count": count, "file_count": len(paths)}

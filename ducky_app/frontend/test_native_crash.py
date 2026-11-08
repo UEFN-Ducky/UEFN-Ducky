@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+import importlib.machinery
 import os
 import subprocess
 import sys
@@ -65,7 +65,8 @@ def _crash_child(tmp_path: Path, mode: str) -> tuple[subprocess.CompletedProcess
 def test_a_native_crash_writes_a_dump_that_names_the_exception(tmp_path: Path, mode: str) -> None:
     """busy = D24: other Python threads hold the GIL while the fault happens; the filter
     needs the GIL, so it must still get it and finish within 10 s."""
-    if importlib.util.find_spec("clr") is None:
+    # PathFinder, not find_spec: pythonnet's clr, once imported here, has no __spec__ and find_spec raises.
+    if importlib.machinery.PathFinder.find_spec("clr") is None:
         pytest.skip("pythonnet not installed")
     proc, folder = _crash_child(tmp_path, mode)
     assert proc.returncode != 0, proc.stderr
