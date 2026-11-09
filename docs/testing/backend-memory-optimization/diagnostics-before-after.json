@@ -1,0 +1,20 @@
+{
+  "before_commit": "c18ed0d660e8bfa1b45e3812a0d38fe0c77b82a9",
+  "scenario": "one 320 ms stall, then a queue growing from 1 to 290, then one diagnostic flush",
+  "before": {
+    "diagnostic_records": 200,
+    "json_bytes": 19783,
+    "stall_preserved": false,
+    "queue_records": 200,
+    "queue_observations_in_summary": null,
+    "peak_pending": 290
+  },
+  "after": {
+    "diagnostic_records": 2,
+    "json_bytes": 187,
+    "stall_preserved": true,
+    "queue_records": 1,
+    "queue_observations_in_summary": 241,
+    "peak_pending": 290
+  }
+}

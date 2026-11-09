@@ -659,6 +659,59 @@ def test_heartbeat_sample_carries_the_census_from_one_table(monkeypatch) -> None
     assert beat["top_other"][0] == ["UnrealEditorFortnite", 5000]
 
 
+@pytest.mark.parametrize("parent_reused", [False, True])
+def test_native_heartbeat_counts_sibling_webviews_but_not_another_launcher(monkeypatch, parent_reused) -> None:
+    from backend.util import proc_table
+
+    monkeypatch.setenv("UEFN_DUCKY_NATIVE_CHILD", "1")
+    procs = _proc_tree()
+    launcher = proc_table.Proc(90, 1, "Ducky-Launcher.exe", 0, 10 * MB, 1, 1, 0.0,
+                               150.0 if parent_reused else 50.0)
+    procs[90] = launcher
+    procs[100] = procs[100]._replace(ppid=90)
+    procs[101] = procs[101]._replace(ppid=90)
+    # A detached window in the same launcher counts; another app instance doesn't.
+    procs[103] = procs[101]._replace(pid=103, private=100 * MB)
+    procs[200] = launcher._replace(pid=200, ppid=1)
+    procs[201] = procs[101]._replace(pid=201, ppid=200, private=1200 * MB)
+    monkeypatch.setattr(proc_table, "table", lambda: procs)
+    monkeypatch.setattr(boot_report.os, "getpid", lambda: 100)
+    beat = boot_report._memory_sample(lambda: 3)
+    assert beat["app_mb"] == 900 and beat["agents"] == 3
+    assert beat["agents_n"] == 6 and beat["agents_mb"] == 1050
+    if parent_reused:
+        assert beat["webview_mb"] == 0 and "launcher_mb" not in beat
+    else:
+        assert beat["webview_mb"] == 1000 and beat["launcher_mb"] == 10
+        assert "Ducky-Launcher" not in [name for name, _ in beat["top_other"]]
+
+
+def test_memory_history_failure_does_not_stop_heartbeat_listeners(crash, monkeypatch) -> None:
+    from frontend import memory_history
+
+    boot_report.begin("test")
+    seen = []
+    monkeypatch.setattr(boot_report, "_memory_sample", lambda _: {"at": 1.0, "app_mb": 42})
+    monkeypatch.setattr(boot_report, "_beat_listeners", [seen.append])
+    monkeypatch.setattr(memory_history, "append", lambda *args: (_ for _ in ()).throw(OSError("disk full")))
+    boot_report.heartbeat()
+    assert seen == [{"at": 1.0, "app_mb": 42}]
+    assert json.loads(boot_report._boot_path().read_text())["heartbeat"]["app_mb"] == 42
+
+
+def test_heartbeat_history_survives_the_next_launch(crash, monkeypatch) -> None:
+    monkeypatch.setattr(boot_report, "_memory_sample", lambda _: {"at": 100.0, "app_mb": 42})
+    monkeypatch.setattr(boot_report, "_beat_listeners", [])
+    boot_report.begin("first")
+    boot_report.heartbeat()
+    boot_report.mark("closed")
+    boot_report.begin("second")
+    boot_report.heartbeat()
+    records = [json.loads(line) for path in (boot_report._dir() / "memory").glob("*.jsonl")
+               for line in path.read_text().splitlines()]
+    assert sorted(record["version"] for record in records) == ["first", "second"]
+
+
 def test_crash_report_shows_agents_and_other_programs_as_size_buckets() -> None:
     beat = {"at": 1000.0, "free_gb": 0.8, "total_gb": 16, "app_gb": 1.3, "agents_n": 6, "agents_mb": 1050,
             "top_other": [["UnrealEditorFortnite", 5000], ["chrome", 4500], ["Discord", 700]]}

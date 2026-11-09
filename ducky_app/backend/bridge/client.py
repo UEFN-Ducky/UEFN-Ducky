@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import sys
 import threading
 import time
 import urllib.error
@@ -65,8 +66,61 @@ _READ_COMMANDS = frozenset(
     }
 )
 
-_response_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+_CACHE_MAX_ENTRIES = 256
+_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_response_cache: dict[tuple[str, str], tuple[float, dict, int]] = {}
 _cache_lock = threading.Lock()
+_cache_timer: threading.Timer | None = None
+
+
+def _prune_responses() -> None:
+    now = time.monotonic()
+    for key in [key for key, entry in _response_cache.items() if entry[0] <= now]:
+        del _response_cache[key]
+    total = sum(entry[2] for entry in _response_cache.values())
+    for key in list(_response_cache):
+        if len(_response_cache) <= _CACHE_MAX_ENTRIES and total <= _CACHE_MAX_BYTES:
+            break
+        total -= _response_cache.pop(key)[2]
+
+
+def _expire_responses() -> None:
+    global _cache_timer
+    with _cache_lock:
+        _cache_timer = None
+        _prune_responses()
+        _schedule_response_expiry()
+
+
+def _schedule_response_expiry() -> None:
+    global _cache_timer
+    if _response_cache and _cache_timer is None:
+        delay = max(.01, min(v[0] for v in _response_cache.values()) - time.monotonic())
+        _cache_timer = threading.Timer(delay, _expire_responses)
+        _cache_timer.daemon = True
+        _cache_timer.start()
+
+
+def _remember_response(key, result, ttl) -> None:
+    # Count actual Python containers/strings; stop walking an oversized value.
+    pending, seen, size = [key, result], set(), 128
+    while pending:
+        value = pending.pop()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        size += sys.getsizeof(value)
+        if size > _CACHE_MAX_BYTES // 4:
+            return
+        if isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            pending.extend(value)
+    with _cache_lock:
+        _response_cache[key] = (time.monotonic() + ttl, result, size)
+        _prune_responses()
+        _schedule_response_expiry()
 
 # Serialize every command sent to the listener. FastMCP runs tool calls on a
 # worker-thread pool; without this lock, parallel MCP tools open N concurrent
@@ -661,18 +715,13 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
     cache_ttl = _CACHEABLE_COMMANDS.get(command)
     key = _cache_key(command, params)
     if cache_ttl is not None:
-        now = time.time()
         with _cache_lock:
+            _prune_responses()
             hit = _response_cache.get(key)
             if hit is not None:
-                if now - hit[0] < cache_ttl:
-                    return hit[1]
                 _response_cache.pop(key, None)
-            # Cap growth: drop oldest expired entries opportunistically.
-            if len(_response_cache) > 256:
-                stale = [k for k, (ts, _) in _response_cache.items() if now - ts >= cache_ttl]
-                for k in stale[:64]:
-                    _response_cache.pop(k, None)
+                _response_cache[key] = hit
+                return hit[1]
 
     # One POST to the configured port, no health GET or port scan first: with UEFN
     # closed that is one refused connection and a short error, never a 30 s wait.
@@ -739,8 +788,7 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
     if command not in _READ_COMMANDS:
         _invalidate_cache()
     elif cache_ttl is not None:
-        with _cache_lock:
-            _response_cache[key] = (time.time(), result)
+        _remember_response(key, result, cache_ttl)
 
     return result
 

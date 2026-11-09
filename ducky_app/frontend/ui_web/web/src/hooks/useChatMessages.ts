@@ -155,7 +155,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   }, [chatId]);
 
   // The list reached its top: the page of saved rows before the oldest one shown. Row ids
-  // are message index * 1000 + row, so the chat's first row is id 0 and nothing is older.
+  // are message index * ROW_ID_STEP + row, so the chat's first row is id 0 and nothing is older.
   const olderBusyRef = useRef(false);
   const noOlderBeforeRef = useRef<number | null>(null);
   const loadOlder = useCallback(async () => {

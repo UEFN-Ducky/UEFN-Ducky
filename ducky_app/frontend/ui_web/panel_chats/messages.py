@@ -42,7 +42,8 @@ def _writer_settled(conv_id: str) -> bool:
     return bool(writer.flush(conv_id, CHECKPOINT_FLUSH_WAIT_S)) or not writer.checkpoint_waits(conv_id)
 
 
-def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dict[str, Any]] | None:
+def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool,
+               display_attachments: bool = True) -> list[dict[str, Any]] | None:
     """The ``limit`` rows before ``before_id`` (the newest without it), opening only the
     messages they come from. ``load_conversation`` opened every message of the chat, one
     DPAPI call each: a 735-message chat out of the opened-row cache took 0.45 s for its
@@ -70,7 +71,8 @@ def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dic
             if seq < count:
                 messages[seq] = message
         conv.messages = messages
-        rows = _pa._messages_to_ui(conv, live=live, before_id=None if before_id is None else int(before_id), limit=limit)
+        rows = _pa._messages_to_ui(conv, live=live, before_id=None if before_id is None else int(before_id),
+                                   limit=limit, display_attachments=display_attachments)
         if start == 0 or (rows and rows[0]["id"] >= start * ROW_ID_STEP):
             return rows
         want *= 4
@@ -82,7 +84,7 @@ def load_messages(
     """The one message-load path: conversation as flat UI rows.
 
     `_messages_to_ui` is the single source of truth for how a stored
-    conversation becomes rows; row ids are message index * 1000 + row index,
+    conversation becomes rows; row ids are message index * ROW_ID_STEP + row index,
     so a page (``limit`` newest rows, or the ``limit`` rows before
     ``before_id``) converts only the messages it shows, newest first.
     Without arguments the whole conversation comes back, as before.
@@ -97,7 +99,8 @@ def load_messages(
         settled = _writer_settled(conv_id)
         # ponytail: a whole load with the writer busy reads every message as one huge page.
         page = int(limit) if limit is not None else (None if settled else 10**9)
-        rows = None if page is None else _page_rows(conv_id, before_id, page, live)
+        rows = None if page is None else _page_rows(conv_id, before_id, page, live,
+                                                    display_attachments=not full_results)
         if rows is None:
             conv = _pa.load_conversation(conv_id)
             if not conv:
@@ -107,6 +110,7 @@ def load_messages(
                 live=live,
                 before_id=None if before_id is None else int(before_id),
                 limit=None if limit is None else int(limit),
+                display_attachments=not full_results,
             )
     except Exception as exc:
         # A chat that can't be read must leave a trace, not just a spinner.
@@ -122,10 +126,12 @@ def load_messages(
 
 def load_tool_result(self, conv_id: str, row_id: int) -> dict[str, Any]:
     """The whole result of one tool row that ``load_messages`` cut."""
-    conv = _pa.load_conversation(conv_id)
-    if not conv:
+    from frontend.ui_web.chats.display import load_display_rows
+    from frontend.ui_web.chats.conversations import load_conversation_meta
+
+    if load_conversation_meta(conv_id) is None:
         return {"ok": False, "error": "Chat not found"}
-    rows = _pa._messages_to_ui(conv, before_id=int(row_id) + 1, limit=1)
+    rows = load_display_rows(conv_id, before_id=int(row_id) + 1, limit=1, live=False)
     tool = rows[-1].get("tool") if rows and rows[-1].get("id") == int(row_id) else None
     if not isinstance(tool, dict):
         return {"ok": False, "error": "No tool result in that row"}

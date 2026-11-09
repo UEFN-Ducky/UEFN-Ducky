@@ -426,6 +426,13 @@ def run_backend(
         boot_report.mark("ok")
     except Exception:
         pass
+    try:
+        from frontend import boot_report
+        from frontend.ui_web.agent_turns.state import list_running_agents
+
+        boot_report.start_heartbeat(lambda: len(list_running_agents()))
+    except Exception:
+        _log.warning("crash heartbeat did not start", exc_info=True)
     timer = threading.Timer(BACKGROUND_AFTER_HELLO_S, start_background)
     timer.daemon = True
     timer.start()

@@ -56,6 +56,8 @@ class InputLane:
                 fn(*args)
             except Exception:
                 _log.exception("%s task failed", self._name)
+            finally:
+                del fn, args
 
 
 _lane: InputLane | None = None

@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import uuid
+import json
 from pathlib import Path
 
 import pytest
@@ -70,6 +71,26 @@ def test_unknown_op_is_refused():
     app.close()
     assert not app.send("cancel", conv_id="c1")
     host.close()
+
+
+def test_writer_splits_by_serialized_bytes_and_count_without_losing_order(monkeypatch):
+    monkeypatch.setattr(protocol, 'MAX_MESSAGE', 512)
+    monkeypatch.setattr(protocol, 'MAX_BATCH_BYTES', 256)
+    monkeypatch.setattr(protocol, 'MAX_BATCH_FRAMES', 3)
+    sent = []
+    class Connection:
+        def send_bytes(self, raw):
+            sent.append(raw)
+    channel = protocol.Channel(Connection(), send_ops=protocol.APP_OPS, recv_ops=protocol.HOST_OPS,
+                               on_frame=lambda frame: None)
+    for i in range(100):
+        channel.send('start_turn', seq=i, text='é' * (i % 20))
+    channel._out.put(None)
+    channel._write_loop()
+    assert all(len(raw) <= 256 and len(json.loads(raw)) <= 3 for raw in sent)
+    assert [f['seq'] for raw in sent for f in json.loads(raw)] == list(range(100))
+    with pytest.raises(ValueError, match='MAX_MESSAGE'):
+        channel.send('start_turn', text='x' * 512)
 
 
 def test_silent_host_is_seen_by_missing_heartbeat():

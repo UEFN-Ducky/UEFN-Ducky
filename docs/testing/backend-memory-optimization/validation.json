@@ -1,0 +1,71 @@
+{
+  "base_commit": "c18ed0d660e8bfa1b45e3812a0d38fe0c77b82a9",
+  "python_full_attempt": {
+    "passed": 6305,
+    "failed": 10,
+    "errors": 0,
+    "skipped": 13,
+    "failures": [
+      "ducky_app/frontend/ui_web/terminal/test_powershell_done_marker.py::test_ctrl_c_from_the_person_stops_the_command_and_ends_the_agents_wait[powershell-ping -n 60 127.0.0.1]",
+      "ducky_app/frontend/ui_web/terminal/test_powershell_done_marker.py::test_ctrl_c_from_the_person_stops_the_command_and_ends_the_agents_wait[bash-ping -n 60 127.0.0.1]",
+      "ducky_app/frontend/ui_web/terminal/test_powershell_done_marker.py::test_a_timed_out_command_still_running_gets_no_typed_commands",
+      "tests/test_panel_port_isolation.py::test_bootstrap_overrides_inherited_live_address_before_import[openai]",
+      "tests/test_panel_port_isolation.py::test_bootstrap_overrides_inherited_live_address_before_import[anthropic]",
+      "tests/test_panel_port_isolation.py::test_bootstrap_overrides_inherited_live_address_before_import[cursor]",
+      "ducky_app/frontend/ui_web/test_webview_native_menu.py::test_windows_spell_checker_answers",
+      "ducky_app/backend/bridge/test_catalog_refresh.py::test_shared_watchers_skip_an_unchanged_catalog",
+      "ducky_app/frontend/native_host/test_pane_host.py::test_a_popout_is_found_by_its_mark_and_never_taken_for_the_main_window",
+      "ducky_app/frontend/native_host/test_pane_host.py::test_pane_opens_inside_another_process_window"
+    ]
+  },
+  "python_full_completed": false,
+  "stop_reason": "stopped at maxfail=10",
+  "pristine_replay_of_failures": {
+    "passed": 1,
+    "failed": 9,
+    "errors": 0,
+    "skipped": 0,
+    "failures": [
+      "ducky_app/frontend/ui_web/terminal/test_powershell_done_marker.py::test_ctrl_c_from_the_person_stops_the_command_and_ends_the_agents_wait[powershell-ping -n 60 127.0.0.1]",
+      "ducky_app/frontend/ui_web/terminal/test_powershell_done_marker.py::test_ctrl_c_from_the_person_stops_the_command_and_ends_the_agents_wait[bash-ping -n 60 127.0.0.1]",
+      "ducky_app/frontend/ui_web/terminal/test_powershell_done_marker.py::test_a_timed_out_command_still_running_gets_no_typed_commands",
+      "tests/test_panel_port_isolation.py::test_bootstrap_overrides_inherited_live_address_before_import[openai]",
+      "tests/test_panel_port_isolation.py::test_bootstrap_overrides_inherited_live_address_before_import[anthropic]",
+      "tests/test_panel_port_isolation.py::test_bootstrap_overrides_inherited_live_address_before_import[cursor]",
+      "ducky_app/frontend/ui_web/test_webview_native_menu.py::test_windows_spell_checker_answers",
+      "ducky_app/frontend/native_host/test_pane_host.py::test_a_popout_is_found_by_its_mark_and_never_taken_for_the_main_window",
+      "ducky_app/frontend/native_host/test_pane_host.py::test_pane_opens_inside_another_process_window"
+    ]
+  },
+  "remaining_changed_tests_and_mcp": {
+    "passed": 17,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "failures": []
+  },
+  "ui_full": {
+    "passed": 2691,
+    "failed": 1,
+    "collection_errors": 1,
+    "failed_test": "src/views/settings/SearchIndexCard.test.tsx: shows what is indexed and the model",
+    "collection_error_suite": "src/views/ChatView.remote.test.tsx"
+  },
+  "ui_remote_rerun": {
+    "passed": 2,
+    "failed": 0
+  },
+  "ui_changed_hooks": {
+    "passed": 35,
+    "failed": 0
+  },
+  "ui_pristine_search_replay": {
+    "passed": 2,
+    "failed": 1,
+    "reason": "host French locale formats thousands with spaces, assertion expects English commas"
+  },
+  "typescript_passed": true,
+  "ruff_passed": true,
+  "full_suite_pass_claimed": false,
+  "rebased_executable_built": false
+}

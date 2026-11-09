@@ -35,7 +35,7 @@ def test_pages_match_full_load_ids() -> None:
     full = chat_rows._messages_to_ui(conv, project_root="")
     ids = [r["id"] for r in full]
     assert ids == sorted(ids) and len(set(ids)) == len(ids)
-    assert full[1]["id"] == 1000 and full[2]["id"] == 1001 and full[3]["id"] == 1002
+    assert [r["id"] for r in full[1:4]] == [chat_rows.ROW_ID_STEP + n for n in range(3)]
 
     started = time.monotonic()
     page = chat_rows._messages_to_ui(conv, project_root="", limit=200)
@@ -67,5 +67,5 @@ def test_first_page_of_a_900_message_chat_skips_old_edit_diffs(monkeypatch) -> N
             del block["file_edits"]  # older turns stored no diff
 
     page = chat_rows._messages_to_ui(conv, project_root="", limit=300)
-    assert len(page) == 300 and page[-1]["id"] // 1000 == 899
+    assert len(page) == 300 and page[-1]["id"] // chat_rows.ROW_ID_STEP == 899
     assert 0 < len(diffs) <= 80  # 300 rows ≈ 75 user+assistant pairs, not all 450 edits

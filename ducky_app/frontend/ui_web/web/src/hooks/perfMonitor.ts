@@ -12,6 +12,10 @@ export type UiPerfEntry = {
   duration_ms: number;
   pending_depth?: number;
   peak_pending?: number;
+  /** Number of observations represented by this interval's summary. */
+  samples?: number;
+  total_duration_ms?: number;
+  delivered?: number;
   /** The long frame's slowest script: who called it and where it lives. */
   source?: string;
 };
@@ -34,6 +38,10 @@ const LONGTASK_MS = 50;
 let installed = false;
 let buffer: UiPerfEntry[] = [];
 let peakPending = 0;
+// Keep queue/delivery counters outside the stall buffer: a burst must not evict
+// the long tasks that explain it. These summaries occupy constant space.
+let pendingSummary: UiPerfEntry | undefined;
+let deliverySummary: UiPerfEntry | undefined;
 
 function enqueue(entry: UiPerfEntry) {
   buffer.push(entry);
@@ -43,10 +51,16 @@ function enqueue(entry: UiPerfEntry) {
 }
 
 function flush() {
-  if (!buffer.length) return;
+  if (!buffer.length && !pendingSummary && !deliverySummary) return;
   const api = getApi();
   if (!api || typeof api.report_ui_perf !== "function") return;
   const batch = buffer.splice(0, buffer.length);
+  if (pendingSummary) batch.push(pendingSummary);
+  if (deliverySummary) batch.push(deliverySummary);
+  pendingSummary = undefined;
+  deliverySummary = undefined;
+  peakPending = 0;
+  if (batch.length > 200) batch.splice(0, batch.length - 200);
   try {
     void api.report_ui_perf(batch);
   } catch {
@@ -57,28 +71,28 @@ function flush() {
 export function notePendingDepth(depth: number) {
   if (depth > peakPending) peakPending = depth;
   if (depth >= 50) {
-    enqueue({
-      kind: "ui_frame",
-      name: "pending_events",
-      duration_ms: 0,
-      pending_depth: depth,
-      peak_pending: peakPending,
-    });
+    if (!pendingSummary) {
+      pendingSummary = { kind: "ui_frame", name: "pending_events", duration_ms: 0, samples: 0 };
+    }
+    pendingSummary.samples = (pendingSummary.samples ?? 0) + 1;
+    pendingSummary.pending_depth = depth;
+    pendingSummary.peak_pending = peakPending;
   }
 }
 
 export function noteFrameDelivery(durationMs: number, delivered: number, remaining: number) {
+  if (remaining > peakPending) peakPending = remaining;
   if (durationMs >= 16 || remaining >= 50) {
-    enqueue({
-      kind: "ui_frame",
-      name: "event_delivery",
-      duration_ms: durationMs,
-      pending_depth: remaining,
-      peak_pending: peakPending,
-    });
+    if (!deliverySummary) {
+      deliverySummary = { kind: "ui_frame", name: "event_delivery", duration_ms: 0, samples: 0 };
+    }
+    deliverySummary.samples = (deliverySummary.samples ?? 0) + 1;
+    deliverySummary.duration_ms = Math.max(deliverySummary.duration_ms, durationMs);
+    deliverySummary.total_duration_ms = (deliverySummary.total_duration_ms ?? 0) + durationMs;
+    deliverySummary.delivered = (deliverySummary.delivered ?? 0) + delivered;
+    deliverySummary.pending_depth = remaining;
+    deliverySummary.peak_pending = peakPending;
   }
-  // silence unused when delivered is only for future diagnostics
-  void delivered;
 }
 
 export function installPerfMonitor() {
@@ -119,7 +133,7 @@ export function installPerfMonitor() {
 
   // Don't wake to look at an empty buffer while the window is hidden.
   const stopFlush = setVisibleInterval(() => {
-    if (buffer.length) flush();
+    flush();
   }, FLUSH_INTERVAL_MS);
 
   window.addEventListener("beforeunload", () => {

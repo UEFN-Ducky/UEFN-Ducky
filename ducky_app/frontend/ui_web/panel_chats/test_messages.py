@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import frontend.ui_web.panel_api as _pa
+import frontend.ui_web.panel_api  # noqa: F401 - initialize the mixin import cycle
 from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
 from frontend.ui_web.panel_chats import messages
 
@@ -17,11 +17,12 @@ def test_a_long_tool_result_is_cut_with_its_size():
 
 
 def test_a_missing_chat_or_row_has_no_tool_result(monkeypatch):
+    from frontend.ui_web.chats import conversations, display
     api = PanelApiChatsMixin()
-    monkeypatch.setattr(_pa, "load_conversation", lambda cid: None)
+    monkeypatch.setattr(conversations, "load_conversation_meta", lambda cid: None)
     assert api.load_tool_result("c", 5) == {"ok": False, "error": "Chat not found"}
-    monkeypatch.setattr(_pa, "load_conversation", lambda cid: object())
-    monkeypatch.setattr(_pa, "_messages_to_ui", lambda conv, **kw: [{"id": 5, "tool": {"result": "all of it"}}])
+    monkeypatch.setattr(conversations, "load_conversation_meta", lambda cid: object())
+    monkeypatch.setattr(display, "load_display_rows", lambda conv, **kw: [{"id": 5, "tool": {"result": "all of it"}}])
     assert api.load_tool_result("c", 5) == {"ok": True, "result": "all of it"}
     assert api.load_tool_result("c", 6)["ok"] is False
 

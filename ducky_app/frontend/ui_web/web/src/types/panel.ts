@@ -1064,6 +1064,8 @@ export interface VideoFrameDto {
 }
 
 export interface MessageAttachmentDto {
+  /** Persisted image reference; resolved with account/path checks on resend. */
+  stored_conv_id?: string;
   /** audio / motion (an HTML scene whose render(t) draws frame t) come from generated media. */
   kind: "image" | "file" | "video" | "audio" | "motion";
   name: string;
@@ -1103,7 +1105,7 @@ export interface VideoPrepStatusDto {
 export type VideoAttachmentStatus = "uploading" | "preparing" | "ready" | "error";
 
 export type ComposerAttachment =
-  | { id: string; kind: "image"; name: string; mime: string; dataUrl: string; projectPath?: string }
+  | { id: string; kind: "image"; name: string; mime: string; dataUrl: string; projectPath?: string; storedConvId?: string; storedPath?: string }
   | { id: string; kind: "file"; name: string; mime: string; text: string }
   | {
       id: string;

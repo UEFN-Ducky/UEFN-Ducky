@@ -1,0 +1,50 @@
+{
+  "python": "3.13.15 (tags/v3.13.15:4061bc4, Aug  5 2026, 13:05:39) [MSC v.1944 64 bit (AMD64)]",
+  "samples": 7,
+  "scope": "isolated source, synthetic data",
+  "chat_100": {
+    "median_ms": 4.356499999630614,
+    "p95_ms": 64.01039999946079,
+    "peak_python_bytes": 1246328,
+    "decoded": [
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64
+    ]
+  },
+  "chat_1000": {
+    "median_ms": 4.557399999612244,
+    "p95_ms": 24.18009999928472,
+    "peak_python_bytes": 611696,
+    "decoded": [
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64
+    ]
+  },
+  "chat_10000": {
+    "median_ms": 6.208200000401121,
+    "p95_ms": 29.55379999912111,
+    "peak_python_bytes": 741762,
+    "decoded": [
+      64,
+      64,
+      64,
+      64,
+      64,
+      64,
+      64
+    ]
+  },
+  "cache_after_2000_keys": 2000,
+  "cache_after_ttl_idle": 2000,
+  "idle_worker_retains_payload": true
+}

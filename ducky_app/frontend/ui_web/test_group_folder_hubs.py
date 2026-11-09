@@ -306,9 +306,11 @@ def test_restart_from_here_erases_the_message_and_everything_after(tmp_path, mon
     save_conversation(conv, root)
     api = PanelApiChatsMixin()
 
-    assert api.rewind_to_message(conv.id, 2000, "changed meanwhile")["ok"] is False
-    assert api.rewind_to_message(conv.id, 1000, "one")["ok"] is False  # not a user message
-    assert api.rewind_to_message(conv.id, 2000, "second") == {"ok": True, "kept": 2}
+    from frontend.ui_web.chat_rows import ROW_ID_STEP
+    assert api.rewind_to_message(conv.id, 2000, "first")["ok"] is False  # obsolete UI cursor
+    assert api.rewind_to_message(conv.id, 2 * ROW_ID_STEP, "changed meanwhile")["ok"] is False
+    assert api.rewind_to_message(conv.id, ROW_ID_STEP, "one")["ok"] is False  # not a user message
+    assert api.rewind_to_message(conv.id, 2 * ROW_ID_STEP, "second") == {"ok": True, "kept": 2}
 
     fresh = load_conversation(conv.id, project_root=root)
     assert [m["content"] for m in fresh.messages] == ["first", "one"]

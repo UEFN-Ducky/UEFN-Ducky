@@ -189,6 +189,8 @@ def rewind_to_message(self, conv_id: str, row_id: int, text: str = "") -> dict[s
             return {"ok": False, "error": "The agent is still stopping. Try again in a moment."}
         conv = _pa.load_conversation(conv_id) or conv
     try:
+        if int(row_id) % ROW_ID_STEP:
+            return {"ok": False, "error": "This chat changed. Reload it and try again."}
         index = int(row_id) // ROW_ID_STEP
     except (TypeError, ValueError):
         return {"ok": False, "error": "Unknown message."}

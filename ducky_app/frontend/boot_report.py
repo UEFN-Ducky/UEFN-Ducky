@@ -845,16 +845,20 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
         procs = proc_table.table()
         me = procs.get(os.getpid())
         if me is not None:
-            beat.update(app_gb=round(me.private / gb, 2), threads=me.threads)
-            mine = proc_table.tree(procs, me.pid)
-            web = mine
-            if os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1" and me.ppid in procs:
-                # Under Ducky-Launcher.exe the window's WebView2 is the launcher's child, not ours.
-                web = proc_table.tree(procs, me.ppid)
-            beat["webview_gb"] = round(
-                sum(procs[p].private for p in web if procs[p].name.lower() == WEBVIEW_EXE) / gb, 2
-            )
-            beat.update(process_census(procs, me.pid, mine))
+            beat.update(app_gb=round(me.private / gb, 2), app_mb=round(me.private / 1024**2, 1),
+                        threads=me.threads, handles=me.handles)
+            # With the Rust launcher, WebView2 is our sibling, not our child.
+            # Check the parent's identity/start time before widening the census.
+            parent = procs.get(me.ppid)
+            launcher = parent if (os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1"
+                                  and parent is not None and parent.name.lower() == "ducky-launcher.exe"
+                                  and parent.started <= me.started) else None
+            mine = proc_table.tree(procs, launcher.pid if launcher else me.pid)
+            webview = sum(procs[p].private for p in mine if procs[p].name.lower() == WEBVIEW_EXE)
+            beat.update(webview_gb=round(webview / gb, 2), webview_mb=round(webview / 1024**2, 1))
+            if launcher:
+                beat["launcher_mb"] = round(launcher.private / 1024**2, 1)
+            beat.update(process_census(procs, me.pid, mine, launcher_pid=launcher.pid if launcher else None))
     except Exception:
         # Out of commit the process table can fail: still say how big Ducky itself was.
         beat.setdefault("threads", threading.active_count())
@@ -875,7 +879,8 @@ TOP_OTHER_N = 3
 _NOT_PROGRAMS = {"system", "registry", "memory compression", "secure system", "idle", "system idle process", ""}
 
 
-def process_census(procs: dict[int, Any], root: int, mine: list[int] | None = None) -> dict[str, Any]:
+def process_census(procs: dict[int, Any], root: int, mine: list[int] | None = None,
+                   *, launcher_pid: int | None = None) -> dict[str, Any]:
     """What else held memory at this beat, from the one process table the beat already read.
 
     ``agents_mb`` / ``agents_n``: every process Ducky started, and theirs, except WebView2
@@ -888,7 +893,7 @@ def process_census(procs: dict[int, Any], root: int, mine: list[int] | None = No
         mine = proc_table.tree(procs, root)
     ours = set(mine)
     mb = 1024**2
-    agents = [procs[p] for p in mine if p != root and procs[p].name.lower() != WEBVIEW_EXE]
+    agents = [procs[p] for p in mine if p not in (root, launcher_pid) and procs[p].name.lower() != WEBVIEW_EXE]
     by_name: dict[str, int] = {}
     for pid, proc in procs.items():
         if pid in ours or proc.name.lower() in _NOT_PROGRAMS:
@@ -966,6 +971,12 @@ def heartbeat(agents: Callable[[], int] | None = None) -> None:
     # The launch's first beat stays, so the trend covers the whole run, not just the last minutes.
     _state["beats"] = [*beats[:1], *beats[1:][-(BEATS_KEPT - 2):], {k: beat[k] for k in keep if k in beat}]
     _write_state()
+    try:
+        from frontend import memory_history
+
+        memory_history.append(_dir() / "memory", _state, beat)
+    except Exception:
+        pass  # full/read-only disk must not stop samples, listeners or the app
     for fn in list(_beat_listeners):
         try:
             fn(beat)
