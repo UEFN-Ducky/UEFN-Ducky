@@ -83,7 +83,8 @@
   left: var(--dropdown-left);
   top: var(--dropdown-top, auto);
   bottom: var(--dropdown-bottom, auto);
-  width: var(--dropdown-width);
+  /* Never wider than a phone's screen. */
+  width: min(var(--dropdown-width), calc(100vw - 16px));
   max-height: var(--dropdown-max-height, min(360px, 50vh));
   /* Set per panel (DropdownPanel zIndex): a plain z-index rule there loses to this one. */
   z-index: var(--dropdown-z, 100010);
