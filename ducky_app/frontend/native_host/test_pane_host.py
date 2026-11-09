@@ -120,7 +120,9 @@ def test_pane_opens_inside_another_process_window(tmp_path, monkeypatch) -> None
         assert bo.open_pane("t1", "about:blank")["ok"]
         bo.set_bounds("t1", 10, 10, 200, 150, cw, ch, True)
         deadline = time.monotonic() + 30
-        while time.monotonic() < deadline and not bo._panes["t1"].ready:
+        # ready is set on the UI thread just before its state push, so wait for both.
+        while time.monotonic() < deadline and not (
+                bo._panes["t1"].ready and any(e.get("pane_id") == "t1" for e in pushed)):
             time.sleep(0.2)
         pane = bo._panes["t1"]
         assert pane.ready, pane.failed

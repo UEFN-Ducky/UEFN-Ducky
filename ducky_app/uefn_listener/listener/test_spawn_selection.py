@@ -57,6 +57,7 @@ def actors(monkeypatch):
     monkeypatch.setitem(sys.modules, "listener.paging", paging)
     device_editor = types.ModuleType("listener.device_editor")
     device_editor._device_kind = lambda a: ""
+    device_editor.hide_verse_device = lambda a: False
     device_scale = types.ModuleType("listener.device_scale")
     device_scale.refuse_if_creative_device_scale = lambda *a: None
     dispatch = types.ModuleType("listener.dispatch")
