@@ -3,7 +3,8 @@
 //!
 //! Mirrors `frontend/ui_web/webview_app.py::_hand_off_to_living_panel` and
 //! `frontend/open_files.py::try_handoff_to_running`. The launcher never closes another
-//! process: a stale or stuck panel is left to the Python backend's own reclaim.
+//! process: a stale or stuck panel is left to the Python backend's own reclaim, and a
+//! hand-off that gets no answer in [`HANDOFF_LIMIT`] opens this launch's own window.
 
 pub mod config;
 pub mod http;
@@ -27,8 +28,9 @@ pub const HANDOFF_PATH: &str = "/__panel_open_files";
 pub const FIRST_TRIES: u32 = 4;
 pub const FIRST_DELAY: Duration = Duration::from_millis(150);
 pub const FIRST_TIMEOUT: Duration = Duration::from_millis(350);
-/// A Ducky that is alive but not answering is starting or busy: wait for it this long.
-pub const LIVING_PANEL_WAIT: Duration = Duration::from_secs(45);
+/// The whole hand-off, first burst included: a Ducky that has not answered by then is hung
+/// (it said hello in 0.4-4.2 s on every report), so this launch opens its own window.
+pub const HANDOFF_LIMIT: Duration = Duration::from_secs(5);
 pub const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
 /// Pause between waiting tries (a refused connect returns at once).
 pub const RETRY_PAUSE: Duration = Duration::from_millis(250);
@@ -97,6 +99,7 @@ pub fn decide_launch(args: &[OsString], cfg: &Config, sys: &dyn System) -> Launc
 }
 
 fn hand_off(pid: u32, port: u16, body: &[u8], sys: &dyn System) -> bool {
+    let deadline = sys.now() + HANDOFF_LIMIT;
     for attempt in 0..FIRST_TRIES {
         if sys.post(port, body, FIRST_TIMEOUT) {
             return true;
@@ -105,12 +108,15 @@ fn hand_off(pid: u32, port: u16, body: &[u8], sys: &dyn System) -> bool {
             sys.sleep(FIRST_DELAY);
         }
     }
-    let deadline = sys.now() + LIVING_PANEL_WAIT;
-    while sys.now() < deadline && sys.is_ducky(pid) {
-        if sys.post(port, body, RETRY_TIMEOUT) {
+    while sys.is_ducky(pid) {
+        let left = deadline.saturating_duration_since(sys.now());
+        if left.is_zero() {
+            break;
+        }
+        if sys.post(port, body, RETRY_TIMEOUT.min(left)) {
             return true;
         }
-        sys.sleep(RETRY_PAUSE);
+        sys.sleep(RETRY_PAUSE.min(deadline.saturating_duration_since(sys.now())));
     }
     false
 }
@@ -212,24 +218,44 @@ mod tests {
     #[test]
     fn a_starting_ducky_is_waited_for_not_given_up_on() {
         let (cfg, dir) = cfg_with_pid(Some("4242"));
-        let sys = Fake::new(true, Some(7));
+        let sys = Fake::new(true, Some(6));
         assert_eq!(decide_launch(&[], &cfg, &sys), Launch::HandedOff);
-        assert_eq!(sys.tries(), 7);
+        assert_eq!(sys.tries(), 6);
         let posts = sys.posts.borrow();
         assert!(posts[..4].iter().all(|p| p.2 == FIRST_TIMEOUT));
-        assert!(posts[4..].iter().all(|p| p.2 == RETRY_TIMEOUT));
+        assert_eq!(posts[4].2, RETRY_TIMEOUT);
+        assert!(posts[5..].iter().all(|p| p.2 <= RETRY_TIMEOUT));
         drop(posts);
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn a_ducky_that_never_answers_is_left_after_the_wait() {
+    fn a_hung_ducky_that_never_answers_is_left_within_5_s() {
         let (cfg, dir) = cfg_with_pid(Some("4242"));
         let sys = Fake::new(true, None);
         assert_eq!(decide_launch(&[], &cfg, &sys), Launch::StartFresh);
-        assert!(sys.clock.get() >= LIVING_PANEL_WAIT);
-        assert!(sys.clock.get() < LIVING_PANEL_WAIT + Duration::from_secs(5));
+        assert!(sys.clock.get() >= HANDOFF_LIMIT - Duration::from_millis(300));
+        assert!(sys.clock.get() < Duration::from_millis(5500), "{:?}", sys.clock.get());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_hung_peer_on_a_real_socket_is_left_within_5_5_s() {
+        // Listening (connects land in the backlog) but never answering: gives up on time.
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        struct Hung;
+        impl System for Hung {
+            fn pid_alive(&self, _: u32) -> bool { true }
+            fn is_ducky(&self, _: u32) -> bool { true }
+            fn post(&self, port: u16, body: &[u8], timeout: Duration) -> bool { RealSystem.post(port, body, timeout) }
+            fn sleep(&self, d: Duration) { std::thread::sleep(d) }
+            fn now(&self) -> Instant { Instant::now() }
+        }
+        let started = Instant::now();
+        assert!(!hand_off(4242, port, b"{}", &Hung));
+        assert!(started.elapsed() < Duration::from_millis(5500), "{:?}", started.elapsed());
+        drop(listener);
     }
 
     #[test]

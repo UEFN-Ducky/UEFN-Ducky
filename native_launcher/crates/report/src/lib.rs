@@ -74,6 +74,16 @@ fn round2(x: f64) -> f64 {
     (x * 100.0).round() / 100.0
 }
 
+/// The time-to-`instance` bucket (lock wait + hand-off) a timeout report groups by.
+pub fn instance_bucket(seconds: f64) -> &'static str {
+    match seconds {
+        s if s < 1.0 => "0-1s",
+        s if s < 5.5 => "1-5s",
+        s if s < 11.0 => "5-10s",
+        _ => "10s+",
+    }
+}
+
 /// One launcher run: its stages (seconds since it started, like `boot_report.stage`)
 /// and, at the end, its exit code.
 #[derive(Clone, Debug)]
@@ -127,6 +137,10 @@ impl LauncherRecord {
         let obj = v.as_object_mut().expect("object");
         if let Some(pid) = self.backend_pid {
             obj.insert("backend_pid".into(), json!(pid));
+        }
+        if let Some((_, s)) = self.stages.iter().find(|(n, _)| n == "instance") {
+            obj.insert("instance_s".into(), json!(s));
+            obj.insert("instance".into(), json!(instance_bucket(*s)));
         }
         if let Some(code) = self.exit {
             obj.insert("exit_code".into(), json!(code));
@@ -240,6 +254,16 @@ mod tests {
             assert_eq!(v["exit_reason"], exit.reason());
             assert!(v.get("error").is_none());
         }
+    }
+
+    #[test]
+    fn instance_time_is_bucketed() {
+        let mut rec = LauncherRecord::new("x");
+        assert!(rec.to_json().get("instance").is_none());
+        rec.stage_at("instance", 5.2);
+        let v = rec.to_json();
+        assert_eq!((v["instance_s"].clone(), v["instance"].clone()), (json!(5.2), json!("1-5s")));
+        assert_eq!([0.4, 3.0, 10.4, 65.7].map(instance_bucket), ["0-1s", "1-5s", "5-10s", "10s+"]);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! `Local\DuckyLauncher`: one launcher starts Ducky at a time. A second launch waits for the
-//! first to finish starting (or die: an abandoned mutex is taken over), then hands off to
+//! first to finish starting (or die: an abandoned mutex is taken over at once, so only a
+//! living owner is ever waited for, and only for the caller's `wait`), then hands off to
 //! the Ducky it started. Ownership is per thread: drop the lock on the thread that took it.
 
 use std::time::Duration;
