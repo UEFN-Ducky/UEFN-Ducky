@@ -95,6 +95,19 @@ def take_large_result(token: str) -> bytes | None:
     return hit[1]
 
 
+def send_large_result(handler: Any, token: str, local: bool) -> None:
+    """Answer ``GET /__panel_large_result/<token>`` on the panel UI server: this PC only, once."""
+    body = take_large_result(token) if local else None
+    if body is None:
+        handler._send_json(404, {"ok": False, "error": "result expired"})
+        return
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 class LineWriter:
     """Thread-safe writer of protocol lines to the launcher (stdout)."""
 

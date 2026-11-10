@@ -226,6 +226,35 @@ def test_writer_lines_and_size_limit() -> None:
     assert headless.take_large_result("nope") is None
 
 
+def test_send_large_result_only_to_this_pc_once() -> None:
+    class _Handler:
+        def __init__(self) -> None:
+            self.wfile, self.status, self.json = io.BytesIO(), None, None
+
+        def _send_json(self, status, payload):
+            self.status, self.json = status, payload
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, *_):
+            pass
+
+        def end_headers(self):
+            pass
+
+    token = headless.park_large_result("big")
+    remote = _Handler()
+    headless.send_large_result(remote, token, local=False)
+    assert remote.status == 404 and remote.wfile.getvalue() == b""
+    local = _Handler()
+    headless.send_large_result(local, token, local=True)
+    assert local.status == 200 and json.loads(local.wfile.getvalue()) == {"ok": True, "result": "big"}
+    again = _Handler()
+    headless.send_large_result(again, token, local=True)
+    assert again.status == 404
+
+
 # --- under the launcher: the UI server on an internal port -------------------------------
 
 
