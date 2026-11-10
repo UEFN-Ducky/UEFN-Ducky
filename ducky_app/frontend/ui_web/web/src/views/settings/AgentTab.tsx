@@ -52,6 +52,8 @@ import {
   requestUsageSlideOrFocus,
 } from "../../navigation/openUsageTab";
 
+import { connectedViaAgent } from "./providerStatus";
+
 const DETAIL_SLIDE_MS = 280;
 
 type KeyStatus = { text: string; ok: boolean; pending?: boolean };
@@ -787,7 +789,7 @@ export function AgentTab() {
                   const rowSaved =
                     !!keySaved[key] ||
                     (hostedRow && !!keySaved[row.id]) ||
-                    !!agentOkByPlugin[row.id.trim().toLowerCase()];
+                    connectedViaAgent(row, agentOkByPlugin);
                   return (
                     <button
                       key={row.id}
