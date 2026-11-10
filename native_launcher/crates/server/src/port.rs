@@ -1,7 +1,9 @@
 //! Port choice, the same rule as `frontend.settings.pick_panel_port`.
 //!
 //! The panel uses a pair: the UI http port (`listener - 1`) and the listener port.
-//! Default listener 4200. `UEFN_DUCKY_PANEL_PORT` wins (test sessions). Otherwise the
+//! Default listener 4200. `UEFN_DUCKY_PANEL_PORT` wins (test sessions) unless Windows reserved
+//! that pair: then the next free pair 10 up is used for this run (env updated, nothing saved).
+//! Otherwise the
 //! saved `panel_port.json` `{"port": N}` (1025 < N < 65535). When Windows reserved either
 //! port of the pair (bind answers WSAEACCES 10013), the first free pair of 4300..8300 step
 //! 100 is used and saved, so every process reads the same moved port.
@@ -65,7 +67,15 @@ impl PortChoice {
 /// Pure port rule. `env` is `UEFN_DUCKY_PANEL_PORT`, `saved` the saved port (0 = none).
 pub fn choose_listener_port(env: Option<&str>, saved: u16, reserved: impl Fn(u16) -> bool) -> PortChoice {
     if let Some(p) = env.and_then(|s| s.trim().parse::<u16>().ok()).filter(|p| *p > 1) {
-        return PortChoice { listener: p, moved: false };
+        if !(reserved(p - 1) || reserved(p)) {
+            return PortChoice { listener: p, moved: false };
+        }
+        // ponytail: 40 pairs 10 apart clear any one exclusion block; still blocked keeps the pin.
+        let found = (1..=40u16)
+            .filter_map(|i| p.checked_add(i * 10))
+            .find(|q| !(reserved(q - 1) || reserved(*q)))
+            .unwrap_or(p);
+        return PortChoice { listener: found, moved: found != p };
     }
     let start = if saved != 0 { saved } else { DEFAULT_PANEL_LISTENER_PORT };
     if !(reserved(start - 1) || reserved(start)) {
@@ -80,9 +90,12 @@ pub fn choose_listener_port(env: Option<&str>, saved: u16, reserved: impl Fn(u16
 
 /// Live pick: reads env + `panel_port.json`, probes reservations and saves a moved port.
 pub fn pick_panel_port(app_data: &Path) -> PortChoice {
-    let env = std::env::var(PORT_ENV).ok();
+    let env = std::env::var(PORT_ENV).ok().filter(|s| s.trim().parse::<u16>().is_ok_and(|p| p > 1));
     let choice = choose_listener_port(env.as_deref(), saved_port(app_data), port_reserved);
-    if choice.moved {
+    if choice.moved && env.is_some() {
+        // The backend child inherits the moved pin, so both sides agree on the port.
+        std::env::set_var(PORT_ENV, choice.listener.to_string());
+    } else if choice.moved {
         let _ = std::fs::create_dir_all(app_data);
         let _ = std::fs::write(app_data.join(PANEL_PORT_FILE), format!("{{\"port\": {}}}", choice.listener));
     }

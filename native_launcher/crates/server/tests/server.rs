@@ -40,9 +40,19 @@ fn port_defaults_and_bad_files() {
 }
 
 #[test]
-fn env_port_wins_without_probing() {
-    let c = choose_listener_port(Some("5123"), 4500, |_| panic!("no probe with env"));
+fn env_port_wins_when_free() {
+    let c = choose_listener_port(Some("5123"), 4500, |_| false);
     assert_eq!(c, PortChoice { listener: 5123, moved: false });
+}
+
+#[test]
+fn env_port_reserved_falls_through() {
+    // 10013 on the pinned 4200: next free pair is 4210/4209.
+    let c = choose_listener_port(Some("4200"), 4500, |p| p == 4200);
+    assert_eq!((c.listener, c.ui_port(), c.moved), (4210, 4209, true));
+    // In use (10048) is not reserved: the pin stays.
+    let c = choose_listener_port(Some("4200"), 0, |_| false);
+    assert_eq!(c, PortChoice { listener: 4200, moved: false });
 }
 
 #[test]
