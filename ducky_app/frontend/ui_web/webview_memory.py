@@ -3,8 +3,9 @@
 Soft: ``MemoryUsageTargetLevel = Low`` while hidden or minimized, while open and untouched for
 SOFT_IDLE_S past SOFT_GB, and at once on ``trim_now``. WebView2 never sets it back by itself, so
 showing or using the window sets ``Normal`` again. Reload (``trim_if_bloated``): hidden past
-TRIM_GB even while agents run, or open but untouched for OPEN_IDLE_S past OPEN_TRIM_GB; a window
-in use is never reloaded."""
+TRIM_GB even while agents run, or open but untouched for OPEN_IDLE_S past OPEN_TRIM_GB with no
+agent running; a window in use is never reloaded. "Untouched" is the Ducky window's own idle time
+(window_idle_s): typing in UEFN next to an open Ducky window does not count as using it."""
 
 from __future__ import annotations
 
@@ -85,6 +86,8 @@ OPEN_IDLE_S = 10 * 60
 _last_trim = {"at": 0.0}
 # When the soft level was set on an open window (monotonic s); 0 = not set.
 _soft = {"at": 0.0}
+# When the Ducky window last had the person's input (monotonic s); 0 = not seen yet.
+_used = {"at": 0.0}
 
 
 def input_idle_s() -> float:
@@ -107,6 +110,30 @@ def input_idle_s() -> float:
         return 0.0
 
 
+def _foreground(native: Any) -> bool | None:
+    """Whether ``native`` is the window the person is typing in; None when unknown."""
+    try:
+        import ctypes
+
+        fg = ctypes.windll.user32.GetForegroundWindow()
+        return bool(fg) and int(fg) == int(native.Handle.ToInt64())
+    except Exception:
+        return None
+
+
+def window_idle_s(native: Any, now: float) -> float:
+    """Seconds since the person last used the Ducky window. anw4b7x2q9k1m: WebView2 grew
+    0 -> 2.7 GB in an open window while the person worked in UEFN. The PC-wide input_idle_s
+    never got to OPEN_IDLE_S, so the reload never ran."""
+    idle = input_idle_s()
+    if _foreground(native) is not False:
+        _used["at"] = now - idle
+        return idle
+    if not _used["at"]:
+        _used["at"] = now  # first seen in the background: count from here
+    return max(idle, now - _used["at"])
+
+
 def _gb(beat: dict[str, Any]) -> float:
     try:
         return float(beat.get("webview_gb") or 0.0)
@@ -117,9 +144,13 @@ def _gb(beat: dict[str, Any]) -> float:
 def should_trim(beat: dict[str, Any], *, active: bool, now: float, last_at: float, idle_s: float = 0.0) -> bool:
     """Reload when nobody is using the window, agent turns or not (mark_crash_reload brings the
     open chats back): not within TRIM_EVERY_S of the last time, and either hidden or minimized
-    past TRIM_GB, or open with no input for OPEN_IDLE_S past OPEN_TRIM_GB."""
+    past TRIM_GB, or open with no input for OPEN_IDLE_S past OPEN_TRIM_GB and no agent streaming
+    (a reload would cut off the turn the person may be watching)."""
     webview_gb = _gb(beat)
-    big = webview_gb >= OPEN_TRIM_GB and idle_s >= OPEN_IDLE_S if active else webview_gb >= TRIM_GB
+    if active:
+        big = webview_gb >= OPEN_TRIM_GB and idle_s >= OPEN_IDLE_S and not beat.get("agents")
+    else:
+        big = webview_gb >= TRIM_GB
     return big and now - last_at >= TRIM_EVERY_S
 
 
@@ -190,7 +221,7 @@ def trim_if_bloated(window: Any, beat: dict[str, Any]) -> bool:
         if native is None or native.IsDisposed:
             return False
         now = time.monotonic()
-        active, idle_s = _form_active(native), input_idle_s()
+        active, idle_s = _form_active(native), window_idle_s(native, now)
         _apply_soft(native, beat, active=active, idle_s=idle_s, now=now)
         if not should_trim(beat, active=active, now=now, last_at=_last_trim["at"], idle_s=idle_s):
             return False
@@ -199,7 +230,7 @@ def trim_if_bloated(window: Any, beat: dict[str, Any]) -> bool:
 
         def reload() -> None:
             open_now = not native.IsDisposed and _form_active(native)
-            if native.IsDisposed or (open_now and input_idle_s() < OPEN_IDLE_S):
+            if native.IsDisposed or (open_now and window_idle_s(native, time.monotonic()) < OPEN_IDLE_S):
                 return  # shown again or used meanwhile: leave the page alone
             from frontend.error_log import record_activity
             from frontend.ui_web.panel_api import mark_crash_reload
@@ -249,6 +280,7 @@ def install(window: Any) -> None:
     def used(_sender: Any, _event: Any) -> None:
         # The person came back (window activated, page focused): Normal now, not on the next
         # heartbeat. The heartbeat in trim_if_bloated stays as the fallback.
+        _used["at"] = time.monotonic()
         if not closed and native is not None and _soft["at"]:
             update_form(native)
 

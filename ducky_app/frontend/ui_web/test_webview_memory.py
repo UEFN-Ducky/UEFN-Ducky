@@ -31,6 +31,7 @@ class Event:
 @pytest.fixture(autouse=True)
 def _fresh_soft(monkeypatch):
     monkeypatch.setattr(memory, "_soft", {"at": 0.0})
+    monkeypatch.setattr(memory, "_used", {"at": 0.0})
 
 
 @pytest.fixture
@@ -246,6 +247,51 @@ def test_idle_open_window_over_a_gb_goes_low_then_normal_on_input(window, monkey
     idle["s"] = 0.0  # the person moved the mouse
     memory.trim_if_bloated(window, {"webview_gb": 1.2, "agents": 2})
     assert core.MemoryUsageTargetLevel == Level.Normal and memory._soft["at"] == 0.0
+
+
+def test_visible_idle_11_min_at_2_5_gb_reloads_and_2_min_does_not():
+    """anw4b7x2q9k1m: WebView2 grew 0 -> 2.7 GB in an open window."""
+    t, beat = memory.TRIM_EVERY_S + 1, {"webview_gb": 2.5, "agents": 0}
+    assert memory.should_trim(beat, active=True, now=t, last_at=0.0, idle_s=11 * 60)
+    assert not memory.should_trim(beat, active=True, now=t, last_at=0.0, idle_s=2 * 60)
+    # An agent streaming into the open window: no reload under the person's eyes.
+    assert not memory.should_trim({**beat, "agents": 1}, active=True, now=t, last_at=0.0, idle_s=11 * 60)
+
+
+def test_working_in_another_program_counts_as_the_ducky_window_idle(window, monkeypatch):
+    monkeypatch.setattr(memory, "input_idle_s", lambda: 1.0)  # the person types in UEFN
+    fg = {"ducky": True}
+    monkeypatch.setattr(memory, "_foreground", lambda native: fg["ducky"])
+    assert memory.window_idle_s(window.native, 100.0) == 1.0
+    fg["ducky"] = False
+    assert memory.window_idle_s(window.native, 100.0 + 11 * 60) == 11 * 60 + 1.0
+    fg["ducky"] = True  # back in Ducky
+    assert memory.window_idle_s(window.native, 2000.0) == 1.0
+
+
+def test_an_open_window_behind_uefn_reloads_after_10_idle_minutes(window, monkeypatch):
+    from frontend import error_log
+    from frontend.ui_web import panel_api
+
+    queued, reloaded = [], []
+    clock = [10_000.0]
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    monkeypatch.setattr(memory.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(memory, "_last_trim", {"at": -memory.TRIM_EVERY_S})
+    monkeypatch.setattr(memory, "input_idle_s", lambda: 2.0)  # PC busy all along
+    monkeypatch.setattr(memory, "_foreground", lambda native: False)
+    monkeypatch.setattr(panel_api, "mark_crash_reload", lambda: None)
+    monkeypatch.setattr(error_log, "record_activity", lambda src, msg: None)
+    window.native.BeginInvoke = queued.append
+    window.native.Controls[0].CoreWebView2.Reload = lambda: reloaded.append(1)
+    beat = {"webview_gb": 2.5, "agents": 0}
+    assert not memory.trim_if_bloated(window, beat)  # first seen in the background
+    clock[0] += 2 * 60
+    assert not memory.trim_if_bloated(window, beat)
+    clock[0] += 9 * 60
+    assert memory.trim_if_bloated(window, beat)
+    queued.pop()()
+    assert reloaded == [1]
 
 
 def test_soft_level_needs_a_gb_and_idle():
