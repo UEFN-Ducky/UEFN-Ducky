@@ -857,10 +857,16 @@ _net_fail_sent: set[tuple[str, str]] = set()
 
 
 def net_fail(code: str, stage: str, proxy: str) -> None:
-    """The app couldn't reach the site (code: what it tried). Once per session per code and stage."""
+    """The app couldn't reach the site (code: what it tried). Once per UTC day per PC per code
+    and stage: the day is kept in ducky.db meta, so every process on the PC shares it (one
+    1.2.483 PC sent 7 timeout rows in a day, one per process)."""
     if (code, stage) in _net_fail_sent:
         return
     _net_fail_sent.add((code, stage))
+    key, today = f"usage.net_fail.{ev.code_of(code)}.{stage}", time.strftime("%Y-%m-%d", time.gmtime())
+    if _meta_get(key) == today:
+        return
+    _meta_set(key, today)
     kind = "timeout" if stage == "timeout" else "offline" if stage in ("dns", "connect", "proxy") else "other"
     track("error.code", code=ev.code_of(code), where="store", kind=kind, version=_app_version(),
           net_stage=stage, proxy=proxy)

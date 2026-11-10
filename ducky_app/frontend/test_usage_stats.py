@@ -110,7 +110,30 @@ def test_free_text_and_unknown_names_never_pass() -> None:
     assert ev.validate("feature.open", {"tab": "my-secret-project"}) == {}
 
 
-def test_net_fail_says_where_the_route_died_once_per_session() -> None:
+@pytest.fixture
+def meta(monkeypatch) -> dict[str, str]:
+    """ducky.db meta as a dict: shared by every 'process' in a test, never the real DB."""
+    store: dict[str, str] = {}
+    monkeypatch.setattr(us, "_meta_get", store.get)
+    monkeypatch.setattr(us, "_meta_set", store.__setitem__)
+    return store
+
+
+def test_net_fail_is_sent_once_a_day_across_processes(meta) -> None:
+    """One 1.2.483 PC sent 7 update_check timeouts in a day, one per process."""
+    for _ in range(2):  # two processes: each starts with an empty in-memory set
+        us._net_fail_sent.clear()
+        us.net_fail("update_check", "timeout", "none")
+    rows, _ = us._take(100)
+    assert len([r for r in rows if r["name"] == "error.code"]) == 1
+    meta["usage.net_fail.update_check.timeout"] = "2000-01-01"  # sent on an earlier day
+    us._net_fail_sent.clear()
+    us.net_fail("update_check", "timeout", "none")
+    rows, _ = us._take(100)
+    assert len([r for r in rows if r["name"] == "error.code"]) == 2
+
+
+def test_net_fail_says_where_the_route_died_once_per_session(meta) -> None:
     us._net_fail_sent.clear()
     us.net_fail("update_check", "timeout", "pac")
     us.net_fail("update_check", "timeout", "pac")  # the same failure again: not counted twice
