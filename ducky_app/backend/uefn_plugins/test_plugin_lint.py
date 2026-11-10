@@ -16,6 +16,36 @@ def _write(root: Path, rel: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def test_writes_into_local_dir_are_this_pcs_cache_not_files_of_its_own(tmp_path: Path) -> None:
+    from backend.uefn_plugins.plugin_lint import check_store_ready
+
+    _write(tmp_path, "assets/icon.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    _write(tmp_path, "backend/__init__.py", (
+        "import os\n"
+        "def register(api):\n"
+        "    def cache_path(n):\n"
+        "        return os.path.join(api.local_dir(), n)\n"
+        "    def write_cache(n, b):\n"
+        "        with open(cache_path(n), 'wb') as fh:\n"   # through a helper that uses local_dir: fine
+        "            fh.write(b)\n"
+        "    def save(n):\n"
+        "        open(n, 'w').write('x')\n"                # line 9: a file of its own
+    ))
+    _, warnings = check_store_ready(tmp_path, {"data_sharing": True}, "demo")
+    assert len(warnings) == 1 and warnings[0].startswith("backend/__init__.py:9: writes files of its own")
+
+
+def test_native_form_controls_point_at_the_kit(tmp_path: Path) -> None:
+    from backend.uefn_plugins.plugin_lint import native_control_warnings
+
+    _write(tmp_path, "ui/index.html", '<!doctype html>\n<select id="a"></select>\n<input type="range">\n<input class="dk-input">')
+    _write(tmp_path, "ui/vendor/lib.js", "document.createElement('select')")
+    out = native_control_warnings(tmp_path, PANEL)
+    assert len(out) == 1 and out[0].startswith("ui/index.html:2, ui/index.html:3:") and "DuckyKit.dropdown" in out[0]
+    _write(tmp_path, "ui/index.html", '<!doctype html><input class="dk-input">')
+    assert native_control_warnings(tmp_path, PANEL) == []
+
+
 def test_register_starts_background_work_only_in_the_app(tmp_path: Path) -> None:
     from backend.uefn_plugins.plugin_lint import register_background_issues
 

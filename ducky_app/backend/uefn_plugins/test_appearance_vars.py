@@ -32,8 +32,19 @@ def test_the_ui_kit_uses_only_appearance_variables_and_no_color_literals(tmp_pat
     for part in ("dk-btn--primary", "dk-btn--secondary", "dk-btn--ghost", "dk-btn--danger", "dk-btn--icon",
                  "dk-input", "dk-select", "dk-check", "dk-tab", "dk-card", "dk-table", "dk-badge",
                  "dk-empty", "dk-loading", "dk-error", ":focus-visible", "dk-layout", "dk-sidebar",
-                 "dk-main", "dk-nav-item", "dk-choice"):
+                 "dk-main", "dk-nav-item", "dk-choice", "dk-slider", "dk-seg", "dk-switch", "dk-chip",
+                 "dk-dropdown"):
         assert part in ui_kit.CSS, part
+    # the custom controls panels build instead of the browser's select / range / checkbox
+    for name in ("slider", "segmented", "toggle", "chip", "choices", "dropdown"):
+        assert f"{name}: {name}" in ui_kit.JS, name
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if node:  # the kit must parse, or every panel loses its theme
+        (tmp_path / "kit.js").write_text(ui_kit.JS, encoding="utf-8")
+        assert subprocess.run([node, "--check", str(tmp_path / "kit.js")], capture_output=True).returncode == 0
 
 
 def test_panel_pages_get_the_error_reporter_and_pointers_after_head_never_before_the_doctype() -> None:

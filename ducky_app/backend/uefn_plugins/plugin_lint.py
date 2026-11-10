@@ -424,6 +424,7 @@ class _Backend:
         looped = {node.target.id: seqs[node.iter.id] for node in ast.walk(tree)
                   if isinstance(node, ast.For) and isinstance(node.target, ast.Name)
                   and isinstance(node.iter, ast.Name) and node.iter.id in seqs}
+        cache_lines = _local_cache_writes(tree)
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self.func_docs[node.name] = (ast.get_docstring(node) or "").strip().split("\n", 1)[0].strip()
@@ -453,7 +454,7 @@ class _Backend:
                 self.tools.add(_kw_str(node, "name") or node.args[0].id)
                 self.tool_funcs[_kw_str(node, "name") or node.args[0].id] = node.args[0].id
             self._source_read(rel, node, name)
-            if _writes_file(node, name):
+            if _writes_file(node, name) and getattr(node, "lineno", 0) not in cache_lines:
                 self.file_writes.append((rel, getattr(node, "lineno", 0)))
 
     def _source_read(self, rel: str, call: ast.Call, name: str) -> None:
@@ -506,6 +507,34 @@ def _writes_file(call: ast.Call, name: str) -> bool:
         return True
     return (owner == "shutil" and name in ("copy", "copy2", "copyfile", "copytree", "move")) or (
         owner == "sqlite3" and name == "connect")
+
+
+def _local_cache_writes(tree: ast.AST) -> set[int]:
+    """Lines of file writes into ``api.local_dir()``: this PC's cache, which is allowed. A write
+    counts when its function calls ``local_dir`` itself, or calls (by name) a function of the
+    module that does, like ``path = cache_path(x)`` with ``cache_path`` returning under it."""
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    fns = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+    def own_calls(fn: ast.AST) -> list[ast.Call]:
+        """Calls in fn's own body, not in functions nested in it (register() holds them all)."""
+        out, todo = [], list(ast.iter_child_nodes(fn))
+        while todo:
+            node = todo.pop()
+            if isinstance(node, defs):
+                continue
+            if isinstance(node, ast.Call):
+                out.append(node)
+            todo.extend(ast.iter_child_nodes(node))
+        return out
+
+    names = {id(fn): {_call_name(c.func) for c in own_calls(fn)} for fn in fns}
+    local = {fn.name for fn in fns if "local_dir" in names[id(fn)]}
+    lines: set[int] = set()
+    for fn in fns:
+        if fn.name in local or names[id(fn)] & local:
+            lines.update(c.lineno for c in own_calls(fn) if _writes_file(c, _call_name(c.func)))
+    return lines
 
 
 def scan_backend(root: Path, *, skip_tests: bool = False) -> _Backend:
@@ -699,6 +728,30 @@ def store_icon_problem(root: Path) -> str:
     return ("No Store icon: the Store rejects a new plugin without assets/icon.png (or .svg / .jpg, up to 700 KB). "
             "Ask the user whether to make one (ducky_ai_image, or their own image model) or use a picture they "
             "have, then ducky_plugin_set_icon(id, image_path).")
+
+
+_NATIVE_CONTROL = re.compile(
+    r"<select\b|createElement\(\s*[\"']select[\"']|type\s*=\s*[\"']?(range|checkbox|radio)\b", re.IGNORECASE)
+
+
+def native_control_warnings(root: Path, manifest: dict[str, Any]) -> list[str]:
+    """Panels built with the browser's own select / range / checkbox / radio: they don't follow
+    the app's look. The kit's DuckyKit controls do (ui_kit.py)."""
+    spots: list[str] = []
+    for rel, path in ui_files(root, manifest):
+        if "vendor/" in rel or ".min." in rel:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        spots += [f"{rel}:{_line(text, m.start())}" for m in _NATIVE_CONTROL.finditer(text)]
+    if not spots:
+        return []
+    return [f"{', '.join(spots[:5])}{' …' if len(spots) > 5 else ''}: the browser's own select, range slider, "
+            "checkbox or radio doesn't look like Ducky. Use the kit's controls (ducky.js): DuckyKit.dropdown, "
+            "DuckyKit.slider, DuckyKit.toggle / DuckyKit.chip, DuckyKit.segmented or DuckyKit.choices "
+            "(skill_read_subskill('ducky', 'plugin_look'))."]
 
 
 def check_store_ready(root: Path, manifest: dict[str, Any], plugin_id: str) -> tuple[list[str], list[str]]:

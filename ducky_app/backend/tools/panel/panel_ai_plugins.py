@@ -649,11 +649,12 @@ def validate_ai_plugin(plugin_id: str) -> dict[str, Any]:
     personal = shipped_personal_paths(root)
     # Not an error while building (installs keep working); publishing refuses it.
     warnings = [personal_path_message(personal)] if personal else []
-    from backend.uefn_plugins.plugin_lint import check_findability, check_store_ready
+    from backend.uefn_plugins.plugin_lint import check_findability, check_store_ready, native_control_warnings
 
     find_errors, find_warnings = check_findability(root, pid)
     errors.extend(find_errors)
     warnings.extend(find_warnings)
+    warnings.extend(native_control_warnings(root, manifest))
     # Not an error while building (installs keep working); a Store build refuses the errors.
     store_errors, store_warnings = check_store_ready(root, manifest, pid)
     warnings.extend(store_errors + store_warnings)

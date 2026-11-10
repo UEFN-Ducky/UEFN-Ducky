@@ -338,6 +338,141 @@ CSS = """\
 }
 .dk-error__title { font-weight: 600; }
 
+/* Custom controls (never the browser's own select, range, checkbox or radio): build them with
+   DuckyKit.slider / segmented / toggle / chip / choices / dropdown from ducky.js. Each is
+   keyboard first and gives a { el, value, set(v) } handle. */
+.dk-slider { margin-bottom: 14px; border-radius: var(--radius-sm); outline: none; touch-action: none; }
+.dk-slider:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 4px; }
+.dk-slider__head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+.dk-slider__label { color: var(--fg-dim); }
+.dk-slider__val {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.dk-slider__track { position: relative; height: 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--input-bg); cursor: pointer; }
+.dk-slider__track::before { content: ""; position: absolute; inset: -8px 0; }
+.dk-slider__fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; background: var(--accent); }
+.dk-slider__thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  background: var(--fg);
+  box-shadow: var(--shadow-sm);
+  transform: translate(-50%, -50%);
+  transition: transform 140ms ease;
+}
+.dk-slider:hover .dk-slider__thumb,
+.dk-slider.is-dragging .dk-slider__thumb { transform: translate(-50%, -50%) scale(1.15); }
+
+.dk-seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--input-bg); }
+.dk-seg__btn {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.dk-seg__btn:hover { background: var(--bg-hover); color: var(--fg); }
+.dk-seg__btn[aria-checked="true"] { background: var(--accent); color: var(--fg-inverse); }
+.dk-seg__btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+.dk-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 0;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dk-switch:hover { background: var(--bg-hover); }
+.dk-switch__label { flex: 1; text-align: left; }
+.dk-switch__track { position: relative; flex: none; width: 30px; height: 18px; border: 1px solid var(--border); border-radius: 999px; background: var(--input-bg); transition: background-color 160ms ease; }
+.dk-switch__knob { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--fg-dim); transition: transform 160ms ease, background-color 160ms ease; }
+.dk-switch[aria-checked="true"] .dk-switch__track { border-color: var(--accent); background: var(--accent); }
+.dk-switch[aria-checked="true"] .dk-switch__knob { background: var(--fg-inverse); transform: translateX(12px); }
+
+.dk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dk-chip:hover { background: var(--bg-hover); color: var(--fg); }
+.dk-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--fg); }
+
+.dk-choices { display: flex; flex-direction: column; gap: 4px; }
+
+.dk-dropdown { position: relative; display: block; }
+.dk-dropdown__button {
+  justify-content: space-between;
+  width: 100%;
+  background: var(--input-bg);
+  text-align: left;
+}
+.dk-dropdown__button::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  opacity: 0.7;
+}
+.dk-dropdown__list {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--dropdown-bg);
+  box-shadow: var(--shadow-dropdown);
+  list-style: none;
+}
+.dk-dropdown__list[hidden] { display: none; }
+.dk-dropdown__option { padding: 6px 8px; border-radius: var(--radius-sm); color: var(--fg); cursor: pointer; }
+.dk-dropdown__option:hover,
+.dk-dropdown__option.is-active { background: var(--tab-hover); }
+.dk-dropdown__option[aria-selected="true"] { color: var(--accent); font-weight: 600; }
+
 /* The panel's tab is hidden (panel.visibility): kit animations pause. */
 :where(html[data-dk-hidden]) *,
 :where(html[data-dk-hidden]) *::before,
@@ -380,6 +515,235 @@ JS = """\
     }
   });
   parent.postMessage({ channel: CHANNEL, id: "ducky-kit-theme", method: "theme.get", params: {} }, "*");
+
+  // ---- DuckyKit: custom controls, never the browser's select / range / checkbox / radio.
+  // Each returns { el, value (getter), set(v) } and calls onChange(v) when the person changes it.
+  function h(tag, cls, text) {
+    var el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = String(text);
+    return el;
+  }
+  function decimals(step) { var s = String(step).split("."); return s.length > 1 ? s[1].length : 0; }
+  function roving(el, items, getValue, choose) {  // arrow keys move the pick in a radio group
+    el.addEventListener("keydown", function (e) {
+      var k = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (!k) return;
+      e.preventDefault();
+      var i = 0;
+      items.forEach(function (it, n) { if (it.value === getValue()) i = n; });
+      var next = items[(i + k + items.length) % items.length];
+      choose(next.value, true);
+      next.el.focus();
+    });
+  }
+  // opts: label, min, max, step, value, format(v) -> text, hint, onInput(v) while dragging, onChange(v)
+  function slider(opts) {
+    var min = +opts.min || 0, max = opts.max == null ? 100 : +opts.max, step = +opts.step || 1;
+    var fmt = opts.format || function (v) { return v.toFixed(decimals(step)); };
+    var el = h("div", "dk-slider"), head = h("div", "dk-slider__head"), val = h("span", "dk-slider__val");
+    var track = h("div", "dk-slider__track"), fill = h("div", "dk-slider__fill"), thumb = h("div", "dk-slider__thumb");
+    el.setAttribute("role", "slider");
+    el.tabIndex = 0;
+    el.setAttribute("aria-label", opts.label || "");
+    el.setAttribute("aria-valuemin", min);
+    el.setAttribute("aria-valuemax", max);
+    if (opts.hint) el.title = opts.hint;
+    head.appendChild(h("span", "dk-slider__label", opts.label || ""));
+    head.appendChild(val);
+    track.appendChild(fill);
+    track.appendChild(thumb);
+    el.appendChild(head);
+    el.appendChild(track);
+    var v = null, dragging = false;
+    function set(nv, why) {
+      nv = Math.round((Math.max(min, Math.min(max, +nv)) - min) / step) * step + min;
+      nv = +nv.toFixed(decimals(step));
+      var changed = nv !== v;
+      v = nv;
+      var pct = ((v - min) / ((max - min) || 1)) * 100;
+      fill.style.width = pct + "%";
+      thumb.style.left = pct + "%";
+      val.textContent = fmt(v);
+      el.setAttribute("aria-valuenow", v);
+      el.setAttribute("aria-valuetext", fmt(v));
+      if (why === "input" && changed && opts.onInput) opts.onInput(v);
+      if (why === "change" && opts.onChange) opts.onChange(v);
+    }
+    function at(x) { var r = track.getBoundingClientRect(); return min + ((x - r.left) / (r.width || 1)) * (max - min); }
+    track.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      track.setPointerCapture(e.pointerId);
+      el.classList.add("is-dragging");
+      el.focus();
+      set(at(e.clientX), "input");
+    });
+    track.addEventListener("pointermove", function (e) { if (dragging) set(at(e.clientX), "input"); });
+    function end() { if (!dragging) return; dragging = false; el.classList.remove("is-dragging"); set(v, "change"); }
+    track.addEventListener("pointerup", end);
+    track.addEventListener("pointercancel", end);
+    el.addEventListener("keydown", function (e) {
+      var big = (max - min) / 10;
+      var d = { ArrowRight: step, ArrowUp: step, ArrowLeft: -step, ArrowDown: -step, PageUp: big, PageDown: -big }[e.key];
+      if (d) { e.preventDefault(); set(v + d, "change"); }
+      else if (e.key === "Home") { e.preventDefault(); set(min, "change"); }
+      else if (e.key === "End") { e.preventDefault(); set(max, "change"); }
+    });
+    set(opts.value == null ? min : opts.value, "");
+    return { el: el, get value() { return v; }, set: function (nv) { set(nv, ""); } };
+  }
+  // opts: label, options [{value, label, icon (an SVG element or markup)}], value, onChange
+  function segmented(opts) {
+    var el = h("div", "dk-seg"), v = opts.value, items = [];
+    el.setAttribute("role", "radiogroup");
+    el.setAttribute("aria-label", opts.label || "");
+    (opts.options || []).forEach(function (o) {
+      var b = h("button", "dk-seg__btn");
+      b.type = "button";
+      b.setAttribute("role", "radio");
+      b.title = o.label;
+      if (o.icon) b.insertAdjacentHTML("beforeend", typeof o.icon === "string" ? o.icon : o.icon.outerHTML);
+      b.appendChild(h("span", "", o.label));
+      b.addEventListener("click", function () { choose(o.value, true); });
+      el.appendChild(b);
+      items.push({ value: o.value, el: b });
+    });
+    function choose(nv, fire) {
+      v = nv;
+      items.forEach(function (it) {
+        var on = it.value === v;
+        it.el.setAttribute("aria-checked", on ? "true" : "false");
+        it.el.tabIndex = on ? 0 : -1;
+      });
+      if (fire && opts.onChange) opts.onChange(v);
+    }
+    roving(el, items, function () { return v; }, choose);
+    choose(v, false);
+    return { el: el, get value() { return v; }, set: function (nv) { choose(nv, false); } };
+  }
+  // opts: label, value (bool), onChange
+  function toggle(opts) {
+    var el = h("button", "dk-switch"), track = h("span", "dk-switch__track"), v = !!opts.value;
+    el.type = "button";
+    el.setAttribute("role", "switch");
+    el.appendChild(h("span", "dk-switch__label", opts.label || ""));
+    track.appendChild(h("span", "dk-switch__knob"));
+    el.appendChild(track);
+    function set(nv, fire) { v = !!nv; el.setAttribute("aria-checked", v ? "true" : "false"); if (fire && opts.onChange) opts.onChange(v); }
+    el.addEventListener("click", function () { set(!v, true); });
+    set(v, false);
+    return { el: el, get value() { return v; }, set: function (nv) { set(nv, false); } };
+  }
+  // A toolbar on/off button. opts: label, value (bool), onChange
+  function chip(opts) {
+    var el = h("button", "dk-chip", opts.label || ""), v = !!opts.value;
+    el.type = "button";
+    function set(nv, fire) { v = !!nv; el.setAttribute("aria-pressed", v ? "true" : "false"); if (fire && opts.onChange) opts.onChange(v); }
+    el.addEventListener("click", function () { set(!v, true); });
+    set(v, false);
+    return { el: el, get value() { return v; }, set: function (nv) { set(nv, false); } };
+  }
+  // Pick one of a few, as .dk-choice rows. opts: label, options [{value, label, hint, icon}], value, onChange
+  function choices(opts) {
+    var el = h("div", "dk-choices"), v = opts.value, items = [];
+    el.setAttribute("role", "radiogroup");
+    el.setAttribute("aria-label", opts.label || "");
+    (opts.options || []).forEach(function (o) {
+      var b = h("button", "dk-choice"), ic = h("span", "dk-choice__icon"), text = h("span", "dk-choice__text");
+      b.type = "button";
+      b.setAttribute("role", "radio");
+      if (o.icon) ic.insertAdjacentHTML("beforeend", typeof o.icon === "string" ? o.icon : o.icon.outerHTML);
+      text.appendChild(h("span", "", o.label));
+      if (o.hint) text.appendChild(h("span", "dk-choice__hint", o.hint));
+      b.appendChild(ic);
+      b.appendChild(text);
+      b.addEventListener("click", function () { choose(o.value, true); });
+      el.appendChild(b);
+      items.push({ value: o.value, el: b });
+    });
+    function choose(nv, fire) {
+      v = nv;
+      items.forEach(function (it) {
+        var on = it.value === v;
+        it.el.setAttribute("aria-checked", on ? "true" : "false");
+        it.el.tabIndex = on ? 0 : -1;
+      });
+      if (fire && opts.onChange) opts.onChange(v);
+    }
+    roving(el, items, function () { return v; }, choose);
+    choose(v, false);
+    return { el: el, get value() { return v; }, set: function (nv) { choose(nv, false); } };
+  }
+  // A dropdown instead of <select>. opts: label, options [{value, label}], value, placeholder, onChange
+  function dropdown(opts) {
+    var el = h("div", "dk-dropdown"), btn = h("button", "dk-btn dk-dropdown__button"), list = h("ul", "dk-dropdown__list");
+    var id = "dk-dd-" + Math.random().toString(36).slice(2, 9), v = opts.value, items = [], active = -1;
+    btn.type = "button";
+    btn.setAttribute("aria-haspopup", "listbox");
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-label", opts.label || "");
+    list.id = id;
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+    btn.setAttribute("aria-controls", id);
+    el.appendChild(btn);
+    el.appendChild(list);
+    function label() {
+      var hit = null;
+      items.forEach(function (it) { if (it.value === v) hit = it; });
+      btn.textContent = hit ? hit.label : (opts.placeholder || "Choose");
+    }
+    function build(options) {
+      list.textContent = "";
+      items = (options || []).map(function (o, n) {
+        var li = h("li", "dk-dropdown__option", o.label);
+        li.setAttribute("role", "option");
+        li.id = id + "-" + n;
+        li.addEventListener("mousedown", function (e) { e.preventDefault(); pick(o.value, true); });
+        list.appendChild(li);
+        return { value: o.value, label: o.label, el: li };
+      });
+      mark();
+      label();
+    }
+    function mark() {
+      items.forEach(function (it, n) {
+        it.el.setAttribute("aria-selected", it.value === v ? "true" : "false");
+        it.el.classList.toggle("is-active", n === active);
+      });
+      if (active >= 0 && items[active]) btn.setAttribute("aria-activedescendant", items[active].el.id);
+    }
+    function open(on) {
+      list.hidden = !on;
+      btn.setAttribute("aria-expanded", on ? "true" : "false");
+      if (on) { items.forEach(function (it, n) { if (it.value === v) active = n; }); mark(); }
+    }
+    function pick(nv, fire) {
+      v = nv;
+      mark();
+      label();
+      open(false);
+      if (fire && opts.onChange) opts.onChange(v);
+    }
+    btn.addEventListener("click", function () { open(list.hidden); });
+    btn.addEventListener("blur", function () { open(false); });
+    btn.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        if (list.hidden) { open(true); return; }
+        active = Math.max(0, Math.min(items.length - 1, active + (e.key === "ArrowDown" ? 1 : -1)));
+        mark();
+      } else if ((e.key === "Enter" || e.key === " ") && !list.hidden && items[active]) {
+        e.preventDefault();
+        pick(items[active].value, true);
+      } else if (e.key === "Escape") {
+        open(false);
+      }
+    });
+    build(opts.options);
+    return { el: el, get value() { return v; }, set: function (nv) { pick(nv, false); }, setOptions: build };
+  }
+  window.DuckyKit = { slider: slider, segmented: segmented, toggle: toggle, chip: chip, choices: choices, dropdown: dropdown };
 })();
 """
 

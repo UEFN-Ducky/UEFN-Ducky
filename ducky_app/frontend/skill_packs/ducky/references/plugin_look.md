@@ -34,9 +34,8 @@ rules cover it: **link the UI kit**, and **color only with Appearance variables*
 | `dk-layout` > `aside.dk-sidebar` (+ `--right`, `dk-sidebar__title`) + `main.dk-main` | Page layout: floating side panels, a frameless main area (§3) |
 | `dk-nav-item` (`aria-current="page"` on the open one) | Icon + label rows in a side panel |
 | `dk-btn` + `dk-btn--primary` / `--secondary` / `--ghost` / `--danger` / `--icon` | Buttons |
-| `dk-input`, `dk-select`, `dk-field` (+ `dk-field__label`, `dk-field__hint`) | Inputs, selects, labelled fields |
+| `dk-input`, `dk-field` (+ `dk-field__label`, `dk-field__hint`) | Text inputs, labelled fields |
 | `dk-choice` (`role="radio"`, `aria-checked`; `dk-choice__icon`, `dk-choice__text`, `dk-choice__hint`) | Picking one of a few things: icon rows with a check, not radio circles |
-| `dk-check` (a `<label>` around a checkbox) | Checkboxes (and radios only in dense forms) |
 | `dk-tabs` > `button.dk-tab[aria-selected="true"]` | Tabs: rounded pills on the page background |
 | `dk-card` (+ `--interactive`, `dk-card__title`) | Cards |
 | `dk-table` | Tables |
@@ -46,6 +45,32 @@ rules cover it: **link the UI kit**, and **color only with Appearance variables*
 
 Every control gets a visible keyboard focus ring (`var(--border-focus)`).
 
+### Custom controls: never the browser's own (HARD)
+
+No `<select>`, `<input type="range">`, `type="checkbox"` or `type="radio"` in a panel: they
+look like the OS, not Ducky, and `ducky_plugin_validate` warns about each one. The kit builds
+the replacements; each call returns `{ el, value, set(v) }`, is keyboard first (arrows,
+Home/End, Enter, Escape) and calls `onChange(v)` when the person changes it:
+
+| Instead of | Use |
+|---|---|
+| `<select>` | `DuckyKit.dropdown({ label, options: [{value, label}], value, onChange })` (`.setOptions(list)` to refill) |
+| `<input type="range">` | `DuckyKit.slider({ label, min, max, step, value, format: v => v + " m", hint, onInput, onChange })` |
+| checkbox (a setting) | `DuckyKit.toggle({ label, value, onChange })` (a switch) |
+| checkbox (a view toggle in a toolbar) | `DuckyKit.chip({ label, value, onChange })` (`aria-pressed` pill) |
+| radios, 2-4 short options | `DuckyKit.segmented({ label, options: [{value, label, icon}], value, onChange })` |
+| radios with a hint each | `DuckyKit.choices({ label, options: [{value, label, hint, icon}], value, onChange })` |
+
+```js
+const height = DuckyKit.slider({ label: "Hill height", min: 0, max: 250, step: 5, value: 60,
+  format: (v) => `${v} m`, onChange: (v) => save({ relief_m: v }) });
+form.append(height.el);
+height.set(90);  // loading a record: no onChange
+```
+
+`window.DuckyKit` exists once `ducky.js` has run: build controls from a `type="module"` script
+or after `DOMContentLoaded`. Live editing already treats them as controls (`role="slider"`,
+`"switch"`, `"radio"`), so teammates see them held.
 ## 2. Colors: Appearance variables only
 
 - **Never** a color literal in a UI file: no `#hex`, `rgb()`, `rgba()`, `hsl()`,

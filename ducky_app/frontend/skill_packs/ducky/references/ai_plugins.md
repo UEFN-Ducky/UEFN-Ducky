@@ -70,7 +70,10 @@ free ones too. See `plugin_publishing`.
    `var(--accent)`, `var(--font-ui)`, …). Never `#hex`, `rgb()`, `hsl()` or named
    colors, never a made-up `var(--x)`: `ducky_plugin_validate` rejects them. Lay it
    out like the app: side panels as floating cards, a frameless main area, pill tabs,
-   icon rows with a check instead of radio circles (`plugin_look` §3).
+   icon rows with a check instead of radio circles (`plugin_look` §3). Never the
+   browser's own `<select>`, range slider, checkbox or radio: build them with the kit's
+   `DuckyKit.dropdown` / `slider` / `toggle` / `chip` / `segmented` / `choices`
+   (`plugin_look` § Custom controls), and never write your own copy of them.
    Theme keys from `theme.get` / `appearance_theme` come **without** `--`. If the
    user specified colors, ship them as an Appearance theme (`appearance.profiles` /
    `appearance.css`) and keep the panel on the variables. Always tell the user the

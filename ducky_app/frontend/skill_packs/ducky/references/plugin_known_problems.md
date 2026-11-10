@@ -26,6 +26,9 @@ Check these before you tell the user a plugin works.
 | Logs, tool errors and node results end up in Settings → Errors and in Support feedback. `api.log` scrubs folders, emails and keys, but not what you put in a result. | Never put the user's chat text, keys or files in logs or errors; secrets go in `secret_keys`. |
 | `scripts/`, `deploy/`, `tests/`, `test_*.py`, `*.zip`, `*.bin` never ship. | Keep runtime files elsewhere. |
 | `api.data.put` over 1 MB raises. | One doc per record; big blobs go in `put_file`. |
+| A panel RPC or tool returning more than 1 MB (a whole road network, a mesh, a big list) failed in the desktop window with "message over 1048576 bytes". | Fixed in the app: a big reply is parked and the page fetches it over HTTP. Still keep replies lean (round numbers, short keys, page lists): every MB is parsed on the window thread. |
+| Validate warned "writes files of its own" for a cache in `api.local_dir()`. | Writes whose function calls `api.local_dir()` (itself or through a helper that returns a path under it) are this PC's cache and pass. Anything a teammate needs goes in `api.data` or a `team_folders` folder. |
+| Adding `team_folders` to a plugin whose data is already on a team copy leaves the team copy without those files: switching the plugin to the team then asks for a first share ("Copy Local into the team" in the plugin's bar), and the plugin can sit on Local until then. | Only declare a team folder for files an outside program must read. A file you can rebuild from `api.data` (a heightmap from a stored grid) goes in `api.local_dir()` and is rebuilt on demand. |
 | Teammates on the same team copy don't see the data: the plugin wrote it to a file or folder of its own, or inside the island folder (UEFN revision control carries that, so the host never shares it). Validate warns. | Records in `api.data`; real files in a `team_folders` folder under `{LOCALAPPDATA}/UEFN-Ducky/<id>/` (`plugin_data`). |
 | No `"data_sharing"` in `plugin.json`: validate warns and every Store build refuses the plugin. | Ask the user whether their team shares its data, then set `true` or `false` (`ai_plugins` rule 8). |
 | The Store rejected a release: "plugin needs an icon". That version number is used up. | `ducky_plugin_set_icon` (ask first, `ai_plugins` rule 14), raise `version`, publish again. |
@@ -52,6 +55,8 @@ Check these before you tell the user a plugin works.
 | Loading your own scripts with `fetch` + `eval`. | `<script src>` / `<link href>` for your files. |
 | Anything from the internet (CDN scripts like unpkg or Tailwind's, outside stylesheets or fonts, `import` from a URL) is blocked, so the panel loads broken or unstyled. Validate rejects it. | `ducky_plugin_vendor` the exact npm version into `ui/vendor/` and load it from there; for styling use the UI kit and Appearance variables. |
 | `prefs.set` keeps only booleans, strings, numbers and `null`. | Store objects with `data.put`. |
+| Native `<select>`, range sliders, checkboxes and radios look like the OS, not Ducky. Validate warns. | `DuckyKit.dropdown` / `slider` / `toggle` / `chip` / `segmented` / `choices` from the kit (`plugin_look` § Custom controls). |
+| A canvas or WebGL view with a light-on-dark assumption: lights or materials coloured from `var(--fg)` go dark in a light theme. | Colour the data from Appearance variables, but light the scene with plain white (`0xffffff`) and tint it; read the variables again on `appearance_theme`. |
 
 ## App surfaces
 
