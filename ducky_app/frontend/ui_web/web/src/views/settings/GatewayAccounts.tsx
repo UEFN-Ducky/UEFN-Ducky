@@ -16,7 +16,7 @@ function resetTime(until: number): string {
 
 function loginText(s: GatewayAccountStatusDto | null | undefined): string {
   if (!s) return "Checking…";
-  if (s.pending) return "Waiting for sign-in in your browser…";
+  if (s.pending) return s.repairing ? REPAIRING : "Waiting for sign-in in your browser…";
   if (!s.loggedIn) return s.error || "Not logged in";
   return [s.email || "Logged in", s.plan].filter(Boolean).join(" · ");
 }
@@ -40,6 +40,7 @@ const LEAVE_MS = 180;
 const LOGIN_POLL_MS = 1500;
 const LOGIN_POLLS = 200; // ~5 min, the plugin's own sign-in timeout
 const TERMINAL_HINT = "Finish signing in in the terminal tab, then Refresh.";
+const REPAIRING = "Repairing Gemini CLI…";
 const reducedMotion = () =>
   typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
@@ -167,7 +168,8 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
       setBusy(false);
     }
     if (!started?.ok || !started.waiting) return;
-    setWaiting({ id, text: started.message || "Waiting for sign-in in your browser…" });
+    const waitText = started.message || "Waiting for sign-in in your browser…";
+    setWaiting({ id, text: waitText });
     let result = "Sign-in didn't finish, try again.";
     for (let i = 0; i < LOGIN_POLLS && mounted.current; i++) {
       await new Promise((r) => setTimeout(r, LOGIN_POLL_MS));
@@ -181,6 +183,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
         result = s.error || result;
         break;
       }
+      if (s && mounted.current) setWaiting({ id, text: s.repairing ? REPAIRING : waitText });
     }
     if (!mounted.current) return;
     setWaiting(null);

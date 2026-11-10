@@ -106,6 +106,8 @@ export interface GatewayAccountStatusDto {
   plan?: string;
   /** A hidden browser sign-in is still running. */
   pending?: boolean;
+  /** The sign-in is reinstalling a broken CLI first. */
+  repairing?: boolean;
   /** The last sign-in failed (timed out or cancelled). */
   error?: string;
 }

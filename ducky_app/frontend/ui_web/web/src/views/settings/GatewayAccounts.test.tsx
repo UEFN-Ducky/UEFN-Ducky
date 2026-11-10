@@ -248,6 +248,19 @@ it("a browser sign-in shows a spinner, not the terminal hint, then Logged in", a
   expect(api.gateway_account_status).toHaveBeenCalledWith("gemini_cli", "default");
 });
 
+it("a broken CLI shows Repairing Gemini CLI, then the browser sign-in", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
+  api.login_gateway_account.mockResolvedValue({ ok: true, waiting: true, message: "Waiting for Google sign-in in your browser…" });
+  api.gateway_account_status.mockReset()
+    .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, repairing: true } })
+    .mockResolvedValue({ ok: true, status: { loggedIn: true, email: "you@gmail.com" } });
+  render(<GatewayAccounts provider="gemini_cli" kind="login" />);
+  await screen.findByText("Not logged in");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await screen.findByText("Repairing Gemini CLI…", undefined, { timeout: 3000 });
+  await screen.findByText("Logged in · you@gmail.com", undefined, { timeout: 4000 });
+});
+
 it("a browser sign-in that times out says try again", async () => {
   api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
   api.login_gateway_account.mockResolvedValue({ ok: true, waiting: true, message: "Waiting…" });
