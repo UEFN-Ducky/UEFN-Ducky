@@ -25,6 +25,14 @@ from frontend import usage_events as ev
         ("request timed out", "timeout"),
         ("Traceback (most recent call last)", "crash"),
         ("prompt is too long: 210000 tokens", "too_long"),
+        # WinError 10013 in any language is one word, never auth or permission.
+        ("PermissionError: [WinError 10013] An attempt was made to access a socket in a way "
+         "forbidden by its access permissions", "port_blocked"),
+        ("PermissionError: [WinError 10013] Une tentative d’accès à un socket de manière "
+         "interdite par ses autorisations d’accès a été tentée", "port_blocked"),
+        ("PermissionError: [WinError 10013] Es wurde versucht, auf einen Socket in einer "
+         "nach Zugriffsrechten des Sockets unzulässigen Weise zuzugreifen", "port_blocked"),
+        ("HTTP 403 Forbidden", "auth"),
         ("claude_code finished with no captured reply.", "other"),
         ("", "other"),
     ],

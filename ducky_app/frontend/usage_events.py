@@ -75,7 +75,8 @@ YES_NO = ("yes", "no")
 WHERE = ("agent", "ui", "bridge", "uefn", "store", "sync", "workflow", "other")
 # What kind of failure an error was, read from its message on the PC (the message never leaves).
 ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth", "too_long", "bad_picture",
-               "bad_request", "server_error", "memory", "permission", "not_found", "crash", "other")
+               "bad_request", "server_error", "memory", "permission", "not_found", "crash", "port_blocked",
+               "other")
 # boot_report stages (webview_app._boot_trace names); a run's last one is sent with app_unclean_exit.
 BOOT_STAGES = ("launch", "handoff", "handoff_exit", "reclaim_claim", "webview_import_patches",
                "import_panel_api", "panel_api_init", "http_server", "create_window",
@@ -339,6 +340,9 @@ def where_of(source: str) -> str:
 _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (kind, re.compile(pattern))
     for kind, pattern in (
+        # WinError 10013 (a port Windows reserved or a firewall holds): first, because its English
+        # text says "forbidden" (auth) and its French one "permission".
+        ("port_blocked", r"winerror 10013|wsaeacces|\b10013\b"),
         ("session_dead", r"session unavailable|taskgroup|session (is )?closed"),
         ("busy", r"\bbusy\b|waiting for listener idle"),
         ("timeout", r"timed? ?out\b|timeout"),
