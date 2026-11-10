@@ -33,12 +33,24 @@ _CONNECT_TIMEOUT_SEC = 45.0
 _HTTP_CONNECT_TIMEOUT_SEC = 2.0
 _HTTP_FAIL_CACHE_SEC = 10.0
 _TOOL_TIMEOUT_SEC = 180.0
-# Epic's UEFN MCP gets no call deadline: a call waits while UEFN works (a big island's
-# execute_python, a Verse build) and queues behind the one running (the session owner runs
-# them in order). It ends when UEFN answers, the connection drops (UEFN closed), Stop, or a
+# An Epic UEFN MCP call ends when UEFN answers, the connection drops (UEFN closed), Stop, a
 # UEFN popup that blocks the editor stays up across two looks this far apart (the save
-# watchdog presses Save prompts first; a popup with a choice goes back to the agent).
+# watchdog presses Save prompts first; a popup with a choice goes back to the agent), or its
+# deadline (call_limits.epic_call_limit): then the agent hears why (popup / editor_busy /
+# no_answer) while UEFN's work goes on; the call is never cancelled at its deadline.
 _EPIC_POPUP_LOOK_SEC = 2.0
+
+
+class _EpicDeadline(Exception):
+    def __init__(self, limit: float) -> None:
+        super().__init__(limit)
+        self.limit = limit
+
+
+def _drop_late_answer(fut: asyncio.Future) -> None:
+    """Read the late answer of a call past its deadline, so asyncio logs no lost error."""
+    if not fut.cancelled():
+        fut.exception()
 
 
 async def _blocking_popup_stays() -> None:
@@ -676,6 +688,11 @@ class PluginClientPool:
             ) from e
         uefn_call = epic_call and epic_editor != EDITOR_UNREAL
         call_timeout = None if epic_call else _TOOL_TIMEOUT_SEC
+        if uefn_call:
+            from backend.bridge.call_limits import epic_call_limit
+            from backend.mcp_plugins.epic import epic_tool_heavy
+
+            deadline = epic_call_limit(epic_tool_heavy(original_name, args))
 
         def _watchdog():
             # Epic's MCP runs on UEFN's Slate thread: a Save prompt or message box
@@ -697,11 +714,18 @@ class PluginClientPool:
                     call = asyncio.ensure_future(session_obj.call_tool(original_name, step))
                     look = asyncio.ensure_future(_blocking_popup_stays())
                     try:
-                        await asyncio.wait({call, look}, return_when=asyncio.FIRST_COMPLETED)
-                    finally:
+                        await asyncio.wait({call, look}, timeout=deadline, return_when=asyncio.FIRST_COMPLETED)
+                    except BaseException:
                         look.cancel()
-                        if not call.done():
-                            call.cancel()
+                        call.cancel()
+                        raise
+                    popup_stays = look.done()
+                    look.cancel()
+                    if not call.done() and not popup_stays:
+                        call.add_done_callback(_drop_late_answer)
+                        raise _EpicDeadline(deadline)
+                    if not call.done():
+                        call.cancel()
                     if not call.done() or call.cancelled():
                         raise asyncio.TimeoutError
                     last = call.result()
@@ -722,6 +746,11 @@ class PluginClientPool:
         try:
             with _watchdog() as pressed:
                 raw = await _invoke(session)
+        except _EpicDeadline as late:
+            from backend.bridge.call_limits import stall_reason
+
+            why = await asyncio.to_thread(stall_reason, namespaced_name, late.limit)
+            raise RuntimeError(json.dumps(why)) from None
         except asyncio.TimeoutError:
             popup = ""
             if uefn_call:

@@ -28,6 +28,8 @@ Rules:
 * **No deadline** -- a UEFN call waits while UEFN works. It ends when UEFN answers, its
   connection drops (UEFN closed), or the person presses Stop. Only a caller's own
   ``timeout`` stops it early (:class:`EditorTimeout`). UEFN is never killed from here.
+  Epic UEFN calls get one in ``client_pool`` (``call_limits.epic_call_limit``): the agent
+  hears why, the editor's work is never cancelled.
 """
 
 from __future__ import annotations
