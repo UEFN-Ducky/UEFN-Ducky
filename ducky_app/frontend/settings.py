@@ -35,6 +35,8 @@ DEFAULT_PANEL_LISTENER_PORT = 4200
 # exclusions answer bind with WinError 10013): every process then reads the same moved port.
 PANEL_PORT_FILE = "panel_port.json"
 _WSAEACCES = 10013
+_WSAEADDRINUSE = 10048
+_PORT_PIN_ENV = "UEFN_DUCKY_PANEL_PORT"
 
 
 def _saved_panel_port() -> int:
@@ -56,10 +58,58 @@ def _port_reserved(port: int) -> bool:
     try:
         sock.bind(("127.0.0.1", port))
     except OSError as exc:
-        return getattr(exc, "winerror", None) == _WSAEACCES or exc.errno == 13
+        return _bind_refused(exc)
     finally:
         sock.close()
     return False
+
+
+def _bind_refused(exc: OSError) -> bool:
+    """WinError 10013 in any Windows language: the number, never the text."""
+    return getattr(exc, "winerror", None) == _WSAEACCES or exc.errno == 13
+
+
+def _bind_in_use(exc: OSError) -> bool:
+    import errno
+
+    return getattr(exc, "winerror", None) == _WSAEADDRINUSE or exc.errno == errno.EADDRINUSE
+
+
+def _save_panel_port(port: int) -> None:
+    try:
+        path = default_app_data_dir() / PANEL_PORT_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"port": port}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def bind_with_fallback(make_server: Any, ui_port: int) -> Any:
+    """``make_server(ui_port)``; when Windows refuses it (10013, even with the env pin: the probe
+    in pick_panel_port can pass and the real bind still fail) or it is in use (10048, unpinned
+    only), take the next free pair by pick_panel_port's rule, save it and return that server."""
+    global PANEL_LISTENER_PORT
+    try:
+        return make_server(ui_port)
+    except OSError as exc:
+        movable = _bind_refused(exc) or (_bind_in_use(exc) and not os.environ.get(_PORT_PIN_ENV))
+        if not movable or not ui_port:
+            raise
+        first = exc
+    for listener in range(4300, 8300, 100):
+        if listener - 1 == ui_port or _port_reserved(listener):
+            continue
+        try:
+            server = make_server(listener - 1)
+        except OSError as again:
+            if _bind_refused(again) or _bind_in_use(again):
+                continue
+            raise
+        PANEL_LISTENER_PORT = listener
+        os.environ[_PORT_PIN_ENV] = str(listener)
+        _save_panel_port(listener)
+        return server
+    raise first
 
 
 def pick_panel_port() -> int:
@@ -75,12 +125,7 @@ def pick_panel_port() -> int:
         # origin); 40 pairs well below the dynamic range clear any one exclusion block.
         port = next((p for p in range(4300, 8300, 100) if not (_port_reserved(p - 1) or _port_reserved(p))), port)
         if port != PANEL_LISTENER_PORT:
-            try:
-                path = default_app_data_dir() / PANEL_PORT_FILE
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps({"port": port}), encoding="utf-8")
-            except OSError:
-                pass
+            _save_panel_port(port)
     PANEL_LISTENER_PORT = port
     if port != DEFAULT_PANEL_LISTENER_PORT:
         os.environ["UEFN_DUCKY_PANEL_PORT"] = str(port)

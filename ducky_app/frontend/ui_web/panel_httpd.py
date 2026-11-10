@@ -719,8 +719,11 @@ def start_panel_ui_server(dist_root: Path, bind_port: int | None = None) -> str:
 
     ``bind_port`` (``--backend`` under the launcher, 0 = any free port) listens there instead;
     the page's origin, and so the URL returned and the POST Origin check, stay on
-    ``PANEL_UI_HTTP_PORT``: the launcher serves that port and proxies here."""
-    global _server, _root
+    ``PANEL_UI_HTTP_PORT``: the launcher serves that port and proxies here.
+
+    WinError 10013 never stops startup: --backend falls back to any free internal port
+    (hello reports it), the window moves the pair (settings.bind_with_fallback)."""
+    global _server, _root, PANEL_UI_HTTP_PORT
 
     root = dist_root.resolve()
     verify_panel_dist(root)
@@ -1500,8 +1503,21 @@ def start_panel_ui_server(dist_root: Path, bind_port: int | None = None) -> str:
                 self.end_headers()
                 self.wfile.write(data)
 
-        port = PANEL_UI_HTTP_PORT if bind_port is None else int(bind_port)
-        _server = _PanelServer(("127.0.0.1", port), Handler)
+        if bind_port is not None:
+            try:
+                _server = _PanelServer(("127.0.0.1", int(bind_port)), Handler)
+            except OSError:
+                if not int(bind_port):
+                    raise
+                _server = _PanelServer(("127.0.0.1", 0), Handler)
+        else:
+            from frontend.settings import bind_with_fallback
+
+            _server = bind_with_fallback(lambda p: _PanelServer(("127.0.0.1", p), Handler), PANEL_UI_HTTP_PORT)
+            if PANEL_UI_HTTP_PORT:
+                # ponytail: modules that copied PANEL_LISTENER_PORT - 1 at import keep the old
+                # port until restart (panel_port.json then has the new one for every process).
+                PANEL_UI_HTTP_PORT = int(_server.server_address[1])
         threading.Thread(target=_server.serve_forever, daemon=True, name="panel-ui-http").start()
 
     return panel_ui_http_url()

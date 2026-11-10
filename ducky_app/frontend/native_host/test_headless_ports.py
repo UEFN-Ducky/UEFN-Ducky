@@ -57,6 +57,12 @@ def panel_root(tmp_path, monkeypatch):
     monkeypatch.setattr(panel_httpd, "_server", None)
     monkeypatch.setattr(panel_httpd, "_root", None)
     monkeypatch.setattr(panel_httpd, "verify_panel_dist", lambda _root: None)
+    monkeypatch.setattr(panel_httpd, "PANEL_UI_HTTP_PORT", panel_httpd.PANEL_UI_HTTP_PORT)
+    # A moved pair is saved and pinned: keep that out of the real app data and environment.
+    monkeypatch.setattr(settings, "default_app_data_dir", lambda: tmp_path / "app")
+    monkeypatch.setattr(settings, "PANEL_LISTENER_PORT", settings.PANEL_LISTENER_PORT)
+    monkeypatch.setenv(settings._PORT_PIN_ENV, "")
+    monkeypatch.delenv(settings._PORT_PIN_ENV)
     yield panel_httpd, tmp_path
     if panel_httpd._server is not None:
         panel_httpd._server.shutdown()
