@@ -161,3 +161,25 @@ def test_list_shows_login_status_cached_and_keys(reg, monkeypatch):
     keys = api.list_gateway_accounts("openai")
     assert {a["id"]: a["has_key"] for a in keys["accounts"]} == {"default": False, team: True}
     assert keys["default"] == team
+
+
+def test_browser_login_hook_opens_no_terminal(reg, monkeypatch):
+    """Gemini signs in hidden in the browser: no terminal tab, the table polls the status."""
+    seen: list = []
+    row = {
+        "account_login": lambda d: {"argv": ["gemini"], "env": {}},
+        "account_browser_login": lambda d: seen.append(d) or {"message": "Waiting for Google sign-in…"},
+        "account_status": lambda d: {"loggedIn": False, "pending": True},
+    }
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda aid: row if aid == "gemini_cli" else None)
+    import frontend.ui_web.terminal as terminal
+
+    monkeypatch.setattr(terminal, "get_terminal_manager", lambda: 1 / 0)  # never a terminal
+    api = PanelApi.__new__(PanelApi)
+    out = api.login_gateway_account("gemini_cli", "default")
+    assert out == {"ok": True, "waiting": True, "message": "Waiting for Google sign-in…"}
+    assert seen == [None]
+    assert api.gateway_account_status("gemini_cli", "default")["status"]["pending"] is True
+    assert accounts._STATUS[("gemini_cli", "default")][1]["pending"] is True  # the next list sees it
+    row["account_browser_login"] = lambda d: {"error": "Gemini CLI isn't installed yet."}
+    assert api.login_gateway_account("gemini_cli", "default") == {"ok": False, "error": "Gemini CLI isn't installed yet."}

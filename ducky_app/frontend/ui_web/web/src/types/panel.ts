@@ -104,6 +104,10 @@ export interface GatewayAccountStatusDto {
   loggedIn: boolean;
   email?: string;
   plan?: string;
+  /** A hidden browser sign-in is still running. */
+  pending?: boolean;
+  /** The last sign-in failed (timed out or cancelled). */
+  error?: string;
 }
 
 /** One usage window of an account (5-hour, weekly, a key's rate limit). */
@@ -3922,7 +3926,7 @@ export interface PanelApi {
   /** key "" keeps the saved key; base_url "" clears it, left out keeps it. */
   set_gateway_account_key?(provider: string, account: string, key: string, base_url?: string): Promise<GatewayAccountResult>;
   set_gateway_auto_switch?(provider: string, on: boolean): Promise<GatewayAccountResult>;
-  login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id: string }>>;
+  login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id?: string; waiting?: boolean; message?: string }>>;
   logout_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
   gateway_account_status?(provider: string, account: string): Promise<GatewayAccountResult<{ status: GatewayAccountStatusDto }>>;
   move_conversation(conv_id: string, folder_id: string): Promise<void>;

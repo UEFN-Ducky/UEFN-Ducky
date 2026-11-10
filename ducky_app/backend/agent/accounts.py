@@ -402,7 +402,9 @@ def _link_dir(src: Path, dst: Path) -> None:
 
 # --- Coding-agent logins: hooks the gateway plugin passes to register_coding_agent ---
 # account_env(dir) -> env · account_login(dir) -> {argv, env} · account_status(dir) ->
-# {loggedIn, email?, plan?} · account_logout(dir) · account_shared={"dirs", "files",
+# {loggedIn, email?, plan?, pending?, error?} · account_logout(dir) ·
+# account_browser_login(dir) -> {message} | {error}: optional, a hidden sign-in in the
+# browser instead of a terminal tab · account_shared={"dirs", "files",
 # "primary": the CLI's own config folder (path or () -> path), linked into each account}.
 # ``dir`` is None for ``default`` (the CLI's own folder).
 
@@ -461,8 +463,14 @@ def report_limit(agent_id: str, account_id: str | None = None, reset_at: float |
 
 
 def account_login(agent_id: str, account_id: str) -> dict:
-    """``{argv, env}`` that signs this account in, from the plugin's ``account_login``."""
+    """``{argv, env}`` that signs this account in, from the plugin's ``account_login``;
+    ``{browser, message}`` when the plugin signs in hidden in the browser."""
     _STATUS.pop((agent_id, account_id), None)  # signing in: ask again next time
+    if callable(_agent_reg(agent_id).get("account_browser_login")):
+        started = _call_hook(agent_id, "account_browser_login", account_id) or {}
+        if started.get("error"):
+            raise ValueError(str(started["error"]))
+        return {"browser": True, "message": str(started.get("message") or "Waiting for sign-in in your browser…")}
     out = _call_hook(agent_id, "account_login", account_id) or {}
     argv = [str(a) for a in out.get("argv") or ()]
     if not argv:
@@ -471,7 +479,9 @@ def account_login(agent_id: str, account_id: str) -> dict:
 
 
 def account_status(agent_id: str, account_id: str) -> dict:
-    return dict(_call_hook(agent_id, "account_status", account_id) or {"loggedIn": False})
+    st = dict(_call_hook(agent_id, "account_status", account_id) or {"loggedIn": False})
+    _STATUS[(agent_id, account_id)] = (time.monotonic(), st)  # the table's next list sees it
+    return st
 
 
 STATUS_TTL_S = 60.0

@@ -10,6 +10,7 @@ const api = {
   set_gateway_account: vi.fn(),
   set_gateway_account_key: vi.fn(),
   login_gateway_account: vi.fn(),
+  gateway_account_status: vi.fn(),
 };
 const confirm = vi.fn();
 const runBridgeJob = vi.fn();
@@ -232,6 +233,39 @@ it("reduced motion deletes at once with no leaving animation", async () => {
   } finally {
     window.matchMedia = matchMedia;
   }
+});
+
+it("a browser sign-in shows a spinner, not the terminal hint, then Logged in", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
+  api.login_gateway_account.mockResolvedValue({ ok: true, waiting: true, message: "Waiting for Google sign-in in your browser…" });
+  api.gateway_account_status.mockReset().mockResolvedValue({ ok: true, status: { loggedIn: true, email: "you@gmail.com" } });
+  render(<GatewayAccounts provider="gemini_cli" kind="login" />);
+  await screen.findByText("Not logged in");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await screen.findByText("Waiting for Google sign-in in your browser…");
+  expect(screen.queryByText(/terminal tab/)).toBeNull();
+  await screen.findByText("Logged in · you@gmail.com", undefined, { timeout: 4000 });
+  expect(api.gateway_account_status).toHaveBeenCalledWith("gemini_cli", "default");
+});
+
+it("a browser sign-in that times out says try again", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
+  api.login_gateway_account.mockResolvedValue({ ok: true, waiting: true, message: "Waiting…" });
+  api.gateway_account_status.mockReset().mockResolvedValue({
+    ok: true, status: { loggedIn: false, error: "Sign-in didn't finish, try again." } });
+  render(<GatewayAccounts provider="gemini_cli" kind="login" />);
+  await screen.findByText("Not logged in");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await waitFor(() => expect(screen.getByText("Sign-in didn't finish, try again.")).toBeTruthy(), { timeout: 4000 });
+});
+
+it("a terminal login still says to finish in the terminal tab", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
+  api.login_gateway_account.mockResolvedValue({ ok: true, session_id: "t1" });
+  render(<GatewayAccounts provider="claude_code" kind="login" />);
+  await screen.findByText("Not logged in");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await screen.findByText("Finish signing in in the terminal tab, then Refresh.");
 });
 
 it("no API key yet shows the empty state with Add API key", async () => {

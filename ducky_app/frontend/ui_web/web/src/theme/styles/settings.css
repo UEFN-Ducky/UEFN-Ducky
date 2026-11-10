@@ -1849,6 +1849,9 @@
   animation: gateway-accounts-in 200ms ease both;
 }
 .gateway-accounts-empty-icon { color: var(--muted); display: inline-flex; }
+.gateway-accounts-waiting { display: inline-flex; align-items: center; gap: 6px; }
+.gateway-accounts-waiting > svg { animation: gateway-accounts-spin 0.9s linear infinite; }
+@keyframes gateway-accounts-spin { to { transform: rotate(360deg); } }
 .gateway-accounts-empty .settings-btn { margin-top: 6px; }
 @keyframes gateway-accounts-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -1856,7 +1859,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .gateway-accounts-table tr { transition: none; }
-  .gateway-accounts-empty { animation: none; }
+  .gateway-accounts-empty, .gateway-accounts-waiting > svg { animation: none; }
 }
 
 .gateway-accounts-auto {

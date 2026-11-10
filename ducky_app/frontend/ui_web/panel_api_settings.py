@@ -1131,6 +1131,8 @@ class PanelApiSettingsMixin:
 
         def login(p: str) -> dict[str, Any]:
             cmd = accounts.account_login(p, account)
+            if cmd.get("browser"):  # signing in hidden in the browser: the table polls the status
+                return {"waiting": True, "message": cmd["message"]}
             from frontend.ui_web.terminal import get_terminal_manager
 
             cwd = (_pa.PanelSettings.load().uefn_project_root or "").strip() or "."

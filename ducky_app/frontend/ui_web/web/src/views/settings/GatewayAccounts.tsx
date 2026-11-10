@@ -1,5 +1,5 @@
 import { runBridgeJob } from "../../hooks/bridgeJobAsync";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { getApi } from "../../hooks/usePanelApi";
@@ -16,7 +16,8 @@ function resetTime(until: number): string {
 
 function loginText(s: GatewayAccountStatusDto | null | undefined): string {
   if (!s) return "Checking…";
-  if (!s.loggedIn) return "Not logged in";
+  if (s.pending) return "Waiting for sign-in in your browser…";
+  if (!s.loggedIn) return s.error || "Not logged in";
   return [s.email || "Logged in", s.plan].filter(Boolean).join(" · ");
 }
 
@@ -36,6 +37,9 @@ function statusPill(a: GatewayAccountDto, isDefault: boolean): { text: string; t
 }
 
 const LEAVE_MS = 180;
+const LOGIN_POLL_MS = 1500;
+const LOGIN_POLLS = 200; // ~5 min, the plugin's own sign-in timeout
+const TERMINAL_HINT = "Finish signing in in the terminal tab, then Refresh.";
 const reducedMotion = () =>
   typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
@@ -89,6 +93,10 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   const [loaded, setLoaded] = useState(false);
   // Row fading out while its delete runs.
   const [leaving, setLeaving] = useState("");
+  // Row signing in hidden in the browser, and what it says meanwhile.
+  const [waiting, setWaiting] = useState<{ id: string; text: string } | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => () => void (mounted.current = false), []);
 
   const load = useCallback(
     async (refresh = false) => {
@@ -141,10 +149,48 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     setDefaultId(a.id);
     void run(() => api()?.set_gateway_account?.(provider, a.id), `${a.label} is the default for new chats.`);
   };
+  /** Log in: a terminal tab (most CLIs), or a hidden browser sign-in whose status we poll. */
+  const startLogin = async (id: string) => {
+    setBusy(true);
+    setMenu(null);
+    let started: { ok: boolean; error?: string; waiting?: boolean; message?: string } | undefined;
+    try {
+      started = await api()?.login_gateway_account?.(provider, id);
+      if (!started) throw new Error("Update Ducky to manage accounts.");
+      if (!started.ok) throw new Error(started.error || "Failed");
+      setNote(started.waiting ? "" : TERMINAL_HINT);
+      await load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+      started = undefined;
+    } finally {
+      setBusy(false);
+    }
+    if (!started?.ok || !started.waiting) return;
+    setWaiting({ id, text: started.message || "Waiting for sign-in in your browser…" });
+    let result = "Sign-in didn't finish, try again.";
+    for (let i = 0; i < LOGIN_POLLS && mounted.current; i++) {
+      await new Promise((r) => setTimeout(r, LOGIN_POLL_MS));
+      const st = await api()?.gateway_account_status?.(provider, id).catch(() => undefined);
+      const s = st?.ok ? st.status : null;
+      if (s?.loggedIn) {
+        result = s.email ? `Logged in · ${s.email}` : "Logged in.";
+        break;
+      }
+      if (s && !s.pending) {
+        result = s.error || result;
+        break;
+      }
+    }
+    if (!mounted.current) return;
+    setWaiting(null);
+    setNote(result);
+    await load();
+  };
   const addLogin = async () => {
     const res = await api()?.add_gateway_account?.(provider, `Account ${accounts.length + 1}`, "login");
     if (!res?.ok) return setNote(res && !res.ok ? res.error : "Update Ducky to manage accounts.");
-    await run(() => api()?.login_gateway_account?.(provider, res.id), "Finish signing in in the terminal tab, then Refresh.");
+    await startLogin(res.id);
   };
   const move = (index: number, delta: number) => {
     const ids = accounts.map((a) => a.id);
@@ -333,7 +379,14 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
                     ) : (
                       <div className="gateway-accounts-label">{a.label}</div>
                     )}
-                    <div className="gateway-accounts-muted">{a.kind === "login" ? loginText(a.status) : keyText(a)}</div>
+                    <div className="gateway-accounts-muted">
+                      {waiting?.id === a.id ? (
+                        <span className="gateway-accounts-waiting">
+                          <Icons.Spinner />
+                          {waiting.text}
+                        </span>
+                      ) : a.kind === "login" ? loginText(a.status) : keyText(a)}
+                    </div>
                     {keyFor === a.id ? keyRow : null}
                   </td>
                   {limits ? (
@@ -356,9 +409,8 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
                           Log out
                         </button>
                       ) : (
-                        <button type="button" className="settings-btn" disabled={busy}
-                          onClick={() => void run(() => api()?.login_gateway_account?.(provider, a.id),
-                            "Finish signing in in the terminal tab, then Refresh.")}>
+                        <button type="button" className="settings-btn" disabled={busy || waiting?.id === a.id}
+                          onClick={() => void startLogin(a.id)}>
                           Log in
                         </button>
                       )
