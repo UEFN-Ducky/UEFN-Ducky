@@ -394,6 +394,9 @@ class _PluginApi:
                 # One tool call is one change to a shared copy, made by the calling agent
                 # (an MCP client of the bridge is an agent even without a ducky's name).
                 actor, ducky = caller("user" if is_app() else "agent")
+                import time as _time
+
+                started = _time.time()
                 with plugin_tool_slot(pid), write_group(pid, actor=actor, ducky=ducky, message=tool_name):
                     # A plugin that keeps declared folders: checked once its call marker is down
                     # (a move of its folders either waited for this call or finished first).
@@ -408,6 +411,13 @@ class _PluginApi:
                     note_tool_images(tool_name, result)
                 except Exception:
                     _log.debug("could not keep %s pictures for the chat", tool_name, exc_info=True)
+                try:
+                    # What the call made goes into Storage under this plugin (Local or the team).
+                    from backend.uefn_plugins.auto_storage import after_plugin_tool
+
+                    after_plugin_tool(pid, tool_name, result, started)
+                except Exception:
+                    _log.debug("could not keep %s outputs in Storage", tool_name, exc_info=True)
                 # Plugins on the host data service: say which copy the tool read or changed.
                 # ponytail: dict results only; string results would need parsing.
                 if pid in _DATA_PLUGINS and isinstance(result, dict) and "scope" not in result:

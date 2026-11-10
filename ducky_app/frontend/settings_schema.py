@@ -301,6 +301,12 @@ FIELD_META: dict[str, FieldMeta] = {
         settable=True,
         description="Counts which features you use and which errors happen, by code. Never your chats, files or project names.",
     ),
+    "keep_plugin_outputs": FieldMeta(
+        "Keep what plugins make in Storage",
+        "General",
+        settable=True,
+        description="Renders, exports, pictures, video and 3D files that plugin and MCP tools make are kept in Storage under the plugin's folder, in Local or your team.",
+    ),
     "allow_settings_write": FieldMeta(
         "Change Ducky Settings", "Account", settable=True,
         description="Let the AI save Appearance, models, voice, and layout in this app.",

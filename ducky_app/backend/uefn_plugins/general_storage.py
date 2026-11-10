@@ -54,12 +54,18 @@ def where() -> dict[str, Any]:
 
 
 def _public(doc: dict[str, Any], item_id: str) -> dict[str, Any]:
-    out = {k: doc.get(k) for k in ("name", "folder", "kind", "path", "size", "mime", "by", "updated")}
+    out = {k: doc.get(k) for k in ("name", "folder", "kind", "path", "size", "mime", "by", "updated",
+                                   "sha1", "tool", "source_path")}
     return {"id": item_id, **{k: v for k, v in out.items() if v not in (None, "")}}
 
 
-def put_file(name: str, data: bytes, *, folder: str = "", by: str = "you") -> dict[str, Any]:
-    """Keep a file: its bytes at ``<folder>/<name>`` and its doc, in one change."""
+_EXTRA_KEYS = ("sha1", "tool", "source_path")
+
+
+def put_file(name: str, data: bytes, *, folder: str = "", by: str = "you",
+             extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Keep a file: its bytes at ``<folder>/<name>`` and its doc, in one change. ``extra`` may
+    carry ``sha1``, ``tool`` and ``source_path`` (what made it), kept on the doc."""
     if not isinstance(data, (bytes, bytearray)):
         raise ValueError("A file's contents must be bytes.")
     if len(data) > _MAX_FILE:
@@ -80,6 +86,9 @@ def put_file(name: str, data: bytes, *, folder: str = "", by: str = "you") -> di
     doc = {"name": name, "folder": folder, "kind": "file", "path": path, "size": len(data),
            "mime": mimetypes.guess_type(name)[0] or "application/octet-stream", "by": str(by or "you"),
            "updated": time.time()}
+    for key in _EXTRA_KEYS:
+        if extra and extra.get(key):
+            doc[key] = str(extra[key])
     store.put(_ITEM + item_id, doc)
     return {"ok": True, "item": _public(doc, item_id), "scope": where()}
 

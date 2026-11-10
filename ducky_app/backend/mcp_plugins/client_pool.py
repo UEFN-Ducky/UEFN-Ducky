@@ -743,6 +743,7 @@ class PluginClientPool:
             return last
 
         pressed: list[dict[str, Any]] = []
+        started = time.time()
         try:
             with _watchdog() as pressed:
                 raw = await _invoke(session)
@@ -780,6 +781,14 @@ class PluginClientPool:
             # Fail loudly so callers fall back instead of treating "not found" as success.
             # Keep the "Available toolsets: ..." list: it is how the agent finds the right name.
             raise RuntimeError(f"Epic MCP: {text.strip()[:4000]}")
+        if not getattr(raw, "isError", False):
+            try:
+                # What the call made (a Blender render, an export…) goes into Storage under this server.
+                from backend.uefn_plugins.auto_storage import after_nested_tool
+
+                after_nested_tool(plugin_id, original_name, text, started)
+            except Exception:  # noqa: BLE001 — the answer goes back anyway
+                pass
         note = _pressed_note(pressed)
         return f"{text}\n\n[Ducky:{note}]" if note else text
 

@@ -413,6 +413,10 @@ class PanelSettings:
     usage_stats: bool = True
     """Send anonymous usage counts (features used, errors by code, time open) to the UEFN Ducky Store."""
 
+    keep_plugin_outputs: bool = True
+    """Keep the files plugin and nested MCP tools make (renders, exports, pictures, video, 3D) in
+    Storage under that plugin's folder, in Local or the team the app is on."""
+
     allow_settings_write: bool = True
     """When false, ducky_settings_set (agent-driven Ducky Settings writes) is refused."""
 
