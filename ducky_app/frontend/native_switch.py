@@ -82,6 +82,8 @@ _lock = threading.Lock()
 _no_native = False
 # The ready file of the last run_native that returned None: {painted_ms, window_ms}.
 last_ready: dict[str, Any] = {}
+# The last run_native gave up on its own deadline (its 23 is "timeout", not the launcher's).
+last_timed_out = False
 
 
 # --- paths ------------------------------------------------------------------------------
@@ -271,7 +273,9 @@ def run_native(
     None: ready (the launcher owns the window; this process should exit). An int is the
     launcher's exit code, or 23 for a timeout and 24 for a spawn error: fall back.
     """
+    global last_timed_out
     last_ready.clear()
+    last_timed_out = False
     exe = exe or launcher_exe()
     env = dict(os.environ)
     env[NATIVE_CHILD_ENV] = "1"
@@ -303,6 +307,7 @@ def run_native(
                 proc.kill()
             except OSError:
                 pass
+            last_timed_out = True
             return EXIT_NO_HELLO
         time.sleep(_POLL_S)
 
@@ -357,7 +362,8 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
         # Synchronous: this process exits right after, which would end a daemon thread.
         record_start("native", last_ready.get("window_ms"), last_ready.get("painted_ms", ms), "")
         return True
-    timed_out = code == EXIT_NO_HELLO and time.perf_counter() - started >= timeout_s
+    # run_native's own deadline, not a clock guess: the launcher's 23 can come long before it.
+    timed_out = code == EXIT_NO_HELLO and last_timed_out
     reason = fallback_reason(code, timed_out=timed_out)
     # A 22 is already in crash_loop.json: the launcher's supervisor wrote it.
     if reason not in _NOT_A_FAILURE and code != EXIT_CRASH_LOOP:
