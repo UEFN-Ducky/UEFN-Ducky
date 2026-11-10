@@ -263,6 +263,86 @@ def test_plugin_collect_404_never_mentions_plugin() -> None:
             raise AssertionError("expected DuckyOSAccountError")
 
 
+def _sign_in_start(answers: list):
+    """Run desktop-device-start (retries=2) against canned api_request answers; no sleeps."""
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    calls: list[int] = []
+
+    def _req(*_a, **_k):
+        calls.append(1)
+        nxt = answers.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+    with (
+        patch.object(acc, "api_request", side_effect=_req),
+        patch.object(acc.time, "sleep", lambda _s: None),
+        patch.object(acc, "_note_site_failure", lambda *_a: None),
+    ):
+        try:
+            out = acc._plugin_collect(
+                "uefn-ducky",
+                "desktop-device-start",
+                {},
+                unavailable_code="auth_unavailable",
+                unavailable_msg="",
+                error_code="device_start_failed",
+                allow_anonymous=True,
+                retries=2,
+            )
+        except acc.DuckyOSAccountError as exc:
+            return len(calls), exc
+    return len(calls), out
+
+
+def test_sign_in_retries_a_cloudflare_challenge_then_names_it() -> None:
+    from frontend.net_access import Answer
+
+    page = "<!DOCTYPE html><html><title>Just a moment...</title></html>"
+    blocked = Answer((403, None, page), {"cf-mitigated": "challenge", "server": "cloudflare"})
+    n, exc = _sign_in_start([blocked, blocked, blocked])
+    assert n == 3
+    assert "firewall blocked this PC (HTTP 403)" in exc.message
+    assert exc.code == "device_start_failed"
+
+
+def test_sign_in_names_a_site_outage_after_retries() -> None:
+    n, exc = _sign_in_start([(502, None, "Bad gateway")] * 3)
+    assert n == 3
+    assert "having trouble (HTTP 502)" in exc.message
+
+
+def test_sign_in_404_then_200_succeeds() -> None:
+    n, out = _sign_in_start([(404, None, ""), (200, {"payload": {"user_code": "AB"}}, "")])
+    assert n == 2
+    assert out == {"user_code": "AB"}
+
+
+def test_sign_in_html_200_is_not_a_success() -> None:
+    n, exc = _sign_in_start([(200, None, "<html>wifi login</html>")] * 3)
+    assert n == 3
+    assert "web page instead of an answer" in exc.message
+
+
+def test_sign_in_timeout_is_named() -> None:
+    from frontend import duckyos_account as acc
+
+    t = acc.DuckyOSAccountError("Network error: timed out", code="network")
+    n, exc = _sign_in_start([t, t, t])
+    assert n == 3
+    assert "didn't answer in time" in exc.message
+
+
+def test_sign_in_json_refusal_is_not_retried() -> None:
+    n, exc = _sign_in_start([(400, {"error": "Too many codes"}, "")])
+    assert n == 1
+    assert exc.message == "Too many codes"
+
+
 def test_plugin_collect_posts_v1_only() -> None:
     from unittest.mock import patch
 

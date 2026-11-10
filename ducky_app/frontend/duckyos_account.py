@@ -605,6 +605,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> d
             error_code="device_start_failed",
             allow_anonymous=True,
             timeout=20.0,
+            retries=2,
         )
         user_code = str(started.get("user_code") or "").strip()
         device_code = str(started.get("device_code") or "").strip()
@@ -628,6 +629,7 @@ def start_browser_login(base_url: str = "", *, timeout_secs: float = 600.0) -> d
                 error_code="device_poll_failed",
                 allow_anonymous=True,
                 timeout=20.0,
+                retries=2,
             )
             if str(payload.get("status") or "") == "pending":
                 __import__("time").sleep(1.0)
@@ -1949,36 +1951,119 @@ def _plugin_collect(
     error_code: str,
     allow_anonymous: bool = False,
     timeout: float = 20.0,
+    retries: int = 0,
 ) -> dict[str, Any]:
-    status, parsed, raw = api_request(
-        "POST",
-        f"/api/v1/plugins/{plugin_id}/collect/{event}",
-        body or {},
-        prefer_bearer=True,
-        allow_anonymous=allow_anonymous,
-        timeout=timeout,
-    )
-    if status == 404:
-        # ponytail: 404 often means the site worker is mid-swap, not "plugin off".
-        # Never mention plugins/tenants — that copy leaked to the Account tab.
-        raise DuckyOSAccountError("Can't connect right now. Try again.", code=unavailable_code)
-    if not (200 <= int(status) < 300):
-        err = ""
-        if isinstance(parsed, dict):
-            err = str(parsed.get("error") or "")
-            payload = parsed.get("payload")
-            if isinstance(payload, dict) and payload.get("error"):
-                err = str(payload["error"])
-        if re.search(r"plugin|tenant", err, re.I):
+    """POST one collect event. ``retries``: extra tries (1 s, 2 s apart) on a 404, a 5xx,
+    a firewall page or a timeout — only for calls that are safe to send twice."""
+    for attempt in range(retries + 1):
+        last = attempt >= retries
+        try:
+            answer = api_request(
+                "POST",
+                f"/api/v1/plugins/{plugin_id}/collect/{event}",
+                body or {},
+                prefer_bearer=True,
+                allow_anonymous=allow_anonymous,
+                timeout=timeout,
+            )
+        except DuckyOSAccountError as exc:
+            if exc.code != "network" or last:
+                if exc.code == "network":
+                    if retries:
+                        _note_site_failure(event, "network", exc.message)
+                    if "timed out" in exc.message.lower():
+                        raise DuckyOSAccountError(
+                            "uefnducky.org didn't answer in time. Check your internet and try again.",
+                            code=error_code,
+                        ) from exc
+                raise
+            time.sleep(attempt + 1)
+            continue
+        status, parsed, raw = answer
+        status = int(status)
+        why = _site_failure(status, parsed, raw, getattr(answer, "headers", None))
+        if why is None:
+            break
+        if not last and why[0] != "refused":
+            time.sleep(attempt + 1)
+            continue
+        kind, msg = why
+        if retries:
+            # ponytail: only retried (sign-in) calls log; heartbeats would flood activity.jsonl.
+            _note_site_failure(event, kind, msg)
+        if kind == "refused":
             err = ""
-        raise DuckyOSAccountError(
-            err or "Can't connect right now. Try again.",
-            code=error_code,
-        )
+            if isinstance(parsed, dict):
+                err = str(parsed.get("error") or "")
+                payload = parsed.get("payload")
+                if isinstance(payload, dict) and payload.get("error"):
+                    err = str(payload["error"])
+            # Never mention plugins/tenants — that copy leaked to the Account tab.
+            if re.search(r"plugin|tenant", err, re.I):
+                err = ""
+            msg = err or msg
+        raise DuckyOSAccountError(msg, code=unavailable_code if status == 404 else error_code)
     if not isinstance(parsed, dict):
         return {}
     payload = parsed.get("payload")
     return payload if isinstance(payload, dict) else parsed
+
+
+def _header(headers: Any, name: str) -> str:
+    try:
+        return str(headers.get(name) or "") if headers is not None else ""
+    except Exception:
+        return ""
+
+
+def _site_failure(
+    status: int, parsed: Any, raw: Any, headers: Any
+) -> tuple[str, str] | None:
+    """(kind, user message) for an answer that isn't a usable one, else None.
+
+    kind "refused" is a real answer from the site (its own JSON error); the rest are worth
+    another try: a Cloudflare challenge/block, a site outage, a web page instead of JSON."""
+    text = raw.decode("utf-8", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw or "")
+    html = text.lstrip()[:1].startswith("<")
+    cloudflare = bool(_header(headers, "cf-mitigated")) or (
+        html and "cloudflare" in (_header(headers, "server") + text[:4000]).lower()
+    )
+    ok = 200 <= status < 300
+    if ok and not (html and parsed is None):
+        return None
+    if cloudflare:
+        return (
+            "cloudflare_block",
+            f"uefnducky.org's firewall blocked this PC (HTTP {status}). "
+            "Try again in a minute, or on another network or VPN.",
+        )
+    if status >= 500:
+        return (
+            f"http_{status}",
+            f"uefnducky.org is having trouble (HTTP {status}). Try again in a minute.",
+        )
+    if ok or (html and parsed is None):
+        return (
+            "html_page",
+            f"uefnducky.org sent a web page instead of an answer (HTTP {status}) — "
+            "a firewall, proxy or Wi-Fi sign-in page may be in the way.",
+        )
+    if status == 404:
+        # ponytail: 404 often means the site worker is mid-swap, not "plugin off".
+        return ("http_404", "uefnducky.org's sign-in isn't answering (HTTP 404). Try again in a minute.")
+    if status == 429:
+        return ("http_429", "uefnducky.org is busy (HTTP 429). Try again in a minute.")
+    return ("refused", f"uefnducky.org refused the request (HTTP {status}).")
+
+
+def _note_site_failure(event: str, kind: str, msg: str) -> None:
+    """One activity line per failed site call, so a support log names the cause."""
+    try:
+        from frontend.error_log import record_activity
+
+        record_activity("account", f"{event} failed [{kind}]: {msg}")
+    except Exception:
+        pass
 
 
 def _collect_payload(event: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
