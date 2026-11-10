@@ -760,9 +760,9 @@ class PluginClientPool:
                 popup = (await asyncio.to_thread(blocked_call_hint)) + " If no popup is up, use"
             else:
                 # The app behind the server (Blender, Unity, Godot, an Adobe app…) may be
-                # waiting on a dialog: app_popups shows it with numbered buttons.
-                popup = ("If the app this server drives shows a dialog, app_popups(app=...) shows it "
-                         "and app_popup_press answers it. Else use")
+                # waiting on a dialog: ducky_app_popups shows it with numbered buttons.
+                popup = ("If the app this server drives shows a dialog, ducky_app_popups(app=...) shows it "
+                         "and ducky_app_popup_press answers it. Else use")
             why = ("stopped: a UEFN popup is blocking the editor" if uefn_call else
                    f"timed out after {call_timeout:.0f}s — server reachable but unresponsive")
             raise RuntimeError(

@@ -328,7 +328,7 @@ def press(hwnd: int, n: int) -> dict[str, Any]:
     """Press button ``n`` (1-based, left to right) of an app popup; report whether it closed."""
     popup = _find(hwnd)
     if popup is None:
-        return {"ok": False, "error": f"no app popup {hwnd} on screen (app_popups lists them)"}
+        return {"ok": False, "error": f"no app popup {hwnd} on screen (ducky_app_popups lists them)"}
     buttons, _img = _buttons(popup)
     if not 1 <= int(n) <= len(buttons):
         return {"ok": False, "error": f"button {n} not found; this popup shows {len(buttons)}", "title": popup["title"]}
@@ -404,7 +404,7 @@ def press_lone_ok(app: str, *, skip: frozenset[int] = frozenset()) -> list[dict[
 
 def stall_report(app: str, *, press_ok: bool = True) -> dict[str, Any]:
     """For a call that stopped answering: press the app's lone-OK message boxes, then list
-    what is still up (each with numbered buttons for ``app_popup_press``)."""
+    what is still up (each with numbered buttons for ``ducky_app_popup_press``)."""
     pressed = press_lone_ok(app) if press_ok else []
     still = [describe(p) for p in list_popups(app)]
     return {"pressed": pressed, "popups": still, "blocking": any(p.get("blocking") for p in still)}

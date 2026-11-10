@@ -99,7 +99,7 @@ ISLAND_RULES = (
     "is `dismiss_uefn_modal`. Verse-error popups on project open are answered for you; then "
     "build Verse clean with `workspace_compile_verse` before anything saves the level. "
     "Any other app a tool drives (After Effects, Premiere, Photoshop, Blender, Unity, Godot…) "
-    "that stops answering: `app_popups(app=...)`, then `app_popup_press(hwnd, n)`.\n"
+    "that stops answering: `ducky_app_popups(app=...)`, then `ducky_app_popup_press(hwnd, n)`.\n"
     "\n"
     "### Editor tools\n"
     "- **Epic UEFN MCP first (HARD):** when `ducky_get_status.epic_mcp_online` is true, use "

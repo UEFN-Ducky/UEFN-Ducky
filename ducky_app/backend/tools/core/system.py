@@ -149,7 +149,7 @@ def uefn_popup_press(hwnd: int, button: int, pretty: bool = False) -> str:
 
 
 @mcp.tool()
-def app_popups(app: str = "", press_lone_ok: bool = False, pretty: bool = False) -> Any:
+def ducky_app_popups(app: str = "", press_lone_ok: bool = False, pretty: bool = False) -> Any:
     """Popups of any desktop app Ducky drives (not UEFN: use uefn_popups), each captured into
     this chat with its buttons numbered 1, 2, 3… left to right, labelled when the dialog has
     real buttons, plus what it says.
@@ -159,7 +159,7 @@ def app_popups(app: str = "", press_lone_ok: bool = False, pretty: bool = False)
     a plugin or nested MCP tool for that app hangs, times out or says the app is busy: a
     modal popup stops the app's scripts. ``blocking`` is true while one is modal.
     ``press_lone_ok=true`` presses blocking message boxes whose only button is the way on
-    (never one about deleting, saving, quitting, signing in or buying). Then app_popup_press.
+    (never one about deleting, saving, quitting, signing in or buying). Then ducky_app_popup_press.
     """
     from backend.tools.core import app_popups as ap
 
@@ -173,8 +173,8 @@ def app_popups(app: str = "", press_lone_ok: bool = False, pretty: bool = False)
 
 
 @mcp.tool()
-def app_popup_press(hwnd: int, button: int, pretty: bool = False) -> str:
-    """Press button ``button`` (1-based, left to right, as numbered by app_popups) on a popup
+def ducky_app_popup_press(hwnd: int, button: int, pretty: bool = False) -> str:
+    """Press button ``button`` (1-based, left to right, as numbered by ducky_app_popups) on a popup
     of any desktop app. Standard dialogs are pressed without moving the pointer; drawn ones
     with a real click that gives the person their window and pointer back. Returns whether
     it closed and which popups of that app are still open."""
