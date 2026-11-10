@@ -567,9 +567,10 @@ def _ask_to_send(body: dict[str, str]) -> bool:
     return choice["send"]
 
 
-def show_now(tk_root: Any, body: dict[str, str]) -> None:
+def show_now(tk_root: Any, body: dict[str, str], reload: Callable[[], None] | None = None) -> None:
     """The crash pop-up while this launch is still open (it got stuck). Runs on the Tk
-    pump thread. Answered = the next launch won't ask again; unanswered = it will."""
+    pump thread. Answered = the next launch won't ask again; unanswered = it will.
+    *reload* (reload the window's page) adds a Reload button to a stuck-page pop-up."""
     if _test_copy():
         _save(body, "kept")
         return
@@ -586,17 +587,21 @@ def show_now(tk_root: Any, body: dict[str, str]) -> None:
         ).start()
 
     try:
-        _fill_popup(tk.Toplevel(tk_root), body, done)
+        _fill_popup(tk.Toplevel(tk_root), body, done, reload)
     except Exception:
         pass
 
 
-def _fill_popup(root: Any, body: dict[str, str], done: Callable[[bool], None]) -> None:
-    """The pop-up's contents in *root* (a Tk root or a Toplevel); *done(send)* runs once."""
+def _fill_popup(root: Any, body: dict[str, str], done: Callable[[bool], None],
+                reload: Callable[[], None] | None = None) -> None:
+    """The pop-up's contents in *root* (a Tk root or a Toplevel); *done(send)* runs once.
+    A stuck page with *reload* also gets Reload: it closes the pop-up (answered, not sent)
+    and reloads the page."""
     import tkinter as tk
 
     bg, fg, dim, accent, panel = "#121216", "#ededed", "#a1a1aa", "#2563eb", "#1c1c22"
-    heading = STUCK_HEADING if "got stuck" in str(body.get("message") or "") else "UEFN Ducky closed unexpectedly"
+    stuck = "got stuck" in str(body.get("message") or "")
+    heading = STUCK_HEADING if stuck else "UEFN Ducky closed unexpectedly"
     root.title(heading)
     root.configure(bg=bg, padx=22, pady=18)
     root.resizable(False, False)
@@ -630,11 +635,20 @@ def _fill_popup(root: Any, body: dict[str, str], done: Callable[[bool], None]) -
         root.destroy()
         done(send)
 
+    def reload_page() -> None:
+        answer(False)
+        try:
+            reload()
+        except Exception:
+            pass
+
     style = {"font": ("Segoe UI", 10), "relief": "flat", "padx": 14, "pady": 6, "cursor": "hand2", "borderwidth": 0}
     view = tk.Button(buttons, text="View report", bg=panel, fg=fg, activebackground=panel, activeforeground=fg, command=toggle_details, **style)
     view.pack(side="left")
     tk.Button(buttons, text="Send report", bg=accent, fg="#ffffff", activebackground=accent, activeforeground="#ffffff", command=lambda: answer(True), **style).pack(side="right")
     tk.Button(buttons, text="Don't send", bg=panel, fg=fg, activebackground=panel, activeforeground=fg, command=lambda: answer(False), **style).pack(side="right", padx=(0, 8))
+    if stuck and reload is not None:
+        tk.Button(buttons, text="Reload", bg=panel, fg=fg, activebackground=panel, activeforeground=fg, command=reload_page, **style).pack(side="right", padx=(0, 8))
     root.protocol("WM_DELETE_WINDOW", lambda: answer(False))
     root.update_idletasks()
     x = (root.winfo_screenwidth() - root.winfo_reqwidth()) // 2

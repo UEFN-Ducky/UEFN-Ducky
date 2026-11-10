@@ -473,7 +473,7 @@ def test_answering_the_stuck_popup_while_open_means_the_next_launch_does_not_ask
     import tkinter
 
     monkeypatch.setattr(tkinter, "Toplevel", lambda root: object())
-    monkeypatch.setattr(boot_report, "_fill_popup", lambda root, body, done: done(True))
+    monkeypatch.setattr(boot_report, "_fill_popup", lambda root, body, done, reload=None: done(True))
     boot_report.begin("1.2.394")
     boot_report.mark("ok")
     boot_report.page_error("Could not load http://127.0.0.1:4198/assets/index-x.js")
@@ -672,3 +672,53 @@ def test_crash_report_shows_agents_and_other_programs_as_size_buckets() -> None:
                                            (5000, "4-8 GB"), (9000, "over 8 GB"), (None, "?")])
 def test_size_bucket(mb, label) -> None:
     assert boot_report.size_bucket(mb) == label
+
+
+class _FakeTk:
+    """Just enough tkinter for _fill_popup, with no window on screen."""
+
+    def __init__(self) -> None:
+        self.buttons: dict[str, object] = {}
+        self.destroyed = 0
+        fake = self
+
+        class Widget:
+            def __init__(self, *_a, text="", command=None, **_k):
+                if command is not None:
+                    fake.buttons[text] = command
+
+            def __getattr__(self, _name):
+                return lambda *a, **k: 0
+
+        self.module = type(sys)("tkinter")
+        self.module.Label = self.module.Text = self.module.Frame = self.module.Button = Widget
+
+        class Root(Widget):
+            def destroy(self):
+                fake.destroyed += 1
+
+        self.root = Root()
+
+
+def _popup(monkeypatch, message: str, reload) -> _FakeTk:
+    tk = _FakeTk()
+    monkeypatch.setitem(sys.modules, "tkinter", tk.module)
+    answers: list[bool] = []
+    boot_report._fill_popup(tk.root, {"message": message, "error_log": ""}, answers.append, reload)
+    tk.answers = answers
+    return tk
+
+
+def test_a_stuck_page_pop_up_has_reload_and_send_and_reload_reloads_once(monkeypatch) -> None:
+    reloads: list[int] = []
+    tk = _popup(monkeypatch, "UEFN Ducky got stuck on its loading screen", lambda: reloads.append(1))
+    assert {"Reload", "Send report", "Don't send"} <= set(tk.buttons)
+    tk.buttons["Reload"]()
+    assert reloads == [1] and tk.destroyed == 1 and tk.answers == [False]  # answered, not sent
+
+
+def test_a_crash_pop_up_has_no_reload(monkeypatch) -> None:
+    tk = _popup(monkeypatch, "UEFN Ducky closed unexpectedly", lambda: None)
+    assert "Reload" not in tk.buttons and "Send report" in tk.buttons
+    tk = _popup(monkeypatch, "UEFN Ducky got stuck on its loading screen", None)  # no window to reload
+    assert "Reload" not in tk.buttons

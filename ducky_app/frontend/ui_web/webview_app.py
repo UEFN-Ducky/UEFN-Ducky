@@ -861,7 +861,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 watch("ui_drawn")  # drawn before the window's shown event got here
             # Still on the loading splash a minute later: a crash, with the pop-up now.
             boot_report.watch_page(
-                lambda body: schedule_tk_call(lambda: boot_report.show_now(tk_root_holder["root"], body)),
+                lambda body: schedule_tk_call(lambda: boot_report.show_now(
+                    tk_root_holder["root"], body, reload=lambda: reload_main_page(window))),
                 page_files,
             )
         except Exception:
