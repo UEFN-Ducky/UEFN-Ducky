@@ -4,7 +4,7 @@ body {
   background-color: var(--bg);
   color: var(--fg);
   font-family: var(--font-ui);
-  font-size: var(--font-ui-size, 12px);
+  font-size: var(--font-ui-size, 13px);
   height: 100%;
   overflow: hidden;
   user-select: none;

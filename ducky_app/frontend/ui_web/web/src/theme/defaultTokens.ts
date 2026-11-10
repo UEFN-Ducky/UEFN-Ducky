@@ -29,7 +29,7 @@ export const DEFAULT_CSS_VARS: Record<string, string> = {
   "radius-sm": "8px",
   "font-ui": '"Inter", "Segoe UI", system-ui, sans-serif',
   "font-mono": '"JetBrains Mono", Consolas, monospace',
-  "font-ui-size": "12px",
+  "font-ui-size": "13px",
   "font-mono-size": "13px",
   "blur-md": "blur(12px)",
 };

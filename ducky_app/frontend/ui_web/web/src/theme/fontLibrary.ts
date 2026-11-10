@@ -13,7 +13,7 @@ export const FONT_META_KEYS = {
 } as const;
 
 /** Base font sizes (px). Independent of the custom-family toggle — always applied. */
-export const UI_FONT_SIZE_DEFAULT = 12;
+export const UI_FONT_SIZE_DEFAULT = 13; // setup rating: "increase the font size a little bit"
 export const MONO_FONT_SIZE_DEFAULT = 13;
 export const FONT_SIZE_MIN = 9;
 export const FONT_SIZE_MAX = 28;
