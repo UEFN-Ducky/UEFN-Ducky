@@ -413,6 +413,14 @@ def test_a_failed_turn_carries_the_app_version_and_a_fixed_list_reason(monkeypat
     assert not any("Users" in str(t) or "1234" in str(t) for t in turns)
 
 
+def test_a_stuck_report_carries_the_app_version(monkeypatch) -> None:
+    monkeypatch.setattr(us, "_app_version", lambda: "1.2.488")
+    us.stuck("claude_code", 300, tool="unreal__call_tool")
+    rows, _ = us._take(100)
+    assert [r["props"] for r in rows if r["name"] == "agent.stuck"] == [
+        {"provider": "claude", "after": "5m", "tool": "unreal__call_tool", "v": "1.2.488"}]
+
+
 def test_overloaded_credit_and_rate_limit_stops_are_limits() -> None:
     assert us._turn_outcome("error", "Error code: 529 overloaded_error") == "limit"
     assert us._turn_outcome("error", "Your credit balance is too low") == "limit"

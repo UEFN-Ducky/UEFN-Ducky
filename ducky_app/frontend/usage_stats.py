@@ -831,7 +831,8 @@ def tool_done(
 
 
 def stuck(coding_agent: str, seconds: float, tool: str = "") -> None:
-    track("agent.stuck", provider=ev.provider_of(coding_agent), after_s=seconds, tool=tool)
+    # v: one heavy PC on an old build told apart from a spread (ans7k2v9d4m1x), as tool.byv does.
+    track("agent.stuck", provider=ev.provider_of(coding_agent), after_s=seconds, tool=tool, v=_app_version())
 
 
 # ----------------------------------------------------------------------------- reliability
