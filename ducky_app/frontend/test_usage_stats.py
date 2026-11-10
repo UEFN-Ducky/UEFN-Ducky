@@ -501,6 +501,61 @@ def test_perf_sample_waits_for_steady_state(monkeypatch) -> None:
     assert stamped and any(r["name"] == "perf.sample" for r in rows)
 
 
+def test_the_idle_loop_never_polls_the_queue_and_samples_cpu_once_a_day(monkeypatch, meta) -> None:
+    """anf7q2w9e4r1t: usage-stats was the hot idle thread; it woke every 5 s to COUNT the queue."""
+    import threading
+
+    import psutil
+
+    counts = {"queued": 0, "cpu": 0, "waits": []}
+    monkeypatch.setattr(us, "queued", lambda: counts.__setitem__("queued", counts["queued"] + 1) or 0)
+    monkeypatch.setattr(us, "_opened_at", time.monotonic() - us.PERF_SETTLE_S - 1)
+    monkeypatch.setattr(us, "HEARTBEAT_S", 0.05)
+
+    class Proc:
+        def memory_info(self):
+            return type("M", (), {"rss": 1 << 20})()
+
+        def cpu_percent(self, interval=None):
+            counts["cpu"] += 1
+            return 0.1
+
+        def threads(self):
+            return []
+
+        def children(self, recursive=False):
+            return []
+
+    monkeypatch.setattr(psutil, "Process", Proc)
+    real_wait = us._wake.wait
+    monkeypatch.setattr(us._wake, "wait", lambda t: counts["waits"].append(t) or real_wait(min(t, 0.05)))
+    us._stop.clear()
+    t = threading.Thread(target=us._loop, daemon=True)
+    t.start()
+    time.sleep(0.6)  # ~10 heartbeats
+    us._stop.set()
+    us._wake.set()
+    t.join(2)
+    rows, _ = us._take(1000)
+    assert sum(r["name"] == "app.heartbeat" for r in rows) >= 3
+    assert counts["queued"] == 0, "an idle wake never counts the queue"
+    assert counts["cpu"] == 1, "one cpu_percent sample per PERF_SAMPLE_EVERY_S"
+
+
+def test_the_idle_loop_sleeps_until_the_first_flush_not_a_5s_poll(monkeypatch) -> None:
+    waits: list[float] = []
+
+    def wait(t: float) -> bool:
+        waits.append(t)
+        us._stop.set()
+        return False
+
+    monkeypatch.setattr(us._wake, "wait", wait)
+    us._stop.clear()
+    us._loop()
+    assert waits and abs(waits[0] - us.FIRST_FLUSH_S) < 1.0, waits
+
+
 def test_perf_sample_names_the_busiest_thread_without_leaking_tool_names() -> None:
     import threading
 

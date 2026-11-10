@@ -492,7 +492,10 @@ def _loop() -> None:
     last_flush = time.monotonic() - FLUSH_EVERY_S + FIRST_FLUSH_S
     last_beat = time.monotonic()
     while not _stop.is_set():
-        _wake.wait(5.0)
+        # Sleep until the next heartbeat or flush: track() wakes it at FLUSH_AT_ROWS. A 5 s
+        # poll with a queue COUNT each time made this the hot idle thread (anf7q2w9e4r1t).
+        now = time.monotonic()
+        woke = _wake.wait(max(0.05, min(last_beat + HEARTBEAT_S, last_flush + FLUSH_EVERY_S) - now))
         _wake.clear()
         if _stop.is_set():
             break
@@ -503,7 +506,7 @@ def _loop() -> None:
                 track("app.heartbeat", uefn_up=_last_uefn_mode == "online")
                 _note_alive()
                 _maybe_perf_sample()
-            due = now - last_flush >= FLUSH_EVERY_S or queued() >= FLUSH_AT_ROWS
+            due = now - last_flush >= FLUSH_EVERY_S or (woke and queued() >= FLUSH_AT_ROWS)
             if due and enabled():
                 last_flush = now
                 if not flush():
