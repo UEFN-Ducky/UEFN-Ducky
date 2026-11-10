@@ -185,6 +185,9 @@ def test_on_screen_check_gives_up_after_two_short_tries(monkeypatch):
     payload, error = version_check.fetch_remote_payload(timeout=5.0, attempts=2)
     assert payload is None and "timed out" in error
     assert calls == [5.0, 15.0]  # a timeout is retried once with 15 s
+    calls.clear()
+    version_check.fetch_remote_payload()
+    assert calls == [8.0] + [15.0] * (ATTEMPTS - 1)  # background checks keep every try, 15 s after a timeout
 
 
 def test_timeout_then_ok_recovers_with_a_longer_wait(monkeypatch):
@@ -202,9 +205,6 @@ def test_timeout_then_ok_recovers_with_a_longer_wait(monkeypatch):
     payload, error = version_check.fetch_remote_payload(timeout=5.0, attempts=2)
     assert error is None and payload["currentVersion"] == "1.2.488"
     assert calls == [5.0, 15.0]
-    calls.clear()
-    version_check.fetch_remote_payload()
-    assert len(calls) == ATTEMPTS  # background checks keep every try
 
 
 def test_packaged_panel_recovers_when_listener_folder_is_missing(tmp_path, monkeypatch):
