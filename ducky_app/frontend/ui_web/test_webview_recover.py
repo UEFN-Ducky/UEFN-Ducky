@@ -510,3 +510,47 @@ def test_a_waiting_evaluate_js_is_freed_by_the_rebuild(monkeypatch) -> None:
     wr.release_js_waiters(edge)
     t.join(2)
     assert not t.is_alive() and out == [None]
+
+
+def test_a_page_that_drops_its_first_page_started_is_reloaded_once_then_ok():
+    """fbn1ojqo9kuob (1.2.476): ui_drawn at 7.9 s, page_started never came within 60 s."""
+    page = {"started": False, "loads": 1}
+    queued: list[tuple[float, object]] = []
+    watch = None
+
+    def reload():
+        page["loads"] += 1
+        watch("ui_drawn")  # the reloaded page draws again: no second reload armed
+        page["started"] = True  # ...and this time its page_started arrives
+
+    watch = wr.page_start_watch(lambda: page["started"], reload, later=lambda s, fn: queued.append((s, fn)))
+    watch("window_shown")
+    assert queued == []
+    watch("ui_drawn")
+    assert [s for s, _ in queued] == [wr.PAGE_RELOAD_AFTER_S] == [20.0]
+    queued.pop()[1]()
+    assert page == {"started": True, "loads": 2} and queued == []
+
+
+def test_a_page_that_started_is_never_reloaded():
+    queued: list[object] = []
+    reloads: list[int] = []
+    started = {"v": False}
+    watch = wr.page_start_watch(lambda: started["v"], lambda: reloads.append(1),
+                                later=lambda s, fn: queued.append(fn))
+    watch("ui_drawn")
+    started["v"] = True  # page_started came at 9 s
+    queued.pop()()
+    assert reloads == []
+
+
+def test_reload_main_page_reloads_the_first_webview(monkeypatch):
+    reloaded: list[str] = []
+    monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
+    form = SimpleNamespace(IsDisposed=False, BeginInvoke=lambda fn: fn(), Controls=[
+        SimpleNamespace(),  # a non-browser control first
+        SimpleNamespace(CoreWebView2=SimpleNamespace(Reload=lambda: reloaded.append("main"))),
+        SimpleNamespace(CoreWebView2=SimpleNamespace(Reload=lambda: reloaded.append("pane"))),
+    ])
+    wr.reload_main_page(SimpleNamespace(native=form))
+    assert reloaded == ["main"]

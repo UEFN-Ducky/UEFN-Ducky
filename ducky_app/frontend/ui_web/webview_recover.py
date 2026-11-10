@@ -340,6 +340,56 @@ def _later(delay_s: float, fn: Callable[..., None], *args: Any) -> None:
     timer.start()
 
 
+# fbn1ojqo9kuob (1.2.476): the app drew (ui_drawn at 7.9 s) but page_started never came within
+# 60 s. Reload the page once this long after ui_drawn; boot_report.watch_page's 60 s report stays
+# as the startup error when the reload didn't help either.
+PAGE_RELOAD_AFTER_S = 20.0
+
+
+def page_start_watch(started: Callable[[], bool], reload: Callable[[], None],
+                     wait_s: float = PAGE_RELOAD_AFTER_S,
+                     later: Callable[..., None] = _later) -> Callable[..., None]:
+    """A ``boot_report.on_stage`` listener: at the first ``ui_drawn`` with no page_started yet,
+    call ``reload()`` once ``wait_s`` later if the page still hasn't started. Only ever once per
+    process, so the reloaded page's own ui_drawn arms nothing."""
+    armed = [False]
+
+    def check() -> None:
+        if started():
+            return
+        _log.warning("page_started missing %.0f s after ui_drawn; reloading the page once", wait_s)
+        try:
+            reload()
+        except Exception:
+            _log.debug("page reload failed", exc_info=True)
+
+    def on_stage(name: str, _ms: int = 0) -> None:
+        if name != "ui_drawn" or armed[0] or started():
+            return
+        armed[0] = True
+        later(wait_s, check)
+
+    return on_stage
+
+
+def reload_main_page(window: Any) -> None:
+    """Reload the window's own page (its first WebView2), on the UI thread."""
+    form = getattr(window, "native", None)
+    if form is None or form.IsDisposed:
+        return
+
+    def go() -> None:
+        for control in form.Controls:
+            core = getattr(control, "CoreWebView2", None)
+            if core is not None:
+                core.Reload()
+                return
+
+    from System import Action
+
+    form.BeginInvoke(Action(go))
+
+
 def _invoke_on_form(form: Any, fn: Callable[[], Any]) -> None:
     from System import Action
 

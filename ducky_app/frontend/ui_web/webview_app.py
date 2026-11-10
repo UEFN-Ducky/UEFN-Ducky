@@ -851,6 +851,14 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             from frontend.ui_web.panel_httpd import page_files
             from frontend.ui_web.shutdown import schedule_tk_call
 
+            from frontend.ui_web.webview_recover import page_start_watch, reload_main_page
+
+            # Drawn but no page_started 20 s later: one silent reload.
+            watch = page_start_watch(lambda: bool(boot_report._page.get("started")),
+                                     lambda: reload_main_page(window))
+            boot_report.on_stage(watch)
+            if any(s[0] == "ui_drawn" for s in boot_report._state.get("stages") or []):
+                watch("ui_drawn")  # drawn before the window's shown event got here
             # Still on the loading splash a minute later: a crash, with the pop-up now.
             boot_report.watch_page(
                 lambda body: schedule_tk_call(lambda: boot_report.show_now(tk_root_holder["root"], body)),
