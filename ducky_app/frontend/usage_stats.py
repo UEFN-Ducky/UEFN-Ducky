@@ -817,6 +817,8 @@ def tool_done(
         props: dict[str, Any] = {"tool": name, "ok": ok, "duration_s": float(duration_ms) / 1000.0}
         if fail:
             props["fail"] = fail
+            # why: the three things a failed call can be, so exits and refusals never read as crashes.
+            props["why"] = {"exit_nonzero": "exit_code", "refused": "refused"}.get(fail, "error")
         if after_fail:
             props["after_fail"] = "yes"
         if name in ev.COMMAND_TOOLS and isinstance(args, dict):

@@ -791,6 +791,7 @@ def test_new_failure_fields(monkeypatch) -> None:
     assert calls[1] == {"tool": "ducky_terminal_run", "ok": "yes", "duration": "1s", "cmd": "test", "after_fail": "yes"}
     assert "cmd" not in calls[2] and "after_fail" not in calls[3]
     stuck = next(r["props"] for r in rows if r["name"] == "agent.stuck")
+    stuck.pop("v", None)
     assert stuck == {"provider": "claude", "after": "5m", "tool": "unreal__call_tool"}
     turn = next(r["props"] for r in rows if r["name"] == "chat.turn")
     assert turn["tool_calls"] == "1-5" and turn["tool_fails"] == "1-5", "the timeout counts, the non-zero exit does not"
@@ -869,4 +870,4 @@ def test_a_failed_tool_call_says_why(monkeypatch) -> None:
     rows, _ = us._take(100)
     calls = [r["props"] for r in rows if r["name"] == "tool.call"]
     assert [c.get("fail") for c in calls[-3:]] == ["exit_nonzero", "error", None]
-    assert calls[-3] == {"tool": "ducky_terminal_run", "ok": "no", "duration": "10s", "fail": "exit_nonzero"}
+    assert calls[-3] == {"tool": "ducky_terminal_run", "ok": "no", "duration": "10s", "fail": "exit_nonzero", "why": "exit_code"}

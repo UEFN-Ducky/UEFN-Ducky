@@ -1069,3 +1069,22 @@ def test_tool_servers_load_numpy_with_one_blas_thread(monkeypatch) -> None:
     monkeypatch.setenv("OPENBLAS_NUM_THREADS", "4")
     launcher.limit_blas_threads()
     assert os.environ["OPENBLAS_NUM_THREADS"] == "4"  # the person's own setting wins
+
+
+def test_a_failed_call_says_whether_it_exited_was_refused_or_broke(monkeypatch) -> None:
+    """anj7w3p9d2f6y / ant6p2k9w3x7d: a test's exit 1 and a plan rule's refusal counted as crashes."""
+    from frontend import usage_stats
+
+    rows: list[dict] = []
+    monkeypatch.setattr(usage_stats, "enabled", lambda: True)
+    monkeypatch.setattr(usage_stats, "track", lambda name, **props: rows.append(props) if name == "tool.call" else None)
+
+    def call(tool: str, text: str) -> None:
+        result = {"content": [{"type": "text", "text": text}], "isError": True}
+        shared_mcp._usage_tool_done(tool, False, time.monotonic(), None, {}, result)
+
+    call("ducky_terminal_run", "Command failed (exit code 1). Output: 3 failed")
+    call("ducky_plan_update_node", "That step belongs to Seat 2: only its owner ticks it")
+    call("spawn_actor", "Traceback (most recent call last)")
+    assert [(r["tool"], r["why"]) for r in rows] == [
+        ("ducky_terminal_run", "exit_code"), ("ducky_plan_update_node", "refused"), ("spawn_actor", "error")]

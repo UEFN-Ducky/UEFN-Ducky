@@ -880,7 +880,12 @@ def _usage_tool_done(
         args = arguments if isinstance(arguments, dict) else {}
         if not ok and not fail and result is not None:
             texts = [str(b.get("text") or "") for b in result.get("content") or [] if isinstance(b, dict) and b.get("type") == "text"]
-            fail = usage_stats.fail_of(texts[0] if texts else "") or ("refused" if _refused(result) else "")
+            text = texts[0] if texts else ""
+            low = text[:500].lower()
+            # A non-zero exit and a plan/lane rule's refusal are not crashes (anj7w3p9d2f6y, ant6p2k9w3x7d).
+            fail = (usage_stats.fail_of(text)
+                    or ("exit_nonzero" if "command failed (exit code" in low else "")
+                    or ("refused" if _refused(result) or "refused" in low or "belongs to" in low else ""))
         usage_stats.tool_done(
             effective_tool_name(name, args), ok=ok, duration_ms=(time.monotonic() - t0) * 1000.0,
             conv_id=str(getattr(ident, "conv_id", "") or ""), args=arguments if isinstance(arguments, dict) else None,

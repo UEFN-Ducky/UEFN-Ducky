@@ -142,7 +142,9 @@ EVENTS: dict[str, dict[str, Any]] = {
     # fail: failed calls only. cmd: COMMAND_TOOLS only. after_fail: sent only as "yes" (this
     # chat's last call of the tool failed), so a retry that works reads as a recovery.
     "tool.call": {"tool": ("slug",), "ok": YES_NO, "duration": ("bucket", TOOL_S, "duration_s"),
-                  "fail": TOOL_FAILS, "cmd": CMD_KINDS, "after_fail": ("yes",)},
+                  "fail": TOOL_FAILS, "cmd": CMD_KINDS, "after_fail": ("yes",),
+                  # Failed calls only: exit_code (ran, exited non-zero), refused (a rule said no), error.
+                  "why": ("exit_code", "refused", "error")},
     "skill.used": {"skill": ("slug",)},
     "workflow.run": {"outcome": ("ok", "error", "stopped"), "nodes": ("bucket", NODES, "nodes_n")},
     "plugin.install": {"plugin_id": ("slug",)},
