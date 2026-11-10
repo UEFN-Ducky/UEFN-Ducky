@@ -162,12 +162,13 @@ export function expandGatewayManifest(
     step(
       "settings.llms.provider.key",
       `${label} key`,
-      `Paste a key (or URL) here. This is what Ducky uses for this gateway.`,
+      `Press Add API key and paste your ${label} key. No key? Press Skip.`,
+      "require_click",
     ),
     step(
       "settings.llms.provider.save",
       "Test & Save",
-      "Press Test & Save after you fill the field. No key? Press Skip.",
+      "Press Test & Save: Ducky checks the key, then saves it.",
       "require_click",
     ),
   );

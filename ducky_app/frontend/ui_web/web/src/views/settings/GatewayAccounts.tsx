@@ -7,6 +7,11 @@ import { onApiReady } from "../../hooks/onApiReady";
 import { Icons } from "../../icons/Icons";
 import type { GatewayAccountDto, GatewayAccountStatusDto } from "../../types/panel";
 import type { UsageWindow } from "../../components/GatewayUsageFooter";
+import { targetRef } from "../../ui-targets/registry";
+
+/** Walkthroughs' "paste a key" and "Test & Save" steps land on the API keys table. */
+const ADD_KEY_TARGET = { kind: "button", label: "Add API key", route: "settings.llms" } as const;
+const SAVE_KEY_TARGET = { kind: "button", label: "Test & Save", route: "settings.llms" } as const;
 
 type Kind = "key" | "login";
 
@@ -22,9 +27,7 @@ function loginText(s: GatewayAccountStatusDto | null | undefined): string {
 }
 
 function keyText(a: GatewayAccountDto): string {
-  const saved = a.id === "default" ? "Uses the key above" : a.key_hint || "Key saved";
-  const key = a.has_key ? saved : "No key yet";
-  return a.base_url ? `${key} · ${a.base_url}` : key;
+  return a.has_key ? a.key_hint || "Key saved" : "No key yet";
 }
 
 /** ★ Default, Full until …, Logged out or No key: the one thing to know about a row. */
@@ -84,10 +87,6 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   // Row whose key is being typed: "new" = the Add API key row.
   const [keyFor, setKeyFor] = useState("");
   const [keyValue, setKeyValue] = useState("");
-  // The key's own endpoint (a proxy or self-hosted gateway); "" = the provider's.
-  const [baseUrl, setBaseUrl] = useState("");
-  // Editing only the base URL of a row whose key stays as it is.
-  const [urlOnly, setUrlOnly] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
@@ -222,37 +221,34 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     setRenaming(null);
     if (label.trim()) void run(() => api()?.rename_gateway_account?.(provider, id, label.trim()));
   };
-  const openKeyRow = (id: string, onlyUrl = false) => {
+  const openKeyRow = (id: string) => {
     setKeyValue("");
-    setBaseUrl(accounts.find((a) => a.id === id)?.base_url || "");
-    setUrlOnly(onlyUrl);
     setKeyFor(id);
   };
-  /** Tests the pasted key (against its base URL), then stores both on the row (a new row
-   *  first for "new"). Base URL only: saved as is, the key stays. */
+  /** Tests the pasted key against the provider's own API, then stores it on the row (a new
+   *  row first for "new"). No base URL to fill: keys work out of the box. A row that
+   *  already had one (older Ducky) keeps it and is tested against it. */
   const saveKey = async () => {
     const value = keyValue.trim();
-    const url = baseUrl.trim();
-    if (!value && !urlOnly) return;
+    if (!value) return;
+    const url = accounts.find((a) => a.id === keyFor)?.base_url || "";
     setBusy(true);
-    setNote(value ? "Testing…" : "");
+    setNote("Testing…");
     try {
-      if (value) {
-        const test = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
-          "test_key", [provider, value, url, true], 300_000);
-        if (!test.ok) throw new Error(test.detail || test.error || "Key test failed");
-      }
+      const test = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
+        "test_key", [provider, value, url, true], 300_000);
+      if (!test.ok) throw new Error(test.detail || test.error || "Key test failed");
       let id = keyFor;
       if (id === "new") {
         const added = await api()?.add_gateway_account?.(provider, `Key ${accounts.length + 1}`, "key");
         if (!added?.ok) throw new Error(added && !added.ok ? added.error : "Could not add the key");
         id = added.id;
       }
-      const saved = await api()?.set_gateway_account_key?.(provider, id, value, url);
+      const saved = await api()?.set_gateway_account_key?.(provider, id, value);
       if (!saved?.ok) throw new Error(saved && !saved.ok ? saved.error : "Could not save the key");
       setKeyFor("");
       setKeyValue("");
-      setNote(value ? "Key saved." : "Base URL saved.");
+      setNote("Key saved.");
       await load();
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
@@ -267,31 +263,24 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   };
   const keyRow = (
     <div className="gateway-accounts-keyrow">
-      {urlOnly ? null : (
-        <input
-          className="settings-input llms-provider-input"
-          type="password"
-          autoFocus
-          aria-label="API key"
-          placeholder="Paste API key"
-          value={keyValue}
-          onChange={(e) => setKeyValue(e.target.value)}
-          onKeyDown={keys}
-        />
-      )}
       <input
         className="settings-input llms-provider-input"
-        type="url"
-        autoFocus={urlOnly}
-        aria-label="Base URL"
-        placeholder="Base URL (optional), e.g. https://proxy.example.com/v1"
-        title="Leave empty to use the provider's own API. Set it for a proxy, regional or self-hosted endpoint."
-        value={baseUrl}
-        onChange={(e) => setBaseUrl(e.target.value)}
+        type="password"
+        autoFocus
+        aria-label="API key"
+        placeholder="Paste API key"
+        value={keyValue}
+        onChange={(e) => setKeyValue(e.target.value)}
         onKeyDown={keys}
       />
-      <button type="button" className="settings-btn" disabled={busy || (!urlOnly && !keyValue.trim())} onClick={() => void saveKey()}>
-        Save
+      <button
+        type="button"
+        className="settings-btn"
+        ref={kind === "key" ? targetRef("settings.llms.provider.save", SAVE_KEY_TARGET) : undefined}
+        disabled={busy || !keyValue.trim()}
+        onClick={() => void saveKey()}
+      >
+        {busy ? "Testing…" : "Test & Save"}
       </button>
       <button type="button" className="settings-btn" disabled={busy} onClick={() => setKeyFor("")}>
         Cancel
@@ -301,10 +290,9 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
 
   const menuItems = (a: GatewayAccountDto, i: number): ContextMenuItem[] => [
     { id: "rename", label: "Rename", onClick: () => setRenaming({ id: a.id, label: a.label }) },
-    ...(a.kind === "key" && a.id !== "default"
-      ? [{ id: "key", label: "Replace key", onClick: () => openKeyRow(a.id) }]
+    ...(a.kind === "key"
+      ? [{ id: "key", label: a.has_key ? "Replace key" : "Add key", onClick: () => openKeyRow(a.id) }]
       : []),
-    ...(a.kind === "key" ? [{ id: "url", label: "Set base URL", onClick: () => openKeyRow(a.id, true) }] : []),
     ...(i > 0 ? [{ id: "up", label: "Move up", onClick: () => move(i, -1) }] : []),
     ...(i < accounts.length - 1 ? [{ id: "down", label: "Move down", onClick: () => move(i, 1) }] : []),
     { id: "remove", label: "Delete", danger: true, onClick: () => void remove(a) },
@@ -324,7 +312,13 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           <span className="general-tab-section-title-text">{`${heading} (${accounts.length})`}</span>
         </h3>
         {loaded && !accounts.length ? null : (
-          <button type="button" className="settings-btn" disabled={busy} onClick={addFirst}>
+          <button
+            type="button"
+            className="settings-btn"
+            ref={kind === "key" ? targetRef("settings.llms.provider.key", ADD_KEY_TARGET) : undefined}
+            disabled={busy}
+            onClick={addFirst}
+          >
             {kind === "login" ? "Log in another account" : "Add API key"}
           </button>
         )}
@@ -343,7 +337,13 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           </div>
           <div className="gateway-accounts-muted">Add one to use these models in chats.</div>
           {keyFor === "new" ? null : (
-            <button type="button" className="settings-btn" disabled={busy} onClick={addFirst}>
+            <button
+              type="button"
+              className="settings-btn"
+              ref={kind === "key" ? targetRef("settings.llms.provider.key", ADD_KEY_TARGET) : undefined}
+              disabled={busy}
+              onClick={addFirst}
+            >
               {kind === "login" ? "Log in" : "Add API key"}
             </button>
           )}

@@ -919,7 +919,9 @@ export function AgentTab() {
               <div className="duckies-tab-detail-scroll">
                 {hosted ? (
                   <HostedGatewayUsage providerId={selected.id} />
-                ) : selected.secret_key || selected.kind === "url" ? (
+                ) : isUrl ? (
+                  // Key providers add and test keys in their "API keys" table below; a second
+                  // single-key box above it doubled up. Only a server URL keeps this box.
                   <section className="general-tab-section" ref={llmsKeySectionRef}>
                     <GeneralSectionHeader
                       icon={<KeyIcon />}
@@ -991,7 +993,10 @@ export function AgentTab() {
                   </section>
                 ) : null}
                 {!hosted && !isUrl && selected.secret_key ? (
-                  <GatewayAccounts provider={secretKey} kind="key" title="API keys" />
+                  <>
+                    <GatewayAccounts provider={secretKey} kind="key" title="API keys" />
+                    {saved ? <AgentApiKeyToggle providerId={selected.id} /> : null}
+                  </>
                 ) : null}
                 {contrib.llm_coding_agents
                   .filter((a) => (a.plugin_id || "").trim().toLowerCase() === selected.plugin_id.trim().toLowerCase())
