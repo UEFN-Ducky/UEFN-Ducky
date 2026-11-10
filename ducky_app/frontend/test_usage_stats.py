@@ -271,7 +271,13 @@ def test_reason_token_is_one_short_word_never_the_detail() -> None:
     assert us.reason_token("Unknown event name: chat.text from C:/Users/x") == "unknown_event_name"
     assert us.reason_token("schema mismatch in a very very long message", 400) == "schema_mismatch_in_a_ver"
     assert us.reason_token("", 418) == "http_418"
-    assert us.reason_token("Payload Too Large", 413) == "too_large"
+    assert us.reason_token("Payload Too Large", 413) == "too_big"
+    # anr9c4x6p1h8j: the usual refusals as fixed words.
+    assert us.reason_token("", 413) == "too_big"
+    assert us.reason_token("bad install id: abc") == "install_id"
+    assert us.reason_token("origin not allowed", 403) == "origin"
+    assert us.reason_token("rate limited", 400) == "rate"
+    assert us.reason_token("", 502) == "server_5xx"
     assert us.reason_token("") == "unknown"
     assert ev.SLUG_RE.match(us.reason_token("schema mismatch in a very very long message"))
 
@@ -303,6 +309,16 @@ def test_a_too_large_half_that_is_refused_again_is_dropped_and_reported() -> Non
     assert sent == [3, 1, 2]
     reports = _refusal_reports()
     assert [r["reason"] for r in reports] == ["too_large"]
+
+
+def test_a_refused_413_reports_too_big(monkeypatch) -> None:
+    from frontend import duckyos_account
+
+    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: (413, None, ""))
+    us.track("feature.open", tab="chat")  # one row: nothing to split, so it counts toward dropping
+    for _ in range(us.REFUSED_DROP_AFTER):
+        assert us.flush() is False
+    assert [r["reason"] for r in _refusal_reports()] == ["too_big"]
 
 
 def test_switch_off_means_no_queue_and_no_network() -> None:

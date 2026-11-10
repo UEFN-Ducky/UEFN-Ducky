@@ -373,15 +373,25 @@ _refused_in_a_row = 0
 
 _USAGE_ROUTE = "/api/v1/plugins/uefn-ducky-store/collect/usage"
 # Reasons that mean the batch was too big, not bad: it is split in half and each half sent once.
-_TOO_LARGE = frozenset({"too_large", "http_413", "payload_too_large"})
+_TOO_LARGE = frozenset({"too_big", "too_large", "http_413", "payload_too_large"})
+# The Store's refusals in a few fixed words (anr9c4x6p1h8j): first match on the reply wins.
+_REFUSAL_CLASSES = (("install_id", r"install.?id"), ("too_big", r"too (large|big)|payload|max_events|too many"),
+                    ("rate", r"too soon|rate|429"), ("origin", r"origin|cors"))
 
 
 def reason_token(error: str, status: int = 0) -> str:
-    """The Store's error as one short word for usage_batch_refused: the text before its first
-    ":" (never the detail after it), as [a-z0-9_] cut to 24 chars, else http_<status>."""
+    """The Store's error as one short word for usage_batch_refused: install_id, too_big, rate,
+    origin or server_5xx when it is one of those, else the text before its first ":" (never
+    the detail after it) as [a-z0-9_] cut to 24 chars, else http_<status>."""
     if status == 413:
-        return "too_large"
-    head = str(error or "").split(":", 1)[0].strip().lower()
+        return "too_big"
+    if status >= 500:
+        return "server_5xx"
+    low = str(error or "").lower()
+    for word, pattern in _REFUSAL_CLASSES:
+        if re.search(pattern, low):
+            return word
+    head = low.split(":", 1)[0].strip()
     word = re.sub(r"[^a-z0-9]+", "_", head).strip("_")[:24].strip("_")
     return word or (f"http_{status}" if status else "unknown")
 
