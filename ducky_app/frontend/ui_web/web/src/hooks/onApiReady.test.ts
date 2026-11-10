@@ -34,7 +34,7 @@ afterEach(() => {
   vi.resetModules();
 });
 
-it("waits for pywebview in the desktop window instead of handing out the HTTP proxy", () => {
+it("waits for pywebview in the desktop window instead of handing out the HTTP proxy", async () => {
   w.chrome = { webview: {} };
   const ready = vi.fn();
   const stop = onApiReady(ready);
@@ -42,7 +42,10 @@ it("waits for pywebview in the desktop window instead of handing out the HTTP pr
 
   const api = injectPywebview();
   expect(ready).toHaveBeenCalledTimes(1);
-  expect(ready).toHaveBeenCalledWith(api);
+  // getApi() hands out the bridge wrapped (big replies over HTTP); calls still reach pywebview.
+  const handed = ready.mock.calls[0][0] as PanelApi;
+  await expect(handed.get_version()).resolves.toBe("1");
+  expect(api.get_version).toHaveBeenCalledTimes(1);
   expect(fetchSpy).not.toHaveBeenCalled();
   stop();
 });
