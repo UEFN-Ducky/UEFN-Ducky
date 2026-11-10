@@ -102,7 +102,8 @@ export function composerAttachmentsFromDto(items: MessageAttachmentDto[]): Compo
           kind: "image" as const,
           name: a.name,
           mime: a.mime || "image/png",
-          dataUrl: `data:${a.mime || "image/png"};base64,${a.data_base64 ?? ""}`,
+          dataUrl: a.media_url || `data:${a.mime || "image/png"};base64,${a.data_base64 ?? ""}`,
+          ...(a.stored_conv_id ? { storedConvId: a.stored_conv_id, storedPath: a.path } : {}),
           ...(a.project_path ? { projectPath: a.project_path } : {}),
         }
       : {
@@ -117,6 +118,10 @@ export function composerAttachmentsFromDto(items: MessageAttachmentDto[]): Compo
 
 function toApiRow(a: ComposerAttachment): MessageAttachmentDto {
   if (a.kind === "image") {
+    if (a.storedConvId && !a.dataUrl.startsWith("data:")) {
+      return { kind: "image", name: a.name, mime: a.mime,
+        stored_conv_id: a.storedConvId, path: a.storedPath, media_url: a.dataUrl };
+    }
     const row: MessageAttachmentDto = {
       kind: "image",
       name: a.name,

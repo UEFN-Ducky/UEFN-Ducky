@@ -69,20 +69,13 @@ class Embedder:
         self.matrix = np.load(folder / MATRIX_FILE, allow_pickle=False, mmap_mode="r")
         self.dim = int(self.matrix.shape[1])
         config: dict[str, Any] = {}
-        manifest: dict[str, Any] = {}
         try:
             config = json.loads((folder / "config.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pass
-        try:
-            manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            pass
         self.normalize = bool(config.get("normalize", True))
-        name = str(manifest.get("model") or "potion-base-8M").rsplit("/", 1)[-1]
-        rev = str(manifest.get("revision") or "")[:8]
         # Stored with every vector: a different model re-embeds every row.
-        self.model_id = f"{name}@{rev}" if rev else name
+        self.model_id = _model_id(folder)
         self.tokenizer = Tokenizer.from_file(str(folder / TOKENIZER_FILE))
         self.tokenizer.no_padding()
         self.tokenizer.enable_truncation(MAX_TOKENS)
@@ -154,6 +147,29 @@ def get_embedder() -> Embedder | None:
 
 def unavailable_reason() -> str:
     return _loaded if isinstance(_loaded, str) else ""
+
+
+def _model_id(folder: Path) -> str:
+    manifest = {}
+    try:
+        manifest = json.loads((folder / 'manifest.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        pass
+    name = str(manifest.get('model') or 'potion-base-8M').rsplit('/', 1)[-1]
+    rev = str(manifest.get('revision') or '')[:8]
+    return f'{name}@{rev}' if rev else name
+
+
+def model_status() -> dict[str, Any]:
+    """Availability is not validation/loading. A settings read never allocates
+    the matrix or tokenizer; actual search keeps get_embedder's fallback."""
+    current = _loaded
+    if isinstance(current, Embedder):
+        return {'model': current.model_id, 'model_loaded': True, 'model_available': True, 'model_error': ''}
+    folder = model_dir()
+    return {'model': _model_id(folder) if folder is not None else '', 'model_loaded': False,
+            'model_available': folder is not None,
+            'model_error': current if isinstance(current, str) else ('' if folder is not None else 'no model folder')}
 
 
 def reset_for_tests() -> None:

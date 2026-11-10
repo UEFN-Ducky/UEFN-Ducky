@@ -125,6 +125,7 @@ def hydrate_attachment_dict(
     conv_id: str,
     conversations_dir: Path,
     project_root: str | None = None,
+    *, display: bool = False,
 ) -> dict[str, Any]:
     del project_root
     if not isinstance(raw, dict):
@@ -146,6 +147,13 @@ def hydrate_attachment_dict(
         return {"kind": "ignored", "name": str(raw.get("name") or "")}
     if not full.is_file():
         return raw
+    if display and kind == "image" and path == f"attachments/{full.name}" and _CHAT_FILE_RE.fullmatch(full.name):
+        # The existing media route enforces account ownership, containment and
+        # opening encrypted files. No bytes/base64 in the chat's JSON response.
+        if not _signed_in_account_may_open(conv_id):
+            return {"kind": "ignored", "name": str(raw.get("name") or "")}
+        return {**{k: v for k, v in raw.items() if k != "data_base64"},
+                "stored_conv_id": conv_id, "media_url": build_chat_attachment_url(conv_id, full.name)}
     if not _open_if_sealed(conversation_attachments_dir(conv_id, None, conversations_dir), full):
         # Still sealed (another thread is opening it, or the account's key isn't here yet):
         # its content in memory if this account can open it, never its ciphertext.
@@ -342,10 +350,11 @@ def hydrate_attachment_dicts(
     conv_id: str,
     conversations_dir: Path,
     project_root: str | None = None,
+    *, display: bool = False,
 ) -> list[dict[str, Any]]:
     if not raw_list:
         return []
     return [
-        hydrate_attachment_dict(raw if isinstance(raw, dict) else {}, conv_id, conversations_dir, project_root)
+        hydrate_attachment_dict(raw if isinstance(raw, dict) else {}, conv_id, conversations_dir, project_root, display=display)
         for raw in raw_list
     ]

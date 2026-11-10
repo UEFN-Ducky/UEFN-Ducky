@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from frontend.ui_web.panel_chats import conversations, folders, groups, messages, permissions, profiles, send, voice
 from frontend.ui_web.panel_chats.send import _sync_composer_selection  # noqa: F401
-from frontend.ui_web.panel_chats.messages import _NOT_LOADED, TOOL_RESULT_CAP, _cap_tool_results, _page_rows  # noqa: F401
+from frontend.ui_web.panel_chats.messages import TOOL_RESULT_CAP, _cap_tool_results  # noqa: F401
 from frontend.ui_web.panel_chats.groups import _copy_name, _leader_agent_ok  # noqa: F401
 from frontend.ui_web.panel_chats.conversations import _conversation_row  # noqa: F401
 from frontend.ui_web.panel_chats.folders import _FOLDER_WRITE_LOCK, GLOBAL_SLUG  # noqa: F401

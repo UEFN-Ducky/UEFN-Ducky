@@ -65,6 +65,7 @@ def test_lane_for():
     assert call_pools.lane_for("voice_transcribe_audio") == "block"
     assert call_pools.lane_for("group_members") == "bg"
     assert call_pools.lane_for("window_input") == "input"
+    assert call_pools.lane_for("cancel_agent") == "control"
 
 
 def test_remote_input_starts_at_once_behind_300_slow_bg_calls(monkeypatch):
@@ -84,6 +85,47 @@ def test_remote_input_starts_at_once_behind_300_slow_bg_calls(monkeypatch):
         assert _bridge_threads() <= 14
     finally:
         release.set()
+
+
+def test_stop_has_reserved_workers():
+    release = threading.Event()
+    for _ in range(call_pools.POOL_SIZES["urgent"]):
+        call_pools.submit("load_messages", release.wait, 5)
+    stopped = threading.Event()
+    call_pools.submit("cancel_agent", stopped.set)
+    try:
+        assert stopped.wait(.25)
+    finally:
+        release.set()
+
+
+def test_idle_worker_releases_last_task():
+    import weakref
+    class Payload:
+        pass
+    value = Payload()
+    ref = weakref.ref(value)
+    done = threading.Event()
+    pool = call_pools._Pool("release", 1)
+    pool.submit(lambda arg: done.set(), value)
+    del value
+    assert done.wait(2)
+    pool._q.join()
+    assert ref() is None
+
+
+def test_cache_has_entry_byte_and_idle_expiry_limits(monkeypatch):
+    monkeypatch.setattr(call_pools, "CACHE_MAX", 4)
+    monkeypatch.setattr(call_pools, "CACHE_MAX_BYTES", 4096)
+    for n in range(30):
+        call_pools.call_shared("group_members", lambda k: "x" * 200, [n])
+    assert len(call_pools._cache) <= 4
+    call_pools.call_shared("group_members", lambda: "x" * 4096, [])
+    assert ("group_members", "[]") not in call_pools._cache
+    deadline = time.monotonic() + 3
+    while call_pools._cache and time.monotonic() < deadline:
+        time.sleep(.02)
+    assert not call_pools._cache
 
 
 # Looked at and fast: return at once (jobs run elsewhere) or a short poll.

@@ -5,7 +5,7 @@ Every frame is ``{"op": ..., **fields}``, e.g.
 ``{"op": "start_turn", "conv_id": "c1", "text": "hi", "mode": "agent", "model": "claude-haiku-5-5"}``.
 
 ``send`` never blocks the caller (the app's window thread): frames go on a queue and a
-writer thread sends them, packing whatever is queued into one length-prefixed pipe message.
+writer thread sends them, packing bounded batches into length-prefixed pipe messages.
 The reader thread only reads; a handler thread hands each frame to ``on_frame`` in order (the
 app's handler passes events to the push path), so a slow push never stops reads and never looks
 like a missing heartbeat. A dead host shows as pipe EOF at once, a hung one as a missing heartbeat.
@@ -34,6 +34,8 @@ HEARTBEAT_S = 2.0
 DEAD_AFTER_S = 3 * HEARTBEAT_S
 SILENT_DEAD_S = 30.0  # a host whose process still runs is hung only after this long a silence
 MAX_MESSAGE = 64 * 1024 * 1024
+MAX_BATCH_BYTES = 1024 * 1024
+MAX_BATCH_FRAMES = 128
 _TICK_S = 0.1
 _EOF = object()  # the reader's EOF, queued behind the frames read before it
 
@@ -70,7 +72,7 @@ class Channel:
         self._dead_after_s = dead_after_s
         self._alive = alive
         self._silent_dead_s = silent_dead_s
-        self._out: queue.SimpleQueue[dict[str, Any] | None] = queue.SimpleQueue()
+        self._out: queue.SimpleQueue[bytes | None] = queue.SimpleQueue()
         self._in: queue.SimpleQueue[Any] = queue.SimpleQueue()
         self._lock = threading.Lock()
         self._closed = threading.Event()
@@ -95,7 +97,13 @@ class Channel:
             raise ValueError(f"unknown op for this side: {op!r}")
         if self._closed.is_set():
             return False
-        self._out.put({"op": op, **fields})
+        raw = json.dumps({"op": op, **fields}, separators=(",", ":")).encode("utf-8")
+        if len(raw) + 2 > MAX_MESSAGE:
+            raise ValueError("agent-host frame exceeds MAX_MESSAGE")
+        with self._lock:
+            if self.closed:
+                return False
+            self._out.put(raw)
         return True
 
     def close(self, reason: str = "closed") -> None:
@@ -104,6 +112,12 @@ class Channel:
                 return
             self.close_reason = reason
             self._closed.set()
+            for pending in (self._out, self._in):
+                while True:
+                    try:
+                        pending.get_nowait()
+                    except queue.Empty:
+                        break
         self._out.put(None)
         self._in.put(None)
         try:
@@ -123,7 +137,10 @@ class Channel:
                     self._in.put(_EOF)
                 return
             self._last_rx = time.monotonic()
-            self._in.put(raw)
+            with self._lock:
+                if not self.closed:
+                    self._in.put(raw)
+            del raw
 
     def _handle_loop(self) -> None:
         while True:
@@ -133,21 +150,28 @@ class Channel:
             if raw is _EOF:
                 self.close("eof")
                 return
+            frames = frame = None
             try:
-                frames = json.loads(raw)
-            except ValueError:
-                continue
-            for frame in frames if isinstance(frames, list) else [frames]:
-                if isinstance(frame, dict) and frame.get("op") in self._recv_ops and frame["op"] != "heartbeat":
-                    self._on_frame(frame)
+                try:
+                    frames = json.loads(raw)
+                except ValueError:
+                    continue
+                for frame in frames if isinstance(frames, list) else [frames]:
+                    if isinstance(frame, dict) and frame.get("op") in self._recv_ops and frame["op"] != "heartbeat":
+                        self._on_frame(frame)
+            finally:
+                del raw, frames, frame
 
     def _write_loop(self) -> None:
+        carry = None
         while True:
-            item = self._out.get()
+            item = carry if carry is not None else self._out.get()
+            carry = None
             if item is None:
                 return
             batch = [item]
-            while True:
+            size = len(item) + 2
+            while len(batch) < MAX_BATCH_FRAMES and size < MAX_BATCH_BYTES:
                 try:
                     more = self._out.get_nowait()
                 except queue.Empty:
@@ -155,12 +179,19 @@ class Channel:
                 if more is None:
                     self._out.put(None)
                     break
+                if size + len(more) + 1 > min(MAX_BATCH_BYTES, MAX_MESSAGE):
+                    carry = more
+                    break
                 batch.append(more)
+                size += len(more) + 1
             try:
-                self._conn.send_bytes(json.dumps(batch, separators=(",", ":")).encode("utf-8"))
+                self._conn.send_bytes(b"[" + b",".join(batch) + b"]")
             except (OSError, ValueError):
                 self.close("eof")
                 return
+            finally:
+                item = more = None
+                batch.clear()
 
     def _tick_loop(self) -> None:
         last_beat = 0.0

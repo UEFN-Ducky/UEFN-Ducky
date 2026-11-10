@@ -114,12 +114,12 @@ def test_load_messages_paging_keeps_row_ids(tmp_path: Path) -> None:
         chat_saves.append_message(conv, {"role": "user", "content": f"m{i}", "text": f"m{i}", "ts": time.time()}, project)
     api = PanelApiChatsMixin()
     full = api.load_messages(conv.id)
-    # Row id = message index * 1000 + row index in that message (chat_rows.ROW_ID_STEP).
-    assert [r["id"] for r in full] == [i * 1000 for i in range(6)]
+    from frontend.ui_web.chat_rows import ROW_ID_STEP
+    assert [r["id"] for r in full] == [i * ROW_ID_STEP for i in range(6)]
     tail = api.load_messages(conv.id, limit=2)
-    assert [r["id"] for r in tail] == [4000, 5000]
-    older = api.load_messages(conv.id, before_id=4000, limit=2)
-    assert [r["id"] for r in older] == [2000, 3000]
+    assert [r["id"] for r in tail] == [4 * ROW_ID_STEP, 5 * ROW_ID_STEP]
+    older = api.load_messages(conv.id, before_id=4 * ROW_ID_STEP, limit=2)
+    assert [r["id"] for r in older] == [2 * ROW_ID_STEP, 3 * ROW_ID_STEP]
 
 
 def test_store_catalog_cache_serves_last_good_copy(monkeypatch) -> None:

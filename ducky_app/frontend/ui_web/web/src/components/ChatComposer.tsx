@@ -475,7 +475,9 @@ export function ChatComposer({
         kind: "image",
         name: att.name,
         mime: att.mime,
-        data_base64: att.dataUrl.replace(/^data:[^;]+;base64,/, ""),
+        ...(att.dataUrl.startsWith("data:")
+          ? { data_base64: att.dataUrl.replace(/^data:[^;]+;base64,/, "") }
+          : { media_url: att.dataUrl, stored_conv_id: att.storedConvId, path: att.storedPath }),
       };
     }
     if (att.kind === "video") {

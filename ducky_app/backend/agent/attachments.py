@@ -38,6 +38,19 @@ def parse_attachment_dict(raw: dict[str, Any], *, current: bool = False) -> Mess
         return None
     if kind == "image":
         data_b64 = _strip_data_url_prefix(str(raw.get("data_base64") or ""))
+        if not data_b64 and raw.get("stored_conv_id"):
+            from pathlib import Path
+            from frontend.ui_web.conversation_attachments import resolve_chat_attachment_path
+
+            path = str(raw.get("path") or "")
+            filename = Path(path).name
+            if path != f"attachments/{filename}":
+                raise ValueError("Invalid attachment reference")
+            full = resolve_chat_attachment_path(str(raw["stored_conv_id"]), filename)
+            policy.require(str(full))
+            if full.stat().st_size > _MAX_IMAGE_BYTES:
+                raise ValueError(f"Image {name!r} exceeds 20MB limit")
+            data_b64 = base64.b64encode(full.read_bytes()).decode("ascii")
         if not data_b64:
             return None
         try:

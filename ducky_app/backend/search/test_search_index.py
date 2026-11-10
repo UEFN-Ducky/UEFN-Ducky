@@ -16,6 +16,15 @@ from backend.store.repos import search as repo
 DUCKY_APP = Path(__file__).resolve().parents[2]
 
 
+def test_status_does_not_load_the_model(monkeypatch):
+    from backend.search import embedder
+    monkeypatch.setattr(embedder, '_loaded', None)
+    monkeypatch.setattr(embedder, 'get_embedder', lambda: pytest.fail('status loaded the model'))
+    result = indexer.status()
+    assert result['ok'] and result['model_loaded'] is False
+    assert embedder._loaded is None
+
+
 def _appdata() -> Path:
     from frontend.app_paths import resolve_app_data_dir
 

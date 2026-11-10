@@ -20,6 +20,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("restoring queued attachments", () => {
+  it("retains a stored image reference on resend, and sends drawn pixels after editing", () => {
+    const image: MessageAttachmentDto = { kind: "image", name: "shot.png", mime: "image/png",
+      stored_conv_id: "c1", path: "attachments/shot.png", media_url: "http://localhost:4199/chat-attachments/c1/shot.png" };
+    const { result } = renderHook(() => useComposerAttachments([image]));
+    expect(result.current.toApiAttachments()).toEqual([image]);
+    act(() => result.current.updateAttachmentImage(result.current.attachments[0].id, "data:image/png;base64,eA=="));
+    expect(result.current.toApiAttachments()[0].data_base64).toBe("eA==");
+    expect(result.current.toApiAttachments()[0].stored_conv_id).toBeUndefined();
+  });
   it("round-trips images, capture paths and file text while preserving draft attachments", () => {
     const { result } = renderHook(() => useComposerAttachments());
     const draft: MessageAttachmentDto = {

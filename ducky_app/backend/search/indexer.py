@@ -514,11 +514,9 @@ def reset_for_tests() -> None:
 
 def status() -> dict[str, Any]:
     """What Settings shows: rows per kind, vectors, the model, when it last indexed."""
-    from backend.search.embedder import get_embedder, unavailable_reason
+    from backend.search.embedder import model_status
 
-    emb = get_embedder()
-    out: dict[str, Any] = {"ok": True, "running": is_running(), "model": emb.model_id if emb else "",
-                           "model_error": "" if emb else (unavailable_reason() or "no model")}
+    out: dict[str, Any] = {"ok": True, "running": is_running(), **model_status()}
     try:
         out.update(repo.counts())
     except Exception as exc:  # noqa: BLE001

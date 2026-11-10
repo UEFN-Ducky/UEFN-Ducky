@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 
@@ -18,8 +19,9 @@ def _tool_result_text(result: dict[str, Any] | None) -> str:
 
 # Row id = message index * ROW_ID_STEP + row index within that message, so a
 # page knows its ids without converting the messages before it.
-# ponytail: a message past 999 rows (~500 tool calls in one turn) collides with the next.
-ROW_ID_STEP = 1000
+# UI ids are transient, never message database keys. Leave room for very large
+# single turns; exact JS integers up to two million stored messages.
+ROW_ID_STEP = 2**32
 
 
 def _messages_to_ui(
@@ -29,6 +31,10 @@ def _messages_to_ui(
     live: bool = False,
     before_id: int | None = None,
     limit: int | None = None,
+    message_offset: int = 0,
+    last_message_index: int | None = None,
+    display_attachments: bool = False,
+    conversations_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Stored conversation → flat UI rows.
 
@@ -45,10 +51,10 @@ def _messages_to_ui(
     from frontend.ui_web.chats.store import get_conversations_dir
 
     root = project_root if project_root is not None else PanelSettings.load().uefn_project_root
-    conv_dir = get_conversations_dir(root)
+    conv_dir = conversations_dir if conversations_dir is not None else get_conversations_dir(root)
     from frontend.ui_web.live_agent_runs import get_live_run_ids
     live_runs = get_live_run_ids() if live else frozenset()
-    last_index = len(conv.messages) - 1
+    last_index = message_offset + len(conv.messages) - 1 if last_message_index is None else last_message_index
 
     def convert(index: int, m: dict[str, Any]) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -58,7 +64,7 @@ def _messages_to_ui(
             row: dict[str, Any] = {"id": i, "role": "user", "text": m.get("text", m.get("content", ""))}
             attachments = m.get("attachments")
             if attachments:
-                row["attachments"] = hydrate_attachment_dicts(attachments, conv.id, conv_dir, root)
+                row["attachments"] = hydrate_attachment_dicts(attachments, conv.id, conv_dir, root, display=display_attachments)
             out.append(row)
             return out
         if role == "assistant":
@@ -67,7 +73,24 @@ def _messages_to_ui(
                 and bool(m.get("incomplete"))
                 and (m.get("run_id") in live_runs if m.get("run_id") else index == last_index)
             )
-            for block in m.get("blocks") or []:
+            blocks = m.get("blocks") or []
+            # Count cheap shell fields first, so a page inside a huge turn need
+            # not inflate or convert every old tool result. Keep absolute ids.
+            widths = [
+                (1 if in_flight and b.get("status") == "pending" else 2) if b.get("type") == "tool_call"
+                else int(bool(str(b.get("text") or "").strip())) if b.get("type") in ("text", "thinking", "user")
+                else 0 for b in blocks
+            ]
+            tail = bool(m.get("content") or m.get("attachments") or str(m.get("thinking") or "").strip()
+                        or m.get("incomplete"))
+            upper = index * ROW_ID_STEP + sum(widths) + int(tail)
+            if before_id is not None:
+                upper = min(upper, before_id)
+            lower = upper - int(limit) if limit is not None and int(limit) > 0 else index * ROW_ID_STEP
+            for block, width in zip(blocks, widths):
+                if i + width <= lower or i >= upper:
+                    i += width
+                    continue
                 btype = block.get("type")
                 if btype == "thinking":
                     # Per-step reasoning, shown inline between tools (Cursor-style).
@@ -167,7 +190,7 @@ def _messages_to_ui(
                 row_asst: dict[str, Any] = {"id": i, "role": "assistant", "text": content}
                 if pictures:
                     # Pictures the agent made this turn show under its reply.
-                    row_asst["attachments"] = hydrate_attachment_dicts(pictures, conv.id, conv_dir, root)
+                    row_asst["attachments"] = hydrate_attachment_dicts(pictures, conv.id, conv_dir, root, display=display_attachments)
                 if isinstance(thinking, str) and thinking.strip():
                     row_asst["thinking"] = thinking
                 if author:
@@ -222,13 +245,13 @@ def _messages_to_ui(
 
     messages = conv.messages
     if before_id is None and limit is None:
-        return [row for index, m in enumerate(messages) for row in convert(index, m)]
-    end = len(messages) if before_id is None else min(len(messages), int(before_id) // ROW_ID_STEP + 1)
+        return [row for index, m in enumerate(messages, message_offset) for row in convert(index, m)]
+    end = len(messages) if before_id is None else min(len(messages), int(before_id) // ROW_ID_STEP + 1 - message_offset)
     want = int(limit) if limit is not None and int(limit) > 0 else None
     pages: list[list[dict[str, Any]]] = []
     count = 0
     for index in range(end - 1, -1, -1):
-        rows = convert(index, messages[index])
+        rows = convert(index + message_offset, messages[index])
         if before_id is not None:
             rows = [r for r in rows if r["id"] < int(before_id)]
         pages.append(rows)

@@ -247,9 +247,9 @@ const ChatRowView = memo(function ChatRowView({
         </ChatCollapseScopeProvider>
       );
     }
-    // A whole saved message only (row id = stored index * 1000): not a send still on its way,
+    // A whole saved message only (chat_rows.ROW_ID_STEP = 2**32): not a send still on its way,
     // nor a message sent into a running turn.
-    const storedId = /^\d+$/.test(row.id) && Number(row.id) % 1000 === 0 ? Number(row.id) : null;
+    const storedId = /^\d+$/.test(row.id) && Number(row.id) % 2 ** 32 === 0 ? Number(row.id) : null;
     const restartFrom = env.onRestartFrom;
     return (
       <ChatCollapseScopeProvider scope={scope}>

@@ -32,6 +32,7 @@ interface EditableUserMessageProps {
 }
 
 function attachmentSrc(att: MessageAttachmentDto): string | null {
+  if (att.kind === "image" && att.media_url) return att.media_url;
   if (att.kind !== "image" || !att.data_base64) return null;
   const mime = att.mime || "image/png";
   return `data:${mime};base64,${att.data_base64}`;
@@ -91,7 +92,7 @@ export function AttachmentStrip({
             }
             title={onPreview ? `Open ${att.name}` : att.name}
           >
-            <img src={src} alt={att.name} className="message-bubble-attachment-image" />
+            <img src={src} alt={att.name} loading="lazy" className="message-bubble-attachment-image" />
           </button>,
         );
       })}

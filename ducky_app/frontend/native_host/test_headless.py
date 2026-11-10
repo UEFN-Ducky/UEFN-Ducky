@@ -52,6 +52,18 @@ _BACKEND_PROBE = textwrap.dedent(
     boot_report.mark = lambda state, **k: marks.append(state)
     real_stage = boot_report.stage
     boot_report.stage = lambda name: (marks.append("stage:" + name), real_stage(name))
+    agent_state = types.ModuleType("frontend.ui_web.agent_turns.state")
+    sys.modules["frontend.ui_web.agent_turns.state"] = agent_state
+    running_agents = ["a", "b"]
+    agent_state.list_running_agents = lambda: list(running_agents)
+    heartbeat_counts = []
+    def start_heartbeat(agents):
+        marks.append("heartbeat")
+        assert any(json.loads(line)["t"] == "hello" for line in out.getvalue().splitlines())
+        heartbeat_counts.append(agents())
+        running_agents.pop()
+        heartbeat_counts.append(agents())
+    boot_report.start_heartbeat = start_heartbeat
     lifecycle.second_instance = lambda paths, links: (lifecycle.FIRST, None)
     lifecycle.watch_parent = lambda pid, on_dead: None
     lifecycle.Shutdown = QuickShutdown
@@ -64,7 +76,8 @@ _BACKEND_PROBE = textwrap.dedent(
     code = headless.run_backend(["UEFN-Ducky.exe", "--backend"], stdin=io.BytesIO(b""), stdout=out)
     lines = [json.loads(line) for line in out.getvalue().decode("utf-8").splitlines()]
     bad = sorted(m for m in ("webview", "tkinter", "_tkinter", "clr", "pythonnet") if m in sys.modules)
-    sys.__stdout__.write(json.dumps({"code": code, "lines": lines, "bad": bad, "marks": marks}))
+    sys.__stdout__.write(json.dumps({"code": code, "lines": lines, "bad": bad, "marks": marks,
+                                  "heartbeat_counts": heartbeat_counts}))
     """
 )
 
@@ -124,6 +137,11 @@ def test_stage_lines_reach_the_launcher_in_order(backend_run) -> None:
     assert [s["name"] for s in stages] == ["panel_api_init", "hello"]
     assert all(isinstance(s["ms"], int) and s["ms"] >= 0 for s in stages)
     assert kinds.index("stage") < kinds.index("hello") < len(kinds) - 1 - kinds[::-1].index("stage")
+
+
+def test_native_backend_starts_heartbeat_after_hello_with_live_agent_count(backend_run) -> None:
+    assert backend_run["marks"][-3:] == ["stage:hello", "ok", "heartbeat"]
+    assert backend_run["heartbeat_counts"] == [2, 1]
 
 
 def test_run_signatures_unchanged() -> None:

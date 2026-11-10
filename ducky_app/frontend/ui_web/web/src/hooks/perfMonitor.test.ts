@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ report_ui_perf: vi.fn() }));
-vi.mock("./usePanelApi", () => ({ getApi: () => api }));
+const api = vi.hoisted(() => ({ report_ui_perf: vi.fn(), available: true }));
+vi.mock("./usePanelApi", () => ({ getApi: () => api.available ? api : undefined }));
 
 type ObserverCallback = (list: { getEntries: () => Array<{ name: string; duration: number }> }) => void;
 
@@ -28,6 +28,7 @@ beforeEach(() => {
   rafCalls = 0;
   queued = [];
   FakeObserver.instances = [];
+  api.available = true;
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
     rafCalls += 1;
     queued.push(cb);
@@ -37,9 +38,75 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.clearAllTimers();
   vi.unstubAllGlobals();
   vi.useRealTimers();
   api.report_ui_perf.mockReset();
+});
+
+it("summarizes a queue burst without evicting an earlier stall", async () => {
+  const { installPerfMonitor, notePendingDepth } = await import("./perfMonitor");
+  installPerfMonitor();
+  FakeObserver.instances[0].callback({ getEntries: () => [{ name: "longtask", duration: 320 }] });
+  for (let depth = 1; depth <= 10_000; depth++) notePendingDepth(depth);
+  await vi.advanceTimersByTimeAsync(5000);
+  const batch = api.report_ui_perf.mock.calls[0][0];
+  expect(batch).toHaveLength(2);
+  expect(batch[0]).toMatchObject({ kind: "ui_stall", duration_ms: 320 });
+  expect(batch[1]).toMatchObject({ name: "pending_events", samples: 9951, peak_pending: 10_000, pending_depth: 10_000 });
+
+  notePendingDepth(60);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(api.report_ui_perf.mock.calls[1][0]).toEqual([
+    { kind: "ui_frame", name: "pending_events", duration_ms: 0, samples: 1, peak_pending: 60, pending_depth: 60 },
+  ]);
+});
+
+it("summarizes slow deliveries while keeping their peak, count and total work", async () => {
+  const { installPerfMonitor, noteFrameDelivery, notePendingDepth } = await import("./perfMonitor");
+  installPerfMonitor();
+  notePendingDepth(90);
+  for (let i = 0; i < 500; i++) noteFrameDelivery(20, 2, 60);
+  noteFrameDelivery(45, 3, 0);
+  await vi.advanceTimersByTimeAsync(5000);
+  const batch = api.report_ui_perf.mock.calls[0][0];
+  expect(batch).toHaveLength(2);
+  expect(batch.find((row: { name: string }) => row.name === "event_delivery")).toMatchObject({
+    samples: 501, duration_ms: 45, total_duration_ms: 10045, delivered: 1003, pending_depth: 0, peak_pending: 90,
+  });
+  noteFrameDelivery(5, 2, 80);
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(api.report_ui_perf.mock.calls[1][0][0]).toMatchObject({
+    name: "event_delivery", samples: 1, pending_depth: 80, peak_pending: 80,
+  });
+});
+
+it("keeps summaries bounded while the API is unavailable and sends them when it returns", async () => {
+  const { installPerfMonitor, notePendingDepth } = await import("./perfMonitor");
+  installPerfMonitor();
+  api.available = false;
+  for (let i = 0; i < 20; i++) {
+    for (let depth = 50; depth <= 290; depth++) notePendingDepth(depth);
+    await vi.advanceTimersByTimeAsync(5000);
+  }
+  expect(api.report_ui_perf).not.toHaveBeenCalled();
+  api.available = true;
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(api.report_ui_perf.mock.calls[0][0]).toEqual([
+    { kind: "ui_frame", name: "pending_events", duration_ms: 0, samples: 4820, peak_pending: 290, pending_depth: 290 },
+  ]);
+});
+
+it("keeps IPC diagnostic batches within 200 entries even with many stalls", async () => {
+  const { installPerfMonitor, notePendingDepth, noteFrameDelivery } = await import("./perfMonitor");
+  installPerfMonitor();
+  FakeObserver.instances[0].callback({ getEntries: () => Array.from({ length: 300 }, () => ({ name: "longtask", duration: 320 })) });
+  notePendingDepth(100);
+  noteFrameDelivery(20, 2, 60);
+  await vi.advanceTimersByTimeAsync(5000);
+  const batch = api.report_ui_perf.mock.calls[0][0];
+  expect(batch).toHaveLength(200);
+  expect(batch.filter((entry: { kind: string }) => entry.kind === "ui_stall")).toHaveLength(198);
 });
 
 function runFrames(count: number) {

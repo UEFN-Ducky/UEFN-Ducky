@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import sys
 import threading
 import time
 import traceback
@@ -26,7 +27,8 @@ from typing import Any, Callable
 _log = logging.getLogger(__name__)
 
 # Bridge lanes stay at 14 threads together, whatever the burst.
-POOL_SIZES: dict[str, int] = {"urgent": 4, "bg": 6, "block": 4}
+POOL_SIZES: dict[str, int] = {"control": 2, "urgent": 2, "bg": 6, "block": 4}
+CONTROL = frozenset({"cancel_agent", "ui_rpc_respond", "steer_message"})
 HTTP_POOL_SIZES: dict[str, int] = {"normal": 16, "streams": 8, "long": 32}
 
 URGENT = frozenset({
@@ -116,6 +118,8 @@ CACHE_TTL_S = 1.0
 # fbw0 group B (app 0.3 -> 1.4 GB over 12 h): every key (get_skill_info per skill, plugin_data per
 # path, list reads per filter) stayed forever after its 1 s TTL, holding its encoded JSON result.
 CACHE_MAX = 64
+# Total encoded size kept; one result over a quarter of it is never cached.
+CACHE_MAX_BYTES = 8 * 1024 * 1024
 
 _CHATS = frozenset({"list_all_conversations", "group_members", "list_running_agents"})
 _PLUGINS = frozenset({"list_mcp_servers", "get_skill_info", "list_coding_agents", "list_agent_profiles", "plugin_data"})
@@ -133,14 +137,15 @@ class _Pool:
     def __init__(self, name: str, size: int) -> None:
         self.name = name
         self.size = max(1, int(size))
-        self._q: queue.SimpleQueue[tuple[Callable[..., Any], tuple[Any, ...]]] = queue.SimpleQueue()
+        self._q: queue.Queue[tuple[Callable[..., Any], tuple[Any, ...]]] = queue.Queue()
         self._lock = threading.Lock()
         self._threads = 0
         self._idle = 0
 
     def submit(self, fn: Callable[..., Any], *args: Any) -> None:
         with self._lock:
-            self._q.put((fn, args))
+            # Preserve reliable delivery under load, including remote calls.
+            self._q.put_nowait((fn, args))
             if self._q.qsize() > self._idle and self._threads < self.size:
                 t = threading.Thread(target=self._work, name=f"{self.name}_{self._threads}", daemon=True)
                 self._threads += 1
@@ -160,6 +165,9 @@ class _Pool:
                 fn(*args)
             except Exception:
                 _log.exception("%s task failed", self.name)
+            finally:
+                del fn, args
+                self._q.task_done()
 
 
 _pools: dict[str, _Pool] = {}
@@ -180,6 +188,8 @@ def lane_for(method: str) -> str:
     # Remote pointer/key frames: their own two workers (remote_link.input_lane), never bg.
     if is_input_method(method):
         return "input"
+    if method in CONTROL:
+        return "control"
     if method in URGENT:
         return "urgent"
     if method in BLOCKING:
@@ -239,7 +249,40 @@ class _Flight:
 _share_lock = threading.Lock()
 _flights: dict[tuple[str, str], _Flight] = {}
 _cache: dict[tuple[str, str], tuple[float, str]] = {}
+_cache_timer: threading.Timer | None = None
 _gen = 0  # bumped by on_push: a call that started before a clear never fills the cache
+
+
+def _prune_cache() -> None:
+    """Under _share_lock; insertion order is also access order."""
+    now = _clock()
+    for key in [k for k, (until, _) in _cache.items() if until <= now]:
+        del _cache[key]
+    sizes = [(k, sys.getsizeof(k[0]) + sys.getsizeof(k[1]) + sys.getsizeof(v[1]) + 128)
+             for k, v in _cache.items()]
+    total = sum(size for _, size in sizes)
+    for key, size in sizes:
+        if len(_cache) <= CACHE_MAX and total <= CACHE_MAX_BYTES:
+            break
+        del _cache[key]
+        total -= size
+
+
+def _expire_cache() -> None:
+    global _cache_timer
+    with _share_lock:
+        _cache_timer = None
+        _prune_cache()
+        _schedule_expiry()
+
+
+def _schedule_expiry() -> None:
+    global _cache_timer
+    if _cache and _cache_timer is None:
+        delay = max(0.01, min(until for until, _ in _cache.values()) - _clock())
+        _cache_timer = threading.Timer(delay, _expire_cache)
+        _cache_timer.daemon = True
+        _cache_timer.start()
 
 
 def encode(result: Any) -> str:
@@ -274,8 +317,11 @@ def call_shared(method: str, func: Callable[..., Any], args: Any) -> str:
         return encode(func(*params))
     with _share_lock:
         if cache:
+            _prune_cache()
             hit = _cache.get(key)
             if hit is not None and hit[0] > _clock():
+                _cache.pop(key)
+                _cache[key] = hit
                 return hit[1]
         flight = _flights.get(key)
         owner = flight is None
@@ -301,15 +347,14 @@ def call_shared(method: str, func: Callable[..., Any], args: Any) -> str:
 
 
 def _store(key: tuple[str, str], value: str) -> None:
-    """Cache ``value`` (under ``_share_lock``); past CACHE_MAX, expired rows go first, then the oldest."""
-    now = _clock()
+    """Cache ``value`` (under ``_share_lock``); past CACHE_MAX or CACHE_MAX_BYTES, expired rows
+    go first, then the oldest. An idle timer empties expired rows when no call comes."""
     _cache.pop(key, None)  # re-inserted last: insertion order is age order
-    _cache[key] = (now + CACHE_TTL_S, value)
-    if len(_cache) > CACHE_MAX:
-        for k in [k for k, (until, _) in _cache.items() if until <= now]:
-            del _cache[k]
-        while len(_cache) > CACHE_MAX:
-            del _cache[next(iter(_cache))]
+    if sys.getsizeof(value) + sys.getsizeof(key[1]) > CACHE_MAX_BYTES // 4:
+        return
+    _cache[key] = (_clock() + CACHE_TTL_S, value)
+    _prune_cache()
+    _schedule_expiry()
 
 
 def on_push(event_type: str) -> None:

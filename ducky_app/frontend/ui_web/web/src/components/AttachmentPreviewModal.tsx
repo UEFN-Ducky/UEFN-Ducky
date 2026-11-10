@@ -16,6 +16,7 @@ function formatSeconds(t: number): string {
 }
 
 function attachmentImageSrc(att: MessageAttachmentDto): string | null {
+  if (att.kind === "image" && att.media_url) return att.media_url;
   if (att.kind !== "image" || !att.data_base64) return null;
   const mime = att.mime || "image/png";
   return `data:${mime};base64,${att.data_base64}`;
