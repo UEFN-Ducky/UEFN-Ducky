@@ -37,6 +37,21 @@ _AGENT_SCAN_SECONDS = 90.0
 # project root -> (time.time() of the last real UEFN build, its error count).
 # ponytail: per process; a build from another Ducky process isn't seen, persist it if that matters.
 _LAST_COMPILE: dict[str, tuple[float, int]] = {}
+# The build still running after an agent's call answered: the next call waits on it again
+# instead of starting a second build behind it.
+_PENDING_BUILD: list[Any] = []
+
+
+def _wait_for_build(client: Any) -> tuple[str, Any]:
+    """Run (or rejoin) the UEFN build for at most VERSE_BUILD_LIMIT_S, looking for a
+    blocking popup every VERSE_POPUP_CHECK_S. Same returns as call_limits.wait_job."""
+    from backend.bridge import call_limits
+
+    job = _PENDING_BUILD[0] if _PENDING_BUILD and not _PENDING_BUILD[0].done.is_set() else None
+    if job is None:
+        job = call_limits.Job(client.compile_project)
+        _PENDING_BUILD[:] = [job]
+    return call_limits.wait_job(job, call_limits.VERSE_BUILD_LIMIT_S, call_limits.VERSE_POPUP_CHECK_S)
 
 
 def _defer_to_clean_build(root: str, payload: dict[str, Any]) -> None:
@@ -277,7 +292,22 @@ def workspace_compile_verse(pretty: bool = False) -> str:
             "Use workspace_list_verse_errors for Problems diagnostics (works offline)."
         )
     try:
-        result = client.compile_project()
+        state, result = _wait_for_build(client)
+        if state == "popup":
+            return tool_json({
+                "ok": False, "blocked_by_popup": True, "hwnd": hex(int(result.get("hwnd") or 0)),
+                "title": str(result.get("title") or ""),
+                "next": "The build waits behind this UEFN popup: call uefn_popups, press the right button "
+                        "with uefn_popup_press(hwnd, n), then call workspace_compile_verse again (it rejoins this build).",
+            }, pretty=pretty)
+        if state == "timeout":
+            from backend.bridge.call_limits import VERSE_BUILD_LIMIT_S
+
+            return tool_json({
+                "ok": False, "still_building": True,
+                "next": f"UEFN is still building after {VERSE_BUILD_LIMIT_S:.0f} s and no popup holds it. "
+                        "Call workspace_compile_verse again to keep waiting on the same build; never start another.",
+            }, pretty=pretty)
         if isinstance(result, dict) and _project_root():
             _LAST_COMPILE[_project_root()] = (time.time(), int(result.get("numErrors") or 0))
     except TimeoutError as exc:

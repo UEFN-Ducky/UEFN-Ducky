@@ -60,6 +60,55 @@ def test_a_build_that_never_answers_names_the_popup(monkeypatch) -> None:
         vd.workspace_compile_verse()
 
 
+class _HangingClient:
+    """A Verse Workflow Server whose build never answers (until released)."""
+
+    connected = True
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.builds = 0
+
+    def compile_project(self):
+        self.builds += 1
+        self.release.wait(10)
+        return {"numErrors": 0}
+
+
+def _short_build_limits(monkeypatch, client) -> None:
+    # ponytail: 0.3 s stands in for the real 180 s limit, 0.1 s for the 60 s popup look.
+    monkeypatch.setattr("backend.bridge.call_limits.VERSE_BUILD_LIMIT_S", 0.3)
+    monkeypatch.setattr("backend.bridge.call_limits.VERSE_POPUP_CHECK_S", 0.1)
+    monkeypatch.setattr(vd, "_PENDING_BUILD", [])
+    monkeypatch.setattr("frontend.ui_web.verse_editor.workflow.client.get_workflow_client", lambda: client)
+
+
+def test_a_build_that_runs_past_its_limit_says_still_building(monkeypatch) -> None:
+    client = _HangingClient()
+    _short_build_limits(monkeypatch, client)
+    monkeypatch.setattr("backend.tools.core.uefn_popups.list_popups", lambda: [])
+    started = time.monotonic()
+    out = json.loads(vd.workspace_compile_verse())
+    assert time.monotonic() - started < 2
+    assert out["ok"] is False and out["still_building"] is True
+    # The next call rejoins the same build instead of starting a second one.
+    json.loads(vd.workspace_compile_verse())
+    assert client.builds == 1
+    client.release.set()
+
+
+def test_a_build_behind_a_popup_names_it_at_the_first_look(monkeypatch) -> None:
+    client = _HangingClient()
+    _short_build_limits(monkeypatch, client)
+    monkeypatch.setattr("backend.tools.core.uefn_popups.list_popups",
+                        lambda: [{"hwnd": 0x1234, "title": "Save changes?", "blocking": True}])
+    started = time.monotonic()
+    out = json.loads(vd.workspace_compile_verse())
+    assert time.monotonic() - started < 0.25  # the first look (60 s live), not the full limit
+    assert out == {**out, "ok": False, "blocked_by_popup": True, "hwnd": "0x1234", "title": "Save changes?"}
+    client.release.set()
+
+
 def test_scan_checks_the_newest_files_first(monkeypatch, tmp_path: Path) -> None:
     from frontend.ui_web.verse_editor.lsp import diagnostics_cache, diagnostics_scan
 
