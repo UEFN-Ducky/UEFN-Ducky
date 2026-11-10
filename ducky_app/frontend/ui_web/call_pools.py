@@ -113,6 +113,9 @@ _PLUGIN_DATA_READS = frozenset({"scope.get", "data.get", "data.list", "files.lis
 # Shared while one runs, never cached: these must always be fresh (D11).
 SINGLE_FLIGHT_ONLY = frozenset({"get_settings", "get_project_info", "get_listener_status"})
 CACHE_TTL_S = 1.0
+# fbw0 group B (app 0.3 -> 1.4 GB over 12 h): every key (get_skill_info per skill, plugin_data per
+# path, list reads per filter) stayed forever after its 1 s TTL, holding its encoded JSON result.
+CACHE_MAX = 64
 
 _CHATS = frozenset({"list_all_conversations", "group_members", "list_running_agents"})
 _PLUGINS = frozenset({"list_mcp_servers", "get_skill_info", "list_coding_agents", "list_agent_profiles", "plugin_data"})
@@ -292,9 +295,21 @@ def call_shared(method: str, func: Callable[..., Any], args: Any) -> str:
         with _share_lock:
             _flights.pop(key, None)
             if cache and flight.error is None and flight.gen == _gen:
-                _cache[key] = (_clock() + CACHE_TTL_S, flight.value or "null")
+                _store(key, flight.value or "null")
         flight.done.set()
     return flight.value
+
+
+def _store(key: tuple[str, str], value: str) -> None:
+    """Cache ``value`` (under ``_share_lock``); past CACHE_MAX, expired rows go first, then the oldest."""
+    now = _clock()
+    _cache.pop(key, None)  # re-inserted last: insertion order is age order
+    _cache[key] = (now + CACHE_TTL_S, value)
+    if len(_cache) > CACHE_MAX:
+        for k in [k for k, (until, _) in _cache.items() if until <= now]:
+            del _cache[k]
+        while len(_cache) > CACHE_MAX:
+            del _cache[next(iter(_cache))]
 
 
 def on_push(event_type: str) -> None:

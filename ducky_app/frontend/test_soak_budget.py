@@ -267,3 +267,27 @@ def test_memory_cli_exit_codes(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "terminals: 6 still open 15 s after the agents finished" in out
     assert "agent workload 600 MB" in out
+
+
+def test_1000_beats_of_bridge_reads_keep_the_call_cache_under_its_cap(monkeypatch):
+    """fbw0 group B: the app grew 0.3 -> 1.4 GB over 12 h. call_pools kept every cached read
+    (per skill, per plugin path) after its 1 s TTL, so distinct keys piled up for the whole run."""
+    from frontend.ui_web import call_pools
+
+    clock = [0.0]
+    monkeypatch.setattr(call_pools, "_clock", lambda: clock[0])
+    monkeypatch.setattr(call_pools, "_cache", {})
+    for beat in range(1000):
+        clock[0] += 30.0  # one heartbeat
+        for n in range(3):  # each beat the page reads a few skills it never asked for before
+            call_pools.call_shared("get_skill_info", lambda s: {"id": s, "body": "x" * 1000}, [f"skill-{beat}-{n}"])
+        assert len(call_pools._cache) <= call_pools.CACHE_MAX
+    # A burst of fresh reads inside one second is capped too, oldest first.
+    for n in range(200):
+        call_pools.call_shared("get_skill_info", lambda s: s, [f"burst-{n}"])
+    assert len(call_pools._cache) == call_pools.CACHE_MAX
+    assert ("get_skill_info", '["burst-199"]') in call_pools._cache
+    # A hit within the TTL is still served from the cache.
+    calls = []
+    call_pools.call_shared("get_skill_info", lambda s: calls.append(s) or s, ["burst-199"])
+    assert calls == []
