@@ -149,6 +149,41 @@ def uefn_popup_press(hwnd: int, button: int, pretty: bool = False) -> str:
 
 
 @mcp.tool()
+def app_popups(app: str = "", press_lone_ok: bool = False, pretty: bool = False) -> Any:
+    """Popups of any desktop app Ducky drives (not UEFN: use uefn_popups), each captured into
+    this chat with its buttons numbered 1, 2, 3… left to right, labelled when the dialog has
+    real buttons, plus what it says.
+
+    ``app``: aftereffects, premiere, mediaencoder, photoshop, illustrator, blender, unity,
+    godot, roblox, unreal, or any exe name ("foo.exe"); empty = all of them. Call it whenever
+    a plugin or nested MCP tool for that app hangs, times out or says the app is busy: a
+    modal popup stops the app's scripts. ``blocking`` is true while one is modal.
+    ``press_lone_ok=true`` presses blocking message boxes whose only button is the way on
+    (never one about deleting, saving, quitting, signing in or buying). Then app_popup_press.
+    """
+    from backend.tools.core import app_popups as ap
+
+    pressed = ap.press_lone_ok(app) if press_lone_ok else []
+    popups = [ap.describe(p) for p in ap.list_popups(app)]
+    result = {"ok": True, "pressed": pressed, "popups": popups, "count": len(popups)}
+    images = [p["path"] for p in popups if p.get("path")]
+    if not images:
+        return tool_json(result, pretty=pretty)
+    return _window_mcp({**result, "path": images[0]}, pretty=pretty)
+
+
+@mcp.tool()
+def app_popup_press(hwnd: int, button: int, pretty: bool = False) -> str:
+    """Press button ``button`` (1-based, left to right, as numbered by app_popups) on a popup
+    of any desktop app. Standard dialogs are pressed without moving the pointer; drawn ones
+    with a real click that gives the person their window and pointer back. Returns whether
+    it closed and which popups of that app are still open."""
+    from backend.tools.core import app_popups as ap
+
+    return tool_json(ap.press(int(hwnd), int(button)), pretty=pretty)
+
+
+@mcp.tool()
 def uefn_wait_window(title_regex: str, timeout: float = 120, pretty: bool = False) -> str:
     """Wait until a UEFN window title matches. Timeout is capped at 300s."""
     from backend.tools.core.uefn_windows import wait_uefn_window
