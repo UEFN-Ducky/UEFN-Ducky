@@ -16,6 +16,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -78,6 +79,28 @@ enum Line {
     /// One non-empty stderr line, already [`scrub`]bed.
     Err(String),
     Eof,
+}
+
+/// The backend still starting: its last stage and when it was spawned (None once it said
+/// hello or failed). ponytail: one global, the launcher runs one supervisor.
+static STARTING: Mutex<Option<(Option<String>, Instant)>> = Mutex::new(None);
+
+fn set_starting(v: Option<(Option<String>, Instant)>) {
+    if let Ok(mut g) = STARTING.lock() {
+        *g = v;
+    }
+}
+
+/// The loading screen's line while the backend starts: `Starting: panel_api_init (24 s)`.
+pub fn starting_status() -> Option<String> {
+    let g = STARTING.lock().ok()?;
+    let (stage, at) = g.as_ref()?;
+    status_text(stage.as_deref(), at.elapsed().as_secs())
+}
+
+/// ponytail: quiet for the first 3 s, so a normal start never flashes it.
+pub fn status_text(stage: Option<&str>, secs: u64) -> Option<String> {
+    (secs >= 3).then(|| format!("Starting: {} ({secs} s)", stage.unwrap_or("backend")))
 }
 
 /// Longest stderr line kept for a report.
@@ -263,6 +286,7 @@ impl Backend {
         let mut last_line = spawned;
         let mut stage: Option<String> = None;
         let mut last_err = String::new();
+        set_starting(Some((None, spawned)));
         loop {
             let deadline = hello_deadline(spawned, last_line, cfg.hello_silence, cfg.hello_cap);
             let left = deadline.saturating_duration_since(Instant::now());
@@ -282,6 +306,7 @@ impl Backend {
                 }
                 Ok(Line::Msg(BackendMsg::Event { name, data })) if name == "stage" => {
                     stage = data["name"].as_str().map(String::from).or(stage);
+                    set_starting(Some((stage.clone(), spawned)));
                 }
                 Ok(Line::Msg(_)) => continue,
                 Ok(Line::Err(s)) => last_err = s,
@@ -359,7 +384,9 @@ impl Supervisor {
 
     fn spawn_until_hello(&mut self) -> Result<&Hello, StartError> {
         loop {
-            match Backend::spawn(&self.cfg) {
+            let spawned = Backend::spawn(&self.cfg);
+            set_starting(None);
+            match spawned {
                 Ok(b) => {
                     self.backend = Some(b);
                     return Ok(&self.backend.as_ref().unwrap().hello);
@@ -468,6 +495,13 @@ mod busy_tests {
         };
         assert!(h(r#"{"t":"hello","protocol":1,"port":4199,"pid":9,"handoff":true}"#).handoff);
         assert!(!h(r#"{"t":"hello","protocol":1,"port":4199}"#).handoff);
+    }
+
+    #[test]
+    fn status_line_names_the_stage_after_3_s() {
+        assert_eq!(status_text(Some("panel_api_init"), 24).as_deref(), Some("Starting: panel_api_init (24 s)"));
+        assert_eq!(status_text(None, 5).as_deref(), Some("Starting: backend (5 s)"));
+        assert_eq!(status_text(Some("x"), 2), None);
     }
 
     #[test]

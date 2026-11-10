@@ -189,6 +189,17 @@ fn fake_backend_entry() {
             say(hello(1));
             std::thread::sleep(Duration::from_secs(30));
         }
+        // A slow PC whose boot only logs to stderr (imports, no stage events yet).
+        "stderr_stages" => {
+            let delay: f64 = std::env::var(DELAY_ENV).ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+            let started = Instant::now();
+            while started.elapsed().as_secs_f64() < delay {
+                eprintln!("boot stage import_panel_api");
+                std::thread::sleep(Duration::from_millis(300));
+            }
+            say(hello(1));
+            std::thread::sleep(Duration::from_secs(30));
+        }
         "stall" => {
             say(json!({"t": "event", "name": "stage", "data": {"name": "panel_api_init", "ms": 5}}));
             std::thread::sleep(Duration::from_secs(30));
@@ -311,6 +322,15 @@ fn no_hello_in_time_gives_23() {
 fn stages_keep_the_hello_wait_open_past_the_silence() {
     let dir = scratch("stages_ok");
     let mut sup = Supervisor::start(fake_slow("stages", &dir, Duration::from_secs(1), Duration::from_secs(30), 3.0)).unwrap();
+    assert!(sup.hello().unwrap().protocol_ok());
+    sup.shutdown("test done");
+}
+
+#[test]
+fn stderr_boot_lines_keep_the_hello_wait_open_too() {
+    // Scaled from "a stage every 10 s for 60 s": 1 s silence, lines every 0.3 s for 3 s.
+    let dir = scratch("stderr_stages");
+    let mut sup = Supervisor::start(fake_slow("stderr_stages", &dir, Duration::from_secs(1), Duration::from_secs(30), 3.0)).unwrap();
     assert!(sup.hello().unwrap().protocol_ok());
     sup.shutdown("test done");
 }

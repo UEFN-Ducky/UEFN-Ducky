@@ -458,7 +458,7 @@ fn create_splash(parent: HWND) -> windows::core::Result<HWND> {
         RegisterClassW(&wc);
         let mut rc = RECT::default();
         let _ = GetClientRect(parent, &mut rc);
-        CreateWindowExW(
+        let splash = CreateWindowExW(
             Default::default(),
             class,
             PCWSTR::null(),
@@ -471,9 +471,14 @@ fn create_splash(parent: HWND) -> windows::core::Result<HWND> {
             None,
             Some(instance),
             None,
-        )
+        )?;
+        // Repaints the "Starting: <stage> (N s)" line once a second while the backend starts.
+        SetTimer(Some(splash), STATUS_TIMER, 1000, None);
+        Ok(splash)
     }
 }
+
+const STATUS_TIMER: usize = 0x7d2;
 
 unsafe extern "system" fn splash_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
@@ -484,7 +489,19 @@ unsafe extern "system" fn splash_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
             splash::paint(hdc.0 as _, rc.right, rc.bottom, GetDpiForWindow(hwnd));
+            if let Some(text) = supervisor::starting_status() {
+                let mut wide: Vec<u16> = text.encode_utf16().collect();
+                let top = rc.bottom * 2 / 3;
+                let mut line = RECT { left: 0, top, right: rc.right, bottom: top + 40 };
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, COLORREF(0x0080_8080));
+                DrawTextW(hdc, &mut wide, &mut line, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+            }
             let _ = EndPaint(hwnd, &ps);
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == STATUS_TIMER => {
+            let _ = InvalidateRect(Some(hwnd), None, false);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),

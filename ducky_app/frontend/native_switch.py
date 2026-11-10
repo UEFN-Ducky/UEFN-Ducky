@@ -67,10 +67,11 @@ FALLBACK_REASONS = (
 _NOT_A_FAILURE = frozenset({"webview2", "no_exe", "crash_loop_active", "launcher_fallback"})
 
 CRASH_LOOP_FAILURES = 3
-# How long a launch waits for the ready file. Longer than the launcher's own 15 s hello
-# wait (which starts after the launcher itself is up), so a silent backend ends in the
+# How long a launch waits for the ready file. Longer than the launcher's own hello wait
+# (20 s of silence, 180 s in all while the backend keeps sending boot lines), so a slow PC
+# that is still starting keeps its launcher window, and a silent backend ends in the
 # launcher's exit 23, with its boot.json record, before this deadline kills it.
-NATIVE_WAIT_S = 22.0
+NATIVE_WAIT_S = 200.0
 CRASH_LOOP_WINDOW_S = 10 * 60
 CRASH_LOOP_HOLD_S = 24 * 3600
 STARTS_KEPT = 200
