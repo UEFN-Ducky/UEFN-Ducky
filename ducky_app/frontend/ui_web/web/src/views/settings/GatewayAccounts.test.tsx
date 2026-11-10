@@ -11,10 +11,11 @@ const api = {
   set_gateway_account_key: vi.fn(),
   login_gateway_account: vi.fn(),
   gateway_account_status: vi.fn(),
+  open_external_url: vi.fn(),
 };
 const confirm = vi.fn();
 const runBridgeJob = vi.fn();
-vi.mock("../../hooks/usePanelApi", () => ({ getApi: () => api }));
+vi.mock("../../hooks/usePanelApi", () => ({ getApi: () => api, isRemote: () => false }));
 vi.mock("../../hooks/onApiReady", () => ({ onApiReady: (fn: () => void) => (fn(), () => {}) }));
 vi.mock("../../contexts/ConfirmModalContext", () => ({ useConfirmModal: () => ({ confirm }) }));
 vi.mock("../../hooks/bridgeJobAsync", () => ({ runBridgeJob }));
@@ -118,6 +119,23 @@ it("Add API key adds a row and saves the key on it", async () => {
   await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "new1", "sk-new"));
   expect(api.add_gateway_account).toHaveBeenCalledWith("anthropic", "Key 4", "key");
   expect(runBridgeJob).toHaveBeenCalledWith("test_key", ["anthropic", "sk-new", "", true], 300_000);
+});
+
+it("a provider with no key yet links to where to get one", async () => {
+  api.list_gateway_accounts.mockImplementation(async () => ({
+    ok: true, auto_switch: true, default: "default",
+    accounts: [{ id: "default", label: "Default", kind: "key", active: true, exhausted_until: null, has_key: false }],
+  }));
+  render(<GatewayAccounts provider="gemini" kind="key" keyUrl="https://aistudio.google.com/apikey" />);
+  await screen.findByText("Default");
+  fireEvent.click(screen.getByRole("button", { name: "Get a key" }));
+  expect(api.open_external_url).toHaveBeenCalledWith("https://aistudio.google.com/apikey");
+});
+
+it("the key link hides once a key is saved", async () => {
+  render(<GatewayAccounts provider="anthropic" kind="key" keyUrl="https://console.anthropic.com" />);
+  await screen.findByText("Team");
+  expect(screen.queryByRole("button", { name: "Get a key" })).toBeNull();
 });
 
 it("adding a key never asks for a base URL", async () => {

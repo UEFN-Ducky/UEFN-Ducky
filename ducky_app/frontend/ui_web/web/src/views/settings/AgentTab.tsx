@@ -996,7 +996,7 @@ export function AgentTab() {
                 ) : null}
                 {!hosted && !isUrl && selected.secret_key ? (
                   <>
-                    <GatewayAccounts provider={secretKey} kind="key" title="API keys" />
+                    <GatewayAccounts provider={secretKey} kind="key" title="API keys" keyUrl={selected.key_url} />
                     {saved ? <AgentApiKeyToggle providerId={selected.id} /> : null}
                   </>
                 ) : null}

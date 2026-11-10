@@ -177,6 +177,8 @@ export type PluginLlmProvider = {
   plugin_id: string;
   shows_thinking_effort?: boolean;
   key_optional?: boolean;
+  /** Where to get an API key (https only); the API keys table links it. */
+  key_url?: string;
   icon_data_url?: string;
   /** False keeps the row on Settings → LLMs and out of the chat model picker. */
   chat?: boolean;

@@ -2,7 +2,7 @@ import { runBridgeJob } from "../../hooks/bridgeJobAsync";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContextMenu, type ContextMenuItem } from "../../components/ContextMenu";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
-import { getApi } from "../../hooks/usePanelApi";
+import { getApi, isRemote } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
 import { Icons } from "../../icons/Icons";
 import type { GatewayAccountDto, GatewayAccountStatusDto } from "../../types/panel";
@@ -76,7 +76,16 @@ function UsageBars({ windows }: { windows: UsageWindow[] | undefined }) {
 /** One gateway's API keys or CLI logins as a table: status and default for new chats.
  *  Usage left and switching at a limit belong to subscription logins (Claude Code, Codex);
  *  API keys are billed per token, so their table has neither. */
-export function GatewayAccounts({ provider, kind, title }: { provider: string; kind: Kind; title?: string }) {
+/** Opens a provider's key page in the person's browser (the window can't navigate away). */
+function openKeyPage(url: string) {
+  const api = getApi();
+  if (!isRemote() && api?.open_external_url) void api.open_external_url(url);
+  else window.open(url, "_blank", "noopener");
+}
+
+export function GatewayAccounts({ provider, kind, title, keyUrl }: {
+  provider: string; kind: Kind; title?: string; keyUrl?: string;
+}) {
   const { confirm } = useConfirmModal();
   const [accounts, setAccounts] = useState<GatewayAccountDto[]>([]);
   const [defaultId, setDefaultId] = useState("");
@@ -311,6 +320,11 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           </span>
           <span className="general-tab-section-title-text">{`${heading} (${accounts.length})`}</span>
         </h3>
+        {kind === "key" && keyUrl && accounts.length > 0 && !accounts.some((a) => a.has_key) ? (
+          <button type="button" className="link-btn gateway-accounts-keylink" onClick={() => openKeyPage(keyUrl)}>
+            Get a key
+          </button>
+        ) : null}
         {loaded && !accounts.length ? null : (
           <button
             type="button"
@@ -336,6 +350,11 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
             {kind === "login" ? `No ${loginName ? `${loginName} ` : ""}login yet` : "No API key yet"}
           </div>
           <div className="gateway-accounts-muted">Add one to use these models in chats.</div>
+          {kind === "key" && keyUrl ? (
+            <button type="button" className="link-btn gateway-accounts-keylink" onClick={() => openKeyPage(keyUrl)}>
+              Get a key
+            </button>
+          ) : null}
           {keyFor === "new" ? null : (
             <button
               type="button"

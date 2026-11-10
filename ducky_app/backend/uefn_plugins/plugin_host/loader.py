@@ -532,6 +532,9 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         }
         if "shows_thinking_effort" in prov:
             entry["shows_thinking_effort"] = bool(prov.get("shows_thinking_effort"))
+        key_url = str(prov.get("key_url") or "").strip()
+        if key_url.startswith("https://"):
+            entry["key_url"] = key_url  # where to get a key: the API keys table links it
         _CONTRIBUTIONS["llm_providers"].append(entry)
 
     for agent in contributes.get("llm.coding_agents") or contributes.get("llm_coding_agents") or []:
