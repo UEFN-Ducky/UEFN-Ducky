@@ -122,6 +122,39 @@ def test_load_messages_paging_keeps_row_ids(tmp_path: Path) -> None:
     assert [r["id"] for r in older] == [2 * ROW_ID_STEP, 3 * ROW_ID_STEP]
 
 
+def test_scrolling_up_reaches_the_first_message(tmp_path: Path) -> None:
+    """The panel's scroll to the top: an 80-row first page, then 300-row pages before the
+    oldest row shown (useChatMessages.loadOlder), until the chat's first row (id 0)."""
+    import frontend.ui_web.panel_api  # noqa: F401 — mixins import the package root first
+    from frontend.settings import PanelSettings
+    from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
+    from frontend.ui_web.panel_api_chats import PanelApiChatsMixin
+
+    project = str(tmp_path / "Island")
+    Path(project).mkdir()
+    s = PanelSettings.load()
+    s.uefn_project_root = project
+    s.save()
+    conv = chat_convs.create_conversation(title="Long", project_root=project, skill_snapshot="x")
+    for turn in range(40):
+        chat_saves.append_message(conv, {"role": "user", "content": f"q{turn}", "text": f"q{turn}", "ts": time.time()}, project)
+        blocks = [{"type": "text", "text": f"step {turn}"}]
+        blocks += [{"type": "tool_call", "id": f"t{turn}-{n}", "name": "read", "arguments": {"n": n},
+                    "status": "success", "result": {"text": "ok"}} for n in range(10)]
+        chat_saves.append_message(conv, {"role": "assistant", "content": f"a{turn}", "blocks": blocks, "ts": time.time()}, project)
+    api = PanelApiChatsMixin()
+    whole = [r["id"] for r in api.load_messages(conv.id)]
+    shown = [r["id"] for r in api.load_messages(conv.id, limit=80)]
+    for _ in range(50):
+        if shown[0] <= 0:
+            break
+        page = [r["id"] for r in api.load_messages(conv.id, before_id=shown[0], limit=300)]
+        assert page, f"scrolling up before row {shown[0]} loaded nothing"
+        assert page[-1] < shown[0]
+        shown = page + shown
+    assert shown == whole
+
+
 def test_store_catalog_cache_serves_last_good_copy(monkeypatch) -> None:
     from frontend.ui_web import panel_api_store as pas
 

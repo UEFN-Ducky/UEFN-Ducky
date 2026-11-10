@@ -27,12 +27,15 @@ from typing import Any, Callable
 _log = logging.getLogger(__name__)
 
 # Bridge lanes stay at 14 threads together, whatever the burst.
-POOL_SIZES: dict[str, int] = {"control": 2, "urgent": 2, "bg": 6, "block": 4}
+POOL_SIZES: dict[str, int] = {"control": 1, "chat": 2, "urgent": 2, "bg": 5, "block": 4}
 CONTROL = frozenset({"cancel_agent", "ui_rpc_respond", "steer_message"})
+# Opening or scrolling a chat never queues behind sends and plan progress: with urgent at 2
+# workers, a busy team kept load_messages waiting past the page's 45 s and scrolling up
+# loaded nothing (Nov 10 2026).
+CHAT = frozenset({"load_messages", "load_tool_result"})
 HTTP_POOL_SIZES: dict[str, int] = {"normal": 16, "streams": 8, "long": 32}
 
 URGENT = frozenset({
-    "load_messages",
     "send_message",
     "steer_message",
     "cancel_agent",
@@ -190,6 +193,8 @@ def lane_for(method: str) -> str:
         return "input"
     if method in CONTROL:
         return "control"
+    if method in CHAT:
+        return "chat"
     if method in URGENT:
         return "urgent"
     if method in BLOCKING:

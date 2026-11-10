@@ -90,11 +90,26 @@ def test_remote_input_starts_at_once_behind_300_slow_bg_calls(monkeypatch):
 def test_stop_has_reserved_workers():
     release = threading.Event()
     for _ in range(call_pools.POOL_SIZES["urgent"]):
-        call_pools.submit("load_messages", release.wait, 5)
+        call_pools.submit("send_message", release.wait, 5)
     stopped = threading.Event()
     call_pools.submit("cancel_agent", stopped.set)
     try:
         assert stopped.wait(.25)
+    finally:
+        release.set()
+
+
+def test_chat_loads_never_wait_behind_busy_sends():
+    """Scrolling up loaded nothing while a team kept both urgent workers busy (Nov 10 2026)."""
+    assert call_pools.lane_for("load_messages") == "chat"
+    release = threading.Event()
+    for _ in range(call_pools.POOL_SIZES["urgent"] + 3):
+        call_pools.submit("send_message", release.wait, 5)
+        call_pools.submit("plan_progress", release.wait, 5)
+    loaded = threading.Event()
+    call_pools.submit("load_messages", loaded.set)
+    try:
+        assert loaded.wait(.25)
     finally:
         release.set()
 
@@ -318,10 +333,10 @@ def test_lane_wait_over_2s_is_traced(monkeypatch):
     gate = threading.Event()
     for _ in range(call_pools.POOL_SIZES["urgent"]):
         call_pools.submit("send_message", gate.wait, 5)
-    call_pools.submit("load_messages", ran.set)
+    call_pools.submit("set_conversation_coding_agent", ran.set)
     time.sleep(0.1)
     now[0] = 2.5
     gate.set()
     assert ran.wait(5)
     waits = [m for k, m in traced if k == "ui_lane_wait"]
-    assert waits and waits[-1]["lane"] == "urgent" and waits[-1]["method"] == "load_messages"
+    assert waits and waits[-1]["lane"] == "urgent" and waits[-1]["method"] == "set_conversation_coding_agent"
