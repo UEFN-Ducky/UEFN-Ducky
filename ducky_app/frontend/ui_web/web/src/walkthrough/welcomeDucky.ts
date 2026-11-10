@@ -10,6 +10,7 @@ import { requestOpenChatTab } from "../navigation/openChatReference";
 import { requestOpenDockSide, requestOpenSidebarPanel } from "../navigation/openSidebarPanel";
 import { FIRST_RUN_TOUR_ID } from "./firstRunSetup";
 import { armIntro, disarmIntro, whenIntroDone } from "./introTyping";
+import { rememberWelcomeChat } from "./WelcomeClip";
 import { whenWalkthroughHydrated } from "./persistence";
 import { markTourCompleted, startTour, subscribeWalkthrough } from "./WalkthroughService";
 
@@ -81,6 +82,7 @@ export async function welcomeAfterSetup(): Promise<void> {
     disarmIntro();
     return;
   }
+  rememberWelcomeChat(made.id);
   await openWelcomeChat(made.id, made.title || WELCOME_TITLE, 10);
   await whenIntroDone();
   await runFirstRunTour(0);

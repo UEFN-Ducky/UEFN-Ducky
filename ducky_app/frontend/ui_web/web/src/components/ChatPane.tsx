@@ -62,6 +62,7 @@ import {
 } from "../walkthrough/WalkthroughService";
 import { whenWalkthroughHydrated } from "../walkthrough/persistence";
 import { whenFirstRunSetupDone } from "../walkthrough/firstRunSetup";
+import { WelcomeClip } from "../walkthrough/WelcomeClip";
 import { isAutoTranslateChat } from "../navigation/tabTranslatePrefs";
 import { usePluginUiPrefs } from "../hooks/usePluginUiPrefs";
 import { requestChatTranslateWalk } from "../navigation/openTranslatedChat";
@@ -1006,6 +1007,7 @@ export function ChatPane({
               onOpenMember={onOpenChat}
             />
           ) : null}
+          <WelcomeClip chatId={chat.id} />
           <ChatRows
             chatId={chat.id}
             isFocus={isFocus}
