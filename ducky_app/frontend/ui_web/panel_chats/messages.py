@@ -25,6 +25,23 @@ def _cap_tool_results(rows: list[dict[str, Any]]) -> None:
 _NOT_LOADED: dict[str, Any] = {"role": "user", "text": ""}
 
 
+# How long a chat load waits for the writer to land this chat's in-flight row. Past it the
+# load reads the last written snapshot: the running turn's stream shows the rest. Without the
+# cap load_conversation's flush waited up to 30 s behind a busy writer and the panel gave up
+# at 45 s (CHAT_LOAD_TIMEOUT_MS) on short chats while a team ran.
+CHECKPOINT_FLUSH_WAIT_S = 0.5
+
+
+def _writer_settled(conv_id: str) -> bool:
+    """True when no checkpoint of this chat waits for the writer (after a short flush)."""
+    from frontend.ui_web.chats import saves as chat_saves
+
+    writer = chat_saves._WRITER
+    if writer is None or not writer.checkpoint_waits(conv_id):
+        return True
+    return bool(writer.flush(conv_id, CHECKPOINT_FLUSH_WAIT_S)) or not writer.checkpoint_waits(conv_id)
+
+
 def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dict[str, Any]] | None:
     """The ``limit`` rows before ``before_id`` (the newest without it), opening only the
     messages they come from. ``load_conversation`` opened every message of the chat, one
@@ -34,8 +51,8 @@ def _page_rows(conv_id: str, before_id: Any, limit: int, live: bool) -> list[dic
     from frontend.ui_web.chat_rows import ROW_ID_STEP
     from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves, store as chat_store
 
-    writer = chat_saves._WRITER
-    if not chat_store._use_db() or chat_saves._queued(conv_id) is not None or (writer is not None and writer.checkpoint_waits(conv_id)):
+    # A checkpoint still waiting is not a reason for the whole load: that flushes for 30 s.
+    if not chat_store._use_db() or chat_saves._queued(conv_id) is not None:
         return None
     conv = chat_convs.load_conversation_meta(conv_id)
     if conv is None:
@@ -77,7 +94,10 @@ def load_messages(
     started = _pa.time.monotonic()
     try:
         live = conv_id in self.list_running_agents()
-        rows = None if limit is None else _page_rows(conv_id, before_id, int(limit), live)
+        settled = _writer_settled(conv_id)
+        # ponytail: a whole load with the writer busy reads every message as one huge page.
+        page = int(limit) if limit is not None else (None if settled else 10**9)
+        rows = None if page is None else _page_rows(conv_id, before_id, page, live)
         if rows is None:
             conv = _pa.load_conversation(conv_id)
             if not conv:
