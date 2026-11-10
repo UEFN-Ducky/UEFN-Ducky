@@ -184,7 +184,24 @@ def test_on_screen_check_gives_up_after_two_short_tries(monkeypatch):
     monkeypatch.setattr(version_check.time, "sleep", lambda s: None)
     payload, error = version_check.fetch_remote_payload(timeout=5.0, attempts=2)
     assert payload is None and "timed out" in error
-    assert calls == [5.0, 5.0]
+    assert calls == [5.0, 15.0]  # a timeout is retried once with 15 s
+
+
+def test_timeout_then_ok_recovers_with_a_longer_wait(monkeypatch):
+    calls = []
+
+    def slow_then_ok(req, timeout=None, **_):
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise urllib.error.URLError(TimeoutError("timed out"))
+        return Response(b'{"payload":{"currentVersion":"1.2.488"}}')
+
+    monkeypatch.setattr(version_check.urllib.request, "urlopen", slow_then_ok)
+    monkeypatch.setattr(version_check, "update_base_url", lambda: "https://example.test")
+    monkeypatch.setattr(version_check.time, "sleep", lambda s: None)
+    payload, error = version_check.fetch_remote_payload(timeout=5.0, attempts=2)
+    assert error is None and payload["currentVersion"] == "1.2.488"
+    assert calls == [5.0, 15.0]
     calls.clear()
     version_check.fetch_remote_payload()
     assert len(calls) == ATTEMPTS  # background checks keep every try

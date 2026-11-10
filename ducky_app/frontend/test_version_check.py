@@ -138,6 +138,12 @@ def _patch_net(monkeypatch, first_error: BaseException, fallback_error: BaseExce
     monkeypatch.setenv(version_check.UPDATE_BASE_URL_ENV, "https://feed.test")
     monkeypatch.setattr(version_check, "clock_skew_message", lambda base: None)
     monkeypatch.setattr(version_check.time, "sleep", lambda s: None)
+    from frontend import update_network
+
+    def no_doh(req, timeout):
+        raise OSError("no DoH in tests")
+
+    monkeypatch.setattr(update_network, "doh_open", no_doh)
 
     def direct(req, timeout):
         raise first_error
@@ -192,6 +198,59 @@ def test_failed_fallback_still_explains_the_first_stage(monkeypatch) -> None:
     payload, error = version_check.fetch_remote_payload(attempts=2)
     assert payload is None and "DNS" in (error or "")
     assert version_check.last_net_stage == "dns" and version_check.last_fallback == "" and len(opens) == 1
+    assert error.startswith("Can't reach the update server.")
+
+
+def test_broken_dns_gets_through_on_the_doh_lookup(monkeypatch) -> None:
+    """The PC's resolver and its proxy both fail: DoH finds the Store and the check still lands."""
+    import io
+    import socket
+    import urllib.error
+
+    from frontend import update_network, version_check
+
+    dns = urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+    real_doh_open = update_network.doh_open
+    _patch_net(monkeypatch, dns, fallback_error=dns)
+    hosts = []
+
+    def fake_resolve(host, timeout=5.0):
+        hosts.append(host)
+        return "203.0.113.7"
+
+    class Pinned:
+        def __init__(self, ip):
+            self.ip = ip
+
+        def open(self, req, timeout):
+            assert self.ip == "203.0.113.7"
+            return io.BytesIO(b'{"payload": {"currentVersion": "1.2.488"}}')
+
+    monkeypatch.setattr(update_network, "doh_open", real_doh_open)
+    monkeypatch.setattr(update_network, "doh_resolve", fake_resolve)
+    monkeypatch.setattr(update_network, "pinned_opener", Pinned)
+    payload, error = version_check.fetch_remote_payload(attempts=2)
+    assert error is None and payload["currentVersion"] == "1.2.488"
+    assert hosts == ["feed.test"] and version_check.last_fallback == "doh"
+
+
+def test_doh_resolve_reads_the_first_a_record(monkeypatch) -> None:
+    import io
+    import urllib.request
+
+    from frontend import update_network
+
+    urls = []
+
+    def fake_urlopen(req, timeout):
+        urls.append(req.full_url)
+        if len(urls) == 1:
+            raise OSError("1.1.1.1 blocked")
+        return io.BytesIO(b'{"Answer": [{"type": 5, "data": "cname."}, {"type": 1, "data": "198.51.100.4"}]}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    assert update_network.doh_resolve("uefnducky.org") == "198.51.100.4"
+    assert urls[1].startswith("https://8.8.8.8/") and "name=uefnducky.org" in urls[1]
 
 
 if __name__ == "__main__":

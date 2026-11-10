@@ -53,6 +53,63 @@ def urlopen(req: urllib.request.Request, *, timeout: float, content_checked: boo
     return content_checked_opener().open(req, timeout=timeout)
 
 
+# DNS-over-HTTPS resolvers addressed by IP (their certificates name the IP), so a PC whose
+# own DNS can't resolve the Store host still finds it.
+DOH_URLS = ("https://1.1.1.1/dns-query", "https://8.8.8.8/resolve")
+
+
+def doh_resolve(host: str, *, timeout: float = 5.0) -> str:
+    """First IPv4 address for ``host`` from a DoH JSON resolver; raises OSError when none answers."""
+    import json
+    from urllib.parse import quote
+
+    last: BaseException = OSError(f"no DoH answer for {host}")
+    for base in DOH_URLS:
+        req = urllib.request.Request(f"{base}?name={quote(host)}&type=A",
+                                     headers={"Accept": "application/dns-json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                answers = json.loads(resp.read().decode("utf-8", "replace")).get("Answer") or []
+        except (OSError, ValueError) as exc:
+            last = exc
+            continue
+        for row in answers:
+            if isinstance(row, dict) and row.get("type") == 1 and row.get("data"):
+                return str(row["data"])
+    raise last if isinstance(last, OSError) else OSError(str(last))
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connects to ``ip`` but keeps ``host`` for SNI, certificate check and the Host header."""
+
+    def __init__(self, host: str, *, ip: str, **kwargs: Any) -> None:
+        super().__init__(host, **kwargs)
+        self._ip = ip
+
+    def connect(self) -> None:
+        import socket
+
+        sock = socket.create_connection((self._ip, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def pinned_opener(ip: str) -> urllib.request.OpenerDirector:
+    class Handler(urllib.request.HTTPSHandler):
+        def https_open(self, req: urllib.request.Request) -> Any:
+            return self.do_open(lambda host, **kw: _PinnedHTTPSConnection(host, ip=ip, **kw), req,
+                                context=ssl.create_default_context())
+
+    return urllib.request.build_opener(Handler())
+
+
+def doh_open(req: urllib.request.Request, *, timeout: float) -> Any:
+    """Open ``req`` with its host looked up over DoH (PC DNS broken or filtered).
+    The certificate is still verified against the real host name."""
+    from urllib.parse import urlsplit
+
+    return pinned_opener(doh_resolve(urlsplit(req.full_url).hostname or "")).open(req, timeout=timeout)
+
+
 def retry_delay(attempt: int) -> float:
     return 0.5 * (attempt + 1)
 

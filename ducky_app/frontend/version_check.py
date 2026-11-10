@@ -23,7 +23,7 @@ from frontend.bundle_root import is_packaged_runtime
 UPDATE_BASE_URL_ENV = "DUCKY_UPDATE_BASE_URL"
 # net_access.NET_STAGES word for the last failed feed request ("" after a success).
 last_net_stage = ""
-# "dns" | "tls" when the last feed request only got through on the fallback try ("" otherwise).
+# "dns" | "tls" | "doh" when the last feed request only got through on the fallback try ("" otherwise).
 last_fallback = ""
 
 
@@ -214,10 +214,11 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
         method="POST",
     )
     from frontend.net_access import build_opener, stage_of
-    from frontend.update_network import ATTEMPTS, cert_failed, retryable, retry_delay
+    from frontend.update_network import ATTEMPTS, cert_failed, doh_open, retryable, retry_delay
 
     tries = attempts or ATTEMPTS
     fell_back = False
+    tried_doh = False
     for attempt in range(tries):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -235,6 +236,16 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
                     break
                 except (OSError, ValueError, http.client.HTTPException) as again:
                     exc = again
+            if stage == "dns" and not tried_doh:
+                # The PC's DNS (and its proxy) can't find the Store: look it up over HTTPS.
+                tried_doh = True
+                try:
+                    with doh_open(req, timeout=timeout) as resp:
+                        body = resp.read().decode("utf-8", errors="replace")
+                    last_fallback = "doh"
+                    break
+                except (OSError, ValueError, http.client.HTTPException):
+                    pass  # explain the PC's own DNS failure, not the resolver's
             if cert_failed(exc):
                 return None, clock_skew_message(base) or str(exc)
             if attempt + 1 == tries or not retryable(exc):
@@ -247,7 +258,9 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
                     usage_stats.net_fail("update_check", last_net_stage, proxy_mode())
                 except Exception:
                     pass
-                return None, text
+                return None, f"Can't reach the update server. {text}"
+            if stage == "timeout":
+                timeout = max(timeout, 15.0)  # a slow link: the next try waits longer
             time.sleep(retry_delay(attempt))
 
     try:
