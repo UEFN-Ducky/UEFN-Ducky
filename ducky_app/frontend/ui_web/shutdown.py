@@ -184,9 +184,9 @@ def _ports_blocked(exc: BaseException | str) -> bool:
     """WinError 10013 that settings.bind_with_fallback could not move past (every pair refused)."""
     if not isinstance(exc, OSError):
         return False
-    from frontend.settings import _bind_refused
+    from frontend.settings import bind_refused
 
-    return _bind_refused(exc)
+    return bind_refused(exc)
 
 
 def _format_fatal_message(exc: BaseException | str) -> str:

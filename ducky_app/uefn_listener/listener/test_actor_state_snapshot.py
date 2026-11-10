@@ -83,6 +83,7 @@ def graph(monkeypatch):
     device_editor = types.ModuleType("listener.device_editor")
     device_editor.get_device_settings = lambda *a, **k: {}
     device_editor.is_creative_device = lambda a: bool(getattr(a, "device", False))
+    device_editor._device_kind = lambda a: "creative_device"
     device_editor.list_creative_devices = lambda *a, **k: []
     dispatch = types.ModuleType("listener.dispatch")
     dispatch.register = lambda name: (lambda fn: fn)

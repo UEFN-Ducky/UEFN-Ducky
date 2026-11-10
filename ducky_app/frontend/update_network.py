@@ -96,8 +96,10 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 def pinned_opener(ip: str) -> urllib.request.OpenerDirector:
     class Handler(urllib.request.HTTPSHandler):
         def https_open(self, req: urllib.request.Request) -> Any:
+            from frontend import ssl_boot
+
             return self.do_open(lambda host, **kw: _PinnedHTTPSConnection(host, ip=ip, **kw), req,
-                                context=ssl.create_default_context())
+                                context=ssl_boot.https_context())
 
     return urllib.request.build_opener(Handler())
 

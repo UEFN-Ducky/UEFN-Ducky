@@ -58,13 +58,13 @@ def _port_reserved(port: int) -> bool:
     try:
         sock.bind(("127.0.0.1", port))
     except OSError as exc:
-        return _bind_refused(exc)
+        return bind_refused(exc)
     finally:
         sock.close()
     return False
 
 
-def _bind_refused(exc: OSError) -> bool:
+def bind_refused(exc: OSError) -> bool:
     """WinError 10013 in any Windows language: the number, never the text."""
     return getattr(exc, "winerror", None) == _WSAEACCES or exc.errno == 13
 
@@ -92,7 +92,7 @@ def bind_with_fallback(make_server: Any, ui_port: int) -> Any:
     try:
         return make_server(ui_port)
     except OSError as exc:
-        movable = _bind_refused(exc) or (_bind_in_use(exc) and not os.environ.get(_PORT_PIN_ENV))
+        movable = bind_refused(exc) or (_bind_in_use(exc) and not os.environ.get(_PORT_PIN_ENV))
         if not movable or not ui_port:
             raise
         first = exc
@@ -102,7 +102,7 @@ def bind_with_fallback(make_server: Any, ui_port: int) -> Any:
         try:
             server = make_server(listener - 1)
         except OSError as again:
-            if _bind_refused(again) or _bind_in_use(again):
+            if bind_refused(again) or _bind_in_use(again):
                 continue
             raise
         PANEL_LISTENER_PORT = listener
