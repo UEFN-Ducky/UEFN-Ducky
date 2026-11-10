@@ -1057,7 +1057,7 @@ class PanelApiSettingsMixin:
                 else:
                     a["has_key"] = bool(accounts.account_key(p, a["id"]))
             return {"accounts": listed, "auto_switch": accounts.auto_switch_enabled(p),
-                    "default": next(a["id"] for a in listed if a["active"])}
+                    "default": next((a["id"] for a in listed if a["active"]), "")}
 
         return _accounts_call(rows, provider)
 
@@ -1109,7 +1109,7 @@ class PanelApiSettingsMixin:
         def get(p: str) -> dict[str, Any]:
             mine = accounts.chat_account(p, str(conv_id or ""))
             account = mine or accounts.active_account(p)
-            label = next(a["label"] for a in accounts.list_accounts(p) if a["id"] == account)
+            label = next((a["label"] for a in accounts.list_accounts(p) if a["id"] == account), "No account")
             return {"account": account, "label": label, "follows_default": mine is None}
 
         return _accounts_call(get, provider)

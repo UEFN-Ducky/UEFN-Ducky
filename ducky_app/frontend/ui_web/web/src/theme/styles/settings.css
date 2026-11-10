@@ -1836,6 +1836,28 @@
 .gateway-accounts-actions .icon-btn,
 .gateway-accounts-head .icon-btn { display: inline-flex; vertical-align: middle; }
 .gateway-accounts-keyrow { display: flex; gap: 6px; margin: 6px 0; }
+/* Delete: the row fades and slides out (LEAVE_MS in GatewayAccounts.tsx); none = the empty card fades in. */
+.gateway-accounts-table tr { transition: opacity 180ms ease, transform 180ms ease; }
+.gateway-accounts-table tr.is-leaving { opacity: 0; transform: translateX(12px); }
+.gateway-accounts-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 20px 12px;
+  text-align: center;
+  animation: gateway-accounts-in 200ms ease both;
+}
+.gateway-accounts-empty-icon { color: var(--muted); display: inline-flex; }
+.gateway-accounts-empty .settings-btn { margin-top: 6px; }
+@keyframes gateway-accounts-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gateway-accounts-table tr { transition: none; }
+  .gateway-accounts-empty { animation: none; }
+}
 
 .gateway-accounts-auto {
   display: inline-flex;

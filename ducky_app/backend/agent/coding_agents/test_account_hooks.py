@@ -94,7 +94,8 @@ def test_rpc_round_trip(reg, monkeypatch):
     assert api.login_gateway_account("codex", work) == {"ok": True, "session_id": "t1"}
     assert spawned["command"] == ["codex", "login"] and spawned["env_extra"]["CODEX_HOME"].endswith(work)
 
-    assert api.remove_gateway_account("codex", "default")["ok"] is False
+    assert api.remove_gateway_account("codex", "default") == {"ok": True}
+    assert reg.calls[-1] == ("logout", None)  # the CLI's own login is signed out
     assert api.set_gateway_account("codex", "nope")["ok"] is False
     assert api.gateway_account_status("openai", "default")["ok"] is False  # no hook
     assert api.list_gateway_accounts("")["ok"] is False

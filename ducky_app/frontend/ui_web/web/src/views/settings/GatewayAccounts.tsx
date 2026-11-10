@@ -21,7 +21,8 @@ function loginText(s: GatewayAccountStatusDto | null | undefined): string {
 }
 
 function keyText(a: GatewayAccountDto): string {
-  const key = a.id === "default" ? "Uses the key above" : a.key_hint || (a.has_key ? "Key saved" : "No key yet");
+  const saved = a.id === "default" ? "Uses the key above" : a.key_hint || "Key saved";
+  const key = a.has_key ? saved : "No key yet";
   return a.base_url ? `${key} · ${a.base_url}` : key;
 }
 
@@ -29,10 +30,14 @@ function keyText(a: GatewayAccountDto): string {
 function statusPill(a: GatewayAccountDto, isDefault: boolean): { text: string; tone: string } | null {
   if (a.exhausted_until) return { text: `Full until ${resetTime(a.exhausted_until)}`, tone: "is-warn" };
   if (a.kind === "login" && a.status && !a.status.loggedIn) return { text: "Logged out", tone: "is-fail" };
-  if (a.kind === "key" && a.id !== "default" && !a.has_key) return { text: "No key", tone: "is-fail" };
+  if (a.kind === "key" && !a.has_key) return { text: "No key", tone: "is-fail" };
   if (isDefault) return { text: "★ Default", tone: "is-ok" };
   return null;
 }
+
+const LEAVE_MS = 180;
+const reducedMotion = () =>
+  typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
 function UsageBars({ windows }: { windows: UsageWindow[] | undefined }) {
   const rows = (windows || []).filter((w) => Number(w.limit) > 0);
@@ -81,6 +86,9 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   const [renaming, setRenaming] = useState<{ id: string; label: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  // Row fading out while its delete runs.
+  const [leaving, setLeaving] = useState("");
 
   const load = useCallback(
     async (refresh = false) => {
@@ -91,7 +99,9 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
         setNote(res.error);
         return;
       }
-      setAccounts(res.accounts);
+      // The table's kind wins: older cores reported a lone CLI login (Default) as a key.
+      setAccounts(res.accounts.map((a) => ({ ...a, kind })));
+      setLoaded(true);
       setDefaultId(res.default || res.accounts.find((a) => a.active)?.id || "");
       setAutoSwitch(res.auto_switch);
       if (!limits || !api.gateway_account_usage) return;
@@ -102,7 +112,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           .catch(() => setUsage((m) => ({ ...m, [a.id]: [] })));
       }
     },
-    [provider, limits],
+    [provider, limits, kind],
   );
 
   useEffect(() => onApiReady(() => void load()), [load]);
@@ -144,12 +154,18 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
   };
   const remove = async (a: GatewayAccountDto) => {
     const ok = await confirm({
-      title: "Remove account",
-      message: `Remove ${a.label}? Its ${a.kind === "login" ? "login" : "API key"} is forgotten.`,
-      confirmLabel: "Remove",
+      title: "Delete account",
+      message: `Delete ${a.label}? Its saved ${a.kind === "login" ? "login" : "key"} is removed from this PC.`,
+      confirmLabel: "Delete",
       danger: true,
     });
-    if (ok === true) await run(() => api()?.remove_gateway_account?.(provider, a.id), "Account removed.");
+    if (ok !== true) return;
+    if (!reducedMotion()) {
+      setLeaving(a.id);
+      await new Promise((r) => setTimeout(r, LEAVE_MS));
+    }
+    await run(() => api()?.remove_gateway_account?.(provider, a.id), `${a.label} deleted.`);
+    setLeaving("");
   };
   const saveRename = () => {
     if (!renaming) return;
@@ -242,8 +258,10 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
     ...(a.kind === "key" ? [{ id: "url", label: "Set base URL", onClick: () => openKeyRow(a.id, true) }] : []),
     ...(i > 0 ? [{ id: "up", label: "Move up", onClick: () => move(i, -1) }] : []),
     ...(i < accounts.length - 1 ? [{ id: "down", label: "Move down", onClick: () => move(i, 1) }] : []),
-    ...(a.id !== "default" ? [{ id: "remove", label: "Remove", danger: true, onClick: () => void remove(a) }] : []),
+    { id: "remove", label: "Delete", danger: true, onClick: () => void remove(a) },
   ];
+  const addFirst = () => (kind === "login" ? void addLogin() : openKeyRow("new"));
+  const loginName = (title || "").replace(/\s*logins?$/i, "").trim();
   const menuIndex = menu ? accounts.findIndex((a) => a.id === menu.id) : -1;
 
   const heading = title || "Accounts";
@@ -256,23 +274,33 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
           </span>
           <span className="general-tab-section-title-text">{`${heading} (${accounts.length})`}</span>
         </h3>
-        <button
-          type="button"
-          className="settings-btn"
-          disabled={busy}
-          onClick={() => {
-            if (kind === "login") void addLogin();
-            else openKeyRow("new");
-          }}
-        >
-          {kind === "login" ? "Log in another account" : "Add API key"}
-        </button>
+        {loaded && !accounts.length ? null : (
+          <button type="button" className="settings-btn" disabled={busy} onClick={addFirst}>
+            {kind === "login" ? "Log in another account" : "Add API key"}
+          </button>
+        )}
         <button type="button" className="icon-btn" disabled={busy} aria-label="Refresh" title="Refresh" onClick={() => void load(true)}>
           <Icons.Refresh />
         </button>
       </div>
       {keyFor === "new" ? keyRow : null}
-      <div className="llms-provider-card gateway-accounts-card">
+      {loaded && !accounts.length ? (
+        <div className="llms-provider-card gateway-accounts-empty" role="status">
+          <span className="gateway-accounts-empty-icon" aria-hidden>
+            <Icons.Users />
+          </span>
+          <div className="gateway-accounts-label">
+            {kind === "login" ? `No ${loginName ? `${loginName} ` : ""}login yet` : "No API key yet"}
+          </div>
+          <div className="gateway-accounts-muted">Add one to use these models in chats.</div>
+          {keyFor === "new" ? null : (
+            <button type="button" className="settings-btn" disabled={busy} onClick={addFirst}>
+              {kind === "login" ? "Log in" : "Add API key"}
+            </button>
+          )}
+        </div>
+      ) : null}
+      <div className="llms-provider-card gateway-accounts-card" hidden={loaded && !accounts.length}>
         <table className="gateway-accounts-table">
           <thead>
             <tr>
@@ -287,7 +315,7 @@ export function GatewayAccounts({ provider, kind, title }: { provider: string; k
               const isDefault = a.id === defaultId;
               const pill = statusPill(a, isDefault);
               return (
-                <tr key={a.id} className={isDefault ? "is-default" : ""}>
+                <tr key={a.id} className={[isDefault ? "is-default" : "", leaving === a.id ? "is-leaving" : ""].join(" ").trim()}>
                   <td>
                     {renaming?.id === a.id ? (
                       <input

@@ -99,7 +99,7 @@ it("asks before removing and only removes on yes", async () => {
   await screen.findByText("Work");
   const removeWork = () => {
     fireEvent.click(screen.getByRole("button", { name: "More for Work" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Remove" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
   };
   removeWork();
   await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
@@ -167,4 +167,77 @@ it("an Anthropic page shows API keys and Claude Code logins tables alike", async
   expect(await screen.findByText("API keys (3)")).toBeTruthy();
   expect(await screen.findByText("Claude Code logins (2)")).toBeTruthy();
   expect(screen.getAllByRole("table")).toHaveLength(2);
+});
+
+const lone = (status: { loggedIn: boolean; email?: string }) => ({
+  ok: true, auto_switch: true, default: "default",
+  // kind "key": what an older core reported for a lone CLI login; the table's kind wins.
+  accounts: [{ id: "default", label: "Default", kind: "key", active: true, exhausted_until: null, status }],
+});
+
+it("one logged-out login shows Logged out and Log in", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
+  render(<GatewayAccounts provider="gemini_cli" kind="login" title="Gemini CLI logins" />);
+  await screen.findByText("Not logged in");
+  expect(within(row("Default")).getByText("Logged out")).toBeTruthy();
+  expect(screen.queryByText("Uses the key above")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Make Default default" })).toBeNull();
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await waitFor(() => expect(api.login_gateway_account).toHaveBeenCalledWith("gemini_cli", "default"));
+});
+
+it("one logged-in login shows Log out", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: true, email: "me@x.com" }));
+  render(<GatewayAccounts provider="gemini_cli" kind="login" />);
+  await screen.findByText("me@x.com");
+  expect(within(row("Default")).getByRole("button", { name: "Log out" })).toBeTruthy();
+});
+
+it("the default key row says No key yet when no key is saved", async () => {
+  api.list_gateway_accounts.mockResolvedValue({
+    ok: true, auto_switch: true, default: "default",
+    accounts: [{ id: "default", label: "Default", kind: "key", active: true, exhausted_until: null, has_key: false }],
+  });
+  render(<GatewayAccounts provider="gemini" kind="key" />);
+  await screen.findByText("No key yet");
+  expect(within(row("Default")).getByText("No key")).toBeTruthy();
+});
+
+it("deleting the last account fades it out and shows the empty state", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: true, email: "me@x.com" }));
+  render(<GatewayAccounts provider="gemini_cli" kind="login" title="Gemini CLI logins" />);
+  await screen.findByText("me@x.com");
+  api.list_gateway_accounts.mockResolvedValue({ ok: true, auto_switch: true, default: "", accounts: [] });
+  fireEvent.click(screen.getByRole("button", { name: "More for Default" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+  await waitFor(() => expect(row("Default").className).toContain("is-leaving"));
+  expect(confirm.mock.calls[0][0].message).toBe("Delete Default? Its saved login is removed from this PC.");
+  await screen.findByText("No Gemini CLI login yet");
+  expect(api.remove_gateway_account).toHaveBeenCalledWith("gemini_cli", "default");
+  expect(screen.queryByRole("button", { name: "Log in another account" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+  await waitFor(() => expect(api.login_gateway_account).toHaveBeenCalledWith("gemini_cli", "new1"));
+});
+
+it("reduced motion deletes at once with no leaving animation", async () => {
+  const matchMedia = window.matchMedia;
+  window.matchMedia = ((q: string) => ({ matches: q.includes("reduce") })) as unknown as typeof window.matchMedia;
+  try {
+    render(<GatewayAccounts provider="anthropic" kind="key" />);
+    await screen.findByText("Team");
+    fireEvent.click(screen.getByRole("button", { name: "More for Team" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await waitFor(() => expect(api.remove_gateway_account).toHaveBeenCalledWith("anthropic", "k1"));
+    expect(row("Team").className).not.toContain("is-leaving");
+  } finally {
+    window.matchMedia = matchMedia;
+  }
+});
+
+it("no API key yet shows the empty state with Add API key", async () => {
+  api.list_gateway_accounts.mockResolvedValue({ ok: true, auto_switch: true, default: "", accounts: [] });
+  render(<GatewayAccounts provider="gemini" kind="key" title="API keys" />);
+  await screen.findByText("No API key yet");
+  fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
+  expect(screen.getByLabelText("API key")).toBeTruthy();
 });

@@ -26,8 +26,33 @@ def test_default_always_there(store):
     (only,) = accounts.list_accounts("openai")
     assert only["id"] == "default" and only["active"] and only["exhausted_until"] is None
     assert accounts.account_config_dir("openai", "default") is None
-    with pytest.raises(ValueError):
-        accounts.remove_account("openai", "default")
+
+
+def test_remove_every_account_then_add_again(store):
+    a = accounts.add_account("openai", "Work", "key")
+    accounts.set_account_key("openai", "default", "sk-default")
+    accounts.remove_account("openai", "default")  # the default moves to the next account
+    assert ids() == [a] and accounts.active_account("openai") == a and "openai" not in store
+    accounts.remove_account("openai", a)  # the last one goes too
+    assert accounts.list_accounts("openai") == []
+    assert accounts.active_account("openai") == "default"  # no account: never raises
+    assert accounts.pick_account("openai", conv_id="c1") == "default"
+    assert accounts.account_key("openai", "default") is None
+    accounts.mark_exhausted("openai", "default")  # a late limit report is a no-op
+    assert accounts.add_account("openai", "Key 1", "key") == "default"  # first one back is default
+    assert [a["label"] for a in accounts.list_accounts("openai")] == ["Key 1"]
+
+
+def test_login_provider_default_row_is_a_login(store, monkeypatch):
+    """One Gemini CLI login (Default) read as an API key: no Log in, 'Uses the key above'."""
+    out: list = []
+    reg = {"account_login": lambda d: {}, "account_logout": out.append}
+    monkeypatch.setattr(accounts, "_agent_reg", lambda agent: reg if agent == "gemini_cli" else {})
+    assert accounts.list_accounts("gemini_cli")[0]["kind"] == "login"
+    assert accounts.list_accounts("gemini")[0]["kind"] == "key"
+    accounts.remove_account("gemini_cli", "default")
+    assert out == [None]  # the CLI's own folder logged out
+    assert accounts.list_accounts("gemini_cli") == []
 
 
 def test_add_rename_reorder_remove(store, tmp_path):

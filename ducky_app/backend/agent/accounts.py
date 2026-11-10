@@ -1,7 +1,9 @@
 """Any number of accounts (API keys or CLI logins) per provider.
 
-Account ``"default"`` always exists: today's key (secret ``provider``) or today's CLI
-login (the CLI's own config folder), so existing setups need no migration. Every other
+Account ``"default"`` is today's key (secret ``provider``) or today's CLI login (the
+CLI's own config folder), so existing setups need no migration. Any account, the default
+and the last one included, can be removed; adding one to an empty provider brings
+``default`` back, so code reading the plain ``provider`` secret keeps working. Every other
 account keeps its key as secret ``provider@<id>`` and, for coding-agent logins, its own
 config folder under Ducky's data.
 """
@@ -58,9 +60,17 @@ def _save(data: dict) -> None:
 def _provider(data: dict, provider: str) -> dict:
     p = data.setdefault("providers", {}).setdefault(provider, {})
     accounts = p.setdefault("accounts", [])
-    if not any(a.get("id") == DEFAULT for a in accounts):
+    if not p.get("no_default") and not any(a.get("id") == DEFAULT for a in accounts):
         accounts.insert(0, {"id": DEFAULT, "label": "Default", "kind": ""})
     return p
+
+
+def _default_kind(provider: str) -> str:
+    """A row with no kind yet: a login when the provider is a coding agent with logins."""
+    try:
+        return "login" if callable(_agent_reg(provider).get("account_login")) else "key"
+    except Exception:
+        return "key"
 
 
 def _find(p: dict, account_id: str) -> dict:
@@ -80,12 +90,13 @@ def list_accounts(provider: str) -> list[dict]:
         p = _provider(_load(), provider)
     active, now = p.get("active") or DEFAULT, time.time()
     if not any(a["id"] == active for a in p["accounts"]):
-        active = DEFAULT
+        active = p["accounts"][0]["id"] if p["accounts"] else DEFAULT
+    blank = "" if all(a.get("kind") for a in p["accounts"]) else _default_kind(provider)
     return [
         {
             "id": a["id"],
             "label": a.get("label") or a["id"],
-            "kind": a.get("kind") or "key",
+            "kind": a.get("kind") or blank,
             "active": a["id"] == active,
             "exhausted_until": _until(p, a["id"], now),
             "base_url": a.get("base_url") or "",
@@ -100,13 +111,19 @@ def add_account(provider: str, label: str, kind: str = "key") -> str:
     with _LOCK:
         data = _load()
         p = _provider(data, provider)
+        if not p["accounts"]:  # every account was removed: the first new one is default again
+            p.pop("no_default", None)
+            p.pop("active", None)
+            p["accounts"].append({"id": DEFAULT, "label": (label or "").strip() or "Default", "kind": kind})
+            _save(data)
+            return DEFAULT
         taken = {a["id"] for a in p["accounts"]}
         new_id = uuid.uuid4().hex[:4]
         while new_id in taken:
             new_id = uuid.uuid4().hex[:4]
-        default = _find(p, DEFAULT)
-        if not default.get("kind"):
-            default["kind"] = kind  # a provider's accounts are all keys or all logins
+        for row in p["accounts"]:
+            if not row.get("kind"):
+                row["kind"] = kind  # a provider's accounts are all keys or all logins
         label = (label or "").strip() or f"Account {len(taken) + 1}"
         p["accounts"].append({"id": new_id, "label": label, "kind": kind})
         _save(data)
@@ -121,16 +138,23 @@ def rename_account(provider: str, account_id: str, label: str) -> None:
 
 
 def remove_account(provider: str, account_id: str) -> None:
-    """Forget one account, its secret and its config folder. ``default`` stays."""
-    if account_id == DEFAULT:
-        raise ValueError("the default account can't be removed")
+    """Forget one account, its secret and its config folder; any account, the last too.
+
+    Removing ``default`` logs its CLI out of its own folder. The account new chats used
+    moves to the next one in order; none left = no account until one is added."""
     with _LOCK:
         data = _load()
         p = _provider(data, provider)
-        p["accounts"].remove(_find(p, account_id))
+        was_active = active_account_in(p) == account_id
+        row = _find(p, account_id)
+        index = p["accounts"].index(row)
+        p["accounts"].remove(row)
+        if account_id == DEFAULT:
+            p["no_default"] = True
         p.get("exhausted", {}).pop(account_id, None)
-        if p.get("active") == account_id:
-            p["active"] = DEFAULT
+        if was_active:
+            rest = p["accounts"]
+            p["active"] = rest[min(index, len(rest) - 1)]["id"] if rest else DEFAULT
         chats = data.get("chat_accounts", {})
         for conv_id, picked in list(chats.items()):
             if picked.get(provider) == account_id:
@@ -138,8 +162,22 @@ def remove_account(provider: str, account_id: str) -> None:
                 if not picked:
                     chats.pop(conv_id)
         _save(data)
+    if account_id == DEFAULT and (row.get("kind") or _default_kind(provider)) == "login":
+        fn = _agent_reg(provider).get("account_logout")
+        try:
+            if callable(fn):
+                fn(None)
+        except Exception:
+            pass  # ponytail: the CLI's own logout failed; the row is gone, its files stay
     _secrets.clear_key(_secret_name(provider, account_id))
     _remove_tree(_account_dir(provider, account_id))
+
+
+def active_account_in(p: dict) -> str:
+    """The account new chats run as in one provider's stored state."""
+    ids = [a["id"] for a in p["accounts"]]
+    active = p.get("active") or DEFAULT
+    return active if active in ids else (ids[0] if ids else DEFAULT)
 
 
 def reorder_accounts(provider: str, ids: list[str]) -> None:
@@ -153,7 +191,8 @@ def reorder_accounts(provider: str, ids: list[str]) -> None:
 
 
 def active_account(provider: str) -> str:
-    return next(a["id"] for a in list_accounts(provider) if a["active"])
+    """The default account for new chats; ``default`` when every account was removed."""
+    return next((a["id"] for a in list_accounts(provider) if a["active"]), DEFAULT)
 
 
 def set_active_account(provider: str, account_id: str) -> None:
@@ -210,7 +249,10 @@ def mark_exhausted(provider: str, account_id: str, until: float | None = None) -
     with _LOCK:
         data = _load()
         p = _provider(data, provider)
-        _find(p, account_id)
+        try:
+            _find(p, account_id)
+        except KeyError:
+            return  # removed meanwhile: nothing to mark
         p.setdefault("exhausted", {})[account_id] = float(until) if until else time.time() + EXHAUSTED_S
         _save(data)
 
@@ -231,6 +273,8 @@ def pick_account(
     exhaustion.
     """
     accounts = list_accounts(provider)
+    if not accounts:
+        return DEFAULT  # no account: callers find no key / a logged-out CLI and say connect one
     mine = chat_account(provider, conv_id)
     start = next(n for n, a in enumerate(accounts) if (a["id"] == mine if mine else a["active"]))
     if not auto_switch_enabled(provider):

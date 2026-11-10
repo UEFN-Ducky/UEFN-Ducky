@@ -178,7 +178,8 @@ def test_8_removing_an_account_deletes_its_key_and_folder_but_not_shared_files(d
     assert ducky.settings.remove_gateway_account("codex", login) == {"ok": True}
     assert not (ducky.tmp / "coding_agents" / "accounts" / "codex" / login).exists()
     assert (ducky.codex_home / "skills" / "verse.md").read_text() == "my skill"
-    assert ducky.settings.remove_gateway_account("openai", "default")["ok"] is False  # the usual one stays
+    assert ducky.settings.remove_gateway_account("openai", "default") == {"ok": True}  # any account goes
+    assert "openai" not in ducky.keys and ducky.settings.list_gateway_accounts("openai")["accounts"] == []
 
 
 def test_9_two_chats_run_on_two_accounts_at_once(ducky):
