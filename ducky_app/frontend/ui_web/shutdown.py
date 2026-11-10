@@ -177,12 +177,31 @@ def hard_exit(*, api: Any = None, keep_others: bool = False) -> None:
     _terminate_process()
 
 
+PORTS_BLOCKED_TITLE = "Ports blocked by Windows"
+
+
+def _ports_blocked(exc: BaseException | str) -> bool:
+    """WinError 10013 that settings.bind_with_fallback could not move past (every pair refused)."""
+    if not isinstance(exc, OSError):
+        return False
+    from frontend.settings import _bind_refused
+
+    return _bind_refused(exc)
+
+
 def _format_fatal_message(exc: BaseException | str) -> str:
     if isinstance(exc, str):
         return exc
     msg = "".join(traceback.format_exception_only(type(exc), exc)).strip()
     if not msg:
         msg = repr(exc)
+    if _ports_blocked(exc):
+        # ponytail: "Copy details" is the native box's Ctrl+C (copies all of the text, error line included).
+        return (
+            "Windows is blocking the network ports Ducky uses (often Hyper-V/WSL reserved ranges). "
+            "Restart the PC or run: netsh int ipv4 show excludedportrange protocol=tcp\n\n"
+            f"Details (Ctrl+C copies them): {msg}"
+        )
     text = str(exc)
     from frontend.bundle_root import is_packaged_runtime
 
@@ -249,7 +268,8 @@ def fatal_error_and_exit(
             root.withdraw()
             owns_root = True
         try:
-            messagebox.showerror("UEFN Ducky", message, parent=root)
+            title = PORTS_BLOCKED_TITLE if _ports_blocked(exc) else "UEFN Ducky"
+            messagebox.showerror(title, message, parent=root)
         finally:
             if owns_root:
                 try:
