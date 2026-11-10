@@ -39,7 +39,8 @@ def pc(monkeypatch):
     monkeypatch.setattr(proc_table, "table", _pc_table)
     monkeypatch.setattr("frontend.notifications.alert", lambda *a, **k: state["alerts"].append((a, k)) or True)
     monkeypatch.setattr("frontend.usage_stats.track", lambda name, **p: state["events"].append((name, p)) or True)
-    monkeypatch.setattr(low_memory, "_count", lambda: None)
+    state["counted"] = []
+    monkeypatch.setattr(low_memory, "_count", lambda answer, free: state["counted"].append((answer, free)))
     monkeypatch.setattr(low_memory, "_last_alert", 0.0)
     monkeypatch.setattr(low_memory, "_last_warn", 0.0)
     monkeypatch.setattr(low_memory, "_last_freed", 0.0)
@@ -87,6 +88,37 @@ def test_continue_starts_anyway_and_cancel_does_not_start(pc) -> None:
     pc["free"] = [0.5]
     assert low_memory.check_at_launch(_asks(pc, "continue")) is True
     assert low_memory.check_at_launch(_asks(pc, "cancel")) is False
+    assert pc["counted"] == [("continue", 0.5), ("cancel", 0.5)]
+
+
+def test_launch_rechecks_while_the_message_waits_and_starts_by_itself_at_1_gb(pc) -> None:
+    # Nov 9 2026: 6 launches stopped at the message; now each 5 s timeout rechecks free memory.
+    pc["free"] = [0.6, 0.8, 1.2]
+    assert low_memory.check_at_launch(_asks(pc, "timeout", "timeout")) is True
+    assert pc["asked"] == [(0.6, NAMES), (0.8, NAMES)]  # the 3rd check found 1.2 GB: no 3rd message
+    assert pc["counted"] == [("auto", 0.6)]
+
+
+def test_the_launch_count_tags_answer_and_free_bucket(monkeypatch) -> None:
+    from frontend import usage_events, usage_stats
+
+    sent = []
+    monkeypatch.setattr(usage_stats, "track", lambda name, **p: sent.append(usage_events.validate(name, p)) or True)
+    low_memory._count("auto", 0.4)
+    assert sent[0]["code"] == "low_memory_start" and sent[0]["at"] == "launch.auto.under_0_5gb"
+
+
+def test_the_default_message_times_out_for_30_s_then_waits(monkeypatch, pc) -> None:
+    pc["free"] = [0.6]
+    clock, waits = [0.0], []
+
+    def box(free, names, timeout_s=0.0):
+        waits.append(timeout_s)
+        clock[0] += timeout_s or 1
+        return "timeout" if timeout_s else "continue"
+    monkeypatch.setattr(low_memory, "_message_box", box)
+    assert low_memory.check_at_launch(clock=lambda: clock[0]) is True
+    assert waits == [5.0] * 6 + [0.0]
 
 
 def test_ducky_and_everything_it_started_count_as_one_program(pc) -> None:

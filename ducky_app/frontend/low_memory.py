@@ -25,6 +25,10 @@ from collections import deque
 from typing import Any, Callable
 
 LAUNCH_GB = 1.0
+# Nov 9 2026: 6 launches on 3 PCs stopped at the launch message. It rechecks every AUTO_EVERY_S
+# for AUTO_FOR_S and starts by itself once LAUNCH_GB is free; after that it waits for an answer.
+AUTO_EVERY_S = 5.0
+AUTO_FOR_S = 30.0
 RUN_GB = 0.7  # critical: the stronger alert
 RUN_EVERY_S = 1800.0
 WARN_GB = 1.5
@@ -132,43 +136,61 @@ def describe(free: float, total: Any, *, freed: dict[str, Any] | None = None, fa
     parts.append(uefn_growth_line(rows))
     return " ".join(p for p in parts if p)
 
-def _message_box(free_gb: float, names: str) -> str:
+def _message_box(free_gb: float, names: str, timeout_s: float = 0.0) -> str:
+    """'cancel' / 'try' / 'continue', or 'timeout' when ``timeout_s`` passed with no answer."""
     import ctypes
 
+    auto = (f"UEFN Ducky checks again every {AUTO_EVERY_S:.0f} seconds and starts by itself once "
+            f"{LAUNCH_GB:g} GB is free. " if timeout_s else "")
     text = (f"Your PC has only {free_gb:.1f} GB of memory free, so UEFN Ducky may close while it starts.\n\n"
             + (f"Using the most memory: {names}.\n\n" if names else "")
-            + "Close a program you don't need, then choose Try Again. Continue starts UEFN Ducky anyway.")
+            + auto + "Close a program you don't need, then choose Try Again. Continue starts UEFN Ducky anyway.")
     flags = 0x6 | 0x30 | 0x10000 | 0x40000  # Cancel / Try Again / Continue, warning icon, in front
-    answer = ctypes.windll.user32.MessageBoxW(None, text, "UEFN Ducky: PC almost out of memory", flags)
-    return {2: "cancel", 10: "try", 11: "continue"}.get(int(answer), "continue")
+    title = "UEFN Ducky: PC almost out of memory"
+    user32 = ctypes.windll.user32
+    if timeout_s:
+        # MessageBoxTimeoutW: exported by user32 since XP, returns 32000 when the time ran out.
+        answer = user32.MessageBoxTimeoutW(None, text, title, flags, 0, int(timeout_s * 1000))
+    else:
+        answer = user32.MessageBoxW(None, text, title, flags)
+    return {2: "cancel", 10: "try", 11: "continue", 32000: "timeout"}.get(int(answer), "continue")
 
 
-def check_at_launch(ask: Callable[[float, str], str] | None = None) -> bool:
-    """Before the window starts. False when the person chose Cancel: don't start."""
+def check_at_launch(ask: Callable[[float, str], str] | None = None,
+                    clock: Callable[[], float] = time.monotonic) -> bool:
+    """Before the window starts. False when the person chose Cancel: don't start.
+
+    ``ask(free_gb, names)`` answers 'cancel' / 'try' / 'continue' / 'timeout'; the default box
+    times out every AUTO_EVERY_S for the first AUTO_FOR_S, and each timeout or Try Again rechecks."""
     if os.name != "nt" or os.environ.get("DUCKY_SKIP_LOW_MEMORY_CHECK"):
         return True
     from frontend.ui_web.admission import free_memory_gb
 
-    ask = ask or _message_box
     free = free_memory_gb()
     if free >= LAUNCH_GB:
         return True
-    _count()
-    while free < LAUNCH_GB:
+    first, start = free, clock()
+    if ask is None:
+        def ask(f: float, names: str) -> str:
+            return _message_box(f, names, AUTO_EVERY_S if clock() - start < AUTO_FOR_S else 0.0)
+    while True:
         answer = ask(free, biggest_programs())
-        if answer == "cancel":
-            return False
-        if answer == "continue":
-            break
+        if answer in ("cancel", "continue"):
+            _count(answer, first)
+            return answer == "continue"
         free = free_memory_gb()
-    return True
+        if free >= LAUNCH_GB:
+            _count("auto", first)
+            return True
 
 
-def _count() -> None:
+def _count(answer: str, free: float) -> None:
+    """error.code low_memory_start, at 'launch.<continue|cancel|auto>.<free bucket at launch>'."""
     try:
         from frontend import usage_stats
 
-        usage_stats.error("low_memory_start", "out of memory", at="launch", kind="memory")
+        usage_stats.error("low_memory_start", "out of memory", at=f"launch.{answer}.{free_bucket(free)}",
+                          kind="memory")
     except Exception:
         pass
 
