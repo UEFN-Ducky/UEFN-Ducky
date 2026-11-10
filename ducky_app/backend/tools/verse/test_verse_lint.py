@@ -10,10 +10,10 @@ import pytest
 from backend.tools.verse.compile_hints import hints_for
 from backend.tools.verse.verse_lint import lint_verse, summarize_findings
 
-# The Virtual Pointer plugin repo checked out next to this one (Documents/GitHub/uefn-plugins).
+# The UEFN plugin repo checked out next to this one (Documents/GitHub/uefn-plugins).
 TEMPLATE_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), *[os.pardir] * 5,
-    "uefn-plugins", "uefn-plugin-virtualpointer", "templates",
+    "uefn-plugins", "uefn-plugin-uefn", "templates",
 )
 
 DEVICE_USINGS = (
@@ -341,7 +341,7 @@ def test_hints_for_parses_codes():
     assert hints_for("") == []
 
 
-@pytest.mark.skipif(not os.path.isdir(TEMPLATE_DIR), reason="virtualpointer templates not on this machine")
+@pytest.mark.skipif(not os.path.isdir(TEMPLATE_DIR), reason="uefn plugin templates not on this machine")
 def test_shipped_templates_have_no_error_findings():
     paths = sorted(glob.glob(os.path.join(TEMPLATE_DIR, "*.verse")))
     assert paths

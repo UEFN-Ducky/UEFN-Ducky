@@ -144,7 +144,7 @@ def _store_template_hint(template_id: str) -> str:
 def ducky_verse_template_list(pretty: bool = False) -> str:
     """List user/AI custom Verse templates (AppData). Never lists Store plugin packs.
 
-    For Store/plugin scaffolds use verse_template_list (uefn-plugin-verse).
+    For Store/plugin scaffolds use verse_template_list (uefn-plugin-uefn).
     """
     return tool_json(list_user_verse_templates(), pretty=pretty)
 

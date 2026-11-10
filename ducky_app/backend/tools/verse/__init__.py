@@ -1,4 +1,4 @@
-"""Verse domain MCP tools (Store plugin: uefn-plugin-verse).
+"""Verse domain MCP tools (Store plugin: uefn-plugin-uefn).
 
 Importing this package loads ``verse`` so legacy ``import backend.tools.verse``
 still registers the core digest tools.
