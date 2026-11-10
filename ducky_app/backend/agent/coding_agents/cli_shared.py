@@ -7,6 +7,8 @@ into text/tool blocks, then translate the finished ``ProcResult`` into a
 
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
 
 from backend.agent.coding_agents.base import CodingAgentLaunchResult
@@ -20,6 +22,28 @@ LOGIN_MARKERS = ("sign in", "log in", "login", "oauth", "not logged", "authentic
 
 
 _JSON_RESULT_CAP = 32_000
+
+_log = logging.getLogger(__name__)
+# A home folder in a CLI's stderr (C:\Users\name, /home/name, /Users/name) reads as ~.
+_HOME_RE = re.compile(r"(?i)\b[a-z]:[\\/]+users[\\/]+[^\\/\s\"']+|/(?:home|users)/[^/\s\"']+")
+
+
+def exit_code_text(code: int) -> str:
+    """An exit code as people search for it: 1 stays 1, 3221225477 reads 0xC0000005."""
+    return str(code) if 0 <= code <= 255 else f"0x{code & 0xFFFFFFFF:08X}"
+
+
+def exit_detail(proc: ProcResult, agent_label: str) -> str:
+    """'<label> exited with code N: <last 3 stderr lines>' with home paths as ~, also logged.
+
+    Nov 9 2026: 0-tool turns and crashes after tools ended with an empty or raw-JSON
+    detail, so every one of them read as kind:other with nothing to go on.
+    """
+    lines = [ln.strip() for ln in (proc.stderr_tail or "").splitlines() if ln.strip()][-3:]
+    tail = _HOME_RE.sub("~", " | ".join(lines))
+    text = f"{agent_label} exited with code {exit_code_text(proc.returncode)}" + (f": {tail}" if tail else "")
+    _log.warning("coding agent exit: %s", text)
+    return text
 
 
 def truncate_tool_result(text: str, max_chars: int = 4000) -> str:
@@ -77,7 +101,8 @@ def finalize_cli_turn(
             blocks=blocks,
         )
     if error_text or (proc.returncode != 0 and not reply):
-        error = error_text or proc.stderr_tail.strip() or proc.raw_tail or f"{agent_label} failed"
+        # Never the raw stdout tail: for a JSON-stream CLI that is transport, not a reason.
+        error = error_text or exit_detail(proc, agent_label)
         low = error.lower()
         status = "needs_login" if any(m in low for m in LOGIN_MARKERS) else "error"
         if session_id and any(m in low for m in stale_session_markers):
