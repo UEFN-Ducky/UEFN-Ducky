@@ -6,6 +6,7 @@
 //! `launcher/crash_loop.json` `{failures:[ts...], until: ts}` (ts = Unix seconds, like
 //! Python's `time.time()`): each give-up adds a failure; 3 failures within 10 min set
 //! `until = now + 24 h`, and while `now < until` the `auto` setting uses Python.
+//! `reason` is the last give-up's crash slug (`port_blocked`, ...); `native_switch` reports it.
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -64,6 +65,8 @@ pub fn unix_now() -> f64 {
 pub struct CrashLoop {
     pub failures: Vec<f64>,
     pub until: f64,
+    /// The last give-up's crash slug; "" = none (not written).
+    pub reason: String,
 }
 
 impl CrashLoop {
@@ -79,11 +82,16 @@ impl CrashLoop {
             .map(|a| a.iter().filter_map(Value::as_f64).collect())
             .unwrap_or_default();
         let until = v.get("until").and_then(Value::as_f64).unwrap_or(0.0);
-        CrashLoop { failures, until }
+        let reason = v.get("reason").and_then(Value::as_str).unwrap_or("").to_string();
+        CrashLoop { failures, until, reason }
     }
 
     pub fn to_json(&self) -> String {
-        json!({"failures": self.failures, "until": self.until}).to_string()
+        let mut v = json!({"failures": self.failures, "until": self.until});
+        if !self.reason.is_empty() {
+            v["reason"] = json!(self.reason);
+        }
+        v.to_string()
     }
 
     pub fn load(app_data: &Path) -> CrashLoop {
@@ -119,9 +127,10 @@ impl CrashLoop {
     }
 }
 
-/// Load, add a failure now, save. Returns whether the backoff is active.
-pub fn record_crash_loop_failure(app_data: &Path) -> bool {
+/// Load, add a failure now with its crash slug, save. Returns whether the backoff is active.
+pub fn record_crash_loop_failure(app_data: &Path, slug: &str) -> bool {
     let mut cl = CrashLoop::load(app_data);
+    cl.reason = slug.to_string();
     let active = cl.record_failure(unix_now());
     let _ = cl.save(app_data);
     active

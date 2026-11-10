@@ -52,10 +52,14 @@ EXIT_REASONS = {
     EXIT_NO_HELLO: "no_hello",
     EXIT_START_ERROR: "start_error",
 }
+# Why the backend died in a crash loop: the launcher's supervisor (crash_slug) writes one of
+# these as crash_loop.json "reason"; a 22 is reported as crash_loop.<slug>.
+CRASH_SLUGS = ("port_blocked", "import_error", "permission", "memory", "other")
 # Every fallback_reason record_start keeps; anything else is "other".
 FALLBACK_REASONS = (
     "webview2", "protocol", "crash_loop", "no_hello", "start_error",
     "timeout", "spawn_error", "no_exe", "crash_loop_active", "launcher_fallback", "exit_other", "other",
+    *(f"crash_loop.{s}" for s in CRASH_SLUGS),
 )
 # A start that says nothing about the launcher's health (no WebView2, no EXE, the 24 h
 # hold itself) is not a failure toward the crash loop.
@@ -302,9 +306,17 @@ def run_native(
         time.sleep(_POLL_S)
 
 
+def crash_slug() -> str:
+    """The launcher's last crash-loop slug from crash_loop.json; "other" when it named none."""
+    slug = str(_crash_loop_state().get("reason") or "").strip().lower()
+    return slug if slug in CRASH_SLUGS else "other"
+
+
 def fallback_reason(code: int, *, timed_out: bool = False) -> str:
     if timed_out:
         return "timeout"
+    if int(code) == EXIT_CRASH_LOOP:
+        return f"crash_loop.{crash_slug()}"
     return EXIT_REASONS.get(int(code), "exit_other")
 
 

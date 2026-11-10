@@ -44,7 +44,7 @@ pub trait Host {
     /// Bye to the backend and wait for it (so a fallback window doesn't hand off to it).
     fn stop_backend(&mut self);
     /// Started directly and failed with 20–24: open the Python window instead.
-    fn fallback(&mut self, code: u8);
+    fn fallback(&mut self, code: u8, error: &str);
     /// Write the crash report with the final code.
     fn finish(&mut self, code: u8, error: &str);
 }
@@ -64,7 +64,7 @@ pub fn launch(host: &mut impl Host, plan: &StartPlan, direct: bool) -> u8 {
     let (code, error) = steps(host, plan);
     host.stop_backend();
     if direct && crate::repoint::is_fallback_code(code) {
-        host.fallback(code);
+        host.fallback(code, &error);
     }
     host.finish(code, &error);
     code
@@ -262,7 +262,7 @@ mod tests {
         fn stop_backend(&mut self) {
             self.calls.push("stop".into());
         }
-        fn fallback(&mut self, code: u8) {
+        fn fallback(&mut self, code: u8, _error: &str) {
             self.calls.push(format!("fallback:{code}"));
         }
         fn finish(&mut self, code: u8, _error: &str) {

@@ -29,6 +29,15 @@ pub fn exit_reason(code: u8) -> &'static str {
     }
 }
 
+/// The starts.json reason for a fallback: a crash loop names its slug
+/// (`crash_loop.port_blocked`, like `native_switch`), everything else is [`exit_reason`].
+pub fn fallback_reason(code: u8, error: &str) -> String {
+    match exit_reason(code) {
+        "crash_loop" => format!("crash_loop.{}", supervisor::crash_slug(error)),
+        other => other.to_string(),
+    }
+}
+
 /// The row `native_switch.record_start(mode, window_ms, painted_ms, reason)` builds.
 pub fn row(native: bool, window_ms: Option<u64>, painted_ms: Option<u64>, reason: &str, ts: f64) -> Value {
     json!({
@@ -121,6 +130,14 @@ mod tests {
     fn exit_reasons_match_native_switch() {
         let got: Vec<_> = [20, 21, 22, 23, 24, 3].map(exit_reason).to_vec();
         assert_eq!(got, ["webview2", "protocol", "crash_loop", "no_hello", "start_error", "exit_other"]);
+    }
+
+    #[test]
+    fn crash_loop_reason_names_the_slug() {
+        let e = "backend crashed 3 times in 60 s (backend ended before hello (exit 1): PermissionError: [WinError 10013] x)";
+        assert_eq!(fallback_reason(22, e), "crash_loop.port_blocked");
+        assert_eq!(fallback_reason(22, ""), "crash_loop.other");
+        assert_eq!(fallback_reason(23, e), "no_hello");
     }
 
     #[test]

@@ -89,13 +89,16 @@ fn crash_loop_three_failures_in_10_min_backs_off_24h() {
 #[test]
 fn crash_loop_file_round_trip() {
     let dir = scratch("crash_loop_file");
-    let cl = CrashLoop { failures: vec![1.5, 2.5], until: 99.0 };
+    let cl = CrashLoop { failures: vec![1.5, 2.5], until: 99.0, reason: String::new() };
     cl.save(&dir).unwrap();
     assert!(dir.join("launcher").join("crash_loop.json").is_file());
     assert_eq!(CrashLoop::load(&dir), cl);
     assert_eq!(CrashLoop::parse("garbage"), CrashLoop::default());
     let v: Value = serde_json::from_str(&cl.to_json()).unwrap();
     assert_eq!(v, json!({"failures": [1.5, 2.5], "until": 99.0}));
+    let named = CrashLoop { reason: "port_blocked".into(), ..cl };
+    named.save(&dir).unwrap();
+    assert_eq!(CrashLoop::load(&dir).reason, "port_blocked");
 }
 
 #[test]
@@ -167,6 +170,13 @@ fn fake_backend_entry() {
     match mode.as_str() {
         // Not 3: that is the backend's BUSY exit, a start error rather than a crash.
         "crash" => std::process::exit(4),
+        // The 10013 bind failure that only the Python fallback used to show.
+        "port_blocked" => {
+            eprintln!("Traceback (most recent call last):");
+            eprintln!(r"  File C:\Users\Someone\AppData\Local\ducky\server.py");
+            eprintln!(r"PermissionError: [WinError 10013] An attempt was made to access a socket in C:\Users\Someone\x");
+            std::process::exit(1);
+        }
         "silent" => std::thread::sleep(Duration::from_secs(30)),
         // A slow PC: a stage line every 0.3 s until the delay, then hello.
         "stages" => {
@@ -275,6 +285,17 @@ fn dying_before_hello_three_times_gives_22() {
     let err = Supervisor::start(fake("crash", &dir, Duration::from_secs(15))).err().unwrap();
     assert_eq!(err.code, exit::CRASH_LOOP);
     assert_eq!(spawns(&dir), 3);
+}
+
+#[test]
+fn crash_loop_names_why_the_backend_died() {
+    let dir = scratch("port_blocked");
+    let err = Supervisor::start(fake("port_blocked", &dir, Duration::from_secs(15))).err().unwrap();
+    assert_eq!(err.code, exit::CRASH_LOOP);
+    assert!(err.reason.contains("PermissionError: [WinError 10013]"), "{}", err.reason);
+    assert!(err.reason.contains(r"socket in ~\x") && !err.reason.contains("Someone"), "{}", err.reason);
+    assert_eq!(supervisor::crash_slug(&err.reason), "port_blocked");
+    assert_eq!(CrashLoop::load(&dir).reason, "port_blocked");
 }
 
 #[test]

@@ -307,7 +307,7 @@ def test_hook_native_ready(launcher_present: Path, monkeypatch: pytest.MonkeyPat
     assert rows == [("native", 95, 640, "")]
 
 
-@pytest.mark.parametrize("code, reason", [(20, "webview2"), (21, "protocol"), (22, "crash_loop"),
+@pytest.mark.parametrize("code, reason", [(20, "webview2"), (21, "protocol"), (22, "crash_loop.other"),
                                           (23, "no_hello"), (24, "start_error"), (9, "exit_other")])
 def test_hook_each_exit_code_falls_back(launcher_present: Path, monkeypatch: pytest.MonkeyPatch,
                                         code: int, reason: str) -> None:
@@ -318,7 +318,27 @@ def test_hook_each_exit_code_falls_back(launcher_present: Path, monkeypatch: pyt
     marker = ns.crash_loop_path()
     failures = json.loads(marker.read_text(encoding="utf-8"))["failures"] if marker.is_file() else []
     # webview2 never tried the launcher; a 22 is already counted by the launcher's supervisor.
-    assert len(failures) == (0 if reason in ("webview2", "crash_loop") else 1)
+    assert len(failures) == (0 if reason in ("webview2", "crash_loop.other") else 1)
+
+
+def test_crash_loop_fallback_names_the_launchers_slug(launcher_present: Path, monkeypatch: pytest.MonkeyPatch,
+                                                      tracked: list) -> None:
+    # What the launcher's supervisor leaves after 3 backends died on a 10013 bind.
+    ns._write_json(ns.crash_loop_path(), {"failures": [1.0], "until": 0, "reason": "port_blocked"})
+    real_record = ns.record_start
+    rows = _sync_records(monkeypatch)
+    monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7400, exit_after=0.0, code=22), []))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert rows == [("python", None, None, "crash_loop.port_blocked")]
+    row = real_record("python", None, None, "crash_loop.port_blocked")
+    assert row["fallback"] == "crash_loop.port_blocked"
+    # A slug off the fixed list never goes out as free text.
+    ns._write_json(ns.crash_loop_path(), {"reason": "C:/Users/x"})
+    assert ns.fallback_reason(22) == "crash_loop.other"
+    from frontend import usage_events as ev
+
+    assert ev.validate("launcher.start", {"mode": "python", "fallback": "crash_loop.port_blocked"})["fallback"] \
+        == "crash_loop.port_blocked"
 
 
 def test_hook_timeout_falls_back(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:

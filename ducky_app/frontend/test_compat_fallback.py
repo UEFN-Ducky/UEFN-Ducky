@@ -208,7 +208,7 @@ def test_missing_key_still_starts_the_launcher(
 # --- 21: protocol mismatch, 22: crash loop ----------------------------------------------
 
 
-@pytest.mark.parametrize(("code", "reason"), [(21, "protocol"), (22, "crash_loop")])
+@pytest.mark.parametrize(("code", "reason"), [(21, "protocol"), (22, "crash_loop.other")])
 def test_exit_21_and_22_run_python_with_the_same_argv(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch, code: int, reason: str
 ) -> None:

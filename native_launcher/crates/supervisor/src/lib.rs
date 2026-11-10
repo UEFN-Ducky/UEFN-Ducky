@@ -1,7 +1,8 @@
 //! Runs `UEFN-Ducky.exe --backend [argv]` and keeps it alive.
 //!
 //! Start: spawn, wait for hello (20 s of silence or 180 s in all, else exit 23; a protocol mismatch is 21; spawn failure
-//! is 24). A backend that dies (non-zero exit, no `quit` event) is restarted up to 2 times in
+//! is 24). Any backend line, stdout or stderr, breaks the silence; the last stderr line
+//! (user paths as `~`, 300 chars) goes into every failure reason, so a report says why it died. A backend that dies (non-zero exit, no `quit` event) is restarted up to 2 times in
 //! 60 s; the third crash records a failure in `launcher/crash_loop.json` and gives 22.
 //! Stdin is closed on shutdown, which is the backend's signal to quit.
 
@@ -74,7 +75,79 @@ impl StartError {
 #[derive(Debug)]
 enum Line {
     Msg(BackendMsg),
+    /// One non-empty stderr line, already [`scrub`]bed.
+    Err(String),
     Eof,
+}
+
+/// Longest stderr line kept for a report.
+pub const STDERR_KEEP: usize = 300;
+
+/// The fixed list of crash slugs (`native_switch.CRASH_SLUGS`).
+pub const CRASH_SLUGS: [&str; 5] = ["port_blocked", "import_error", "permission", "memory", "other"];
+
+/// Why a backend died, from its error text: one of [`CRASH_SLUGS`]. Port first: a 10013
+/// bind is a `PermissionError` too.
+pub fn crash_slug(text: &str) -> &'static str {
+    let t = text.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| t.contains(w));
+    if has(&["10013", "10048", "address already in use", "eaddrinuse", "only one usage of each socket"]) {
+        "port_blocked"
+    } else if has(&["modulenotfounderror", "importerror", "dll load failed"]) {
+        "import_error"
+    } else if has(&["permissionerror", "access is denied", "winerror 5]", "errno 13"]) {
+        "permission"
+    } else if has(&["memoryerror", "out of memory", "winerror 8]", "winerror 1455"]) {
+        "memory"
+    } else {
+        "other"
+    }
+}
+
+/// A stderr line safe for a report: `C:\Users\<name>` / `/Users/<name>` become `~`,
+/// at most [`STDERR_KEEP`] chars.
+pub fn scrub(line: &str) -> String {
+    let lower = line.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut out = String::new();
+    let mut i = 0;
+    while let Some((at, len)) = ["\\users\\", "/users/"].iter().filter_map(|p| lower[i..].find(p).map(|k| (i + k, p.len()))).min() {
+        let start = if at >= i + 2 && bytes[at - 1] == b':' && bytes[at - 2].is_ascii_alphabetic() { at - 2 } else { at };
+        let end = lower[at + len..].find(['\\', '/']).map_or(lower.len(), |e| at + len + e);
+        out.push_str(&line[i..start]);
+        out.push('~');
+        i = end;
+    }
+    out.push_str(&line[i..]);
+    out.trim().chars().take(STDERR_KEEP).collect()
+}
+
+fn read_stderr(stderr: impl Read + Send + 'static, tx: mpsc::Sender<Line>) {
+    thread::spawn(move || {
+        for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+            let line = scrub(&String::from_utf8_lossy(&line));
+            if !line.is_empty() && tx.send(Line::Err(line)).is_err() {
+                return;
+            }
+        }
+    });
+}
+
+/// After stdout ended: take the stderr lines still on their way (short wait each).
+fn drain_stderr(rx: &Receiver<Line>, last_err: &mut String) {
+    while let Ok(line) = rx.recv_timeout(Duration::from_millis(200)) {
+        if let Line::Err(s) = line {
+            *last_err = s;
+        }
+    }
+}
+
+fn with_stderr(reason: String, last_err: &str) -> String {
+    if last_err.is_empty() {
+        reason
+    } else {
+        format!("{reason}: {last_err}")
+    }
 }
 
 enum SpawnFailure {
@@ -149,18 +222,27 @@ fn before_hello_failure(code: Option<i32>) -> SpawnFailure {
     SpawnFailure::Died(format!("backend ended before hello ({})", describe_code(code)))
 }
 
+fn died_with(failure: SpawnFailure, last_err: &str) -> SpawnFailure {
+    match failure {
+        SpawnFailure::Died(r) => SpawnFailure::Died(with_stderr(r, last_err)),
+        SpawnFailure::Fatal(e) => SpawnFailure::Fatal(StartError::new(e.code, with_stderr(e.reason, last_err))),
+    }
+}
+
 /// One running backend process that said hello.
 pub struct Backend {
     child: Child,
     stdin: Option<ChildStdin>,
     rx: Receiver<Line>,
+    /// The backend's last stderr line (scrubbed).
+    last_err: String,
     pub hello: Hello,
 }
 
 impl Backend {
     fn spawn(cfg: &Config) -> Result<Backend, SpawnFailure> {
         let mut cmd = Command::new(&cfg.exe);
-        cmd.args(&cfg.args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        cmd.args(&cfg.args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         for (k, v) in &cfg.env {
             cmd.env(k, v);
         }
@@ -175,10 +257,12 @@ impl Backend {
         })?;
         let stdin = child.stdin.take();
         let (tx, rx) = mpsc::channel();
+        read_stderr(child.stderr.take().expect("piped stderr"), tx.clone());
         read_lines(child.stdout.take().expect("piped stdout"), tx);
         let spawned = Instant::now();
         let mut last_line = spawned;
         let mut stage: Option<String> = None;
+        let mut last_err = String::new();
         loop {
             let deadline = hello_deadline(spawned, last_line, cfg.hello_silence, cfg.hello_cap);
             let left = deadline.saturating_duration_since(Instant::now());
@@ -194,28 +278,28 @@ impl Backend {
                             format!("backend protocol {} not in [1,1]", hello.protocol),
                         )));
                     }
-                    return Ok(Backend { child, stdin, rx, hello });
+                    return Ok(Backend { child, stdin, rx, last_err, hello });
                 }
                 Ok(Line::Msg(BackendMsg::Event { name, data })) if name == "stage" => {
                     stage = data["name"].as_str().map(String::from).or(stage);
                 }
                 Ok(Line::Msg(_)) => continue,
+                Ok(Line::Err(s)) => last_err = s,
                 Ok(Line::Eof) | Err(RecvTimeoutError::Disconnected) => {
                     drop(stdin);
                     let st = wait_timeout(&mut child, Duration::from_secs(2)).or_else(|| kill(&mut child));
-                    return Err(before_hello_failure(st.and_then(|s| s.code())));
+                    drain_stderr(&rx, &mut last_err);
+                    return Err(died_with(before_hello_failure(st.and_then(|s| s.code())), &last_err));
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     drop(stdin);
                     kill(&mut child);
-                    return Err(SpawnFailure::Fatal(StartError::new(
-                        exit::NO_HELLO,
-                        format!(
-                            "no hello, last stage {} after {} s",
-                            stage.as_deref().unwrap_or("none"),
-                            spawned.elapsed().as_secs()
-                        ),
-                    )));
+                    let reason = format!(
+                        "no hello, last stage {} after {} s",
+                        stage.as_deref().unwrap_or("none"),
+                        spawned.elapsed().as_secs()
+                    );
+                    return Err(SpawnFailure::Fatal(StartError::new(exit::NO_HELLO, with_stderr(reason, &last_err))));
                 }
             }
         }
@@ -290,7 +374,7 @@ impl Supervisor {
         match self.policy.on_crash(Instant::now()) {
             Decision::Restart => Ok(()),
             Decision::GiveUp => {
-                record_crash_loop_failure(&self.cfg.app_data);
+                record_crash_loop_failure(&self.cfg.app_data, crash_slug(&reason));
                 Err(StartError::new(exit::CRASH_LOOP, format!("backend crashed 3 times in 60 s ({reason})")))
             }
         }
@@ -314,11 +398,16 @@ impl Supervisor {
 
     /// Next backend line, or a restart / exit when the process ended.
     pub fn next(&mut self, timeout: Duration) -> Step {
-        let line = match self.backend.as_ref() {
-            Some(b) => b.rx.recv_timeout(timeout),
-            None => return Step::Exited,
+        let deadline = Instant::now() + timeout;
+        let line = loop {
+            let Some(b) = self.backend.as_mut() else { return Step::Exited };
+            match b.rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(Line::Err(s)) => b.last_err = s,
+                other => break other,
+            }
         };
         match line {
+            Ok(Line::Err(_)) => Step::Idle,
             Ok(Line::Msg(msg)) => {
                 if matches!(&msg, BackendMsg::Event { name, .. } if name == "quit") {
                     self.quitting = true;
@@ -333,7 +422,8 @@ impl Supervisor {
                 if self.quitting || st.map(|s| s.success()).unwrap_or(false) {
                     return Step::Exited;
                 }
-                if let Err(e) = self.on_crash(describe(st)) {
+                drain_stderr(&b.rx, &mut b.last_err);
+                if let Err(e) = self.on_crash(with_stderr(describe(st), &b.last_err)) {
                     return Step::Fatal(e);
                 }
                 match self.spawn_until_hello() {
@@ -378,5 +468,17 @@ mod busy_tests {
         };
         assert!(h(r#"{"t":"hello","protocol":1,"port":4199,"pid":9,"handoff":true}"#).handoff);
         assert!(!h(r#"{"t":"hello","protocol":1,"port":4199}"#).handoff);
+    }
+
+    #[test]
+    fn slugs_and_scrub() {
+        assert_eq!(crash_slug("PermissionError: [WinError 10013] An attempt was made"), "port_blocked");
+        assert_eq!(crash_slug("ModuleNotFoundError: No module named 'x'"), "import_error");
+        assert_eq!(crash_slug("PermissionError: [WinError 5] Access is denied"), "permission");
+        assert_eq!(crash_slug("MemoryError"), "memory");
+        assert_eq!(crash_slug("exit 1"), "other");
+        assert_eq!(scrub(r"  File C:\Users\Bob Smith\AppData\x.py, /Users/al/y  "), r"File ~\AppData\x.py, ~/y");
+        assert_eq!(scrub(&"é".repeat(400)).chars().count(), STDERR_KEEP);
+        assert_eq!(scrub("no path"), "no path");
     }
 }
