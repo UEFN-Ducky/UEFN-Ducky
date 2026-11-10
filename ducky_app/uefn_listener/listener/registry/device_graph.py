@@ -15,9 +15,9 @@ import unreal
 
 from listener import lookup
 from listener.device_editor import (
+    _device_kind,
     get_device_settings,
     is_creative_device,
-    list_creative_devices,
 )
 from listener.dispatch import register
 from listener.serialize import serialize
@@ -28,6 +28,35 @@ _MAX_DEVICES = 150
 # The host waits 12 s (live_graph._LISTENER_SNAPSHOT_TIMEOUT_SEC); deep reads stop after
 # this so a big island answers in time (bridge_timeout.device_graph_snapshot, Oct 29 2026).
 _DEEP_BUDGET_S = 6.0
+# The device walk itself shares that budget: listing every actor of a 5,000-device level
+# (is_creative_device reads components) ran past the host's wait before any deep read
+# started (anp3j8r5t2v6c, Nov 2026). Listing stops at this, deep reads at _DEEP_BUDGET_S.
+_LIST_BUDGET_S = 3.0
+
+
+def _list_devices(class_filter: str, label_filter: str, cap: int, stop_at: float) -> tuple:
+    """Up to ``cap`` device rows, walking the level only until ``stop_at``.
+    Returns (rows, more): ``more`` is True when devices past the cap exist or the walk
+    ran out of time before the level's end."""
+    needle = (label_filter or "").lower()
+    rows: List[dict] = []
+    for actor in lookup.actor_list():
+        if len(rows) >= cap or time.monotonic() >= stop_at:
+            return rows, True
+        try:
+            if not is_creative_device(actor):
+                continue
+            cls = actor.get_class().get_name()
+            label = actor.get_actor_label() or ""
+            if class_filter and class_filter not in cls:
+                continue
+            if needle and needle not in label.lower():
+                continue
+            rows.append({"label": label, "class": cls, "path": actor.get_path_name(),
+                         "kind": _device_kind(actor)})
+        except Exception:
+            continue
+    return rows, False
 
 
 def _location_of(actor: Any) -> Optional[dict]:
@@ -146,12 +175,8 @@ def device_graph_snapshot(
 ) -> dict:
     """Snapshot placed devices as nodes + wiring edges for offline simulation."""
     cap = max(1, min(int(limit or 100), _MAX_DEVICES))
-    listed = list_creative_devices(
-        class_filter=class_filter or "",
-        label_filter=label_filter or "",
-        limit=cap,
-    )
-    devices = listed.get("devices") or []
+    started = time.monotonic()
+    devices, more = _list_devices(class_filter or "", label_filter or "", cap, started + _LIST_BUDGET_S)
     nodes: List[dict] = []
     edges: List[dict] = []
     errors: List[dict] = []
@@ -167,7 +192,7 @@ def device_graph_snapshot(
     _MAX_DEEP_CREATIVE = 60
     deep_verse = 0
     deep_creative = 0
-    deadline = time.monotonic() + _DEEP_BUDGET_S
+    deadline = started + _DEEP_BUDGET_S
     partial = False
 
     for d in devices:
@@ -248,12 +273,13 @@ def device_graph_snapshot(
         "count": len(nodes),
         "edge_count": len(edges),
         "errors": errors,
-        "truncated": len(devices) >= cap,
-        # Out of time: only the first `read` of `total` devices are in. Narrow with
-        # label_filter / class_filter for the rest.
+        # More devices exist than are listed (past the cap or the walk's budget), or the
+        # deep reads ran out of time: narrow with label_filter / class_filter for the rest.
+        "truncated": more or partial,
         "partial": partial,
         "read": len(nodes),
-        "total": int(listed.get("total") or len(devices)),
+        # Devices found; with truncated, at least this many.
+        "total": len(devices),
     }
 
 
