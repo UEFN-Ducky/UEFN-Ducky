@@ -750,7 +750,7 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
         outcome = _turn_outcome(reason, detail)
         # Why a turn failed, as one ERROR_KINDS word (Oct 27 2026: Codex 0 -> 13 errors, 7 within
         # 10 s, and nothing said why). The detail itself never leaves.
-        why = {"kind": ev.kind_of(detail)} if outcome == "error" else {}
+        why = {"kind": ev.kind_of(detail), "reason": ev.turn_reason(detail)} if outcome == "error" else {}
         track(
             "chat.turn",
             provider=meta["provider"],
@@ -759,6 +759,7 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
             duration_s=time.monotonic() - float(meta["started"]),
             tool_calls_n=int(meta["tools"]),
             tool_fails_n=int(meta.get("fails") or 0),
+            v=_app_version(),
             **why,
         )
     except Exception:

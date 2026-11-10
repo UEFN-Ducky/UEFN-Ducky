@@ -133,6 +133,9 @@ EVENTS: dict[str, dict[str, Any]] = {
         "duration": ("bucket", DURATION_S, "duration_s"),
         "tool_calls": ("bucket", TOOL_CALLS, "tool_calls_n"),
         "kind": ERROR_KINDS,  # failed turns only
+        # Failed turns only: why, from a fixed list (turn_reason); cli_exit_<code> keeps the exit code.
+        "reason": ("slug",),
+        "v": ("version",),
         # Failed tool calls in the turn; a command that exited non-zero is not one.
         "tool_fails": ("bucket", TOOL_CALLS, "tool_fails_n"),
     },
@@ -159,7 +162,8 @@ EVENTS: dict[str, dict[str, Any]] = {
                    # usage_batch_refused only: the Store's one-word reason (usage_stats.reason_token).
                    "reason": ("slug",)},
     # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
-    "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",)},
+    "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",),
+                    "v": ("version",)},
     "ui.crash": {"code": ("slug",)},
     # Source control (Unreal Revision Control): one per push or pull, never a path or a message.
     "revision.op": {"op": ("push", "pull"), "outcome": ("ok", "up_to_date", "blocked", "fail"),
@@ -360,7 +364,8 @@ _KIND_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("not_found", r"not found|no such file|filenotfounderror|does not exist"),
         # A turn that died before its first tool call: Ducky's MCP tools never connected, or the
         # CLI quit. The Store takes only ERROR_KINDS words, so these read as offline and crash.
-        ("offline", r"tools didn.t connect|mcp (server )?(failed|error)|could not connect to (ducky|mcp)"),
+        ("offline", r"tools didn.t connect|mcp (server )?(failed|error)|mcp server .{0,40}fail"
+                    r"|could not connect to (ducky|mcp)"),
         ("crash", r"exited unsuccessfully|exited with code|process exited"),
         ("crash", r"traceback|crash|exit code|exited with"),
     )
@@ -373,6 +378,34 @@ def kind_of(message: str) -> str:
     for kind, rule in _KIND_RULES:
         if rule.search(text):
             return kind
+    return "other"
+
+
+# Why a chat turn failed (chat.turn reason): first match wins; cli_exit gets the code appended.
+_TURN_REASONS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (reason, re.compile(pattern))
+    for reason, pattern in (
+        ("mcp_connect", r"mcp server .{0,40}fail|mcp (server )?(failed|error)|tools didn.t connect"
+                        r"|could not connect to (ducky|mcp)"),
+        ("session_resume", r"no conversation found|resum(e|ing) (the )?session|session .{0,20}resume|--resume"),
+        ("context_full", r"context.?(window|length)|prompt is too long|too many tokens|maximum context"),
+        ("cli_exit", r"exit(ed)? (unsuccessfully )?\(?(with )?code:? ?-?(\d+)"),
+        ("network", r"not reachable|offline|network|connection (refused|reset|aborted)|econnreset|getaddrinfo"
+                    r"|winerror 100(54|61)"),
+        ("auth", r"\b40[13]\b|unauthori[sz]ed|not logged in|authentication|invalid api key"),
+        ("empty", r"no captured reply|empty (reply|response)|no output"),
+    )
+)
+TURN_REASONS = ("mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty", "other")
+
+
+def turn_reason(detail: str) -> str:
+    """A failed turn's end detail as one TURN_REASONS word; cli_exit becomes cli_exit_<code>."""
+    text = (detail or "").lower()
+    for reason, rule in _TURN_REASONS:
+        m = rule.search(text)
+        if m:
+            return f"cli_exit_{m.group(4)[:12]}" if reason == "cli_exit" else reason
     return "other"
 
 

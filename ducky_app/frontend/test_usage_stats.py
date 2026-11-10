@@ -311,7 +311,9 @@ def test_chat_turn_counts_its_tools_and_first_message_once() -> None:
     assert names.count("tool.call") == 2
     assert names.count("skill.used") == 1
     turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
-    assert turns[0] == {"provider": "codex", "model_family": "gpt", "outcome": "ok", "duration": "10s", "tool_calls": "1-5", "tool_fails": "0"}
+    v = {"v": us._app_version()} if ev.VERSION_RE.match(us._app_version()) else {}
+    assert turns[0] == {"provider": "codex", "model_family": "gpt", "outcome": "ok", "duration": "10s", "tool_calls": "1-5",
+                        "tool_fails": "0", **v}
     assert turns[1]["provider"] == "claude" and turns[1]["outcome"] == "error" and turns[1]["tool_calls"] == "0"
     assert not any("Cube" in str(r) for r in rows)
 
@@ -384,6 +386,31 @@ def test_a_failed_turn_says_what_kind_of_failure_and_nothing_else() -> None:
     turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
     assert [t.get("kind") for t in turns] == [want for _, _, want in cases]
     assert not any("Users" in str(t) or "codex.exe" in str(t) for t in turns)
+
+
+def test_a_failed_turn_carries_the_app_version_and_a_fixed_list_reason(monkeypatch) -> None:
+    """ank4r8t2b6x9p: 198 Claude turns a day died as kind:other with no build to tell them apart."""
+    monkeypatch.setattr(us, "_app_version", lambda: "1.2.488")
+    cases = [("MCP server uefn failed to connect", "mcp_connect"),
+             ("Claude Code exited unsuccessfully (code 1)", "cli_exit_1"),
+             ("codex process exited with code 3221225477", "cli_exit_3221225477"),
+             ("No conversation found with session ID: 1234-abcd", "session_resume"),
+             ("prompt is too long: 210000 tokens", "context_full"),
+             ("connection reset by peer", "network"),
+             ("Error: not logged in", "auth"),
+             ("claude_code finished with no captured reply.", "empty"),
+             ("something odd at C:/Users/x", "other")]
+    for i, (detail, _) in enumerate(cases):
+        us.run_begin(f"t{i}", f"ct{i}", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
+        us.run_end(f"t{i}", "error", detail)
+    us.run_begin("ok", "c-ok", coding_agent="claude_code")
+    us.run_end("ok", "done")
+    rows, _ = us._take(100)
+    turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
+    assert [t.get("reason") for t in turns] == [want for _, want in cases] + [None]
+    assert all(t["v"] == "1.2.488" for t in turns)
+    assert turns[0]["kind"] == "offline" and turns[0]["outcome"] == "error"
+    assert not any("Users" in str(t) or "1234" in str(t) for t in turns)
 
 
 def test_overloaded_credit_and_rate_limit_stops_are_limits() -> None:
@@ -540,6 +567,7 @@ def test_a_coding_agent_turn_counts_the_tools_its_cli_ran() -> None:
     us.run_end("run-cli", "done")
     rows, _ = us._take(100)
     turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
+    turns[0].pop("v", None)
     assert turns == [{"provider": "claude", "model_family": "claude", "outcome": "ok", "duration": "10s", "tool_calls": "6-20", "tool_fails": "0"}]
     assert not [r for r in rows if r["name"] == "tool.call"]  # the tool server counts those
 
