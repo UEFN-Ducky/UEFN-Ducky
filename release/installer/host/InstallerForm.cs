@@ -106,6 +106,8 @@ namespace DuckySetup
                 previousVersion = detect.installed ? Engine.InstalledVersion() : "",
                 license = Embed.ReadText("LICENSE"),
                 isUpgrade = detect.installed,
+                // Welcome offers Repair: UEFN Ducky was here before (its id, chats and settings stayed).
+                hadDucky = _kind == "reinstall",
                 allUsers = detect.allUsers,
                 dir = _installDir,
                 userDir = Engine.UserDir,

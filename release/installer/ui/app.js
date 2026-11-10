@@ -6,6 +6,7 @@
     version: "",
     previousVersion: "",
     isUpgrade: false,
+    repair: false,
     allUsers: false,
     userDir: "",
     machineDir: "",
@@ -156,7 +157,18 @@
     state.dir = data.dir || (state.allUsers ? state.machineDir : state.userDir);
     renderLicense(data.license || "");
     $("welcome-version").textContent = v(state.version);
-    document.title = state.isUpgrade ? "Updating UEFN Ducky" : "UEFN Ducky Setup";
+    // UEFN Ducky was on this PC (its chats and settings are still here): a reinstall is a
+    // repair, not a fresh start. 8 of 19 Setup opens on Nov 7 2026 left on this screen.
+    state.repair = !state.isUpgrade && !!data.hadDucky;
+    if (state.repair) {
+      $("welcome-title").textContent = "Repair UEFN Ducky";
+      $("welcome-tagline").textContent =
+        (state.previousVersion ? "UEFN Ducky " + v(state.previousVersion) + " is installed." : "UEFN Ducky was on this PC before.") +
+        " Repair keeps your chats and settings.";
+      $("install").textContent = "Repair";
+      $("options-install").textContent = "Repair";
+    }
+    document.title = state.isUpgrade ? "Updating UEFN Ducky" : state.repair ? "Repair UEFN Ducky" : "UEFN Ducky Setup";
     $("progress-title").textContent = state.isUpgrade ? "Updating UEFN Ducky" : "Installing UEFN Ducky";
     $("progress-versions").textContent =
       state.isUpgrade && state.previousVersion && state.previousVersion !== state.version
@@ -182,7 +194,7 @@
     const cancelled = state.cancelled;
     $("error-title").textContent = cancelled ? "Setup was cancelled" : "Setup didn't finish";
     $("error").textContent = cancelled ? "You can run it again any time." : data.error || "The install did not finish.";
-    $("retry").textContent = !cancelled ? "Try again" : state.isUpgrade ? "Update again" : "Install again";
+    $("retry").textContent = !cancelled ? "Try again" : state.isUpgrade ? "Update again" : state.repair ? "Repair again" : "Install again";
     document.querySelector('[data-screen="error"]').classList.toggle("is-cancelled", cancelled);
     show("error");
   }
