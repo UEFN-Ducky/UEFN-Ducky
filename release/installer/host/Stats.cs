@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace DuckySetup
 {
@@ -71,13 +72,50 @@ namespace DuckySetup
         public static string FailReason(string? log)
         {
             var t = (log ?? "").ToLowerInvariant();
-            if (t.Contains("being used by another process") || t.Contains("code 32.") || t.Contains("restartmanager found an application"))
+            if (t.Contains("being used by another process") || t.Contains("code 32.") || t.Contains("restartmanager found an application")
+                || Regex.IsMatch(t, @"\berror 32\b"))
                 return "file_in_use";
             if (t.Contains("not enough space") || t.Contains("code 112."))
                 return "disk_full";
-            if (t.Contains("access is denied") || t.Contains("code 5."))
+            if (t.Contains("access is denied") || t.Contains("code 5.") || Regex.IsMatch(t, @"\berror 5\b"))
                 return "access_denied";
+            if (t.Contains("setup was not completed"))
+                return "inno_not_completed";
             return "";
+        }
+
+        // The log's last line, as "unknown_<text>", when FailReason knows none of it: a bare
+        // exit_4 told us nothing. 32 characters, so exit_4.unknown_... stays within 48.
+        public static string UnknownReason(string? log)
+        {
+            var line = (log ?? "").Replace("\r", "").Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.Length > 0) ?? "";
+            // Inno log lines start with a timestamp: "2026-11-06 10:12:33.120   ...".
+            var text = Regex.Replace(Regex.Replace(line.ToLowerInvariant(), @"^[\d\-:. ]+", ""), @"[^a-z0-9]+", "_").Trim('_');
+            return text.Length == 0 ? "unknown" : "unknown_" + (text.Length > 32 ? text.Substring(0, 32).TrimEnd('_') : text);
+        }
+
+        // Downloads paused on the Store: check again every minute for 10 minutes.
+        public const int PauseChecks = 10;
+        public const int PauseCheckSeconds = 60;
+
+        // The progress line while waiting: the Store paused downloads (a release going out).
+        public static string PausedStatus(int check) =>
+            "Waiting for the UEFN Ducky Store… downloads are paused, checking again in a minute ("
+            + check + " of " + PauseChecks + ").";
+
+        // The first answer that is no longer paused, or the last paused one after PauseChecks.
+        // A failed recheck keeps waiting; a cancel (OperationCanceledException from wait) stops.
+        public static T WaitWhilePaused<T>(T first, Func<T, bool> paused, Func<T> refetch, Action<int> wait, Action<int>? onCheck = null)
+        {
+            var current = first;
+            for (var check = 1; check <= PauseChecks && paused(current); check++)
+            {
+                onCheck?.Invoke(check);
+                wait(PauseCheckSeconds);
+                try { current = refetch(); }
+                catch (Exception ex) when (!(ex is OperationCanceledException)) { /* Store still down: next check */ }
+            }
+            return current;
         }
 
         // Why the downloaded Setup itself gave up before or around its engine, from its setup-host.log.

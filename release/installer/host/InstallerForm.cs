@@ -223,6 +223,12 @@ namespace DuckySetup
                 if (WebRelease.NeedsFetch(_release))
                     _release = Task.Run(Web.FetchLatest);
                 var release = await _release!;
+                if (release.Paused)
+                {
+                    release = await Task.Run(() => Web.WaitWhilePaused(release, cancel.Token, check => OnUi(() =>
+                        Post(new { type = "progress", percent = 0, status = Stats.PausedStatus(check) }))));
+                    _release = Task.FromResult(release);
+                }
                 path = await Task.Run(() => Web.Download(release, (got, total) => OnUi(() =>
                 {
                     var status = got >= total ? "Checking the download…" : WebRelease.DownloadStatus(got, total);
@@ -311,6 +317,9 @@ namespace DuckySetup
             var reason = Stats.FailReason(engineLog);
             if (code == 1 && !_cancelled && reason.Length == 0)
                 reason = Stats.ExitOneReason(engineLog, Engine.ReadHostLog(_installStarted));
+            // Never a bare exit_N: name the log's last line when no rule knows it.
+            if (code != 0 && !_cancelled && reason.Length == 0)
+                reason = Stats.UnknownReason(engineLog);
             // A running UEFN Ducky the engine could not close kept a file locked: close it, try once more.
             if (reason == "file_in_use" && !_retried && _lastArgs != null)
             {

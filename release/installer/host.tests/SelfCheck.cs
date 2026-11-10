@@ -310,6 +310,33 @@ namespace DuckySetup.Tests
             Check(Stats.HostFailReason("System.NullReferenceException: boom") == "host_error" && Stats.HostFailReason("") == "", "exit_1: other host error");
             Check(Stats.ExitOneReason("", "") == "no_log" && Stats.ExitOneReason("Log opened.", "") == "" && Stats.ExitOneReason("", "Could not start x") == "engine_start", "exit_1: logs");
             Check(Stats.FailCode(1, Stats.ExitOneReason("", "")) == "exit_1.no_log", "exit_1 code");
+
+            // exit_4 always says why: Inno's own lines, then the log's last line as a last resort.
+            Check(Stats.FailReason("2026-11-06 10:12:33.120   Setup was not completed.") == "inno_not_completed", "exit_4: setup not completed");
+            Check(Stats.FailCode(4, Stats.FailReason("Setup was not completed.")) == "exit_4.inno_not_completed", "exit_4.inno_not_completed code");
+            Check(Stats.FailReason("RenameFile failed; error 5") == "access_denied" && Stats.FailReason("error 50 something") == "", "exit_4: error 5");
+            Check(Stats.FailReason("DeleteFile failed; error 32") == "file_in_use" && Stats.FailReason("error 321") == "", "exit_4: error 32");
+            Check(Stats.FailReason("Access is denied. Setup was not completed.") == "access_denied", "a known cause beats not completed");
+            var unknown = Stats.UnknownReason("Log opened.\r\n2026-11-06 10:12:33.120   Exception: Something odd broke here, very long text indeed\r\n\r\n");
+            Check(unknown == "unknown_exception_something_odd_broke_he" && Stats.FailCode(4, unknown).Length <= 48, "exit_4: unknown_ last line, fits usage_events");
+            Check(Stats.UnknownReason("") == "unknown" && Stats.UnknownReason(null) == "unknown" && Stats.UnknownReason("12:00:01.5 ") == "unknown", "exit_4: empty log");
+
+            // Downloads paused: a feed that clears after 2 checks goes on with the install.
+            var answers = new Queue<StoreRelease>(new[] { new StoreRelease { Paused = true }, new StoreRelease { Version = "1.2.488" } });
+            var pauseWaits = new List<int>();
+            var checks = new List<int>();
+            var cleared = Stats.WaitWhilePaused(new StoreRelease { Paused = true }, r => r.Paused, answers.Dequeue, pauseWaits.Add, checks.Add);
+            Check(!cleared.Paused && cleared.Version == "1.2.488" && pauseWaits.SequenceEqual(new[] { 60, 60 }) && checks.SequenceEqual(new[] { 1, 2 }), "paused feed clears after 2 checks");
+            var tries = 0;
+            var still = Stats.WaitWhilePaused(new StoreRelease { Paused = true }, r => r.Paused,
+                () => { if (++tries % 2 == 0) throw new WebException("down"); return new StoreRelease { Paused = true }; }, _ => { });
+            Check(still.Paused && tries == Stats.PauseChecks, "still paused after 10 checks (a failed recheck keeps waiting)");
+            Check(!Stats.WaitWhilePaused(new StoreRelease(), r => r.Paused, () => throw new Exception("never"), _ => throw new Exception("never")).Paused, "not paused: no wait");
+            var stopped = false;
+            try { Stats.WaitWhilePaused(new StoreRelease { Paused = true }, r => r.Paused, () => new StoreRelease { Paused = true }, _ => throw new OperationCanceledException()); }
+            catch (OperationCanceledException) { stopped = true; }
+            Check(stopped, "cancel stops the wait");
+            Check(Stats.PausedStatus(3).Contains("Waiting for the UEFN Ducky Store") && Stats.PausedStatus(3).Contains("3 of 10"), "waiting screen text");
             Check(Stats.Reason("bugs") == "bugs" && Stats.Reason("  slow ") == "slow" && Stats.Reason("hacked") == "none" && Stats.Reason(null) == "none", "reasons");
             Check(Stats.Screen("done") == "done" && Stats.Screen("<b>") == "welcome", "screens");
             Check(Stats.IsRetry("error") && !Stats.IsRetry("welcome") && !Stats.IsRetry("options") && !Stats.IsRetry(null), "install from the error screen counts as a retry");

@@ -108,6 +108,15 @@ namespace DuckySetup
             return reader.ReadToEnd();
         }
 
+        // Downloads paused on the Store (5 of 9 web updates on Nov 6 2026 stopped here): ask
+        // again every minute for 10 minutes before giving up. onCheck(n) runs before each wait.
+        public static StoreRelease WaitWhilePaused(StoreRelease release, CancellationToken ct, Action<int>? onCheck = null) =>
+            Stats.WaitWhilePaused(release, r => r.Paused, FetchLatest, seconds =>
+            {
+                ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds));
+                ct.ThrowIfCancellationRequested();
+            }, onCheck);
+
         // Downloads (or reuses) the release's full Setup and returns its path once it
         // passed every check. progress(got, total) runs on this thread.
         public static string Download(StoreRelease release, Action<long, long>? progress, CancellationToken ct)
@@ -302,7 +311,7 @@ namespace DuckySetup
         {
             if (Environment.GetEnvironmentVariable(ChildEnv) == "1")
                 throw new InvalidOperationException("The Store's download is a web installer, not the full Setup: stopping here.");
-            var release = FetchLatest();
+            var release = WaitWhilePaused(FetchLatest(), CancellationToken.None);
             var path = Download(release, null, CancellationToken.None);
             using var proc = StartSetup(path, args);
             proc.WaitForExit();
