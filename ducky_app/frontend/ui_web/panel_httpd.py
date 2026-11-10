@@ -850,6 +850,21 @@ def start_panel_ui_server(dist_root: Path, bind_port: int | None = None) -> str:
                 ):
                     self.send_error(403)
                     return
+                # A result too big for the launcher's 1 MB stdio line, parked by the backend
+                # (native_host/headless.py): handed out once, to this PC only.
+                if path.startswith("/__panel_large_result/"):
+                    from frontend.native_host.headless import take_large_result
+
+                    body = take_large_result(path[len("/__panel_large_result/") :].strip("/"))
+                    if body is None or not host_is_local(self._request_host()):
+                        self._send_json(404, {"ok": False, "error": "result expired"})
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if path.startswith("/__panel_api/"):
                     method = unquote(path[len("/__panel_api/") :]).strip().strip("/")
                     try:

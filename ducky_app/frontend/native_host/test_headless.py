@@ -217,6 +217,13 @@ def test_writer_lines_and_size_limit() -> None:
     big = json.loads(lines[1])
     assert big["id"] == "big" and big["ok"] is False
     assert lines[2] == b""
+    # the oversized value is parked for the page to fetch once, not lost
+    assert big["error"].startswith(headless.LARGE_RESULT_PREFIX)
+    token = big["error"][len(headless.LARGE_RESULT_PREFIX):].split(" ", 1)[0]
+    body = headless.take_large_result(token)
+    assert body is not None and json.loads(body) == {"ok": True, "result": "x" * (headless.MAX_LINE_BYTES + 10)}
+    assert headless.take_large_result(token) is None, "handed out once"
+    assert headless.take_large_result("nope") is None
 
 
 # --- under the launcher: the UI server on an internal port -------------------------------

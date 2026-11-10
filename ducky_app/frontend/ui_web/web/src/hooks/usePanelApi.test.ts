@@ -34,6 +34,27 @@ describe("remoteInflightKey", () => {
   });
 });
 
+describe("desktop bridge replies over 1 MB", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as unknown as { pywebview?: unknown }).pywebview;
+  });
+
+  it("fetches the parked result once instead of failing (any method, plugin_call too)", async () => {
+    const bridgeCall = vi.fn(() => Promise.reject(new Error("large result:tok123 (message over 1048576 bytes)")));
+    (window as unknown as { pywebview: unknown }).pywebview = {
+      api: { get_listener_status: vi.fn(), plugin_call: bridgeCall, other: () => Promise.reject(new Error("boom")) },
+    };
+    const fetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ ok: true, result: { roads: 4 } }), { status: 200 })));
+    vi.stubGlobal("fetch", fetch);
+    const api = getApi() as unknown as { plugin_call: () => Promise<unknown>; other: () => Promise<unknown> };
+    await expect(api.plugin_call()).resolves.toEqual({ roads: 4 });
+    expect(fetch).toHaveBeenCalledWith("/__panel_large_result/tok123", expect.objectContaining({ method: "POST" }));
+    await expect(api.other()).rejects.toThrow("boom");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("remoteApi", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

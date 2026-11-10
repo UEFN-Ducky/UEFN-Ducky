@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import sys
 import threading
+import time
 from typing import IO, Any, Callable
 from urllib.parse import urlparse
 
@@ -20,6 +22,13 @@ BACKEND_FLAG = "--backend"
 AFTER_UPDATE_FLAG = "--after-update"
 PROTOCOL = 1
 MAX_LINE_BYTES = 1024 * 1024
+# A result over the line cap is parked here and answered with this error plus a token; the
+# page (usePanelApi.ts) fetches it once from /__panel_large_result/<token>. Without it a
+# plugin panel's big reply (a 1.5 MB road network) only said "message over 1048576 bytes".
+LARGE_RESULT_PREFIX = "large result:"
+LARGE_RESULT_TTL_S = 120.0
+_large_results: dict[str, tuple[float, bytes]] = {}
+_large_lock = threading.Lock()
 # As the window: the deferred startup work waits until the page had its first calls.
 BACKGROUND_AFTER_HELLO_S = 1.5
 # No hello was sent: the launcher reports its own code (23 no hello / 24 start error) and
@@ -65,6 +74,27 @@ def encode(message: dict[str, Any]) -> bytes:
     return data
 
 
+def park_large_result(value: Any) -> str:
+    """Keep one oversized result (as the ``/__panel_api`` reply body) for a single fetch."""
+    body = json.dumps({"ok": True, "result": value}, ensure_ascii=False, default=str).encode("utf-8")
+    token = secrets.token_urlsafe(18)
+    now = time.monotonic()
+    with _large_lock:
+        for key in [k for k, (at, _) in _large_results.items() if now - at > LARGE_RESULT_TTL_S]:
+            del _large_results[key]
+        _large_results[token] = (now, body)
+    return token
+
+
+def take_large_result(token: str) -> bytes | None:
+    """The parked reply body for ``token``, once; None when unknown or expired."""
+    with _large_lock:
+        hit = _large_results.pop(str(token or ""), None)
+    if hit is None or time.monotonic() - hit[0] > LARGE_RESULT_TTL_S:
+        return None
+    return hit[1]
+
+
 class LineWriter:
     """Thread-safe writer of protocol lines to the launcher (stdout)."""
 
@@ -79,7 +109,10 @@ class LineWriter:
             if message.get("t") != "result":
                 _log.warning("backend message not sent: %s", exc)
                 return False
-            data = encode({"t": "result", "id": message.get("id"), "ok": False, "error": str(exc)})
+            error = str(exc)
+            if message.get("ok") and isinstance(exc, ValueError):
+                error = f"{LARGE_RESULT_PREFIX}{park_large_result(message.get('value'))} ({exc})"
+            data = encode({"t": "result", "id": message.get("id"), "ok": False, "error": error})
         with self._lock:
             try:
                 self._stream.write(data)

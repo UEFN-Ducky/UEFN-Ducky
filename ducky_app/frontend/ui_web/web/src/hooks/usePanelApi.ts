@@ -154,22 +154,58 @@ export const HTTP_ROUTED_METHODS: ReadonlySet<string> = new Set([
 
 const _routed = new WeakMap<PanelApi, PanelApi>();
 
-/** `api` with HTTP_ROUTED_METHODS sent over HTTP; one wrapper per bridge object. */
+/** Error the backend sends for a reply over the launcher's 1 MB line (native_host/headless.py). */
+export const LARGE_RESULT_PREFIX = "large result:";
+
+/** The parked reply behind a "large result:<token>" error, fetched once; other errors pass through. */
+export async function claimLargeResult(err: unknown): Promise<{ ok: true; result: unknown } | null> {
+  const msg = String((err as Error)?.message ?? err ?? "");
+  if (!msg.startsWith(LARGE_RESULT_PREFIX)) return null;
+  const token = msg.slice(LARGE_RESULT_PREFIX.length).split(" ", 1)[0];
+  const res = await fetch("/__panel_large_result/" + encodeURIComponent(token), {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  const json = (await res.json().catch(() => ({}))) as { ok?: boolean; result?: unknown };
+  return res.ok && json.ok !== false ? { ok: true, result: json.result } : null;
+}
+
+/**
+ * `api` with HTTP_ROUTED_METHODS sent over HTTP, and every call able to take a reply too big
+ * for the native launcher's bridge (any method, plugin.call included); one wrapper per bridge.
+ */
 function routedApi(api: PanelApi): PanelApi {
   const hit = _routed.get(api);
   if (hit) return hit;
+  const fns = new Map<string, (...args: unknown[]) => Promise<unknown>>();
   const wrapped = new Proxy(api, {
     get(target, prop) {
       const value = Reflect.get(target, prop, target) as unknown;
-      if (typeof prop !== "string" || typeof value !== "function" || !HTTP_ROUTED_METHODS.has(prop)) return value;
+      if (typeof prop !== "string" || typeof value !== "function") return value;
+      const cached = fns.get(prop);
+      if (cached) return cached;
       const bridge = value as (...args: unknown[]) => Promise<unknown>;
-      return async (...args: unknown[]) => {
-        if (canCallOverHttp()) {
-          const http = await callOverHttp(prop, args);
-          if (http.ok) return http.result;
+      const viaBridge = async (args: unknown[]) => {
+        try {
+          return await bridge.apply(target, args);
+        } catch (err) {
+          const big = await claimLargeResult(err);
+          if (big) return big.result;
+          throw err;
         }
-        return bridge.apply(target, args);
       };
+      const fn = HTTP_ROUTED_METHODS.has(prop)
+        ? async (...args: unknown[]) => {
+            if (canCallOverHttp()) {
+              const http = await callOverHttp(prop, args);
+              if (http.ok) return http.result;
+            }
+            return viaBridge(args);
+          }
+        : (...args: unknown[]) => viaBridge(args);
+      fns.set(prop, fn);
+      return fn;
     },
   });
   _routed.set(api, wrapped);
