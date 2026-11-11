@@ -388,6 +388,12 @@ def _host_started_fine() -> None:
         pass
 
 
+def python_style_call(argv: list[str]) -> bool:
+    """``-m pytest``, ``-c code``, ``-I``: the EXE was called as if it were python.exe."""
+    first = argv[1] if len(argv) > 1 else ""
+    return first.startswith("-") and not first.startswith("--") and len(first) > 1
+
+
 def _hidden_by_hand_off(argv: list[str] | None = None) -> bool:
     """A sign-in start that an older version handed to this one. Its hand-off took
     ``--background`` out of argv but kept ``UEFN_DUCKY_START_HIDDEN=1`` in the environment it
@@ -449,6 +455,15 @@ def main() -> None:
         from frontend.runtime_smoke import run as run_runtime_smoke
 
         raise SystemExit(run_runtime_smoke(sys.argv[2]))
+    if python_style_call(sys.argv):
+        # Code that took sys.executable for Python ("UEFN-Ducky.exe -m pytest") booted a whole
+        # second Ducky: its logo splash, a hand-off to the open window exiting 0 (read as passed).
+        # Ducky's own options all start with "--" (multiprocessing's children divert earlier).
+        try:
+            sys.stderr.write(f"UEFN-Ducky.exe is not a Python interpreter: {' '.join(sys.argv[1:3])}\n")
+        except Exception:
+            pass
+        raise SystemExit(2)
     # Before ANY subprocess can be spawned —
     # panel and bridge modes both fork children.
     scrub_pyinstaller_boot_env()

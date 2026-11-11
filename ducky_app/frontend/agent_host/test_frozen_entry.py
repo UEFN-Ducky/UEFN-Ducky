@@ -29,6 +29,28 @@ def test_agent_host_argv_runs_the_host_not_the_app(monkeypatch):
     assert got == [["--slot", "0", "--pipe", "p"]]
 
 
+@pytest.mark.parametrize("args", [["-m", "pytest", "-q"], ["-I", "-c", "print(1)"], ["-c", "x"]])
+def test_python_style_args_never_boot_a_second_ducky(monkeypatch, args):
+    """The release check ran 'UEFN-Ducky.exe -m pytest': a second Ducky with its logo splash
+    popped up mid-chat, handed off to the open one and exited 0, read as tests passed."""
+    monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe", *args])
+
+    def _app(*_a, **_k):
+        raise AssertionError("a python-style call started Ducky")
+
+    for name in ("scrub_pyinstaller_boot_env", "_sweep_stale_extracts", "_hand_off_to_newest", "run_bridge"):
+        monkeypatch.setattr(launcher, name, _app)
+    with pytest.raises(SystemExit) as ended:
+        launcher.main()
+    assert ended.value.code == 2
+
+
+def test_ducky_options_and_files_are_not_python_style():
+    for argv in (["x"], ["x", "--backend"], ["x", "--background"], ["x", "C:/a/b.verse"],
+                 ["x", "uefn-ducky://store"], ["x", "agent-host"], ["x", "-"]):
+        assert not launcher.python_style_call(argv)
+
+
 def test_a_host_an_older_app_handed_off_clears_its_start_count(monkeypatch, tmp_path):
     """An older app's hand-off counts each host start; two uncleared ones mark the version bad."""
     from frontend import __version__, app_versions

@@ -60,6 +60,16 @@ def test_not_a_repo_is_refused(tmp_path) -> None:
     assert "not a git repository" in p.clean_clone_test_check(tmp_path)["error"]
 
 
+def test_the_installed_app_says_skipped_never_a_fake_pass(tmp_path, monkeypatch) -> None:
+    """Frozen, sys.executable is UEFN-Ducky.exe: '-m pytest' booted a second Ducky that exited
+    0 without running a test (Nov 11 2026)."""
+    repo = _repo(tmp_path / "plug", "def test_ok():\n    assert False\n")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(p.subprocess, "run", lambda *a, **k: pytest.fail("ran a process"))
+    out = p.clean_clone_test_check(repo)
+    assert out["ok"] is True and out["clone_tests"] == "skipped" and "no Python" in out["note"]
+
+
 def _zip(files: dict[str, str]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:

@@ -775,6 +775,11 @@ def clean_clone_test_check(repo: str | Path, *, test_cmd: list[str] | None = Non
     """Run the plugin's tests in a fresh clone of HEAD: no ignored, untracked or uncommitted
     files, the way the release workflow sees the repo. A failure names the ignored files the
     output mentions (a test reading the git-ignored tests/evidence/ passes only in the draft)."""
+    if test_cmd is None and getattr(sys, "frozen", False):
+        # The installed app's sys.executable is UEFN-Ducky.exe, not Python: '-m pytest' booted a
+        # second Ducky (its logo splash, a hand-off exiting 0) and read as tests passed (Nov 11 2026).
+        return {"ok": True, "clone_tests": "skipped",
+                "note": "the installed app has no Python to run pytest; run the plugin's tests from its repo"}
     repo = Path(repo).resolve()
     try:
         top = _git(repo, "rev-parse", "--show-toplevel")
