@@ -291,13 +291,27 @@ _FIX_WORDS = re.compile(r"\b(no longer|fixed|fixes|again|works now|now works)\b"
 _NEW_WORDS = re.compile(r"^(new\b|now you can\b|you can now\b|adds?\b)|\bnew\b", re.IGNORECASE)
 
 
+# Commits about the release itself or its tests are not changes anyone using Ducky sees.
+_INTERNAL_NOTE = re.compile(r"^(release desktop\b|fix release tests\b|split:)|\btests?\b", re.IGNORECASE)
+
+
 def note_item(subject: str) -> dict[str, str] | None:
     """One short change from a commit subject: the first sentence up to its first
-    colon, semicolon or ", so", without the closing full stop."""
+    colon, semicolon or ", so", without the closing full stop. A short topic label
+    ("Bridge: …", "API keys: …") gives the sentence after it, never the label alone
+    (1.2.492's What's new listed just "Bridge", "API keys", "perf")."""
     first = re.split(r"(?<=[.!?])\s", subject.strip(), maxsplit=1)[0]
-    text = re.split(r"[:;]\s|,\s+so\s|\s+—\s", first, maxsplit=1)[0].strip().rstrip(".")
+    label, colon, rest = first.partition(": ")
+    if colon and len(label.split()) <= 4:
+        if _INTERNAL_NOTE.search(label):
+            return None
+        first = rest
+    elif _INTERNAL_NOTE.search(first):
+        return None
+    text = re.split(r"[:;]\s|,\s+so\s|\s+—\s|\s+\(", first, maxsplit=1)[0].strip().rstrip(".")
     if not text:
         return None
+    text = text[0].upper() + text[1:]
     kind = "fix" if _FIX_WORDS.search(text) else "new" if _NEW_WORDS.search(text) else "improved"
     return {"kind": kind, "text": text}
 

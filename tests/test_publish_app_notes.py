@@ -36,6 +36,24 @@ def test_commits_become_short_changes_with_a_kind():
     assert left_out == []
 
 
+def test_a_topic_label_gives_the_sentence_after_it_not_one_word():
+    """1.2.492's What's new showed only "Bridge", "API keys", "Release tests", "perf"."""
+    pub = _load()
+    items, _ = pub.short_note_items([
+        "Bridge: a lost reply is a timeout that may still be running",
+        "API keys: an empty key row never wins over a saved key. Google's key sat …",
+        "Release tests: the failed-test re-run uses pytest --lf",
+        "perf: reduce backend retention and chat payloads (#27).",
+        "Release desktop 1.2.491.",
+        "Fix release tests: app_popups tools lacked a group prefix",
+    ])
+    assert [i["text"] for i in items] == [
+        "A lost reply is a timeout that may still be running",
+        "An empty key row never wins over a saved key",
+        "Reduce backend retention and chat payloads",
+    ]
+
+
 def test_long_changes_and_more_than_five_stay_out_of_the_window():
     pub = _load()
     long = "On one account across several PCs a lock belongs to one PC and the others say so by name."
