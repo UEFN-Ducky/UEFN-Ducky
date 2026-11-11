@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
+from frontend.settings import DEFAULT_MAKER_SETTINGS
 from frontend.ui_web.gateway_accounts_changed import accounts_changed as _accounts_changed  # noqa: E402
 
 
@@ -76,8 +77,7 @@ class PanelApiSettingsMixin:
             "chat_mentions_enabled": bool(getattr(s, "chat_mentions_enabled", True)),
             "chat_slash_references_enabled": bool(getattr(s, "chat_slash_references_enabled", True)),
             "chat_title_model": getattr(s, "chat_title_model", "") or "",
-            "default_image_provider": getattr(s, "default_image_provider", "") or "",
-            "default_mesh_provider": getattr(s, "default_mesh_provider", "") or "",
+            **{key: getattr(s, key, "") or "" for key in DEFAULT_MAKER_SETTINGS},
             "web_access": (
                 s.web_access if getattr(s, "web_access", "ask") in ("off", "ask", "on") else "ask"
             ),
@@ -642,7 +642,7 @@ class PanelApiSettingsMixin:
             s.chat_slash_references_enabled = bool(patch.get("chat_slash_references_enabled"))
         if "chat_title_model" in patch:
             s.chat_title_model = str(patch.get("chat_title_model") or "").strip()
-        for key in ("default_image_provider", "default_mesh_provider"):
+        for key in DEFAULT_MAKER_SETTINGS:
             if key in patch:
                 setattr(s, key, str(patch.get(key) or "").strip())
         if "team_send_delay_s" in patch or "team_poll_s" in patch:

@@ -125,6 +125,7 @@ _PUBLIC_METHODS = frozenset({
     'coding_agent_login_submit',
     'coding_agent_logout',
     'list_gateway_accounts',
+    'list_media_makers',
     'add_gateway_account',
     'rename_gateway_account',
     'remove_gateway_account',

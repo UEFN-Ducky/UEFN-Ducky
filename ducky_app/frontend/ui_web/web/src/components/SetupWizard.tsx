@@ -20,8 +20,9 @@ import { DuckyModelPicker } from "./ducky/DuckyModelPicker";
 import { SetupModelTiles } from "./SetupModelTiles";
 import { SetupStepDuck } from "./SetupStepDuck";
 import { SetupWelcomeScene } from "./SetupWelcomeScene";
-import { loadVoiceSettings, saveVoiceSettings } from "../voice/voiceSettings";
+import { loadJobModels, MODEL_JOBS, NO_JOB_MODELS, saveJobModel, type JobModels, type ModelJob } from "./modelJobs";
 
+export { MODEL_JOBS };
 export type SetupStep = "welcome" | "plugins" | "ai" | "defaults";
 export type InstallPhase = "ready" | "installing" | "installed" | "error";
 export type InstallRow = { phase: InstallPhase; detail?: string };
@@ -1073,43 +1074,6 @@ function AiStep({ onInstallStep }: { onInstallStep: () => void }) {
   );
 }
 
-/** Each job that has its own model, what to pick for it, and where it is saved. */
-type ModelJob = { id: "chat" | "live" | "spoken" | "memory"; title: string; suggest: string; empty: string };
-export const MODEL_JOBS: ModelJob[] = [
-  {
-    id: "chat",
-    title: "Chats and duckies",
-    suggest: "Your strongest model: it writes Verse, builds levels and uses tools. Try Claude Sonnet or Opus, GPT or Gemini Pro.",
-    empty: "Pick a model",
-  },
-  {
-    id: "live",
-    title: "Live voice",
-    suggest: "A fast, small model that answers you out loud right away while the ducky keeps working. Try Claude Haiku, GPT mini or Gemini Flash.",
-    empty: "The chat's model",
-  },
-  {
-    id: "spoken",
-    title: "Spoken summaries",
-    suggest: "Your cheapest model: it only shortens replies before they are read aloud.",
-    empty: "Chats model",
-  },
-  {
-    id: "memory",
-    title: "Memory summaries",
-    suggest: "A cheap model that shrinks older messages in long chats. Empty uses the spoken summaries model, then the chats model.",
-    empty: "Spoken summaries model",
-  },
-];
-
-function saveJobModel(id: ModelJob["id"], next: string) {
-  const api = getApi();
-  if (id === "chat") void api?.save_agent_settings({ default_model: next });
-  else if (id === "live") void saveVoiceSettings({ liveModel: next });
-  else if (id === "spoken") void saveVoiceSettings({ summaryModel: next });
-  else void api?.set_memory_settings?.({ memory_summary_model: next });
-}
-
 function DefaultsStep({
   plugins,
   rows,
@@ -1129,30 +1093,18 @@ function DefaultsStep({
   useEffect(() => {
     onAi(ai());
   });
-  const [models, setModels] = useState<Record<ModelJob["id"], string>>({ chat: "", live: "", spoken: "", memory: "" });
+  const [models, setModels] = useState<JobModels>(NO_JOB_MODELS);
   const [loaded, setLoaded] = useState(false);
   const model = models.chat;
 
   useEffect(() => {
     void refreshModelsCatalog();
-    const api = getApi();
-    if (!api?.get_settings) return;
-    const put = (patch: Partial<Record<ModelJob["id"], string>>) => setModels((cur) => ({ ...cur, ...patch }));
-    void Promise.resolve(api.get_settings())
-      .then((s) => put({ chat: ((s as { default_model?: string })?.default_model || "").trim() }))
-      .catch(() => undefined)
-      .finally(() => setLoaded(true));
-    void loadVoiceSettings()
-      .then((v) => put({ live: v.liveModel, spoken: v.summaryModel }))
-      .catch(() => undefined);
-    void Promise.resolve(api.get_memory_settings?.())
-      .then((m) => put({ memory: String(m?.memory_summary_model || "") }))
-      .catch(() => undefined);
+    void loadJobModels((patch) => setModels((cur) => ({ ...cur, ...patch }))).finally(() => setLoaded(true));
   }, []);
 
   const save = (id: ModelJob["id"], next: string) => {
     setModels((cur) => ({ ...cur, [id]: next }));
-    saveJobModel(id, next);
+    void saveJobModel(id, next);
   };
 
   const installed = plugins.filter((p) => rows[p.slug]?.phase === "installed").length;

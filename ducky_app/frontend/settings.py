@@ -18,6 +18,11 @@ from typing import Any
 _SAVE_LOCK = threading.Lock()
 
 
+# Who makes pictures, 3D models, videos and music when nothing else is picked: the plugin ids
+# Settings > LLMs > Default models saves, one setting per kind.
+DEFAULT_MAKER_SETTINGS = ("default_image_provider", "default_mesh_provider", "default_video_provider", "default_music_provider")
+
+
 def default_app_data_dir() -> Path:
     from frontend.app_paths import resolve_app_data_dir
 
@@ -373,10 +378,17 @@ class PanelSettings:
     """Cheap API model that refines the auto role title (empty = keyword names only)."""
 
     default_image_provider: str = ""
-    """Plugin id that makes pictures when nothing else is picked (empty = first one set up)."""
+    """Plugin id that makes pictures when nothing else is picked (empty = first one set up).
+    One of DEFAULT_MAKER_SETTINGS, with the three below."""
 
     default_mesh_provider: str = ""
     """Plugin id that makes 3D models when nothing else is picked (empty = first one set up)."""
+
+    default_video_provider: str = ""
+    """Plugin id that makes videos when nothing else is picked (empty = first one set up)."""
+
+    default_music_provider: str = ""
+    """Plugin id that makes music when nothing else is picked (empty = first one set up)."""
 
     video_max_mb: int = 100
     """Largest video a chat message may carry (Settings → Videos, 10–200)."""
@@ -730,6 +742,8 @@ class PanelSettings:
             or self.chat_title_model.strip()
             or self.default_image_provider.strip()
             or self.default_mesh_provider.strip()
+            or self.default_video_provider.strip()
+            or self.default_music_provider.strip()
             or self.web_access != "ask"
             or not self.prompt_caching_enabled
             or not self.freeze_prompt_prefix

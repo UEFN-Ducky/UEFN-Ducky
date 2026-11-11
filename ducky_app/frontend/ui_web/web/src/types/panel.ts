@@ -435,6 +435,14 @@ export interface AutomationBackendSetupDto {
   label: string;
 }
 
+/** One plugin that makes a kind of media (video, music): its id is what the default setting saves. */
+export interface MediaMakerDto {
+  id: string;
+  label: string;
+  /** Its key is saved (or it needs none): it can run now. */
+  ready: boolean;
+}
+
 export interface AutomationBackendDto {
   id: string;
   label: string;
@@ -1665,6 +1673,9 @@ export interface PanelSettingsDto {
   /** Plugin id that makes pictures / 3D models when nothing else is picked (empty = first one set up). */
   default_image_provider?: string;
   default_mesh_provider?: string;
+  /** Plugin id that makes videos / music when nothing else is picked (empty = first one set up). */
+  default_video_provider?: string;
+  default_music_provider?: string;
   /** Public web lookup: off, ask once per chat, or on. */
   web_access?: "off" | "ask" | "on" | string;
   /** Follow agent file edits in the editor (walkthrough). */
@@ -3959,6 +3970,8 @@ export interface PanelApi {
   login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id?: string; waiting?: boolean; message?: string }>>;
   logout_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
   gateway_account_status?(provider: string, account: string): Promise<GatewayAccountResult<{ status: GatewayAccountStatusDto }>>;
+  /** The plugins turned on here that make videos or music, for Settings → LLMs → Default models. */
+  list_media_makers?(): Promise<{ ok: boolean; makers: Partial<Record<"video" | "music", MediaMakerDto[]>>; error?: string }>;
   move_conversation(conv_id: string, folder_id: string): Promise<void>;
   move_chats_to_project?(
     conv_ids: string[],

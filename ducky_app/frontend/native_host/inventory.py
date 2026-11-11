@@ -230,7 +230,8 @@ _JS_API: dict[str, str] = {
         edit_workflow_node_code emit_workflow_trigger export_workflow_folder
         get_generated_image_attachment get_workflow get_workflow_node_code
         get_workflow_tools_catalog get_workflow_version import_local_workflows
-        import_workflow_bundle keep_workflow_preview list_generated_images list_workflow_nodes
+        import_workflow_bundle keep_workflow_preview list_generated_images list_media_makers
+        list_workflow_nodes
         list_workflow_templates list_workflow_versions list_workflows move_workflow_folder
         pick_workflow_files pick_workflow_folder queue_file_pick run_workflow run_workflow_node
         save_workflow save_workflow_template set_workflow_editor_prefs set_workflow_folder

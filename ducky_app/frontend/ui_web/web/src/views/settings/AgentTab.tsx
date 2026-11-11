@@ -1,7 +1,6 @@
 import { runBridgeJob } from "../../hooks/bridgeJobAsync";
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { getApi } from "../../hooks/usePanelApi";
-import { fetchStoreCatalog } from "../../hooks/storeCatalogCache";
 import { savePermissionSettings } from "../../hooks/permissionSettings";
 import { onApiReady } from "../../hooks/onApiReady";
 import { Icons } from "../../icons/Icons";
@@ -22,9 +21,7 @@ import { PluginSettingsSections } from "./PluginSettingsSections";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 import { AgentApiKeyToggle } from "./AgentApiKeyToggle";
 import { GatewayAccounts } from "./GatewayAccounts";
-import { DuckyModelPicker } from "../../components/ducky/DuckyModelPicker";
-import { MediaMakerPicker } from "../../components/MediaMakerPicker";
-import { unsetDefaultGatewayIcons, type GatewayIcon } from "./defaultModelGateways";
+import { DefaultModelsCard } from "./DefaultModelsCard";
 import {
   usePluginContributions,
   type PluginLlmProvider,
@@ -32,8 +29,6 @@ import {
 import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
 import {
   clearLlmsShortcutJump,
-  consumeDefaultModelHighlight,
-  HIGHLIGHT_DEFAULT_MODEL_EVENT,
   llmsJumpRecordAction,
   peekLlmsShortcutJump,
   requestOpenSettings,
@@ -132,153 +127,6 @@ function applyKeyTestResult(
   }));
 }
 
-function DefaultModelSection() {
-  const [loaded, setLoaded] = useState(false);
-  const [defaultModel, setDefaultModel] = useState("");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [highlight, setHighlight] = useState(false);
-  const [gatewayIcons, setGatewayIcons] = useState<GatewayIcon[]>([]);
-  const [busySlug, setBusySlug] = useState<string | null>(null);
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    return onApiReady((api) => {
-      void api.get_settings().then((settings) => {
-        setDefaultModel((settings.default_model || "").trim());
-        setLoaded(true);
-      });
-    });
-  }, []);
-
-  useEffect(() => {
-    let timer = 0;
-    const pulse = () => {
-      setHighlight(true);
-      cardRef.current?.scrollIntoView({ block: "center", inline: "nearest" });
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => setHighlight(false), 2600);
-    };
-    if (consumeDefaultModelHighlight()) pulse();
-    const onHighlight = () => {
-      consumeDefaultModelHighlight();
-      pulse();
-    };
-    window.addEventListener(HIGHLIGHT_DEFAULT_MODEL_EVENT, onHighlight);
-    return () => {
-      window.removeEventListener(HIGHLIGHT_DEFAULT_MODEL_EVENT, onHighlight);
-      window.clearTimeout(timer);
-    };
-  }, []);
-
-  const loadGatewayIcons = useCallback(async () => {
-    const api = getApi();
-    if (!api?.duckyos_store_catalog) return;
-    try {
-      const catalog = await fetchStoreCatalog(api);
-      setGatewayIcons(unsetDefaultGatewayIcons(catalog?.items || []));
-    } catch {
-      /* catalog can be offline — the picker still works */
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!loaded || defaultModel.trim()) return;
-    void loadGatewayIcons();
-  }, [loaded, defaultModel, loadGatewayIcons]);
-
-  useEffect(() => {
-    return subscribePanelPush((event) => {
-      if (event.type === "uefn_plugins_changed") void loadGatewayIcons();
-    });
-  }, [loadGatewayIcons]);
-
-  const installGateway = async (slug: string) => {
-    if (busySlug) return;
-    setBusySlug(slug);
-    try {
-      const result = await runBridgeJob<{ ok?: boolean }>(
-        "duckyos_store_download",
-        [slug, "", false],
-        180_000,
-      );
-      if (result?.ok) setGatewayIcons((rows) => rows.filter((row) => row.slug !== slug));
-    } catch {
-      /* leave the icon so they can retry */
-    } finally {
-      setBusySlug(null);
-    }
-  };
-
-  const save = async (next: string) => {
-    const api = getApi();
-    if (!api) return;
-    setDefaultModel(next);
-    setSaveStatus("saving");
-    try {
-      await api.save_agent_settings({ default_model: next });
-      setSaveStatus("saved");
-      window.setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 2500);
-    } catch {
-      setSaveStatus("error");
-    }
-  };
-
-  const showGatewayIcons = loaded && !defaultModel.trim() && gatewayIcons.length > 0;
-
-  return (
-    <div
-      ref={cardRef}
-      className={`llms-default-model-card${highlight ? " is-highlight" : ""}`}
-    >
-      <div className="llms-default-model-row">
-        <h3 className="llms-default-model-title">
-          <span className="general-tab-section-icon" aria-hidden>
-            <Icons.Brain />
-          </span>
-          Default Model
-        </h3>
-        <div className="llms-default-model-picker">
-          <DuckyModelPicker
-            model={defaultModel}
-            onChange={(model) => void save(model)}
-            allowClear
-            placeholder={loaded ? "No models" : "Loading…"}
-            label=""
-            hint=""
-            menuPlacement="bottom"
-          />
-        </div>
-      </div>
-      <p className="llms-default-model-note">
-        Duckies and chats without their own model use this.
-        {saveStatus === "saving"
-          ? " Saving…"
-          : saveStatus === "saved"
-            ? " Saved."
-            : saveStatus === "error"
-              ? " Could not save."
-              : ""}
-      </p>
-      {showGatewayIcons ? (
-        <div className="llms-default-model-gateways" role="group" aria-label="Install a gateway">
-          {gatewayIcons.map((row) => (
-            <button
-              key={row.slug}
-              type="button"
-              className="llms-default-model-gateway"
-              aria-label={`Install ${row.slug}`}
-              disabled={busySlug !== null}
-              onClick={() => void installGateway(row.slug)}
-            >
-              <img src={row.icon} alt="" draggable={false} />
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function ChatTitleSection() {
   const [loaded, setLoaded] = useState(false);
   const [autoTitle, setAutoTitle] = useState(true);
@@ -308,24 +156,6 @@ function ChatTitleSection() {
         }}
       />
       <p className="general-tab-toggle-desc">The working AI chooses a task name as its first tool call. No separate naming model is used.</p>
-    </div>
-  );
-}
-
-function MediaMakersSection() {
-  return (
-    <div className="general-tab-toggle-card">
-      {([["image", "Pictures"], ["mesh", "3D models"]] as const).map(([kind, label]) => (
-        <div key={kind} className="general-tab-toggle-row">
-          <div className="general-tab-toggle-row-text">
-            <span className="general-tab-toggle-label">{label}</span>
-          </div>
-          <MediaMakerPicker kind={kind} label={label} />
-        </div>
-      ))}
-      <p className="general-tab-toggle-desc">
-        Who makes them when a workflow node or a ducky does not pick one. A ducky asks before it spends.
-      </p>
     </div>
   );
 }
@@ -769,9 +599,7 @@ export function AgentTab() {
           <div className="llms-tab-list" aria-label="LLM settings">
             <h2 className="general-tab-page-title">LLMs</h2>
 
-            <DefaultModelSection />
-
-            <MediaMakersSection />
+            <DefaultModelsCard />
 
             <section className="general-tab-section">
               <GeneralSectionHeader icon={<KeyIcon />} title="Providers" />

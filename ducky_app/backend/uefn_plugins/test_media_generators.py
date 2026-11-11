@@ -46,3 +46,37 @@ def test_disabled_plugin_hidden(monkeypatch):
     services.register_media_generator("fakevid", "video", lambda p, **o: {})
     patch_host(monkeypatch, "is_plugin_enabled", lambda pid: False)
     assert services.media_generators("video") == []
+
+
+def test_the_persons_default_maker_comes_first_and_the_picker_lists_every_one(monkeypatch):
+    _keys(monkeypatch, {"b_key": "sk-1"})
+    services.register_media_generator("alpha", "video", lambda p, **o: {}, {"label": "Alpha"})
+    services.register_media_generator("beta", "video", lambda p, **o: {}, {"label": "Beta", "secret_key": "b_key"})
+    services.register_media_generator("gamma", "video", lambda p, **o: {}, {"secret_key": "g_key"})
+    monkeypatch.setattr(services, "default_media_plugin", lambda kind: "")
+    assert [r["plugin_id"] for r in services.media_generators("video")] == ["alpha", "beta"]
+    assert services.media_makers("video") == [
+        {"id": "alpha", "label": "Alpha", "ready": True},
+        {"id": "beta", "label": "Beta", "ready": True},
+        {"id": "gamma", "label": "gamma", "ready": False},
+    ]
+    # Settings > LLMs > Default models: callers take the first that answers.
+    monkeypatch.setattr(services, "default_media_plugin", lambda kind: "beta" if kind == "video" else "")
+    assert [r["plugin_id"] for r in services.media_generators("video")] == ["beta", "alpha"]
+    # A default that is not set up never reaches a caller.
+    monkeypatch.setattr(services, "default_media_plugin", lambda kind: "gamma")
+    assert [r["plugin_id"] for r in services.media_generators("video")] == ["alpha", "beta"]
+    assert services.media_makers("video")[0] == {"id": "gamma", "label": "gamma", "ready": False}
+
+
+def test_the_default_maker_is_read_from_its_own_setting(monkeypatch):
+    from types import SimpleNamespace
+
+    from frontend.settings import PanelSettings
+
+    saved = SimpleNamespace(default_image_provider="account", default_video_provider=" higgsfield ", default_music_provider="")
+    monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls: saved))
+    assert services.default_media_plugin("video") == "higgsfield"
+    assert services.default_media_plugin("image") == services.default_media_plugin("image_edit") == "account"
+    assert services.default_media_plugin("music") == ""
+    assert services.default_media_plugin("mesh") == ""

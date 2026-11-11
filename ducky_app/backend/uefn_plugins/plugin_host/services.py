@@ -74,20 +74,55 @@ def register_media_generator(
         _MEDIA_GENERATORS[(kind, pid)] = {"fn": fn, "describe": dict(describe or {})}
 
 
-def media_generators(kind: str) -> list[dict[str, Any]]:
-    """Makers for ``kind`` whose plugin is enabled and whose saved key is present."""
+# The setting that names the person's own maker of a kind (Settings > LLMs > Default models).
+MEDIA_DEFAULT_SETTING = {
+    "image": "default_image_provider",
+    "image_edit": "default_image_provider",
+    "video": "default_video_provider",
+    "music": "default_music_provider",
+}
+
+
+def default_media_plugin(kind: str) -> str:
+    """The plugin the person picked to make ``kind`` ("" = none picked)."""
+    key = MEDIA_DEFAULT_SETTING.get(kind)
+    if not key:
+        return ""
+    try:
+        from frontend.settings import PanelSettings
+
+        return str(getattr(PanelSettings.load(), key, "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _media_rows(kind: str) -> list[tuple[str, dict[str, Any], bool]]:
+    """(plugin id, row, ready) of every maker of ``kind`` from a plugin turned on here, the
+    person's default first. Ready: its saved key is there (or it needs none)."""
     from backend.agent.secrets import get_key
 
     with _LOCK:
         rows = [(pid, dict(r)) for (k, pid), r in _MEDIA_GENERATORS.items() if k == kind]
-    out: list[dict[str, Any]] = []
-    for pid, row in sorted(rows, key=lambda x: x[0]):
-        desc = row["describe"]
-        secret = str(desc.get("secret_key") or "").strip()
-        if not is_plugin_enabled(pid) or (secret and not (get_key(secret) or "").strip()):
+    mine = default_media_plugin(kind)
+    out: list[tuple[str, dict[str, Any], bool]] = []
+    for pid, row in sorted(rows, key=lambda x: (x[0] != mine, x[0])):
+        if not is_plugin_enabled(pid):
             continue
-        out.append({"plugin_id": pid, "kind": kind, "fn": row["fn"], **desc})
+        secret = str(row["describe"].get("secret_key") or "").strip()
+        out.append((pid, row, not secret or bool((get_key(secret) or "").strip())))
     return out
+
+
+def media_generators(kind: str) -> list[dict[str, Any]]:
+    """Makers for ``kind`` whose plugin is enabled and whose saved key is present, the
+    person's default maker first (callers take the first that answers)."""
+    return [{"plugin_id": pid, "kind": kind, "fn": row["fn"], **row["describe"]} for pid, row, ready in _media_rows(kind) if ready]
+
+
+def media_makers(kind: str) -> list[dict[str, Any]]:
+    """The default picker's rows for ``kind``: ``{id, label, ready}`` per plugin turned on
+    here, set up or not. Never the callable or a credential."""
+    return [{"id": pid, "label": str(row["describe"].get("label") or pid), "ready": ready} for pid, row, ready in _media_rows(kind)]
 
 
 def register_connection_probe(

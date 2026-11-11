@@ -36,6 +36,16 @@ def _approve_typed_code(before: dict[str, Any] | None, saved: dict[str, Any]) ->
 
 
 class PanelApiAutomationsMixin:
+    def list_media_makers(self) -> dict[str, Any]:
+        """``{ok, makers: {video: [...], music: [...]}}``: the plugins turned on here that make
+        videos or music, as ``{id, label, ready}``, for Settings > LLMs > Default models."""
+        from backend.uefn_plugins.plugin_host.services import media_makers
+
+        try:
+            return {"ok": True, "makers": {kind: media_makers(kind) for kind in ("video", "music")}}
+        except Exception as exc:  # noqa: BLE001 - the card shows no row rather than an error
+            return {"ok": False, "error": str(exc), "makers": {}}
+
     def list_workflow_nodes(self, plugin: str = "", fields: str = "") -> dict[str, Any]:
         """The full catalog (the editor needs it); ``plugin`` / ``fields`` give small rows like the tool."""
         from backend.automations.catalog import list_nodes

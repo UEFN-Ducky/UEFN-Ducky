@@ -3632,6 +3632,48 @@
   color: var(--muted);
 }
 
+/* The list scrolls, so its rows keep their height: a row with overflow hidden (a toggle
+   card) otherwise shrinks to its border once the list is taller than the tab. The Pictures /
+   3D models card sat under Default Model as a thin line on every PC with a few providers. */
+.llms-tab-list > * {
+  flex-shrink: 0;
+}
+
+.llms-defaults-list {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.llms-defaults-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 7px 0;
+}
+
+.llms-defaults-row + .llms-defaults-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.llms-defaults-label {
+  flex: 0 0 150px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.llms-defaults-row .media-maker-picker {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .llms-default-model-card.is-highlight {
   animation: llms-default-model-pulse 1.1s ease-in-out 2;
   outline: 2px solid var(--accent, #6ea8fe);

@@ -212,6 +212,18 @@ FIELD_META: dict[str, FieldMeta] = {
         settable=True,
         description="Plugin id that makes 3D models when nothing else is picked (meshy, studio3d, tripo…; empty = first one set up).",
     ),
+    "default_video_provider": FieldMeta(
+        "Default video maker",
+        "LLMs",
+        settable=True,
+        description="Plugin id that makes videos when nothing else is picked (higgsfield…; empty = first one set up).",
+    ),
+    "default_music_provider": FieldMeta(
+        "Default music maker",
+        "LLMs",
+        settable=True,
+        description="Plugin id that makes music when nothing else is picked (empty = first one set up).",
+    ),
     "video_max_mb": FieldMeta(
         "Max video size (MB)", "Videos", settable=True,
         description="Largest video a chat message may carry (10–200).",

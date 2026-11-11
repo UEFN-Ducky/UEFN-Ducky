@@ -1,7 +1,9 @@
 /**
- * Which plugin makes pictures or 3D models when nothing else is picked (a workflow node with
- * no backend, a ducky's ducky_generate_image). The choices are the makers the workflow nodes
- * list; one that is not set up yet says what it needs.
+ * Which plugin makes pictures, 3D models, videos or music when nothing else is picked (a
+ * workflow node with no backend, a ducky's ducky_generate_image, a plugin that asks the host
+ * for a maker). The choices are the makers installed here: pictures and 3D models from what
+ * the workflow nodes list, videos and music from what plugins register with the host. One that
+ * is not set up yet says so.
  */
 import { useEffect, useState } from "react";
 import { getApi } from "../hooks/usePanelApi";
@@ -9,9 +11,16 @@ import { loadWorkflowNodes } from "../automations/workflowNodeCatalog";
 import type { AutomationNodeDto } from "../types/panel";
 import { ChoiceDropdown } from "./ChoiceDropdown";
 
-export type MediaKind = "image" | "mesh";
-const NODES: Record<MediaKind, string[]> = { image: ["image.generate"], mesh: ["mesh.generate", "mesh.from_image"] };
-const SETTING = { image: "default_image_provider", mesh: "default_mesh_provider" } as const;
+export type MediaKind = "image" | "mesh" | "video" | "music";
+/** Kinds whose makers the host lists itself (`list_media_makers`). */
+export type HostMediaKind = "video" | "music";
+const NODES: Partial<Record<MediaKind, string[]>> = { image: ["image.generate"], mesh: ["mesh.generate", "mesh.from_image"] };
+const SETTING = {
+  image: "default_image_provider",
+  mesh: "default_mesh_provider",
+  video: "default_video_provider",
+  music: "default_music_provider",
+} as const;
 
 export type Maker = { id: string; label: string; ready: boolean; reason?: string; cost?: string };
 
@@ -19,7 +28,7 @@ export type Maker = { id: string; label: string; ready: boolean; reason?: string
 export function makersFrom(nodes: AutomationNodeDto[], kind: MediaKind): Maker[] {
   const out = new Map<string, Maker>();
   for (const node of nodes) {
-    if (!NODES[kind].includes(node.type)) continue;
+    if (!NODES[kind]?.includes(node.type)) continue;
     for (const b of node.backends || []) {
       const id = b.plugin_id || b.id;
       const cur = out.get(id);
@@ -30,25 +39,37 @@ export function makersFrom(nodes: AutomationNodeDto[], kind: MediaKind): Maker[]
   return [...out.values()];
 }
 
-export function MediaMakerPicker({ kind, label }: { kind: MediaKind; label: string }) {
-  const [makers, setMakers] = useState<Maker[] | null>(null);
+/** The video and music makers installed here ({} on an app that can't list them). */
+export async function loadHostMakers(): Promise<Partial<Record<HostMediaKind, Maker[]>>> {
+  const res = await Promise.resolve(getApi()?.list_media_makers?.()).catch(() => undefined);
+  return res?.ok ? res.makers || {} : {};
+}
+
+/** `known`: the kind's makers when the caller already loaded them (videos, music). */
+export function MediaMakerPicker({ kind, label, known }: { kind: MediaKind; label: string; known?: Maker[] }) {
+  const [makers, setMakers] = useState<Maker[] | null>(known ?? null);
   const [value, setValue] = useState("");
 
   useEffect(() => {
     const api = getApi();
     if (!api) return;
     let live = true;
-    // Fresh: this sits in Settings, where a key just added makes a backend ready.
-    void loadWorkflowNodes(true)
-      .then((nodes) => live && setMakers(makersFrom(nodes, kind)))
-      .catch(() => live && setMakers([]));
+    if (known) setMakers(known);
+    else if (kind === "video" || kind === "music") {
+      void loadHostMakers().then((all) => live && setMakers(all[kind] || []));
+    } else {
+      // Fresh: this sits in Settings, where a key just added makes a backend ready.
+      void loadWorkflowNodes(true)
+        .then((nodes) => live && setMakers(makersFrom(nodes, kind)))
+        .catch(() => live && setMakers([]));
+    }
     void Promise.resolve(api.get_settings?.())
       .then((s) => live && setValue(String(s?.[SETTING[kind]] || "")))
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [kind]);
+  }, [kind, known]);
 
   const picked = makers?.find((m) => m.id === value);
   return (
