@@ -225,17 +225,6 @@ def _std_binary(which: str) -> IO[bytes] | None:
         return None
 
 
-def _dismiss_splash() -> None:
-    # Only when an entry already showed it: importing early_splash here would load Tk.
-    splash = sys.modules.get("frontend.early_splash")
-    if splash is None:
-        return
-    try:
-        splash.dismiss()
-    except Exception:
-        pass
-
-
 def _register_shell_integrations() -> None:
     # Shortcuts, Open with and uefn-ducky:// keep pointing at UEFN-Ducky.exe (this EXE).
     if os.environ.get("DUCKY_SANDBOX"):
@@ -338,7 +327,6 @@ def run_backend(
         pass
     if stdout is None:
         sys.stdout = sys.stderr  # a stray print never lands in the protocol stream
-    _dismiss_splash()
 
     from backend.store import db as store_db
 
@@ -438,6 +426,7 @@ def run_backend(
         # session stayed "starting" in boot.json, and a crash read as "closed while starting".
         boot_report.stage("hello")
         boot_report.mark("ok")
+        boot_report.ask_pending()  # the last launch's crash pop-up, kept until now (launcher.py)
     except Exception:
         pass
     try:

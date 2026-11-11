@@ -9,7 +9,7 @@
 pub enum FirstPaint {
     /// Navigate the WebView now; API calls wait in the proxy for the backend.
     Navigate,
-    /// Keep the logo splash; navigate when the backend is ready.
+    /// Keep the splash (the theme background); navigate when the backend is ready.
     KeepSplash,
 }
 

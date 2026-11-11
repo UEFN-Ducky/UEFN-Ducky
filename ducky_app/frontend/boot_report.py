@@ -59,6 +59,8 @@ STUCK_HEADING = "UEFN Ducky got stuck while starting"
 _state: dict[str, Any] = {}
 _state_lock = threading.Lock()  # stage(), mark() and the heartbeat thread share boot.tmp
 _native_file: Any = None
+# begin(ask=False): the kept report the pop-up asks about once ask_pending() runs.
+_pending: dict[str, Any] = {}
 HEARTBEAT_S = 30.0
 _heartbeat: dict[str, Any] = {"thread": None}
 # The window's page: started = its main script ran; errors = what it hit before that.
@@ -703,7 +705,7 @@ def list_reports() -> list[dict[str, Any]]:
 
 
 def send_report(report_id: str, version: str) -> bool:
-    """Send a kept report (Settings → Support)."""
+    """Send a kept report (the crash pop-up, Settings → Support)."""
     path = _report_path(report_id)
     if path is None or not path.stem.startswith("kept-"):
         return False
@@ -727,9 +729,39 @@ def delete_report(report_id: str) -> bool:
     return True
 
 
-def begin(version: str) -> None:
+def _ask_and_send(report_id: str, body: dict[str, str], version: str) -> None:
+    if not _test_copy() and _ask_to_send(body):
+        send_report(report_id, version)
+
+
+def ask_pending() -> None:
+    """Ducky-Launcher.exe's backend, once it said hello: the pop-up for the report
+    ``begin(ask=False)`` kept, on a thread of its own (the main thread serves the launcher)."""
+    report_id, body = _pending.pop("id", ""), _pending.pop("body", None)
+    if not report_id or not body:
+        return
+    version = str(_state.get("version") or "")
+
+    def ask() -> None:
+        import gc
+
+        try:
+            _ask_and_send(report_id, body, version)
+        finally:
+            # Tk garbage freed on another thread ends the process (Tcl_AsyncDelete): free it here.
+            gc.collect()
+
+    threading.Thread(target=ask, daemon=True, name="crash-report-ask").start()
+
+
+def begin(version: str, *, ask: bool = True) -> None:
     """First thing in a GUI launch: if the last launch crashed, ask to send its report;
-    then start recording this launch."""
+    then start recording this launch.
+
+    The report is saved (``kept-``) before the pop-up: a launch ended while it is open
+    keeps it for Settings → Support. ``ask=False`` (the launcher's backend) only keeps it;
+    ``ask_pending`` shows the pop-up after hello. Asked before hello, the launcher saw a
+    backend silent for 20 s, ended it and the report with it, and opened the Python window."""
     global _native_file
     try:
         _dir().mkdir(parents=True, exist_ok=True)
@@ -770,8 +802,14 @@ def begin(version: str) -> None:
             _native_path().write_text("", encoding="utf-8")
         except OSError:
             pass
-        sent = not _test_copy() and _ask_to_send(body) and _send(body, version)
-        _save(body, "sent" if sent else "kept")
+        report_id = _save(body, "kept")
+        if not report_id:  # the crash folder can't be written: ask and send as it is
+            if ask and not _test_copy() and _ask_to_send(body):
+                _send(body, version)
+        elif ask:
+            _ask_and_send(report_id, body, version)
+        else:
+            _pending.update(id=report_id, body=body)
 
     _state.clear()
     _state.update(

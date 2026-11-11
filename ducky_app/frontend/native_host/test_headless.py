@@ -64,6 +64,7 @@ _BACKEND_PROBE = textwrap.dedent(
         running_agents.pop()
         heartbeat_counts.append(agents())
     boot_report.start_heartbeat = start_heartbeat
+    boot_report.ask_pending = lambda: marks.append("ask_pending")
     lifecycle.second_instance = lambda paths, links: (lifecycle.FIRST, None)
     lifecycle.watch_parent = lambda pid, on_dead: None
     lifecycle.Shutdown = QuickShutdown
@@ -140,8 +141,38 @@ def test_stage_lines_reach_the_launcher_in_order(backend_run) -> None:
 
 
 def test_native_backend_starts_heartbeat_after_hello_with_live_agent_count(backend_run) -> None:
-    assert backend_run["marks"][-3:] == ["stage:hello", "ok", "heartbeat"]
+    assert backend_run["marks"][-4:] == ["stage:hello", "ok", "ask_pending", "heartbeat"]
     assert backend_run["heartbeat_counts"] == [2, 1]
+
+
+def test_the_installed_exe_backend_waits_for_nobody_before_hello(monkeypatch) -> None:
+    """The EXE starts at launcher.main. Its --backend showed the low-memory box and the last
+    crash's pop-up before hello; 20 s unanswered and Ducky-Launcher.exe ended it, report and
+    all, and opened the Python window (PHANTOMYT, Nov 11 2026)."""
+    from types import SimpleNamespace
+
+    from frontend import boot_report, launcher, low_memory, native_switch, net_access, settings
+    from frontend.ui_web import run as ui_run
+
+    monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe", "--backend"])
+    monkeypatch.setitem(sys.modules, "truststore", SimpleNamespace(inject_into_ssl=lambda: None))
+    for name in ("scrub_pyinstaller_boot_env", "_sweep_stale_extracts", "_wait_for_previous_version",
+                 "_check_install", "_hand_off_to_newest"):
+        monkeypatch.setattr(launcher, name, lambda *a, **k: None)
+    monkeypatch.setattr(net_access, "install", lambda: None)
+    monkeypatch.setattr(settings, "pick_panel_port", lambda: None)
+    monkeypatch.setattr(native_switch, "maybe_start_native", lambda *a, **k: False)
+
+    def _prompt(*_a, **_k):
+        raise AssertionError("the backend asked the person something before hello")
+
+    monkeypatch.setattr(low_memory, "check_at_launch", _prompt)
+    began: list = []
+    monkeypatch.setattr(boot_report, "begin", lambda version, **k: began.append(k))
+    ran: list = []
+    monkeypatch.setattr(ui_run, "run", lambda: ran.append(True))
+    launcher.main()
+    assert began == [{"ask": False}] and ran == [True]
 
 
 def test_run_signatures_unchanged() -> None:

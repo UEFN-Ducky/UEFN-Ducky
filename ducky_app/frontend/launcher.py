@@ -475,7 +475,7 @@ def main() -> None:
         pass
     if len(sys.argv) > 1 and sys.argv[1] == "agent-host":
         # The supervisor's child (frozen: this EXE). Falling through to the GUI booted a whole
-        # second app on every agent turn: logo splash, hand-off to the open window, no host.
+        # second app on every agent turn: hand-off to the open window, no host.
         _ensure_repo_on_path()
         _host_started_fine()
         from frontend.agent_host.main import main as agent_host_main
@@ -501,7 +501,7 @@ def main() -> None:
         # Wall clock from process entry — webview_app boot traces use this for total_ms.
         os.environ["UEFN_DUCKY_BOOT_T0"] = str(_time.perf_counter())
         _ensure_repo_on_path()
-        # Windows sign-in start (frontend/autostart.py): open hidden in the tray, no logo splash.
+        # Windows sign-in start (frontend/autostart.py): open hidden in the tray.
         # Taken out of argv so it is never read as a file to open.
         from frontend.autostart import START_HIDDEN_ENV, take_background_flag
 
@@ -530,33 +530,32 @@ def main() -> None:
             native = False
         if native:
             raise SystemExit(0)
-        # Before the crash recorder starts, so a Cancel here never reads as a crash next time.
-        try:
-            from frontend.low_memory import check_at_launch
+        # Ducky-Launcher.exe's backend (--backend): the launcher draws the window and waits for
+        # this process's hello, as python -m frontend's backend start (__main__.py). Nothing
+        # here may wait for the person before hello: 20 s silent and the launcher ends it.
+        from frontend.app_versions import backend_mode
 
-            if not check_at_launch():
-                raise SystemExit(0)
-        except SystemExit:
-            raise
-        except Exception:
-            pass
+        backend = backend_mode()
+        # Before the crash recorder starts, so a Cancel here never reads as a crash next time.
+        if not backend:
+            try:
+                from frontend.low_memory import check_at_launch
+
+                if not check_at_launch():
+                    raise SystemExit(0)
+            except SystemExit:
+                raise
+            except Exception:
+                pass
         # Before anything that could crash: send the last launch's crash report, if any,
-        # and start recording this one.
+        # and start recording this one. The backend asks after its hello (headless.py).
         try:
             from frontend import __version__ as _version
             from frontend import boot_report
 
-            boot_report.begin(str(_version))
+            boot_report.begin(str(_version), ask=not backend)
         except Exception:
             pass
-        # Logo window before panel_api / webview imports — otherwise double-click is a blank wait.
-        if not start_hidden:
-            try:
-                from frontend.early_splash import show as show_early_splash
-
-                show_early_splash()
-            except Exception:
-                pass
         from frontend.ui_web.run import run
 
         try:
@@ -566,12 +565,6 @@ def main() -> None:
             # (webview_app raises it after forwarding Open-with / deep links).
             raise
         except BaseException as exc:
-            try:
-                from frontend.early_splash import dismiss as dismiss_early_splash
-
-                dismiss_early_splash()
-            except Exception:
-                pass
             # A version Ducky downloaded that can't start: go back to the one before it.
             try:
                 from frontend import __version__ as _failed_version

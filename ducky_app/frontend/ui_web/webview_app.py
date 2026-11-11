@@ -270,12 +270,6 @@ def run() -> None:
                 mark_ready(str(_forwarding_version))
             except Exception:
                 pass
-            try:
-                from frontend.early_splash import dismiss as dismiss_early_splash
-
-                dismiss_early_splash()
-            except Exception:
-                pass
             raise SystemExit(0)
         # Fall through: reclaim kills the wedged instance, then we start fresh.
     _boot_trace("handoff", t_handoff)
@@ -614,8 +608,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     )
     _allow_screencast_without_gesture()
 
-    # Keep the early logo splash up through heavy imports — create the pump Tk later
-    # by converting that same splash root (avoids a second Tcl interpreter).
     # The panel API loads no webview/pythonnet, so it imports and starts here while the
     # warm-up thread is still loading .NET WinForms (~0.4-0.6 s), not after it.
     api = boot_panel_api()
@@ -654,7 +646,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     window_holder: dict[str, object] = {}
     api_holder["window_holder"] = window_holder
     api._window_holder = window_holder  # type: ignore[attr-defined]
-    # Filled just before webview.start once the splash becomes the pump root.
+    # Filled by the Tk pump thread's hidden root (tray, pop-ups) once the window started.
     tk_root_holder: dict[str, object] = {"root": None}
 
     # Register BEFORE the panel HTTP server starts so a second-instance Open-with
@@ -889,15 +881,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     ensure_started()
 
-    # The splash Tk belongs to this (main) thread, which blocks in webview.start next: close it
-    # here, and let the pump thread own the hidden Tk root the tray and pop-ups use.
-    try:
-        from frontend.early_splash import dismiss as dismiss_early_splash
-
-        dismiss_early_splash()
-    except Exception:
-        pass
-
+    # The pump thread owns the hidden Tk root the tray and pop-ups use.
     def _hidden_root():
         root = tk.Tk()
         root.withdraw()

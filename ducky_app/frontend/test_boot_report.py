@@ -20,6 +20,7 @@ def crash(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.delenv("DUCKY_SANDBOX", raising=False)  # these tests run the normal app's path
     monkeypatch.setattr(boot_report, "_state", {})
+    monkeypatch.setattr(boot_report, "_pending", {})
     # Keep pytest's own crash handler in this process; the child process below uses the real one.
     monkeypatch.setattr(faulthandler, "enable", lambda *a, **k: None)
     monkeypatch.setattr(faulthandler, "disable", lambda *a, **k: None)
@@ -236,6 +237,35 @@ def test_offline_send_keeps_the_report(crash) -> None:
     _crashed_launch("create_window")
     boot_report.begin("1.2.360")
     assert [r["sent"] for r in boot_report.list_reports()] == [False]
+
+
+def test_the_report_is_kept_before_the_pop_up_asks(crash, monkeypatch) -> None:
+    """A pop-up ended with its process (the launcher gives up on a silent backend) used to
+    take the report with it: boot.json was already cleared and nothing was saved yet."""
+    _crashed_launch("create_window")
+    seen: list = []
+    monkeypatch.setattr(boot_report, "_ask_to_send", lambda body: seen.append(boot_report.list_reports()) or False)
+    boot_report.begin("1.2.360")
+    assert [[r["sent"] for r in reports] for reports in seen] == [[False]]
+
+
+def test_the_launchers_backend_asks_after_hello_not_before(crash) -> None:
+    import threading
+
+    _crashed_launch("create_window")
+    boot_report.begin("1.2.360", ask=False)  # Ducky-Launcher.exe's backend, before hello
+    assert crash["asked"] == []
+    assert [r["sent"] for r in boot_report.list_reports()] == [False]
+    assert boot_report._read_json(boot_report._boot_path())["state"] == "starting"  # this launch records
+    boot_report.ask_pending()  # after hello
+    for thread in threading.enumerate():
+        if thread.name == "crash-report-ask":
+            thread.join(timeout=10)
+    assert len(crash["asked"]) == 1 and len(crash["sent"]) == 1
+    assert "create_window" in crash["sent"][0]["error_log"]
+    assert [r["sent"] for r in boot_report.list_reports()] == [True]
+    boot_report.ask_pending()
+    assert len(crash["asked"]) == 1  # asked once
 
 
 def test_the_report_names_the_loading_plugin_and_hides_the_home_folder(crash) -> None:

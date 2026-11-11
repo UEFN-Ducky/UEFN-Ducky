@@ -3,6 +3,7 @@ import ast
 import inspect
 import sys
 import textwrap
+from pathlib import Path
 
 from frontend.ui_web import webview_app
 
@@ -172,8 +173,16 @@ def test_tray_tk_and_update_setup_run_beside_webview2_not_before_it():
     assert "start_tk_pump" not in outside and "TrayIconController" not in outside
     source = inspect.getsource(webview_app._run_panel)
     assert "webview.start(\n        _after_gui_start," in source
-    # The splash Tk belongs to the main thread: still closed there, before webview.start.
-    assert source.index("dismiss_early_splash()") < source.index("webview.start(")
+
+
+def test_no_logo_splash_anywhere_in_a_start() -> None:
+    """The window is the first thing a start shows: the floating logo duck is gone."""
+    import frontend.launcher as launcher
+    from frontend.native_host import headless
+
+    for module in (launcher, headless, webview_app):
+        assert "early_splash" not in inspect.getsource(module)
+    assert not (Path(webview_app.__file__).parents[1] / "early_splash.py").exists()
 
 
 def test_panel_api_loads_no_webview():

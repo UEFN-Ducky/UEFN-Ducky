@@ -1,61 +1,21 @@
 //! The launcher's splash: the theme background, painted in the main window's client area
 //! from the first frame until the page has painted (the page then shows the app's outline).
-//!
-//! `paint` draws no logo any more; `LOGO_BGRA` / `logo_rect` stay for the floating-duck
-//! asset checks only.
+//! No logo: the window is Ducky's own from its first frame.
 
 mod first_paint;
 pub use first_paint::{first_paint, FirstPaint};
 
 /// Theme background, the same `#0a0a0a` as `webview_app.py` / critical.css.
 pub const BACKGROUND_RGB: (u8, u8, u8) = (0x0A, 0x0A, 0x0A);
-/// Logo edge at 96 DPI, the same 220 px as `early_splash.py`.
-pub const LOGO_PX: i32 = 220;
-/// Smallest margin kept around the logo at 96 DPI.
-pub const PAD_PX: i32 = 10;
 /// The autostart flag (`frontend/autostart.py` `BACKGROUND_FLAG`).
 pub const BACKGROUND_FLAG: &str = "--background";
 /// Set by an update hand-over that starts hidden (`frontend/autostart.py` `START_HIDDEN_ENV`).
 pub const START_HIDDEN_ENV: &str = "UEFN_DUCKY_START_HIDDEN";
 
-/// 220x220 top-down BGRA pixels, already on the theme background.
-pub static LOGO_BGRA: &[u8] = include_bytes!("../../../assets/logo_220.bgra");
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rect {
-    pub left: i32,
-    pub top: i32,
-    pub right: i32,
-    pub bottom: i32,
-}
-
-impl Rect {
-    pub fn width(&self) -> i32 {
-        self.right - self.left
-    }
-    pub fn height(&self) -> i32 {
-        self.bottom - self.top
-    }
-}
-
 /// No splash when started hidden: `--background` (sign-in start) or the hidden hand-over.
 pub fn should_show<S: AsRef<str>>(argv: &[S], start_hidden_env: Option<&str>) -> bool {
     let background = argv.iter().skip(1).any(|a| a.as_ref() == BACKGROUND_FLAG);
     !(background || start_hidden_env == Some("1"))
-}
-
-/// Where the logo goes in a `client_w` x `client_h` client area at `dpi`: centred,
-/// 220 px scaled by DPI, shrunk to keep the pad in a small window, never negative.
-pub fn logo_rect(client_w: i32, client_h: i32, dpi: u32) -> Rect {
-    let dpi = if dpi == 0 { 96 } else { dpi } as i64;
-    let want = (LOGO_PX as i64 * dpi / 96) as i32;
-    let pad = (PAD_PX as i64 * dpi / 96) as i32;
-    let cw = client_w.max(0);
-    let ch = client_h.max(0);
-    let size = want.min(cw - 2 * pad).min(ch - 2 * pad).max(0);
-    let left = (cw - size) / 2;
-    let top = (ch - size) / 2;
-    Rect { left, top, right: left + size, bottom: top + size }
 }
 
 /// Splash lifetime: shown from the first frame (unless started hidden), gone for good
@@ -82,7 +42,7 @@ impl Splash {
     }
 
     /// The page has painted. True only the first time while visible: the caller then
-    /// stops painting the logo (WebView2 covers the client area from here on).
+    /// stops painting the splash (WebView2 covers the client area from here on).
     pub fn on_painted(&mut self) -> bool {
         std::mem::replace(&mut self.visible, false)
     }

@@ -14,7 +14,18 @@ from frontend.open_files import (
     register_windows_open_with,
     register_windows_url_protocol,
     take_pending_open_paths,
+    try_handoff_to_running,
 )
+
+
+def test_handoff_defaults_are_short() -> None:
+    """Stale panel.pid must not burn ~20s of connect timeouts on cold start."""
+    import inspect
+
+    sig = inspect.signature(try_handoff_to_running)
+    assert sig.parameters["retries"].default <= 4
+    assert float(sig.parameters["timeout_s"].default) <= 0.5
+    assert float(sig.parameters["delay_s"].default) <= 0.25
 
 
 def test_cli_open_paths_picks_existing_files(tmp_path: Path) -> None:
