@@ -206,7 +206,7 @@ EVENTS: dict[str, dict[str, Any]] = {
 UI_EVENTS = frozenset({"feature.open", "setup.step", "setup.ai", "setup.source", "setup.rating", "tour.end"})
 
 # Setup, the web installer and the uninstaller (release/installer/host) report setup.open,
-# setup.install, setup.result, setup.close and uninstall.done under the same install id
+# setup.install, setup.result, setup.close, setup.launch and uninstall.done under the same install id
 # (kept in HKCU\Software\UEFN Ducky, see usage_stats); the Store's list in
 # plugin-uefn-ducky-store src/usage.rs holds those too.
 

@@ -216,17 +216,33 @@ namespace DuckySetup
             }
         }
 
-        public static void LaunchApp(string dir)
+        // True when the app's EXE was there and its start was handed to Explorer.
+        public static bool LaunchApp(string dir)
         {
             var exe = Path.Combine(dir, AppExeName);
             if (!File.Exists(exe))
-                return;
+                return false;
             Process.Start(new ProcessStartInfo
             {
                 FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
                 Arguments = "\"" + exe + "\"",
                 UseShellExecute = true,
             });
+            return true;
+        }
+
+        // The ProgId that opens https links for this person ("" when Windows doesn't say).
+        public static string DefaultBrowserProgId()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice");
+                return key?.GetValue("ProgId") as string ?? "";
+            }
+            catch (Exception)
+            {
+                return "";
+            }
         }
 
         public static (bool installed, bool allUsers, string? location) DetectInstall()

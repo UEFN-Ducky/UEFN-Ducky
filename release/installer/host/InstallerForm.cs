@@ -30,6 +30,10 @@ namespace DuckySetup
         bool _closeTracked;
         string _screen = "welcome";
 
+        // When "Open UEFN Ducky" started the app (null: it was not pressed), and this run's kind.
+        public DateTime? LaunchedUtc { get; private set; }
+        public string Kind => _kind;
+
         sealed class ProcessHandle
         {
             public System.Diagnostics.Process Proc = null!;
@@ -71,8 +75,9 @@ namespace DuckySetup
             {
                 var launch = Truthy(msg, "launch");
                 TrackClose("done", launch);
-                if (launch)
-                    Engine.LaunchApp(_installDir);
+                // Program.Go watches how that start goes once this window is closed (LaunchCheck).
+                if (launch && Engine.LaunchApp(_installDir))
+                    LaunchedUtc = DateTime.UtcNow;
                 Close();
             }
         }
@@ -89,6 +94,7 @@ namespace DuckySetup
                 ["kind"] = _kind,
                 ["web"] = _isWeb ? "yes" : "no",
                 ["os"] = Stats.Os(Environment.OSVersion.Version.Build),
+                ["browser"] = Stats.Browser(Engine.DefaultBrowserProgId()),
             });
             _ = Usage.Send();
             // The web installer installs whatever the Store has now; no version shows

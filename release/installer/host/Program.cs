@@ -60,7 +60,11 @@ namespace DuckySetup
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new InstallerForm(VersionString()));
+            var form = new InstallerForm(VersionString());
+            Application.Run(form);
+            // "Open UEFN Ducky" was pressed: with the window gone, say whether the app came up.
+            if (form.LaunchedUtc is DateTime launched)
+                LaunchCheck.Report(launched, form.Kind);
             return Environment.ExitCode;
         }
 

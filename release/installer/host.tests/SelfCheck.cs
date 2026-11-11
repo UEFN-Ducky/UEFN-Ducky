@@ -341,6 +341,24 @@ namespace DuckySetup.Tests
             Check(Stats.Screen("done") == "done" && Stats.Screen("<b>") == "welcome", "screens");
             Check(Stats.IsRetry("error") && !Stats.IsRetry("welcome") && !Stats.IsRetry("options") && !Stats.IsRetry(null), "install from the error screen counts as a retry");
             Check(Stats.Os(22631) == "win11" && Stats.Os(19045) == "win10", "Windows version");
+            Check(Stats.Browser("MSEdgeHTM") == "edge" && Stats.Browser("ChromeHTML") == "chrome" && Stats.Browser("BraveHTML") == "chrome"
+                && Stats.Browser("FirefoxURL-308046B0AF4A39CB") == "firefox" && Stats.Browser("Opera GXStable") == "opera"
+                && Stats.Browser("VivaldiHTM.ABC") == "other" && Stats.Browser(null) == "other", "default browser from its ProgId");
+
+            // "Open UEFN Ducky": one look at the app's boot record, then what to send.
+            Check(Stats.LaunchLook(false, "ok", true) == "", "an older record says nothing about this start");
+            Check(Stats.LaunchLook(true, "ok", true) == "started" && Stats.LaunchLook(true, "fatal", false) == "error"
+                && Stats.LaunchLook(true, "stuck", true) == "stuck" && Stats.LaunchLook(true, "closed", false) == "closed"
+                && Stats.LaunchLook(true, "stopped", false) == "closed", "final boot states");
+            Check(Stats.LaunchLook(true, "starting", true) == "" && Stats.LaunchLook(true, "starting", false) == "died"
+                && Stats.LaunchLook(true, "handoff", false) == "" && Stats.LaunchLook(true, null, false) == "died", "still starting, died, or handed off");
+            Check(Stats.LaunchVerdict("started", 0, true, false) == "started", "started is sent at once");
+            Check(Stats.LaunchVerdict("died", 3, true, false) == "" && Stats.LaunchVerdict("died", Stats.LaunchSettleSeconds, true, false) == "died"
+                && Stats.LaunchVerdict("died", 3, true, true) == "died", "a failure counts once it held, or when time is up");
+            Check(Stats.LaunchVerdict("", 40, true, false) == "" && Stats.LaunchVerdict("", 90, true, true) == "slow"
+                && Stats.LaunchVerdict("", 90, false, true) == "never_appeared", "time up: still starting, or no record at all");
+            Check(Stats.LaunchTook(3) == "5s" && Stats.LaunchTook(12) == "15s" && Stats.LaunchTook(40) == "60s" && Stats.LaunchTook(80) == "more", "start time buckets");
+            Check(Stats.Stage("http_server") == "http_server" && Stats.Stage("hello") == "other" && Stats.Stage(@"C:\Users\x") == "other" && Stats.Stage(null) == "other", "boot stage is a listed word");
 
             Check(Stats.ExePath("\"C:\\Program Files\\UEFN Ducky\\unins000.exe\" /SILENT") ==@"C:\Program Files\UEFN Ducky\unins000.exe", "quoted uninstall command");
             Check(Stats.ExePath(@"C:\Apps\unins000.exe /SILENT") == @"C:\Apps\unins000.exe" && Stats.ExePath("") == "" && Stats.ExePath("\"") == "", "plain and empty commands");

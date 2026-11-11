@@ -171,6 +171,74 @@ namespace DuckySetup
 
         public static string Os(int build) => build >= 22000 ? "win11" : "win10";
 
+        // The PC's default browser, from the ProgId that opens https links: most likely the one
+        // that downloaded Setup. Brave reads as chrome, as it does on the site's Download click.
+        public static string Browser(string? progId)
+        {
+            var p = (progId ?? "").Trim().ToLowerInvariant();
+            if (p.StartsWith("msedge", StringComparison.Ordinal)) return "edge";
+            if (p.StartsWith("chrome", StringComparison.Ordinal) || p.StartsWith("brave", StringComparison.Ordinal)) return "chrome";
+            if (p.StartsWith("firefox", StringComparison.Ordinal)) return "firefox";
+            if (p.StartsWith("opera", StringComparison.Ordinal)) return "opera";
+            return "other";
+        }
+
+        // ---- "Open UEFN Ducky": how the app's first start went, read from the app's own boot
+        // record (LaunchCheck.cs). The Store's words for it are setup.launch in usage.rs.
+
+        // Setup watches this long after the press, with no window.
+        public const int LaunchWatchSeconds = 90;
+        // A failure counts once it held this long: a fast-launcher start that fails is followed
+        // by the Python window's own start, which writes a new record.
+        public const int LaunchSettleSeconds = 15;
+
+        static readonly string[] BootStages =
+        {
+            "launch", "handoff", "handoff_exit", "reclaim_claim", "webview_import_patches", "import_panel_api",
+            "panel_api_init", "http_server", "create_window", "ready_for_webview_start", "window_shown", "page_started",
+        };
+
+        // The app's last boot stage as the Store lists it ("other" for a name it doesn't).
+        public static string Stage(string? name)
+        {
+            var s = (name ?? "").Trim();
+            return Array.IndexOf(BootStages, s) >= 0 ? s : "other";
+        }
+
+        // One look at the boot record: "started", a failure word, or "" (still starting).
+        // fresh: the record is this start's; alive: the process that wrote it still runs.
+        public static string LaunchLook(bool fresh, string? state, bool alive)
+        {
+            if (!fresh)
+                return "";
+            switch ((state ?? "").Trim())
+            {
+                case "ok": return "started";
+                case "fatal": return "error";
+                case "stuck": return "stuck";
+                case "closed":
+                case "stopped": return "closed";
+                case "handoff": return ""; // another start took over and writes its own record
+                default: return alive ? "" : "died";
+            }
+        }
+
+        // What to send, or "" to look again: started at once; a failure once it held (or time is
+        // up); with time up and nothing final, slow (still starting) or never_appeared (no record).
+        public static string LaunchVerdict(string look, double heldSeconds, bool fresh, bool timeUp)
+        {
+            if (look == "started")
+                return look;
+            if (look.Length > 0 && (heldSeconds >= LaunchSettleSeconds || timeUp))
+                return look;
+            if (!timeUp)
+                return "";
+            return fresh ? "slow" : "never_appeared";
+        }
+
+        // How long the app took to come up after the press.
+        public static string LaunchTook(double seconds) => seconds <= 5 ? "5s" : seconds <= 15 ? "15s" : seconds <= 60 ? "60s" : "more";
+
         // The program a registry command line runs: "C:\a b\x.exe" /SILENT is C:\a b\x.exe.
         public static string ExePath(string? command)
         {
