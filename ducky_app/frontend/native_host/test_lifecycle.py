@@ -118,6 +118,8 @@ def stubbed_backend(monkeypatch):
         lambda ui_port=None: ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/"),
     )
     monkeypatch.setattr(lifecycle, "watch_parent", lambda pid, on_dead: None)
+    # The real one starts the usage thread in this process (and marks the run opened).
+    monkeypatch.setattr(headless, "_start_usage_stats", lambda api: None)
     ended: list[str] = []
 
     class _Shutdown(lifecycle.Shutdown):

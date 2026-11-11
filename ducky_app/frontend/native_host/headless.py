@@ -260,6 +260,49 @@ def _start_auto_update(api: Any) -> None:
         pass
 
 
+UEFN_LINK_POLL_S = 8.0
+
+
+def _watch_uefn_link(api: Any, *, every_s: float = UEFN_LINK_POLL_S, rounds: int | None = None) -> None:
+    """UEFN link changes for the usage counts (uefn.connect, the heartbeat's uefn_up), as the
+    window's listener poll reports them. ``rounds`` is for tests."""
+    from frontend import usage_stats
+    from frontend.ui_web import webview_app as panel
+
+    last: str | None = None
+    done = 0
+    while rounds is None or done < rounds:
+        try:
+            mode = panel.uefn_link_mode(api)
+            if mode != last:
+                last = mode
+                usage_stats.uefn_mode(mode)
+        except Exception:
+            pass
+        done += 1
+        if rounds is None or done < rounds:
+            time.sleep(every_s)
+
+
+def _start_usage_stats(api: Any) -> None:
+    """app.open, the stats thread (heartbeat, timed sends, crash hooks) and UEFN link changes,
+    as the Python window starts them (webview_app._after_gui_start and its listener poll).
+    Missing here, launcher starts (every start since 1.2.478) sent no app.open, heartbeat or
+    uefn.connect and sent their queued rows only at a clean quit: a new PC read as
+    "installed, never opened" (13 of 50 opened, Nov 5-11 2026)."""
+    try:
+        from frontend import usage_stats
+
+        raw_t0 = os.environ.get("UEFN_DUCKY_BOOT_T0")
+        boot_ms = (time.perf_counter() - float(raw_t0)) * 1000.0 if raw_t0 else None
+        threading.Thread(
+            target=usage_stats.app_opened, args=(boot_ms,), name="usage-stats-open", daemon=True
+        ).start()
+        threading.Thread(target=_watch_uefn_link, args=(api,), name="usage-uefn-link", daemon=True).start()
+    except Exception:
+        _log.warning("usage stats did not start", exc_info=True)
+
+
 def _bind_notifications(writer: LineWriter) -> None:
     def _toast(title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
         return writer.event("toast", {"title": str(title or ""), "message": str(message or "")})
@@ -428,6 +471,7 @@ def run_backend(
     except Exception:
         pass
     _start_auto_update(api)
+    _start_usage_stats(api)
     try:
         from frontend import boot_report
 

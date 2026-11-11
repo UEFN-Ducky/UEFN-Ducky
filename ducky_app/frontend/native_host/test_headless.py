@@ -72,13 +72,22 @@ _BACKEND_PROBE = textwrap.dedent(
     webview_app.boot_panel_api = Api
     webview_app.install_workspace_services = lambda: None
     webview_app.start_panel_server = lambda ui_port=None: ("http://127.0.0.1:4567/", False, "http://127.0.0.1:4567/")
+    import threading
+    from frontend import usage_stats
+
+    usage = []
+    usage_stats.app_opened = lambda boot_ms=None: usage.append("open")
+    headless._watch_uefn_link = lambda api, **k: usage.append("link")
 
     out = io.BytesIO()
     code = headless.run_backend(["UEFN-Ducky.exe", "--backend"], stdin=io.BytesIO(b""), stdout=out)
+    for t in threading.enumerate():
+        if t.name in ("usage-stats-open", "usage-uefn-link"):
+            t.join(5)
     lines = [json.loads(line) for line in out.getvalue().decode("utf-8").splitlines()]
     bad = sorted(m for m in ("webview", "tkinter", "_tkinter", "clr", "pythonnet") if m in sys.modules)
     sys.__stdout__.write(json.dumps({"code": code, "lines": lines, "bad": bad, "marks": marks,
-                                  "heartbeat_counts": heartbeat_counts}))
+                                  "heartbeat_counts": heartbeat_counts, "usage": sorted(usage)}))
     """
 )
 
@@ -386,3 +395,24 @@ def test_backend_starts_the_auto_updater(monkeypatch) -> None:
     assert carried == [[{"conv_id": "c1"}]]
     src = inspect.getsource(headless.run_backend if hasattr(headless, "run_backend") else headless)
     assert "_start_auto_update(api)" in src
+
+
+def test_backend_starts_usage_stats_after_hello(backend_run) -> None:
+    """Launcher starts send app.open and run the stats thread too (only the Python window
+    did: launcher starts sent rows at a clean quit only, and never app.open or uefn.connect)."""
+    assert backend_run["usage"] == ["link", "open"]
+
+
+def test_uefn_link_changes_reach_usage_stats(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from frontend import usage_stats
+
+    modes: list[str] = []
+    monkeypatch.setattr(usage_stats, "uefn_mode", modes.append)
+    api = SimpleNamespace(_last_listener_status={})
+    headless._watch_uefn_link(api, every_s=0, rounds=2)
+    assert modes == ["offline"]  # said once, not every round
+    api._last_listener_status = {"online": True}
+    headless._watch_uefn_link(api, every_s=0, rounds=1)
+    assert modes == ["offline", "online"]

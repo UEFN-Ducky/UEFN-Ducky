@@ -81,11 +81,16 @@ def _apply_shell_icons(api: object, mode: str) -> None:
             pass
 
 
+def uefn_link_mode(api: object) -> str:
+    """online / offline / wedged, from the status the page last fetched (never a listener request)."""
+    cached = getattr(api, "_last_listener_status", None)
+    return _connection_mode_from_status(cached if isinstance(cached, dict) else None)
+
+
 def _poll_once(api: object, last_mode: str | None) -> str | None:
     """One heartbeat round: the icons and usage stats change only when the mode does."""
     try:
-        cached = getattr(api, "_last_listener_status", None)
-        mode = _connection_mode_from_status(cached if isinstance(cached, dict) else None)
+        mode = uefn_link_mode(api)
         if mode != last_mode:
             _apply_shell_icons(api, mode)
             try:
