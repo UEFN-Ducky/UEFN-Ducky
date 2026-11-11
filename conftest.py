@@ -126,9 +126,20 @@ def _panel_is_running(real: Path) -> bool:
         pid = int((real / "panel.pid").read_text().strip())
         from frontend.open_files import panel_process_alive
 
-        return bool(panel_process_alive(pid))
+        if panel_process_alive(pid):
+            return True
     except Exception:
-        return False
+        pass
+    # A restart or launcher hand-off can leave the live panel without panel.pid
+    # (Nov 2026: the guard then flagged its crash/, ducky.db and webview writes).
+    # Something listening on the panel port is the live app too.
+    with socket.socket() as probe:
+        probe.settimeout(1.0)
+        try:
+            _socket_connect(probe, ("127.0.0.1", _LIVE_PORTS[0]))
+            return True
+        except OSError:
+            return False
 
 
 def _tree_signature(root: Path, live_panel: bool = False) -> dict[str, tuple[int, int]]:
@@ -187,6 +198,34 @@ def _drop_store_updates(real: Path, changed: list[str]) -> list[str]:
     return [p for p in changed if not store_update(p)]
 
 
+def _ai_plugin_versions(real: Path) -> dict[str, str]:
+    """plugin.json version per ai_plugins/<slug> draft folder."""
+    import json
+
+    out: dict[str, str] = {}
+    for manifest in (real / "ai_plugins").glob("*/plugin.json"):
+        try:
+            out[manifest.parent.name] = str(json.loads(manifest.read_text(encoding="utf-8")).get("version") or "")
+        except (OSError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def _drop_ai_plugin_releases(real: Path, before: dict[str, str], changed: list[str]) -> list[str]:
+    """An agent in the live panel releasing its AI plugin rewrites that plugin's
+    ai_plugins/<slug> draft (code, bytecode) mid-run. A draft that existed before the
+    run and now carries a new plugin.json version was such a release; a test's fixture
+    plugin is new to the real AppData, so it still fails the run."""
+    after = _ai_plugin_versions(real)
+    released = {s for s, v in before.items() if s in after and after[s] != v}
+
+    def release(path: str) -> bool:
+        parts = Path(path).parts
+        return len(parts) > 1 and parts[0] == "ai_plugins" and parts[1] in released
+
+    return [p for p in changed if not release(p)]
+
+
 def pytest_configure(config: pytest.Config) -> None:
     if _OPT_OUT:
         return
@@ -207,6 +246,7 @@ def pytest_configure(config: pytest.Config) -> None:
     live = bool(real) and _panel_is_running(real)
     config._ducky_live_panel = live  # type: ignore[attr-defined]
     config._ducky_real_sig = _tree_signature(real, live) if real else {}  # type: ignore[attr-defined]
+    config._ducky_ai_versions = _ai_plugin_versions(real) if real and live else {}  # type: ignore[attr-defined]
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -220,6 +260,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
     if changed and live:
         changed = _drop_store_updates(real, changed)
+        changed = _drop_ai_plugin_releases(real, getattr(config, "_ducky_ai_versions", {}), changed)
     if changed:
         rep = session.config.pluginmanager.get_plugin("terminalreporter")
         msg = (
