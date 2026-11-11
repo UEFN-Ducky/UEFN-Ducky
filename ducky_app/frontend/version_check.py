@@ -302,11 +302,14 @@ def feed_is_paused(payload: dict[str, Any]) -> bool:
 
 def _background_update_stuck() -> bool:
     """The background download keeps failing on this PC (proxy, antivirus, range requests
-    blocked): offer Setup again instead of leaving the copy on an old build for good."""
+    blocked), or the background updater isn't running in this Ducky at all: offer Setup
+    again instead of leaving the copy on an old build for good. 1.2.478-1.2.492 never
+    started the updater under Ducky-Launcher.exe and still hid the Setup offer, so those
+    PCs sat on their version with nothing on screen (Nov 2026)."""
     try:
-        from frontend.update_swap import FAILURES_FOR_SETUP, status
+        from frontend.update_swap import FAILURES_FOR_SETUP, not_running, status
 
-        return int(status().get("failures") or 0) >= FAILURES_FOR_SETUP
+        return not_running() or int(status().get("failures") or 0) >= FAILURES_FOR_SETUP
     except Exception:
         return False
 

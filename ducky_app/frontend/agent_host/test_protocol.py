@@ -231,3 +231,22 @@ def test_killed_host_is_seen_within_1s():
         proc.kill()
         proc.wait(5)
         listener.close()
+
+
+def test_frames_read_before_a_close_are_still_handed_over():
+    """A turn's last events sit in the queue when the channel closes (the app stops the host,
+    a write fails): they reach the app in order, so the chat never stays "running"."""
+    got: list[str] = []
+    ch = protocol.Channel(_StuckConn(), send_ops=protocol.APP_OPS, recv_ops=protocol.HOST_OPS,
+                          on_frame=lambda f: got.append(f["conv_id"]))
+    ch._in.put(b'[{"op":"event","conv_id":"a"},{"op":"turn_ended","conv_id":"b"}]')
+    ch._in.put(b'{"op":"saved","conv_id":"c"}')
+    assert ch.send("cancel", conv_id="x")
+    ch.close("stopped")
+    handler = threading.Thread(target=ch._handle_loop, daemon=True)
+    handler.start()
+    handler.join(2)
+    assert not handler.is_alive() and got == ["a", "b", "c"]
+    # What was waiting to be sent is gone with the pipe: only the stop marker is left.
+    assert ch._out.get_nowait() is None and ch._out.empty()
+    assert ch.send("cancel", conv_id="y") is False

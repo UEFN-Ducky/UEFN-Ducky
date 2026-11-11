@@ -132,6 +132,11 @@ def test_idle_worker_releases_last_task():
 def test_cache_has_entry_byte_and_idle_expiry_limits(monkeypatch):
     monkeypatch.setattr(call_pools, "CACHE_MAX", 4)
     monkeypatch.setattr(call_pools, "CACHE_MAX_BYTES", 4096)
+    monkeypatch.setattr(call_pools, "CACHE_SWEEP_S", 0.05)
+    monkeypatch.setattr(call_pools, "CACHE_TTL_S", 0.05)
+    starts: list[float] = []
+    real_timer = threading.Timer
+    monkeypatch.setattr(call_pools.threading, "Timer", lambda *a, **k: (starts.append(a[0]), real_timer(*a, **k))[1])
     for n in range(30):
         call_pools.call_shared("group_members", lambda k: "x" * 200, [n])
     assert len(call_pools._cache) <= 4
@@ -141,6 +146,9 @@ def test_cache_has_entry_byte_and_idle_expiry_limits(monkeypatch):
     while call_pools._cache and time.monotonic() < deadline:
         time.sleep(.02)
     assert not call_pools._cache
+    time.sleep(0.2)
+    # One sweep timer while rows wait, none once the cache is empty: never one per expiry.
+    assert call_pools._cache_timer is None and 1 <= len(starts) <= 6 and set(starts) == {0.05}
 
 
 # Looked at and fast: return at once (jobs run elsewhere) or a short poll.

@@ -90,6 +90,8 @@ def test_a_running_chat_holds_the_automatic_switch_even_right_after_a_start(monk
 def test_repeated_download_failures_bring_back_setup(monkeypatch) -> None:
     from frontend import version_check
 
+    monkeypatch.setattr(us, "_started_at", time.time())  # a fresh start: the updater isn't late yet
+
     update = {"version": "9.9.9", "packUrl": "/p", "manifestUrl": "/m", "manifestSha256": "a" * 64}
     monkeypatch.setattr("frontend.version_check.fetch_remote_payload", lambda: ({"update": update}, None))
 
@@ -172,6 +174,46 @@ def test_switch_starts_the_new_version_and_leaves_without_stopping_bridges(monke
     handover = app_versions.take_handover()
     assert handover["hidden"] is True and handover["maximized"] is True
     assert handover["chats"] == [{"conv_id": "c1", "mode": "agent", "model": "ducky-ai"}]
+
+
+def test_an_updater_that_never_started_brings_back_setup(monkeypatch) -> None:
+    """1.2.478-1.2.492 never started the updater under Ducky-Launcher.exe and still hid the
+    Setup offer (update_pack): those PCs stayed on their version with nothing on screen."""
+    from frontend import version_check
+
+    now = time.time()
+    monkeypatch.setattr(us, "_thread", None)
+    monkeypatch.setattr(us, "_started_at", now)
+    assert not us.not_running(now + 10) and not version_check._background_update_stuck()
+    assert us.not_running(now + us.NOT_RUNNING_AFTER_S + 1)
+    monkeypatch.setattr(us, "_started_at", now - us.NOT_RUNNING_AFTER_S - 1)
+    assert version_check._background_update_stuck()
+    monkeypatch.setattr(us, "_thread", object())  # started: only failed downloads count
+    assert not us.not_running() and not version_check._background_update_stuck()
+
+
+def test_a_switch_under_the_launcher_starts_the_next_ducky_on_its_own(monkeypatch) -> None:
+    """Under Ducky-Launcher.exe this process is the launcher's backend. Handed on, its
+    UEFN_DUCKY_NATIVE_CHILD made the new version skip its own launcher (the slow Python
+    window) and act as a backend with no launcher behind it."""
+    import sys
+
+    monkeypatch.setenv("UEFN_DUCKY_NATIVE_CHILD", "1")
+    monkeypatch.setenv("UEFN_DUCKY_BACKEND_EXE", sys.executable)
+    monkeypatch.setenv("UEFN_DUCKY_BACKEND_UI_PORT", "0")
+    monkeypatch.setattr(us, "_holders", {"api": SimpleNamespace(_maximized=False), "window_holder": {"hidden": False}})
+    monkeypatch.setattr(us, "_stop_chats", lambda: [])
+    started = []
+    monkeypatch.setattr(app_versions, "start_detached", lambda exe, args, env=None: started.append(env) or True)
+    monkeypatch.setattr(app_versions, "write_current", lambda *a, **k: None)
+    monkeypatch.setattr("frontend.ui_web.shutdown.hard_exit", lambda api=None, keep_others=False: None)
+    monkeypatch.setattr("frontend.usage_stats.app_closing", lambda: None)
+    assert us.restart() == {"ok": True}
+    env = started[0]
+    assert not {"UEFN_DUCKY_NATIVE_CHILD", "UEFN_DUCKY_BACKEND_EXE", "UEFN_DUCKY_BACKEND_UI_PORT"} & set(env)
+    assert env[app_versions.LAUNCHER_ENV]  # the EXE that was started still travels
+    # A backend handing its pipes to a newer backend (run_attached) stays a launcher's child.
+    assert app_versions.hand_off_env()["UEFN_DUCKY_NATIVE_CHILD"] == "1"
 
 
 def test_restart_starts_this_exe_again_with_the_window_and_chats(monkeypatch) -> None:

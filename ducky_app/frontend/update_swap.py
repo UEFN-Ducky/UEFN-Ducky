@@ -46,6 +46,9 @@ REMOTE_RECENT_S = 10 * 60.0
 # The new version shows "Updated to …" in background activity this long after a switch.
 UPDATED_NOTE_S = 10 * 60.0
 SWITCHED_FROM_ENV = "UEFN_DUCKY_SWITCHED_FROM"
+# The updater thread gets this long to start before Settings and the update check call
+# it missing (a start asks for the update status before the updater is up).
+NOT_RUNNING_AFTER_S = 5 * 60.0
 # A stopped chat finishes its current tool and saves its turn; past this it is cut off
 # (its last checkpoint still holds the turn).
 CHAT_STOP_WAIT_S = 10.0
@@ -230,6 +233,14 @@ def status() -> dict[str, Any]:
     return out
 
 
+def not_running(now: float | None = None) -> bool:
+    """True when this Ducky has been up a while and its background updater never started:
+    nothing will download an update here, so the update check offers Setup instead."""
+    now = time.time() if now is None else now
+    with _lock:
+        return _thread is None and now - _started_at > NOT_RUNNING_AFTER_S
+
+
 def _auto_update_allowed() -> bool:
     from frontend.app_stage import is_loopback
     from frontend.bundle_root import is_packaged_runtime
@@ -332,7 +343,9 @@ def _relaunch(exe: Path, version: str | None) -> dict[str, Any]:
             "chats": chats,
         }
     )
-    env = app_versions.hand_off_env()
+    # Not hand_off_env: under Ducky-Launcher.exe this process is its backend, and the
+    # next Ducky must start its own launcher, not take itself for another backend.
+    env = app_versions.own_start_env()
     if version:
         env[SWITCHED_FROM_ENV] = __version__
     if not app_versions.start_detached(exe, ["--after-update", str(os.getpid())], env=env):

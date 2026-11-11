@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 import time
 import uuid
@@ -296,7 +297,11 @@ def parent_alive_check(pid: int) -> Callable[[], bool]:
 
         def _alive() -> bool:
             try:
-                return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+                if not proc.is_running():
+                    return False
+                # Windows has no zombies, and psutil's status() there walks every thread of
+                # every process: 3% of the app's CPU for this one poll (Nov 11 2026).
+                return sys.platform == "win32" or proc.status() != psutil.STATUS_ZOMBIE
             except psutil.Error:
                 return False
 

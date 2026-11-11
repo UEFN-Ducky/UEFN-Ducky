@@ -372,6 +372,22 @@ def hand_off_env() -> dict[str, str]:
     return env
 
 
+# What Ducky-Launcher.exe sets for its own backend (native_switch.NATIVE_CHILD_ENV /
+# BACKEND_EXE_ENV, headless.BACKEND_UI_PORT_ENV). A version started on its own must not
+# inherit them: after a switch under the launcher the new version took itself for a
+# launcher's backend, never started its own launcher and ran the slow Python window.
+_LAUNCHER_CHILD_ENV = ("UEFN_DUCKY_NATIVE_CHILD", "UEFN_DUCKY_BACKEND_EXE", "UEFN_DUCKY_BACKEND_UI_PORT")
+
+
+def own_start_env() -> dict[str, str]:
+    """The environment for a Ducky that starts on its own (a version switch, a restart, a
+    rollback): :func:`hand_off_env` without what a launcher gave this process as its backend."""
+    env = hand_off_env()
+    for name in _LAUNCHER_CHILD_ENV:
+        env.pop(name, None)
+    return env
+
+
 def _kill_with_me(proc: subprocess.Popen) -> None:
     """Put ``proc`` in a job closed with this process, so an IDE stopping the bridge it
     started also stops the newer bridge this one handed off to."""
@@ -457,7 +473,7 @@ def start_detached(exe: Path, args: list[str], *, env: dict[str, str] | None = N
         try:
             subprocess.Popen(
                 [str(exe), *args],
-                env=env or hand_off_env(),
+                env=env or own_start_env(),
                 cwd=str(exe.parent),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,

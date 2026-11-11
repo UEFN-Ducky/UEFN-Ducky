@@ -10,7 +10,7 @@ from typing import Any
 
 from backend.agent.runner import AgentRunner
 from frontend.ui_web.agent_turns.push import PushFn, _in_bridge_process
-from frontend.ui_web.chats.conversations import load_conversation
+from frontend.ui_web.chats.conversations import load_conversation_meta
 
 SESSION_JOIN_TIMEOUT = 2.0
 
@@ -374,7 +374,9 @@ def _alert_finished(conv_id: str, reason: str) -> None:
 
     def _send() -> None:
         try:
-            conv = load_conversation(conv_id)
+            # Its name and hub only: the whole chat opened every message (a 130 MB chat
+            # took 12% of the app's CPU for one alert, Nov 11 2026).
+            conv = load_conversation_meta(conv_id)
             # Group members report to their hub; the hub's own run is the one to announce.
             if conv is None or str(getattr(conv, "parent_conv_id", "") or ""):
                 return

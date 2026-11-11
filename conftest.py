@@ -133,6 +133,10 @@ def _panel_is_running(real: Path) -> bool:
     # A restart or launcher hand-off can leave the live panel without panel.pid
     # (Nov 2026: the guard then flagged its crash/, ducky.db and webview writes).
     # Something listening on the panel port is the live app too.
+    if not real.is_dir():
+        # No app data here, so nothing a live panel could write: never touch its port (a
+        # child session given its own empty AppData failed test_panel_port_isolation on this).
+        return False
     with socket.socket() as probe:
         probe.settimeout(1.0)
         try:

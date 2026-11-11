@@ -123,6 +123,10 @@ CACHE_TTL_S = 1.0
 CACHE_MAX = 64
 # Total encoded size kept; one result over a quarter of it is never cached.
 CACHE_MAX_BYTES = 8 * 1024 * 1024
+# Expired results nobody asked for again leave this often. One timer at most, and none once
+# the cache is empty: a timer per expiry started a new thread every second while the panel
+# polled (results live 1 s), all day.
+CACHE_SWEEP_S = 15.0
 
 _CHATS = frozenset({"list_all_conversations", "group_members", "list_running_agents"})
 _PLUGINS = frozenset({"list_mcp_servers", "get_skill_info", "list_coding_agents", "list_agent_profiles", "plugin_data"})
@@ -284,8 +288,7 @@ def _expire_cache() -> None:
 def _schedule_expiry() -> None:
     global _cache_timer
     if _cache and _cache_timer is None:
-        delay = max(0.01, min(until for until, _ in _cache.values()) - _clock())
-        _cache_timer = threading.Timer(delay, _expire_cache)
+        _cache_timer = threading.Timer(CACHE_SWEEP_S, _expire_cache)
         _cache_timer.daemon = True
         _cache_timer.start()
 

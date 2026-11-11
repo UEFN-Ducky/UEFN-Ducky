@@ -112,12 +112,14 @@ class Channel:
                 return
             self.close_reason = reason
             self._closed.set()
-            for pending in (self._out, self._in):
-                while True:
-                    try:
-                        pending.get_nowait()
-                    except queue.Empty:
-                        break
+            # Unsent frames go (the pipe closes below). Frames already read stay: the handler
+            # hands them over in order before it stops, so a turn's last events (its end, its
+            # error) are never lost to a close that raced them and left the chat "running".
+            while True:
+                try:
+                    self._out.get_nowait()
+                except queue.Empty:
+                    break
         self._out.put(None)
         self._in.put(None)
         try:
@@ -137,9 +139,7 @@ class Channel:
                     self._in.put(_EOF)
                 return
             self._last_rx = time.monotonic()
-            with self._lock:
-                if not self.closed:
-                    self._in.put(raw)
+            self._in.put(raw)
             del raw
 
     def _handle_loop(self) -> None:

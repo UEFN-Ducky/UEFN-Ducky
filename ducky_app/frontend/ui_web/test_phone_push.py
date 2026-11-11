@@ -69,7 +69,7 @@ def test_group_members_stay_quiet_and_reply_text_never_leaves(monkeypatch) -> No
             messages=[{"role": "assistant", "content": "secret plan"}],
         ),
     }
-    patch_turns(monkeypatch, "load_conversation", lambda cid: convs.get(cid))
+    patch_turns(monkeypatch, "load_conversation_meta", lambda cid: convs.get(cid))
 
     state._alert_finished("member", "done")
     state._alert_finished("solo", "done")
