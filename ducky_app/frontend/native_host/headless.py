@@ -241,8 +241,9 @@ def _register_shell_integrations() -> None:
 
 
 def _start_auto_update(api: Any) -> None:
-    """The background updater, as the Python window starts it (webview_app._after_gui_start).
-    Missing here, launcher starts (every start since 1.2.478) never downloaded an update."""
+    """The background updater and the folder access check, as the Python window starts them
+    (webview_app._after_gui_start). Missing here, launcher starts (every start since 1.2.478)
+    never downloaded an update."""
     try:
         from frontend import update_swap
         from frontend.app_versions import take_handover
@@ -251,6 +252,12 @@ def _start_auto_update(api: Any) -> None:
         update_swap.continue_chats(take_handover().get("chats"))  # the chats the switch stopped
     except Exception:
         _log.warning("auto-update did not start", exc_info=True)
+    try:
+        from frontend import folder_access
+
+        folder_access.check_soon()  # Windows Controlled folder access blocking Documents
+    except Exception:
+        pass
 
 
 def _bind_notifications(writer: LineWriter) -> None:

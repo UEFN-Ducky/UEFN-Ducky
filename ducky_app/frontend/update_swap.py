@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 from frontend import __version__
@@ -299,11 +301,24 @@ def switch(version: str) -> dict[str, Any]:
     exe = folder / "UEFN-Ducky.exe"
     if not app_versions.is_ready(folder) or app_versions.is_bad(version):
         return {"ok": False, "error": f"{version} isn't ready."}
-    api = _holders.get("api")
-    window_holder = _holders.get("window_holder") or {}
     if not app_versions.record_start(version):
         _set(phase="failed", error=f"{version} didn't start before")
         return {"ok": False, "error": f"{version} didn't start before."}
+    return _relaunch(exe, version)
+
+
+def restart() -> dict[str, Any]:
+    """Close this Ducky and start it again where the window was, running chats carried over
+    (folder_access: Windows lets a newly allowed app write only from its next start)."""
+    return _relaunch(Path(sys.executable), None)
+
+
+def _relaunch(exe: Path, version: str | None) -> dict[str, Any]:
+    """Start ``exe`` (``version``, or this one again when None) and close this process."""
+    from frontend import app_versions
+
+    api = _holders.get("api")
+    window_holder = _holders.get("window_holder") or {}
     try:
         chats = _stop_chats()
     except Exception:
@@ -318,13 +333,15 @@ def switch(version: str) -> dict[str, Any]:
         }
     )
     env = app_versions.hand_off_env()
-    env[SWITCHED_FROM_ENV] = __version__
+    if version:
+        env[SWITCHED_FROM_ENV] = __version__
     if not app_versions.start_detached(exe, ["--after-update", str(os.getpid())], env=env):
         continue_chats(chats)
-        return {"ok": False, "error": f"{version} could not be started."}
-    app_versions.write_current(version)
-    _set(phase="switching")
-    _log.info("switching to %s", version)
+        return {"ok": False, "error": f"{version or __version__} could not be started."}
+    if version:
+        app_versions.write_current(version)
+        _set(phase="switching")
+    _log.info("switching to %s", version or "this version again")
     try:
         from frontend import usage_stats
 

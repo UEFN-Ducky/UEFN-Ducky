@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -171,6 +172,25 @@ def test_switch_starts_the_new_version_and_leaves_without_stopping_bridges(monke
     handover = app_versions.take_handover()
     assert handover["hidden"] is True and handover["maximized"] is True
     assert handover["chats"] == [{"conv_id": "c1", "mode": "agent", "model": "ducky-ai"}]
+
+
+def test_restart_starts_this_exe_again_with_the_window_and_chats(monkeypatch) -> None:
+    """folder_access: Windows lets a newly allowed app write only from its next start."""
+    import sys
+
+    monkeypatch.setattr(us, "_holders", {"api": SimpleNamespace(_maximized=False), "window_holder": {"hidden": False}})
+    monkeypatch.setattr(us, "_stop_chats", lambda: [{"conv_id": "c1"}])
+    started, exits, current = [], [], []
+    monkeypatch.setattr(app_versions, "start_detached", lambda exe, args, env=None: started.append((exe, args, env)) or True)
+    monkeypatch.setattr(app_versions, "write_current", lambda *a, **k: current.append(a))
+    monkeypatch.setattr("frontend.ui_web.shutdown.hard_exit", lambda api=None, keep_others=False: exits.append(keep_others))
+    monkeypatch.setattr("frontend.usage_stats.app_closing", lambda: None)
+    assert us.restart() == {"ok": True}
+    exe, args, env = started[0]
+    assert exe == Path(sys.executable) and args[0] == "--after-update"
+    assert us.SWITCHED_FROM_ENV not in env  # not an update: no "updated to" notice
+    assert current == [] and exits == [True]
+    assert app_versions.take_handover()["chats"] == [{"conv_id": "c1"}]
 
 
 def test_switch_marks_the_run_closed_before_it_exits(monkeypatch) -> None:

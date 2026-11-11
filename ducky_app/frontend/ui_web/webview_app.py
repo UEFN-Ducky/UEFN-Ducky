@@ -940,6 +940,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         except Exception:
             logging.getLogger(__name__).warning("auto-update did not start", exc_info=True)
         try:
+            from frontend import folder_access
+
+            folder_access.check_soon()  # Windows Controlled folder access blocking Documents
+        except Exception:
+            pass
+        try:
             from frontend import usage_stats
 
             raw_t0 = os.environ.get("UEFN_DUCKY_BOOT_T0")
