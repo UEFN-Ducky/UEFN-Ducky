@@ -636,11 +636,19 @@ def pick_backend(ntype: str, wanted: Any) -> dict[str, Any]:
         if ntype == "image.generate":
             raise ValueError("No direct image backend is installed. Turn on an image-capable gateway or image plugin from the Store.")
         raise ValueError(f"No backends for {ntype}.")
-    picked = next((row for row in rows if row["id"] == str(wanted or "")), None)
+    want = str(wanted or "").strip()
+    # A plugin's own id ("openai") names its backend too, when it has just one here.
+    picked = next((row for row in rows if row["id"] == want), None)
+    by_plugin = [row for row in rows if want and row.get("plugin_id") == want]
+    if picked is None and len(by_plugin) == 1:
+        picked = by_plugin[0]
     if picked is not None:
         return picked
     if ntype == "image.generate" and wanted:
-        raise ValueError(f"Image backend {wanted} is unavailable. Choose a direct image backend in this node's details.")
+        here = "; ".join(f"{row['id']} ({plugin_label(row)}, {cost_text(row)}"
+                         f"{'' if is_ready(row) else ', not set up'})" for row in rows)
+        raise ValueError(f"Image backend {wanted} is unavailable. Image backends here: {here}. "
+                         "Choose a direct image backend in this node's details.")
     return _default_row(ntype, rows)
 
 

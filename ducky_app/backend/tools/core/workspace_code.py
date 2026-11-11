@@ -635,7 +635,9 @@ def ducky_generate_image(prompt: str, confirm_spend: bool = False, backend: str 
     person set up (their default in Settings > LLMs; backend= one backend id picks another).
     A maker on the person's own API key just runs: asking for the picture was the yes. One
     billed in credits answers with its price first: ask the person, then call again with
-    confirm_spend=true. Never offer or name a maker this answer did not name.
+    backend=<the id it named> and confirm_spend=true (a yes never charges a maker it did not
+    name). If a maker fails, tell the person why and ask before trying another.
+    Never offer or name a maker this answer did not name.
     size: e.g. "1024x1024" when the maker takes one. Returns the picture, so you see it."""
     import tempfile
     from pathlib import Path
@@ -651,6 +653,11 @@ def ducky_generate_image(prompt: str, confirm_spend: bool = False, backend: str 
         raise ValueError(f"No picture maker is set up here yet. {media.why_not(row, media.plugin_label(row))}")
     # Their own API key pays for it, as it pays for this chat: no second question.
     own_key = bool(row.get("node"))
+    if confirm_spend and not own_key and str(backend or "").strip() not in (row["id"], row.get("plugin_id")):
+        # A yes is for the maker the person was told about: never let it charge the default instead.
+        raise ValueError(f"Nothing was charged. The default maker here is {row['label']} ({media.plugin_label(row)}), "
+                         f"{media.cost_text(row)} a picture. Tell the person that maker and price, ask, then call "
+                         f"again with backend=\"{row['id']}\" and confirm_spend=true.")
     cfg: dict[str, Any] = {"backend": row["id"], "spend": bool(confirm_spend) or own_key}
     if size:
         cfg["gateway_config"] = {row["id"]: {"size": str(size)}}

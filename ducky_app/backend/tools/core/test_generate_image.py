@@ -45,7 +45,7 @@ def test_it_asks_before_spending_then_keeps_the_picture_for_the_chat_once(maker)
     with pytest.raises(ValueError, match="confirm_spend=true"):
         workspace_code.ducky_generate_image("a duck")
     assert maker == []
-    out = workspace_code.ducky_generate_image("a duck", confirm_spend=True)
+    out = workspace_code.ducky_generate_image("a duck", confirm_spend=True, backend="ducky_ai_image")
     from mcp.server.fastmcp import Image
 
     assert isinstance(out[1], Image) and json.loads(out[0])["backend"] == "Ducky AI · Image"
@@ -63,8 +63,22 @@ def test_a_picture_the_plugin_already_kept_is_not_kept_again(maker, monkeypatch)
         return data
 
     monkeypatch.setattr(media, "tool_fn", lambda name: kept_by_plugin)
-    workspace_code.ducky_generate_image("a duck", confirm_spend=True)
+    workspace_code.ducky_generate_image("a duck", confirm_spend=True, backend="ducky_ai_image")
     assert [r["name"] for r in gen.list_generated_images()] == ["from_plugin.png"]
+
+
+def test_a_yes_without_naming_the_maker_charges_nothing(maker) -> None:
+    """The person said yes to one maker; a bare yes must not charge the default instead."""
+    with pytest.raises(ValueError, match='Nothing was charged.*backend="ducky_ai_image"'):
+        workspace_code.ducky_generate_image("a duck", confirm_spend=True)
+    assert maker == []
+
+
+def test_a_plugin_id_names_its_maker_and_a_wrong_one_lists_the_real_ones(maker, monkeypatch) -> None:
+    assert media.pick_backend("image.generate", "account")["id"] == "ducky_ai_image"
+    with pytest.raises(ValueError, match=r"Image backends here: ducky_ai_image \("):
+        workspace_code.ducky_generate_image("a duck", confirm_spend=True, backend="openai")
+    assert maker == []
 
 
 def _own_key_maker(monkeypatch, tmp_path: Path, *, key: bool) -> list[dict[str, Any]]:
