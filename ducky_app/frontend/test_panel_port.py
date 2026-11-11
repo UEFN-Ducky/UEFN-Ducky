@@ -49,3 +49,15 @@ def test_port_in_use_is_not_reserved() -> None:
         sock.bind(("127.0.0.1", 0))
         sock.listen(1)
         assert settings._port_reserved(sock.getsockname()[1]) is False
+
+
+def test_a_moved_panel_pair_leaves_the_uefn_listener_port_alone(monkeypatch, tmp_path: Path) -> None:
+    """Nov 11 2026: the panel moved to 4299/4300 and every bridge then looked for UEFN on 4300."""
+    from frontend import mcp_block
+
+    _setup(monkeypatch, tmp_path, reserved={4199})
+    assert settings.pick_panel_port() == 4300
+    s = settings.PanelSettings(port=4300)
+    args = mcp_block.resolve_bridge_args(s)
+    assert args[args.index("--port") + 1] == "4200"
+    assert mcp_block.build_uefn_server_block(s)["env"]["UEFN_DUCKY_PORT"] == "4200"

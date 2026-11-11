@@ -181,9 +181,9 @@ def ship_newest_everywhere(
         try:
             from backend.bridge import listener_get_health, send_command
             from frontend.deploy import appdata_listener_dir, listener_tree_stamp
-            from frontend.settings import PANEL_LISTENER_PORT
+            from frontend.settings import UEFN_LISTENER_PORT
 
-            if listener_get_health(PANEL_LISTENER_PORT, timeout=0.5) is None:
+            if listener_get_health(UEFN_LISTENER_PORT, timeout=0.5) is None:
                 _log("listener auto-reload: skipped (offline)")
             else:
                 disk = listener_tree_stamp(appdata_listener_dir())

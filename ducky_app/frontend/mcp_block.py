@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from frontend.bundle_root import is_packaged_runtime
-from frontend.settings import PanelSettings
+from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
 
 # Windows MCP clients that declare an explicit ``env`` block for a stdio server
 # typically REPLACE the child process's environment instead of merging it with
@@ -139,7 +139,7 @@ def shared_mcp_enabled(settings: PanelSettings | None = None) -> bool:
 
 
 def resolve_bridge_args(settings: PanelSettings) -> list[str]:
-    port_args = ["--port", str(settings.port)]
+    port_args = ["--port", str(UEFN_LISTENER_PORT)]
     # Flag-on: same exe, but ``--adapter`` relays to the one shared daemon instead
     # of loading FastMCP per IDE. Falls back to dedicated in-process when no daemon.
     if shared_mcp_enabled(settings):
@@ -153,7 +153,7 @@ def resolve_bridge_args(settings: PanelSettings) -> list[str]:
 def build_uefn_server_block(settings: PanelSettings, own_run: bool = False) -> dict:
     """Return dict suitable for mcpServers['uefn'] (stdio). ``own_run``: see resolve_bridge_command."""
     env = _base_os_env()
-    env["UEFN_DUCKY_PORT"] = str(settings.port)
+    env["UEFN_DUCKY_PORT"] = str(UEFN_LISTENER_PORT)
     for key in ("UEFN_VSCODE_WORKSPACE_FOLDERS", "UEFN_DUCKY_PROJECT_ROOT"):
         val = os.environ.get(key, "")
         if val:

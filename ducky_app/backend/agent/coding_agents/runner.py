@@ -933,9 +933,9 @@ def _run_coding_agent_message(
                                        "effective_mode": effective_mode})
 
     from backend.bridge import set_port_override
-    from frontend.settings import PANEL_LISTENER_PORT
+    from frontend.settings import UEFN_LISTENER_PORT
 
-    set_port_override(PANEL_LISTENER_PORT)
+    set_port_override(UEFN_LISTENER_PORT)
     # No listener status read per turn (2026-11-03): a UEFN tool finds out when it's called.
     cwd = project_root or "."
     cli_path = str(cfg.get("cli_path") or "")

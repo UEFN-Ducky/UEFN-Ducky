@@ -63,7 +63,7 @@ def check_uefn(cfg: dict[str, Any]) -> dict[str, Any]:
 def _project_state(project: str) -> dict[str, Any]:
     from backend.bridge.client import listener_get_health
     from backend.bridge.status import _project_from_health
-    from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
+    from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
     from frontend.window_view import uefnproject_path
 
     selected = ""
@@ -71,7 +71,7 @@ def _project_state(project: str) -> dict[str, Any]:
         selected = str(uefnproject_path(project or None).parent)
     except Exception:
         selected = (PanelSettings.load().uefn_project_root or "").strip()
-    health = listener_get_health(int(PANEL_LISTENER_PORT), timeout=0.8)
+    health = listener_get_health(int(UEFN_LISTENER_PORT), timeout=0.8)
     if not isinstance(health, dict) or health.get("status") != "ok":
         return {}
     _dir, name, match = _project_from_health(health, selected_project_root=selected)

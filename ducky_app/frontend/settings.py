@@ -49,6 +49,11 @@ def _saved_panel_port() -> int:
 
 PANEL_LISTENER_PORT = int(os.environ.get("UEFN_DUCKY_PANEL_PORT") or _saved_panel_port() or DEFAULT_PANEL_LISTENER_PORT)
 
+# The UEFN listener's own port. The island boot file (Content/Python/init_unreal.py) always
+# starts it here, so it never follows the panel pair when that moves off a busy or reserved
+# range: a moved pair sent every editor tool to 4300 while UEFN answered on 4200 (Nov 11 2026).
+UEFN_LISTENER_PORT = int(os.environ.get("UEFN_DUCKY_LISTENER_PORT") or DEFAULT_PANEL_LISTENER_PORT)
+
 
 def _port_reserved(port: int) -> bool:
     """True when Windows refuses this loopback port outright (10013); in use (10048) is not reserved."""

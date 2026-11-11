@@ -14,7 +14,7 @@ from typing import Any, Literal, Optional
 from frontend.agent_profiles import get_agent_profile, list_agent_profiles_available
 from frontend.archive_folder import is_archive_folder_id
 from frontend.error_log import read_errors
-from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
+from frontend.settings import PANEL_LISTENER_PORT, UEFN_LISTENER_PORT, PanelSettings
 from frontend.ui_web.project_switch import get_panel_project_info, list_panel_projects
 from frontend.ui_web.chats.conversations import (  # delete_conversation: test_subagent_recycle patches it here
     conversation_project_slug, create_conversation, delete_conversation, list_conversations,  # noqa: F401
@@ -457,7 +457,7 @@ def ducky_get_status(pretty: bool = False) -> str:
 
     settings = PanelSettings.load()
     result = fetch_listener_status(
-        PANEL_LISTENER_PORT,
+        UEFN_LISTENER_PORT,
         state=_status_state,
         version=__version__,
         selected_project_root=settings.uefn_project_root,
@@ -641,7 +641,7 @@ def ducky_sync_project_to_uefn(pretty: bool = False) -> str:
         switch_panel_project,
     )
 
-    info = post_command_to_listener(PANEL_LISTENER_PORT, "get_project_info", {}, timeout=5.0)
+    info = post_command_to_listener(UEFN_LISTENER_PORT, "get_project_info", {}, timeout=5.0)
     live_name = str(info.get("project_name") or "").strip() if isinstance(info, dict) else ""
     if is_reserved_mount(live_name):
         live_name = ""
