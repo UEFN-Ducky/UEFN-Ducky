@@ -37,11 +37,13 @@ def start_exe(stub: Path) -> Path:
     """What Windows should start for the install root's ``UEFN-Ducky.exe`` (Run key, Open with,
     ``uefn-ducky://``): ``Ducky-Launcher.exe`` next to it whenever it is there (no setting
     turns it off), else ``stub`` itself. Every start re-registers, so an old command naming
-    the stub heals to the launcher on the next start."""
+    the stub heals to the launcher on the next start. A launcher that is not a whole Windows
+    program counts as missing: sign-in would say "This app can't run on your PC"."""
+    from frontend.install_health import starts_with_mz
     from frontend.native_switch import LAUNCHER_EXE_NAME
 
     launcher = Path(stub).parent / LAUNCHER_EXE_NAME
-    return launcher if launcher.is_file() else Path(stub)
+    return launcher if launcher.is_file() and starts_with_mz(launcher) else Path(stub)
 
 
 def managed_exe() -> Path | None:

@@ -296,7 +296,8 @@ def test_stale_unsigned_cache_is_replaced_by_signed_download(monkeypatch, harnes
     assert calls["downloads"] == 1
     dest, args, waited, launched_bytes = calls["launch"][0]
     assert dest.name == "Setup-1.2.343.exe" and launched_bytes == signed
-    assert args == [*LEGACY_ARGV, "/CURRENTUSER"] and waited is False
+    assert args[:-1] == [*LEGACY_ARGV, "/CURRENTUSER"] and waited is False
+    assert re.fullmatch(r"/LOG=.+[\\/]logs[\\/]setup-\d{8}-\d{6}\.log", args[-1])
     assert _never_exit == ["shutdown"]
 
 
@@ -308,7 +309,7 @@ def test_matching_cache_is_reused_without_download(monkeypatch, harness) -> None
     monkeypatch.setattr(updater, "_download", lambda *_a, **_k: pytest.fail("cache matches the feed"))
     assert updater.apply_update()["ok"] is True
     _dest, args, waited, _b = calls["launch"][0]
-    assert args == [*LEGACY_ARGV, "/ALLUSERS"] and waited is True
+    assert args[:-1] == [*LEGACY_ARGV, "/ALLUSERS"] and waited is True
 
 
 def test_bad_digest_never_launches(monkeypatch, harness) -> None:

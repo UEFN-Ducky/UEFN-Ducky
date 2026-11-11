@@ -170,8 +170,10 @@ def refresh_root_launcher() -> None:
     if not getattr(sys, "frozen", False) or os.environ.get(NO_HOP_ENV) or not running_from_versions():
         return
     root = _installed_exe()
-    if root is not None:
-        copy_launcher_files(Path(sys.executable).parent, root.parent)
+    if root is not None and copy_launcher_files(Path(sys.executable).parent, root.parent):
+        from frontend import install_health
+
+        install_health.record("refresh", root.parent)  # Ducky's own change, not one while off
 
 
 # The launcher and the one DLL it loads. Only files the install already has are replaced.
@@ -235,6 +237,12 @@ def mark_ready(version: str) -> None:
         refresh_root_launcher()
     except Exception:
         _log.warning("root launcher refresh failed", exc_info=True)
+    try:
+        from frontend import install_health
+
+        install_health.after_ready()
+    except Exception:
+        pass
     clear_starts(version)
 
 

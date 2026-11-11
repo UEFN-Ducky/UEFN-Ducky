@@ -163,6 +163,12 @@ def hard_exit(*, api: Any = None, keep_others: bool = False) -> None:
         boot_report.mark("closed")
     except Exception:
         pass
+    try:
+        from frontend import install_health
+
+        install_health.record("exit")
+    except Exception:
+        pass
     _stop_all_agents()
     _stop_cpu_workers()
     _stop_all_terminals()

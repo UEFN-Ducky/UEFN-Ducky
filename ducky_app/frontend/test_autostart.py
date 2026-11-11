@@ -139,6 +139,19 @@ def test_run_key_stays_on_the_stub_only_without_a_launcher(monkeypatch, reg):
     assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
 
 
+def test_a_zero_filled_launcher_sends_sign_in_to_the_stub_then_heals_back(monkeypatch, reg):
+    """Nov 10 2026: a broken root launcher made the sign-in start say "This app can't run on
+    your PC". The Run key names the stub while it is broken, the launcher once it is whole."""
+    launcher = reg.exe.parent / "Ducky-Launcher.exe"
+    launcher.write_bytes(b"\0" * 64)
+    _launcher_mode(monkeypatch, "on")
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
+    launcher.write_bytes(b"MZ")
+    assert autostart.apply(True) is True
+    assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
+
+
 def test_an_unreadable_setting_still_starts_the_launcher(monkeypatch, reg):
     from frontend.settings import PanelSettings
 

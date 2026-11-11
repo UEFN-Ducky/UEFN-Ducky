@@ -119,6 +119,16 @@ def _silent_install_args(install_scope: Any) -> list[str]:
     return args
 
 
+def _setup_log_args() -> list[str]:
+    """``/LOG=…\\logs\\setup-<ts>.log``: every Setup run leaves a log (install_health reads it)."""
+    try:
+        from frontend.install_health import setup_log_args
+
+        return setup_log_args()
+    except Exception:
+        return []
+
+
 def _result(*, ok: bool, error: str | None, stage: str) -> dict[str, Any]:
     _set_progress(stage=stage, error=error)
     return {"ok": ok, "error": error, "stage": stage}
@@ -864,7 +874,7 @@ def apply_update() -> dict[str, Any]:
     _set_progress(stage="installing", error=None)
     code, child_running = _launch_setup_until_handoff(
         dest,
-        _silent_install_args(status["install_scope"]),
+        [*_silent_install_args(status["install_scope"]), *_setup_log_args()],
         wait_for_elevation=status.get("install_scope") == "machine",
     )
 

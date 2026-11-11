@@ -403,6 +403,16 @@ def _hidden_by_hand_off(argv: list[str] | None = None) -> bool:
     )
 
 
+def _check_install() -> None:
+    """What changed in the install folder while Ducky was off; a broken root launcher back."""
+    try:
+        from frontend import install_health
+
+        install_health.check_at_start()
+    except Exception:
+        pass
+
+
 def _wait_for_previous_version() -> None:
     """``--after-update <pid>``: the version that switched to this one is still closing."""
     if "--after-update" not in sys.argv:
@@ -473,6 +483,7 @@ def main() -> None:
         raise SystemExit(agent_host_main(sys.argv[2:]))
     _sweep_stale_extracts()
     if is_bridge_exe() or (len(sys.argv) > 1 and sys.argv[1] == "bridge"):
+        _check_install()
         _hand_off_to_newest(bridge=True)
         run_bridge()
     elif len(sys.argv) > 1 and sys.argv[1] == "db":
@@ -507,6 +518,7 @@ def main() -> None:
         except Exception:
             pass
         _wait_for_previous_version()
+        _check_install()
         _hand_off_to_newest(bridge=False)
         # native_launcher on/auto: Ducky-Launcher.exe draws the window and this process exits.
         # Off (the default) spawns nothing; any launcher failure runs the Python window below.
