@@ -81,6 +81,15 @@ def test_a_plugin_id_names_its_maker_and_a_wrong_one_lists_the_real_ones(maker, 
     assert maker == []
 
 
+def test_a_plugin_with_two_makers_picks_the_ready_one(monkeypatch) -> None:
+    """OpenAI: no API key, but signed in to ChatGPT: "openai" means Codex's picture tool."""
+    rows = [{"id": "codex_image", "plugin_id": "openai", "tool": "codex_image", "label": "Codex"},
+            {"id": "openai_image", "plugin_id": "openai", "node": "openai.image", "key": "openai", "label": "API"}]
+    monkeypatch.setattr(media, "table", lambda ntype: rows)
+    monkeypatch.setattr(media, "is_ready", lambda row: row["id"] == "codex_image")
+    assert media.pick_backend("image.generate", "openai")["id"] == "codex_image"
+
+
 def _own_key_maker(monkeypatch, tmp_path: Path, *, key: bool) -> list[dict[str, Any]]:
     """An AI gateway's own picture node, paid by the person's API key."""
     asked: list[dict[str, Any]] = []

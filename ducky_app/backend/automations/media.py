@@ -637,11 +637,13 @@ def pick_backend(ntype: str, wanted: Any) -> dict[str, Any]:
             raise ValueError("No direct image backend is installed. Turn on an image-capable gateway or image plugin from the Store.")
         raise ValueError(f"No backends for {ntype}.")
     want = str(wanted or "").strip()
-    # A plugin's own id ("openai") names its backend too, when it has just one here.
+    # A plugin's own id ("openai") names its backend too: its only one, else its only ready one
+    # (OpenAI: the API-key image node and Codex on the ChatGPT sign-in).
     picked = next((row for row in rows if row["id"] == want), None)
     by_plugin = [row for row in rows if want and row.get("plugin_id") == want]
-    if picked is None and len(by_plugin) == 1:
-        picked = by_plugin[0]
+    ready = [row for row in by_plugin if is_ready(row)]
+    if picked is None and (len(by_plugin) == 1 or len(ready) == 1):
+        picked = by_plugin[0] if len(by_plugin) == 1 else ready[0]
     if picked is not None:
         return picked
     if ntype == "image.generate" and wanted:
