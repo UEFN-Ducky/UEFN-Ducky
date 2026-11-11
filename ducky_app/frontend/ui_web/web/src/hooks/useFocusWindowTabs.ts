@@ -10,6 +10,7 @@ import type { TerminalShell } from "../terminal/types";
 
 import { basename, isVerseFile, projectRelativePath } from "../verse-editor/utils/isVerseFile";
 
+import { onShownChatsChange, shownChatIds } from "./shownChats";
 import { WINDOW_ID, installFileDeleteListener, installFileRenameListener, installTabRegistryListener, openOrFocusTab, releaseAllTabs, reportOpenTabs, reportOpenTabsNow } from "../tabs/tabRegistryClient";
 import { registerUsageTabFocusIfOpen } from "../navigation/openUsageTab";
 import { clearBrowserPaneBounds, orphanedPluginTabs } from "../plugin-ui";
@@ -75,7 +76,10 @@ const shownByViewer = new Map<string, string[]>();
 let visibilityListener = false;
 
 function sendVisible(viewerId: string): void {
-  const ids = typeof document !== "undefined" && document.hidden ? [] : shownByViewer.get(viewerId) ?? [];
+  // The viewer's tabs plus every chat a visible pane shows outside them (a plugin's chat
+  // dock, a pop-up card): hooks/shownChats.ts.
+  const shown = [...new Set([...(shownByViewer.get(viewerId) ?? []), ...shownChatIds()])].sort();
+  const ids = typeof document !== "undefined" && document.hidden ? [] : shown;
   const key = ids.join("\0");
   if (lastVisibleKey.get(viewerId) === key) return;
   lastVisibleKey.set(viewerId, key);
@@ -89,13 +93,27 @@ function sendVisible(viewerId: string): void {
  */
 export function reportVisibleChats(ids: readonly string[], viewerId: string = WINDOW_ID): void {
   shownByViewer.set(viewerId, [...new Set(ids)].sort());
-  if (!visibilityListener && typeof document !== "undefined") {
-    visibilityListener = true;
-    document.addEventListener("visibilitychange", () => {
-      for (const viewer of shownByViewer.keys()) sendVisible(viewer);
-    });
-  }
+  listenForShownChanges();
   sendVisible(viewerId);
+}
+
+function listenForShownChanges(): void {
+  if (visibilityListener || typeof document === "undefined") return;
+  visibilityListener = true;
+  const resend = () => {
+    for (const viewer of shownByViewer.keys()) sendVisible(viewer);
+  };
+  document.addEventListener("visibilitychange", resend);
+  // A pane outside the tabs opened or closed: this window's own list changes with it.
+  onShownChatsChange(() => {
+    if (!shownByViewer.has(WINDOW_ID)) shownByViewer.set(WINDOW_ID, []);
+    resend();
+  });
+}
+
+/** Start reporting chats that visible panes show, before any tab layout reports (ChatPane). */
+export function watchShownChats(): void {
+  listenForShownChanges();
 }
 
 /** Report this window's visible chats whenever the set changes (a re-render alone sends nothing). */

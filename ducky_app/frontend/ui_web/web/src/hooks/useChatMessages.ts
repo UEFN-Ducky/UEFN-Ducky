@@ -177,9 +177,17 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
   }, [chatId]);
 
   // Keep the reducer's mirror of the global running-set in sync with the prop.
+  const wasRunningRef = useRef(isAgentRunning);
   useEffect(() => {
     dispatch({ type: "externalRunning", running: isAgentRunning });
-  }, [isAgentRunning]);
+    const ended = wasRunningRef.current && !isAgentRunning;
+    wasRunningRef.current = isAgentRunning;
+    // The app says this chat's run is over and this pane is idle: take the saved copy once
+    // more. A load while the app still listed the run was merged with the live rows, and a
+    // pane that missed the turn's last events has nothing else to tell it the reply is there.
+    const s = stateRef.current;
+    if (ended && s.status === "idle" && !s.stopped && s.atBottom) void load();
+  }, [isAgentRunning, load]);
 
   // Latch the shared turn clock as soon as this pane knows a run is live
   // (covers the gap before the first agent event hits the global running-set).

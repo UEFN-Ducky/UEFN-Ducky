@@ -21,6 +21,8 @@ class EventBacklog:
         self.bytes = 0
         self.max_events = max_events
         self.max_bytes = max_bytes
+        # The newest event dropped to make room: a window that last read before it missed events.
+        self.dropped_through = 0
 
     def add(self, seq: int, event: dict[str, object]) -> None:
         size = event_size(event)
@@ -28,10 +30,28 @@ class EventBacklog:
         self.bytes += size
         # The newest event always stays, however big, so pollers still receive it.
         while len(self.rows) > 1 and (len(self.rows) > self.max_events or self.bytes > self.max_bytes):
-            self.bytes -= self.rows.popleft()[2]
+            dropped_seq, _event, dropped_size = self.rows.popleft()
+            self.bytes -= dropped_size
+            self.dropped_through = max(self.dropped_through, dropped_seq)
+
+    def missed(self, seq: int) -> bool:
+        """True when events after ``seq`` were dropped before a window that read up to ``seq``
+        could get them (0: a window that has read nothing yet loads its state itself)."""
+        return 0 < seq < self.dropped_through
 
     def since(self, seq: int, limit: int = 500) -> list[tuple[int, dict[str, object]]]:
         return [(s, event) for s, event, _size in self.rows if s > seq][0:limit]
+
+
+    def with_resync(self, seq: int, events: list[dict[str, object]]) -> list[dict[str, object]]:
+        """``events`` for a window that read up to ``seq``, led by a ``remote_resync`` when it
+        fell behind and events it never got were dropped (a burst of big tool events, a busy
+        app). Without it the window sat on a stale chat: a tool card spinning, a turn that
+        never ends. The page reloads what it shows on that event, as the phone does after
+        its link drops (remote/protocol.ts REMOTE_RESYNC)."""
+        if not self.missed(seq):
+            return events
+        return [{"type": "remote_resync", "reason": "events_missed"}, *events]
 
 
 def event_size(event: dict[str, object]) -> int:

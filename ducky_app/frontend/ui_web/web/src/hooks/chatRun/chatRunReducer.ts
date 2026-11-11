@@ -63,6 +63,12 @@ export interface RunState {
   reloadToken: number;
   /** Monotonic source of transient optimistic-row ids. */
   idSeq: number;
+  /** The turn this pane watched has ended and nothing live came since: the next load is its
+   *  saved copy and replaces the rows on screen, even while the app's running list still
+   *  names the chat for a moment. Merged instead, that load kept only the live rows and
+   *  dropped the saved reply; a chat that got no live text ("Done" with no answer until the
+   *  tab was reopened) lost the whole turn. */
+  settling?: boolean;
 }
 
 export type RunAction =
@@ -277,6 +283,7 @@ function reset(state: RunState, patch: Partial<RunState>): RunState {
 function startTurn(state: RunState, messages: ChatMessage[]): RunState {
   return reset(state, {
     messages,
+    settling: false,
     status: "sending",
     runId: null,
     stopped: false,
@@ -286,8 +293,13 @@ function startTurn(state: RunState, messages: ChatMessage[]): RunState {
   });
 }
 
-function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
-  if (!eventMatchesRun(event, state.runId, state.stopped)) return state;
+/** Events that put a turn's live rows or text on screen. */
+const LIVE_EVENTS = new Set(["text_delta", "thinking", "tool", "tool_done", "user_steered", "assistant_done", "error"]);
+
+function applyAgentEvent(current: RunState, event: AgentEvent): RunState {
+  if (!eventMatchesRun(event, current.runId, current.stopped)) return current;
+  // Another turn is live on screen: a load now belongs to it and merges as before.
+  const state = current.settling && LIVE_EVENTS.has(event.type) ? { ...current, settling: false } : current;
 
   switch (event.type) {
     case "context_changed":
@@ -458,8 +470,8 @@ function applyAgentEvent(state: RunState, event: AgentEvent): RunState {
         // reconcileTail: pull canonical copy if the user is at the bottom, else
         // just flag that there's something new below without yanking their scroll.
         return state.atBottom
-          ? reset(base, { reloadToken: base.reloadToken + 1 })
-          : reset(base, { hasNewBelow: true });
+          ? reset(base, { reloadToken: base.reloadToken + 1, settling: true })
+          : reset(base, { hasNewBelow: true, settling: true });
       }
       // Error stop: the preceding "error" event already committed the partial;
       // leave it and let a later clean reload reconcile.
@@ -589,11 +601,14 @@ export function chatRunReducer(state: RunState, action: RunAction): RunState {
     case "agentEvent":
       return applyAgentEvent(state, action.event);
 
-    case "loaded":
+    case "loaded": {
       if (!Array.isArray(action.rows)) return state; // a load that brought nothing keeps what is shown
-      return isInFlight(state) || state.stopped
+      // The saved copy of a turn that ended here (see RunState.settling).
+      const settled = Boolean(state.settling) && state.status === "idle" && !state.stopped;
+      return (isInFlight(state) && !settled) || state.stopped
         ? reset(state, { messages: mergeCommitted(state.messages, action.rows) })
-        : reset(state, { messages: action.rows, stream: "", thinking: "", statusText: "", hasNewBelow: false });
+        : reset(state, { messages: action.rows, stream: "", thinking: "", statusText: "", hasNewBelow: false, settling: false });
+    }
 
     case "older": {
       const first = state.messages.find((m) => typeof m.id === "number")?.id;

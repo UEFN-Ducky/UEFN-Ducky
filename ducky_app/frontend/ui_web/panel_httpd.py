@@ -578,7 +578,7 @@ def _poll_panel_events(since: int, timeout: float = 20.0) -> tuple[int, list[dic
             return _event_seq, []
         cursor = rows[-1][0]
         events = _drop_replayed_remote_gone(since, [event for _, event in rows])
-        return cursor, events
+        return cursor, _event_backlog.with_resync(since, events)
 
 
 def register_window_rtc(session_id: str, sock: object) -> None:

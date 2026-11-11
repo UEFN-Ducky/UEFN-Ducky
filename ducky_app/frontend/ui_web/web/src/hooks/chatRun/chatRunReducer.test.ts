@@ -678,3 +678,49 @@ describe("chatRunReducer — Send now into a running turn", () => {
     expect(texts(s)).toEqual(["build it", "use blue too"]);
   });
 });
+
+describe("chatRunReducer — a turn that ended takes its saved copy", () => {
+  const saved: ChatMessage[] = [
+    { id: 0, role: "user", text: "hi" },
+    { id: 4294967296, role: "assistant", text: "the real reply" },
+  ];
+
+  it("replaces the rows even while the app's running list still names the chat", () => {
+    // A chat that got no live text (docked in a plugin panel, a background tab): only the
+    // person's own bubble is live. The app still lists the run for a moment after it ends.
+    const sent = run({ ...initialRunState, externalRunning: true }, { type: "send", text: "hi" }, { type: "sendAccepted", runId: "r1" });
+    const ended = run(sent, ev({ type: "agent_stopped", reason: "done", run_id: "r1" } as AgentEvent));
+    expect(ended.status).toBe("idle");
+    expect(ended.settling).toBe(true);
+    const loaded = run(ended, { type: "loaded", rows: saved });
+    expect(texts(loaded)).toEqual(["hi", "the real reply"]); // was ["hi"]: "Done" with no answer
+    expect(loaded.settling).toBe(false);
+    expect(loaded.messages.every((m) => typeof m.id === "number")).toBe(true);
+  });
+
+  it("still merges when another turn is already live on screen", () => {
+    const sent = run({ ...initialRunState, externalRunning: true }, { type: "send", text: "hi" }, { type: "sendAccepted", runId: "r1" });
+    const ended = run(sent, ev({ type: "agent_stopped", reason: "done", run_id: "r1" } as AgentEvent));
+    const next = run(ended, ev({ type: "text_delta", text: "next turn", run_id: "r2" } as AgentEvent));
+    expect(next.settling).toBe(false);
+    const loaded = run(next, { type: "loaded", rows: saved });
+    expect(loaded.stream).toBe("next turn"); // the live text of the new turn stays
+  });
+
+  it("a new send from this pane keeps its own bubble through the load", () => {
+    const sent = run({ ...initialRunState, externalRunning: true }, { type: "send", text: "hi" }, { type: "sendAccepted", runId: "r1" });
+    const ended = run(sent, ev({ type: "agent_stopped", reason: "done", run_id: "r1" } as AgentEvent));
+    const again = run(ended, { type: "send", text: "and another thing" });
+    expect(again.settling).toBe(false);
+    const loaded = run(again, { type: "loaded", rows: saved });
+    expect(texts(loaded).at(-1)).toBe("and another thing");
+  });
+
+  it("scrolled up, the turn's end still marks the next load as its saved copy", () => {
+    const sent = run({ ...initialRunState, externalRunning: true, atBottom: false }, { type: "send", text: "hi" }, { type: "sendAccepted", runId: "r1" });
+    const ended = run(sent, ev({ type: "agent_stopped", reason: "done", run_id: "r1" } as AgentEvent));
+    expect(ended.hasNewBelow).toBe(true);
+    expect(ended.reloadToken).toBe(sent.reloadToken); // no load pulled under a reader
+    expect(texts(run(ended, { type: "loaded", rows: saved }))).toEqual(["hi", "the real reply"]);
+  });
+});

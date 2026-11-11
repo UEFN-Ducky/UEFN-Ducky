@@ -43,6 +43,8 @@ import {
 import { PromptQueueBar } from "./PromptQueueBar";
 import { basename } from "../verse-editor/utils/isVerseFile";
 import { ChatWorkflowRunCard } from "./ChatWorkflowRunCard";
+import { markChatShown } from "../hooks/shownChats";
+import { watchShownChats } from "../hooks/useFocusWindowTabs";
 import {
   getAskUserSessionForConv,
   setFocusedChatForAsk,
@@ -263,6 +265,13 @@ export function ChatPane({
     stopRun,
     rewindAndAppendUser,
   } = useChatMessages(chat.id, visible, isAgentRunning);
+  // Wherever this pane sits (a tab, a plugin's chat dock, a pop-up), its chat is on screen
+  // while it is visible: the app then streams the turn's live text here.
+  useEffect(() => {
+    if (!visible) return;
+    watchShownChats();
+    return markChatShown(chat.id);
+  }, [visible, chat.id]);
 
   const turnTimer = useChatTurnTimerState(chat.id);
   const linkedAgents = useLinkedAgents(chat.id, messages, allChats);
