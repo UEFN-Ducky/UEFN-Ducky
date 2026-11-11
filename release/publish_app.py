@@ -990,6 +990,8 @@ NATIVE_MANIFEST = ROOT / "native_launcher" / "Cargo.toml"
 # The full pytest run names its folders: pytest.ini's testpaths leaves out release/, whose
 # tests pin these release steps.
 PYTEST_PATHS = ("ducky_app", "tests", "release")
+# More failed tests than this in one full run are not re-run one by one as flaky.
+FLAKY_RERUN_MAX = 200
 
 
 def run_cargo_tests(manifest: Path | None = None) -> None:
@@ -1010,6 +1012,17 @@ def run_cargo_tests(manifest: Path | None = None) -> None:
     proc = subprocess.run([cargo, "test", "--manifest-path", str(manifest)], cwd=str(ROOT))
     if proc.returncode != 0:
         raise SystemExit(f"cargo test failed (exit {proc.returncode})")
+
+
+def rerun_failed_argv(failed: list[str]) -> list[str]:
+    """The one re-run of a full run's failed tests. Their ids come from pytest's own cache
+    (``--lf``): on the command line they hit Windows' 32K limit ([WinError 206]) once enough
+    failed. More than FLAKY_RERUN_MAX is never one flaky test: a broken checkout (a second
+    release deleted this worktree mid-run, Nov 10 2026: 2178 import errors) or a real break,
+    so it stops with that instead of re-running them all."""
+    if len(failed) > FLAKY_RERUN_MAX:
+        raise SystemExit(f"{len(failed)} tests failed: too many to be flaky, not re-run; see above")
+    return [sys.executable, "-m", "pytest", "-q", "--tb=short", "--lf", *PYTEST_PATHS]
 
 
 def run_regression_tests() -> None:
@@ -1088,11 +1101,7 @@ def run_regression_tests() -> None:
             # failed outside any test, e.g. the AppData guard (exit 3) or a crashed worker.
             raise SystemExit(f"pytest failed (exit {full.returncode}) with no failed test to re-run; see above")
         print(f"=== pytest: running only the {len(failed)} failed tests again ===")
-        alone = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--tb=short", *failed],
-            cwd=str(ROOT),
-            env=env,
-        )
+        alone = subprocess.run(rerun_failed_argv(failed), cwd=str(ROOT), env=env)
         if alone.returncode != 0:
             # The fixer's commit is tested against just these (and what it touches) next time.
             retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or failed)

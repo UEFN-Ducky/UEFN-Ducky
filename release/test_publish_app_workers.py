@@ -16,6 +16,18 @@ def _load():
     return mod
 
 
+def test_failed_tests_rerun_from_pytests_cache_never_on_the_command_line() -> None:
+    """2251 failed ids on one command line: [WinError 206] (Nov 10 2026)."""
+    import pytest
+
+    pa = _load()
+    argv = pa.rerun_failed_argv([f"ducky_app/t.py::test_{n}" for n in range(pa.FLAKY_RERUN_MAX)])
+    assert "--lf" in argv and not any("::" in a for a in argv)
+    assert sum(len(a) + 3 for a in argv) < 2000
+    with pytest.raises(SystemExit, match="too many to be flaky"):
+        pa.rerun_failed_argv(["x.py::t"] * (pa.FLAKY_RERUN_MAX + 1))
+
+
 def test_uefn_in_the_process_list_means_fewer_workers() -> None:
     pa = _load()
     with_uefn = ["System", "explorer.exe", "UnrealEditorFortnite-Win64-Shipping.exe", "python.exe"]
