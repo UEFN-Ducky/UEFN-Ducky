@@ -25,7 +25,7 @@ def run(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("frontend.bundle_root.is_packaged_runtime", lambda: True)
     monkeypatch.setattr(fa, "_state_path", lambda: tmp_path / fa.STATE_FILE)
     calls: dict = {"asked": [], "told": [], "allowed": [], "restarts": 0, "probes": 0, "modes": 0}
-    world: dict = {"blocked": False, "mode": fa.BLOCK, "yes": True, "uac": True, "events": []}
+    world: dict = {"blocked": False, "mode": fa.BLOCK, "yes": True, "uac": True, "events": [], "restarted": True}
 
     def blocked() -> bool:
         calls["probes"] += 1
@@ -36,8 +36,9 @@ def run(monkeypatch, tmp_path: Path):
         return world["mode"]
 
     def check(probe: bool = True) -> str:
-        def restart() -> None:
+        def restart() -> bool:
             calls["restarts"] += 1
+            return world["restarted"]
 
         return fa.check(
             probe=probe,
@@ -131,6 +132,24 @@ def test_still_blocked_after_allowing_says_how_to_do_it_by_hand_once(run) -> Non
     assert len(calls["asked"]) == 1
 
 
+def test_the_blocked_tool_server_counts_as_ducky_and_restarts_it(run) -> None:
+    """The user report: UEFN-Ducky-Bridge.exe (the shared tool server) refused in Content\\Python."""
+    check, calls, world = run
+    bridge = r"C:\Users\pat\AppData\Local\Programs\UEFN Ducky\UEFN-Ducky-Bridge.exe"
+    world["events"] = [("2026-11-11T08:00:00Z", bridge)]
+    assert check(probe=False) == "allowed"
+    assert calls["asked"] == [fa.ask_text([fa.DUCKY])]
+    assert any(p.endswith("UEFN-Ducky-Bridge.exe") for p in calls["allowed"][0]) and calls["restarts"] == 1
+
+
+def test_a_restart_that_cannot_start_tells_the_person_to_reopen(run) -> None:
+    check, calls, world = run
+    world["blocked"] = True
+    world["restarted"] = False
+    assert check() == "allowed"
+    assert calls["told"] == [fa.RESTART_TEXT]
+
+
 def test_declining_windows_admin_prompt_keeps_ducky_running_and_says_how(run) -> None:
     check, calls, world = run
     world["blocked"] = True
@@ -179,6 +198,60 @@ def test_defenders_block_log_is_read_for_the_watched_programs_only(monkeypatch) 
     assert fa.blocked_programs() == [("2026-11-11T08:00:02.1Z", CLAUDE),
                                      ("2026-11-11T08:00:00.1Z", r"C:\Tools\R&D\Node.EXE")]
     assert seen[0][:3] == ["wevtutil", "qe", fa.LOG] and "EventID=1123" in seen[0][3]
+
+
+def test_a_refused_write_names_controlled_folder_access_only_when_windows_logged_it(monkeypatch) -> None:
+    island = r"C:\Users\pat\OneDrive\Documents\Fortnite Projects\abaa\Content\Python"
+    logged = [("2026-11-11T08:00:00Z", r"C:\x\UEFN-Ducky-Bridge.exe", island + r"\.init_unreal.py.ab12.tmp")]
+    turns: list = []
+    monkeypatch.setattr(fa, "after_turn", lambda: turns.append(1))
+    windows: list = []
+
+    def blocks(window_ms: int):
+        windows.append(window_ms)
+        return logged
+
+    assert fa.refusal_hint(island + r"\init_unreal.py", blocks=blocks) == fa.REFUSED_HINT
+    assert fa.refusal_hint(island, blocks=blocks) == fa.REFUSED_HINT  # the folder itself
+    assert windows[0] == fa.REFUSAL_WINDOW_S * 1000 and turns == [1, 1]  # the app asks right away
+    assert fa.refusal_hint(r"C:\Users\pat\Desktop\x.txt", blocks=blocks) == ""  # folder permissions
+    assert "Controlled folder access" in fa.REFUSED_HINT and "UEFN-Ducky-Bridge.exe" in fa.REFUSED_HINT
+
+
+def test_ending_tool_servers_ends_only_ducky_daemons_named_in_their_state(monkeypatch, tmp_path: Path) -> None:
+    from backend.util import proc_table
+
+    me = os.getpid()
+
+    def proc(pid: int, name: str, ppid: int = 4):
+        return SimpleNamespace(pid=pid, ppid=ppid, name=name, started=10.0)
+
+    monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(proc_table, "table", lambda: {
+        101: proc(101, "UEFN-Ducky-Bridge.exe"), 102: proc(102, "chrome.exe"), me: proc(me, "UEFN-Ducky.exe"),
+        103: proc(103, "UEFN-Ducky.exe", ppid=me),
+    })
+    (tmp_path / "shared_mcp.json").write_text('{"pid": 101}', encoding="utf-8")
+    (tmp_path / "shared_mcp-h0.json").write_text('{"pid": 102}', encoding="utf-8")  # pid reused by another program
+    (tmp_path / "shared_mcp-h1.json").write_text(f'{{"pid": {me}}}', encoding="utf-8")  # the app hosts it
+    (tmp_path / "shared_mcp-h3.json").write_text('{"pid": 103}', encoding="utf-8")  # the app's agent host
+    (tmp_path / "shared_mcp-h2.json").write_text('{"pid": 999}', encoding="utf-8")  # already gone
+    (tmp_path / "shared_mcp_fallbacks.json").write_text('{"pid": 101}', encoding="utf-8")  # not a daemon's state
+    ended: list = []
+    assert fa.end_tool_servers(terminate=lambda pid: ended.append(pid) or True) == [101]
+    assert ended == [101]
+    assert not (tmp_path / "shared_mcp.json").exists() and (tmp_path / "shared_mcp-h0.json").exists()
+
+
+def test_the_write_test_covers_documents_and_every_projects_folder(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("frontend.ui_web.known_projects.documents_dir", lambda: tmp_path / "Documents")
+    monkeypatch.setattr("frontend.ui_web.known_projects.known_project_roots", lambda: [
+        str(tmp_path / "Documents" / "Fortnite Projects" / "abaa"),
+        str(tmp_path / "Documents" / "Fortnite Projects" / "b"),
+        str(tmp_path / "Desktop" / "Islands" / "c"),
+    ])
+    assert fa.probe_folders() == [tmp_path / "Documents", tmp_path / "Documents" / "Fortnite Projects",
+                                  tmp_path / "Desktop" / "Islands"]
 
 
 def test_a_device_path_in_the_log_becomes_a_drive_path() -> None:

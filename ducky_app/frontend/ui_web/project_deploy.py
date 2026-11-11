@@ -51,6 +51,10 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
                     log(ln)
         except Exception as e:
             msg = f"Deploy skipped for {path}: {e}"
+            if isinstance(e, PermissionError):
+                from frontend.folder_access import refusal_hint
+
+                msg = f"{msg} {refusal_hint(getattr(e, 'filename', None) or path)}".rstrip()
             lines.append(msg)
             record_error("deploy", msg)
             if log:

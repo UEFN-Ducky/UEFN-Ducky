@@ -935,4 +935,19 @@ def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = Tr
         from frontend.skill_deploy import sync_skill_on_mcp_update
 
         logs.extend(sync_skill_on_mcp_update())
+    if any(_refused(line) for line in logs):
+        # Windows Controlled folder access refused Content/Python: UEFN never got the listener.
+        try:
+            from frontend.folder_access import refusal_hint
+
+            hint = refusal_hint(content_python_dir(project_root))
+        except Exception:
+            hint = ""
+        if hint:
+            logs.append(hint)
     return logs
+
+
+def _refused(line: str) -> bool:
+    low = line.lower()
+    return "access is denied" in low or "permissionerror" in low or "winerror 5]" in low or "errno 13]" in low

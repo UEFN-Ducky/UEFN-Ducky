@@ -653,6 +653,22 @@ class ProjectWriter:
 
     @staticmethod
     def _atomic_write(full: str, content: str, *, ai: bool = False) -> None:
+        try:
+            ProjectWriter._atomic_write_raw(full, content, ai=ai)
+        except PermissionError as exc:
+            # Windows Controlled folder access answers a bare "Access is denied": say what it was.
+            try:
+                from frontend.folder_access import refusal_hint
+
+                hint = refusal_hint(full)
+            except Exception:  # noqa: BLE001 - the write's own error stands
+                hint = ""
+            if not hint:
+                raise
+            raise PermissionError(exc.errno, f"{exc.strerror or 'Access is denied'}: {full}. {hint}") from exc
+
+    @staticmethod
+    def _atomic_write_raw(full: str, content: str, *, ai: bool = False) -> None:
         parent = os.path.dirname(full)
         tmp_name = os.path.join(parent, f".{os.path.basename(full)}.{uuid.uuid4().hex}.tmp")
         if ai:

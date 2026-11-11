@@ -561,6 +561,27 @@ def test_atomic_write_persistent_reader_denial_preserves_original(project):
     assert not list(target.parent.glob(".*.tmp"))
 
 
+def test_a_write_controlled_folder_access_refused_says_so(project, monkeypatch):
+    """A bare 'Access is denied' told nobody Windows' ransomware protection refused it."""
+    from backend.workspace import writer as writer_module
+
+    target = project / "Content/Verse/tool.verse"
+    asked: list = []
+    monkeypatch.setattr("frontend.folder_access.refusal_hint", lambda path: asked.append(path) or "CFA HINT")
+
+    def refuse(*_a, **_k):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(writer_module.os, "open", refuse)
+    with pytest.raises(PermissionError, match="Access is denied: .*tool.verse. CFA HINT"):
+        ProjectWriter.for_root(str(project)).write_text("Content/Verse/tool.verse", "x")
+    assert asked == [str(target)] or os.path.normcase(asked[0]) == os.path.normcase(str(target))
+    monkeypatch.setattr("frontend.folder_access.refusal_hint", lambda path: "")
+    with pytest.raises(PermissionError) as plain:  # folder permissions: the write's own error
+        ProjectWriter.for_root(str(project)).write_text("Content/Verse/tool.verse", "x")
+    assert "CFA" not in str(plain.value)
+
+
 def test_atomic_write_does_not_retry_unrelated_error(project, monkeypatch):
     from backend.workspace import writer as writer_module
 

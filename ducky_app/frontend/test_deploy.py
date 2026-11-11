@@ -133,6 +133,27 @@ def test_deploy_listener_writes_init_and_keeps_it(tmp_path, monkeypatch) -> None
     assert any("init_unreal.py" in line for line in logs)
 
 
+def test_a_listener_deploy_windows_refused_says_why(tmp_path, monkeypatch) -> None:
+    """Content/Python refused by Controlled folder access: the island never got the listener."""
+    project = tmp_path / "Island"
+    (project / "Content").mkdir(parents=True)
+    (project / "Island.uefnproject").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(deploy, "quarantine_project_python", lambda *_a, **_k: [])
+    monkeypatch.setattr(deploy, "enable_uefn_project_python", lambda _p: None)
+    monkeypatch.setattr("backend.mcp_plugins.epic.ensure_editor_auto_start", lambda: False)
+
+    def refused(_root):
+        raise PermissionError(13, "Access is denied", str(project / "Content" / "Python"))
+
+    monkeypatch.setattr(deploy, "ensure_project_init", refused)
+    asked: list = []
+    monkeypatch.setattr("frontend.folder_access.refusal_hint", lambda path: asked.append(Path(path)) or "CFA HINT")
+    logs = deploy.deploy_listener(project, 4200, shared=False)
+    assert logs[-1] == "CFA HINT" and asked == [project / "Content" / "Python"]
+    monkeypatch.setattr(deploy, "ensure_project_init", lambda _root: ["Wrote init_unreal.py"])
+    assert "CFA HINT" not in deploy.deploy_listener(project, 4200, shared=False)
+
+
 def test_enable_uefn_project_python_skips_missing_file(tmp_path: Path) -> None:
     assert deploy.enable_uefn_project_python(tmp_path) is None
 

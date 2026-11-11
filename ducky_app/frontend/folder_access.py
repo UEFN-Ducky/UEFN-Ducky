@@ -8,9 +8,13 @@ Five seconds after a start Ducky tries one write in Documents and reads Defender
 blocked programs (event 1123, readable without admin rights). After an agent turn it reads
 that log again. Anything blocked that Ducky runs (its own EXEs, the agents' programs, UEFN) is
 asked about in one box, named; Yes adds them to the allowed apps through Windows' admin prompt
-(Ducky's EXEs for this install and every downloaded version, by wildcard), then restarts
-Ducky when Ducky itself was blocked: Windows lets an allowed app write only from its next
-start. Only Windows' admin prompt can add an app, so its one Yes is the least it takes.
+(Ducky's EXEs for this install and every downloaded version, by wildcard). When Ducky itself
+was blocked it then ends its shared tool servers (UEFN-Ducky-Bridge.exe --shared-daemon outlives
+the app; a user's island Content\\Python was refused to one, Nov 2026) and restarts: Windows lets
+an allowed app write only from its next start, and every start redeploys the listener into each
+island's Content\\Python, so what was refused lands in UEFN with nothing redone by hand. A refused
+write names Controlled folder access (refusal_hint). Only Windows' admin prompt can add an app,
+so its one Yes is the least it takes.
 Shells and script hosts (PowerShell, cmd, bash, python) are never offered: allowed, they
 would let anything through. A No is kept for the app version.
 """
@@ -54,6 +58,14 @@ BY_HAND = ("Open Windows Security → Virus & threat protection → Ransomware p
 NOT_ALLOWED_TEXT = "Not allowed, so it can't save into Documents yet.\n\nTo allow it later: " + BY_HAND
 STILL_BLOCKED_TEXT = ("Windows still blocks UEFN Ducky from saving into Documents. This PC's settings may be "
                       "managed by your organization: ask whoever manages it, or " + BY_HAND[0].lower() + BY_HAND[1:])
+RESTART_TEXT = ("UEFN Ducky is allowed now. Close it (tray icon → Exit) and open it again: Windows lets it "
+                "save into Documents from its next start.")
+REFUSED_HINT = ("Windows Controlled folder access (ransomware protection) refused this write. UEFN Ducky asks "
+                "to be allowed when this turn ends or at its next start, and then writes it again; or "
+                + BY_HAND[0].lower() + BY_HAND[1:] + " Add UEFN-Ducky-Bridge.exe too.")
+PROBE_FOLDERS_MAX = 8
+REFUSAL_WINDOW_S = 120
+_TOOL_SERVER_STATE = re.compile(r"^shared_mcp(-h\d+)?\.json$", re.IGNORECASE)
 
 _busy = threading.Lock()  # one check at a time: a start's and a turn's never ask together
 _last_turn_check = [0.0]
@@ -128,29 +140,109 @@ def _dos_path(path: str) -> str:
     return path
 
 
-def parse_blocked(xml: str) -> list[tuple[str, str]]:
-    """``(time, program path)`` per Controlled folder access block in ``wevtutil /f:xml`` text."""
+def parse_blocked(xml: str) -> list[tuple[str, str, str]]:
+    """``(time, program, refused file)`` per Controlled folder access block in ``wevtutil /f:xml`` text."""
     found = []
     for event in xml.split("</Event>"):
         when = re.search(r"<TimeCreated SystemTime='([^']+)'", event)
         name = re.search(r"<Data Name='Process Name'>([^<]+)</Data>", event)
+        target = re.search(r"<Data Name='Path'>([^<]*)</Data>", event)
         if when and name:
-            found.append((when.group(1), _dos_path(html.unescape(name.group(1)).strip())))
+            found.append((when.group(1), _dos_path(html.unescape(name.group(1)).strip()),
+                          _dos_path(html.unescape(target.group(1)).strip()) if target else ""))
     return found
 
 
-def blocked_programs(days: int = LOOK_BACK_DAYS) -> list[tuple[str, str]]:
-    """Ducky's EXEs and agents' programs Windows blocked lately, ``(time, path)``, newest first."""
-    query = f"*[System[(EventID={BLOCKED_EVENT}) and TimeCreated[timediff(@SystemTime) <= {days * 86_400_000}]]]"
+def _blocks(window_ms: int) -> list[tuple[str, str, str]]:
+    query = f"*[System[(EventID={BLOCKED_EVENT}) and TimeCreated[timediff(@SystemTime) <= {window_ms}]]]"
     try:
         out = subprocess.run(["wevtutil", "qe", LOG, f"/q:{query}", "/c:200", "/rd:true", "/f:xml"],
                              capture_output=True, text=True, encoding="utf-8", errors="replace",
                              timeout=20, creationflags=0x08000000)
     except (OSError, subprocess.SubprocessError):
         return []
+    return parse_blocked(out.stdout or "")
+
+
+def blocked_programs(days: int = LOOK_BACK_DAYS) -> list[tuple[str, str]]:
+    """Ducky's EXEs and agents' programs Windows blocked lately, ``(time, path)``, newest first."""
     watched = {exe.lower() for exe in EXES} | AGENT_PROGRAMS
-    return [(when, path) for when, path in parse_blocked(out.stdout or "")
-            if Path(path).name.lower() in watched]
+    return [(when, path) for when, path, _ in _blocks(days * 86_400_000) if Path(path).name.lower() in watched]
+
+
+def refusal_hint(path: str | Path, *, blocks: Callable[[int], list[tuple[str, str, str]]] = _blocks) -> str:
+    """What to say about a refused write into ``path`` (a file or its folder): REFUSED_HINT when
+    Windows' Controlled folder access refused a write in that folder within the last two minutes,
+    else "" (folder permissions: not ours to explain). In the app it also starts the check."""
+    if os.name != "nt":
+        return ""
+    target = Path(path)
+    folders = {os.path.normcase(str(target)), os.path.normcase(str(target.parent))}
+    if not any(os.path.normcase(str(Path(refused).parent)) in folders
+               for _, _, refused in blocks(REFUSAL_WINDOW_S * 1000) if refused):
+        return ""
+    try:
+        after_turn()
+    except Exception:  # noqa: BLE001 - the hint stands on its own
+        pass
+    return REFUSED_HINT
+
+
+def probe_folders() -> list[Path]:
+    """Where a refused write would hurt: Documents (OneDrive's too) and each known project's folder."""
+    from frontend.ui_web.known_projects import documents_dir, known_project_roots
+
+    folders = [documents_dir()]
+    try:
+        folders += [Path(root).parent for root in known_project_roots()]
+    except Exception:  # noqa: BLE001 - Documents alone still answers
+        pass
+    return list(dict.fromkeys(folders))[:PROBE_FOLDERS_MAX]
+
+
+def _terminate(pid: int) -> bool:
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
+    if not handle:
+        return False
+    try:
+        return bool(kernel32.TerminateProcess(handle, 1))
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def end_tool_servers(terminate: Callable[[int], bool] = _terminate) -> list[int]:
+    """End the shared tool servers (``--shared-daemon``, state in ``shared_mcp*.json``): they outlive
+    the app's restart and keep Windows' old answer. The next tool call starts an allowed one; IDE
+    adapters reconnect by themselves. One the app hosts itself goes with the app's restart."""
+    from backend.util import proc_table
+    from frontend.settings import default_app_data_dir
+
+    procs = proc_table.table()
+    ours = {exe.lower() for exe in EXES}
+    # The app's own agent hosts serve tools in-process (shared_mcp-h<slot>.json names them): they
+    # end with the app's restart, which carries their chats over; ending them first cut the chats.
+    app_tree = set(proc_table.tree(procs, os.getpid()))
+    ended = []
+    for state in default_app_data_dir().glob("shared_mcp*.json"):
+        if not _TOOL_SERVER_STATE.match(state.name):
+            continue
+        try:
+            pid = int(json.loads(state.read_text(encoding="utf-8")).get("pid") or 0)
+        except (OSError, ValueError, AttributeError, TypeError):
+            continue
+        proc = procs.get(pid)
+        if not pid or pid in app_tree or proc is None or proc.name.lower() not in ours:
+            continue  # gone, the app or its agent hosts, or a pid Windows gave to another program
+        if terminate(pid):
+            ended.append(pid)
+            try:
+                state.unlink()  # its own exit would have cleared it
+            except OSError:
+                pass
+    return ended
 
 
 def _is_ducky(path: str) -> bool:
@@ -232,10 +324,15 @@ def _box(text: str, yes_no: bool) -> bool:
     return int(ctypes.windll.user32.MessageBoxW(None, text, TITLE, flags)) in (1, 6)
 
 
-def _restart() -> None:
+def _restart() -> bool:
+    """End the tool servers, then restart the app (does not return when it restarts)."""
+    try:
+        end_tool_servers()
+    except Exception:  # noqa: BLE001 - the app's restart still helps
+        _log.warning("tool servers not ended", exc_info=True)
     from frontend import update_swap
 
-    update_swap.restart()
+    return bool(update_swap.restart().get("ok"))
 
 
 def check(
@@ -247,7 +344,7 @@ def check(
     ask: Callable[[str], bool] = lambda text: _box(text, True),
     tell: Callable[[str], None] = lambda text: _box(text, False),
     allow: Callable[[list[str]], bool] = lambda paths: run_as_admin(allow_command(paths)),
-    restart: Callable[[], None] = _restart,
+    restart: Callable[[], bool] = _restart,
 ) -> str:
     """One check; returns what happened (tests read it). ``probe``: also try Ducky's own write."""
     from frontend.bundle_root import is_packaged_runtime
@@ -268,9 +365,7 @@ def check(
             ducky = True
         elif probe:
             if blocked is None:
-                from frontend.ui_web.known_projects import documents_dir
-
-                blocked = lambda: write_blocked(documents_dir())  # noqa: E731
+                blocked = lambda: any(write_blocked(f) for f in probe_folders())  # noqa: E731
             ducky = blocked() and mode() == BLOCK  # refused for another reason: not ours to fix
     if ducky and allowed.get(DUCKY) == __version__:
         ducky = False  # allowed and restarted, still refused: an organization's policy wins
@@ -294,8 +389,8 @@ def check(
         return "failed"
     state["allowed"] = {**allowed, **dict.fromkeys(items, __version__)}
     _write_state(state)
-    if ducky:
-        restart()
+    if ducky and not restart():
+        tell(RESTART_TEXT)  # a start that could not be launched: the person restarts it
     return "allowed"
 
 
