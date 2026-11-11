@@ -19,6 +19,7 @@ import { getPluginThemeVars } from "./pluginTheme";
 import { alertRefusedWrite, refusedFromResult } from "./scopeAlerts";
 import { pluginUiTabId, type BridgeRequest, type BridgeResponse } from "./types";
 import { closeDock, dockSnapshot, getDock, offsetOf, openDock, sanitizeChoices, sanitizeTheme, setDock, type DockState } from "./pluginChatDockStore";
+import { enqueueComposerDraft } from "../hooks/chatComposerCache";
 
 export type BridgeContext = {
   pluginId: string;
@@ -1055,12 +1056,18 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
    * Ducky's own chat docked in this panel, focused on the plugin:
    * ``{key?, title?, brief?, conv_id?, place?: "bottom"|"right"|"float", size?, expanded?, theme?: {"--var": value},
    * offset?, choices?: [{id, title}]}`` (float: a card over the panel, `offset` px up from its bottom, that
-   * pops in and out; `choices` fill its header's chat picker)
+   * pops in and out; `choices` fill its header's chat picker; `draft` is put in the chat's typing box for the
+   * person to finish and send: never sent by itself)
    * → ``{open, expanded, place, size, conv_id, running}``. `key` picks the conversation (one per key,
    * remembered); `brief` is what the agent is told about the plugin; `conv_id` binds an existing chat.
    * Changes come back as the event ``chat.state``.
    */
-  "chat.open": async (ctx, params) => dockSnapshot(await openDock(paneKey(ctx), ctx.pluginId, params)),
+  "chat.open": async (ctx, params) => {
+    const dock = await openDock(paneKey(ctx), ctx.pluginId, params);
+    const draft = typeof params.draft === "string" ? params.draft.trim().slice(0, 8000) : "";
+    if (draft) enqueueComposerDraft(dock.convId, draft);
+    return dockSnapshot(dock);
+  },
   /** Change the open dock: ``{expanded?, place?, size?, theme?, open?, offset?, choices?}``. */
   "chat.set": (ctx, params) => {
     const patch: Partial<DockState> = {};

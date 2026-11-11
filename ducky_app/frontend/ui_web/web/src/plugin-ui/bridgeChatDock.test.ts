@@ -9,6 +9,7 @@ vi.mock("../hooks/usePanelApi", () => ({ getApi: () => host.api, isRemote: () =>
 import { handleBridgeRequest } from "./bridge";
 import { BRIDGE_CHANNEL } from "./constants";
 import { getDock } from "./pluginChatDockStore";
+import { takeComposerDraft } from "../hooks/chatComposerCache";
 
 afterEach(() => localStorage.clear());
 
@@ -25,4 +26,11 @@ it("chat.open / set / state / close drive the pane's docked Ducky chat", async (
   expect(await call("chat.state")).toMatchObject({ result: { open: true, conv_id: "conv-art" } });
   expect(await call("chat.close")).toMatchObject({ result: { open: false } });
   expect(host.api.create_conversation).toHaveBeenCalledTimes(1);
+});
+
+it("chat.open draft goes into the chat's typing box, never sent", async () => {
+  await call("chat.open", { conv_id: "conv-pin", place: "float", draft: "  A spot in Northgate: " });
+  expect(takeComposerDraft("conv-pin")).toBe("A spot in Northgate:");
+  await call("chat.open", { conv_id: "conv-pin", place: "float" });
+  expect(takeComposerDraft("conv-pin")).toBeUndefined();
 });

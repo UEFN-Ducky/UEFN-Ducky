@@ -73,7 +73,7 @@ await call("prefs.get", { id: "highScore" });
 | `live.leave` | — | `{ ok }` — this PC leaves the group, every plugin with it (a room of the plugin's own: only that) |
 | `live.state` | — | `{ supported, reason, on, room, state, peers }` |
 | `live.send` | `{ topic, data, to? }` (JSON ≤ 16 KB, ≤ 30/s) | `{ ok, sent }` — to teammates live in the room (`to`: one PC's device id); `ducky.*` topics are the host's |
-| `chat.open` | `{ key?, title?, brief?, conv_id?, place?: "bottom"\|"right"\|"float", size?, expanded?, theme?, offset?, choices? }` | `{ open, expanded, place, size, conv_id, running }` — Ducky's own chat docked in this panel (see below) |
+| `chat.open` | `{ key?, title?, brief?, conv_id?, place?: "bottom"\|"right"\|"float", size?, expanded?, theme?, offset?, choices?, draft? }` | `{ open, expanded, place, size, conv_id, running }` — Ducky's own chat docked in this panel (see below) |
 | `chat.set` | `{ expanded?, place?, size?, theme?, open? }` | same as `chat.open` — change the open dock |
 | `chat.close` / `chat.state` | — | same — close the dock / read it |
 
@@ -89,7 +89,8 @@ variables only; values with `url(`, `;` or braces are dropped). `place: "float"`
 over the panel instead (bottom right, `offset` px up from the bottom so it clears your own launcher
 button, `size` px wide) that pops in from its corner and back out on close; it is always full size.
 Pass `choices: [{ id, title }]` (chat ids, at most 40) and its header becomes a picker that swaps the
-chat in place (`conv_id` in `chat.state` says which one shows). Every change comes back as the
+chat in place (`conv_id` in `chat.state` says which one shows). `draft` (text, up to 8000 chars) goes into
+the chat's typing box for the person to finish and send; it is never sent on its own. Every change comes back as the
 event `{ type: "chat.state", open, expanded, place, size, conv_id, running }`.
 
 ### Plugin data (host data service)
