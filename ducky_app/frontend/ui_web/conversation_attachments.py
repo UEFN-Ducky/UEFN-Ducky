@@ -277,6 +277,9 @@ def _open_if_sealed(folder: Path, path: Path) -> bool:
 
     try:
         sealed_files.open_chat_folder(folder, account_rows.current())
+        # A chat made signed out and moved into this account: its files were sealed for
+        # this PC while the account was signed in (the caller checked whose chat it is).
+        sealed_files.open_local_folder(folder)
     except Exception:  # noqa: BLE001 — locked for now: shown once the account's key is here
         pass
     return not sealed_files.is_sealed_file(path)

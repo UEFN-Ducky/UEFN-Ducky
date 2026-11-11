@@ -1731,6 +1731,16 @@ export interface DuckySyncPeer {
   chats: Array<{ conv_id: string; title: string; updated: number; synced: number }>;
 }
 
+/** A chat made on this PC before signing in (or a group, with every chat in it). */
+export interface LocalChatRow {
+  id: string;
+  title: string;
+  updated: number;
+  /** How many chats move or go with it (its sub-agent chats, or the whole group). */
+  chats: number;
+  group: boolean;
+}
+
 export interface DuckyOSAccountStatus {
   ok?: boolean;
   logged_in?: boolean;
@@ -3620,6 +3630,12 @@ export interface PanelApi {
   ducky_link_call?(to: string, method: string, args?: Record<string, unknown>): Promise<{ ok?: boolean; result?: unknown; error?: string }>;
   /** Open another of your UEFN Duckies in its own window here: its whole app, chats included (at `chat_id`). */
   ducky_link_open?(key_id: string, name?: string, chat_id?: string): Promise<{ ok?: boolean; error?: string }>;
+  /** Chats made on this PC before signing in, for the signed-in account (none signed out). */
+  list_local_chats?(): Promise<{ ok?: boolean; chats?: LocalChatRow[] }>;
+  /** Move them into the signed-in account, each with what belongs to it; `null` = every one. */
+  adopt_local_chats?(conv_ids?: string[] | null): Promise<{ ok?: boolean; error?: string; moved?: string[]; failed?: string[] }>;
+  /** Delete them for good, each with what belongs to it. */
+  delete_local_chats?(conv_ids: string[]): Promise<{ ok?: boolean; error?: string; deleted?: string[] }>;
   /** Your other UEFN Duckies' chats as copied here by sync (no rows). */
   ducky_sync_list?(): Promise<{ ok?: boolean; error?: string; duckies?: DuckySyncPeer[]; errors?: Record<string, string> }>;
   /** Answer the right-click menu over typed text: run WebView2's command (a spelling fix...) or -1 for none. */

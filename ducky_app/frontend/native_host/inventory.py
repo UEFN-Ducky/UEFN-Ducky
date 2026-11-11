@@ -147,10 +147,10 @@ _JS_API: dict[str, str] = {
         test_mcp_server test_uefn_plugin_secret uninstall_uefn_plugin
     """,
     "PanelApiChatsMixin": """
-        apply_ducky_config apply_sidebar_layout archive_agent_profile cancel_agent chat_tool_view
+        adopt_local_chats apply_ducky_config apply_sidebar_layout archive_agent_profile cancel_agent chat_tool_view
         clear_agent_permission_rules continue_interrupted create_conversation create_folder
         delete_agent_profile delete_conversation delete_custom_ducky
-        delete_custom_verse_template delete_folder duplicate_agent_profile
+        delete_custom_verse_template delete_folder delete_local_chats duplicate_agent_profile
         finish_first_run_setup get_agent_permissions get_agent_profile_editor_catalog
         get_context_usage get_conversation_skills get_custom_verse_template get_session_files
         group_add_member group_check_lane group_create group_find_or_create group_get_lanes
@@ -158,7 +158,7 @@ _JS_API: dict[str, str] = {
         group_set_leader group_set_member_lane group_set_member_model group_stop
         held_for_model list_agent_profiles list_all_conversations list_conversations
         list_conversations_for_file list_custom_verse_templates list_ducky_catalog
-        list_folders list_running_agents list_saved_agent_permissions load_messages
+        list_folders list_local_chats list_running_agents list_saved_agent_permissions load_messages
         load_tool_file_edits load_tool_result move_chats_to_project move_conversation open_custom_duckies_folder
         post_team_message remove_agent_permission_rule rename_conversation rename_folder
         resend_last_user_message reset_context restore_context revoke_saved_agent_permission

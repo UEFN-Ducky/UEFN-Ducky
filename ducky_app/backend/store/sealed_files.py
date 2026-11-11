@@ -33,6 +33,7 @@ _PUB_META = "file_key_pub:"
 _PRIV_META = "file_key_priv:"
 _ARRANGED_META = "chat_files_for"
 _INFO = b"ducky-file-key/1"
+_LOCAL = "_local"  # backend.uefn_plugins.scopes.LOCAL: this PC signed out
 
 _log = logging.getLogger("uefn_ducky.store.sealed_files")
 _lock = threading.Lock()
@@ -507,6 +508,36 @@ def open_chat_folder(folder: Path, account: str) -> int:
                 n += 1
         except (OSError, ValueError, WrongAccount):
             _log.warning("could not open a sealed attachment in %s", folder.parent.name, exc_info=True)
+    return n
+
+
+def open_local_folder(folder: Path) -> int:
+    """Open every attachment in one chat's ``folder`` that is sealed for this PC's
+    signed-out owner (``_local``), whoever is signed in: that key is this Windows user's,
+    no account's. For a chat made signed out that now belongs to the signed-in account
+    (the caller checked that it does)."""
+    if not folder.is_dir():
+        return 0
+    n = 0
+    for path in _files(folder):
+        try:
+            if sealed_for(path) != _LOCAL:
+                continue
+            times = path.stat()
+            tmp = _tmp_for(path)
+            try:
+                with open(path, "rb") as src, open(tmp, "wb") as out:
+                    header, raw = _read_header(src)
+                    for part in _decrypt_stream(src, _unwrap(header, _LOCAL), raw):
+                        out.write(part)
+                    out.flush()
+                    os.fsync(out.fileno())
+                _swap_in(tmp, path, times)
+            finally:
+                tmp.unlink(missing_ok=True)
+            n += 1
+        except Exception:  # noqa: BLE001 — that file stays sealed; the next read tries again
+            _log.warning("could not open an attachment made signed out in %s", folder.parent.name, exc_info=True)
     return n
 
 

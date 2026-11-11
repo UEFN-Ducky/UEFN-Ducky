@@ -45,6 +45,7 @@ import { getApi, isRemote } from "../hooks/usePanelApi";
 import { onApiReady } from "../hooks/onApiReady";
 import { emitDuckyProfileChanged, onDuckyProfileChanged } from "../navigation/duckyProfileChanged";
 import { SidebarStackedPanels } from "./sidebar/SidebarStackedPanels";
+import { LocalChats } from "./sidebar/LocalChats";
 import { OtherDuckiesChats } from "./sidebar/OtherDuckiesChats";
 import { canToggleStackedPanel, contentCollapsedWithoutProject, hasOpenProject } from "./sidebar/contentWithoutProject";
 import { ProjectFlavorIcon, useProjectFlavor } from "./ProjectFlavorIcon";
@@ -1386,7 +1387,13 @@ export const ChatSidebar = forwardRef<ChatSidebarHandle, ChatSidebarProps>(funct
       </div>
       {/* Chats of your other UEFN Duckies, copied by sync: this PC's windows only. Pinned
           under the list with its own resize handle, like UEFN Core under Content. */}
-      {!isRemote() && !(duckySearchMode === "text" && duckyTreeSearchOpen) ? <OtherDuckiesChats /> : null}
+      {!isRemote() && !(duckySearchMode === "text" && duckyTreeSearchOpen) ? (
+        <>
+          {/* Chats made on this PC before signing in: only there while some are left. */}
+          <LocalChats onOpenChat={handleChatOpenPermanent} />
+          <OtherDuckiesChats />
+        </>
+      ) : null}
     </>
   );
 

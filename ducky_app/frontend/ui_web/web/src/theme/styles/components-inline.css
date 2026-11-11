@@ -6093,6 +6093,33 @@ html.window-fullscreen:has(.remote-ducky-reveal:hover, .remote-ducky-bar:hover, 
   font-size: 11px;
 }
 
+/* ── LocalChats: chats made on this PC before signing in (same look as the section below) ── */
+.local-chats__body {
+  max-height: 180px;
+}
+
+.local-chats__hint {
+  margin: 0;
+  padding: 2px 10px 4px 30px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.local-chats__chat:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.local-chats__chat.is-busy {
+  opacity: 1;
+}
+
+.other-duckies__sync:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .other-duckies-copy {
   display: flex;
   flex-direction: column;

@@ -6,7 +6,7 @@ as ``self``; binding it here keeps its name and signature on the JS API.
 
 from __future__ import annotations
 
-from frontend.ui_web.panel_chats import conversations, folders, groups, messages, permissions, profiles, send, voice
+from frontend.ui_web.panel_chats import conversations, folders, groups, local, messages, permissions, profiles, send, voice
 from frontend.ui_web.panel_chats.send import _sync_composer_selection  # noqa: F401
 from frontend.ui_web.panel_chats.messages import TOOL_RESULT_CAP, _cap_tool_results  # noqa: F401
 from frontend.ui_web.panel_chats.groups import _copy_name, _leader_agent_ok  # noqa: F401
@@ -35,6 +35,11 @@ class PanelApiChatsMixin:
     delete_conversation = folders.delete_conversation
     _layout_project_root = staticmethod(folders._layout_project_root)
     apply_sidebar_layout = folders.apply_sidebar_layout
+
+    # -- chats made before signing in (panel_chats/local.py) --------------------
+    list_local_chats = local.list_local_chats
+    adopt_local_chats = local.adopt_local_chats
+    delete_local_chats = local.delete_local_chats
 
     # -- one chat's setup (panel_chats/conversations.py) ------------------------
     chat_tool_view = conversations.chat_tool_view
