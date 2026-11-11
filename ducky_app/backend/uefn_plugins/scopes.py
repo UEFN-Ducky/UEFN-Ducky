@@ -1236,14 +1236,15 @@ class PluginData:
     def _scope_for(self, key: str) -> dict[str, Any]:
         return _personal_for(self.plugin_id) if self._local(key) else self._scope()
 
-    def _rows(self, kind: str, prefix: str) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    def _rows(self, kind: str, prefix: str, values: bool = True) -> list[tuple[dict[str, Any], dict[str, Any]]]:
         """``(scope, row)`` of every live row under ``prefix``, by key: this PC's own items
         (``data_local``) from Local, the rest from the copy the plugin shows (a team copy's
         own items under a ``data_local`` prefix are never read)."""
         from backend.store.repos import plugin_data as repo
 
         s = self._scope()
-        out = [] if _closed(s) else [(s, r) for r in repo.rows(s["account"], s["id"], self.plugin_id, kind, prefix)]
+        out = [] if _closed(s) else [(s, r) for r in repo.rows(s["account"], s["id"], self.plugin_id, kind, prefix,
+                                                                values=values)]
         local = () if self._personal else local_prefixes(self.plugin_id)
         mine = _personal_for(self.plugin_id) if local else s
         if not local or (mine["account"], mine["id"]) == (s["account"], s["id"]):
@@ -1253,7 +1254,8 @@ class PluginData:
         for p in local:
             narrower = p if p.startswith(prefix) else prefix if prefix.startswith(p) else None
             if narrower is not None:
-                own.update((r["key"], r) for r in repo.rows(mine["account"], mine["id"], self.plugin_id, kind, narrower))
+                own.update((r["key"], r) for r in repo.rows(mine["account"], mine["id"], self.plugin_id, kind, narrower,
+                                                            values=values))
         return sorted([*out, *((mine, r) for r in own.values())], key=lambda pair: pair[1]["key"])
 
     def on_change(self, callback: Any) -> None:
@@ -1323,7 +1325,7 @@ class PluginData:
         return {"ok": True, "key": key, "changed": True}
 
     def keys(self, prefix: str = "") -> list[str]:
-        return [r["key"] for _, r in self._rows("doc", prefix) if not r["sensitive"]]
+        return [r["key"] for _, r in self._rows("doc", prefix, values=False) if not r["sensitive"]]
 
     def items(self, prefix: str = "") -> dict[str, Any]:
         """All docs under ``prefix`` in one read: ``{key: value}``."""
@@ -1402,7 +1404,7 @@ class PluginData:
             return None
 
     def files(self, prefix: str = "") -> list[dict[str, Any]]:
-        return [{"path": r["key"], "size": r["size"], "sha256": r["sha256"]} for _, r in self._rows("asset", prefix)]
+        return [{"path": r["key"], "size": r["size"], "sha256": r["sha256"]} for _, r in self._rows("asset", prefix, values=False)]
 
     def delete_file(self, path: str) -> bool:
         from backend.store.repos import plugin_data as repo

@@ -199,11 +199,14 @@ def has_rows(account: str, plugin: str, scope: str | None = None) -> bool:
     return db.connect().execute(sql + " LIMIT 1", args).fetchone() is not None
 
 
-def rows(account: str, scope: str, plugin: str, kind: str, prefix: str = "") -> list[dict[str, Any]]:
+def rows(account: str, scope: str, plugin: str, kind: str, prefix: str = "", *,
+         values: bool = True) -> list[dict[str, Any]]:
     """Live rows whose key starts with exactly ``prefix`` (``_`` is no wildcard). Keys are
-    ASCII, so ``prefix + chr(127)`` bounds the range."""
+    ASCII, so ``prefix + chr(127)`` bounds the range. ``values=False`` leaves ``value``
+    None: listing keys never loads every sealed doc."""
+    cols = _COLS if values else _COLS.replace("value,", "NULL AS value,", 1)
     out = db.connect().execute(
-        f"SELECT {_COLS} FROM plugin_data WHERE account_id=? AND scope_id=? AND plugin_id=? AND kind=? "
+        f"SELECT {cols} FROM plugin_data WHERE account_id=? AND scope_id=? AND plugin_id=? AND kind=? "
         "AND deleted=0 AND key>=? AND key<? ORDER BY key",
         (account, scope, plugin, kind, prefix, prefix + "\x7f"),
     ).fetchall()
