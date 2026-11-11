@@ -150,15 +150,15 @@ def _packaged(monkeypatch: pytest.MonkeyPatch, stable: Path) -> None:
 
 
 @pytest.mark.parametrize("mode", ["on", "auto", "off"])
-def test_run_key_starts_the_launcher_under_the_same_name(
+def test_run_key_starts_the_stub_under_the_same_name(
     monkeypatch: pytest.MonkeyPatch, fake_winreg: _FakeWinreg, install_dir: Path, mode: str
 ) -> None:
-    """Every setting value: no turning the launcher off."""
+    """Every setting value: sign-in starts UEFN-Ducky.exe, which repairs a broken launcher."""
     _packaged(monkeypatch, install_dir / "UEFN-Ducky.exe")
     _mode(monkeypatch, mode)
     assert autostart.apply(True) is True
     assert fake_winreg.values == {
-        (autostart.RUN_KEY, "UEFN Ducky"): f'"{(install_dir / LAUNCHER).resolve()}" --background'
+        (autostart.RUN_KEY, "UEFN Ducky"): f'"{(install_dir / "UEFN-Ducky.exe").resolve()}" --background'
     }
 
 

@@ -1,7 +1,10 @@
 """Start with Windows: Ducky opens hidden in the tray at sign-in, so clicking it later is instant.
 
-The entry is a per-user ``Run`` value pointing at the installed EXE with ``--background``
-(``Ducky-Launcher.exe`` beside it whenever it is there: :func:`start_exe`).
+The entry is a per-user ``Run`` value pointing at the installed ``UEFN-Ducky.exe`` with
+``--background``, never ``Ducky-Launcher.exe``: the root launcher broke after restarts 19 times
+Nov 7-10 2026 ("This app can't run on your PC" at sign-in), and only a Python start runs
+``install_health.check_at_start``, which puts a broken launcher back and logs what changed it.
+A hidden start costs nothing visible, so the stub's 1-2 s don't matter there.
 Only the installed app manages it: a test copy (``DUCKY_SANDBOX``), a source checkout or
 any other EXE never writes or removes it, so it can never point at a throwaway copy.
 """
@@ -92,7 +95,7 @@ def apply(enabled: bool) -> bool:
     reg = _winreg()
     try:
         if enabled:
-            command = command_for(start_exe(exe))
+            command = command_for(exe)
             if registered_command() == command:
                 return True
             with reg.CreateKeyEx(reg.HKEY_CURRENT_USER, RUN_KEY, 0, reg.KEY_SET_VALUE) as key:

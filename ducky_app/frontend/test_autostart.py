@@ -122,34 +122,30 @@ def _launcher_mode(monkeypatch, mode):
 
 
 @pytest.mark.parametrize("mode", ["on", "auto", "off", "garbage"])
-def test_run_key_starts_the_launcher_whenever_present(monkeypatch, reg, mode):
-    """No setting turns the launcher off: a saved off still gets the fast window."""
+def test_run_key_starts_the_stub_even_with_a_launcher(monkeypatch, reg, mode):
+    """Sign-in starts UEFN-Ducky.exe: it repairs a broken root launcher before anyone clicks
+    it (Nov 7-10 2026: 19 "This app can't run on your PC" starts). Open with keeps the launcher."""
     launcher = reg.exe.parent / "Ducky-Launcher.exe"
     launcher.write_bytes(b"MZ")
     _launcher_mode(monkeypatch, mode)
     assert autostart.start_exe(reg.exe) == launcher
     assert autostart.apply(True) is True
-    assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
+    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
 
 
-def test_run_key_stays_on_the_stub_only_without_a_launcher(monkeypatch, reg):
+def test_run_key_stays_on_the_stub_without_a_launcher(monkeypatch, reg):
     _launcher_mode(monkeypatch, "on")
     assert autostart.start_exe(reg.exe) == reg.exe
     assert autostart.apply(True) is True
     assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
 
 
-def test_a_zero_filled_launcher_sends_sign_in_to_the_stub_then_heals_back(monkeypatch, reg):
-    """Nov 10 2026: a broken root launcher made the sign-in start say "This app can't run on
-    your PC". The Run key names the stub while it is broken, the launcher once it is whole."""
+def test_a_zero_filled_launcher_is_never_what_open_with_starts(monkeypatch, reg):
     launcher = reg.exe.parent / "Ducky-Launcher.exe"
     launcher.write_bytes(b"\0" * 64)
-    _launcher_mode(monkeypatch, "on")
-    assert autostart.apply(True) is True
-    assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
+    assert autostart.start_exe(reg.exe) == reg.exe
     launcher.write_bytes(b"MZ")
-    assert autostart.apply(True) is True
-    assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
+    assert autostart.start_exe(reg.exe) == launcher
 
 
 def test_an_unreadable_setting_still_starts_the_launcher(monkeypatch, reg):
@@ -165,14 +161,10 @@ def test_an_unreadable_setting_still_starts_the_launcher(monkeypatch, reg):
     assert autostart.start_exe(reg.exe) == launcher
 
 
-def test_self_heal_moves_an_old_run_key_to_the_launcher(monkeypatch, reg):
+def test_self_heal_moves_a_launcher_run_key_back_to_the_stub(monkeypatch, reg):
     launcher = reg.exe.parent / "Ducky-Launcher.exe"
-    reg.values[autostart.VALUE_NAME] = f'"{reg.exe}" --background'  # an old install
+    reg.values[autostart.VALUE_NAME] = f'"{launcher}" --background'  # 1.2.477-1.2.492
     launcher.write_bytes(b"MZ")
-    _launcher_mode(monkeypatch, "off")  # even a saved off
-    assert autostart.apply(True) is True
-    assert reg.values[autostart.VALUE_NAME] == f'"{launcher}" --background'
-    launcher.unlink()  # the launcher is gone
     assert autostart.apply(True) is True
     assert reg.values[autostart.VALUE_NAME] == f'"{reg.exe}" --background'
     assert list(reg.values) == [autostart.VALUE_NAME]

@@ -99,9 +99,8 @@ _RUN_CASES = [(False, "auto"), (False, "on"), (True, "off"), (True, "auto"), (Tr
 
 
 def _run_target(root: Path, with_launcher: bool, mode: str) -> Path:
-    # Always the launcher when the install has it, whatever ``mode`` is saved.
-    name = "Ducky-Launcher.exe" if with_launcher else "UEFN-Ducky.exe"
-    return (root / name).resolve()
+    # Always the stub: sign-in repairs a broken root launcher before anyone clicks it.
+    return (root / "UEFN-Ducky.exe").resolve()
 
 
 @pytest.mark.parametrize("with_launcher, mode", _RUN_CASES)
