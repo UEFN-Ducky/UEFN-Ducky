@@ -141,15 +141,24 @@ def _cache_hit_rate_cumulative(total_input: int, total_cache_read: int) -> float
     return min(100.0, round((total_cache_read / total_input) * 100.0, 1))
 
 
-def token_usage_report(conv: Any) -> dict[str, Any]:
-    """Return exact sent/received totals and per-call history for the UI."""
+def token_usage_report(conv: Any, message_usage: tuple[int, int] | None = None) -> dict[str, Any]:
+    """Return exact sent/received totals and per-call history for the UI.
+
+    ``message_usage``: :func:`usage_from_messages` of this chat when the caller already has
+    it (the context meter keeps it per message revision). The messages themselves are read
+    only when the chat has no usage log, which is all they were ever used for."""
     logged = normalize_token_usage(getattr(conv, "token_usage", None))
-    msg_in, msg_out = usage_from_messages(list(getattr(conv, "messages", None) or []))
     total_input = int(logged["total_input"] or 0)
     total_output = int(logged["total_output"] or 0)
-    if total_input == 0 and total_output == 0 and (msg_in or msg_out):
-        total_input = msg_in
-        total_output = msg_out
+    if total_input == 0 and total_output == 0:
+        msg_in, msg_out = (
+            message_usage
+            if message_usage is not None
+            else usage_from_messages(list(getattr(conv, "messages", None) or []))
+        )
+        if msg_in or msg_out:
+            total_input = msg_in
+            total_output = msg_out
     calls = list(logged.get("calls") or [])
     total_cache_read = int(logged.get("total_cache_read") or 0)
     total_cache_write = int(logged.get("total_cache_write") or 0)

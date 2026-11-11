@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import threading
+import time
+from collections import OrderedDict
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
 
 from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
+from frontend.chat_store import Conversation
 from frontend.ui_web.chats.conversations import load_conversation
 from frontend.ui_web.context_omit import (
     context_omit_set,
@@ -460,6 +465,192 @@ def _apply_stale_clear_for_meter(
     return out
 
 
+# ---- what the meter needs from a chat's messages, kept per message revision ---------------
+#
+# The meter runs after every turn and every pause in typing, and each time it opened the
+# whole chat (a DPAPI call per row and part) and counted every message again: 11% of the
+# app's CPU with one 130 MB chat open (Nov 11 2026). Those numbers change only when the
+# chat's rows change, so they are kept under the chat's message revision: a read that finds
+# them opens no message at all.
+_FACTS_MAX_CHATS = 8
+# Nothing kept is older than this, whatever else it depends on (app state no key names).
+_FACTS_TTL_S = 600.0
+_facts_lock = threading.Lock()
+# (app data folder, chat id) -> (message revision, kept at, {what: value})
+_facts: OrderedDict[tuple[str, str], tuple[int, float, dict[Any, Any]]] = OrderedDict()
+
+
+class _MeterConversation(Conversation):
+    """A chat loaded without its messages. They are read the first time something asks,
+    so a helper that still reads ``conv.messages`` gets the real rows, never an empty list."""
+
+    _read_messages: Callable[[], list[dict[str, Any]]] | None = None
+
+
+def _meter_messages(self: _MeterConversation) -> list[dict[str, Any]]:
+    read = self._read_messages
+    if read is not None:
+        self._read_messages = None
+        self._messages = list(read())
+    return self._messages
+
+
+_MeterConversation.messages = property(_meter_messages, Conversation.messages.fset)  # type: ignore[assignment, attr-defined]
+
+
+class _MeterChat:
+    """One meter read of a chat: ``conv`` for its settings, and :meth:`fact` for what comes
+    from its messages (read only when a number isn't kept for this revision)."""
+
+    def __init__(self, conv_id: str) -> None:
+        self.conv_id = conv_id
+        self.conv: Any = None
+        self._key: tuple[str, str] | None = None  # None: nothing is kept for this read
+        self._rev = 0
+        self._kept: dict[Any, Any] = {}
+        self._messages: list[dict[str, Any]] | None = None
+
+    def messages(self) -> list[dict[str, Any]]:
+        if self._messages is None:
+            full = load_conversation(self.conv_id)
+            self._messages = list(getattr(full, "messages", None) or [])
+            if self._key is not None and getattr(full, "_msg_rev", None) != self._rev:
+                # Rows changed since the revision was read: what is counted now isn't that
+                # revision's, so this read keeps nothing.
+                self._key = None
+                self._kept = {}
+        return self._messages
+
+    def fact(
+        self,
+        what: Any,
+        compute: Callable[[list[dict[str, Any]]], Any],
+        copy: Callable[[Any], Any] | None = None,
+    ) -> Any:
+        """``compute(messages)``, from what is kept for this revision when it is there.
+        ``copy``: a fresh copy for the caller (a kept list is never handed out to be changed)."""
+        if what in self._kept:
+            value = self._kept[what]
+            return copy(value) if copy is not None else value
+        value = compute(self.messages())
+        if self._key is not None:
+            with _facts_lock:
+                entry = _facts.get(self._key)
+                if entry is None or entry[0] != self._rev:
+                    entry = (self._rev, time.monotonic(), {})
+                    _facts[self._key] = entry
+                entry[2][what] = value
+                _facts.move_to_end(self._key)
+                while len(_facts) > _FACTS_MAX_CHATS:
+                    _facts.popitem(last=False)
+        return copy(value) if copy is not None else value
+
+
+def _open_meter_chat(conv_id: str) -> _MeterChat:
+    """The chat for one meter read. On the row store, with no save of it still on its way,
+    that is the chat without its messages plus what is kept for its revision; otherwise
+    the whole chat, as before."""
+    chat = _MeterChat(conv_id)
+    try:
+        from frontend.app_paths import resolve_app_data_dir
+        from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves, store as chat_store
+
+        if chat_store._use_db():
+            writer = chat_saves._WRITER
+            waiting = writer is not None and writer.checkpoint_waits(conv_id)
+            if not waiting and chat_saves._queued(conv_id) is None:
+                rev = chat_store._repo().conv_msg_rev(conv_id)
+                meta = chat_convs.load_conversation_meta(conv_id) if rev is not None else None
+                if meta is not None:
+                    conv = _MeterConversation(
+                        **{f.name: getattr(meta, f.name) for f in dataclasses.fields(Conversation)}
+                    )
+                    conv._read_messages = chat.messages
+                    chat.conv, chat._rev = conv, int(rev)
+                    chat._key = (str(resolve_app_data_dir()), conv_id)
+                    with _facts_lock:
+                        entry = _facts.get(chat._key)
+                        if entry is not None and (
+                            entry[0] != chat._rev or time.monotonic() - entry[1] > _FACTS_TTL_S
+                        ):
+                            del _facts[chat._key]
+                            entry = None
+                        if entry is not None:
+                            chat._kept = entry[2]
+                            _facts.move_to_end(chat._key)
+    except Exception:  # noqa: BLE001 - the meter still answers, from the whole chat
+        chat = _MeterChat(conv_id)
+    if chat.conv is None:
+        chat.conv = load_conversation(conv_id)
+        chat._messages = list(getattr(chat.conv, "messages", None) or [])
+    return chat
+
+
+def forget_meter_facts() -> None:
+    """Drop everything kept (a sign-out, tests)."""
+    with _facts_lock:
+        _facts.clear()
+
+
+def _settings_mark(settings: Any) -> int:
+    """Changes whenever a setting does: part of what a kept conversation count is kept under
+    (compaction, stale-result clearing and token counting all read settings)."""
+    try:
+        return hash(json.dumps(dataclasses.asdict(settings), sort_keys=True, default=str))
+    except Exception:  # noqa: BLE001 - not a dataclass (a test stand-in)
+        return hash(repr(settings))
+
+
+def _copy_conversation_report(
+    value: tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]],
+) -> tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]]:
+    summarized, conversation, summarized_items, conversation_items = value
+    return summarized, conversation, [dict(i) for i in summarized_items], [dict(i) for i in conversation_items]
+
+
+def _kept_conversation_report(
+    chat: _MeterChat,
+    settings: Any,
+    *,
+    model: str,
+    provider: str,
+    tool_result_format: str,
+    keep_last: int,
+    apply_stale_clear: bool,
+) -> tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]]:
+    """:func:`_conversation_report` for ``chat``, counted once per message revision."""
+    conv = chat.conv
+    summary = str(getattr(conv, "context_summary", "") or "")
+    through = int(getattr(conv, "context_summary_through", 0) or 0)
+    summary_tokens = int(getattr(conv, "context_summary_tokens", 0) or 0)
+    what = (
+        "conversation", model, provider, tool_result_format, keep_last, hash(summary), through,
+        summary_tokens, apply_stale_clear, _settings_mark(settings),
+    )
+    return chat.fact(
+        what,
+        lambda messages: _conversation_report(
+            messages,
+            model=model,
+            provider=provider,
+            tool_result_format=tool_result_format,
+            keep_last=keep_last,
+            context_summary=summary,
+            context_summary_through=through,
+            context_summary_tokens=summary_tokens,
+            conv_id=str(getattr(conv, "id", "") or ""),
+            apply_stale_clear=apply_stale_clear,
+        ),
+        _copy_conversation_report,
+    )
+
+
+def _message_usage(chat: _MeterChat) -> tuple[int, int]:
+    from frontend.ui_web.token_usage import usage_from_messages
+
+    return chat.fact("usage", usage_from_messages)
+
+
 def _conversation_report(
     messages: list[dict[str, Any]],
     *,
@@ -693,6 +884,7 @@ def _external_agent_breakdown(
     model: str,
     context_tokens: int,
     include_content: bool,
+    chat: _MeterChat | None = None,
 ) -> list[dict[str, Any]]:
     """Best-effort breakdown of what Ducky controls plus an internals remainder.
 
@@ -700,25 +892,25 @@ def _external_agent_breakdown(
     Context Usage panel is not a single opaque "Conversation" blob.
     """
     provider = _external_agent_token_provider(agent_id)
-    messages = list(getattr(conv, "messages", None) or [])
     fmt = str(getattr(settings, "tool_result_format", None) or "toon")
 
+    # The tool floor reads no message (select_tools ignores history).
     mcp_tokens, mcp_items = _tool_definition_report_sync(
-        messages, mode="agent", model=model, provider=provider
+        [], mode="agent", model=model, provider=provider
     )
     skill_tokens, skill_items, _ = _deployed_skill_token_report(
         agent_id, model=model, provider=provider, include_content=include_content
     )
-    summarized_tokens, conversation_tokens, summarized_items, conversation_items = _conversation_report(
-        messages,
+    if chat is None:
+        chat = _MeterChat(str(getattr(conv, "id", "") or ""))
+        chat.conv, chat._messages = conv, list(getattr(conv, "messages", None) or [])
+    summarized_tokens, conversation_tokens, summarized_items, conversation_items = _kept_conversation_report(
+        chat,
+        settings,
         model=model,
         provider=provider,
         tool_result_format=fmt,
         keep_last=_keep_last_messages(settings),
-        context_summary=str(getattr(conv, "context_summary", "") or ""),
-        context_summary_through=int(getattr(conv, "context_summary_through", 0) or 0),
-        context_summary_tokens=int(getattr(conv, "context_summary_tokens", 0) or 0),
-        conv_id=str(getattr(conv, "id", "") or ""),
         apply_stale_clear=False,
     )
 
@@ -794,6 +986,7 @@ def _external_agent_report(
     model: str,
     *,
     include_content: bool,
+    chat: _MeterChat | None = None,
 ) -> dict[str, Any]:
     """Real backend info for a chat running on Claude Code / Codex / Cursor.
 
@@ -879,7 +1072,7 @@ def _external_agent_report(
         except Exception:
             agent_info["skills"] = []
 
-    usage_report = token_usage_report(conv)
+    usage_report = token_usage_report(conv, _message_usage(chat) if chat is not None else None)
     raw_calls = list(usage_report.get("calls") or [])
     last_call = raw_calls[-1] if raw_calls else {}
     context_tokens = resolve_context_window_tokens(
@@ -904,6 +1097,7 @@ def _external_agent_report(
             model=real_model,
             context_tokens=context_tokens,
             include_content=include_content,
+            chat=chat,
         )
     except Exception:
         breakdown = [
@@ -957,7 +1151,9 @@ def compute_context_report(
     would not reflect what that agent actually sent.
     """
     settings = PanelSettings.load()
-    conv = load_conversation(conv_id)
+    # The chat without its messages when its counts are kept (see _MeterChat).
+    chat = _open_meter_chat(conv_id)
+    conv = chat.conv
 
     # This chat's gateway + model — never Settings → agent_provider (that was
     # showing OpenAI's 400k while the composer ran ollama:qwen…).
@@ -998,7 +1194,7 @@ def compute_context_report(
     coding_agent = normalize_coding_agent(getattr(conv, "coding_agent", None) or "ducky")
     if coding_agent != "ducky":
         return _external_agent_report(
-            conv, settings, coding_agent, model, include_content=include_content
+            conv, settings, coding_agent, model, include_content=include_content, chat=chat
         )
 
     apply_workspace_env(settings.uefn_project_root)
@@ -1030,7 +1226,10 @@ def compute_context_report(
         from backend.agent.prompt_cache import snapshot_has_block
         from backend.agent.toolsets.intents import skill_intent_matched
 
-        if not skill_intent_matched(draft, conv.messages) and not snapshot_has_block(conv, "skill"):
+        asked = skill_intent_matched(draft) or chat.fact(
+            "skill_intent", lambda messages: skill_intent_matched("", messages)
+        )
+        if not asked and not snapshot_has_block(conv, "skill"):
             skill_active = ""
             skill_gated = bool(skill_enabled.strip())
 
@@ -1151,8 +1350,9 @@ def compute_context_report(
     tool_items: list[dict[str, Any]] = []
     if not mcp_tools_omitted_flag:
         try:
+            # The tool floor reads no message (select_tools ignores history).
             tool_tokens, tool_items = _tool_definition_report_sync(
-                conv.messages,
+                [],
                 mode=mode,
                 model=model,
                 provider=provider,
@@ -1183,16 +1383,14 @@ def compute_context_report(
         )
     if mcp_tools_items:
         items_by_id["mcp_tools"] = mcp_tools_items
-    summarized_tokens, conversation_tokens, summarized_items, conversation_items = _conversation_report(
-        conv.messages,
+    summarized_tokens, conversation_tokens, summarized_items, conversation_items = _kept_conversation_report(
+        chat,
+        settings,
         model=model,
         provider=provider,
         tool_result_format=settings.tool_result_format or "toon",
         keep_last=_keep_last_messages(settings),
-        context_summary=str(getattr(conv, "context_summary", "") or ""),
-        context_summary_through=int(getattr(conv, "context_summary_through", 0) or 0),
-        context_summary_tokens=int(getattr(conv, "context_summary_tokens", 0) or 0),
-        conv_id=str(getattr(conv, "id", "") or ""),
+        apply_stale_clear=True,
     )
     items_by_id["summarized"] = summarized_items
     items_by_id["conversation"] = conversation_items
@@ -1202,7 +1400,8 @@ def compute_context_report(
     from frontend.ui_web.token_usage import token_usage_report
     from backend.agent.model_pricing import call_cost_usd, estimate_cost_usd, usage_cost_report
 
-    usage_report = token_usage_report(conv)
+    message_usage = _message_usage(chat)
+    usage_report = token_usage_report(conv, message_usage)
     input_reported = int(usage_report.get("total_input") or 0)
     output_reported = int(usage_report.get("total_output") or 0)
 
@@ -1228,10 +1427,7 @@ def compute_context_report(
         for call in raw_calls
     ]
     if input_reported == 0 and output_reported == 0:
-        for message in conv.messages:
-            usage = message.get("usage") if isinstance(message.get("usage"), dict) else {}
-            input_reported += int(usage.get("input_tokens") or 0)
-            output_reported += int(usage.get("output_tokens") or 0)
+        input_reported, output_reported = message_usage
 
     # Floor schemas + server instructions + compact index (full schemas deferred).
     mcp_tools_tokens = tool_tokens + mcp_tokens + tool_index_tokens
