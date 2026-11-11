@@ -32,6 +32,20 @@ def _read_manifest(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _wait_tools_import() -> None:
+    """Import ``backend.server`` and ``backend.tools`` whole before a plugin imports any of them.
+
+    A plugin importing ``backend.tools.panel.*`` while app threads imported ``backend.server``
+    and ``backend.tools`` took the module locks in another order (deadlock), and Python broke
+    it by handing one side a half-built module (Nov 10 2026, Account: "cannot import name
+    'mcp' from 'backend.server'", cached for 60 s). Imported here first, holding no other
+    import lock, each one waits for the thread already importing it. Free once loaded.
+    ponytail: covers plugin loads only; other threads importing ``backend.tools.panel.*``
+    first would need the same call."""
+    import backend.server  # noqa: F401
+    import backend.tools  # noqa: F401
+
+
 _PLUGIN_LOAD_LOCKS: dict[str, threading.RLock] = {}
 _PLUGIN_LOAD_LOCKS_GUARD = threading.Lock()
 
@@ -680,6 +694,7 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         # registers anything (a broken junction is repaired).
         folder_epoch = _bind_folders(pid)
         marker = _load_marker_begin(pid, version)
+        _wait_tools_import()
         try:
             if _manifest_is_compiled(manifest):
                 mod = _import_compiled_backend(pid, root, manifest)
