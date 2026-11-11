@@ -161,7 +161,8 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
     void run(() => api()?.set_gateway_account?.(provider, a.id), `${a.label} is the default for new chats.`);
   };
   /** Log in: a terminal tab (most CLIs), or a hidden browser sign-in whose status we poll. */
-  const startLogin = async (id: string) => {
+  /** False when the sign-in didn't start (the CLI missing, an RPC error). */
+  const startLogin = async (id: string): Promise<boolean> => {
     setBusy(true);
     setMenu(null);
     let started: { ok: boolean; error?: string; waiting?: boolean; message?: string } | undefined;
@@ -177,7 +178,8 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
     } finally {
       setBusy(false);
     }
-    if (!started?.ok || !started.waiting) return;
+    if (!started?.ok) return false;
+    if (!started.waiting) return true;
     const waitText = started.message || "Waiting for sign-in in your browser…";
     setWaiting({ id, text: waitText });
     let result = "Sign-in didn't finish, try again.";
@@ -195,15 +197,24 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
       }
       if (s && mounted.current) setWaiting({ id, text: s.repairing ? REPAIRING : waitText });
     }
-    if (!mounted.current) return;
+    if (!mounted.current) return true;
     setWaiting(null);
     setNote(result);
     await load();
+    return true;
   };
   const addLogin = async () => {
-    const res = await api()?.add_gateway_account?.(provider, `Account ${accounts.length + 1}`, "login");
+    const names = new Set(accounts.map((a) => a.label));
+    let n = accounts.length + 1;
+    while (names.has(`Account ${n}`)) n += 1;
+    const res = await api()?.add_gateway_account?.(provider, `Account ${n}`, "login");
     if (!res?.ok) return setNote(res && !res.ok ? res.error : "Update Ducky to manage accounts.");
-    await startLogin(res.id);
+    // A sign-in that couldn't start leaves no empty row behind (three "Account 2" rows
+    // piled up while Claude Code wasn't installed).
+    if (!(await startLogin(res.id))) {
+      await api()?.remove_gateway_account?.(provider, res.id);
+      await load();
+    }
   };
   const move = (index: number, delta: number) => {
     const ids = accounts.map((a) => a.id);

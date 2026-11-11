@@ -161,6 +161,16 @@ it("Add API key fills an empty Default row instead of adding a second row", asyn
   expect(api.add_gateway_account).not.toHaveBeenCalled();
 });
 
+it("a sign-in that can't start leaves no extra row, and names never repeat", async () => {
+  api.login_gateway_account.mockResolvedValue({ ok: false, error: "Claude Code isn't installed yet." });
+  render(<GatewayAccounts provider="claude_code" kind="login" title="Claude Code logins" />);
+  await screen.findByText("Work");
+  fireEvent.click(screen.getByRole("button", { name: "Log in another account" }));
+  await waitFor(() => expect(api.remove_gateway_account).toHaveBeenCalledWith("claude_code", "new1"));
+  expect(api.add_gateway_account).toHaveBeenCalledWith("claude_code", "Account 3", "login");
+  await screen.findByText("Claude Code isn't installed yet.");
+});
+
 it("a provider with no key yet links to where to get one", async () => {
   api.list_gateway_accounts.mockImplementation(async () => ({
     ok: true, auto_switch: true, default: "default",
