@@ -161,6 +161,11 @@ def _tree_signature(root: Path, live_panel: bool = False) -> dict[str, tuple[int
             # (crash_guard writes them when is_app()); a test never does.
             dirnames[:] = []
             continue
+        if live_panel and (rel_dir.name == "__pycache__" or rel_dir.parts[:2] == ("ai_plugins", ".releases")):
+            # The live app's plugin host compiles plugin bytecode, and its plugin release
+            # workflow runs record their locks in ai_plugins/.releases (start_release_run).
+            dirnames[:] = []
+            continue
         for name in filenames:
             if name in _APP_NOISE_FILES or ".bak." in name or name.endswith(".tmp"):
                 continue
