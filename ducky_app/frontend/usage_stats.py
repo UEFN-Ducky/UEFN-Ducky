@@ -636,6 +636,7 @@ def app_opened(boot_total_ms: float | None = None) -> None:
             return
         from frontend import __version__
 
+        first_open = not _meta_get(META_INSTALL)  # no id yet: this PC's first open
         install_id()
         _mirror(True)
         last = _meta_get(META_LAST_VERSION) or ""
@@ -647,6 +648,11 @@ def app_opened(boot_total_ms: float | None = None) -> None:
             _meta_set(META_LAST_VERSION, __version__)
         track("app.open", version=__version__, os=_os_label(), install_age_s=install_age_s())
         start()
+        if first_open:
+            # A new PC's first open is heard now, not a minute in: one that is closed or dies
+            # in its first minute still counts as opened in the install journey. This thread
+            # is the open's own, and the timed send a minute later is past the Store's 30 s gap.
+            flush()
     except Exception:
         pass
 

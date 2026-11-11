@@ -945,3 +945,26 @@ def test_a_failed_tool_call_says_why(monkeypatch) -> None:
     calls = [r["props"] for r in rows if r["name"] == "tool.call"]
     assert [c.get("fail") for c in calls[-3:]] == ["exit_nonzero", "error", None]
     assert calls[-3] == {"tool": "ducky_terminal_run", "ok": "no", "duration": "10s", "fail": "exit_nonzero", "why": "exit_code"}
+
+
+def test_a_new_pcs_first_open_is_sent_right_away(monkeypatch) -> None:
+    """The install journey's "Opened UEFN Ducky": a PC closed or dead within its first minute
+    was never heard from (the first timed send comes a minute in). Later opens wait for it."""
+    from frontend import error_log
+
+    meta: dict[str, str] = {}
+    monkeypatch.setattr(us, "_meta_get", meta.get)
+    monkeypatch.setattr(us, "_meta_set", meta.__setitem__)
+    monkeypatch.setattr(us, "start", lambda: None)
+    monkeypatch.setattr(error_log, "install_crash_hooks", lambda: None)
+    sent: list[dict[str, Any]] = []
+    us.send_override = lambda body: sent.append(body) or True
+
+    us.app_opened()
+    assert len(sent) == 1 and sent[0]["installId"] == meta[us.META_INSTALL]
+    assert [e["name"] for e in sent[0]["events"]] == ["app.open"]
+    us.app_closing()  # its own send, as before
+    sent.clear()
+    us.app_opened()   # this PC has its id now
+    assert sent == []
+    assert [r["name"] for r in us._take(100)[0]] == ["app.open"]
