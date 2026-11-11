@@ -54,12 +54,13 @@ def test_unknown_profile_folders_count_as_the_users_own(monkeypatch):
     assert app_paths.foreign_profile_reason() == ""
 
 
-def test_a_non_default_panel_port_skips_auto_apply(monkeypatch):
+def test_a_moved_panel_still_heals_ide_configs(monkeypatch):
+    # The person's own app on 4299/4300 must re-point IDEs that an older version left on --port 4300.
     monkeypatch.setattr(app_paths, "foreign_profile_reason", lambda: "")
     monkeypatch.setattr(ide_apply, "PANEL_LISTENER_PORT", 4300)
-    assert "4300" in ide_apply.auto_apply_skip_reason()
-    monkeypatch.setattr(ide_apply, "PANEL_LISTENER_PORT", ide_apply.DEFAULT_PANEL_LISTENER_PORT)
     assert ide_apply.auto_apply_skip_reason() == ""
+    block = ide_apply.build_uefn_server_block(ide_apply.PanelSettings(port=4300))
+    assert block["args"][block["args"].index("--port") + 1] == "4200"
     monkeypatch.setattr(app_paths, "foreign_profile_reason", lambda: "LOCALAPPDATA is elsewhere")
     assert ide_apply.auto_apply_skip_reason() == "LOCALAPPDATA is elsewhere"
 

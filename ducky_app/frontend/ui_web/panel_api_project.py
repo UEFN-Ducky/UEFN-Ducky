@@ -132,12 +132,12 @@ class PanelApiProjectMixin:
         try:
             from backend.bridge import post_command_to_listener
 
-            info = post_command_to_listener(_pa.PANEL_LISTENER_PORT, "get_project_info", {}, timeout=4.0)
+            info = post_command_to_listener(_pa.UEFN_LISTENER_PORT, "get_project_info", {}, timeout=4.0)
             root = str((info or {}).get("content_root") or "").strip().rstrip("/")
             if root:
                 asset_path = f"{root}/{content_rel}"
             res = post_command_to_listener(
-                _pa.PANEL_LISTENER_PORT,
+                _pa.UEFN_LISTENER_PORT,
                 "open_asset_in_uefn",
                 {"asset_path": asset_path},
                 timeout=15.0,
@@ -155,7 +155,7 @@ class PanelApiProjectMixin:
 
         content_rel = _pa.content_package_rel(relative_path)
         asset_path = f"/Game/{content_rel}"
-        info = post_command_to_listener(_pa.PANEL_LISTENER_PORT, "get_project_info", {}, timeout=4.0)
+        info = post_command_to_listener(_pa.UEFN_LISTENER_PORT, "get_project_info", {}, timeout=4.0)
         root = str((info or {}).get("content_root") or "").strip().rstrip("/")
         if root:
             asset_path = f"{root}/{content_rel}"
@@ -172,14 +172,14 @@ class PanelApiProjectMixin:
         try:
             if is_file:
                 res = post_command_to_listener(
-                    _pa.PANEL_LISTENER_PORT,
+                    _pa.UEFN_LISTENER_PORT,
                     "delete_asset",
                     {"asset_path": asset_path},
                     timeout=60.0,
                 )
             else:
                 res = post_command_to_listener(
-                    _pa.PANEL_LISTENER_PORT,
+                    _pa.UEFN_LISTENER_PORT,
                     "delete_directory",
                     {"directory": asset_path},
                     timeout=120.0,
@@ -705,7 +705,7 @@ class PanelApiProjectMixin:
             _pa.record_error("deploy", str(e))
             return [f"Deploy failed: {e}"]
         try:
-            lines = _pa.deploy_listener(root, _pa.PANEL_LISTENER_PORT)
+            lines = _pa.deploy_listener(root, _pa.UEFN_LISTENER_PORT)
             from frontend.ui_web.recent_projects import add_recent_project
 
             add_recent_project(str(root), kind="uefn")

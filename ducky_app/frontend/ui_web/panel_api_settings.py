@@ -741,7 +741,7 @@ class PanelApiSettingsMixin:
 
             def _deploy() -> None:
                 try:
-                    lines = _pa.deploy_listener(root, _pa.PANEL_LISTENER_PORT)
+                    lines = _pa.deploy_listener(root, _pa.UEFN_LISTENER_PORT)
                     for ln in lines:
                         _pa._log(ln)
                 except Exception as e:
@@ -2114,7 +2114,7 @@ class PanelApiSettingsMixin:
             from backend.bridge import post_command_to_listener
 
             res = post_command_to_listener(
-                _pa.PANEL_LISTENER_PORT, "get_editor_log", {"last_n": 200, "filter_str": "Error"}, timeout=6.0
+                _pa.UEFN_LISTENER_PORT, "get_editor_log", {"last_n": 200, "filter_str": "Error"}, timeout=6.0
             )
             for line in res.get("lines", []) or []:
                 _pa.record_error("editor", str(line))

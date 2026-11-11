@@ -403,7 +403,7 @@ def wait_uefn_ready(
 
     from backend.bridge.client import listener_get_health
     from backend.bridge.status import _project_from_health
-    from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
+    from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
 
     cap = min(max(float(timeout or 0), 1.0), _READY_CAP_S)
     started = time.time()
@@ -426,7 +426,7 @@ def wait_uefn_ready(
         selected = (PanelSettings.load().uefn_project_root or "").strip()
     last_name = ""
     while time.time() < deadline:
-        health = listener_get_health(int(PANEL_LISTENER_PORT), timeout=0.8)
+        health = listener_get_health(int(UEFN_LISTENER_PORT), timeout=0.8)
         if isinstance(health, dict) and health.get("status") == "ok":
             _proj_dir, name, match = _project_from_health(
                 health, selected_project_root=selected

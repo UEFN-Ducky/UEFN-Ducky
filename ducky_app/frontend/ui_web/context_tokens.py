@@ -12,7 +12,7 @@ from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
 
-from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
+from frontend.settings import UEFN_LISTENER_PORT, PanelSettings, apply_workspace_env
 from frontend.chat_store import Conversation
 from frontend.ui_web.chats.conversations import load_conversation
 from frontend.ui_web.context_omit import (
@@ -1235,7 +1235,7 @@ def compute_context_report(
 
     from backend.bridge import listener_get_health
 
-    health = listener_get_health(PANEL_LISTENER_PORT)
+    health = listener_get_health(UEFN_LISTENER_PORT)
     listener_online = health is not None and health.get("status") == "ok"
     listener_wedged = bool(health and health.get("wedged"))
 
@@ -1246,7 +1246,7 @@ def compute_context_report(
         from backend.bridge.status import listener_project_fields
 
         _, uefn_project_name, project_match, _LISTENER_PROJECT_CACHE = listener_project_fields(
-            PANEL_LISTENER_PORT,
+            UEFN_LISTENER_PORT,
             selected_project_root=settings.uefn_project_root,
             cache=_LISTENER_PROJECT_CACHE,
         )
@@ -1257,7 +1257,7 @@ def compute_context_report(
     mode_suffix = _mode_suffix(mode)
     parts = get_system_prompt_parts(
         listener_online=listener_online,
-        listener_port=PANEL_LISTENER_PORT,
+        listener_port=UEFN_LISTENER_PORT,
         project_root=settings.uefn_project_root,
         skill_text=skill_active,
         mode_suffix=mode_suffix,

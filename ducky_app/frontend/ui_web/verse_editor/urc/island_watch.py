@@ -115,9 +115,9 @@ def _open_island() -> str:
             return _known_island
         _known_island = ""  # UEFN closed: the next UEFN may open another island
     from backend.bridge import listener_get_health
-    from frontend.settings import PANEL_LISTENER_PORT
+    from frontend.settings import UEFN_LISTENER_PORT
 
-    health = listener_get_health(PANEL_LISTENER_PORT)
+    health = listener_get_health(UEFN_LISTENER_PORT)
     if not health or health.get("status") != "ok":
         return ""
     island = os.path.normpath(str(health.get("island_dir") or "")) if health.get("island_dir") else ""

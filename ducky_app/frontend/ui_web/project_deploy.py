@@ -14,7 +14,7 @@ from pathlib import Path
 from frontend.deploy import deploy_listener, resolve_uefn_project_root
 from frontend.error_log import record_error
 from frontend.project_kind import has_uefnproject
-from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
+from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
 from frontend.ui_web.known_projects import known_project_roots
 from frontend.ui_web.project_switch import mark_deployed
 
@@ -40,7 +40,7 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
     for i, path in enumerate(paths):
         try:
             root = resolve_uefn_project_root(Path(path))
-            project_lines = deploy_listener(root, PANEL_LISTENER_PORT, shared=(i == 0))
+            project_lines = deploy_listener(root, UEFN_LISTENER_PORT, shared=(i == 0))
             mark_deployed(path)
             for ln in project_lines:
                 lines.append(ln)

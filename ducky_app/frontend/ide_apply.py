@@ -13,7 +13,7 @@ from typing import Callable, Optional
 from frontend.ide_paths import IdeKind, path_for_ide
 from frontend.mcp_block import build_uefn_server_block
 from frontend.merge import merge_uefn_into_config
-from frontend.settings import DEFAULT_PANEL_LISTENER_PORT, PANEL_LISTENER_PORT, PanelSettings
+from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
 from frontend.skill_deploy import sync_skill_for_ide
 
 # The fallback while plugins load. OpenCode is applied only when its gateway registers the
@@ -30,9 +30,11 @@ def auto_apply_skip_reason() -> str:
     LOCALAPPDATA, panel port 4300) did that too, aiming the person's IDEs at a
     throwaway exe and sandbox AppData until their own app re-applied. The
     Settings Apply button and the MCP apply tool still write.
+
+    The sandbox is told by its own profile folders, never by the panel port: the person's
+    own app moves its panel pair too (4299/4300 when 4199 is busy), and a port check left
+    their IDE configs on an old ``--port 4300`` that never reached UEFN (Nov 11 2026).
     """
-    if PANEL_LISTENER_PORT != DEFAULT_PANEL_LISTENER_PORT:
-        return f"panel port {PANEL_LISTENER_PORT} is not the default {DEFAULT_PANEL_LISTENER_PORT}"
     from frontend.app_paths import foreign_profile_reason
 
     return foreign_profile_reason()

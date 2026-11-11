@@ -81,10 +81,10 @@ def _listener_line() -> str:
     try:
         from backend.bridge.status import fetch_listener_status
         from frontend import __version__
-        from frontend.settings import PANEL_LISTENER_PORT, PanelSettings
+        from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
 
         st = fetch_listener_status(
-            PANEL_LISTENER_PORT,
+            UEFN_LISTENER_PORT,
             version=__version__,
             selected_project_root=PanelSettings.load().uefn_project_root,
         )

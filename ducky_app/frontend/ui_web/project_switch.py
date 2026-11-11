@@ -201,10 +201,10 @@ def set_panel_project_root(path: str, *, push_ui: bool = True) -> dict[str, str]
 def _run_project_deploy(root: str, on_log: Callable[[str], None] | None = None) -> None:
     from frontend.deploy import deploy_listener
     from frontend.error_log import record_error
-    from frontend.settings import PANEL_LISTENER_PORT
+    from frontend.settings import UEFN_LISTENER_PORT
 
     try:
-        lines = deploy_listener(Path(root), PANEL_LISTENER_PORT)
+        lines = deploy_listener(Path(root), UEFN_LISTENER_PORT)
         if on_log:
             for ln in lines:
                 on_log(ln)

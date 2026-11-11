@@ -59,6 +59,7 @@ def listener(monkeypatch, tmp_path):
     monkeypatch.setattr(client, "_record_editor_change", lambda *a, **k: None)
     monkeypatch.setattr(editor_gateway, "call", lambda chat, op, mutating, fn: fn())
     monkeypatch.setattr(settings, "PANEL_LISTENER_PORT", port)
+    monkeypatch.setattr(settings, "UEFN_LISTENER_PORT", port)
     monkeypatch.setattr(listener_status_cache, "_last", None)
     monkeypatch.setattr(island_watch, "_read_doc", lambda: None)
     monkeypatch.setattr(island_watch, "_read_locks", lambda: None)

@@ -91,7 +91,13 @@ from frontend.appearance_builtin_profiles import (
     apply_built_in_appearance,
     is_built_in_appearance_profile,
 )
-from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env, default_app_data_dir
+from frontend.settings import (
+    PANEL_LISTENER_PORT,
+    UEFN_LISTENER_PORT,
+    PanelSettings,
+    apply_workspace_env,
+    default_app_data_dir,
+)
 from frontend.skill_deploy import sync_skill_for_ide, sync_skill_on_mcp_update
 from frontend.stdio_probe import probe_stdio_mcp
 from frontend.ui_web.agent_turns.push import notify_chats_changed
@@ -1218,7 +1224,7 @@ class PanelApi(
             "uefn_project_dir": "",
             "uefn_project_name": "",
             "project_match": True,
-            "port": PANEL_LISTENER_PORT,
+            "port": UEFN_LISTENER_PORT,
         }
 
     def _refresh_listener_status(self) -> dict[str, Any]:
@@ -1238,7 +1244,7 @@ class PanelApi(
         from backend.bridge.revive import error_source, revive_listener
 
         try:
-            result = revive_listener(PANEL_LISTENER_PORT)
+            result = revive_listener(UEFN_LISTENER_PORT)
         except Exception as e:
             result = {"ok": False, "action": "failed", "message": str(e)}
         if not result.get("ok"):
@@ -1252,7 +1258,7 @@ class PanelApi(
 
             settings = PanelSettings.load()
             return fetch_listener_status(
-                PANEL_LISTENER_PORT,
+                UEFN_LISTENER_PORT,
                 state=self._listener_status_state,
                 version=__version__,
                 selected_project_root=settings.uefn_project_root,
