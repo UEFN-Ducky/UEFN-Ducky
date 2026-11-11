@@ -65,6 +65,24 @@ def test_send_command_posts_without_health_get_or_discovery_scan(
     assert posted == [4200]
 
 
+@pytest.mark.parametrize("reason", [TimeoutError("timed out"), ConnectionResetError(10054, "reset by peer")])
+def test_a_lost_reply_is_not_called_offline(monkeypatch: pytest.MonkeyPatch, reason) -> None:
+    """The POST reached UEFN and only the reply was lost: the job may still run there. Calling it
+    'listener not running' made agents re-send a save job that was still going (UEFN ran it twice)."""
+    monkeypatch.setattr(bridge, "_pinned_port", 4200)
+    monkeypatch.setattr(bridge, "_discovered_port", 4200)
+    monkeypatch.setattr(bridge, "configured_listener_port", lambda: 4200)
+
+    def _lost(*_a, **_k):
+        raise urllib.error.URLError(reason)
+
+    monkeypatch.setattr(bridge, "_post_json_locked", _lost)
+    bridge._invalidate_cache()
+    with pytest.raises(TimeoutError, match="may still be running") as got:
+        bridge.send_command("spawn_actor", {})
+    assert "not running" not in str(got.value) and "Do not send it again" in str(got.value)
+
+
 def test_expected_offline_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
     logged: list[str] = []
     monkeypatch.setattr(

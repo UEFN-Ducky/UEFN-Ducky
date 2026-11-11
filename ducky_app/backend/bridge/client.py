@@ -525,6 +525,15 @@ def _is_refused(error: BaseException) -> bool:
     return isinstance(reason, ConnectionRefusedError) or isinstance(error, ConnectionRefusedError)
 
 
+def _was_delivered(error: BaseException) -> bool:
+    """True when the request reached the listener and only the reply was lost (timed out, reset): the
+    command may still be running in UEFN. Reporting that as "listener not running" made agents re-issue
+    a long save job that was still going, and UEFN ran it twice with a dialog per saved asset."""
+    reason = getattr(error, "reason", error)
+    return isinstance(reason, (TimeoutError, ConnectionResetError, ConnectionAbortedError)) or (
+        "timed out" in str(reason).lower())
+
+
 def is_read_command(command: str) -> bool:
     """True for a listener command that never changes the editor or the island."""
     return command in _READ_COMMANDS
@@ -752,6 +761,12 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
             _discovered_port = None
         if _is_refused(e):
             raise _offline_error(port) from e  # UEFN closed: status, not an Errors-tab failure
+        if _was_delivered(e):
+            _record_bridge_error(f"No reply in time for '{command}' (it reached UEFN): {e}", command)
+            raise TimeoutError(
+                f"UEFN got '{command}' but did not answer in time: it may still be running there. Do not "
+                f"send it again; wait until the editor is idle (ducky_get_status busy=false), then check its result."
+            ) from e
         _record_bridge_error(f"Listener not reachable for '{command}': {e}")
         raise ConnectionError(
             "UEFN listener is not running. "
