@@ -370,6 +370,7 @@ _PUBLIC_METHODS = frozenset({
     'list_workspace_roots',
     'load_appearance_profile',
     'load_messages',
+    'load_tool_file_edits',
     'load_tool_result',
     'load_verse_diagnostics_cache',
     'memory_report',

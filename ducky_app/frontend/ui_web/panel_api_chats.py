@@ -107,6 +107,7 @@ class PanelApiChatsMixin:
     # -- messages and context (panel_chats/messages.py) -------------------------
     load_messages = messages.load_messages
     load_tool_result = messages.load_tool_result
+    load_tool_file_edits = messages.load_tool_file_edits
     get_context_usage = messages.get_context_usage
     reset_context = messages.reset_context
     restore_context = messages.restore_context

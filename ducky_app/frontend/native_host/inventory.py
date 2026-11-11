@@ -159,7 +159,7 @@ _JS_API: dict[str, str] = {
         held_for_model list_agent_profiles list_all_conversations list_conversations
         list_conversations_for_file list_custom_verse_templates list_ducky_catalog
         list_folders list_running_agents list_saved_agent_permissions load_messages
-        load_tool_result move_chats_to_project move_conversation open_custom_duckies_folder
+        load_tool_file_edits load_tool_result move_chats_to_project move_conversation open_custom_duckies_folder
         post_team_message remove_agent_permission_rule rename_conversation rename_folder
         resend_last_user_message reset_context restore_context revoke_saved_agent_permission
         rewind_to_message run_held_messages save_agent_profile save_agent_profile_override

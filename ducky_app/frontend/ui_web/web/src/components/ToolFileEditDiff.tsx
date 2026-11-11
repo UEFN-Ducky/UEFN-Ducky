@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Icons } from "../icons/Icons";
 import { chatCollapseKey, useChatCollapseScope, useChatCollapseState } from "../hooks/useChatCollapseState";
 import type { FileEditData } from "../types/panel";
@@ -12,6 +12,9 @@ interface ToolFileEditDiffProps {
   onOpenFile?: (path: string, name: string, options?: { line?: number }) => void;
   /** Start open inline (changeset review, Changes view); chat cards open the diff in a popup. */
   defaultExpanded?: boolean;
+  /** Reads the edit with its before/after texts, for an edit that came without them
+   *  (`contentOmitted`: a chat page leaves big ones out until the diff is opened). */
+  loadFull?: () => Promise<FileEditData | null>;
 }
 
 /** Lines per block: the browser skips laying out blocks scrolled out of view, so huge diffs stay smooth. */
@@ -85,7 +88,7 @@ function DiffLines({ summary, openAt }: { summary: FileEditDiffSummary; openAt?:
   );
 }
 
-export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: ToolFileEditDiffProps) {
+export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false, loadFull }: ToolFileEditDiffProps) {
   const inline = defaultExpanded;
   const collapseScope = useChatCollapseScope();
   const [expanded, setExpanded] = useChatCollapseState(
@@ -95,7 +98,38 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
   const [popup, setPopup] = useState(false);
   const verseEditor = useVerseEditorOptional();
   const shown = inline ? expanded : popup;
-  const summary = useMemo(() => (shown ? buildDiff(edit) : null), [edit, shown]);
+  // An edit that came without its texts: read once, when the diff, the file or the
+  // walk-through is first asked for. Until then the card needs only its name and counts.
+  const [loaded, setLoaded] = useState<FileEditData | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const pendingRef = useRef<Promise<FileEditData | null> | null>(null);
+  const full = edit.contentOmitted ? loaded : edit;
+  const ensureFull = (): Promise<FileEditData | null> => {
+    if (full) return Promise.resolve(full);
+    if (!loadFull) return Promise.resolve(null);
+    if (!pendingRef.current) {
+      setLoadError("");
+      pendingRef.current = loadFull()
+        .then((got) => {
+          if (got) setLoaded(got);
+          else setLoadError("These changes could not be loaded.");
+          return got;
+        })
+        .catch(() => {
+          setLoadError("These changes could not be loaded.");
+          return null;
+        })
+        .finally(() => {
+          pendingRef.current = null;
+        });
+    }
+    return pendingRef.current;
+  };
+  useEffect(() => {
+    if (shown && !full) void ensureFull();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ensureFull reads the latest props itself
+  }, [shown, full]);
+  const summary = useMemo(() => (shown && full ? buildDiff(full) : null), [full, shown]);
 
   const displayName = basename(edit.path);
   const hasChanges = edit.linesAdded > 0 || edit.linesRemoved > 0 || edit.kind === "create";
@@ -107,14 +141,20 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
   };
 
   const openFirstChange = () => {
-    const diff = summary ?? buildDiff(edit);
-    openAt(diff.hunks.flatMap((h) => h.lines).find((line) => line.kind !== "context")?.line ?? 1);
+    const open = (got: FileEditData | null) => {
+      const diff = got ? (got === full && summary ? summary : buildDiff(got)) : null;
+      openAt(diff?.hunks.flatMap((h) => h.lines).find((line) => line.kind !== "context")?.line ?? 1);
+    };
+    // At once when the texts are here; an edit that came without them is read first.
+    if (full) open(full);
+    else void ensureFull().then(open);
   };
 
   const replay = (e: MouseEvent | KeyboardEvent) => {
     e.stopPropagation();
     setPopup(false);
-    verseEditor?.startReplay(edit);
+    if (full) verseEditor?.startReplay(full);
+    else void ensureFull().then((got) => (got ? verseEditor?.startReplay(got) : undefined));
   };
 
   const stats = hasChanges ? (
@@ -206,7 +246,13 @@ export function ToolFileEditDiff({ edit, onOpenFile, defaultExpanded = false }: 
             {replayButton}
           </div>
           <div className="tool-file-edit-diff-modal-scroll">
-            {summary ? <DiffLines summary={summary} openAt={onOpenFile ? openAt : undefined} /> : null}
+            {summary ? (
+              <DiffLines summary={summary} openAt={onOpenFile ? openAt : undefined} />
+            ) : full ? null : (
+              <div className="tool-file-edit-diff-empty" role={loadError ? "alert" : "status"}>
+                {loadError || "Loading the changes…"}
+              </div>
+            )}
           </div>
         </Modal>
       )}

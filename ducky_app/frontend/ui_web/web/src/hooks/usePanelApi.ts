@@ -150,6 +150,7 @@ export const HTTP_ROUTED_METHODS: ReadonlySet<string> = new Set([
   "list_uefn_plugins",
   "load_messages",
   "load_tool_result",
+  "load_tool_file_edits",
 ]);
 
 const _routed = new WeakMap<PanelApi, PanelApi>();

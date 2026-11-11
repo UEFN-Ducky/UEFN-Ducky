@@ -48,6 +48,42 @@ describe("chat file edit cards", () => {
   });
 });
 
+describe("a file edit that came without its texts", () => {
+  const whole = { path: "big.verse", before: "same\nold", after: "same\nnew", linesAdded: 1, linesRemoved: 1, kind: "write" as const };
+  const stub = { ...whole, before: "", after: "", contentOmitted: true };
+
+  it("shows its name and counts without reading anything, and reads once when the diff opens", async () => {
+    const loadFull = vi.fn(async () => whole);
+    const view = render(<ChatCollapseScopeProvider scope="omitted"><ToolFileEditDiff edit={stub} loadFull={loadFull} /></ChatCollapseScopeProvider>);
+    expect(view.container.textContent).toContain("big.verse");
+    expect(view.container.textContent).toContain("+1");
+    expect(loadFull).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole("button", { name: /big\.verse/ }));
+    expect(screen.getByRole("status").textContent).toBe("Loading the changes…");
+    await vi.waitFor(() => expect(screen.getByRole("dialog").querySelector(".tool-file-edit-diff-code")?.textContent).toContain("new"));
+    expect(screen.getByRole("dialog").querySelector(".tool-file-edit-diff-code")?.textContent).toContain("old");
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]!);
+    fireEvent.click(view.getByRole("button", { name: /big\.verse/ }));
+    expect(screen.getByRole("dialog").querySelector(".tool-file-edit-diff-code")?.textContent).toContain("new");
+    expect(loadFull).toHaveBeenCalledTimes(1); // kept for the card
+  });
+
+  it("opens the file at the first change after reading the edit", async () => {
+    const loadFull = vi.fn(async () => whole);
+    const onOpenFile = vi.fn();
+    const view = render(<ChatCollapseScopeProvider scope="omitted-open"><ToolFileEditDiff edit={stub} loadFull={loadFull} onOpenFile={onOpenFile} /></ChatCollapseScopeProvider>);
+    fireEvent.click(view.getByRole("link"));
+    await vi.waitFor(() => expect(onOpenFile).toHaveBeenCalledWith("big.verse", "big.verse", { line: 2 }));
+    expect(loadFull).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so when the edit cannot be read", async () => {
+    const view = render(<ChatCollapseScopeProvider scope="omitted-fail"><ToolFileEditDiff edit={stub} loadFull={async () => null} /></ChatCollapseScopeProvider>);
+    fireEvent.click(view.getByRole("button", { name: /big\.verse/ }));
+    expect((await screen.findByRole("alert")).textContent).toBe("These changes could not be loaded.");
+  });
+});
+
 describe("buildFileEditDiff on big files", () => {
   it("diffs a one-line change in a 20k-line file fast, with the right line numbers", () => {
     const before = Array.from({ length: 20_000 }, (_, i) => `line ${i}`);

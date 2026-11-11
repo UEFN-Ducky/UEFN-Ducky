@@ -32,7 +32,7 @@ CONTROL = frozenset({"cancel_agent", "ui_rpc_respond", "steer_message"})
 # Opening or scrolling a chat never queues behind sends and plan progress: with urgent at 2
 # workers, a busy team kept load_messages waiting past the page's 45 s and scrolling up
 # loaded nothing (Nov 10 2026).
-CHAT = frozenset({"load_messages", "load_tool_result"})
+CHAT = frozenset({"load_messages", "load_tool_result", "load_tool_file_edits"})
 HTTP_POOL_SIZES: dict[str, int] = {"normal": 16, "streams": 8, "long": 32}
 
 URGENT = frozenset({

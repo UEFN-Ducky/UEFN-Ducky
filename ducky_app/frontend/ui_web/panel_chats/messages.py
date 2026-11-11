@@ -20,6 +20,41 @@ def _cap_tool_results(rows: list[dict[str, Any]]) -> None:
                            "resultBytes": len(result.encode("utf-8"))}
 
 
+# A file edit's before and after texts travel with its row only when they are this small
+# together. A bigger one goes as its path and line counts, and the card asks for the texts
+# when its diff is opened (load_tool_file_edits): the card shows a name and "+54 -4" until
+# then, and 300 rows of one chat were 4.4 MB with 4.0 MB of it these texts (Nov 11 2026).
+FILE_EDIT_INLINE_CHARS = 4_000
+
+
+def _edit_without_texts(edit: Any) -> Any:
+    if not isinstance(edit, dict):
+        return edit
+    before, after = edit.get("before"), edit.get("after")
+    size = (len(before) if isinstance(before, str) else 0) + (len(after) if isinstance(after, str) else 0)
+    if size <= FILE_EDIT_INLINE_CHARS:
+        return edit
+    return {**edit, "before": "", "after": "", "contentOmitted": True}
+
+
+def _trim_file_edits(rows: list[dict[str, Any]]) -> None:
+    for row in rows:
+        tool = row.get("tool")
+        if not isinstance(tool, dict):
+            continue
+        one, many = tool.get("fileEdit"), tool.get("fileEdits")
+        changed: dict[str, Any] = {}
+        if isinstance(many, list) and many:
+            changed["fileEdits"] = [_edit_without_texts(edit) for edit in many]
+            if isinstance(one, dict):
+                # chat_rows sends the first edit under both names: one copy, not two.
+                changed["fileEdit"] = changed["fileEdits"][0] if one is many[0] else _edit_without_texts(one)
+        elif isinstance(one, dict):
+            changed["fileEdit"] = _edit_without_texts(one)
+        if changed:
+            row["tool"] = {**tool, **changed}
+
+
 # The stand-in for a message a page doesn't show: _messages_to_ui walks from the end and
 # stops once it has enough rows, so it is never converted (a page that reaches it widens).
 _NOT_LOADED: dict[str, Any] = {"role": "user", "text": ""}
@@ -91,7 +126,9 @@ def load_messages(
 
     A tool result over ``TOOL_RESULT_CAP`` chars is cut, with ``resultTruncated``
     and ``resultBytes`` on the row (``load_tool_result`` has it whole): 40 rows over
-    32 KB were 22% of a 7 MB chat. ``full_results`` keeps them whole (account mirror).
+    32 KB were 22% of a 7 MB chat. A file edit over ``FILE_EDIT_INLINE_CHARS`` comes
+    without its before/after texts (``contentOmitted``; ``load_tool_file_edits`` has them).
+    ``full_results`` keeps both whole (account mirror).
     """
     started = _pa.time.monotonic()
     try:
@@ -118,6 +155,7 @@ def load_messages(
         raise
     if not full_results:
         _cap_tool_results(rows)
+        _trim_file_edits(rows)
     took = _pa.time.monotonic() - started
     if took > 5.0:
         _pa.record_activity("chat", f"Chat {str(conv_id)[:8]} took {took:.1f}s to load ({len(rows)} rows)")
@@ -136,6 +174,29 @@ def load_tool_result(self, conv_id: str, row_id: int) -> dict[str, Any]:
     if not isinstance(tool, dict):
         return {"ok": False, "error": "No tool result in that row"}
     return {"ok": True, "result": str(tool.get("result") or "")}
+
+
+def load_tool_file_edits(self, conv_id: str, row_id: int) -> dict[str, Any]:
+    """The file edits of one tool row with their before/after texts, which ``load_messages``
+    leaves out of a page when they are big. Asked for when the card's diff is opened."""
+    from frontend.ui_web.chats.display import load_display_rows
+    from frontend.ui_web.chats.conversations import load_conversation_meta
+
+    if load_conversation_meta(conv_id) is None:
+        return {"ok": False, "error": "Chat not found"}
+    # Numbered as load_messages numbered the page: a running turn's pending tools are one row.
+    live = conv_id in self.list_running_agents()
+    rows = load_display_rows(conv_id, before_id=int(row_id) + 1, limit=1, live=live)
+    tool = rows[-1].get("tool") if rows and rows[-1].get("id") == int(row_id) else None
+    if not isinstance(tool, dict):
+        return {"ok": False, "error": "No file edit in that row"}
+    many, one = tool.get("fileEdits"), tool.get("fileEdit")
+    edits = [e for e in many if isinstance(e, dict)] if isinstance(many, list) else []
+    if not edits and isinstance(one, dict):
+        edits = [one]
+    if not edits:
+        return {"ok": False, "error": "No file edit in that row"}
+    return {"ok": True, "fileEdits": edits}
 
 
 def get_context_usage(

@@ -10,6 +10,7 @@ import { chatCollapseKey, useChatCollapseScope, useChatCollapseState } from "../
 import { ChatListPanel, SingleChatPanel } from "./ChatListPanel";
 import { LinkedAgentCard } from "./LinkedAgentCard";
 import { ToolFileEditDiff } from "./ToolFileEditDiff";
+import type { FileEditData } from "../types/panel";
 import { DefaultBody } from "./tool-cards/bodies/DefaultBody";
 import { FileProtectionRecovery } from "./FileProtectionRecovery";
 import { walkthroughStepsFromTool } from "./tool-cards/bodies/WalkthroughBody";
@@ -35,6 +36,17 @@ import {
 import { formatToolDuration, humanToolLabel, isWebLookupTool, webToolDetail, webToolLabel } from "../utils/agentActivity";
 import { fmtCompactTokens } from "../utils/contextFormat";
 import { unwrapCodingAgentTool } from "../utils/unwrapCodingAgentTool";
+
+/** Reads one file edit whole for a card whose page came without the edit's texts
+ *  (`contentOmitted`). Undefined for rows that aren't saved yet: those carry their texts. */
+function fullEditLoader(convId: string, rowId: unknown, path: string): (() => Promise<FileEditData | null>) | undefined {
+  if (!convId || typeof rowId !== "number") return undefined;
+  return async () => {
+    const res = await getApi()?.load_tool_file_edits?.(convId, rowId);
+    if (!res?.ok) return null;
+    return (res.fileEdits ?? []).find((edit) => edit.path === path) ?? null;
+  };
+}
 
 /** "Show full result (40 KB)" under a result `load_messages` cut; the click reads it whole. */
 function FullResultButton({ convId, rowId, bytes, onLoaded }: {
@@ -319,7 +331,12 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
     <div data-tool-activity-id={toolId} className={`tool-execution-card-wrap${embedded ? " tool-execution-card-wrap--embedded" : ""}`}>
       {/* Diff always mounts above the tool bar — never buried behind expand/accordion. */}
       {fileEdits.map((edit) => (
-        <ToolFileEditDiff key={edit.path} edit={edit} onOpenFile={onOpenFile} />
+        <ToolFileEditDiff
+          key={edit.path}
+          edit={edit}
+          onOpenFile={onOpenFile}
+          loadFull={edit.contentOmitted ? fullEditLoader(convId, result?.id, edit.path) : undefined}
+        />
       ))}
       {hideShellForFileEdit ? null : (
       <div

@@ -1036,6 +1036,9 @@ export interface FileEditData {
   linesAdded: number;
   linesRemoved: number;
   kind: "write" | "create";
+  /** `load_messages` left `before` / `after` out of a big edit (the card asks
+   *  `load_tool_file_edits` for them when its diff is opened). */
+  contentOmitted?: boolean;
 }
 
 export interface ChatMessage {
@@ -3950,6 +3953,7 @@ export interface PanelApi {
   load_messages(conv_id: string, before_id?: number | null, limit?: number): Promise<ChatMessage[]>;
   /** The whole result of a tool row `load_messages` cut. */
   load_tool_result?(conv_id: string, row_id: number): Promise<{ ok: boolean; result?: string; error?: string }>;
+  load_tool_file_edits?(conv_id: string, row_id: number): Promise<{ ok: boolean; fileEdits?: FileEditData[]; error?: string }>;
   get_settings(): Promise<PanelSettingsDto>;
   get_appearance(): Promise<AppearanceDto>;
   save_appearance(patch: AppearanceDto): Promise<string>;
