@@ -2094,6 +2094,8 @@ export interface CodingAgentDto {
   logged_in?: boolean | null;
   /** Gateway registered a `login` hook → Settings can run the CLI login itself. */
   can_login?: boolean;
+  /** Gateway signs in hidden in the browser (`login_gateway_account`): one click, and it installs a missing CLI first. */
+  one_click_login?: boolean;
   /** Gateway registered a `logout` hook → Settings can sign the CLI out. */
   can_logout?: boolean;
   capabilities?: {

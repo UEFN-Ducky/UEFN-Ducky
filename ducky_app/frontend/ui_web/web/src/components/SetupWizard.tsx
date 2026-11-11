@@ -15,6 +15,7 @@ import { usageTrack } from "../hooks/usageTrack";
 import { Icons } from "../icons/Icons";
 import type { CodingAgentDto, DuckyOSAccountStatus, DuckyOSStoreItemDto, StarterPluginDto } from "../types/panel";
 import { CodingAgentLoginModal } from "../views/settings/CodingAgentsSection";
+import { BROWSER_WAIT, waitForInstall, waitForSignIn } from "../views/settings/gatewayLogin";
 import { DuckyModelPicker } from "./ducky/DuckyModelPicker";
 import { SetupModelTiles } from "./SetupModelTiles";
 import { SetupStepDuck } from "./SetupStepDuck";
@@ -523,10 +524,16 @@ function AgentRow({
   onChanged: () => void;
 }) {
   const [loginOpen, setLoginOpen] = useState(false);
-  const [busy, setBusy] = useState<"" | "check" | "mcp">("");
+  const [busy, setBusy] = useState<"" | "check" | "mcp" | "connect">("");
   const [note, setNote] = useState("");
+  // What Connect is waiting on: an install, or the sign-in in the browser.
+  const [progress, setProgress] = useState("");
+  const alive = useRef(true);
+  useEffect(() => () => void (alive.current = false), []);
   const state = agentConnection(agent);
   const ok = isConnectedAgent(agent);
+  // Connect also installs a missing program when its plugin can sign in from here.
+  const canConnect = !!(agent.one_click_login || agent.can_login);
 
   const setUpMcp = async () => {
     const api = getApi();
@@ -559,6 +566,77 @@ function AgentRow({
     }
   };
 
+  /**
+   * One click from "Not installed" or "Not logged in" to connected: the plugin installs the
+   * program when it's missing, signs in (hidden, in the browser, when it can; else its link-and-
+   * code window), then Ducky's tools are set up in that program. Same calls as Settings → LLMs.
+   */
+  const connect = async () => {
+    const api = getApi();
+    if (!api) return;
+    setNote("");
+    if (state === "logged_out" && !agent.one_click_login) {
+      setLoginOpen(true);
+      return;
+    }
+    setBusy("connect");
+    const watch = { alive: () => alive.current, onWaiting: setProgress };
+    let signedIn = false;
+    try {
+      const listed = await api.list_gateway_accounts?.(agent.id).catch(() => undefined);
+      const account = (listed?.ok && (listed.default || listed.accounts[0]?.id)) || "default";
+      if (!agent.one_click_login) {
+        // Missing, with a link-and-code sign-in: looking again starts the plugin's install.
+        setProgress(`Installing ${agent.label}…`);
+        const found = await api.detect_coding_agent_cli?.(agent.id).catch(() => undefined);
+        const install = found?.available ? { ran: true, ok: true, error: "" } : await waitForInstall(agent.id, account, watch);
+        if (!alive.current) return;
+        if (!install.ok) {
+          setNote(install.error || String(found?.error || "") || `Couldn't install ${agent.label}. Install it yourself, then press Connect.`);
+          return;
+        }
+        await api.detect_coding_agent_cli?.(agent.id).catch(() => undefined);
+        onChanged();
+        setLoginOpen(true);
+        return;
+      }
+      for (let attempt = 0; attempt < 2 && !signedIn; attempt++) {
+        const started = await api.login_gateway_account?.(agent.id, account).catch(() => undefined);
+        if (!alive.current) return;
+        if (started?.ok && started.waiting) {
+          const done = await waitForSignIn(agent.id, account, started.message || BROWSER_WAIT, watch);
+          if (!alive.current) return;
+          if (!done.loggedIn) {
+            setNote(done.text);
+            return;
+          }
+          signedIn = true;
+        } else if (started?.ok) {
+          setNote("Finish signing in in the terminal tab, then press Connect.");
+          return;
+        } else {
+          // Not started: the program is missing and the plugin is installing it; then once more.
+          const install = await waitForInstall(agent.id, account, watch);
+          if (!alive.current) return;
+          if (!install.ok || attempt) {
+            setNote(install.error || (started && !started.ok ? started.error : "") || "Couldn't start the sign-in. Try again.");
+            return;
+          }
+        }
+      }
+      // Its row reads Logged in from a fresh look at the program.
+      await api.detect_coding_agent_cli?.(agent.id).catch(() => undefined);
+      void refreshModelsCatalog();
+    } finally {
+      if (alive.current) {
+        setBusy("");
+        setProgress("");
+        if (!signedIn) onChanged();
+      }
+    }
+    if (signedIn && alive.current) await setUpMcp();
+  };
+
   const connected = ok && (!ide || ideReady);
   let help = "";
   if (state === "missing") help = (agent.install_help || "").trim();
@@ -570,9 +648,9 @@ function AgentRow({
       <span className={`setup-wizard-pill${ok ? " is-ok" : ""}`} aria-label={`${agent.label}: ${AGENT_STATE_LABEL[state]}`}>
         {ok ? <Icons.Check /> : null} {AGENT_STATE_LABEL[state]}
       </span>
-      {connected ? null : state === "logged_out" && agent.can_login ? (
-        <button type="button" className="setup-wizard-btn is-primary" onClick={() => setLoginOpen(true)}>
-          Connect
+      {connected ? null : (state === "logged_out" || state === "missing") && canConnect ? (
+        <button type="button" className="setup-wizard-btn is-primary" disabled={!!busy} onClick={() => void connect()}>
+          {busy === "connect" ? "Connecting…" : "Connect"}
         </button>
       ) : ok ? (
         <button type="button" className="setup-wizard-btn is-primary" disabled={!!busy} onClick={() => void setUpMcp()}>
@@ -592,6 +670,11 @@ function AgentRow({
       {ide && ideReady ? (
         <span className="setup-wizard-agent-note">
           <Icons.Check /> Ducky's tools are set up in {ide.label}
+        </span>
+      ) : null}
+      {progress ? (
+        <span className="setup-wizard-agent-note" role="status">
+          {progress}
         </span>
       ) : null}
       {note ? <span className="setup-wizard-agent-note is-error">{note}</span> : null}

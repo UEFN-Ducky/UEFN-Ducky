@@ -8,6 +8,7 @@ import { Icons } from "../../icons/Icons";
 import type { GatewayAccountDto, GatewayAccountStatusDto } from "../../types/panel";
 import type { UsageWindow } from "../../components/GatewayUsageFooter";
 import { targetRef } from "../../ui-targets/registry";
+import { BROWSER_WAIT, INSTALLING, REPAIRING, waitForInstall as waitForCliInstall, waitForSignIn } from "./gatewayLogin";
 
 /** Walkthroughs' "paste a key" and "Test & Save" steps land on the API keys table. */
 const ADD_KEY_TARGET = { kind: "button", label: "Add API key", route: "settings.llms" } as const;
@@ -21,7 +22,7 @@ function resetTime(until: number): string {
 
 function loginText(s: GatewayAccountStatusDto | null | undefined): string {
   if (!s) return "Checking…";
-  if (s.pending) return s.installing ? INSTALLING : s.repairing ? REPAIRING : "Waiting for sign-in in your browser…";
+  if (s.pending) return s.installing ? INSTALLING : s.repairing ? REPAIRING : BROWSER_WAIT;
   if (!s.loggedIn) return s.error || "Not logged in";
   if (s.access === "none") return [s.email, s.error || "No access for this account"].filter(Boolean).join(" · ");
   return [s.email || "Logged in", s.plan].filter(Boolean).join(" · ");
@@ -42,11 +43,7 @@ function statusPill(a: GatewayAccountDto, isDefault: boolean): { text: string; t
 }
 
 const LEAVE_MS = 180;
-const LOGIN_POLL_MS = 1500;
-const LOGIN_POLLS = 200; // ~5 min, the plugin's own sign-in timeout
 const TERMINAL_HINT = "Finish signing in in the terminal tab, then Refresh.";
-const REPAIRING = "Repairing Gemini CLI…";
-const INSTALLING = "Installing it (about a minute)… the sign-in starts by itself.";
 const reducedMotion = () =>
   typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
@@ -163,21 +160,16 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
   };
   /** True once a CLI install the plugin is running for this row has finished cleanly. */
   const waitForInstall = async (id: string): Promise<boolean> => {
-    const first = await api()?.gateway_account_status?.(provider, id).catch(() => undefined);
-    if (!first?.ok || !first.status?.installing) return false;
-    setNote("");
-    setWaiting({ id, text: INSTALLING });
     try {
-      for (let i = 0; i < LOGIN_POLLS && mounted.current; i++) {
-        await new Promise((r) => setTimeout(r, LOGIN_POLL_MS));
-        const st = await api()?.gateway_account_status?.(provider, id).catch(() => undefined);
-        const s = st?.ok ? st.status : null;
-        if (s && !s.pending) {
-          if (s.error) setNote(s.error);
-          return !s.error;
-        }
-      }
-      return false;
+      const install = await waitForCliInstall(provider, id, {
+        alive: () => mounted.current,
+        onWaiting: (text) => {
+          setNote("");
+          setWaiting({ id, text });
+        },
+      });
+      if (install.error) setNote(install.error);
+      return install.ok;
     } finally {
       if (mounted.current) setWaiting(null);
     }
@@ -207,26 +199,13 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
       return false;
     }
     if (!started.waiting) return true;
-    const waitText = started.message || "Waiting for sign-in in your browser…";
-    setWaiting({ id, text: waitText });
-    let result = "Sign-in didn't finish, try again.";
-    for (let i = 0; i < LOGIN_POLLS && mounted.current; i++) {
-      await new Promise((r) => setTimeout(r, LOGIN_POLL_MS));
-      const st = await api()?.gateway_account_status?.(provider, id).catch(() => undefined);
-      const s = st?.ok ? st.status : null;
-      if (s?.loggedIn) {
-        result = s.email ? `Logged in · ${s.email}` : "Logged in.";
-        break;
-      }
-      if (s && !s.pending) {
-        result = s.error || result;
-        break;
-      }
-      if (s && mounted.current) setWaiting({ id, text: s.repairing ? REPAIRING : waitText });
-    }
+    const done = await waitForSignIn(provider, id, started.message || BROWSER_WAIT, {
+      alive: () => mounted.current,
+      onWaiting: (text) => setWaiting({ id, text }),
+    });
     if (!mounted.current) return true;
     setWaiting(null);
-    setNote(result);
+    setNote(done.text);
     await load();
     return true;
   };

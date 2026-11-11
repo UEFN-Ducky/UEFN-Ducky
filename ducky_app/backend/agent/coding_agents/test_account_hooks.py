@@ -183,3 +183,18 @@ def test_browser_login_hook_opens_no_terminal(reg, monkeypatch):
     assert accounts._STATUS[("gemini_cli", "default")][1]["pending"] is True  # the next list sees it
     row["account_browser_login"] = lambda d: {"error": "Gemini CLI isn't installed yet."}
     assert api.login_gateway_account("gemini_cli", "default") == {"ok": False, "error": "Gemini CLI isn't installed yet."}
+
+
+def test_agent_row_says_when_its_sign_in_is_one_click(monkeypatch):
+    """The setup guide's Connect reads this: a browser sign-in needs no window and no code."""
+    from backend.agent.coding_agents.base import CodingAgentInfo
+
+    rows = {
+        "codex": {"login": lambda **k: {}, "account_browser_login": lambda d: {"message": "…"}},
+        "claude_code": {"login": lambda **k: {}, "account_login": lambda d: {"argv": ["claude"]}},
+    }
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda aid: rows.get(aid))
+    info = lambda aid: CodingAgentInfo(id=aid, label=aid, enabled=True, available=False, status="CLI not found").to_dict()  # noqa: E731
+    assert (info("codex")["one_click_login"], info("codex")["can_login"]) == (True, True)
+    assert (info("claude_code")["one_click_login"], info("claude_code")["can_login"]) == (False, True)
+    assert info("kimi")["one_click_login"] is False

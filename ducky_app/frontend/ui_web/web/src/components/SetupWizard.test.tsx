@@ -17,6 +17,9 @@ const fake = vi.hoisted(() => {
     coding_agent_login_submit: vi.fn(),
     coding_agent_login_cancel: vi.fn(),
     detect_coding_agent_cli: vi.fn(),
+    list_gateway_accounts: vi.fn(),
+    login_gateway_account: vi.fn(),
+    gateway_account_status: vi.fn(),
     duckyos_get_status: vi.fn(),
     duckyos_login: vi.fn(),
     duckyos_open_site: vi.fn(),
@@ -374,6 +377,108 @@ describe("SetupWizard", () => {
     expect(screen.queryByText("Log in to Claude Code")).toBeNull();
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
   });
+
+  const DEFAULT_ACCOUNT = { ok: true, accounts: [{ id: "default", label: "Default", kind: "login", active: true }], default: "default", auto_switch: true };
+
+  it("Connect signs a plan in with one click: the browser, no window to fill in, then Ducky's tools", async () => {
+    fake.providers = [OPENAI];
+    let loggedIn = false;
+    fake.api.list_coding_agents.mockImplementation(() =>
+      Promise.resolve({ agents: [{ ...AGENTS[0]!, logged_in: loggedIn, can_login: true, one_click_login: true }] }),
+    );
+    fake.api.list_gateway_accounts.mockResolvedValue(DEFAULT_ACCOUNT);
+    fake.api.login_gateway_account.mockResolvedValue({ ok: true, waiting: true, message: "Sign in to ChatGPT in the browser tab that just opened…" });
+    fake.api.gateway_account_status
+      .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true } })
+      .mockImplementation(() => {
+        loggedIn = true;
+        return Promise.resolve({ ok: true, status: { loggedIn: true, email: "a@b.c" } });
+      });
+    fake.api.detect_coding_agent_cli.mockResolvedValue({ ok: true, available: true });
+    wizard({ step: "ai" });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Sign in to ChatGPT in the browser tab that just opened…")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Connecting…" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(screen.getByLabelText("Codex: Logged in")).toBeTruthy(), { timeout: 8000 });
+    expect(fake.api.login_gateway_account).toHaveBeenCalledWith("codex", "default");
+    expect(fake.api.coding_agent_login).not.toHaveBeenCalled();
+    expect(screen.queryByText("Log in to Codex")).toBeNull();
+    await waitFor(() => expect(fake.api.apply_ide).toHaveBeenCalledWith("codex"));
+    expect(screen.queryByText("Sign in to ChatGPT in the browser tab that just opened…")).toBeNull();
+  }, 15000);
+
+  it("Connect on a program that isn't installed installs it, then signs in by itself", async () => {
+    fake.providers = [CURSOR];
+    let state: "missing" | "installed" | "in" = "missing";
+    fake.api.list_coding_agents.mockImplementation(() =>
+      Promise.resolve({
+        agents: [{ ...AGENTS[2]!, one_click_login: true, available: state !== "missing", logged_in: state === "missing" ? null : state === "in" }],
+      }),
+    );
+    fake.api.list_gateway_accounts.mockResolvedValue(DEFAULT_ACCOUNT);
+    fake.api.login_gateway_account
+      .mockResolvedValueOnce({ ok: false, error: "Cursor isn't installed yet. Ducky is installing it; sign-in starts by itself." })
+      .mockResolvedValue({ ok: true, waiting: true, message: "Sign in to Cursor in the browser tab that just opened…" });
+    fake.api.gateway_account_status
+      .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, installing: true } })
+      .mockImplementationOnce(() => {
+        state = "installed";
+        return Promise.resolve({ ok: true, status: { loggedIn: false } });
+      })
+      .mockImplementation(() => {
+        state = "in";
+        return Promise.resolve({ ok: true, status: { loggedIn: true } });
+      });
+    fake.api.detect_coding_agent_cli.mockResolvedValue({ ok: true, available: true });
+    wizard({ step: "ai" });
+    expect(await screen.findByLabelText("Cursor Agent: Not installed")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText(/^Installing it/)).toBeTruthy();
+    await waitFor(() => expect(fake.api.login_gateway_account).toHaveBeenCalledTimes(2), { timeout: 8000 });
+    await waitFor(() => expect(screen.getByLabelText("Cursor Agent: Logged in")).toBeTruthy(), { timeout: 8000 });
+    expect(fake.api.apply_ide).toHaveBeenCalledWith("cursor");
+    expect(screen.queryByText(/isn't installed yet/)).toBeNull();
+  }, 20000);
+
+  it("a failed install says why, on the row", async () => {
+    fake.providers = [CURSOR];
+    fake.api.list_coding_agents.mockResolvedValue({ agents: [{ ...AGENTS[2]!, one_click_login: true }] });
+    fake.api.list_gateway_accounts.mockResolvedValue(DEFAULT_ACCOUNT);
+    fake.api.login_gateway_account.mockResolvedValue({ ok: false, error: "Cursor isn't installed yet." });
+    fake.api.gateway_account_status
+      .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, installing: true } })
+      .mockResolvedValue({ ok: true, status: { loggedIn: false, error: "Cursor install failed: no internet" } });
+    wizard({ step: "ai" });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Cursor install failed: no internet", {}, { timeout: 8000 })).toBeTruthy();
+    expect(fake.api.login_gateway_account).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
+  }, 15000);
+
+  it("Claude Code that isn't installed: Connect installs it, then opens its sign-in", async () => {
+    fake.providers = [ANTHROPIC];
+    let installed = false;
+    fake.api.list_coding_agents.mockImplementation(() =>
+      Promise.resolve({ agents: [{ ...AGENTS[1]!, available: installed, logged_in: installed ? false : null, status: installed ? "Not logged in" : "CLI not found" }] }),
+    );
+    fake.api.list_gateway_accounts.mockResolvedValue(DEFAULT_ACCOUNT);
+    fake.api.detect_coding_agent_cli.mockResolvedValue({ ok: true, available: false, status: "Installing Claude Code CLI…" });
+    fake.api.gateway_account_status
+      .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, installing: true } })
+      .mockImplementation(() => {
+        installed = true;
+        return Promise.resolve({ ok: true, status: { loggedIn: false } });
+      });
+    fake.api.coding_agent_login.mockResolvedValue({ ok: true, auth_url: "https://claude.ai/oauth?x=1" });
+    wizard({ step: "ai" });
+    expect(await screen.findByLabelText("Claude Code: Not installed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("Log in to Claude Code", {}, { timeout: 8000 })).toBeTruthy();
+    expect(fake.api.detect_coding_agent_cli).toHaveBeenCalledWith("claude_code");
+    expect(fake.api.login_gateway_account).not.toHaveBeenCalled(); // that one opens a terminal tab for Claude Code
+    await waitFor(() => expect(fake.api.coding_agent_login).toHaveBeenCalledWith("claude_code"));
+  }, 15000);
 
   it("checks an agent again after it was installed or signed in elsewhere", async () => {
     fake.providers = [CURSOR];

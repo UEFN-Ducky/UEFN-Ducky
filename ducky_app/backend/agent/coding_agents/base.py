@@ -191,6 +191,7 @@ class CodingAgentInfo:
         shows_thinking = False
         can_login = False
         can_logout = False
+        one_click_login = False
         try:
             from backend.uefn_plugins.plugin_host.gateways import get_coding_agent_registration
 
@@ -201,6 +202,8 @@ class CodingAgentInfo:
                 reg.get("shows_thinking_effort") or callable(reg.get("thinking_env"))
             )
             can_login = callable(reg.get("login"))
+            # A hidden sign-in in the browser (backend.agent.accounts): no window, no code to copy.
+            one_click_login = callable(reg.get("account_browser_login"))
             can_logout = callable(reg.get("logout"))
         except Exception:
             pass
@@ -218,6 +221,7 @@ class CodingAgentInfo:
             # Adapters set this after construction (True/False); None = n/a.
             "logged_in": getattr(self, "logged_in", None),
             "can_login": can_login,
+            "one_click_login": one_click_login,
             "can_logout": can_logout,
             "capabilities": {
                 "terminal_agent": self.capabilities.terminal_agent,
