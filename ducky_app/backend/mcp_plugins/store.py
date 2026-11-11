@@ -1097,8 +1097,3 @@ def delete_mcp_server(server_id: str) -> bool:
     return True
 
 
-# Legacy no-op helpers kept for imports that copied trees.
-def _copy_plugin_tree(src: Path, dest: Path) -> None:
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.copytree(src, dest)

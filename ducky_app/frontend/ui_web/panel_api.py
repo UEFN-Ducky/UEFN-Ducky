@@ -485,27 +485,6 @@ def _prune_model_caches_to_enabled_providers() -> None:
     _save_model_cache_to_disk()
 
 
-def _all_cached_model_ids() -> list[str]:
-    allowed = _catalog_keep_providers()
-    ids: list[str] = []
-    seen: set[str] = set()
-    for prov, models in _model_cache.items():
-        if allowed and prov not in allowed:
-            continue
-        for item in models:
-            mid = item.id if hasattr(item, "id") else str(item)
-            if mid and mid not in seen:
-                seen.add(mid)
-                ids.append(mid)
-    return ids
-
-
-def _coding_agent_favorite_ids() -> frozenset[str]:
-    from backend.agent.coding_agents.base import CODING_AGENT_IDS
-
-    return frozenset(aid for aid in CODING_AGENT_IDS if aid != "ducky")
-
-
 def resolve_model_selection(favorite_models: Any, settings: PanelSettings):
     """ResolveOk | ResolveErr for the profile's model, falling back to settings.default_model."""
     from frontend.favorite_models import resolve_model_strict
@@ -616,10 +595,6 @@ def _migrate_legacy_built_in_appearance(s: Any) -> bool:
         s.appearance_effect_id = ""
         s.appearance_effects_enabled = False
     return True
-
-
-def _reset_appearance_to_defaults(s: Any) -> None:
-    apply_built_in_appearance(s, DEFAULT_APPEARANCE_PROFILE_ID)
 
 
 def _patch_bool(value: Any) -> bool:

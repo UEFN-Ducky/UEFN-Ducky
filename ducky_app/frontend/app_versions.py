@@ -376,16 +376,26 @@ def hand_off_env() -> dict[str, str]:
 # BACKEND_EXE_ENV, headless.BACKEND_UI_PORT_ENV). A version started on its own must not
 # inherit them: after a switch under the launcher the new version took itself for a
 # launcher's backend, never started its own launcher and ran the slow Python window.
-_LAUNCHER_CHILD_ENV = ("UEFN_DUCKY_NATIVE_CHILD", "UEFN_DUCKY_BACKEND_EXE", "UEFN_DUCKY_BACKEND_UI_PORT")
+LAUNCHER_CHILD_ENV = ("UEFN_DUCKY_NATIVE_CHILD", "UEFN_DUCKY_BACKEND_EXE", "UEFN_DUCKY_BACKEND_UI_PORT")
 
 
 def own_start_env() -> dict[str, str]:
     """The environment for a Ducky that starts on its own (a version switch, a restart, a
     rollback): :func:`hand_off_env` without what a launcher gave this process as its backend."""
     env = hand_off_env()
-    for name in _LAUNCHER_CHILD_ENV:
+    for name in LAUNCHER_CHILD_ENV:
         env.pop(name, None)
     return env
+
+
+def drop_inherited_launcher_marks(argv: list[str] | None = None) -> bool:
+    """This process's own environment, for a start that is no launcher's backend: only
+    ``--backend`` is the launcher's child, so any other start that still carries the
+    launcher's marks inherited them (1.2.494 and 1.2.495 pass their whole environment to
+    the version they switch to). True when something was dropped."""
+    if BACKEND_ARG in (sys.argv if argv is None else argv)[1:]:
+        return False
+    return bool([name for name in LAUNCHER_CHILD_ENV if os.environ.pop(name, None) is not None])
 
 
 def _kill_with_me(proc: subprocess.Popen) -> None:

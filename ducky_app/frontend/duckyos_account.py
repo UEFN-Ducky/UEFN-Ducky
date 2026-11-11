@@ -361,24 +361,6 @@ def _request(
         raise DuckyOSAccountError(f"Network error: {exc}", code="network") from exc
 
 
-def _ensure_csrf(base_url: str, blob: dict[str, Any]) -> dict[str, Any]:
-    """Fetch ``/login`` to obtain a CSRF cookie when missing (needed for login/code)."""
-    if blob.get("csrf_value") and blob.get("csrf_name"):
-        return blob
-    status, cookies, _body, _raw = _request("GET", f"{base_url}/login", timeout=15.0)
-    if status >= 400 and status != 302:
-        # Still try to harvest cookies from a soft failure.
-        pass
-    csrf = _pick_cookie(cookies, _CSRF_COOKIE_RE)
-    if csrf:
-        blob["csrf_name"], blob["csrf_value"] = csrf
-        # Prefer explicit header-style exposure if jar renamed oddly
-    elif cookies.get("duckyos_csrf"):
-        blob["csrf_name"] = "duckyos_csrf"
-        blob["csrf_value"] = cookies["duckyos_csrf"]
-    return blob
-
-
 def _device_key_name() -> str:
     host = ""
     try:
@@ -543,28 +525,6 @@ def _persist_base_url(base: str) -> None:
             s.save()
     except Exception:
         pass
-
-
-def _finish_login(blob: dict[str, Any], email_fallback: str = "") -> dict[str, Any]:
-    blob.pop("challenge_name", None)
-    blob.pop("challenge_value", None)
-    blob.pop("pending_code", None)
-    blob.pop("browser_pending", None)
-    if email_fallback and not blob.get("email"):
-        blob["email"] = email_fallback
-    if blob.get("session_value"):
-        try:
-            blob = fetch_me(blob)
-        except DuckyOSAccountError:
-            pass
-        try:
-            blob = fetch_permissions(blob)
-        except DuckyOSAccountError:
-            pass
-        if not blob.get("device_key"):
-            blob = mint_device_key(blob)
-    _save_blob(blob)
-    return blob
 
 
 _BROWSER_LOGIN_LOCK = __import__("threading").Lock()

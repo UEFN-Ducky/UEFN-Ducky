@@ -577,29 +577,6 @@ def _conversation_report(
     return summarized, conversation, summarized_items, conv_items
 
 
-def _conversation_token_split(
-    messages: list[dict[str, Any]],
-    *,
-    model: str,
-    provider: str,
-    tool_result_format: str = "toon",
-    keep_last: int | None = None,
-    context_summary: str = "",
-    context_summary_through: int = 0,
-) -> tuple[int, int]:
-    """Return (summarized_tokens, conversation_tokens) mirroring agent compaction."""
-    summarized, conversation, _, _ = _conversation_report(
-        messages,
-        model=model,
-        provider=provider,
-        tool_result_format=tool_result_format,
-        keep_last=keep_last,
-        context_summary=context_summary,
-        context_summary_through=context_summary_through,
-    )
-    return summarized, conversation
-
-
 def _breakdown_item_omitted(item_id: str, omit: frozenset[str]) -> bool:
     if item_id == "mcp_tools":
         return mcp_tools_omitted(omit)

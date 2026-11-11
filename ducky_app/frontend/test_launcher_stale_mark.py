@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 
 from frontend import launcher, native_switch
-from frontend.app_versions import _LAUNCHER_CHILD_ENV
+from frontend.app_versions import LAUNCHER_CHILD_ENV as _LAUNCHER_CHILD_ENV
 
 
 def test_a_window_start_drops_the_marks_and_its_launcher_starts_again(monkeypatch) -> None:

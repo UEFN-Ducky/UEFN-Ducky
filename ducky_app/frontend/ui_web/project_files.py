@@ -256,17 +256,6 @@ def _workspace_folder_paths() -> list[Path]:
     return [Path(f["path"]).resolve() for f in _workspace_folders()]
 
 
-def _workspace_folder_index(path: Path) -> int | None:
-    resolved = path.resolve()
-    for i, folder in enumerate(_workspace_folders()):
-        try:
-            if Path(folder["path"]).resolve() == resolved:
-                return i
-        except OSError:
-            continue
-    return None
-
-
 def _is_content_folder_path(folder_path: Path) -> bool:
     try:
         return folder_path.resolve() == _content_dir()
@@ -537,12 +526,6 @@ def _join_content_path(parent_relative: str, name: str) -> str:
     return f"{parent}/{safe_name}"
 
 
-def _norm_relative_path(relative_path: str) -> str:
-    rel = (relative_path or "").strip().replace("\\", "/").strip("/")
-    # A full path inside Content names the same file as its Content/ form (locked files too).
-    return (_abs_to_content_rel(rel) or rel).lower()
-
-
 def _show_hidden_project_files() -> bool:
     return PanelSettings.load().show_hidden_project_files
 
@@ -629,18 +612,6 @@ def _content_tree_filter(show_hidden: bool | None = None, folder: bool | None = 
     return lambda name, is_dir: not _should_skip(name, is_dir, show_hidden) and not _is_hidden_tree_entry(
         name, is_dir, show_hidden
     )
-
-
-def _include_in_content_tree(name: str, is_dir: bool, show_hidden: bool | None = None) -> bool:
-    """Whether *name* belongs in the sidebar's Content tree.
-
-    ``show_hidden`` is the one setting these predicates need, and it is constant
-    for the whole listing. It used to be read *per entry* — two
-    ``PanelSettings.load()`` calls per file — so the 1.5 s tree-fingerprint poll
-    re-read the settings store thousands of times a second. Callers that loop
-    read it once and pass it in.
-    """
-    return _content_tree_filter(show_hidden)(name, is_dir)
 
 
 def _is_binary_file_name(name: str) -> bool:

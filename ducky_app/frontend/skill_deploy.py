@@ -237,11 +237,6 @@ def _ledger_stamps(data: dict) -> dict[str, dict]:
     return {str(k): v for k, v in stamps.items() if isinstance(v, dict)} if isinstance(stamps, dict) else {}
 
 
-def _read_deploy_ledger(skills_root: Path) -> set[str]:
-    """Pack ids we deployed into this root on a previous run."""
-    return _ledger_packs(_read_ledger_doc(skills_root))
-
-
 def _write_deploy_ledger(
     skills_root: Path, pack_ids: Iterable[str], stamps: dict[str, dict] | None = None
 ) -> None:

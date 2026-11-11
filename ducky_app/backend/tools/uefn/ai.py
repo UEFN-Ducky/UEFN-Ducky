@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
 
 from backend.bridge import send_command
 from backend.util.json_util import tool_json
@@ -69,16 +68,6 @@ def _extract_code_block(text: str, lang: str = "") -> str:
     pattern = r"```(?:" + (lang or r"[a-zA-Z]*") + r")?\s*\n(.*?)```"
     m = re.search(pattern, text, re.DOTALL)
     return m.group(1).strip() if m else text.strip()
-
-
-def _command_catalog() -> dict:
-    """Compact catalog of what the editor can do right now, for grounding the model."""
-    catalog: dict[str, Any] = {"commands": []}
-    try:
-        catalog["commands"] = send_command("ping").get("commands", [])
-    except Exception as e:
-        catalog["commands_error"] = str(e)
-    return catalog
 
 
 @plugin_mcp_tool("uefn")

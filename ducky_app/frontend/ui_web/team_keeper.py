@@ -197,11 +197,6 @@ def _stuck_steps(plan: dict[str, Any]) -> list[tuple[dict[str, Any], str]]:
     return out
 
 
-def _person_only(plan: dict[str, Any]) -> bool:
-    """Only the person (or the lead, for orphaned steps) can move the plan: ``_stuck_steps``."""
-    return bool(_stuck_steps(plan))
-
-
 _STUCK_WHY = {
     "person": "waits on the person",
     "blocked": "its member is BLOCKED",
@@ -307,18 +302,6 @@ def _dormant(plan: dict[str, Any], now: float) -> bool:
     Oct 12 2026: scanning recent projects woke six chats of three earlier teams at once."""
     updated = float(plan.get("updated_at") or 0.0)
     return updated > 0 and now - updated > _DORMANT_S
-
-
-def _has_owner(plan: dict[str, Any]) -> bool:
-    """A sub plan with an agent: assigning it is what starts that agent."""
-    stack = list(plan.get("nodes") or [])
-    while stack:
-        node = stack.pop()
-        if isinstance(node, dict):
-            if node.get("assignee"):
-                return True
-            stack.extend(node.get("children") or [])
-    return False
 
 
 def kept_plans(project_root: str | None = None) -> list[dict[str, Any]]:
@@ -650,10 +633,6 @@ def _open_leaves(plan: dict[str, Any]) -> list[tuple[dict[str, Any], str, Any]]:
         if not kids and not held and node.get("status") in ("pending", "in_progress"):
             out.append((node, owner, section))
     return out
-
-
-def _open_leaves_by_member(plan: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    return {owner: work["points"] for owner, work in _work_by_member(plan).items()}
 
 
 def _member_chat(owner: str, project_root: str | None) -> str:

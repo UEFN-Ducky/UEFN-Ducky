@@ -409,10 +409,6 @@ def _resize_border_px(hwnd: int) -> int:
         return 8
 
 
-def _top_resize_border_px(hwnd: int) -> int:
-    return _resize_border_px(hwnd)
-
-
 def _is_maximized(hwnd: int) -> bool:
     try:
         return bool(user32.IsZoomed(hwnd))

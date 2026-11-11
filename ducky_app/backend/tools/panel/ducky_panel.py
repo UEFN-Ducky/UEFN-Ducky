@@ -149,12 +149,6 @@ def _mode_discovery(name: str, catalog: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _truncate_desc(text: str, limit: int = _DESC_TRUNC) -> str:
-    from backend.agent.toolsets.tool_index import truncate_desc
-
-    return truncate_desc(text, limit)
-
-
 def _discovery_cached_connections() -> dict[str, Any]:
     """Read already-loaded caches only: no imports, probes, locks or maintenance.
 
@@ -812,53 +806,6 @@ def ducky_memory_report(start_trace: bool = False, stop_trace: bool = False, col
     except Exception as exc:  # noqa: BLE001
         return tool_json({"ok": False, "error": f"Ducky's window did not answer: {exc}"}, pretty=pretty)
     return tool_json(out.get("result") if isinstance(out.get("result"), dict) else out, pretty=pretty)
-
-
-def _tool_ids_from_conv(conv: Any) -> list[str] | None:
-    ids: list[str] = []
-    for x in getattr(conv, "builtin_toolsets", None) or []:
-        s = str(x or "").strip()
-        if s:
-            ids.append(s)
-    for x in getattr(conv, "mcp_plugins", None) or []:
-        s = str(x or "").strip()
-        if s:
-            ids.append(s)
-    for x in getattr(conv, "uefn_plugins", None) or []:
-        s = str(x or "").strip()
-        if s:
-            ids.append(s)
-    return ids or None
-
-
-def _disabled_tool_ids_from_conv(conv: Any) -> list[str]:
-    """Reconstruct deny-list so a recycled twin keeps the same tool surface."""
-    from frontend.ui_web.chats.conversations import all_available_tool_ids
-
-    effective = set(_tool_ids_from_conv(conv) or [])
-    if not effective:
-        return []
-    return [tid for tid in all_available_tool_ids() if tid not in effective]
-
-
-def _spawn_kwargs_from_conv(conv: Any) -> dict[str, Any]:
-    """Copy persona/skills/model from an existing subagent for a recycled twin."""
-    subs = getattr(conv, "enabled_subskills", None)
-    return {
-        "ducky_style": str(getattr(conv, "ducky_style", None) or "classic"),
-        "ducky_name": str(getattr(conv, "ducky_name", None) or ""),
-        "profile_id": str(getattr(conv, "profile_id", None) or "").strip(),
-        "ducky_personality": str(getattr(conv, "ducky_personality", None) or ""),
-        "tts_voice": str(getattr(conv, "tts_voice", None) or "").strip(),
-        "tts_speed": float(getattr(conv, "tts_speed", 0) or 0.0),
-        "disabled_packs": list(getattr(conv, "disabled_packs", None) or []),
-        "enabled_subskills": dict(subs) if isinstance(subs, dict) else None,
-        "disabled_tool_ids": _disabled_tool_ids_from_conv(conv),
-        "model": str(getattr(conv, "model", None) or "").strip() or None,
-        "provider": str(getattr(conv, "provider", None) or "").strip() or None,
-        "coding_agent": str(getattr(conv, "coding_agent", None) or "ducky"),
-        "skill_snapshot": str(getattr(conv, "skill_snapshot", None) or ""),
-    }
 
 
 def build_recycle_spawn_message(handoff: str, continue_message: str = "", max_chars: int = _MAX_MESSAGE_CHARS) -> str:
