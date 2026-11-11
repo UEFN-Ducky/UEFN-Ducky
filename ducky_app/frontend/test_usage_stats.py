@@ -532,7 +532,10 @@ def test_the_idle_loop_never_polls_the_queue_and_samples_cpu_once_a_day(monkeypa
     us._stop.clear()
     t = threading.Thread(target=us._loop, daemon=True)
     t.start()
-    time.sleep(0.6)  # ~10 heartbeats
+    # Wait for a few heartbeat wakes, not a fixed 0.6 s: a loaded full-suite run starved the thread.
+    deadline = time.monotonic() + 10
+    while len(counts["waits"]) < 5 and time.monotonic() < deadline:
+        time.sleep(0.05)
     us._stop.set()
     us._wake.set()
     t.join(2)
