@@ -51,14 +51,26 @@ def test_launcher_host_takes_every_wid_and_pushes_events() -> None:
 # Pumps messages like the launcher's UI thread: a cross-process child shares its input queue,
 # so focus calls wait on this thread.
 _FAKE_LAUNCHER = """
-import tkinter as tk, sys, threading
+import os, tkinter as tk, sys, threading
 r = tk.Tk(); r.geometry('800x600-4000-4000'); r.update()
 done = threading.Event()
 threading.Thread(target=lambda: (sys.stdin.readline(), done.set()), daemon=True).start()
 def poll():
     r.destroy() if done.is_set() else r.after(100, poll)
-print('up', flush=True); poll(); r.mainloop()
+print(os.getpid(), flush=True); poll(); r.mainloop()
 """
+
+
+def _start_fake_launcher() -> tuple[subprocess.Popen, int]:
+    """The fake launcher and the pid that owns its window, once the window is up.
+
+    Not the Popen's pid: in a venv on Windows ``python.exe`` is a redirector that runs the
+    real interpreter as its child, so the window belongs to another pid. Both window tests
+    below looked under the redirector's pid and failed on every run from a venv (each
+    release's test step, Nov 2026)."""
+    proc = subprocess.Popen([sys.executable, "-c", _FAKE_LAUNCHER], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    return proc, int(proc.stdout.readline().strip())
 
 
 def test_each_launcher_window_gets_its_own_host() -> None:
@@ -76,17 +88,15 @@ def test_a_popout_is_found_by_its_mark_and_never_taken_for_the_main_window() -> 
     """The first window of the class in z-order was taken: a focus window in front got the panes."""
     from frontend.native_host import pane_host as ph
 
-    proc = subprocess.Popen([sys.executable, "-c", _FAKE_LAUNCHER], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, text=True)
+    proc, pid = _start_fake_launcher()
     try:
-        assert proc.stdout.readline().strip() == "up"
-        hwnd = ph.find_launcher_window(proc.pid, "TkTopLevel")
+        hwnd = ph.find_launcher_window(pid, "TkTopLevel")
         assert hwnd
         u = ctypes.WinDLL("user32")
         u.SetPropW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.HANDLE]
         assert u.SetPropW(hwnd, ph.WID_PROP, 255)
-        assert ph.find_launcher_window(proc.pid, "TkTopLevel", 255) == hwnd
-        assert ph.find_launcher_window(proc.pid, "TkTopLevel") == 0
+        assert ph.find_launcher_window(pid, "TkTopLevel", 255) == hwnd
+        assert ph.find_launcher_window(pid, "TkTopLevel") == 0
     finally:
         proc.stdin.write("\n")
         proc.stdin.flush()
@@ -100,13 +110,11 @@ def test_pane_opens_inside_another_process_window(tmp_path, monkeypatch) -> None
     from frontend.native_host import pane_host as ph
     from frontend.ui_web import browser_overlay as bo
 
-    proc = subprocess.Popen([sys.executable, "-c", _FAKE_LAUNCHER], stdin=subprocess.PIPE,
-                            stdout=subprocess.PIPE, text=True)
+    proc, pid = _start_fake_launcher()
     old = bo._main_window
     try:
-        assert proc.stdout.readline().strip() == "up"
         pushed: list[dict] = []
-        host = ph.PaneHost(proc.pid, class_name="TkTopLevel", push=pushed.append)
+        host = ph.PaneHost(pid, class_name="TkTopLevel", push=pushed.append)
         monkeypatch.setattr(bo, "user_data_dir", lambda: str(tmp_path / "profile"))
         monkeypatch.setattr(bo, "_mode", "memory")
         bo.configure(main_window=host)
