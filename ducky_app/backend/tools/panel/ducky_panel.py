@@ -1855,6 +1855,26 @@ def _profile_spawn_kwargs(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _seat_model(model: str, coding_agent: str = "") -> str:
+    """The model a new seat is asked for, tied to the agent its caller named.
+
+    A bare model name runs on the first coding agent whose list has it (so an agent never
+    bills an API key by accident). ``coding_agent`` says otherwise: "ducky" is the model's
+    own API, any other id is that agent. Nov 11 2026: coding_agent="ducky" with
+    model="gemini-3.8-flash" was seated on Cursor, whose list has that name too, because
+    the argument was thrown away; the chat then failed on Cursor's key."""
+    wanted = (model or "").strip()
+    agent = (coding_agent or "").strip().lower().replace("-", "_")
+    if not wanted or not agent or ":" in wanted:
+        return wanted
+    if agent != "ducky":
+        return f"{agent}:{wanted}"
+    from backend.agent.model_pricing import infer_provider
+
+    provider = infer_provider(wanted)
+    return f"{provider}:{wanted}" if provider else wanted
+
+
 @mcp.tool()
 def ducky_spawn_chat(
     message: str,
@@ -1866,7 +1886,7 @@ def ducky_spawn_chat(
     mode: str = "agent",
     wait_for_reply: bool = True,
     timeout_sec: float = 180.0,
-    coding_agent: str = "ducky",
+    coding_agent: str = "",
     sender: str = "",
     write_allowed: Optional[list[str]] = None,
     name: str = "",
@@ -1881,7 +1901,9 @@ def ducky_spawn_chat(
     it. ``as_leader=true`` (or ``name`` "Lead: …") makes the new member that group's leader.
 
     ``model`` seats a new member on that model instead of the profile's own (an idle seat
-    that is reused keeps its model). ``context_limit`` ("200k") is its context limit: past
+    that is reused keeps its model). A bare model name runs on a coding agent that offers it;
+    ``coding_agent`` with ``model`` picks where: "ducky" is the model's own API, any other
+    id ("codex", "gemini_cli") is that agent. ``context_limit`` ("200k") is its context limit: past
     it, it starts a fresh session between turns (omit for 60% of its model's window).
 
     ``name`` names the seat by its role ("Search lead"): an idle seat of that name gets the
@@ -1903,7 +1925,8 @@ def ducky_spawn_chat(
     text = _truncate_text(message.strip(), _MAX_MESSAGE_CHARS)
     if not text:
         raise ValueError("message must not be empty")
-    del coding_agent, chat_title  # invite uses the profile's model; title = profile name
+    del chat_title  # title = profile name
+    model = _seat_model(model, coding_agent)  # with no model the profile's own model seats it
     caller = _resolve_sender(sender)
 
     if not ducky.strip():
