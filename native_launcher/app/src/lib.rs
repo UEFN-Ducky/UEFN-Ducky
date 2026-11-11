@@ -16,10 +16,13 @@ mod ui;
 use std::ffi::OsString;
 use std::time::Duration;
 
-/// How long a second launch waits for a launcher that is already starting Ducky. A dead
-/// owner's lock is abandoned and taken at once; a living one that is still starting after
-/// this gets the hand-off's own 5 s, then this launch opens its own window.
-pub const LOCK_WAIT: Duration = Duration::from_secs(5);
+/// How long a second launch waits for a launcher that is already starting Ducky: as long as
+/// that launcher itself waits for its backend's hello, plus a margin. A dead owner's lock is
+/// abandoned and taken at once, so only a living, still-starting Ducky is waited for.
+/// Was 5 s: the first start after an update took ~40 s (Nov 10 2026), so a second click
+/// opened a second Ducky beside the one still "loading".
+pub const LOCK_WAIT: Duration =
+    Duration::from_secs(supervisor::HELLO_CAP.as_secs() + 10);
 
 /// Ducky's app version (the Python `frontend.__version__` this launcher ships with).
 pub const APP_VERSION: &str = env!("DUCKY_APP_VERSION");
