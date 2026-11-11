@@ -58,7 +58,14 @@ def _read(conv_id: str) -> tuple[tuple, tuple[int, int], bool]:
     return report, ct._message_usage(opened), asked
 
 
-def test_a_second_read_opens_no_message(chat, loads) -> None:
+@pytest.fixture
+def steady_settings(monkeypatch) -> None:
+    """A count is kept per settings state. Another test's background thread saving a
+    setting between two reads recounts (rightly) and failed these under a loaded run."""
+    monkeypatch.setattr(kept, "settings_mark", lambda settings: 1)
+
+
+def test_a_second_read_opens_no_message(chat, loads, steady_settings) -> None:
     conv, _ = chat
     first = _read(conv.id)
     assert loads == [conv.id]  # one whole load, shared by every number
@@ -154,7 +161,7 @@ def test_only_the_last_chats_are_kept(chat, loads, monkeypatch) -> None:
     assert loads == [conv.id, conv.id, conv.id]
 
 
-def test_an_external_agent_report_reads_the_chat_once(chat, loads) -> None:
+def test_an_external_agent_report_reads_the_chat_once(chat, loads, steady_settings) -> None:
     conv, project = chat
     fresh = chat_convs.load_conversation(conv.id, project)
     fresh.coding_agent = "claude_code"

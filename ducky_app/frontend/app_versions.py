@@ -336,8 +336,27 @@ def launcher_exe() -> Path:
     return exe
 
 
+def apart_from_the_install() -> bool:
+    """This copy is not the PC's install: a test copy (``DUCKY_SANDBOX``), or one on another
+    profile folder (a sandbox with its own LOCALAPPDATA). Its version folders are its own,
+    while the registry still names the person's real install: it must never start that
+    install or write into it (a sandboxed copy that updated itself would have put its own
+    launcher in the real install folder)."""
+    if os.environ.get("DUCKY_SANDBOX"):
+        return True
+    try:
+        from frontend.app_paths import foreign_profile_reason
+
+        return bool(foreign_profile_reason())
+    except Exception:
+        return False
+
+
 def _installed_exe() -> Path | None:
-    """The registered install's UEFN-Ducky.exe, when there is one on disk."""
+    """The registered install's UEFN-Ducky.exe, when there is one on disk and this copy
+    belongs to it (:func:`apart_from_the_install`)."""
+    if apart_from_the_install():
+        return None
     try:
         from frontend.install_info import installed_location
 

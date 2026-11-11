@@ -158,6 +158,7 @@ def test_a_version_started_directly_names_the_install(monkeypatch, tmp_path) -> 
     monkeypatch.setattr(sys, "executable", str(_version("1.2.472") / "UEFN-Ducky.exe"))
     root = tmp_path / "Programs" / "UEFN Ducky"
     monkeypatch.setattr(install_info, "installed_location", lambda: str(root))
+    monkeypatch.setattr(av, "apart_from_the_install", lambda: False)  # the install's own copy
     # No install on disk: the version's own EXE, as before.
     assert av.launcher_exe() == Path(sys.executable)
     root.mkdir(parents=True)
@@ -167,6 +168,40 @@ def test_a_version_started_directly_names_the_install(monkeypatch, tmp_path) -> 
     # An EXE outside versions/ (a portable copy beside an install) stays itself.
     monkeypatch.setattr(sys, "executable", str(tmp_path / "Downloads" / "UEFN-Ducky.exe"))
     assert av.launcher_exe() == tmp_path / "Downloads" / "UEFN-Ducky.exe"
+
+
+def test_a_sandboxed_copy_never_starts_or_writes_the_real_install(monkeypatch, tmp_path) -> None:
+    """A test copy has its own version folders, but the registry still names the person's
+    install: a sandboxed copy that updated itself would have put its launcher there."""
+    from frontend import app_paths, install_info
+
+    root = tmp_path / "Programs" / "UEFN Ducky"
+    root.mkdir(parents=True)
+    (root / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    (root / "Ducky-Launcher.exe").write_bytes(b"MZ the person's own launcher")
+    monkeypatch.setattr(install_info, "installed_location", lambda: str(root))
+    monkeypatch.delenv(av.LAUNCHER_ENV, raising=False)
+    monkeypatch.delenv(av.NO_HOP_ENV, raising=False)
+    version = _version("1.2.496")
+    (version / "Ducky-Launcher.exe").write_bytes(b"MZ a test build's launcher")
+    monkeypatch.setattr(sys, "executable", str(version / "UEFN-Ducky.exe"))
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    for sandbox, profile in (("1", ""), ("", "LOCALAPPDATA is not this Windows user's own folder")):
+        monkeypatch.setenv("DUCKY_SANDBOX", sandbox) if sandbox else monkeypatch.delenv("DUCKY_SANDBOX", raising=False)
+        monkeypatch.setattr(app_paths, "foreign_profile_reason", lambda profile=profile: profile)
+        assert av.apart_from_the_install() is True
+        assert av.launcher_exe() == Path(sys.executable)
+        av.refresh_root_launcher()
+        assert (root / "Ducky-Launcher.exe").read_bytes() == b"MZ the person's own launcher"
+
+    # The person's own install (their profile, no test mark): its root launcher follows the version.
+    monkeypatch.delenv("DUCKY_SANDBOX", raising=False)
+    monkeypatch.setattr(app_paths, "foreign_profile_reason", lambda: "")
+    assert av.apart_from_the_install() is False
+    assert av.launcher_exe() == root / "UEFN-Ducky.exe"
+    av.refresh_root_launcher()
+    assert (root / "Ducky-Launcher.exe").read_bytes() == b"MZ a test build's launcher"
 
 
 def test_handover_is_read_once_and_only_while_fresh() -> None:
