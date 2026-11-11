@@ -726,8 +726,8 @@ def store_icon_problem(root: Path) -> str:
             return f"{rel} isn't a real {path.suffix[1:].upper()} file: set one with ducky_plugin_set_icon(id, image_path)."
         return ""
     return ("No Store icon: the Store rejects a new plugin without assets/icon.png (or .svg / .jpg, up to 700 KB). "
-            "Ask the user whether to make one (ducky_ai_image, or their own image model) or use a picture they "
-            "have, then ducky_plugin_set_icon(id, image_path).")
+            "Ask the user whether to make one (ducky_generate_image, with their own picture maker) or use a "
+            "picture they have, then ducky_plugin_set_icon(id, image_path).")
 
 
 _NATIVE_CONTROL = re.compile(

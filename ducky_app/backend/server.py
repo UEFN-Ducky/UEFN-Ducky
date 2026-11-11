@@ -89,10 +89,14 @@ class ProtectedFastMCP(FastMCP):
         if current_policy().strict:
             return [t for t in available if t.name in SAFE_TOOLS]
         try:
-            from backend.uefn_plugins.plugin_host.tool_registry import sensitive_tool_block_reason
+            from backend.uefn_plugins.plugin_host.tool_registry import plugin_tool_hidden, sensitive_tool_block_reason
 
-            # A client whose run names its model never sees sensitive tools it may not call.
-            return [t for t in available if not sensitive_tool_block_reason(t.name, listing=True)]
+            # A client whose run names its model never sees sensitive tools it may not call,
+            # nor a tool its plugin lists only for accounts that have what it reaches.
+            return [
+                t for t in available
+                if not sensitive_tool_block_reason(t.name, listing=True) and not plugin_tool_hidden(t.name)
+            ]
         except Exception:
             return available
 

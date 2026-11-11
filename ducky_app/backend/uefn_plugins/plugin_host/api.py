@@ -337,6 +337,7 @@ class _PluginApi:
         name: str | None = None,
         intent: str | None = None,
         listener: bool = False,
+        visible: Callable[[], bool] | None = None,
     ) -> Any:
         """Register an MCP tool on the app's shared FastMCP server.
 
@@ -346,6 +347,11 @@ class _PluginApi:
         Pass ``listener=True`` only when the tool cannot start without the UEFN editor open:
         it is then refused while UEFN is closed. Every other tool runs whatever UEFN's state
         (a call that does reach the editor still fails fast on its own).
+
+        Pass ``visible=fn`` for a tool only some accounts may use (a paid service of the
+        plugin's): agents are shown it only while ``fn()`` is true, so none offers what the
+        person does not have. ``fn`` runs on every tool listing: it must answer from memory,
+        never from the network. A call still reaches the tool, which gives its own answer.
         """
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -369,7 +375,7 @@ class _PluginApi:
                     return func
                 # Same plugin after reload_plugins() (MCP entry survives invalidate):
                 # re-track ownership without double-registering on FastMCP.
-                _record_plugin_api_tool(pid, tool_name, intent=intent, listener=listener)
+                _record_plugin_api_tool(pid, tool_name, intent=intent, listener=listener, visible=visible)
                 _log.debug("[%s] MCP tool already registered: %s", pid, tool_name)
                 return func
 
@@ -427,7 +433,7 @@ class _PluginApi:
                 return _with_panel_note(pid, result)
 
             mcp.tool(name=tool_name)(wrapper)
-            _record_plugin_api_tool(pid, tool_name, intent=intent, listener=listener)
+            _record_plugin_api_tool(pid, tool_name, intent=intent, listener=listener, visible=visible)
             _log.debug("[%s] MCP tool registered: %s", pid, tool_name)
             return wrapper
 

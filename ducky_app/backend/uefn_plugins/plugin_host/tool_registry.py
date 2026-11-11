@@ -171,6 +171,20 @@ def sensitive_tool_block_reason(name: str, *, listing: bool = False) -> str:
     return block_reason(pid, name, label=_plugin_label(pid), listing=listing)
 
 
+def plugin_tool_hidden(name: str) -> bool:
+    """A plugin registered this tool with ``visible=`` and it says not now: no agent is
+    shown it. A check that fails hides the tool (it must never be offered by mistake)."""
+    with _LOCK:
+        visible = _TOOL_VISIBLE.get((name or "").strip())
+    if visible is None:
+        return False
+    try:
+        return not visible()
+    except Exception:  # noqa: BLE001 — the plugin's check broke: not offered until it answers
+        _log.debug("visible check of %s failed", name, exc_info=True)
+        return True
+
+
 def filter_uefn_plugin_tools(tools: list[Any]) -> list[Any]:
     """Drop UEFN app-plugin tools that are Store-disabled or not in the run allowlist.
 
@@ -222,7 +236,7 @@ def filter_uefn_plugin_tools(tools: list[Any]) -> list[Any]:
             continue
         if active is not None and pid not in active:
             continue
-        if sensitive_tool_block_reason(name, listing=True):
+        if sensitive_tool_block_reason(name, listing=True) or plugin_tool_hidden(name):
             continue
         out.append(t)
     return out
@@ -262,9 +276,14 @@ def _record_plugin_api_tool(
     *,
     intent: str | None = None,
     listener: bool = False,
+    visible: Any = None,
 ) -> None:
     """Track a tool registered via ``api.tool()`` (survives contribution reloads)."""
     with _LOCK:
+        if callable(visible):
+            _TOOL_VISIBLE[tool_name] = visible
+        else:
+            _TOOL_VISIBLE.pop(tool_name, None)
         _API_TOOL_REGISTRY.setdefault(pid, set()).add(tool_name)
         if isinstance(intent, str) and intent.strip():
             _API_INTENT_PATTERNS[pid] = intent.strip()
@@ -895,6 +914,7 @@ from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _TOOL_CONCURRENCY,
     _TOOL_LAST_OWNER,
     _TOOL_SLOTS,
+    _TOOL_VISIBLE,
     DEFAULT_TOOL_CONCURRENCY,
     TOOL_SLOT_WAIT_S,
     _log,

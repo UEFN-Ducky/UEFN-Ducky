@@ -138,6 +138,8 @@ def _drop_plugin_runtime(pid: str, mod_name: str) -> None:
         _API_INTENT_PATTERNS.pop(pid, None)
         _PLUGIN_TOOL_NAMES.difference_update(tool_names)
         _PLUGIN_HOST_ONLY_TOOLS.difference_update(tool_names)
+        for name in tool_names:
+            _TOOL_VISIBLE.pop(name, None)
         _PLUGIN_PLAN_TOOLS.difference_update(tool_names)
         _PLUGIN_DESTRUCTIVE_TOOLS.difference_update(tool_names)
         _PLUGIN_INTENT_ROWS[:] = [row for row in _PLUGIN_INTENT_ROWS if row[0] != pid]
@@ -513,6 +515,7 @@ from backend.uefn_plugins.plugin_host.state import (  # noqa: E402
     _PEOPLE_PROVIDERS,
     _PLUGIN_DESTRUCTIVE_TOOLS,
     _PLUGIN_HOST_ONLY_TOOLS,
+    _TOOL_VISIBLE,
     _PLUGIN_INTENT_ROWS,
     _PLUGIN_PLAN_TOOLS,
     _PLUGIN_TOOL_NAMES,

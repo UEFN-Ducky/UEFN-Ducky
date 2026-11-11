@@ -278,11 +278,14 @@ def gateway_image_nodes() -> list[tuple[str, str]]:
 
 
 def plugin_image_generators() -> list[dict[str, Any]]:
-    """What the plugins turned on here declare under contributes.automations.image_generators."""
+    """What the plugins turned on here declare under contributes.automations.image_generators.
+    A maker whose tool its plugin lists only for some accounts (``api.tool(visible=)``: a
+    paid service this account does not have) is left out: it is nobody's default here."""
     try:
+        from backend.uefn_plugins.plugin_host.tool_registry import plugin_tool_hidden
         from backend.uefn_plugins.plugin_host.ui_registry import image_generators
 
-        return image_generators()
+        return [row for row in image_generators() if not plugin_tool_hidden(str(row.get("tool") or ""))]
     except Exception:
         return []
 

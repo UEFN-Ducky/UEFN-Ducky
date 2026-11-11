@@ -1090,8 +1090,9 @@ def ducky_plugin_set_icon(id: str, image_path: str, pretty: bool = False) -> str
     """Make a picture the plugin draft's Store icon (assets/icon.png, 512 px; an .svg is kept as is).
 
     The Store rejects a new plugin without an icon. image_path is a picture on this PC: one
-    ducky_ai_image made (ask the user first, it is billed), one from their own image model, or
-    a file they picked. Refuses when another icon file the Store would pick first is there.
+    ducky_generate_image made with the person's own picture maker (ask the user whether to
+    make one first), or a file they picked. Refuses when another icon file the Store would
+    pick first is there.
     """
     return tool_json(set_ai_plugin_icon(id, image_path), pretty=pretty)
 

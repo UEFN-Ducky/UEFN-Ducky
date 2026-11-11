@@ -116,6 +116,9 @@ _LOAD_FAILURES: dict[str, str] = {}
 _COMPILED_LOADED: dict[str, tuple[Any, str]] = {}
 # Plugins whose newer compiled version waits for a restart: pid -> message.
 _RESTART_PENDING: dict[str, str] = {}
+# api.tool(visible=fn): tools a plugin lists for agents only while fn() says so (what the
+# tool reaches is not this account's to use right now). The plugin's own tool still answers a call.
+_TOOL_VISIBLE: dict[str, Any] = {}
 # api.tool(listener=False) — host-cache / non-editor tools (skip UEFN listener gate).
 _PLUGIN_HOST_ONLY_TOOLS: set[str] = set()
 # Plugins that touched api.data: their tool results name the scope ("space Alpha Studio").

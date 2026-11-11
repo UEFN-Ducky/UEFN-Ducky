@@ -79,3 +79,34 @@ def test_a_nested_call_reuses_its_slot() -> None:
         with state._LOCK:
             state._TOOL_CONCURRENCY.pop("slot-probe", None)
             state._TOOL_SLOTS.pop("slot-probe", None)
+
+
+def test_a_tool_is_listed_only_while_its_plugin_says_so(recorded, monkeypatch) -> None:
+    """api.tool(visible=fn): a paid service's tool is not shown to agents of an account
+    that does not have it (a ducky offered Ducky AI pictures and their billing to people
+    with no plan, Nov 2026)."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(tool_registry, "is_plugin_enabled", lambda pid: True)
+    monkeypatch.setattr(tool_registry, "ensure_plugins_loaded", lambda: None)
+    tools = [SimpleNamespace(name=recorded), SimpleNamespace(name="workspace_read_file")]
+    has = {"it": False}
+    tool_registry._record_plugin_api_tool("reg-probe", recorded, visible=lambda: has["it"])
+    try:
+        assert tool_registry.plugin_tool_hidden(recorded) is True
+        assert [t.name for t in tool_registry.filter_uefn_plugin_tools(tools)] == ["workspace_read_file"]
+        has["it"] = True
+        assert tool_registry.plugin_tool_hidden(recorded) is False
+        assert [t.name for t in tool_registry.filter_uefn_plugin_tools(tools)] == [recorded, "workspace_read_file"]
+
+        def broken() -> bool:
+            raise RuntimeError("no answer")
+
+        tool_registry._record_plugin_api_tool("reg-probe", recorded, visible=broken)
+        assert tool_registry.plugin_tool_hidden(recorded) is True, "a check that fails never offers the tool"
+        # Registered again without a check (a reload of a plugin that dropped it): listed again.
+        tool_registry._record_plugin_api_tool("reg-probe", recorded)
+        assert tool_registry.plugin_tool_hidden(recorded) is False
+    finally:
+        state._TOOL_VISIBLE.pop(recorded, None)
+    assert tool_registry.plugin_tool_hidden("workspace_read_file") is False

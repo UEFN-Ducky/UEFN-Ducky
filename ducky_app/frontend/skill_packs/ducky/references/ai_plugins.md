@@ -128,9 +128,9 @@ free ones too. See `plugin_publishing`.
 14. **A Store icon**: `assets/icon.png` (or `.svg` / `.jpg`, up to 700 KB). The Store
     rejects a new plugin without one, and `ducky_plugin_validate` warns. With none, ask
     the user (in the same `ducky_ask_user` as rule 8) whether to make one or use a
-    picture they have. Make one only on their yes: `ducky_ai_image(prompt,
-    confirm_spend=true)` is billed to their Ducky AI credit (a Text to Image workflow
-    node with their own image model works too). A simple bold symbol on a plain
+    picture they have. Make one only on their yes: `ducky_generate_image(prompt)` uses
+    the picture maker they set up (it says so when none is: pass that on, and never
+    offer a maker they don't have). A simple bold symbol on a plain
     background reads best small. Then `ducky_plugin_set_icon(id, image_path)` with the
     path it returned or they gave: it fits the picture into a 512 px PNG.
 15. **Team-ready the moment it's finished** (`data_sharing: true`). A plugin is multiplayer
@@ -230,7 +230,7 @@ Store build refuses a plugin without it (rule 8). Optional `data_locks`, `data_l
 
 | Call | Use |
 |---|---|
-| `@api.tool(name=None, intent=None, listener=False)` | MCP tool. Docstring = description. `listener=True` only if it needs the UEFN editor open. Return a dict. |
+| `@api.tool(name=None, intent=None, listener=False, visible=None)` | MCP tool. Docstring = description. `listener=True` only if it needs the UEFN editor open. Return a dict. `visible=fn` (answers from memory, no network): agents are shown the tool only while `fn()` is true, for a paid service only some accounts have. |
 | `@api.register_pipeline_node("<id>.<node>")` | Workflow node handler `fn(ctx) -> dict` (alias `register_automation_node`). |
 | `api.register_panel_rpc(name, fn)` | Panel `plugin.call` target. `fn` is called with **keyword** arguments: `fn(**params)`. |
 | `api.call_tool(name, arguments=None)` | Call any Ducky MCP tool in-process, with the same approvals as the agent; returns the parsed result, raises `ValueError` on failure. |
