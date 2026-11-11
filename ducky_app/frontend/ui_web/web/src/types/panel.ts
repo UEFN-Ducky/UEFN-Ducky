@@ -108,8 +108,10 @@ export interface GatewayAccountStatusDto {
   pending?: boolean;
   /** The sign-in is reinstalling a broken CLI first. */
   repairing?: boolean;
-  /** The last sign-in failed (timed out or cancelled). */
+  /** The last sign-in failed (timed out or cancelled), or why a signed-in account has no access. */
   error?: string;
+  /** "none": signed in, but the provider refuses this account (e.g. Gemini CLI, personal Google). */
+  access?: string;
 }
 
 /** One usage window of an account (5-hour, weekly, a key's rate limit). */

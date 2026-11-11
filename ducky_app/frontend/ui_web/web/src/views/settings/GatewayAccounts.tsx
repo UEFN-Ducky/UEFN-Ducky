@@ -23,6 +23,7 @@ function loginText(s: GatewayAccountStatusDto | null | undefined): string {
   if (!s) return "Checking…";
   if (s.pending) return s.repairing ? REPAIRING : "Waiting for sign-in in your browser…";
   if (!s.loggedIn) return s.error || "Not logged in";
+  if (s.access === "none") return [s.email, s.error || "No access for this account"].filter(Boolean).join(" · ");
   return [s.email || "Logged in", s.plan].filter(Boolean).join(" · ");
 }
 
@@ -34,6 +35,7 @@ function keyText(a: GatewayAccountDto): string {
 function statusPill(a: GatewayAccountDto, isDefault: boolean): { text: string; tone: string } | null {
   if (a.exhausted_until) return { text: `Full until ${resetTime(a.exhausted_until)}`, tone: "is-warn" };
   if (a.kind === "login" && a.status && !a.status.loggedIn) return { text: "Logged out", tone: "is-fail" };
+  if (a.kind === "login" && a.status?.access === "none") return { text: "No access", tone: "is-fail" };
   if (a.kind === "key" && !a.has_key) return { text: "No key", tone: "is-fail" };
   if (isDefault) return { text: "★ Default", tone: "is-ok" };
   return null;
@@ -242,7 +244,7 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
     if (!value) return;
     const url = accounts.find((a) => a.id === keyFor)?.base_url || "";
     setBusy(true);
-    setNote("Testing…");
+    setNote(""); // the button says Testing…; a second line under the table only repeated it
     try {
       const test = await runBridgeJob<{ ok: boolean; detail?: string; error?: string }>(
         "test_key", [provider, value, url, true], 300_000);

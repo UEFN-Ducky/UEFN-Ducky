@@ -121,6 +121,18 @@ it("Add API key adds a row and saves the key on it", async () => {
   expect(runBridgeJob).toHaveBeenCalledWith("test_key", ["anthropic", "sk-new", "", true], 300_000);
 });
 
+it("a signed-in account the provider refuses says No access, not Default", async () => {
+  api.list_gateway_accounts.mockResolvedValue({
+    ok: true, auto_switch: true, default: "default",
+    accounts: [{ id: "default", label: "Default", kind: "login", active: true, exhausted_until: null,
+      status: { loggedIn: true, email: "you@gmail.com", access: "none", error: "No Gemini access: personal accounts" } }],
+  });
+  render(<GatewayAccounts provider="gemini_cli" kind="login" title="Gemini CLI logins" />);
+  await screen.findByText("you@gmail.com · No Gemini access: personal accounts");
+  expect(within(row("Default")).getByText("No access")).toBeTruthy();
+  expect(screen.queryByText("★ Default")).toBeNull();
+});
+
 it("a provider with no key yet links to where to get one", async () => {
   api.list_gateway_accounts.mockImplementation(async () => ({
     ok: true, auto_switch: true, default: "default",
