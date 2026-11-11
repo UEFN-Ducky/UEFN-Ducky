@@ -21,7 +21,7 @@ function resetTime(until: number): string {
 
 function loginText(s: GatewayAccountStatusDto | null | undefined): string {
   if (!s) return "Checking…";
-  if (s.pending) return s.repairing ? REPAIRING : "Waiting for sign-in in your browser…";
+  if (s.pending) return s.installing ? INSTALLING : s.repairing ? REPAIRING : "Waiting for sign-in in your browser…";
   if (!s.loggedIn) return s.error || "Not logged in";
   if (s.access === "none") return [s.email, s.error || "No access for this account"].filter(Boolean).join(" · ");
   return [s.email || "Logged in", s.plan].filter(Boolean).join(" · ");
@@ -46,6 +46,7 @@ const LOGIN_POLL_MS = 1500;
 const LOGIN_POLLS = 200; // ~5 min, the plugin's own sign-in timeout
 const TERMINAL_HINT = "Finish signing in in the terminal tab, then Refresh.";
 const REPAIRING = "Repairing Gemini CLI…";
+const INSTALLING = "Installing it (about a minute)… the sign-in starts by itself.";
 const reducedMotion = () =>
   typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
@@ -160,9 +161,30 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
     setDefaultId(a.id);
     void run(() => api()?.set_gateway_account?.(provider, a.id), `${a.label} is the default for new chats.`);
   };
+  /** True once a CLI install the plugin is running for this row has finished cleanly. */
+  const waitForInstall = async (id: string): Promise<boolean> => {
+    const first = await api()?.gateway_account_status?.(provider, id).catch(() => undefined);
+    if (!first?.ok || !first.status?.installing) return false;
+    setNote("");
+    setWaiting({ id, text: INSTALLING });
+    try {
+      for (let i = 0; i < LOGIN_POLLS && mounted.current; i++) {
+        await new Promise((r) => setTimeout(r, LOGIN_POLL_MS));
+        const st = await api()?.gateway_account_status?.(provider, id).catch(() => undefined);
+        const s = st?.ok ? st.status : null;
+        if (s && !s.pending) {
+          if (s.error) setNote(s.error);
+          return !s.error;
+        }
+      }
+      return false;
+    } finally {
+      if (mounted.current) setWaiting(null);
+    }
+  };
   /** Log in: a terminal tab (most CLIs), or a hidden browser sign-in whose status we poll. */
   /** False when the sign-in didn't start (the CLI missing, an RPC error). */
-  const startLogin = async (id: string): Promise<boolean> => {
+  const startLogin = async (id: string, retried = false): Promise<boolean> => {
     setBusy(true);
     setMenu(null);
     let started: { ok: boolean; error?: string; waiting?: boolean; message?: string } | undefined;
@@ -178,7 +200,12 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
     } finally {
       setBusy(false);
     }
-    if (!started?.ok) return false;
+    if (!started?.ok) {
+      // The CLI isn't installed: Log in started its install. Wait for it here and sign in
+      // by itself once, so the person never has to press Log in a second time.
+      if (!retried && (await waitForInstall(id))) return startLogin(id, true);
+      return false;
+    }
     if (!started.waiting) return true;
     const waitText = started.message || "Waiting for sign-in in your browser…";
     setWaiting({ id, text: waitText });

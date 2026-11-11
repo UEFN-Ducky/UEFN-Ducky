@@ -108,6 +108,8 @@ export interface GatewayAccountStatusDto {
   pending?: boolean;
   /** The sign-in is reinstalling a broken CLI first. */
   repairing?: boolean;
+  /** Log in found no CLI and is installing it; the table signs in by itself afterwards. */
+  installing?: boolean;
   /** The last sign-in failed (timed out or cancelled), or why a signed-in account has no access. */
   error?: string;
   /** "none": signed in, but the provider refuses this account (e.g. Gemini CLI, personal Google). */

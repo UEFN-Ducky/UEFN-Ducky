@@ -161,6 +161,42 @@ it("Add API key fills an empty Default row instead of adding a second row", asyn
   expect(api.add_gateway_account).not.toHaveBeenCalled();
 });
 
+it("Log in with no CLI waits for its install, then signs in by itself (one click)", async () => {
+  api.list_gateway_accounts.mockResolvedValue({
+    ok: true, auto_switch: true, default: "default",
+    accounts: [{ id: "default", label: "Default", kind: "login", active: true, exhausted_until: null, status: { loggedIn: false } }],
+  });
+  api.login_gateway_account
+    .mockResolvedValueOnce({ ok: false, error: "Installing Claude Code… the sign-in starts by itself when it's done." })
+    .mockResolvedValueOnce({ ok: true });
+  api.gateway_account_status
+    .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, installing: true } })
+    .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, installing: true } })
+    .mockResolvedValue({ ok: true, status: { loggedIn: false } });
+  render(<GatewayAccounts provider="claude_code" kind="login" title="Claude Code logins" />);
+  await screen.findByText("Default");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await screen.findByText(/Installing it \(about a minute\)/);
+  await waitFor(() => expect(api.login_gateway_account).toHaveBeenCalledTimes(2), { timeout: 8000 });
+  expect(api.login_gateway_account).toHaveBeenLastCalledWith("claude_code", "default");
+}, 12000);
+
+it("a failed install says why and doesn't retry the sign-in", async () => {
+  api.list_gateway_accounts.mockResolvedValue({
+    ok: true, auto_switch: true, default: "default",
+    accounts: [{ id: "default", label: "Default", kind: "login", active: true, exhausted_until: null, status: { loggedIn: false } }],
+  });
+  api.login_gateway_account.mockResolvedValue({ ok: false, error: "Installing Claude Code…" });
+  api.gateway_account_status
+    .mockResolvedValueOnce({ ok: true, status: { loggedIn: false, pending: true, installing: true } })
+    .mockResolvedValue({ ok: true, status: { loggedIn: false, error: "Claude Code install failed: no network" } });
+  render(<GatewayAccounts provider="claude_code" kind="login" title="Claude Code logins" />);
+  await screen.findByText("Default");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await screen.findAllByText("Claude Code install failed: no network", {}, { timeout: 6000 });
+  expect(api.login_gateway_account).toHaveBeenCalledTimes(1);
+}, 10000);
+
 it("a sign-in that can't start leaves no extra row, and names never repeat", async () => {
   api.login_gateway_account.mockResolvedValue({ ok: false, error: "Claude Code isn't installed yet." });
   render(<GatewayAccounts provider="claude_code" kind="login" title="Claude Code logins" />);
