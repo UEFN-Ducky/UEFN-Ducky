@@ -174,14 +174,18 @@ def test_reconstructed_writer_checks_current_bytes_not_persisted_history(project
 
 
 @pytest.mark.parametrize(
-    "rel",
-    ["Saved/x.txt", "Proj.uproject", "Content/Python/x.py", "Content/Verse/Fortnite.digest.verse", "../escape.txt"],
+    "rel", ["Saved/x.txt", "Proj.uproject", "Content/Python/x.py", "Content/Verse/Fortnite.digest.verse"],
 )
-def test_guarded_paths_are_refused_before_write(project: Path, rel: str) -> None:
-    w = ProjectWriter.for_root(str(project))
+def test_any_path_in_the_project_is_written(project: Path, rel: str) -> None:
+    """No island rules (owner, Nov 11 2026): Saved/, the root, .py and digests are files too."""
+    ProjectWriter.for_root(str(project)).write_text(rel, "x")
+    assert (project / rel).read_text(encoding="utf-8") == "x"
+
+
+def test_a_path_outside_the_project_is_refused_before_write(project: Path) -> None:
     with pytest.raises(ValueError):
-        w.write_text(rel, "x")
-    assert not (project / rel).exists()
+        ProjectWriter.for_root(str(project)).write_text("../escape.txt", "x")
+    assert not (project.parent / "escape.txt").exists()
 
 
 def test_policy_denial_raises_and_emits_event(project: Path) -> None:

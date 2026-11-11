@@ -30,9 +30,8 @@ def make_repo(root: Path) -> Path:
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    from backend.workspace import journal as journal_module, writer
+    from backend.workspace import journal as journal_module
 
-    monkeypatch.setattr(writer, "_is_folder_project_root", lambda root: True)
     monkeypatch.setattr(journal_module, "_use_db", lambda: False)
     outer = tmp_path / "GitHub"
     inner = make_repo(outer / "Repo")

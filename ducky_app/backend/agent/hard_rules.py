@@ -1,8 +1,9 @@
 """Always-on agent hard rules shared by MCP instructions, BYOA bootstrap, and chat prompts.
 
 Only cross-tool rules live here. A rule about one tool lives in that tool's docstring,
-and a rule the code enforces (digest writes, island .py, device scale, execute_python
-placement, Epic instance arrays) is one line at most: the refusal teaches the rest.
+and a rule the code enforces (device scale, execute_python placement, Epic instance
+arrays) is one line at most: the refusal teaches the rest. File writes have no such rule:
+anywhere in the project, any file type (backend.workspace.paths).
 
 ``CORE_RULES`` go to every agent. ``ISLAND_RULES`` (the editor, Verse, island files) only
 matter in a UEFN island: a folder project gets ``hard_rules_for(root)`` without them, since
@@ -169,16 +170,15 @@ ISLAND_RULES = (
     "`umg_verse_field_events`, `events_subscriptions`.\n"
     "- **Persistence `weak_map` (HARD):** never remove player keys once added; replace values "
     'via rebuild+`set`. Field changes: `skill_read_subskill("verse","persistence")`.\n'
-    "- UEFN digests (`*.digest.verse`) are READ-ONLY: UEFN auto-edits them on build; read "
-    "them with `search_verse_digest` / `get_verse_api`.\n"
+    "- UEFN regenerates its digests (`*.digest.verse`) on every Verse build; look APIs up "
+    "with `search_verse_digest` / `get_verse_api`.\n"
     "- **Research budget:** copy names from loaded skills; ~5 digest lookups and ~3 "
     "subskill loads, then WRITE. Two search misses → move on.\n"
     "\n"
     "### Island files\n"
-    "- **Write boundary (HARD):** inside a UEFN island write only `Content/**` and "
-    "`.ducky/**`, and No Python in the island: no `.py` / `.pyc` except Ducky's "
-    "`Content/Python/init_unreal.py` (Never delete it; extra files get `ContainsPythonData`). "
-    "Folder projects are fully editable. Project folder storage: caches, temps and captures "
+    "- **Writes:** anywhere in the island, any file type, as in a folder project. Ducky "
+    "rewrites `Content/Python/init_unreal.py` (its UEFN listener boot) at each start. Project "
+    "folder storage: caches, temps and captures "
     "go to `%LOCALAPPDATA%/UEFN-Ducky/`, never `Saved/DuckyCaptures`; screenshots land in "
     "the chat's `conversations/<chat>/attachments/` and come back as MCP image content.\n"
     "- **Project assets only:** new assets go under `get_project_info().content_root` — "

@@ -38,44 +38,11 @@ from backend.workspace.paths import (
     normalize_rel,
     real_path,
     rel_from_root,
-    require_not_digest_path,
-    require_writable_folder_path,
-    require_writable_project_path,
+    require_inside_project,
 )
 from backend.workspace.policy import Decision, WritePolicy, WriteRequest, evaluate
 
 log = logging.getLogger(__name__)
-
-
-def _is_folder_project_root(root: str) -> bool:
-    """True only for a folder project the user added (never an island or an unknown root).
-
-    Any failure answers False, which keeps the stricter island rules.
-    """
-    try:
-        from frontend.project_kind import is_saved_folder_project
-
-        return is_saved_folder_project(root)
-    except Exception:
-        return False
-
-
-def _is_lent_folder(root: str) -> bool:
-    """A folder the workflow step this agent is doing lends it (backend.workspace.run_folders)."""
-    try:
-        from backend.workspace.run_folders import is_granted_root
-
-        return is_granted_root(root)
-    except Exception:
-        return False
-
-
-def _require_writable(full: str, root: str) -> None:
-    # A lent folder is plain files, like a folder project: never the island rules.
-    if _is_folder_project_root(root) or _is_lent_folder(root):
-        require_writable_folder_path(full, root)
-    else:
-        require_writable_project_path(full)
 
 
 def _beside_content(rel: str, root: str) -> str:
@@ -530,11 +497,9 @@ class ProjectWriter:
         if root and os.path.basename(os.path.realpath(root)).lower() == "content" and rel.lower().startswith("content/"):
             rel = rel[8:]
         rel = _beside_content(rel, root)
-        require_not_digest_path(rel)
         full = self._path_resolver(rel)
-        require_not_digest_path(full)
         root = self._owning_root(full, root)
-        _require_writable(full, root)
+        require_inside_project(full, root)  # anywhere in it, any file type (paths.py)
         canonical = rel_from_root(full, root)
         if not canonical:
             raise ValueError(f"Path is outside the active project: {rel_in!r}")

@@ -65,14 +65,14 @@ def test_write_tool_result_is_small_and_never_echoes_the_old_file(project) -> No
     assert len(text.encode("utf-8")) < 400
 
 
-def test_write_tool_refuses_guarded_paths(project, monkeypatch) -> None:
+def test_write_tool_writes_anywhere_in_the_project(project, monkeypatch) -> None:
     root, _ = project
-    monkeypatch.setattr(system, "tool_json", lambda payload, pretty=False: json.dumps(payload))
+    monkeypatch.setattr(system, "tool_json", lambda payload, pretty=False, **_k: json.dumps(payload))
+    system.workspace_write_file("Content/Verse/Fortnite.digest.verse", content="x")
+    system.workspace_write_file("Saved/x.txt", content="x")
+    assert (root / "Saved" / "x.txt").read_text(encoding="utf-8") == "x"
     with pytest.raises(ValueError):
-        system.workspace_write_file("Content/Verse/Fortnite.digest.verse", content="x")
-    with pytest.raises(ValueError):
-        system.workspace_write_file("Saved/x.txt", content="x")
-    assert not (root / "Saved").exists()
+        system.workspace_write_file("../escape.txt", content="x")
 
 
 def test_read_tool_notes_the_base_for_conflicts(project, monkeypatch) -> None:

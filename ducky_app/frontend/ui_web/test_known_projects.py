@@ -97,23 +97,24 @@ def test_the_boot_deploy_sets_up_every_discovered_island(docs: Path, monkeypatch
     assert sorted(deployed) == sorted(str(i) for i in islands)
 
 
-def test_the_boot_deploy_walks_only_the_selected_island_deep(docs: Path, monkeypatch) -> None:
-    """Every folder of every island at each boot held a core for two minutes: only the
-    selected one gets the deep sweep, the rest the shallow one."""
+def test_the_boot_deploy_refreshes_every_island_selected_first(docs: Path, monkeypatch) -> None:
+    """Each start redeploys every island's listener (what a refused write left out lands now);
+    the selected island does the once-per-process shared work."""
     from types import SimpleNamespace
 
     from frontend.ui_web import project_deploy
 
     islands = [_island(docs / "Fortnite Projects", n) for n in ("One", "Two", "Three")]
-    deep: dict[str, bool] = {}
+    calls: list[tuple[str, bool]] = []
     monkeypatch.setattr(
         project_deploy, "deploy_listener",
-        lambda root, _port, shared=True, deep_sweep=True: deep.__setitem__(str(root), deep_sweep) or [],
+        lambda root, _port, shared=True: calls.append((str(root), shared)) or [],
     )
     monkeypatch.setattr(project_deploy.PanelSettings, "load",
                         classmethod(lambda cls: SimpleNamespace(uefn_project_root=str(islands[1]))))
     project_deploy.deploy_all_recent_projects()
-    assert deep == {str(islands[0]): False, str(islands[1]): True, str(islands[2]): False}
+    assert sorted(root for root, _ in calls) == sorted(str(i) for i in islands)
+    assert [shared for _, shared in calls] == [True, False, False]
 
 
 def test_a_plugin_source_adds_a_tab_and_claims_its_folders(docs: Path, tmp_path: Path, monkeypatch) -> None:

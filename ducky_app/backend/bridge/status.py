@@ -11,7 +11,7 @@ import os
 import threading
 import time
 import weakref
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +44,6 @@ class ListenerStatusState:
 
     ping_fail_streak: int = 0
     project_cache: dict[str, Any] | None = None
-    python_quarantined: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         with _states_lock:
@@ -359,23 +358,13 @@ def fetch_listener_status(
 
     if selected_project_root and _claim_python_sweep(selected_project_root, time.time()):
         try:
-            from frontend.deploy import (
-                quarantine_project_python,
-                refresh_inits,
-                resolve_uefn_project_root,
-            )
+            from frontend.deploy import refresh_inits, resolve_uefn_project_root
             from frontend.project_kind import has_uefnproject
 
             root = resolve_uefn_project_root(Path(selected_project_root))
             if not has_uefnproject(root):
-                raise ValueError("folder project: no island sweep")
-            moved = quarantine_project_python(root, deep=False)
-            if moved:
-                st.python_quarantined = moved
-            try:
-                refresh_inits(root)
-            except Exception:
-                pass
+                raise ValueError("folder project: no island init refresh")
+            refresh_inits(root)
         except Exception:
             pass
 
@@ -404,5 +393,4 @@ def fetch_listener_status(
         "python_and_toolsets": coexistence,
         "listener_init_race": init_race_active,
         "beta_access_note": str(beta.get("agent_note") or "") if init_race_active else "",
-        "project_python_quarantined": list(st.python_quarantined),
     }

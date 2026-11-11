@@ -1,4 +1,4 @@
-"""Deploy the listener stub + AppData listener. Quarantine stray island .py only."""
+"""Deploy the listener stub + AppData listener. Every other island file stays where it is."""
 
 from __future__ import annotations
 
@@ -459,11 +459,6 @@ def resolve_uefn_project_root(user_selection: Path) -> Path:
     )
 
 
-_SWEEP_SKIP_DIRS = frozenset({"Saved", "Intermediate", "DerivedDataCache", ".git"})
-_PY_FILE_SUFFIXES = frozenset({".py", ".pyc"})
-# The only .py Ducky is allowed to keep in the island — listener boot after Content mounts.
-_KEEP_ISLAND_PYTHON = frozenset({"content/python/init_unreal.py"})
-
 
 def content_python_dir(project_root: Path) -> Path:
     return project_root / "Content" / "Python"
@@ -475,120 +470,6 @@ def _is_island(project_root: Path) -> bool:
     from frontend.project_kind import has_uefnproject
 
     return has_uefnproject(project_root)
-
-
-def _is_kept_island_python(project_root: Path, path: Path) -> bool:
-    try:
-        rel = path.relative_to(project_root.resolve()).as_posix().lower()
-    except ValueError:
-        return False
-    return rel in _KEEP_ISLAND_PYTHON
-
-
-def quarantine_python_root() -> Path:
-    return appdata_uefn_ducky_dir() / "quarantined_python"
-
-
-def _project_slug_for_quarantine(project_root: Path) -> str:
-    try:
-        from frontend.ui_web.chats.store import project_slug
-
-        return project_slug(str(project_root))
-    except Exception:
-        name = project_root.name or "project"
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:40]
-        return safe or "project"
-
-
-def _is_python_file(path: Path) -> bool:
-    # Suffix first: an island holds tens of thousands of .uasset files, and a stat on each
-    # one at every boot kept a core busy for minutes.
-    return path.suffix.lower() in _PY_FILE_SUFFIXES and path.is_file()
-
-
-def _walk_python_artifacts(base: Path, found: list[Path], project_root: Path) -> None:
-    if not base.is_dir():
-        return
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in _SWEEP_SKIP_DIRS]
-        for name in list(dirnames):
-            if name == "__pycache__":
-                found.append(Path(dirpath) / name)
-                dirnames.remove(name)
-        for name in filenames:
-            path = Path(dirpath) / name
-            if _is_python_file(path) and not _is_kept_island_python(project_root, path):
-                found.append(path)
-
-
-def _collect_python_artifacts(project_root: Path, *, deep: bool) -> list[Path]:
-    root = project_root.resolve()
-    found: list[Path] = []
-    if deep:
-        _walk_python_artifacts(root, found, root)
-        return found
-    # ponytail: shallow = project-root files + Content/Python/** + .ducky/**
-    # Ceiling: a .py dropped deeper than depth 1 outside those two trees is only
-    # caught by the next deploy sweep (deep=True). Upgrade: walk the whole
-    # project on a background timer if agents keep dropping scratch mid-session.
-    try:
-        for child in root.iterdir():
-            if child.is_dir() and child.name == "__pycache__":
-                found.append(child)
-            elif _is_python_file(child) and not _is_kept_island_python(root, child):
-                found.append(child)
-    except OSError:
-        pass
-    _walk_python_artifacts(root / "Content" / "Python", found, root)
-    _walk_python_artifacts(root / ".ducky", found, root)
-    return found
-
-
-def _unique_quarantine_dest(dest: Path) -> Path:
-    if not dest.exists():
-        return dest
-    stem, suffix = dest.stem, dest.suffix
-    n = 1
-    while True:
-        candidate = dest.with_name(f"{stem}__{n}{suffix}" if suffix else f"{dest.name}__{n}")
-        if not candidate.exists():
-            return candidate
-        n += 1
-
-
-def quarantine_project_python(project_root: Path, *, deep: bool) -> list[str]:
-    """Move every ``.py`` / ``.pyc`` / ``__pycache__`` out of the island into AppData.
-
-    Leaves Ducky's managed ``Content/Python/init_unreal.py`` in place. Extra
-    ``.py`` / ``.pyc`` / ``__pycache__`` (agent scratch) is moved, never deleted.
-    Does nothing unless the folder holds a ``*.uefnproject``: a folder project (a repo)
-    keeps every Python file it has.
-    """
-    try:
-        root = Path(project_root).resolve()
-    except OSError:
-        return []
-    if not root.is_dir() or not _is_island(root):
-        return []
-    dest_root = quarantine_python_root() / _project_slug_for_quarantine(root)
-    logs: list[str] = []
-    for src in _collect_python_artifacts(root, deep=deep):
-        if _is_kept_island_python(root, src):
-            continue
-        try:
-            rel = src.relative_to(root)
-        except ValueError:
-            continue
-        dest = dest_root / rel
-        try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest = _unique_quarantine_dest(dest)
-            shutil.move(str(src), str(dest))
-        except OSError as exc:
-            logs.append(f"Failed to quarantine {rel.as_posix()}: {exc}")
-            continue
-        logs.append(f"Quarantined {rel.as_posix()} -> {dest}")
-    return logs
 
 
 def enable_uefn_project_python(project_root: Path) -> str | None:
@@ -879,23 +760,19 @@ _shared_deploy_lock = threading.Lock()
 _shared_deploy_done = False
 
 
-def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = True, deep_sweep: bool = True) -> list[str]:
-    """Write the island listener stub, then quarantine any other project ``.py``.
+def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = True) -> list[str]:
+    """Write the island listener stub (``Content/Python/init_unreal.py``).
 
     Listener source is refreshed into ``%LOCALAPPDATA%/UEFN-Ducky/listener`` by
-    ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch. The only
-    island Python file is ``Content/Python/init_unreal.py``.
+    ``sync_listener_to_appdata`` on UEFN-Ducky.exe / bridge launch. Every other file in the
+    island stays where it is, ``.py`` included (no quarantine: the owner removed it, Nov 11 2026).
 
     ``shared=False`` skips the once-per-process work (all-project init refresh,
     listener hint, skill sync). Startup can call this from both project-switch
     and ``deploy_all_recent_projects``; only the first shared call runs that block.
 
-    ``deep_sweep=False`` quarantines only the island root, ``Content/Python`` and ``.ducky``
-    (where UEFN runs Python from) instead of walking every folder: the boot pass over every
-    known island walked them all and held a core for two minutes after each launch.
-
-    The island steps (init, quarantine, ``.uefnproject`` Python flag) each check for a
-    real ``*.uefnproject`` themselves, so a folder project passes through untouched.
+    The island steps (init, ``.uefnproject`` Python flag) each check for a real
+    ``*.uefnproject`` themselves, so a folder project passes through untouched.
     """
     global _shared_deploy_done
     do_shared = False
@@ -912,7 +789,6 @@ def deploy_listener(project_root: Path, listener_port: int, *, shared: bool = Tr
             logs.extend(ensure_project_init(project_root))
         except Exception as exc:
             logs.append(f"init refresh failed for {project_root}: {exc}")
-    logs.extend(quarantine_project_python(project_root, deep=deep_sweep))
     py_log = enable_uefn_project_python(project_root)
     if py_log:
         logs.append(py_log)

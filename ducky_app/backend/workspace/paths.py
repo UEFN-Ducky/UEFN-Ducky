@@ -1,8 +1,11 @@
 """Project path rules shared by every write path.
 
 Pure helpers: no I/O beyond ``os.path`` normalisation, no frontend imports.
-``backend.tools.core.system`` and ``backend.tools.verse.verse_digests`` re-export
-the guard functions so existing importers keep working.
+
+A write may go anywhere inside its project, any file type, as Claude Code writes in its
+folder: no island-only rules (Content/ and .ducky/ only, no .py, no digests, no
+Saved/ or Intermediate/) and no folder-project ones (.git internals). The owner had them
+all removed (Nov 11 2026); only a path outside the project is refused.
 """
 
 from __future__ import annotations
@@ -11,37 +14,10 @@ import difflib
 import hashlib
 import os
 
-WRITE_OUTSIDE_CONTENT_FORBIDDEN = (
-    "workspace_write_file may only write under the UEFN project's Content/ or "
-    ".ducky/ folders. Never touch UEFN core files, digests, Saved/, Intermediate/, "
-    "or the project root. Never write .py/.pyc into the island (Epic rejects "
-    "the upload with ContainsPythonData). Scratch files belong in "
-    "%LOCALAPPDATA%/UEFN-Ducky/ (or OS temp). Allowed: Content/** (Verse, assets) "
-    "and .ducky/** (tests, tasks) — never Python."
+WRITE_OUTSIDE_PROJECT_FORBIDDEN = (
+    "That path is outside the project. Writes go anywhere inside the open project (or a "
+    "folder the step lends); open the other project first to write there."
 )
-
-WRITE_PYTHON_IN_PROJECT_FORBIDDEN = (
-    "Never write extra .py/.pyc into a UEFN project. Ducky auto-manages "
-    "Content/Python/init_unreal.py (listener boot) — never delete that file. "
-    "Scratch → %LOCALAPPDATA%/UEFN-Ducky/. execute_python is in-memory only."
-)
-
-DIGEST_WRITE_FORBIDDEN = (
-    "UEFN digests are READ-ONLY — UEFN auto-edits them on Verse build. Never write, "
-    "edit, delete, rename, or patch any *.digest.verse. Run workspace_compile_verse "
-    "then search_verse_digest / get_verse_api / list_verse_types. Write project Verse "
-    "under Content/Verse/ only."
-)
-
-WRITE_OUTSIDE_FOLDER_FORBIDDEN = (
-    "This is a folder project (not a UEFN island): writes must stay inside the project "
-    "folder and never touch .git/ internals. Use git commands for repository changes."
-)
-
-_WRITE_BLOCKED_ANCESTORS = frozenset({"Saved", "Intermediate", "DerivedDataCache"})
-_FOLDER_BLOCKED_NAMES = frozenset({".git", ".svn", ".hg"})
-_WRITE_ALLOWED_ANCESTORS = frozenset({"Content", ".ducky"})
-_WRITE_BLOCKED_SUFFIXES = (".py", ".pyc")
 
 # Hash width shared with the editor's file history so ids line up across stores.
 HASH_HEX_CHARS = 16
@@ -148,37 +124,11 @@ def is_uefn_digest_path(path: str) -> bool:
     return name.endswith(".digest.verse") or (name.endswith(".verse") and "digest" in name)
 
 
-def require_not_digest_path(path: str) -> None:
-    """Raise if *path* names a UEFN digest — digests must never be mutated."""
-    if is_uefn_digest_path(path):
-        raise ValueError(DIGEST_WRITE_FORBIDDEN)
-
-
-def require_writable_project_path(file_path: str) -> None:
-    """Refuse writes outside Content/** and .ducky/** of a UEFN project.
-
-    Digests are blocked separately by require_not_digest_path. This guard stops
-    the rest: Saved/, Intermediate/, project-root junk, UEFN core files, and
-    any .py/.pyc (Epic ContainsPythonData).
-    """
-    lowered = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").lower()
-    if lowered.endswith(_WRITE_BLOCKED_SUFFIXES):
-        raise ValueError(WRITE_PYTHON_IN_PROJECT_FORBIDDEN)
-    parts = os.path.normpath(os.path.abspath(file_path or "")).replace("\\", "/").split("/")
-    names = [p for p in parts if p and p != "."]
-    for i, name in enumerate(names):
-        if name in _WRITE_BLOCKED_ANCESTORS:
-            raise ValueError(WRITE_OUTSIDE_CONTENT_FORBIDDEN)
-        if name in _WRITE_ALLOWED_ANCESTORS and i < len(names) - 1:
-            return
-    raise ValueError(WRITE_OUTSIDE_CONTENT_FORBIDDEN)
-
-
-def require_writable_folder_path(file_path: str, root: str) -> None:
-    """Folder-project rule: anywhere under *root* (``.py`` included) except VCS internals."""
+def require_inside_project(file_path: str, root: str) -> None:
+    """Anywhere under *root*, any file type (an island's or a folder project's alike)."""
     rel = rel_from_root(file_path, root)
     if rel is None or rel in ("", "."):
-        raise ValueError(WRITE_OUTSIDE_FOLDER_FORBIDDEN)
+        raise ValueError(WRITE_OUTSIDE_PROJECT_FORBIDDEN)
     parts = [p for p in rel.split("/") if p and p != "."]
-    if not parts or parts[0] == ".." or any(p.lower() in _FOLDER_BLOCKED_NAMES for p in parts):
-        raise ValueError(WRITE_OUTSIDE_FOLDER_FORBIDDEN)
+    if not parts or parts[0] == "..":
+        raise ValueError(WRITE_OUTSIDE_PROJECT_FORBIDDEN)

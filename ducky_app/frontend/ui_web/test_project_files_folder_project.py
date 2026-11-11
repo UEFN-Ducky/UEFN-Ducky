@@ -109,7 +109,7 @@ def test_island_listing_is_unchanged(tmp_path: Path, monkeypatch) -> None:
     assert pf.content_root_rel() == "Content"
     assert _names(pf.list_project_files("Content")) == ["Verse"]  # .umap hidden on islands
     assert pf.list_project_files("Content")["entries"][0]["path"] == "Content/Verse"
-    with pytest.raises(ValueError):
-        pf.create_project_file("Content", "scratch.py")
-    with pytest.raises(ValueError):
-        pf.list_project_files("src")  # outside Content stays off-limits on an island
+    # No island rules (owner, Nov 11 2026): .py and folders outside Content are files too.
+    pf.create_project_file("Content", "scratch.py")
+    assert (island / "Content" / "scratch.py").is_file()
+    pf.list_project_files("src")

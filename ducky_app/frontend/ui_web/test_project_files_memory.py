@@ -15,7 +15,6 @@ from frontend.ui_web import project_files as pf
 def test_editability_reads_only_file_header(tmp_path, monkeypatch, external, binary):
     target = tmp_path / "NOTES"
     target.write_bytes((b"\x00" if binary else b"hello") + b"x" * 8192)
-    monkeypatch.setattr(pf, "is_locked_project_file", lambda path: False)
     monkeypatch.setattr(pf, "_is_workspace_locked_path", lambda path: False)
     monkeypatch.setattr(pf, "_resolve_relative", lambda path: target)
     original_open = Path.open

@@ -88,7 +88,7 @@ def _sandbox_resolve(encoded: str) -> Path:
         if not pf._is_under_any_workspace_folder(target):  # noqa: SLF001
             raise ValueError("Path escapes workspace folders")
     else:
-        pf._require_under_content(target, encoded)  # noqa: SLF001
+        pf._require_in_project(target, encoded)  # noqa: SLF001
     return target
 
 

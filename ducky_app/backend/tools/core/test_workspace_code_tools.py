@@ -52,7 +52,6 @@ def project(tmp_path: Path, monkeypatch):
     journal = RecordingJournal()
     runtime.reset_for_tests(ProjectWriter.for_root(str(root), journal=journal))
     # A folder project: the island rules (Content/ only, no .py) do not apply.
-    monkeypatch.setattr("backend.workspace.writer._is_folder_project_root", lambda _root: True)
     monkeypatch.setattr(wc, "resolve_workspace_path", resolve)
     monkeypatch.setattr(system, "resolve_workspace_path", resolve)
     monkeypatch.setattr(wc, "tool_json", lambda payload, pretty=False: json.dumps(payload))

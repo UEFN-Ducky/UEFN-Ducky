@@ -1,4 +1,5 @@
-"""A full path inside the island's Content is as writable as its Content/ form."""
+"""A full path anywhere inside the open island is as writable as its project-relative form;
+only paths outside the project stay read-only (owner, Nov 11 2026: no Content-only rule)."""
 
 from __future__ import annotations
 
@@ -22,28 +23,28 @@ def test_full_path_inside_content_is_writable(tmp_path, monkeypatch):
     assert pf._is_workspace_locked_path("Content/Probes") is False
 
 
-def test_full_path_outside_content_stays_locked(tmp_path, monkeypatch):
+def test_the_whole_island_is_writable_not_only_content(tmp_path, monkeypatch):
     root = _island(tmp_path, monkeypatch)
-    assert pf._is_workspace_locked_path((root / ".ducky").as_posix()) is True
-    assert pf._is_workspace_locked_path(root.as_posix()) is True
-    assert pf._is_workspace_locked_path((tmp_path / "Elsewhere").as_posix()) is True
-    assert pf._is_workspace_locked_path(f"{pf.ABS_PATH_PREFIX}{(root / '.ducky').as_posix()}") is True
+    for path in (root / ".ducky", root / "Saved" / "x.txt", root / "Content" / "Python" / "tool.py"):
+        assert pf._is_workspace_locked_path(path.as_posix()) is False
+        assert pf._is_workspace_locked_path(f"{pf.ABS_PATH_PREFIX}{path.as_posix()}") is False
+    assert pf._is_workspace_locked_path(".ducky/notes.md") is False
+    escape = f"{root.as_posix()}/Content/Probes/../../.ducky/x.md"  # still inside the island
+    assert pf._is_workspace_locked_path(escape) is False
 
 
-def test_dotdot_and_other_projects_stay_locked(tmp_path, monkeypatch):
-    root = _island(tmp_path, monkeypatch)
+def test_paths_outside_the_project_stay_locked(tmp_path, monkeypatch):
+    _island(tmp_path, monkeypatch)
     (tmp_path / "Other" / "Content").mkdir(parents=True)
-    escape = f"{root.as_posix()}/Content/Probes/../../.ducky/x.md"
-    assert pf._is_workspace_locked_path(escape) is True
-    assert pf._is_workspace_locked_path(f"{pf.ABS_PATH_PREFIX}{escape}") is True
+    assert pf._is_workspace_locked_path((tmp_path / "Elsewhere").as_posix()) is True
     assert pf._is_workspace_locked_path((tmp_path / "Other" / "Content" / "a.verse").as_posix()) is True
 
 
-def test_full_path_keeps_locked_file_and_content_root_guards(tmp_path, monkeypatch):
+def test_only_the_project_folder_itself_cannot_be_moved_or_deleted(tmp_path, monkeypatch):
     root = _island(tmp_path, monkeypatch)
-    init = (root / "Content" / "Python" / "init_unreal.py").as_posix()
-    assert pf.is_locked_project_file(init) is True
-    assert pf.is_locked_project_file(f"{pf.ABS_PATH_PREFIX}{init}") is True
-    assert pf._is_content_root_rel((root / "Content").as_posix()) is True
-    assert pf._is_content_root_rel(f"{pf.ABS_PATH_PREFIX}{(root / 'Content').as_posix()}") is True
-    assert pf._is_content_root_rel((root / "Content" / "Probes").as_posix()) is False
+    assert pf._is_project_root_rel(root.as_posix()) is True
+    assert pf._is_project_root_rel(f"{pf.ABS_PATH_PREFIX}{root.as_posix()}") is True
+    assert pf._is_project_root_rel("") is True
+    assert pf._is_project_root_rel((root / "Content").as_posix()) is False
+    assert pf._is_project_root_rel("Content") is False
+    assert not hasattr(pf, "is_locked_project_file")  # init_unreal.py too: each start rewrites it

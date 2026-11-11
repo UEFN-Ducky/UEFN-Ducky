@@ -59,12 +59,6 @@ _HIDDEN_FILE_NAMES = frozenset(
     }
 )
 
-_LOCKED_RELATIVE_PATHS = frozenset(
-    {
-        "content/python/init_unreal.py",
-    }
-)
-
 # Folder projects (plain repos/folders): never list VCS internals; hide the usual
 # tool/cache folders until "Show hidden project files" is on. None of the UEFN
 # rules (.umap, *_Default*, Saved/, Binaries/, dist/) apply to them.
@@ -160,12 +154,11 @@ def content_root_rel() -> str:
     return FOLDER_CONTENT_ROOT if _active_is_folder() else CONTENT_DIR
 
 
-def _is_content_root_rel(rel: str) -> bool:
+def _is_project_root_rel(rel: str) -> bool:
+    """The project folder itself (deleting or moving it would take the whole project)."""
     norm = (rel or "").strip().replace("\\", "/").strip("/")
-    norm = _abs_to_content_rel(norm) or norm  # a full path to Content is the root too
-    if _active_is_folder():
-        return norm in {"", "."}
-    return norm.lower() == CONTENT_DIR.lower()
+    norm = _abs_to_content_rel(norm) if _abs_to_content_rel(norm) is not None else norm
+    return norm in {"", "."}
 
 
 def invalidate_workspace_folders_cache() -> None:
@@ -282,13 +275,11 @@ def _is_content_folder_path(folder_path: Path) -> bool:
 
 
 def _is_workspace_locked_path(relative_path: str) -> bool:
-    """True for abs:/ws: paths and, on an island, any path outside Content/.
-
-    In a folder project every project-relative path (``.`` is the root) is writable.
-    """
+    """True for abs:/ws: paths outside the open project (other projects, Verse workspace
+    roots). Every path inside the project, an island's or a folder's, is writable."""
     rel = (relative_path or "").strip().replace("\\", "/")
     # Agents pass full paths (C:/.../Content/x, or abs:C:/...): one inside the open
-    # project's Content is as writable as its Content-relative form.
+    # project is as writable as its project-relative form.
     in_content = _abs_to_content_rel(rel)
     if in_content is not None:
         rel = in_content
@@ -296,22 +287,21 @@ def _is_workspace_locked_path(relative_path: str) -> bool:
         return True
     if rel.lower().startswith(WS_PATH_PREFIX.lower()):
         return True
-    if rel.lower() in {"", WORKSPACE_ROOTS_PATH.lower()}:
-        return True
-    if _active_is_folder():
-        return False
-    return not rel.lower().startswith(f"{CONTENT_DIR.lower()}/") and rel.lower() != CONTENT_DIR.lower()
+    if Path(rel).is_absolute():
+        return True  # a full path the mapping above left alone is outside the project
+    return rel.lower() in {"", WORKSPACE_ROOTS_PATH.lower()}
 
 
 def _abs_to_content_rel(rel: str) -> str | None:
-    """``Content/...`` for a raw or abs:-encoded absolute path inside the open Content, else None."""
+    """Project-relative path (``Content/...``, ``Plugins/...``) for a raw or abs:-encoded absolute
+    path inside the open project, else None."""
     raw = rel[len(ABS_PATH_PREFIX) :] if rel.lower().startswith(ABS_PATH_PREFIX.lower()) else rel
     candidate = Path(raw)
     if not candidate.is_absolute():
         return None
     try:
         target = candidate.resolve()
-        if not _is_under_content(target):
+        if not _is_under_project(target):
             return None
         return str(target.relative_to(_project_root().resolve())).replace("\\", "/")
     except (OSError, ValueError):
@@ -462,16 +452,13 @@ def _resolve_file_path(relative_path: str) -> Path:
 
 
 def _require_writable_content_path(relative_path: str) -> None:
+    """Anywhere in the open project, any file type (backend.workspace.paths); only folders
+    outside it (other projects, Verse workspace roots) are read-only here."""
     if _is_workspace_locked_path(relative_path):
-        raise ValueError(
-            f"Locked workspace file cannot be modified: {relative_path}. On a UEFN island only paths "
-            "under Content/ can be written, moved or deleted here (the project root, .ducky and "
-            "outside folders are read-only). Don't offer to move files there: to take files out of "
-            "the build, delete them with the user's OK or ask the user to move them."
-        )
-    _require_not_digest(relative_path)
+        raise ValueError(f"Outside the open project, so read-only here: {relative_path}. "
+                         "Open that project to change its files.")
     target = _resolve_relative(relative_path)
-    _require_under_content(target, relative_path)
+    _require_in_project(target, relative_path)
 
 
 def list_workspace_roots() -> list[dict[str, object]]:
@@ -522,9 +509,17 @@ def _is_under_content(target: Path) -> bool:
         return False
 
 
-def _require_under_content(target: Path, relative_path: str) -> None:
-    if not _is_under_content(target):
-        raise ValueError(f"Path is outside Content: {relative_path!r}")
+def _is_under_project(target: Path) -> bool:
+    try:
+        return _is_path_under(target, _project_root())
+    except ValueError:
+        return False
+
+
+def _require_in_project(target: Path, relative_path: str) -> None:
+    """Anywhere in the open project (an island's root, Saved/, Plugins/ too), never outside it."""
+    if not _is_under_project(target):
+        raise ValueError(f"Path is outside the project: {relative_path!r}")
 
 
 def _validate_entry_name(name: str) -> str:
@@ -552,31 +547,10 @@ def _show_hidden_project_files() -> bool:
     return PanelSettings.load().show_hidden_project_files
 
 
-def is_locked_project_file(relative_path: str) -> bool:
-    """Ducky's island listener bootstrap. A folder project has no locked files."""
-    if _norm_relative_path(relative_path) not in _LOCKED_RELATIVE_PATHS:
-        return False
-    return not _active_is_folder()
-
-
-def _require_not_locked(relative_path: str) -> None:
-    if is_locked_project_file(relative_path):
-        raise ValueError(f"File is locked and cannot be modified: {relative_path}")
-
-
-def _require_not_digest(relative_path: str) -> None:
-    """UEFN digests are Epic-generated — never create/edit/delete via the panel."""
-    from backend.tools.verse.verse_digests import require_not_digest_path
-
-    require_not_digest_path(relative_path)
-
-
 def _require_writable_mutation(relative_path: str) -> None:
-    if _is_content_root_rel(relative_path):
-        raise ValueError("Cannot change the project's Content root itself.")
+    if _is_project_root_rel(relative_path):
+        raise ValueError("Cannot change the project folder itself.")
     _require_writable_content_path(relative_path)
-    _require_not_locked(relative_path)
-    _require_not_digest(relative_path)
 
 
 def _is_uefn_engine_file(name: str) -> bool:
@@ -680,9 +654,7 @@ def _read_file_header(target: Path) -> bytes:
 
 
 def is_editable_text_file(relative_path: str) -> bool:
-    """True for panel-editable text files under Content (not binary or locked)."""
-    if is_locked_project_file(relative_path):
-        return False
+    """True for panel-editable text files in the project (not binary)."""
     if _is_ext_encoded_path(relative_path):
         # External drops are editable in place only when classified as text.
         info = classify_project_file(relative_path)
@@ -950,7 +922,7 @@ def list_project_files(relative_path: str = "") -> dict[str, object]:
         return {"path": rel, "entries": entries}
 
     target = _resolve_relative(rel)
-    _require_under_content(target, rel)
+    _require_in_project(target, rel)
     if not target.is_dir():
         raise ValueError(f"Not a directory: {relative_path or '.'}")
     entries = _list_directory_entries(target, content_tree=True)
@@ -966,7 +938,7 @@ def stat_project_file(relative_path: str) -> dict[str, int | str | bool]:
     elif _is_abs_encoded_path(relative_path):
         rel = _encode_abs_path(target)
     else:
-        _require_under_content(target, relative_path)
+        _require_in_project(target, relative_path)
         rel = str(target.relative_to(_project_root().resolve())).replace("\\", "/")
     if not target.is_file():
         return {"path": rel, "mtime_ns": 0, "size": 0, "exists": False}
@@ -1044,7 +1016,7 @@ def read_project_file(relative_path: str) -> dict[str, str]:
     elif _is_abs_encoded_path(relative_path):
         rel = _encode_abs_path(target)
     else:
-        _require_under_content(target, relative_path)
+        _require_in_project(target, relative_path)
         rel = str(target.relative_to(_project_root().resolve())).replace("\\", "/")
     if not target.is_file():
         raise ValueError(f"Not a file: {relative_path}")
@@ -1161,7 +1133,7 @@ def open_project_file(relative_path: str) -> None:
     """Open a project or workspace file with the OS default application."""
     target = _resolve_file_path(relative_path)
     if not _is_abs_encoded_path(relative_path):
-        _require_under_content(target, relative_path)
+        _require_in_project(target, relative_path)
     if not target.is_file():
         raise ValueError(f"Not a file: {relative_path}")
     os.startfile(str(target))  # type: ignore[attr-defined]
@@ -1172,7 +1144,7 @@ def create_project_folder(parent_relative: str, name: str) -> dict[str, str]:
     _require_writable_content_path(parent_relative)
     rel = _join_content_path(parent_relative, name)
     target = _resolve_relative(rel)
-    _require_under_content(target, rel)
+    _require_in_project(target, rel)
     if target.exists():
         raise ValueError(f"Already exists: {rel}")
     try:
@@ -1235,10 +1207,10 @@ def move_project_entry(source_relative: str, dest_parent_relative: str) -> dict[
     _require_writable_mutation(source_relative)
     _require_writable_content_path(dest_parent_relative)
     source_rel = source_relative.strip().replace("\\", "/").strip("/")
-    if _is_content_root_rel(source_rel):
-        raise ValueError("Cannot move Content root.")
+    if _is_project_root_rel(source_rel):
+        raise ValueError("Cannot move the project folder itself.")
     source = _resolve_relative(source_rel)
-    _require_under_content(source, source_rel)
+    _require_in_project(source, source_rel)
     if not source.exists():
         raise ValueError(f"Not found: {source_relative}")
 
@@ -1246,7 +1218,7 @@ def move_project_entry(source_relative: str, dest_parent_relative: str) -> dict[
     if not parent_rel:
         parent_rel = content_root_rel()
     dest_parent = _resolve_relative(parent_rel)
-    _require_under_content(dest_parent, parent_rel)
+    _require_in_project(dest_parent, parent_rel)
     if not dest_parent.is_dir():
         raise ValueError(f"Not a directory: {dest_parent_relative}")
 
@@ -1298,16 +1270,16 @@ def copy_project_entry(source_relative: str, dest_parent_relative: str) -> dict[
     _require_writable_mutation(source_relative)
     _require_writable_content_path(dest_parent_relative)
     source_rel = source_relative.strip().replace("\\", "/").strip("/")
-    if _is_content_root_rel(source_rel):
-        raise ValueError("Cannot copy Content root.")
+    if _is_project_root_rel(source_rel):
+        raise ValueError("Cannot copy the project folder into itself.")
     source = _resolve_relative(source_rel)
-    _require_under_content(source, source_rel)
+    _require_in_project(source, source_rel)
     if not source.exists():
         raise ValueError(f"Not found: {source_relative}")
 
     parent_rel = (dest_parent_relative or content_root_rel()).strip().replace("\\", "/").strip("/") or content_root_rel()
     dest_parent = _resolve_relative(parent_rel)
-    _require_under_content(dest_parent, parent_rel)
+    _require_in_project(dest_parent, parent_rel)
     if not dest_parent.is_dir():
         raise ValueError(f"Not a directory: {dest_parent_relative}")
 
@@ -1344,7 +1316,7 @@ def import_external_entries(
     _require_writable_content_path(dest_parent_relative)
     parent_rel = (dest_parent_relative or content_root_rel()).strip().replace("\\", "/").strip("/") or content_root_rel()
     dest_parent = _resolve_relative(parent_rel)
-    _require_under_content(dest_parent, parent_rel)
+    _require_in_project(dest_parent, parent_rel)
     if not dest_parent.is_dir():
         raise ValueError(f"Not a directory: {dest_parent_relative}")
 
@@ -1428,7 +1400,7 @@ def content_entry_needs_uefn_delete(relative_path: str) -> bool:
         return False
     try:
         target = _resolve_relative(relative_path.strip().replace("\\", "/").strip("/"))
-        _require_under_content(target, relative_path)
+        _require_in_project(target, relative_path)
     except (ValueError, OSError):
         return False
     if not target.exists():
@@ -1446,7 +1418,7 @@ def content_entry_exists(relative_path: str) -> bool:
     """Whether the Content-relative path still exists on disk."""
     try:
         target = _resolve_relative(relative_path.strip().replace("\\", "/").strip("/"))
-        _require_under_content(target, relative_path)
+        _require_in_project(target, relative_path)
     except (ValueError, OSError):
         return False
     return target.exists()
@@ -1492,10 +1464,10 @@ def delete_project_entry(relative_path: str) -> dict[str, str]:
 
     _require_writable_mutation(relative_path)
     rel = relative_path.strip().replace("\\", "/").strip("/")
-    if not rel or _is_content_root_rel(rel):
-        raise ValueError("Cannot delete Content root.")
+    if _is_project_root_rel(rel):
+        raise ValueError("Cannot delete the project folder itself.")
     target = _resolve_relative(rel)
-    _require_under_content(target, rel)
+    _require_in_project(target, rel)
     if not target.exists():
         raise ValueError(f"Not found: {relative_path}")
     token = uuid.uuid4().hex
@@ -1578,12 +1550,11 @@ def rename_project_entry(source_relative: str, new_name: str) -> dict[str, str]:
 
     _require_writable_mutation(source_relative)
     safe_name = _validate_entry_name(new_name)
-    _require_not_digest(safe_name)
     source_rel = source_relative.strip().replace("\\", "/").strip("/")
-    if not source_rel or _is_content_root_rel(source_rel):
-        raise ValueError("Cannot rename Content root.")
+    if _is_project_root_rel(source_rel):
+        raise ValueError("Cannot rename the project folder itself.")
     source = _resolve_relative(source_rel)
-    _require_under_content(source, source_rel)
+    _require_in_project(source, source_rel)
     if not source.exists():
         raise ValueError(f"Not found: {source_relative}")
     dest = source.parent / safe_name
@@ -1618,10 +1589,9 @@ def create_project_verse_file(parent_relative: str, name: str, content: str = ""
     safe_name = _validate_entry_name(name)
     if not safe_name.lower().endswith(".verse"):
         safe_name = f"{safe_name}.verse"
-    _require_not_digest(safe_name)
     rel = _join_content_path(parent_relative, safe_name)
     target = _resolve_relative(rel)
-    _require_under_content(target, rel)
+    _require_in_project(target, rel)
     if target.exists():
         raise ValueError(f"Already exists: {rel}")
     text = content if content else _DEFAULT_VERSE_FILE
@@ -1633,23 +1603,18 @@ def create_project_verse_file(parent_relative: str, name: str, content: str = ""
 
 
 def create_project_file(parent_relative: str, name: str, content: str = "") -> dict[str, str]:
-    """Create a new text file under Content (any editable extension; no .py on an island)."""
+    """Create a new text file in the project (any editable extension, .py included)."""
     _require_writable_content_path(parent_relative)
     safe_name = _validate_entry_name(name)
     if not Path(safe_name).suffix:
         safe_name = f"{safe_name}.txt"
-    if Path(safe_name).suffix.lower() in {".py", ".pyc"} and not _active_is_folder():
-        raise ValueError(
-            "Never create .py in a UEFN project — Epic rejects the upload "
-            "(ContainsPythonData). Scratch → %LOCALAPPDATA%/UEFN-Ducky/."
-        )
     if _is_binary_file_name(safe_name):
         raise ValueError(f"Cannot create binary file: {safe_name}")
     rel = _join_content_path(parent_relative, safe_name)
     if not is_editable_text_file(rel):
         raise ValueError(f"Unsupported file type: {safe_name}")
     target = _resolve_relative(rel)
-    _require_under_content(target, rel)
+    _require_in_project(target, rel)
     if target.exists():
         raise ValueError(f"Already exists: {rel}")
     root = _project_root().resolve()

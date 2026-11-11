@@ -156,14 +156,12 @@ def test_hard_rules_captures_use_appdata_not_project():
     assert "conversations" in AGENT_HARD_RULES
     assert "LOCALAPPDATA" in AGENT_HARD_RULES or "AppData" in AGENT_HARD_RULES
     assert "MCP image" in AGENT_HARD_RULES or "vision" in AGENT_HARD_RULES
-    assert ".ducky" in AGENT_HARD_RULES
     assert "Never" in AGENT_HARD_RULES or "never" in AGENT_HARD_RULES
 
 
-def test_hard_rules_forbid_project_side_storage_except_ducky():
+def test_hard_rules_keep_ducky_storage_out_of_the_project():
     assert "Project folder storage" in AGENT_HARD_RULES
-    assert ".ducky" in AGENT_HARD_RULES
-    assert "DuckyCaptures" in AGENT_HARD_RULES  # named as forbidden
+    assert "DuckyCaptures" in AGENT_HARD_RULES  # Ducky's own caches, not a write ban
     assert "LOCALAPPDATA" in AGENT_HARD_RULES or "AppData" in AGENT_HARD_RULES
 
 
@@ -179,23 +177,19 @@ def test_hard_rules_forbid_persist_weak_map_key_removal():
     assert "never remove" in AGENT_HARD_RULES.lower()
 
 
-def test_hard_rules_forbid_digest_mutation():
-    assert "digest" in AGENT_HARD_RULES.lower()
-    assert "READ-ONLY" in AGENT_HARD_RULES or "read-only" in AGENT_HARD_RULES.lower()
-    assert "*.digest.verse" in AGENT_HARD_RULES or ".digest.verse" in AGENT_HARD_RULES
+def test_hard_rules_say_uefn_regenerates_digests_without_forbidding_writes():
+    assert "*.digest.verse" in AGENT_HARD_RULES
+    assert "regenerates" in AGENT_HARD_RULES
     assert "workspace_compile_verse" in AGENT_HARD_RULES
-    assert "auto-edit" in AGENT_HARD_RULES.lower() or "auto-edits" in AGENT_HARD_RULES.lower()
+    assert "READ-ONLY" not in AGENT_HARD_RULES
 
 
-def test_hard_rules_write_boundary_content_and_ducky():
-    assert "Write boundary" in AGENT_HARD_RULES
-    assert "Content/" in AGENT_HARD_RULES
-    assert ".ducky" in AGENT_HARD_RULES
-    assert "execute_python" in AGENT_HARD_RULES
-    assert "No Python in the island" in AGENT_HARD_RULES
-    assert "Never delete" in AGENT_HARD_RULES
+def test_hard_rules_let_island_writes_go_anywhere():
+    """Owner, Nov 11 2026: no write boundary, no Python ban in islands."""
+    assert "anywhere in the island, any file type" in AGENT_HARD_RULES
     assert "init_unreal.py" in AGENT_HARD_RULES
-    assert "ContainsPythonData" in AGENT_HARD_RULES
+    for gone in ("Write boundary", "No Python in the island", "ContainsPythonData"):
+        assert gone not in AGENT_HARD_RULES
 
 
 def test_hard_rules_inspect_is_not_census():
@@ -482,47 +476,34 @@ def test_fixup_redirectors_has_no_fixup_referencers():
     assert "delete_asset" not in body
 
 
-def test_digest_path_guard_blocks_writes():
-    from backend.tools.verse.verse_digests import is_uefn_digest_path, require_not_digest_path
+def test_digest_paths_are_recognised():
+    from backend.tools.verse.verse_digests import is_uefn_digest_path
 
     assert is_uefn_digest_path("Fortnite.digest.verse")
     assert is_uefn_digest_path(r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse")
     assert is_uefn_digest_path("Verse/Verse.digest.verse")
     assert not is_uefn_digest_path("Content/Verse/Economy/economy_manager.verse")
-    try:
-        require_not_digest_path("UnrealEngine.digest.verse")
-        raise AssertionError("expected ValueError for digest write")
-    except ValueError as exc:
-        assert "READ-ONLY" in str(exc)
 
 
-def test_writable_project_path_allowlist():
-    from backend.tools.core.system import require_writable_project_path
+def test_every_path_inside_the_island_is_writable():
+    from backend.workspace.paths import require_inside_project
 
-    require_writable_project_path(r"C:\Fortnite Projects\Roguelike\Content\Verse\Foo\foo.verse")
-    require_writable_project_path(r"C:\Fortnite Projects\Roguelike\.ducky\tests\x.json")
-    refused = (
+    root = r"C:\Fortnite Projects\Roguelike"
+    for path in (
+        r"C:\Fortnite Projects\Roguelike\Content\Verse\Foo\foo.verse",
+        r"C:\Fortnite Projects\Roguelike\.ducky\tests\x.json",
         r"C:\Fortnite Projects\Roguelike\Saved\x.txt",
         r"C:\Fortnite Projects\Roguelike\Intermediate\x.txt",
         r"C:\Fortnite Projects\Roguelike\notes.md",
-        r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse",
-        r"C:\Fortnite Projects\Roguelike\Saved\VerseProject\P\Content\sneak.verse",
-    )
-    for path in refused:
-        try:
-            require_writable_project_path(path)
-            raise AssertionError(f"expected ValueError for {path}")
-        except ValueError as exc:
-            assert "Content/" in str(exc)
-            assert ".ducky" in str(exc)
+        r"C:\Fortnite Projects\Roguelike\Content\Python\init_unreal.py",
+        r"C:\Fortnite Projects\Roguelike\Content\Python\tool.py",
+    ):
+        require_inside_project(path, root)
     try:
-        require_writable_project_path(
-            r"C:\Fortnite Projects\Roguelike\Content\Python\init_unreal.py"
-        )
-        raise AssertionError("expected ValueError for .py in project")
+        require_inside_project(r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse", root)
+        raise AssertionError("a path outside the project must still be refused")
     except ValueError as exc:
-        assert "init_unreal.py" in str(exc)
-        assert "never delete" in str(exc).lower() or "LOCALAPPDATA" in str(exc)
+        assert "outside the project" in str(exc)
 
 
 def test_hard_rules_require_ask_user_questionnaire():
@@ -657,11 +638,11 @@ if __name__ == "__main__":
     test_hard_rules_never_scale_fortnite_devices()
     test_hard_rules_python_is_last_not_exhausted_fallback()
     test_hard_rules_captures_use_appdata_not_project()
-    test_hard_rules_forbid_project_side_storage_except_ducky()
-    test_hard_rules_forbid_digest_mutation()
-    test_hard_rules_write_boundary_content_and_ducky()
+    test_hard_rules_keep_ducky_storage_out_of_the_project()
+    test_hard_rules_say_uefn_regenerates_digests_without_forbidding_writes()
+    test_hard_rules_let_island_writes_go_anywhere()
     test_hard_rules_separate_systems()
     test_hard_rules_verse_build_lifecycle()
-    test_digest_path_guard_blocks_writes()
-    test_writable_project_path_allowlist()
+    test_digest_paths_are_recognised()
+    test_every_path_inside_the_island_is_writable()
     print("ok")

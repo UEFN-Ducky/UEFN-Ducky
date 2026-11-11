@@ -70,7 +70,7 @@ def test_a_file_in_another_project_is_written_and_journaled_there(roots) -> None
 
 def test_without_other_projects_the_open_one_is_the_only_place(roots) -> None:
     target = os.path.join(roots[1], "Content", "Verse", "shop.verse")
-    with pytest.raises(ValueError, match="outside the active project"):
+    with pytest.raises(ValueError, match="outside the (active )?project"):
         _writer(roots, Journal(), others=False).write_text(target, "x", op="create")
     assert not os.path.exists(target)
 

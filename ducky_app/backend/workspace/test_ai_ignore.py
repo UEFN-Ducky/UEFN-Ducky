@@ -124,7 +124,6 @@ def test_write_delete_and_both_move_ends_are_guarded(protected, monkeypatch):
     from backend.tools.core import system, workspace_code as wc
     from backend.workspace import runtime
     from backend.workspace.writer import ProjectWriter
-    monkeypatch.setattr("backend.workspace.writer._is_folder_project_root", lambda _: True)
     runtime.reset_for_tests(ProjectWriter.for_root(str(protected)))
     try:
         for fn in (
@@ -144,7 +143,6 @@ def test_write_delete_and_both_move_ends_are_guarded(protected, monkeypatch):
 
 def test_writer_guards_custom_resolvers_but_allows_human(protected, monkeypatch):
     from backend.workspace.writer import ProjectWriter
-    monkeypatch.setattr("backend.workspace.writer._is_folder_project_root", lambda _: True)
     writer = ProjectWriter.for_root(str(protected))
     token = identity.bind(identity.RunContext(run_id="test"))
     try:
@@ -310,7 +308,6 @@ def test_policy_errors_fail_closed(protected, monkeypatch):
 
 def test_temporary_files_also_respect_ignore_rules(protected, monkeypatch):
     from backend.workspace.writer import ProjectWriter
-    monkeypatch.setattr("backend.workspace.writer._is_folder_project_root", lambda _: True)
     settings = PanelSettings.load()
     settings.ai_ignore_patterns = ["*.tmp"]
     settings.save()

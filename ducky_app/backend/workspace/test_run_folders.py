@@ -67,7 +67,7 @@ def test_a_grant_is_one_chat_s_until_released_or_expired(out: Path, monkeypatch)
 
 def test_the_step_s_agent_reads_and_writes_the_lent_folder_and_no_one_else(out: Path, monkeypatch) -> None:
     from backend.bridge import client
-    from backend.workspace import writer
+    from backend.workspace import paths
 
     project = out.parent / "Island"
     project.mkdir()
@@ -80,7 +80,7 @@ def test_the_step_s_agent_reads_and_writes_the_lent_folder_and_no_one_else(out: 
         token = _as("step-chat")
         try:
             assert client.resolve_workspace_path(str(bible)) == os.path.realpath(bible)
-            writer._require_writable(str(bible), os.path.realpath(out))  # plain files, no island rules
+            paths.require_inside_project(str(bible), os.path.realpath(out))  # any file in the lent folder
         finally:
             identity.reset(token)
         token = _as("another-chat")

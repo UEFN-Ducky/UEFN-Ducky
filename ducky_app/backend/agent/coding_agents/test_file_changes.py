@@ -32,8 +32,7 @@ def repo(root):
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    from backend.workspace import writer, journal as journal_module
-    monkeypatch.setattr(writer, "_is_folder_project_root", lambda root: True)
+    from backend.workspace import journal as journal_module
     monkeypatch.setattr(journal_module, "_use_db", lambda: False)
     root = repo(tmp_path / "repo")
     ledger = FileChangeJournal(lambda path: tmp_path / "ledger" / Path(path).name)

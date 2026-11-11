@@ -79,10 +79,8 @@ def read_file(relative_path: str) -> dict[str, str]:
 def write_file(relative_path: str, content: str) -> dict[str, object]:
     """Save from the panel editor: panel rules, then the shared write pipeline."""
     pf._require_writable_content_path(relative_path)  # noqa: SLF001
-    pf._require_not_locked(relative_path)  # noqa: SLF001
-    pf._require_not_digest(relative_path)  # noqa: SLF001 — never mutate UEFN digests
     target = pf._resolve_relative(relative_path)  # noqa: SLF001 — shared path rules
-    pf._require_under_content(target, relative_path)  # noqa: SLF001
+    pf._require_in_project(target, relative_path)  # noqa: SLF001
     if not pf.is_editable_text_file(relative_path):
         raise ValueError(f"File type cannot be saved in panel: {relative_path}")
     rel = str(target.relative_to(pf._project_root().resolve())).replace("\\", "/")  # noqa: SLF001

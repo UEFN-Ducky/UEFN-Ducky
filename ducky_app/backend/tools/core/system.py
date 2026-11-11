@@ -9,11 +9,6 @@ from backend.bridge import resolve_workspace_path, send_command
 from backend.util.json_util import tool_json
 from backend.server import mcp
 from backend.tools.panel import team_waits
-from backend.workspace.paths import (  # noqa: F401 - re-exported for existing importers
-    WRITE_OUTSIDE_CONTENT_FORBIDDEN,
-    WRITE_PYTHON_IN_PROJECT_FORBIDDEN,
-    require_writable_project_path,
-)
 
 
 @mcp.tool()
@@ -414,9 +409,9 @@ def workspace_write_file(relative_path: str = "", *, content: str, pretty: bool 
     Goes through the shared write pipeline: atomic replace, history snapshot with
     your identity, change journal, and write-lane policy when you are a laned
     group member (an out-of-lane path is refused — do not retry it).
-    Only Content/** and .ducky/**, or this chat's sandbox by its absolute path (sandbox_open's
-    work folder). Never writes UEFN digests (*.digest.verse), .py/.pyc (Epic
-    ContainsPythonData), or anything outside those roots (Saved/, Intermediate/, project root).
+    Anywhere in the open project, any file type (an island's root, Content/, Saved/, .py,
+    digests alike), or this chat's sandbox by its absolute path (sandbox_open's work folder).
+    Only a path outside the project is refused.
     """
     from backend.tools.core.workspace_code import path_arg
     from backend.workspace.runtime import get_writer
@@ -469,9 +464,7 @@ def reload_listener(pretty: bool = False) -> str:
 def execute_python(code: str) -> str:
     """Run arbitrary Python in UEFN (escape hatch). Call uefn_editor_python_hints first for materials/Fort*.
 
-    In-memory only — never write any file to disk, especially not .py into the
-    island (Epic ContainsPythonData). Never mutate *.digest.verse. Never loop
-    spawn/import/prefab packaging — that freezes UEFN.
+    Never loop spawn/import/prefab packaging — that freezes UEFN.
     """
     result = send_command("execute_python", {"code": code}, timeout=120.0)
     parts = []

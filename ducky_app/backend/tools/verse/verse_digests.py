@@ -62,11 +62,7 @@ DIGEST_PURPOSE: dict[str, str] = {
     ),
 }
 
-from backend.workspace.paths import (  # noqa: F401 - re-exported for existing importers
-    DIGEST_WRITE_FORBIDDEN,
-    is_uefn_digest_path,
-    require_not_digest_path,
-)
+from backend.workspace.paths import is_uefn_digest_path  # noqa: F401 - re-exported for existing importers
 
 
 @dataclass

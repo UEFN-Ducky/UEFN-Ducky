@@ -164,7 +164,6 @@ def test_island_sweep_runs_once_a_minute_whatever_state_the_caller_passes(monkey
     sweeps: list[str] = []
     monkeypatch.setattr(deploy, "resolve_uefn_project_root", lambda root: root)
     monkeypatch.setattr(project_kind, "has_uefnproject", lambda _root: True)
-    monkeypatch.setattr(deploy, "quarantine_project_python", lambda root, deep=False: [])
     monkeypatch.setattr(deploy, "refresh_inits", lambda root: sweeps.append(str(root)))
     island = str(tmp_path / "Island")
 

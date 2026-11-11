@@ -115,7 +115,6 @@ def test_deploy_listener_writes_init_and_keeps_it(tmp_path, monkeypatch) -> None
     (project / "Content" / "Verse").mkdir(parents=True)
     (project / "Island.uefnproject").write_text("{}", encoding="utf-8")
     (project / "_junk.py").write_text("x\n", encoding="utf-8")
-    monkeypatch.setattr(deploy, "quarantine_python_root", lambda: tmp_path / "q")
     monkeypatch.setattr(deploy, "enable_uefn_project_python", lambda _p: None)
     monkeypatch.setattr(deploy, "install_toolset_listener_boot", lambda: None)
     monkeypatch.setattr(
@@ -129,7 +128,7 @@ def test_deploy_listener_writes_init_and_keeps_it(tmp_path, monkeypatch) -> None
     init = project / "Content" / "Python" / "init_unreal.py"
     assert init.is_file()
     assert "from listener.bootstrap import run" in init.read_text(encoding="utf-8")
-    assert not (project / "_junk.py").exists()
+    assert (project / "_junk.py").read_text(encoding="utf-8") == "x\n"  # the island's own .py stays
     assert any("init_unreal.py" in line for line in logs)
 
 
@@ -138,7 +137,6 @@ def test_a_listener_deploy_windows_refused_says_why(tmp_path, monkeypatch) -> No
     project = tmp_path / "Island"
     (project / "Content").mkdir(parents=True)
     (project / "Island.uefnproject").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(deploy, "quarantine_project_python", lambda *_a, **_k: [])
     monkeypatch.setattr(deploy, "enable_uefn_project_python", lambda _p: None)
     monkeypatch.setattr("backend.mcp_plugins.epic.ensure_editor_auto_start", lambda: False)
 
@@ -172,41 +170,16 @@ def _island_with_python(tmp_path: Path) -> Path:
     return project
 
 
-def test_quarantine_project_python_deep_moves_island_py_skips_saved(tmp_path, monkeypatch) -> None:
+def test_deploy_leaves_every_island_python_file_where_it_is(tmp_path, monkeypatch) -> None:
+    """No quarantine any more (owner, Nov 11 2026): an agent's .py in the island stays put."""
     project = _island_with_python(tmp_path)
-    quarantine = tmp_path / "quarantine"
-    monkeypatch.setattr(deploy, "quarantine_python_root", lambda: quarantine)
-
-    logs = deploy.quarantine_project_python(project, deep=True)
-    assert any("_probe_errs.py" in line for line in logs)
-    assert any("nested.py" in line for line in logs)
-    assert not any("init_unreal.py" in line for line in logs)
-    assert not (project / "_probe_errs.py").exists()
-    assert (project / "Content" / "Python" / "init_unreal.py").is_file()
-    assert not (project / "Content" / "Verse" / "nested.py").exists()
-    assert (project / "Content" / "Verse" / "foo.verse").is_file()
-    assert (project / "Saved" / "x.py").is_file()
-    dests = list(quarantine.rglob("*.py"))
-    names = {p.name for p in dests}
-    assert names == {"_probe_errs.py", "nested.py"}
-
-
-def test_quarantine_project_python_shallow_catches_root_and_content_python(
-    tmp_path, monkeypatch
-) -> None:
-    project = _island_with_python(tmp_path)
-    quarantine = tmp_path / "quarantine"
-    monkeypatch.setattr(deploy, "quarantine_python_root", lambda: quarantine)
-
-    logs = deploy.quarantine_project_python(project, deep=False)
-    assert any("_probe_errs.py" in line for line in logs)
-    assert not any("init_unreal.py" in line for line in logs)
-    assert not (project / "_probe_errs.py").exists()
-    assert (project / "Content" / "Python" / "init_unreal.py").is_file()
-    # ponytail ceiling: deep scratch outside Content/Python waits for deploy
-    assert (project / "Content" / "Verse" / "nested.py").is_file()
-    assert (project / "Content" / "Verse" / "foo.verse").is_file()
-    assert (project / "Saved" / "x.py").is_file()
+    monkeypatch.setattr(deploy, "enable_uefn_project_python", lambda _p: None)
+    monkeypatch.setattr("backend.mcp_plugins.epic.ensure_editor_auto_start", lambda: False)
+    logs = deploy.deploy_listener(project, 4200, shared=False)
+    for rel in ("_probe_errs.py", "Content/Verse/nested.py", "Saved/x.py", "Content/Verse/foo.verse"):
+        assert (project / rel).is_file(), rel
+    assert not any("uarantine" in line for line in logs)
+    assert not hasattr(deploy, "quarantine_project_python")
 
 
 def test_ensure_project_init_replaces_stale(tmp_path: Path) -> None:

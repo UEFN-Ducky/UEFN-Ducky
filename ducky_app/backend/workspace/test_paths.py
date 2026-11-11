@@ -56,28 +56,28 @@ def test_line_delta_counts_insert_delete_replace() -> None:
         "Content/Verse/my_digest_notes.verse",
     ],
 )
-def test_digest_paths_are_refused(path: str) -> None:
+def test_digest_paths_are_still_recognised(path: str) -> None:
     assert paths.is_uefn_digest_path(path)
-    with pytest.raises(ValueError):
-        paths.require_not_digest_path(path)
 
 
-def test_non_digest_verse_is_allowed() -> None:
-    paths.require_not_digest_path("Content/Verse/Shop/shop.verse")
-
-
-def test_writable_project_path_rules() -> None:
-    paths.require_writable_project_path(r"C:\P\Content\Verse\a.verse")
-    paths.require_writable_project_path(r"C:\P\.ducky\tests\x.json")
-    for bad in (
+def test_a_write_may_go_anywhere_in_the_project_any_file_type() -> None:
+    """As Claude Code writes in its folder: the owner had every island and folder rule removed
+    (Content/ and .ducky/ only, no .py, no digests, no Saved/, no .git internals; Nov 11 2026)."""
+    for ok in (
+        r"C:\P\Content\Verse\a.verse",
+        r"C:\P\.ducky\tests\x.json",
+        r"C:\P\Content\Python\tool.py",
+        r"C:\P\Content\Python\__pycache__\tool.cpython-313.pyc",
         r"C:\P\Saved\a.txt",
         r"C:\P\Intermediate\a.txt",
         r"C:\P\P.uproject",
-        r"C:\P\Content",
-        r"C:\P\Content\Python\evil.py",
+        r"C:\P\Plugins\P\Verse.digest.verse",
+        r"C:\P\.git\config",
     ):
-        with pytest.raises(ValueError):
-            paths.require_writable_project_path(bad)
+        paths.require_inside_project(ok, r"C:\P")
+    for bad in (r"C:\P", r"C:\Other\a.txt", r"C:\P\..\Other\a.txt"):
+        with pytest.raises(ValueError, match="outside the project"):
+            paths.require_inside_project(bad, r"C:\P")
 
 
 windows_only = pytest.mark.skipif(paths.os.name != "nt", reason="Windows realpath race")

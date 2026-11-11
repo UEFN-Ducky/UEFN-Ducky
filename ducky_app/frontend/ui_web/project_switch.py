@@ -326,10 +326,9 @@ def delete_panel_project(path: str, *, push_ui: bool = True) -> dict[str, str]:
         _deployed_roots.discard(norm)
 
     from frontend.appdata_maintenance import delete_project_appdata
-    from frontend.deploy import quarantine_project_python, remove_project_init
+    from frontend.deploy import remove_project_init
 
     delete_project_appdata(slug)
-    quarantine_project_python(Path(norm), deep=True)
     remove_project_init(Path(norm))
 
     if was_active:

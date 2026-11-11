@@ -24,10 +24,8 @@ WRITES = 5
 
 @pytest.fixture
 def nested(tmp_path: Path, monkeypatch):
-    from backend.workspace import writer as writer_mod
 
     # Both are folder projects (plain files), like Documents/GitHub and the repo in it.
-    monkeypatch.setattr(writer_mod, "_is_folder_project_root", lambda _root: True)
     outer = tmp_path / "GitHub"
     inner = outer / "Repo"
     (inner / "pkg").mkdir(parents=True)

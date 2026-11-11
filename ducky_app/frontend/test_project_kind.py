@@ -167,16 +167,6 @@ def test_switching_to_a_folder_saves_its_kind(tmp_path: Path, monkeypatch) -> No
 # --------------------------------------------------------------------------- island machinery never runs on a folder
 
 
-def test_folder_python_is_never_quarantined(tmp_path: Path, monkeypatch) -> None:
-    repo = _repo(tmp_path)
-    before = _snapshot(repo)
-    monkeypatch.setattr(deploy, "quarantine_python_root", lambda: tmp_path / "q")
-    assert deploy.quarantine_project_python(repo, deep=True) == []
-    assert deploy.quarantine_project_python(repo, deep=False) == []
-    assert _snapshot(repo) == before
-    assert not (tmp_path / "q").exists()
-
-
 def test_folder_never_gets_listener_init(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     before = _snapshot(repo)
@@ -189,7 +179,6 @@ def test_folder_never_gets_listener_init(tmp_path: Path) -> None:
 def test_deploy_listener_leaves_a_folder_untouched(tmp_path: Path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     before = _snapshot(repo)
-    monkeypatch.setattr(deploy, "quarantine_python_root", lambda: tmp_path / "q")
     monkeypatch.setattr("backend.mcp_plugins.epic.ensure_editor_auto_start", lambda: False)
     deploy.deploy_listener(repo, 4200, shared=False)
     assert _snapshot(repo) == before
@@ -228,7 +217,6 @@ def test_removing_a_folder_project_keeps_its_files(tmp_path: Path, monkeypatch) 
     from frontend.ui_web import project_switch
 
     repo = _repo(tmp_path)
-    monkeypatch.setattr(deploy, "quarantine_python_root", lambda: tmp_path / "q")
     project_switch.set_panel_project_root(str(repo), push_ui=False)
     before = _snapshot(repo)
     project_switch.delete_panel_project(str(repo), push_ui=False)
@@ -238,15 +226,15 @@ def test_removing_a_folder_project_keeps_its_files(tmp_path: Path, monkeypatch) 
 # --------------------------------------------------------------------------- write rules
 
 
-def test_folder_write_rule_allows_python_blocks_git(tmp_path: Path) -> None:
-    from backend.workspace.paths import require_writable_folder_path
+def test_write_rule_is_anywhere_inside_the_project(tmp_path: Path) -> None:
+    from backend.workspace.paths import require_inside_project
 
     root = str(tmp_path)
-    require_writable_folder_path(str(tmp_path / "src" / "app.py"), root)
-    require_writable_folder_path(str(tmp_path / ".gitignore"), root)
-    for bad in (tmp_path / ".git" / "config", tmp_path / "sub" / ".git" / "HEAD", tmp_path.parent / "x.py", tmp_path):
+    for ok in (tmp_path / "src" / "app.py", tmp_path / ".gitignore", tmp_path / ".git" / "config"):
+        require_inside_project(str(ok), root)
+    for bad in (tmp_path.parent / "x.py", tmp_path):
         with pytest.raises(ValueError):
-            require_writable_folder_path(str(bad), root)
+            require_inside_project(str(bad), root)
 
 
 def test_writer_uses_folder_rules_only_for_saved_folder_projects(tmp_path: Path) -> None:
@@ -261,13 +249,13 @@ def test_writer_uses_folder_rules_only_for_saved_folder_projects(tmp_path: Path)
 
     ProjectWriter.for_root(str(repo)).write_text("src/pkg/new.py", "x = 2\n", tool="test")
     assert (repo / "src" / "pkg" / "new.py").read_text(encoding="utf-8") == "x = 2\n"
-    with pytest.raises(ValueError):
-        ProjectWriter.for_root(str(repo)).write_text(".git/config", "x", tool="test")
-    # Islands and roots Ducky never recorded keep the island rules.
+    ProjectWriter.for_root(str(repo)).write_text(".git/info/exclude", "x", tool="test")
+    # Islands and unrecorded roots take any file anywhere in them too (owner, Nov 11 2026).
     for root in (island, unknown):
-        with pytest.raises(ValueError):
-            ProjectWriter.for_root(str(root)).write_text("scratch.py", "x", tool="test")
+        ProjectWriter.for_root(str(root)).write_text("scratch.py", "x", tool="test")
+        assert (root / "scratch.py").read_text(encoding="utf-8") == "x"
     ProjectWriter.for_root(str(island)).write_text("Content/Verse/a.verse", "x", tool="test")
+    ProjectWriter.for_root(str(island)).write_text("Saved/notes.txt", "x", tool="test")
 
 
 # --------------------------------------------------------------------------- agents and UEFN status

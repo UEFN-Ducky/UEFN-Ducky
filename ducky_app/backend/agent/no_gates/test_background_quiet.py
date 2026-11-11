@@ -109,7 +109,6 @@ def test_status_sweep_runs_only_inside_a_status_read(monkeypatch, tmp_path) -> N
     gets: list[int] = []
     monkeypatch.setattr(status, "listener_get_health", lambda port, *a, **k: gets.append(port))
     monkeypatch.setattr("backend.mcp_plugins.epic.probe_epic_mcp", lambda **k: {})
-    monkeypatch.setattr("frontend.deploy.quarantine_project_python", lambda root, deep=False: [])
     monkeypatch.setattr("frontend.deploy.refresh_inits", lambda root: None)
     monkeypatch.setattr(status, "_python_sweep_at", {})
 

@@ -200,7 +200,6 @@ def test_ten_idle_minutes_with_uefn_closed_make_zero_connections(processes, conn
     from frontend.ui_web.verse_editor.urc import island_watch
 
     monkeypatch.setattr(epic, "epic_mcp_enabled", lambda: True)
-    monkeypatch.setattr("frontend.deploy.quarantine_project_python", lambda root, deep=False: [])
     monkeypatch.setattr("frontend.deploy.refresh_inits", lambda root: None)
     monkeypatch.setattr(island_watch, "_write_doc", lambda doc: None)
     monkeypatch.setattr(island_watch, "_write_locks", lambda doc: None)
@@ -227,7 +226,6 @@ def test_the_idle_round_does_connect_when_uefn_runs(processes, connects, monkeyp
     editor_presence.forget()
     monkeypatch.setattr(epic, "epic_mcp_enabled", lambda: True)
     monkeypatch.setattr(epic, "_panel_project_root", lambda: "")
-    monkeypatch.setattr("frontend.deploy.quarantine_project_python", lambda root, deep=False: [])
     monkeypatch.setattr("frontend.deploy.refresh_inits", lambda root: None)
     monkeypatch.setattr(island_watch, "_write_doc", lambda doc: None)
     monkeypatch.setattr(island_watch, "_write_locks", lambda doc: None)

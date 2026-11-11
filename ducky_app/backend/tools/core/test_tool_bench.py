@@ -126,7 +126,6 @@ def repo(tmp_path: Path, monkeypatch):
         runtime.reset_for_tests(ProjectWriter.for_root(str(root), journal=_Journal()))
 
     use_root(REPO)
-    monkeypatch.setattr("backend.workspace.writer._is_folder_project_root", lambda _root: True)
     monkeypatch.setattr(wc, "resolve_workspace_path", resolve)
     monkeypatch.setattr(system, "resolve_workspace_path", resolve)
     monkeypatch.setattr("frontend.ui_web.verse_editor.agent_sync.emit_for_bridge_tool", lambda *a, **k: None)
