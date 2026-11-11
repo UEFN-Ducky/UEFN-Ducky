@@ -91,6 +91,13 @@ export function pickScreenshotMediaUrl(data: Record<string, unknown> | null): st
   return "";
 }
 
+/** The desktop panel's own link (http://127.0.0.1:<port>/x) as a panel asset path, so Remote
+ * View loads it through its worker instead of the phone's own 127.0.0.1. */
+export function panelMediaSrc(url: string): string {
+  const local = /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+\/(.+)$/i.exec(url);
+  return local ? assetUrl(local[1]) : url;
+}
+
 /** Chat-folder PNG path → panel URL the card can load. */
 export function screenshotSrcFromPath(path: string): string {
   const norm = path.replace(/\\/g, "/");
@@ -150,7 +157,7 @@ export function ScreenshotBody({
       : "";
   const mime = pickMime(data);
   const src = useMemo(() => {
-    if (mediaUrl) return mediaUrl;
+    if (mediaUrl) return panelMediaSrc(mediaUrl);
     if (fromPath) return assetUrl(fromPath); // inside the phone panel's worker scope in Remote View
     if (base64) return `data:${mime};base64,${base64}`;
     return "";

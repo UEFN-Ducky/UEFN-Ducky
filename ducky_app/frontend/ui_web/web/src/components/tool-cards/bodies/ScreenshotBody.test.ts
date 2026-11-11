@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { __setAssetBaseForTest } from "../../../remote/assetBase";
 import {
+  panelMediaSrc,
   parseScreenshotResult,
   pickScreenshotBase64,
   pickScreenshotMediaUrl,
@@ -74,6 +76,16 @@ describe("ScreenshotBody result parsing", () => {
     const data = parseScreenshotResult(raw);
     expect(pickScreenshotMediaUrl(data)).toBe(url);
     expect(pickScreenshotPath(data, {})).toContain("uefn_viewport_1.png");
+  });
+
+  it("loads a made picture through the panel, also in Remote View", () => {
+    const url = "http://127.0.0.1:4199/generated-images/image_1_0.png";
+    __setAssetBaseForTest("/");
+    expect(panelMediaSrc(url)).toBe("/generated-images/image_1_0.png");
+    __setAssetBaseForTest("/static/plugins/uefn-ducky/panel/");
+    expect(panelMediaSrc(url)).toBe("/static/plugins/uefn-ducky/panel/generated-images/image_1_0.png");
+    expect(panelMediaSrc("https://cdn.example.com/a.png")).toBe("https://cdn.example.com/a.png");
+    __setAssetBaseForTest(null);
   });
 
   it("unwraps string data envelopes", () => {
