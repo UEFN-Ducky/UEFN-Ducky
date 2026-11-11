@@ -122,6 +122,8 @@ _LEAK_STORE_FILES = frozenset({
 
 
 def _panel_is_running(real: Path) -> bool:
+    if not real.is_dir():
+        return False  # no Ducky AppData: nothing to guard, and no reason to touch the live port
     try:
         pid = int((real / "panel.pid").read_text().strip())
         from frontend.open_files import panel_process_alive
