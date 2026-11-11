@@ -251,6 +251,19 @@ def _register_shell_integrations() -> None:
         _log.warning("shell integrations not registered", exc_info=True)
 
 
+def _start_auto_update(api: Any) -> None:
+    """The background updater, as the Python window starts it (webview_app._after_gui_start).
+    Missing here, launcher starts (every start since 1.2.478) never downloaded an update."""
+    try:
+        from frontend import update_swap
+        from frontend.app_versions import take_handover
+
+        update_swap.start(api=api, tk_root_holder={}, window_holder=api._window_holder)
+        update_swap.continue_chats(take_handover().get("chats"))  # the chats the switch stopped
+    except Exception:
+        _log.warning("auto-update did not start", exc_info=True)
+
+
 def _bind_notifications(writer: LineWriter) -> None:
     def _toast(title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
         return writer.event("toast", {"title": str(title or ""), "message": str(message or "")})
@@ -417,6 +430,7 @@ def run_backend(
         mark_ready(app_version())
     except Exception:
         pass
+    _start_auto_update(api)
     try:
         from frontend import boot_report
 
