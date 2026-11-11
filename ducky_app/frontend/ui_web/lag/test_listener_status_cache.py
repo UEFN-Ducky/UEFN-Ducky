@@ -62,7 +62,9 @@ def test_fifty_refreshes_during_a_3s_fetch_return_at_once_and_fetch_twice_at_mos
     start.set()
     for t in threads:
         t.join()
-    assert time.perf_counter() - t0 < 0.05
+    # One caller blocked on the 0.5 s fetch would take all of it; starting and joining
+    # 50 threads alone took 52 ms on a loaded release run, so the bar is half the fetch.
+    assert time.perf_counter() - t0 < 0.25
     assert _wait_for(lambda: not cache._inflight, timeout=5)
     assert 1 <= len(calls) <= 2  # one fetch, plus one queued by refreshes during it
 
