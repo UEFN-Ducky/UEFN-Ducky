@@ -1,6 +1,7 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import type { ChatPlan, PlanProgress } from "../types/panel";
 import type { OpenFileHandler } from "../types/richContent";
+import { useDockReveal } from "../hooks/useDockReveal";
 import { requestOpenPlanTab } from "../navigation/openPlanTab";
 import { PlanTodoCard, countProgress } from "./PlanTodoCard";
 import { PlanKeeperPill } from "./PlanKeeperPill";
@@ -29,49 +30,11 @@ export const ChatPlanPopup = memo(function ChatPlanPopup({
   onOpenChange,
 }: ChatPlanPopupProps) {
   const [open, setOpen] = useState(false);
-  // `present` keeps the body mounted through the close animation. `expanded` flips a frame later so height can transition.
-  const [present, setPresent] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const popupRef = useRef<HTMLDivElement>(null);
+  // One card growing upward from the dock, body mounted through the close animation.
+  const { popupRef, present, expanded } = useDockReveal(open, ".chat-pane-plan-dock");
   useEffect(() => {
     onOpenChange?.(open);
   }, [open, onOpenChange]);
-  useLayoutEffect(() => {
-    if (open) {
-      setPresent(true);
-      return;
-    }
-    setExpanded(false);
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const timer = window.setTimeout(() => setPresent(false), reduce ? 0 : 260);
-    return () => window.clearTimeout(timer);
-  }, [open]);
-  useLayoutEffect(() => {
-    if (!open || !present) return;
-    const frame = requestAnimationFrame(() => setExpanded(true));
-    return () => cancelAnimationFrame(frame);
-  }, [open, present]);
-  // Keep the open card's top inside the chat pane so the bar stays on screen and the body can scroll.
-  useLayoutEffect(() => {
-    const popup = popupRef.current;
-    if (!present || !popup) return;
-    const dock = popup.closest(".chat-pane-plan-dock");
-    const pane = popup.closest(".chat-pane-root");
-    if (!(dock instanceof HTMLElement) || !(pane instanceof HTMLElement)) return;
-    const input = popup.closest(".chat-pane-input-area");
-    const fit = () => {
-      const room = dock.getBoundingClientRect().bottom - pane.getBoundingClientRect().top - 8;
-      popup.style.setProperty("--plan-open-max", `${Math.max(96, Math.floor(room))}px`);
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(pane);
-    if (input instanceof HTMLElement) ro.observe(input);
-    return () => {
-      ro.disconnect();
-      popup.style.removeProperty("--plan-open-max");
-    };
-  }, [present]);
   const [stopping, setStopping] = useState(false);
   const { done, total } = useMemo(() => countProgress(plan, progress), [plan, progress]);
   const allDone = total > 0 && done >= total;

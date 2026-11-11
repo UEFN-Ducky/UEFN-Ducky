@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { requestFocusGraph } from "../hooks/graphActivity";
+import { useDockReveal } from "../hooks/useDockReveal";
 import {
   dismissWorkflowRun,
   stopWorkflowRun,
@@ -128,10 +129,12 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
   const now = useTick(running);
   const currentRef = useRef<HTMLLIElement | null>(null);
   const current = run ? currentStep(run) : undefined;
+  // Bar and steps are one card that grows upward from the dock, like the plan bar.
+  const { popupRef, present, expanded } = useDockReveal(open, ".chat-pane-workflow-dock");
 
   useEffect(() => {
-    if (open) currentRef.current?.scrollIntoView?.({ block: "nearest" });
-  }, [open, current?.node]);
+    if (expanded) currentRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [expanded, current?.node]);
 
   if (!run) return null;
   const steps = shownSteps(run);
@@ -151,7 +154,8 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
   return (
     <div className="chat-pane-workflow-dock">
       <div
-        className={`chat-plan-popup chat-workflow-run is-${run.state}`}
+        ref={popupRef}
+        className={`chat-plan-popup chat-workflow-run is-${run.state}${expanded ? " is-open" : ""}${present ? " is-present" : ""}`}
         data-testid="chat-workflow-run"
       >
         <div className="chat-plan-popup-bar chat-workflow-run-bar">
@@ -271,7 +275,10 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
           </span>
         </div>
         {stopError ? <div role="alert" className="chat-workflow-run-error">{stopError}</div> : null}
-        {open ? (
+        {present ? (
+          <div className="chat-plan-popup-reveal">
+            <div className="chat-plan-popup-clip">
+              <div className="chat-plan-popup-panel chat-workflow-run-panel">
           <ol className="chat-workflow-run-steps">
             {steps.map((s) => (
               <li
@@ -317,6 +324,9 @@ function WorkflowRunCard({ chatId, run }: { chatId: string; run: ChatWorkflowRun
               </li>
             ))}
           </ol>
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </div>

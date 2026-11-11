@@ -213,6 +213,8 @@
 /* The workflow the ducky is running: docks above the plan in the plan bar's shape,
    blue where the plan is amber, live pulse + progress along the bar's bottom edge. */
 .chat-pane-workflow-dock {
+  position: relative;
+  z-index: 9;
   margin: 0 0 4px;
   min-width: 0;
 }
@@ -319,15 +321,16 @@
   transition: width 0.4s ease;
 }
 
+/* The steps are the body of the bar's own card (no box of their own): the card scrolls. */
+.chat-workflow-run .chat-workflow-run-panel {
+  gap: 0;
+  padding: 0;
+}
+
 .chat-workflow-run-steps {
   list-style: none;
-  margin: 6px 0 0;
+  margin: 0;
   padding: 10px 14px 10px 12px;
-  max-height: 420px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--card);
   font-size: 13px;
 }
 
@@ -366,7 +369,7 @@
   height: 18px;
   border-radius: 50%;
   border: 1.5px solid var(--border);
-  background: var(--card);
+  background: var(--dropdown-bg);
   color: var(--fg-muted, var(--fg));
 }
 
@@ -590,12 +593,16 @@
   min-height: 36px;
 }
 
-/* Open card leaves flow and grows upward. Keep the closed-bar slot so the composer stays put. */
-.chat-pane-plan-dock:has(.chat-plan-popup.is-present) {
+/* Plan bar and workflow bar: the open card leaves flow and grows upward, bar and body one
+   box in the bar's own background (useDockReveal). Keep the closed-bar slot so the
+   composer stays put. */
+.chat-pane-plan-dock:has(.chat-plan-popup.is-present),
+.chat-pane-workflow-dock:has(.chat-plan-popup.is-present) {
   min-height: 36px;
 }
 
-.chat-pane-plan-dock .chat-plan-popup.is-present {
+.chat-pane-plan-dock .chat-plan-popup.is-present,
+.chat-pane-workflow-dock .chat-plan-popup.is-present {
   position: absolute;
   left: 0;
   right: 0;
@@ -608,26 +615,34 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--card);
+  background: var(--dropdown-bg);
   box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-bar {
+.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-bar,
+.chat-pane-workflow-dock .chat-plan-popup.is-present .chat-plan-popup-bar {
   flex-shrink: 0;
   border: 0;
   border-radius: 0;
-  border-bottom: 1px solid var(--border);
   background: transparent;
 }
 
-.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-reveal {
+/* The line under the bar belongs to the body, so a closing card ends as the bar alone. */
+.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-clip,
+.chat-pane-workflow-dock .chat-plan-popup.is-present .chat-plan-popup-clip {
+  box-shadow: inset 0 1px 0 var(--border);
+}
+
+.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-reveal,
+.chat-pane-workflow-dock .chat-plan-popup.is-present .chat-plan-popup-reveal {
   position: static;
   top: auto;
   min-height: 0;
   max-height: none;
 }
 
-.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-panel {
+.chat-pane-plan-dock .chat-plan-popup.is-present .chat-plan-popup-panel,
+.chat-pane-workflow-dock .chat-plan-popup.is-present .chat-plan-popup-panel {
   position: static;
   top: auto;
   bottom: auto;

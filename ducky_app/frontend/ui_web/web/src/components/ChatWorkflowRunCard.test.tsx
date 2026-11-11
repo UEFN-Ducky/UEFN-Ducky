@@ -208,4 +208,27 @@ describe("ChatWorkflowRunCard", () => {
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Disk unavailable");
     expect(screen.getByTestId("chat-workflow-run")).toBeTruthy();
   });
+
+  it("opens the steps inside the bar's own card and keeps them through the close animation", async () => {
+    render(<ChatWorkflowRunCard chatId="chat-1" />);
+    act(() => {
+      start();
+      step("s", "running");
+    });
+    const card = screen.getByTestId("chat-workflow-run");
+    expect(card.querySelector(".chat-workflow-run-steps")).toBeNull();
+    fireEvent.click(screen.getByTitle("Show steps"));
+    // One box: the list is the body of the card that holds the bar, in the shared reveal.
+    const list = card.querySelector(".chat-plan-popup-reveal .chat-plan-popup-clip .chat-workflow-run-steps");
+    expect(list).toBeTruthy();
+    expect(card.querySelector(".chat-workflow-run-bar")).toBeTruthy();
+    expect(card.classList.contains("is-present")).toBe(true);
+    await waitFor(() => expect(card.classList.contains("is-open")).toBe(true));
+    fireEvent.click(screen.getByTitle("Hide steps"));
+    // Closing: the height animates shut first, then the body leaves.
+    expect(card.classList.contains("is-open")).toBe(false);
+    expect(card.querySelector(".chat-workflow-run-steps")).toBeTruthy();
+    await waitFor(() => expect(card.querySelector(".chat-workflow-run-steps")).toBeNull());
+    expect(card.classList.contains("is-present")).toBe(false);
+  });
 });
