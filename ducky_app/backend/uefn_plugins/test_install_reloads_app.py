@@ -52,6 +52,47 @@ def test_tool_server_install_asks_the_app_to_reload(monkeypatch) -> None:
     assert args == ["island-media-kit"]
 
 
+def _app_on(monkeypatch, live_ui_port: int | None) -> list[str]:
+    """The app listening on live_ui_port only (None: nowhere); returns every URL tried."""
+    tried: list[str] = []
+
+    class _Reply:
+        def read(self) -> bytes:
+            return b'{"ok": true, "result": {"ok": true}}'
+
+    def _urlopen(req, timeout=0):
+        tried.append(req.full_url)
+        if live_ui_port is None or f":{live_ui_port}/" not in req.full_url:
+            raise ConnectionRefusedError(10061, "refused")
+        return _Reply()
+
+    monkeypatch.setattr("urllib.request.urlopen", _urlopen)
+    monkeypatch.setattr(threading, "Thread", _SyncThread)
+    patch_turns(monkeypatch, "_in_bridge_process", lambda: True)
+    return tried
+
+
+def test_a_stale_port_file_still_reaches_the_app(monkeypatch) -> None:
+    """Nov 11 2026: panel_port.json said 4300 while the app ran on 4199/4200, so every reload went to
+    4299 and failed in silence: a City Builder fix installed by an agent never reached its panel."""
+    from frontend import settings
+
+    tried = _app_on(monkeypatch, 4199)
+    monkeypatch.setattr(settings, "app_listener_ports", lambda: [4300, 4200])
+    store._reload_in_app_process("road-network")
+    assert [u.split("/__")[0] for u in tried] == ["http://127.0.0.1:4299", "http://127.0.0.1:4199"]
+
+
+def test_a_reload_that_reaches_no_app_says_so(monkeypatch, caplog) -> None:
+    from frontend import settings
+
+    _app_on(monkeypatch, None)
+    monkeypatch.setattr(settings, "app_listener_ports", lambda: [4300, 4200])
+    with caplog.at_level("WARNING", logger=store.__name__):
+        store._reload_in_app_process("road-network")
+    assert "did not load the new copy" in caplog.text and "4299" in caplog.text and "4199" in caplog.text
+
+
 def test_the_app_itself_does_not_call_itself(monkeypatch) -> None:
     posts = _capture_posts(monkeypatch)
     patch_turns(monkeypatch, "_in_bridge_process", lambda: False)

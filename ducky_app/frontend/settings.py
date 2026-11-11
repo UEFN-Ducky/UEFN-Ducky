@@ -87,7 +87,13 @@ def _save_panel_port(port: int) -> None:
 def bind_with_fallback(make_server: Any, ui_port: int) -> Any:
     """``make_server(ui_port)``; when Windows refuses it (10013, even with the env pin: the probe
     in pick_panel_port can pass and the real bind still fail) or it is in use (10048, unpinned
-    only), take the next free pair by pick_panel_port's rule, save it and return that server."""
+    only), take the next free pair by pick_panel_port's rule and return that server.
+
+    Only a refused port is saved for every process (PANEL_PORT_FILE). A busy one is nearly always
+    the running Ducky: a second copy (a test run, a double launch) moves itself and its children
+    (the env pin) and leaves the file alone. Saving it sent every tool server the running app
+    started afterwards to the second copy's port: plugin reloads, agent events and panel calls
+    went nowhere until a restart (Nov 11 2026)."""
     global PANEL_LISTENER_PORT
     try:
         return make_server(ui_port)
@@ -96,6 +102,7 @@ def bind_with_fallback(make_server: Any, ui_port: int) -> Any:
         if not movable or not ui_port:
             raise
         first = exc
+    shared = bind_refused(first)
     for listener in range(4300, 8300, 100):
         if listener - 1 == ui_port or _port_reserved(listener):
             continue
@@ -107,9 +114,20 @@ def bind_with_fallback(make_server: Any, ui_port: int) -> Any:
             raise
         PANEL_LISTENER_PORT = listener
         os.environ[_PORT_PIN_ENV] = str(listener)
-        _save_panel_port(listener)
+        if shared:
+            _save_panel_port(listener)
         return server
     raise first
+
+
+def app_listener_ports() -> list[int]:
+    """Listener ports a process outside the app should try to reach the running app on, best
+    first: its own idea (env pin, saved file, default), then the saved and default ones (a
+    stale file must not cut a tool server off from the app). A pinned process (a test session)
+    only ever gets its pin: tests must never reach the running app."""
+    if os.environ.get(_PORT_PIN_ENV):
+        return [PANEL_LISTENER_PORT]
+    return list(dict.fromkeys(p for p in (PANEL_LISTENER_PORT, _saved_panel_port(), DEFAULT_PANEL_LISTENER_PORT) if p))
 
 
 def pick_panel_port() -> int:

@@ -62,6 +62,24 @@ def test_in_use_moves_unpinned_only(app_dir: Path, monkeypatch) -> None:
         settings.bind_with_fallback(_maker({4199: busy}), 4199)
 
 
+def test_a_second_copy_on_a_busy_port_leaves_the_shared_file_alone(app_dir: Path) -> None:
+    """Nov 11 2026: a second copy found 4199 taken by the running app, moved to 4299 and saved
+    4300 for everyone: each tool server the app started next sent its reloads, events and panel
+    calls to 4299, where nothing listened."""
+    busy = _err(10048, 98, "Only one usage of each socket address is normally permitted")
+    assert settings.bind_with_fallback(_maker({4199: busy}), 4199) == 4299
+    assert settings.PANEL_LISTENER_PORT == 4300  # this copy and its children move
+    assert not (app_dir / settings.PANEL_PORT_FILE).exists()  # every other process stays with the app
+
+
+def test_app_listener_ports_try_the_saved_and_default_port_unpinned_only(app_dir: Path, monkeypatch) -> None:
+    (app_dir / settings.PANEL_PORT_FILE).write_text(json.dumps({"port": 4300}), encoding="utf-8")
+    monkeypatch.setattr(settings, "PANEL_LISTENER_PORT", 4300)
+    assert settings.app_listener_ports() == [4300, 4200]
+    monkeypatch.setenv(settings._PORT_PIN_ENV, "4300")
+    assert settings.app_listener_ports() == [4300]  # a test session never reaches the running app
+
+
 def test_free_port_binds_and_writes_nothing(app_dir: Path) -> None:
     assert settings.bind_with_fallback(_maker({}), 4199) == 4199
     assert not (app_dir / settings.PANEL_PORT_FILE).exists()

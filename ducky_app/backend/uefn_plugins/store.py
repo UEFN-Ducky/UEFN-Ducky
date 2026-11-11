@@ -1069,17 +1069,30 @@ def _reload_in_app_process(pid: str) -> None:
         return
 
     def run() -> None:
-        try:
-            import urllib.request
+        import urllib.request
 
-            from frontend.settings import PANEL_LISTENER_PORT
+        from frontend.settings import app_listener_ports
 
-            url = f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/__panel_api/reload_uefn_plugin"
-            data = json.dumps({"args": [pid]}).encode("utf-8")
+        data = json.dumps({"args": [pid]}).encode("utf-8")
+        tried = []
+        # The app's port as this process knows it first, then the others it can be on: a stale
+        # panel_port.json once sent every reload to a port nothing listened on (Nov 11 2026)
+        for port in app_listener_ports():
+            url = f"http://127.0.0.1:{port - 1}/__panel_api/reload_uefn_plugin"
             req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=30).read()
-        except Exception:
-            logging.getLogger(__name__).debug("app reload of plugin %s failed", pid, exc_info=True)
+            try:
+                reply = json.loads(urllib.request.urlopen(req, timeout=30).read() or b"{}")
+            except (OSError, ValueError) as exc:  # nothing there (refused), or not the app
+                tried.append(f"{port - 1}: {getattr(exc, 'reason', exc)}")
+                continue
+            result = reply.get("result") if isinstance(reply.get("result"), dict) else reply
+            if reply.get("ok") is False or result.get("ok") is False:
+                tried.append(f"{port - 1}: {result.get('error') or reply.get('error') or 'refused'}")
+                continue
+            return
+        logging.getLogger(__name__).warning(
+            "Plugin %s installed, but the app did not load the new copy (its panels keep the old code "
+            "until Ducky restarts): %s", pid, "; ".join(tried) or "no port to try")
 
     threading.Thread(target=run, daemon=True, name=f"plugin-app-reload-{pid}").start()
 
