@@ -372,7 +372,7 @@ def on_push(event_type: str) -> None:
         methods: frozenset[str] | None = None
     elif kind == "chats_changed" or kind.startswith("group"):
         methods = _CHATS
-    elif kind == "uefn_plugins_changed":
+    elif kind in ("uefn_plugins_changed", "gateway_accounts_changed"):
         methods = _PLUGINS
     elif kind.startswith("terminal"):
         methods = _TERMINALS

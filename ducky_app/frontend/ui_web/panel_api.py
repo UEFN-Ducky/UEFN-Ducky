@@ -570,6 +570,18 @@ def _warm_model_cache() -> None:
         if not cred:
             reg = get_llm_provider_registration(provider) or {}
             if not reg.get("key_optional") and provider not in contrib_optional:
+                # Its key is gone (deleted, or the account removed): so is its list. Skipped
+                # with the old list left in place, the picker kept offering API models nothing
+                # could run. Only for a gateway that is loaded and says it needs a key: before
+                # its plugin registers nobody knows, and the last session's list stays.
+                if reg and _model_cache.pop(provider, None):
+                    changed = True
+                    try:
+                        from backend.agent.model_fetch import clear_model_cache
+
+                        clear_model_cache(provider)
+                    except Exception:
+                        pass
                 continue
         try:
             models = fetch_models(provider, cred)

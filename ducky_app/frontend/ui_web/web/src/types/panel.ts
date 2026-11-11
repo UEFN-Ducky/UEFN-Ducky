@@ -2404,6 +2404,7 @@ export interface PanelPushEvent {
     | "discord_changed"
     | "uefn_plugins_changed"
     | "duckyos_account_changed"
+    | "gateway_accounts_changed"
     | "plugin_scope_changed"
     /** A write of a plugin (an agent's tool call, its folder) was refused: someone holds the unit. */
     | "plugin_write_refused"

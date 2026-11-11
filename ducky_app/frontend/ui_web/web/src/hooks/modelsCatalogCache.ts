@@ -122,6 +122,12 @@ export function installModelsCatalogAutoRefresh(): void {
     }
     if (event.type === "key_test_done" && event.ok) {
       scheduleModelsCatalogRefresh(true);
+      return;
+    }
+    if (event.type === "gateway_accounts_changed") {
+      // A key or account was removed, added or switched (Settings, the picker): the app is
+      // fetching the lists again and announces what changed; read what it has now.
+      scheduleModelsCatalogRefresh(false);
     }
   });
   // Window for another UEFN Ducky / phone: a load asked for before the link to that PC was

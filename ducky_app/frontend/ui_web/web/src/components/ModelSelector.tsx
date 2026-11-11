@@ -307,6 +307,12 @@ export function ModelSelector({
       }
       if (event.type === "coding_agents_updated" || event.type === "uefn_plugins_changed") {
         void loadAgents();
+        return;
+      }
+      if (event.type === "gateway_accounts_changed") {
+        // An account or key changed somewhere: this picker's logins, account chip and usage follow.
+        void loadAgents();
+        setUsageTick((t) => t + 1);
       }
     });
   }, [catalogRows, loadAgents]);

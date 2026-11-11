@@ -130,6 +130,11 @@ def test_idle_worker_releases_last_task():
 
 
 def test_cache_has_entry_byte_and_idle_expiry_limits(monkeypatch):
+    with call_pools._share_lock:  # a sweep another test left armed would outlast this one
+        if call_pools._cache_timer is not None:
+            call_pools._cache_timer.cancel()
+        call_pools._cache_timer = None
+        call_pools._cache.clear()
     monkeypatch.setattr(call_pools, "CACHE_MAX", 4)
     monkeypatch.setattr(call_pools, "CACHE_MAX_BYTES", 4096)
     monkeypatch.setattr(call_pools, "CACHE_SWEEP_S", 0.05)

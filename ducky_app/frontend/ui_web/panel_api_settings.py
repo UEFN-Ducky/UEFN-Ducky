@@ -5,9 +5,11 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
+from frontend.ui_web.gateway_accounts_changed import accounts_changed as _accounts_changed  # noqa: E402
 
-def _accounts_call(fn: Callable[[str], Any], provider: str) -> dict[str, Any]:
-    """Run one accounts RPC: ``{ok: True, **result}`` or ``{ok: False, error}``."""
+
+def _accounts_call(fn: Callable[[str], Any], provider: str, changed: Any = None) -> dict[str, Any]:
+    """One accounts RPC: ``{ok: True, **result}`` or ``{ok: False, error}``. ``changed`` (the API): it changed accounts."""
     p = str(provider or "").strip().lower()
     if not p:
         return {"ok": False, "error": "provider required"}
@@ -15,7 +17,8 @@ def _accounts_call(fn: Callable[[str], Any], provider: str) -> dict[str, Any]:
         out = fn(p)
     except (KeyError, ValueError, OSError) as exc:
         return {"ok": False, "error": str(exc.args[0] if exc.args else exc)}
-    return {"ok": True, **(out if isinstance(out, dict) else {})}
+    done = {"ok": True, **(out if isinstance(out, dict) else {})}
+    return done if changed is None else _accounts_changed(changed, done, p)
 
 
 class PanelApiSettingsMixin:
@@ -1040,7 +1043,7 @@ class PanelApiSettingsMixin:
         from backend.agent.coding_agents.base import kick_detect_refresh
 
         kick_detect_refresh()
-        return result if isinstance(result, dict) else {"ok": bool(result)}
+        return _accounts_changed(self, result if isinstance(result, dict) else {"ok": bool(result)}, aid)
 
     # --- Accounts per gateway (API keys or CLI logins), backend.agent.accounts ---
 
@@ -1073,28 +1076,28 @@ class PanelApiSettingsMixin:
     def add_gateway_account(self, provider: str, label: str = "", kind: str = "key") -> dict[str, Any]:
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: {"id": accounts.add_account(p, label, kind)}, provider)
+        return _accounts_call(lambda p: {"id": accounts.add_account(p, label, kind)}, provider, self)
 
     def rename_gateway_account(self, provider: str, account: str, label: str) -> dict[str, Any]:
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.rename_account(p, account, label), provider)
+        return _accounts_call(lambda p: accounts.rename_account(p, account, label), provider, self)
 
     def remove_gateway_account(self, provider: str, account: str) -> dict[str, Any]:
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.remove_account(p, account), provider)
+        return _accounts_call(lambda p: accounts.remove_account(p, account), provider, self)
 
     def reorder_gateway_accounts(self, provider: str, ids: list[str] | None = None) -> dict[str, Any]:
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.reorder_accounts(p, [str(i) for i in ids or ()]), provider)
+        return _accounts_call(lambda p: accounts.reorder_accounts(p, [str(i) for i in ids or ()]), provider, self)
 
     def set_gateway_account(self, provider: str, account: str) -> dict[str, Any]:
         """The model picker's account switch: later turns run as this account."""
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.set_active_account(p, account), provider)
+        return _accounts_call(lambda p: accounts.set_active_account(p, account), provider, self)
 
     def set_chat_account(self, conv_id: str, provider: str, account_id: str = "") -> dict[str, Any]:
         """The model picker in a chat: this chat runs as ``account_id`` ("" = the default)."""
@@ -1118,7 +1121,7 @@ class PanelApiSettingsMixin:
         """``key`` "" keeps the saved key; ``base_url`` None keeps the saved URL, "" clears it."""
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.save_key_account(p, account, str(key or ""), base_url), provider)
+        return _accounts_call(lambda p: accounts.save_key_account(p, account, str(key or ""), base_url), provider, self)
 
     def set_gateway_auto_switch(self, provider: str, on: bool = True) -> dict[str, Any]:
         from backend.agent import accounts
@@ -1149,7 +1152,7 @@ class PanelApiSettingsMixin:
     def logout_gateway_account(self, provider: str, account: str) -> dict[str, Any]:
         from backend.agent import accounts
 
-        return _accounts_call(lambda p: accounts.account_logout(p, account), provider)
+        return _accounts_call(lambda p: accounts.account_logout(p, account), provider, self)
 
     def gateway_account_status(self, provider: str, account: str) -> dict[str, Any]:
         from backend.agent import accounts

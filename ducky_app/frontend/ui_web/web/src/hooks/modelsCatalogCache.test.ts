@@ -127,6 +127,14 @@ describe("models_updated push", () => {
     onPush!({ type: "key_test_done", ok: true } as never);
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(catalog).toHaveBeenLastCalledWith(true);
+
+    // A key or account removed, added or switched: read what the app has now (it fetches
+    // the lists itself and announces what changed).
+    const before = catalog.mock.calls.length;
+    onPush!({ type: "gateway_accounts_changed" } as never);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(catalog).toHaveBeenCalledTimes(before + 1);
+    expect(catalog).toHaveBeenLastCalledWith(false);
   });
 });
 
