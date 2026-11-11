@@ -348,7 +348,12 @@ def _relaunch(exe: Path, version: str | None) -> dict[str, Any]:
     env = app_versions.own_start_env()
     if version:
         env[SWITCHED_FROM_ENV] = __version__
-    if not app_versions.start_detached(exe, ["--after-update", str(os.getpid())], env=env):
+    args = [app_versions.AFTER_UPDATE_ARG, str(os.getpid())]
+    if window_holder.get("hidden"):
+        # In the tray now: the next Ducky starts there too. Without this it decided on its
+        # window before reading the handover and opened one in the person's face.
+        args.append(app_versions.BACKGROUND_ARG)
+    if not app_versions.start_detached(exe, args, env=env):
         continue_chats(chats)
         return {"ok": False, "error": f"{version or __version__} could not be started."}
     if version:

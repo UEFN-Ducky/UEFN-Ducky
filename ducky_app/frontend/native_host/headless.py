@@ -376,7 +376,9 @@ def run_backend(
         dialogs = lifecycle.DialogBroker(writer.event)
         window = lifecycle.BackendWindow(dialogs)
         api._tray = None
-        api._window_holder = {"window": window, "hidden": False}
+        # The launcher keeps "hidden" true to its window (lifecycle.WINDOW_HIDDEN_CALL): the
+        # update switch waits less for a window in the tray and starts the next version there.
+        api._window_holder = {"window": window, "hidden": os.environ.get(START_HIDDEN_ENV) == "1"}
         ending = lifecycle.Shutdown(api)
 
         def _on_exit() -> None:
@@ -456,7 +458,10 @@ def run_backend(
             name="backend-call",
         ).start()
 
-    reason = lifecycle.serve(inp, on_call=_call, dialogs=dialogs, reply=writer.send)
+    reason = lifecycle.serve(
+        inp, on_call=_call, dialogs=dialogs, reply=writer.send,
+        on_hidden=lambda hidden: api._window_holder.__setitem__("hidden", bool(hidden)),
+    )
     ending.run(reason)
     return 0
 

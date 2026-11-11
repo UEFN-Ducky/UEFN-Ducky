@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::trim;
 
-use super::{drain_backend, hook_page, ms_since, on_page_host, with, TITLE, WM_WAKE};
+use super::{drain_backend, hook_page, ms_since, note_hidden, on_page_host, with, TITLE, WM_WAKE};
 
 /// A pop-out window the backend opened.
 pub(super) struct Extra {
@@ -420,8 +420,15 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             }
             retrim(hwnd, None);
         }
-        WM_SHOWWINDOW => retrim(hwnd, Some(wp.0 == 0)),
-        WM_TIMER if wp.0 == TRIM_TIMER => retrim(hwnd, None),
+        WM_SHOWWINDOW => {
+            retrim(hwnd, Some(wp.0 == 0));
+            note_hidden(wp.0 == 0);
+        }
+        WM_TIMER if wp.0 == TRIM_TIMER => {
+            retrim(hwnd, None);
+            // Whatever a missed show or hide left wrong is put right within a minute.
+            note_hidden(!IsWindowVisible(hwnd).as_bool());
+        }
         WM_CLOSE => save_bounds(hwnd),
         WM_DESTROY => {
             with(|u| {
@@ -521,6 +528,8 @@ pub(super) fn show_main() {
         let _ = ShowWindow(h, if IsIconic(h).as_bool() { SW_RESTORE } else { SW_SHOW });
         let _ = SetForegroundWindow(h);
     }
+    // A window made just now was shown before its messages came here.
+    note_hidden(false);
 }
 
 #[cfg(test)]

@@ -481,3 +481,38 @@ def test_backend_busy_instance_sends_no_hello(stubbed_backend, monkeypatch, no_k
     code, lines = _run(io.BytesIO(b""))
     assert code == headless.EXIT_INSTANCE_BUSY
     assert lines == []
+
+
+def test_the_launcher_says_when_its_window_goes_to_the_tray() -> None:
+    """``__window_hidden`` never reaches the API: it sets what the update switch reads."""
+    calls: list[dict] = []
+    seen: list[bool] = []
+    replies: list[dict] = []
+    reason = lifecycle.serve(
+        _lines(
+            {"t": "call", "id": "hidden-1", "name": "__window_hidden", "args": [True]},
+            {"t": "call", "id": "c1", "name": "get_settings"},
+            {"t": "call", "id": "hidden-0", "name": "__window_hidden", "args": [False]},
+            {"t": "call", "id": "hidden-x", "name": "__window_hidden"},
+            {"t": "bye"},
+        ),
+        on_call=calls.append,
+        reply=replies.append,
+        on_hidden=seen.append,
+    )
+    assert reason == "bye" and seen == [True, False, False]
+    assert [c["id"] for c in calls] == ["c1"]
+    assert replies == [{"t": "result", "id": i, "ok": True, "value": True} for i in ("hidden-1", "hidden-0", "hidden-x")]
+    # A backend nobody listens on answers too, and a failing listener never ends the loop.
+    replies.clear()
+
+    def boom(hidden: bool) -> None:
+        raise RuntimeError("no holder")
+
+    again = _lines({"t": "call", "id": "h", "name": "__window_hidden", "args": [True]}, {"t": "bye"})
+    assert lifecycle.serve(again, on_call=calls.append, reply=replies.append, on_hidden=boom) == "bye"
+    assert replies == [{"t": "result", "id": "h", "ok": True, "value": True}]
+    replies.clear()
+    again = _lines({"t": "call", "id": "h", "name": "__window_hidden", "args": [True]}, {"t": "bye"})
+    assert lifecycle.serve(again, on_call=calls.append, reply=replies.append) == "bye"
+    assert replies == [{"t": "result", "id": "h", "ok": True, "value": False}]

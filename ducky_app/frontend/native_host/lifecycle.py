@@ -65,8 +65,12 @@ def serve(
     on_call: Callable[[dict[str, Any]], None],
     dialogs: DialogBroker | None = None,
     reply: Callable[[dict[str, Any]], Any] | None = None,
+    on_hidden: Callable[[bool], None] | None = None,
 ) -> str:
     """Hand each ``call`` to ``on_call`` until a ``bye`` or stdin's end; return why it ended.
+
+    A ``__window_hidden [bool]`` call is the launcher saying its main window went to the tray
+    or came back: it goes to ``on_hidden`` (the update switch reads it), never to ``on_call``.
 
     A ``__dialog_result`` call is the launcher's answer to a ``dialog`` event: it goes to the
     waiting dialog (``dialogs``), never to ``on_call``. Waiting dialogs end (None) with serve."""
@@ -80,6 +84,18 @@ def serve(
                 if reply is not None:
                     try:
                         reply({"t": "result", "id": message.get("id"), "ok": True, "value": found})
+                    except Exception:
+                        pass
+            elif kind == "call" and message.get("name") == WINDOW_HIDDEN_CALL:
+                args = message.get("args")
+                if on_hidden is not None:
+                    try:
+                        on_hidden(bool(args[0]) if isinstance(args, list) and args else False)
+                    except Exception:
+                        _log.warning("backend: the window's hidden state was not taken", exc_info=True)
+                if reply is not None:
+                    try:
+                        reply({"t": "result", "id": message.get("id"), "ok": True, "value": on_hidden is not None})
                     except Exception:
                         pass
             elif kind == "call" and message.get("name") == "__menu_result":
@@ -107,6 +123,8 @@ def serve(
 # --- file dialogs: the launcher owns the window, so it shows them -------------------------
 
 DIALOG_RESULT_CALL = "__dialog_result"
+# The launcher's main window went to the tray (True) or came back (False).
+WINDOW_HIDDEN_CALL = "__window_hidden"
 DIALOG_TIMEOUT_S = 600.0
 # pywebview's FileDialog values (OPEN, FOLDER, SAVE).
 DIALOG_KINDS = {10: "open", 20: "folder", 30: "save"}

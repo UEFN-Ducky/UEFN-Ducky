@@ -92,6 +92,8 @@ struct Ui {
     end: Option<End>,
     /// The backend's pop-out windows (`window_open`).
     extras: wins::Registry,
+    /// The main window's hidden state as last told to the backend (None: not told yet).
+    hidden_told: Option<bool>,
 }
 
 thread_local! {
@@ -157,6 +159,7 @@ impl UiHost {
                 started: None,
                 end: None,
                 extras: Default::default(),
+                hidden_told: None,
             })
         });
         UiHost { args, lock: None }
@@ -426,14 +429,19 @@ fn on_step(step: Step) {
         Step::Restarted(hello) => {
             // The page keeps its origin; requests wait while the new backend starts, then go
             // to its (new) internal port.
-            with(|u| {
+            let main = with(|u| {
                 u.record.stage("restarted");
                 u.bridge.on_hello(&hello);
                 if let Some(s) = &u.server {
                     s.gate().hold();
                     s.release_origin(&hello.origin);
                 }
-            });
+                // The new backend knows nothing of the window: tell it again.
+                u.hidden_told = None;
+                u.main
+            })
+            .flatten();
+            note_hidden(main.is_none_or(|h| !unsafe { IsWindowVisible(h) }.as_bool()));
         }
         Step::Exited => {
             close_gate();
@@ -487,6 +495,20 @@ fn on_event(name: &str, data: Value) {
         }
         "window_open" | "window_close" | "window_raise" => wins::on_window_event(name, &data),
         _ => post_page(&shim::event_message(name, &data)),
+    }
+}
+
+/// Tell the backend the main window went to the tray or came back (`__window_hidden`).
+/// Its update switch waits less for a hidden window, and the version it switches to then
+/// starts in the tray too instead of opening a window nobody asked for. Only changes are
+/// sent; one that could not go out (no backend yet) is tried again at the next call.
+pub(super) fn note_hidden(hidden: bool) {
+    if with(|u| u.hidden_told == Some(hidden)).unwrap_or(true) {
+        return;
+    }
+    let id = format!("hidden-{}", u8::from(hidden));
+    if send_call(id, "__window_hidden".into(), vec![json!(hidden)]) {
+        with(|u| u.hidden_told = Some(hidden));
     }
 }
 

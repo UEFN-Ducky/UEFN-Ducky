@@ -168,6 +168,8 @@ def test_switch_starts_the_new_version_and_leaves_without_stopping_bridges(monke
     exe, args, env = started[0]
     assert exe == folder / "UEFN-Ducky.exe"
     assert args[0] == "--after-update" and args[1].isdigit()
+    # In the tray: the next version starts there too (it picks its window before the handover).
+    assert args[2:] == [app_versions.BACKGROUND_ARG]
     assert env[us.SWITCHED_FROM_ENV]
     assert exits == [True]
     assert stopped == [("c1", False)]
@@ -230,6 +232,7 @@ def test_restart_starts_this_exe_again_with_the_window_and_chats(monkeypatch) ->
     assert us.restart() == {"ok": True}
     exe, args, env = started[0]
     assert exe == Path(sys.executable) and args[0] == "--after-update"
+    assert len(args) == 2  # the window was showing: the next one shows too
     assert us.SWITCHED_FROM_ENV not in env  # not an update: no "updated to" notice
     assert current == [] and exits == [True]
     assert app_versions.take_handover()["chats"] == [{"conv_id": "c1"}]
