@@ -38,7 +38,7 @@ export function ComposerAttachmentChips({ attachments, readInParts, onRemove, on
             type="button"
             className="composer-attachment-chip-open"
             aria-label={`Preview ${att.name}`}
-            title={att.kind === "image" ? "Click to preview / draw" : "Click to preview"}
+            title={att.kind === "image" ? `${att.name}: click to preview / draw` : "Click to preview"}
             onClick={() => onPreview?.(att)}
             disabled={!onPreview}
           >

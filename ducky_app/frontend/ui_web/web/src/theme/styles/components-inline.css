@@ -4104,9 +4104,11 @@ html.window-maximized .window-resize-grip {
   margin: 0 2px;
 }
 
+/* One row however many files: extra chips scroll sideways instead of stacking rows. */
 .composer-attachment-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   gap: 8px;
   padding: 12px 16px 0;
 }
@@ -4115,6 +4117,7 @@ html.window-maximized .window-resize-grip {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
   max-width: 200px;
   padding: 6px 8px;
   border: 1px solid var(--border);
@@ -4165,11 +4168,10 @@ html.window-maximized .window-resize-grip {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Phones: an image chip is just its thumbnail; the file name only took room. */
-@media (max-width: 720px) {
-  .composer-attachment-chip--image .composer-attachment-chip-name {
-    display: none;
-  }
+/* An image chip is just its thumbnail; the name is in the hover title. */
+.composer-attachment-chip--image { gap: 4px; padding: 4px; }
+.composer-attachment-chip--image .composer-attachment-chip-name {
+  display: none;
 }
 
 .composer-attachment-chip-remove {
