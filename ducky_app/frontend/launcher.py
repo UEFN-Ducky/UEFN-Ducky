@@ -419,6 +419,20 @@ def _check_install() -> None:
         pass
 
 
+def _drop_stale_launcher_mark(argv: list[str] | None = None) -> bool:
+    """Only ``--backend`` is Ducky-Launcher.exe's child. A window start that still carries
+    the launcher's marks inherited them: 1.2.494 and 1.2.495 pass their whole environment to
+    the version they switch to, and that version then skipped its own launcher and ran the
+    slow Python window (seen on 1.2.495, Nov 11 2026). Dropped here, so a version switched
+    to by one of those still starts its launcher. True when something was dropped."""
+    from frontend.app_versions import BACKEND_ARG, _LAUNCHER_CHILD_ENV
+
+    if BACKEND_ARG in (sys.argv if argv is None else argv)[1:]:
+        return False
+    dropped = [name for name in _LAUNCHER_CHILD_ENV if os.environ.pop(name, None) is not None]
+    return bool(dropped)
+
+
 def _wait_for_previous_version() -> None:
     """``--after-update <pid>``: the version that switched to this one is still closing."""
     if "--after-update" not in sys.argv:
@@ -534,6 +548,7 @@ def main() -> None:
             pass
         _wait_for_previous_version()
         _check_install()
+        _drop_stale_launcher_mark()
         _hand_off_to_newest(bridge=False)
         # native_launcher on/auto: Ducky-Launcher.exe draws the window and this process exits.
         # Off (the default) spawns nothing; any launcher failure runs the Python window below.

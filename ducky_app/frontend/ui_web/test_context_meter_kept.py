@@ -14,7 +14,7 @@ import pytest
 
 from frontend.chat_store import Conversation
 from frontend.settings import PanelSettings
-from frontend.ui_web import context_tokens as ct
+from frontend.ui_web import context_meter_chat as kept, context_tokens as ct
 from frontend.ui_web.chats import conversations as chat_convs, saves as chat_saves
 
 
@@ -34,7 +34,7 @@ def chat(tmp_path: Path):
             row["usage"] = {"input_tokens": 100 + i, "output_tokens": 10 + i}
         chat_saves.append_message(conv, row, project)
     assert chat_saves.flush_chat_saves(conv.id)
-    ct.forget_meter_facts()
+    kept.forget()
     return conv, project
 
 
@@ -108,7 +108,7 @@ def test_other_settings_are_counted_apart(chat, loads, monkeypatch) -> None:
     # Any setting moves the mark, so a changed setting is counted again too.
     changed = PanelSettings.load()
     changed.memory_keep_last_messages = int(changed.memory_keep_last_messages or 0) + 1
-    assert ct._settings_mark(changed) != ct._settings_mark(settings)
+    assert kept.settings_mark(changed) != kept.settings_mark(settings)
     ct._kept_conversation_report(ct._open_meter_chat(conv.id), changed, keep_last=20, **kwargs)
     assert counted == [20, 2, 20]
 
@@ -131,7 +131,7 @@ def test_a_save_on_its_way_reads_the_whole_chat_and_keeps_nothing(chat, loads, m
     _read(conv.id)
     _read(conv.id)
     assert loads == [conv.id, conv.id]
-    assert not ct._facts
+    assert not kept._facts
 
 
 def test_a_missing_chat_reads_as_none(loads) -> None:
@@ -141,15 +141,15 @@ def test_a_missing_chat_reads_as_none(loads) -> None:
 
 def test_only_the_last_chats_are_kept(chat, loads, monkeypatch) -> None:
     conv, _ = chat
-    monkeypatch.setattr(ct, "_FACTS_MAX_CHATS", 1)
+    monkeypatch.setattr(kept, "MAX_CHATS", 1)
     _read(conv.id)
-    with ct._facts_lock:
-        ct._facts[("elsewhere", "other")] = (1, time.monotonic(), {})
-        while len(ct._facts) > ct._FACTS_MAX_CHATS:
-            ct._facts.popitem(last=False)
+    with kept._lock:
+        kept._facts[("elsewhere", "other")] = (1, time.monotonic(), {})
+        while len(kept._facts) > kept.MAX_CHATS:
+            kept._facts.popitem(last=False)
     _read(conv.id)
     assert loads == [conv.id, conv.id]
-    monkeypatch.setattr(ct, "_FACTS_TTL_S", -1.0)  # kept too long ago: counted again
+    monkeypatch.setattr(kept, "TTL_S", -1.0)  # kept too long ago: counted again
     _read(conv.id)
     assert loads == [conv.id, conv.id, conv.id]
 
@@ -160,7 +160,7 @@ def test_an_external_agent_report_reads_the_chat_once(chat, loads) -> None:
     fresh.coding_agent = "claude_code"
     chat_saves.save_conversation(fresh, project)
     assert chat_saves.flush_chat_saves(conv.id)
-    ct.forget_meter_facts()
+    kept.forget()
     loads.clear()
 
     def conversation_tokens(report: dict) -> int:
