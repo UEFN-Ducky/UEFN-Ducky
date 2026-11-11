@@ -497,10 +497,21 @@ def node_fn(node_type: str) -> Callable[..., Any] | None:
 
 
 def _has_key(provider: str) -> bool:
+    """A key the gateway can run on: the plain saved key, or a key account's. Keys added
+    since accounts are key accounts with no plain key: reading only that one called every
+    such gateway's picture maker "not set up" (Nov 11 2026: Google, two keys saved, was
+    "unavailable" to ducky_generate_image while its plugin made pictures)."""
     try:
         from backend.agent.secrets import get_key
 
-        return bool((get_key(provider) or "").strip())
+        if (get_key(provider) or "").strip():
+            return True
+    except Exception:
+        pass
+    try:
+        from backend.agent import accounts
+
+        return bool((accounts.account_key(provider, accounts.pick_account(provider)) or "").strip())
     except Exception:
         return False
 
