@@ -110,7 +110,11 @@ it("asks before removing and only removes on yes", async () => {
   await waitFor(() => expect(api.remove_gateway_account).toHaveBeenCalledWith("claude_code", "a1"));
 });
 
-it("Add API key adds a row and saves the key on it", async () => {
+it("Add API key adds a row (with a name not taken) when every row has a key", async () => {
+  api.list_gateway_accounts.mockImplementation(async () => ({
+    ok: true, auto_switch: true, default: "k1",
+    accounts: [...keys.filter((k) => k.has_key), { id: "k3", label: "Key 3", kind: "key", active: false, exhausted_until: null, has_key: true }],
+  }));
   render(<GatewayAccounts provider="anthropic" kind="key" />);
   await screen.findByText("Team");
   fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
@@ -119,6 +123,16 @@ it("Add API key adds a row and saves the key on it", async () => {
   await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "new1", "sk-new"));
   expect(api.add_gateway_account).toHaveBeenCalledWith("anthropic", "Key 4", "key");
   expect(runBridgeJob).toHaveBeenCalledWith("test_key", ["anthropic", "sk-new", "", true], 300_000);
+});
+
+it("Add API key puts the key on the row that has none", async () => {
+  render(<GatewayAccounts provider="anthropic" kind="key" />);
+  await screen.findByText("Spare");
+  fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-new" } });
+  fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+  await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("anthropic", "k2", "sk-new"));
+  expect(api.add_gateway_account).not.toHaveBeenCalled();
 });
 
 it("a signed-in account the provider refuses says No access, not Default", async () => {
@@ -131,6 +145,20 @@ it("a signed-in account the provider refuses says No access, not Default", async
   await screen.findByText("you@gmail.com · No Gemini access: personal accounts");
   expect(within(row("Default")).getByText("No access")).toBeTruthy();
   expect(screen.queryByText("★ Default")).toBeNull();
+});
+
+it("Add API key fills an empty Default row instead of adding a second row", async () => {
+  api.list_gateway_accounts.mockImplementation(async () => ({
+    ok: true, auto_switch: true, default: "default",
+    accounts: [{ id: "default", label: "Default", kind: "key", active: true, exhausted_until: null, has_key: false }],
+  }));
+  render(<GatewayAccounts provider="gemini" kind="key" />);
+  await screen.findByText("Default");
+  fireEvent.click(screen.getByRole("button", { name: "Add API key" }));
+  fireEvent.change(screen.getByLabelText("API key"), { target: { value: "AIza-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Test & Save" }));
+  await waitFor(() => expect(api.set_gateway_account_key).toHaveBeenCalledWith("gemini", "default", "AIza-key"));
+  expect(api.add_gateway_account).not.toHaveBeenCalled();
 });
 
 it("a provider with no key yet links to where to get one", async () => {

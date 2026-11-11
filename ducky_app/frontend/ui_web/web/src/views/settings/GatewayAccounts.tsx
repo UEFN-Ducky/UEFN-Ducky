@@ -250,8 +250,15 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
         "test_key", [provider, value, url, true], 300_000);
       if (!test.ok) throw new Error(test.detail || test.error || "Key test failed");
       let id = keyFor;
+      // An empty key row (Default with no key) takes the key: a new "Key 2" beside it left
+      // chats on the keyless Default and two rows named alike in the model picker.
+      const empty = id === "new" ? accounts.find((a) => a.kind === "key" && !a.has_key) : undefined;
+      if (empty) id = empty.id;
       if (id === "new") {
-        const added = await api()?.add_gateway_account?.(provider, `Key ${accounts.length + 1}`, "key");
+        const names = new Set(accounts.map((a) => a.label));
+        let n = accounts.length + 1;
+        while (names.has(`Key ${n}`)) n += 1;
+        const added = await api()?.add_gateway_account?.(provider, `Key ${n}`, "key");
         if (!added?.ok) throw new Error(added && !added.ok ? added.error : "Could not add the key");
         id = added.id;
       }

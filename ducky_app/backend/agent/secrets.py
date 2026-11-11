@@ -300,7 +300,15 @@ def forget_login_stamp() -> None:
 
 
 def has_key(provider: str) -> bool:
-    return bool(get_key(provider))
+    """A key for ``provider``: its Default slot, or any other key account (Settings' API keys
+    table can hold the only key in "Key 2" while Default is empty)."""
+    if get_key(provider):
+        return True
+    try:
+        from backend.agent.accounts import any_account_key
+    except Exception:
+        return False
+    return any_account_key(provider)
 
 
 def clear_memory_cache() -> None:

@@ -272,11 +272,11 @@ def pick_account(
     whose limit resets first. ``is_full(id)`` adds a live check on top of the recorded
     exhaustion.
     """
-    accounts = list_accounts(provider)
+    accounts = with_keys_first(provider, list_accounts(provider))
     if not accounts:
         return DEFAULT  # no account: callers find no key / a logged-out CLI and say connect one
     mine = chat_account(provider, conv_id)
-    start = next(n for n, a in enumerate(accounts) if (a["id"] == mine if mine else a["active"]))
+    start = next((n for n, a in enumerate(accounts) if (a["id"] == mine if mine else a["active"])), 0)
     if not auto_switch_enabled(provider):
         return accounts[start]["id"]
     ring = accounts[start:] + accounts[:start]
@@ -284,6 +284,24 @@ def pick_account(
         if a["exhausted_until"] is None and not (is_full and is_full(a["id"])):
             return a["id"]
     return min(ring, key=lambda a: a["exhausted_until"] or float("inf"))["id"]
+
+
+def with_keys_first(provider: str, accounts: list[dict]) -> list[dict]:
+    """Key accounts that hold a key, when any does: an empty Default row next to a saved
+    "Key 2" made chats run keyless (Google treated as unusable, the chat fell back to
+    another model). Logins, and a provider with no key at all, are left as they are."""
+    if not accounts or any(a.get("kind") == "login" for a in accounts):
+        return accounts
+    keyed = [a for a in accounts if account_key(provider, a["id"])]
+    return keyed or accounts
+
+
+def any_account_key(provider: str) -> bool:
+    """Some key account of ``provider`` holds a key (Default or another)."""
+    try:
+        return any(a.get("kind") != "login" and account_key(provider, a["id"]) for a in list_accounts(provider))
+    except Exception:
+        return False
 
 
 def _secret_name(provider: str, account_id: str) -> str:

@@ -28,6 +28,23 @@ def test_default_always_there(store):
     assert accounts.account_config_dir("openai", "default") is None
 
 
+def test_an_empty_default_never_wins_over_a_saved_key(store, monkeypatch):
+    """Nov 10 2026: Google's key sat in 'Key 2' while Default was empty; chats picked the
+    keyless Default, Google read as not connected and the chat fell back to Cursor."""
+    from backend.agent import secrets
+
+    k2 = accounts.add_account("gemini", "Key 2", "key")
+    accounts.set_account_key("gemini", k2, "AIza-real")
+    assert accounts.active_account("gemini") == "default"  # still the default for new chats
+    assert accounts.pick_account("gemini", conv_id="c1") == k2
+    assert accounts.with_keys_first("gemini", accounts.list_accounts("gemini"))[0]["id"] == k2
+    monkeypatch.setattr(secrets, "get_key", store.get)
+    assert secrets.has_key("gemini") is True  # no Default key, but Key 2 has one
+    assert secrets.has_key("openai") is False
+    # No key anywhere: nothing is filtered (callers say connect one).
+    assert accounts.pick_account("anthropic") == "default"
+
+
 def test_remove_every_account_then_add_again(store):
     a = accounts.add_account("openai", "Work", "key")
     accounts.set_account_key("openai", "default", "sk-default")

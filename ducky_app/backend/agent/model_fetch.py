@@ -206,6 +206,12 @@ def _accounts_of(*providers: str) -> tuple[str, list[dict[str, Any]]]:
 
 def _account_switch(provider: str, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Core's picker toggle: one option per account, picking calls ``set_gateway_account``."""
+    try:
+        from backend.agent.accounts import with_keys_first
+
+        rows = with_keys_first(provider, rows)  # an empty key row isn't a choice
+    except Exception:
+        pass
     if len(rows) < 2:
         return None
     return {
