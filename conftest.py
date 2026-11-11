@@ -341,6 +341,16 @@ def _appdata_per_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Island discovery scans Documents/Fortnite Projects and the boot deploy writes into
     # every island it finds: tests get an empty Documents, never the person's islands.
     monkeypatch.setenv("UEFN_DUCKY_DOCUMENTS_DIR", str(tmp_path / ".ducky-documents"))
+    # The PC's own install (the registry's uninstall entry) does not exist for tests. One
+    # that faked a frozen version folder and marked it ready put its 2-byte stand-in
+    # launcher into the person's installed app: seven times on Nov 11 2026, each repaired
+    # by the app at its next start, and until then the installed Ducky could not open.
+    try:
+        from frontend import install_info
+
+        monkeypatch.setattr(install_info, "_read_uninstall_entry", lambda: None)
+    except Exception:
+        pass
     try:
         from frontend.ui_web.known_projects import forget_cache
 

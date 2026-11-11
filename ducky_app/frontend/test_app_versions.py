@@ -300,3 +300,14 @@ def test_a_crashed_download_falls_back_but_the_installed_copy_does_not(monkeypat
     assert av.fall_back_after_failed_start("1.2.412", "boom") is True
     assert started == [launcher]
     assert av.is_bad("1.2.412")
+
+
+def test_tests_never_see_the_pcs_own_install() -> None:
+    """conftest hides the registered install: a test that faked a frozen version folder and
+    marked it ready replaced the person's installed Ducky-Launcher.exe with its 2-byte
+    stand-in (Nov 11 2026, seven times in a day; the app's health check repaired each)."""
+    from frontend import install_info
+
+    assert install_info.installed_location() == ""
+    assert install_info.get_install_info()["installed"] is False
+    assert av._installed_exe() is None
