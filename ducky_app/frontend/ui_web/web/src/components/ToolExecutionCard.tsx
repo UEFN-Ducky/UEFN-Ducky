@@ -186,8 +186,8 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const Body = category.Body ?? DefaultBody;
   const isAskUser = meta.name === "ducky_ask_user";
   const isCapture = category.id === "screenshot";
-  // A picture the agent looked at sits folded in the tools list: its row opens on the
-  // picture, and a failed read shows the error rather than an empty photo frame.
+  // Every picture shows open in the chat; a failed read shows the error rather than an
+  // empty photo frame.
   const lookedAtPicture = /(^|__)view_image$/.test(meta.name);
   const captureBody = isCapture && !(lookedAtPicture && !isSuccess);
   const [askSession, setAskSession] = useState(() =>
@@ -492,7 +492,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {captureBody && (!lookedAtPicture || expanded) && !isCancelled && !isGuardBlocked && !isRunning ? (
+        {captureBody && !isCancelled && !isGuardBlocked && !isRunning ? (
           <div className="tool-execution-card-body">
             <Body
               toolName={meta.name}

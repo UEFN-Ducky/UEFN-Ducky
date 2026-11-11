@@ -123,8 +123,8 @@ export function isPictureSearch(toolName: string, args?: Record<string, unknown>
 export function isStandaloneToolCard(toolName: string, args?: Record<string, unknown>): boolean {
   return (
     isFileWriteTool(toolName) ||
-    // Looking at a picture is a read: it folds with the other tools, its row opens on the picture.
-    (isCaptureTool(toolName) && toolName !== "view_image") ||
+    // Every picture (made, captured or looked at) stays in the chat, never folded away.
+    isCaptureTool(toolName) ||
     toolName === "ducky_ask_user" ||
     isPictureSearch(toolName, args)
   );
