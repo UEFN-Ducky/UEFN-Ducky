@@ -102,9 +102,11 @@ def run_in_host(
     push: PushFn,
     cancel: threading.Event,
     ready_s: float = READY_S,
+    on_started: Callable[[], None] | None = None,
 ) -> str | None:
     """Run one turn in a host and wait for it. None: no host took it (run it here instead);
-    "" once it ended; otherwise the host's error text."""
+    "" once it ended; otherwise the host's error text. ``on_started`` runs once the host has
+    the turn (from then on this call never returns None)."""
     try:
         sup = _supervisor()
         host = sup.assign(conv_id)
@@ -120,6 +122,11 @@ def run_in_host(
     try:
         if not host.send("start_turn", conv_id=conv_id, run_id=run_id, text=text, model=model, mode=mode):
             return None
+        if on_started is not None:
+            try:
+                on_started()
+            except Exception:  # noqa: BLE001 - the caller's bookkeeping never stops a turn
+                pass
         try:
             from frontend.ui_web import ui_rpc
 

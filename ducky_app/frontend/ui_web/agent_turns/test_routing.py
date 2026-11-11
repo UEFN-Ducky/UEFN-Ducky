@@ -17,7 +17,7 @@ def test_with_the_host_on_a_coding_turn_runs_in_the_host(external_turns, monkeyp
     monkeypatch.setenv("DUCKY_AGENT_HOST", "1")
     handed: list[tuple] = []
 
-    def in_host(conv_id, run_id, text, *, model, mode, push, cancel):
+    def in_host(conv_id, run_id, text, *, model, mode, push, cancel, on_started=None):
         handed.append((conv_id, text, model, mode))
         push({"type": "agent_stopped", "reason": "done", "conv_id": conv_id, "run_id": run_id})
         return ""
@@ -42,7 +42,7 @@ def test_a_host_turn_counts_as_running_in_the_app_until_it_ends(external_turns, 
     monkeypatch.setenv("DUCKY_AGENT_HOST", "1")
     started, end = threading.Event(), threading.Event()
 
-    def in_host(conv_id, run_id, text, *, model, mode, push, cancel):
+    def in_host(conv_id, run_id, text, *, model, mode, push, cancel, on_started=None):
         started.set()
         end.wait(10)
         return ""
@@ -126,3 +126,46 @@ def test_a_dead_hosts_turn_is_interrupted_with_its_checkpoint_kept(external_turn
     assert kept and kept[0]["reply"] == "half" and kept[0]["blocks"] == [{"type": "text", "text": "half"}]
     assert kept[0]["error"] == host_turns.INTERRUPTED
     assert external_turns.chats["x"].session_id == "sess-1"  # kept for --resume
+
+
+def test_a_turn_in_the_host_does_not_keep_the_chat_in_the_app(external_turns, monkeypatch):  # noqa: F811
+    """The app held its own copy of the chat until the turn ended: every message of it,
+    130 MB for one long chat that ran for hours (Nov 11 2026)."""
+    import gc
+    import threading
+    import weakref
+    from types import SimpleNamespace
+
+    from frontend.agent_host import turns as host_turns
+    from frontend.ui_web.agent_turns.testing import patch_turns
+
+    monkeypatch.setenv("DUCKY_AGENT_HOST", "1")
+    took, end = threading.Event(), threading.Event()
+
+    def in_host(conv_id, run_id, text, *, model, mode, push, cancel, on_started=None):
+        on_started()  # the host has the turn
+        took.set()
+        end.wait(10)
+        return ""
+
+    monkeypatch.setattr(host_turns, "run_in_host", in_host)
+    made: list[weakref.ref] = []
+
+    class Chat(SimpleNamespace):
+        pass
+
+    def load(cid, **kw):
+        chat = Chat(id=cid, title=cid, folder_id="", coding_agent="codex", provider="openai", model="gpt-test",
+                    messages=[{"role": "user", "content": "earlier"}])
+        made.append(weakref.ref(chat))
+        return chat
+
+    patch_turns(monkeypatch, "load_conversation", load)
+    assert routing.run_message("hosted", "go", "agent", "", push=lambda e: None)
+    assert took.wait(10)
+    gc.collect()
+    try:
+        assert made and [ref for ref in made if ref() is not None] == [], "the app still holds the chat"
+    finally:
+        end.set()
+    assert _wait_for(lambda: state.list_running_agents() == [])

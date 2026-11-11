@@ -13,7 +13,7 @@ from backend.agent.attachments import parse_attachment_dicts
 from backend.agent.coding_agents.plans import PLAN_PROTOCOL
 from backend.agent.runner import RunConfig
 from backend.agent.secrets import get_key
-from frontend.settings import PANEL_LISTENER_PORT, PanelSettings, apply_workspace_env
+from frontend.settings import UEFN_LISTENER_PORT, PanelSettings, apply_workspace_env
 from frontend.ui_web.agent_turns.pending import (
     BUSY_QUEUED,
     _hold_for_model,
@@ -548,9 +548,15 @@ def run_message(
             if not (parent_conv and is_group_conversation(parent_conv)):
                 notify_chats_changed(conv_id, child_title, conv.folder_id, push=push)
         cancel_event = session._cancel
+        # This process's copy of the chat, for a turn it runs itself. Dropped once an agent
+        # host has the turn: the host works from the stored chat, and here the copy only sat
+        # in memory until the turn ended, every message of it (130 MB for one long chat that
+        # ran for hours, Nov 11 2026). work_external reads it from this list and never names
+        # the chat itself, or its closure would keep the chat alive anyway.
+        chat_held: list[Any] = [conv]
 
         def work_external() -> None:
-            fresh = conv
+            fresh: Any = None  # the chat, once this process needs it
             # The coding-agent runner pushes its own agent_stopped: its reason is the alert's.
             ended: dict[str, str] = {}
 
@@ -575,14 +581,17 @@ def run_message(
                 # The CLI and its reader threads run in an agent-host process when one starts.
                 outcome = (
                     host_turns.run_in_host(conv_id, run_id, turn_text, model=turn_model, mode=m,
-                                           push=watched_push, cancel=cancel_event)
+                                           push=watched_push, cancel=cancel_event,
+                                           on_started=chat_held.clear)
                     if host_turns.enabled() else None
                 )
                 if outcome:
                     raise host_turns.HostTurnError(outcome)
                 if outcome is None:
-                    # Reload conv so append_message in runner sees the user turn we just saved.
-                    fresh = load_conversation(conv_id) or conv
+                    # Reload the chat so append_message in runner sees the user turn we just saved.
+                    fresh = load_conversation(conv_id) or (chat_held[0] if chat_held else None)
+                    if fresh is None:
+                        raise RuntimeError("This chat no longer exists.")
                     run_coding_agent_message(
                         fresh,
                         turn_text,
@@ -600,14 +609,17 @@ def run_message(
                 interrupted = host_error and e.interrupted
                 if interrupted:
                     fresh = load_conversation(conv_id) or fresh  # the dead host's last checkpoint
-                partial = next((msg for msg in reversed(fresh.messages)
-                                if msg.get("role") == "assistant" and msg.get("run_id") == run_id), {})
                 if not host_error or interrupted:  # a live host kept its own partial reply
-                    checkpoint_coding_turn(
-                        fresh, agent_id=coding_agent, run_id=run_id,
-                        blocks=partial.get("blocks"), reply=partial.get("text", ""),
-                        error=str(e), requested_mode=m, effective_mode="",
-                    )
+                    if fresh is None:  # failed before this process had the chat
+                        fresh = load_conversation(conv_id) or (chat_held[0] if chat_held else None)
+                    if fresh is not None:
+                        partial = next((msg for msg in reversed(fresh.messages)
+                                        if msg.get("role") == "assistant" and msg.get("run_id") == run_id), {})
+                        checkpoint_coding_turn(
+                            fresh, agent_id=coding_agent, run_id=run_id,
+                            blocks=partial.get("blocks"), reply=partial.get("text", ""),
+                            error=str(e), requested_mode=m, effective_mode="",
+                        )
 
                 def error_push(event: dict[str, Any]) -> None:
                     push({**event, "requested_mode": m, "effective_mode": ""})
@@ -718,9 +730,9 @@ def run_message(
             from backend.bridge import set_port_override
             from backend.bridge.status import fetch_listener_status
 
-            set_port_override(PANEL_LISTENER_PORT)
+            set_port_override(UEFN_LISTENER_PORT)
             listener_status = fetch_listener_status(
-                PANEL_LISTENER_PORT,
+                UEFN_LISTENER_PORT,
                 selected_project_root=settings.uefn_project_root,
             )
             listener_online = bool(listener_status.get("online"))
@@ -732,7 +744,7 @@ def run_message(
             config = RunConfig(
                 provider=provider_name,
                 model=turn_model,
-                listener_port=PANEL_LISTENER_PORT,
+                listener_port=UEFN_LISTENER_PORT,
                 listener_online=listener_online,
                 listener_wedged=listener_wedged,
                 project_root=settings.uefn_project_root,
