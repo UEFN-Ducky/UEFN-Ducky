@@ -473,6 +473,13 @@ def make_background_work():
                 start_team_keeper()
             except Exception:
                 pass
+            try:
+                # Stuck states that once waited for a person to notice put right by themselves
+                from frontend.auto_heal import start as start_auto_heal
+
+                start_auto_heal()
+            except Exception:
+                pass
             # island_watch is not started here (2026-11-03): the first successful UEFN tool
             # call starts it, and it stops itself once UEFN is closed.
 

@@ -257,6 +257,7 @@ def snapshot(detail: bool = False) -> dict[str, Any]:
         "gpu": _gpu(procs),
         "agents_in_window": agents_in_window(),
         "ui_last_hour": _ui_last_hour(),
+        "auto_heal": _auto_healed(),
     }
     if detail:
         out["perf"] = _perf()
@@ -563,9 +564,25 @@ def _ui_last_hour() -> dict[str, Any]:
         return {}
 
 
+def _auto_healed() -> list[dict[str, Any]]:
+    """What auto-heal put right lately (frontend.auto_heal), newest last."""
+    try:
+        from frontend import auto_heal
+
+        return auto_heal.recent()
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
     """Plain-words causes, most important first, each with the fix (a self-care action or a step)."""
     out: list[dict[str, str]] = []
+    healed = [h for h in snap.get("auto_heal") or [] if time.time() - float(h.get("at") or 0) < 3600]
+    if healed:
+        out.append({"severity": "low", "what": f"Ducky fixed {_plural(len(healed), 'stuck thing', 'stuck things')} "
+                                               "by itself in the last hour",
+                    "why": "; ".join(str(h.get("fixed") or "") for h in healed[-3:]),
+                    "fix": "Nothing to do. The same fix coming back every few minutes means something keeps breaking it."})
     app = snap.get("app") or {}
     pc = snap.get("pc") or {}
     ncpu = int(pc.get("cpus") or 1)
