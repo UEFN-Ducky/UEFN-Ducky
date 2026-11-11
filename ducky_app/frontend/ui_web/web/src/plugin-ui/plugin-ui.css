@@ -156,6 +156,60 @@
 .plugin-chat-dock__resize:hover {
   background: var(--dock-accent, var(--accent, #8b5cf6));
 }
+/* place "float": a card over the plugin, bottom right, that pops in from its corner and back out */
+.plugin-chat-dock--float {
+  position: absolute;
+  right: 16px;
+  bottom: var(--dock-offset, 16px);
+  z-index: 20;
+  height: min(620px, calc(100% - var(--dock-offset, 16px) - 24px));
+  max-width: calc(100% - 32px);
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg, 0 18px 48px rgba(0, 0, 0, 0.45));
+  overflow: hidden;
+  transform-origin: bottom right;
+  animation: plugin-chat-dock-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
+}
+.plugin-chat-dock--float.is-leaving {
+  animation: plugin-chat-dock-out 160ms ease-in both;
+  pointer-events: none;
+}
+.plugin-chat-dock--float > .plugin-chat-dock__resize {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+.plugin-chat-dock--float .plugin-chat-dock__head {
+  height: 40px;
+  padding: 0 8px 0 10px;
+}
+.plugin-chat-dock__pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.plugin-chat-dock__choice {
+  min-width: 0;
+  max-width: 100%;
+}
+@keyframes plugin-chat-dock-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes plugin-chat-dock-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(14px) scale(0.9); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .plugin-chat-dock--float,
+  .plugin-chat-dock--float.is-leaving { animation-duration: 1ms; }
+}
 
 /* Duck-Tac-Toe chat-first shell: board aside + ChatPane */
 .ducktactoe-chat-shell {

@@ -18,7 +18,7 @@ import { pluginPrefsKey } from "../hooks/pluginPrefsStorage";
 import { getPluginThemeVars } from "./pluginTheme";
 import { alertRefusedWrite, refusedFromResult } from "./scopeAlerts";
 import { pluginUiTabId, type BridgeRequest, type BridgeResponse } from "./types";
-import { closeDock, dockSnapshot, getDock, openDock, sanitizeTheme, setDock, type DockState } from "./pluginChatDockStore";
+import { closeDock, dockSnapshot, getDock, offsetOf, openDock, sanitizeChoices, sanitizeTheme, setDock, type DockState } from "./pluginChatDockStore";
 
 export type BridgeContext = {
   pluginId: string;
@@ -1053,20 +1053,29 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
   },
   /**
    * Ducky's own chat docked in this panel, focused on the plugin:
-   * ``{key?, title?, brief?, conv_id?, place?: "bottom"|"right", size?, expanded?, theme?: {"--var": value}}``
+   * ``{key?, title?, brief?, conv_id?, place?: "bottom"|"right"|"float", size?, expanded?, theme?: {"--var": value},
+   * offset?, choices?: [{id, title}]}`` (float: a card over the panel, `offset` px up from its bottom, that
+   * pops in and out; `choices` fill its header's chat picker)
    * → ``{open, expanded, place, size, conv_id, running}``. `key` picks the conversation (one per key,
    * remembered); `brief` is what the agent is told about the plugin; `conv_id` binds an existing chat.
    * Changes come back as the event ``chat.state``.
    */
   "chat.open": async (ctx, params) => dockSnapshot(await openDock(paneKey(ctx), ctx.pluginId, params)),
-  /** Change the open dock: ``{expanded?, place?, size?, theme?, open?}``. */
+  /** Change the open dock: ``{expanded?, place?, size?, theme?, open?, offset?, choices?}``. */
   "chat.set": (ctx, params) => {
     const patch: Partial<DockState> = {};
     if (typeof params.expanded === "boolean") patch.expanded = params.expanded;
-    if (typeof params.open === "boolean") patch.open = params.open;
-    if (params.place === "bottom" || params.place === "right") patch.place = params.place;
+    if (params.open === false) {  // a floating card plays its close animation first
+      closeDock(paneKey(ctx));
+      return dockSnapshot(getDock(paneKey(ctx)));
+    }
+    if (params.open === true) patch.open = true;
+    if (params.place === "bottom" || params.place === "right" || params.place === "float") patch.place = params.place;
     if (typeof params.size === "number") patch.size = params.size;
     if (params.theme !== undefined) patch.theme = sanitizeTheme(params.theme);
+    if (params.offset !== undefined) patch.offset = offsetOf(params.offset);
+    if (params.choices !== undefined) patch.choices = sanitizeChoices(params.choices);
+    if (patch.place === "float") patch.expanded = true;
     const next = setDock(paneKey(ctx), patch);
     if (!next) throw new Error("chat.set: call chat.open first");
     return dockSnapshot(next);

@@ -18,11 +18,15 @@ import {
   dockSnapshot,
   getDock,
   isPluginDockChat,
+  LEAVE_MS,
+  offsetOf,
   openDock,
   registerChatLookup,
+  sanitizeChoices,
   sanitizeTheme,
   setDock,
   subscribeDocks,
+  switchDockChat,
 } from "./pluginChatDockStore";
 
 describe("pluginChatDock", () => {
@@ -66,6 +70,28 @@ describe("pluginChatDock", () => {
     closeDock("t3");
     expect(dockSnapshot(getDock("t3"), true)).toEqual({ open: false, expanded: true, place: "bottom", size: 120, conv_id: "conv-1", running: true });
     expect(dockSnapshot(undefined).open).toBe(false);
+  });
+
+  it("float: full size card, offset and chat choices, a close that animates first, switching chats", async () => {
+    vi.useFakeTimers();
+    try {
+      const d = await openDock("t4", "p", {
+        conv_id: "c-a", title: "A", place: "float", expanded: false, offset: 9999,
+        choices: [{ id: "c-a", title: "A" }, { id: "c-b", title: "B" }, { id: "c-b", title: "dup" }, { title: "no id" }, "x"],
+      });
+      expect(d).toMatchObject({ place: "float", expanded: true, size: 400, offset: 400, choices: [{ id: "c-a", title: "A" }, { id: "c-b", title: "B" }] });
+      switchDockChat("t4", { id: "c-b", title: "B" });
+      expect(getDock("t4")).toMatchObject({ convId: "c-b", title: "B" });
+      expect(isPluginDockChat({ id: "c-b" })).toBe(true);
+      closeDock("t4");
+      expect(getDock("t4")).toMatchObject({ open: true, leaving: true });
+      vi.advanceTimersByTime(LEAVE_MS);
+      expect(getDock("t4")).toMatchObject({ open: false, leaving: false });
+      expect(sanitizeChoices("nope")).toEqual([]);
+      expect(offsetOf(-5)).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sanitizes theme values and personality length", () => {

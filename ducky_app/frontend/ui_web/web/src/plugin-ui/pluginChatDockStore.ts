@@ -4,12 +4,17 @@
  * A plugin calls `chat.open` (bridge) and the host renders the real ChatPane at the bottom or
  * right of that pane, bound to a conversation focused on the plugin (its brief becomes the
  * ducky's personality). The plugin can collapse, expand, resize, restyle (CSS variables) or
- * close it with `chat.set` / `chat.close`, and hears `chat.state` back.
+ * close it with `chat.set` / `chat.close`, and hears `chat.state` back. `place: "float"` shows it as a
+ * card over the plugin (bottom right, `offset` px up) that pops in and out, with an agent picker
+ * in its header when the plugin passes `choices`.
  */
 import { DEFAULT_BUNDLED_DUCKY_STYLE } from "../generated/bundledDuckies";
 import { getApi } from "../hooks/usePanelApi";
 
-export type DockPlace = "bottom" | "right";
+export type DockPlace = "bottom" | "right" | "float";
+
+/** A chat the floating dock's header can switch to (the plugin's own list). */
+export type DockChoice = { id: string; title: string };
 
 export type DockState = {
   pluginId: string;
@@ -22,6 +27,12 @@ export type DockState = {
   convId: string;
   /** CSS custom properties applied to the dock (already sanitized). */
   theme: Record<string, string>;
+  /** Float only: px between the pane's bottom and the card (room for the plugin's own button). */
+  offset: number;
+  /** Float only: the chats its header picker offers. */
+  choices: DockChoice[];
+  /** Float only: playing its close animation; `open` turns false when it ends. */
+  leaving?: boolean;
 };
 
 export type DockOpenParams = {
@@ -33,12 +44,17 @@ export type DockOpenParams = {
   size?: unknown;
   expanded?: unknown;
   theme?: unknown;
+  offset?: unknown;
+  choices?: unknown;
 };
 
 const SIZES: Record<DockPlace, { min: number; max: number; def: number }> = {
   bottom: { min: 120, max: 900, def: 320 },
   right: { min: 260, max: 760, def: 380 },
+  float: { min: 300, max: 760, def: 400 },
 };
+/** How long the floating card's close animation runs (plugin-ui.css plugin-chat-dock-out). */
+export const LEAVE_MS = 160;
 
 const states = new Map<string, DockState>();
 const subs = new Set<() => void>();
@@ -54,7 +70,23 @@ export function getDock(tabId: string): DockState | undefined {
 }
 
 export const placeOf = (v: unknown, fallback: DockPlace = "bottom"): DockPlace =>
-  v === "right" || v === "bottom" ? v : fallback;
+  v === "right" || v === "bottom" || v === "float" ? v : fallback;
+
+export const offsetOf = (v: unknown, fallback = 16): number =>
+  typeof v === "number" && Number.isFinite(v) ? Math.min(400, Math.max(0, Math.round(v))) : fallback;
+
+/** The plugin's chat list for the float header: ids and titles only, at most 40. */
+export function sanitizeChoices(raw: unknown): DockChoice[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DockChoice[] = [];
+  for (const c of raw) {
+    const id = c && typeof c === "object" ? str((c as { id?: unknown }).id, 80) : "";
+    if (!id || out.some((o) => o.id === id)) continue;
+    out.push({ id, title: str((c as { title?: unknown }).title, 80) || "Chat" });
+    if (out.length >= 40) break;
+  }
+  return out;
+}
 
 export function clampSize(place: DockPlace, v: unknown): number {
   const s = SIZES[place];
@@ -92,7 +124,22 @@ export function setDock(tabId: string, patch: Partial<DockState>): DockState | u
 }
 
 export function closeDock(tabId: string): void {
-  setDock(tabId, { open: false });
+  const cur = states.get(tabId);
+  if (cur?.place !== "float" || !cur.open) {
+    setDock(tabId, { open: false });
+    return;
+  }
+  if (cur.leaving) return;
+  setDock(tabId, { leaving: true });  // the card plays its close animation first
+  setTimeout(() => {
+    if (states.get(tabId)?.leaving) setDock(tabId, { open: false, leaving: false });
+  }, LEAVE_MS);
+}
+
+/** The float header's picker: show another of the plugin's chats in the same card. */
+export function switchDockChat(tabId: string, choice: DockChoice): void {
+  dockChatIds.add(choice.id);
+  setDock(tabId, { convId: choice.id, title: choice.title });
 }
 
 export function dropDock(tabId: string): void {
@@ -176,12 +223,16 @@ export async function openDock(tabId: string, pluginId: string, params: DockOpen
   const next: DockState = {
     pluginId,
     open: true,
-    expanded: typeof params.expanded === "boolean" ? params.expanded : prev?.expanded ?? false,
+    // a floating card is always open full size: closing it is how it goes away
+    expanded: place === "float" || (typeof params.expanded === "boolean" ? params.expanded : prev?.expanded ?? false),
     place,
     size: clampSize(place, params.size ?? prev?.size),
     title,
     convId,
     theme: params.theme === undefined ? prev?.theme ?? {} : sanitizeTheme(params.theme),
+    offset: offsetOf(params.offset, prev?.offset),
+    choices: params.choices === undefined ? prev?.choices ?? [] : sanitizeChoices(params.choices),
+    leaving: false,
   };
   states.set(tabId, next);
   notify();

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { ChatPane } from "../components/ChatPane";
+import { ChoiceDropdown } from "../components/ChoiceDropdown";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import type { ChatTab } from "../types/panel";
 import type { PluginChatOverlayProps } from "./PluginWebviewPane";
-import { clampSize, closeDock, getDock, setDock, subscribeDocks, type DockState } from "./pluginChatDockStore";
+import { clampSize, closeDock, getDock, setDock, subscribeDocks, switchDockChat, type DockState } from "./pluginChatDockStore";
 
 export function useDock(tabId: string): DockState | undefined {
   return useSyncExternalStore(subscribeDocks, () => getDock(tabId), () => undefined);
@@ -44,6 +45,11 @@ export function PluginChatDock({ tabId, dock, overlay, visible }: Props) {
   const running = overlay.runningChatIds.has(dock.convId);
   const timer = useRunClock(running);
   const bottom = dock.place === "bottom";
+  const float = dock.place === "float";
+  // the float header's picker: the plugin's chats, plus the one showing if it is not among them
+  const choices = float && dock.choices.length
+    ? (dock.choices.some((c) => c.id === dock.convId) ? dock.choices : [{ id: dock.convId, title: dock.title }, ...dock.choices])
+    : [];
   const drag = useRef<{ start: number; size: number } | null>(null);
 
   const onResizeDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -64,11 +70,13 @@ export function PluginChatDock({ tabId, dock, overlay, visible }: Props) {
   const style = {
     ...dock.theme,
     ...(dock.expanded ? (bottom ? { height: dock.size } : { width: dock.size }) : {}),
+    ...(float ? { "--dock-offset": `${dock.offset}px` } : {}),
   } as CSSProperties;
 
   return (
     <section
-      className={`plugin-chat-dock plugin-chat-dock--${dock.place}${dock.expanded ? " is-expanded" : ""}`}
+      className={`plugin-chat-dock plugin-chat-dock--${dock.place}${dock.expanded ? " is-expanded" : ""}${dock.leaving ? " is-leaving" : ""}`}
+      role={float ? "dialog" : undefined}
       style={style}
       aria-label={`${dock.title} chat`}
     >
@@ -85,25 +93,46 @@ export function PluginChatDock({ tabId, dock, overlay, visible }: Props) {
         />
       ) : null}
       <header className="plugin-chat-dock__head">
-        <button
-          type="button"
-          className="plugin-chat-dock__line"
-          onClick={() => setDock(tabId, { expanded: !dock.expanded })}
-          title={dock.expanded ? "Collapse to one line" : "Show the chat"}
-        >
-          <span className={`plugin-chat-dock__dot${running ? " is-running" : ""}`} aria-hidden="true" />
-          <span className="plugin-chat-dock__title">{running ? "Working" : dock.title}</span>
-          {timer ? <span className="plugin-chat-dock__time">{timer}</span> : null}
-        </button>
-        <button
-          type="button"
-          className="plugin-chat-dock__btn"
-          onClick={() => setDock(tabId, { expanded: !dock.expanded })}
-          aria-label={dock.expanded ? "Collapse chat" : "Expand chat"}
-          title={dock.expanded ? "Collapse" : "Expand"}
-        >
-          {dock.expanded ? (bottom ? "▾" : "▸") : bottom ? "▴" : "◂"}
-        </button>
+        {choices.length > 1 ? (
+          <div className="plugin-chat-dock__pick">
+            <span className={`plugin-chat-dock__dot${running ? " is-running" : ""}`} aria-hidden="true" />
+            <ChoiceDropdown
+              value={dock.convId}
+              options={choices.map((c) => ({ value: c.id, label: c.title }))}
+              onChange={(id) => {
+                const c = choices.find((x) => x.id === id);
+                if (c) switchDockChat(tabId, c);
+              }}
+              size="compact"
+              searchable={choices.length > 8}
+              searchPlaceholder="Find a chat"
+              className="plugin-chat-dock__choice"
+            />
+            {timer ? <span className="plugin-chat-dock__time">{timer}</span> : null}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="plugin-chat-dock__line"
+            onClick={float ? undefined : () => setDock(tabId, { expanded: !dock.expanded })}
+            title={float ? dock.title : dock.expanded ? "Collapse to one line" : "Show the chat"}
+          >
+            <span className={`plugin-chat-dock__dot${running ? " is-running" : ""}`} aria-hidden="true" />
+            <span className="plugin-chat-dock__title">{running ? "Working" : dock.title}</span>
+            {timer ? <span className="plugin-chat-dock__time">{timer}</span> : null}
+          </button>
+        )}
+        {float ? null : (
+          <button
+            type="button"
+            className="plugin-chat-dock__btn"
+            onClick={() => setDock(tabId, { expanded: !dock.expanded })}
+            aria-label={dock.expanded ? "Collapse chat" : "Expand chat"}
+            title={dock.expanded ? "Collapse" : "Expand"}
+          >
+            {dock.expanded ? (bottom ? "▾" : "▸") : bottom ? "▴" : "◂"}
+          </button>
+        )}
         <button
           type="button"
           className="plugin-chat-dock__btn"
