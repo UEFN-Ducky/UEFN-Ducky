@@ -7,6 +7,7 @@ passes and stores a session_id — how resume works is the plugin's job.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -175,8 +176,10 @@ def uefn_mcp_pending_in_log(path: Path) -> bool:
     """True when the saved Claude log still lists the uefn server as pending or failed."""
     if not path.is_file():
         return False
-    try:
-        raw = path.read_bytes()[-400_000:]
+    try:  # the tail only: a long chat's log with pictures in it reaches 500+ MB
+        with path.open("rb") as fh:
+            fh.seek(max(0, fh.seek(0, os.SEEK_END) - 400_000))
+            raw = fh.read()
     except OSError:
         return False
     text = raw.decode("utf-8", errors="ignore")
