@@ -8,9 +8,12 @@ interface PromptQueueBarProps {
   /** Stop the live turn (if any) and run this prompt next. */
   onSendNow: (id: string) => void;
   onDelete: (id: string) => void;
+  /** The prompt Send now already handed to the running agent: it goes in at the agent's
+   *  next step, and pressing its button again stops the current step and sends it at once. */
+  steeringId?: string | null;
 }
 
-export function PromptQueueBar({ items, onEdit, onSendNow, onDelete }: PromptQueueBarProps) {
+export function PromptQueueBar({ items, onEdit, onSendNow, onDelete, steeringId = null }: PromptQueueBarProps) {
   if (items.length === 0) return null;
 
   return (
@@ -37,6 +40,11 @@ export function PromptQueueBar({ items, onEdit, onSendNow, onDelete }: PromptQue
                 {item.attachments.length} file{item.attachments.length === 1 ? "" : "s"}
               </div>
             ) : null}
+            {item.id === steeringId ? (
+              <div className="prompt-queue-meta prompt-queue-meta--steering" role="status">
+                Goes in at the agent's next step
+              </div>
+            ) : null}
             <div className="prompt-queue-actions">
               <button
                 type="button"
@@ -49,11 +57,13 @@ export function PromptQueueBar({ items, onEdit, onSendNow, onDelete }: PromptQue
               </button>
               <button
                 type="button"
-                className="prompt-queue-icon-btn"
-                title={item.attachments.length
-                  ? "Send now (stops current turn)"
-                  : "Send now (the agent reads it at its next step)"}
-                aria-label="Send queued prompt now"
+                className={`prompt-queue-icon-btn${item.id === steeringId ? " is-armed" : ""}`}
+                title={item.id === steeringId
+                  ? "Stop the current step and send this now"
+                  : item.attachments.length
+                    ? "Send now (stops current turn)"
+                    : "Send now (the agent reads it at its next step)"}
+                aria-label={item.id === steeringId ? "Stop the current step and send this now" : "Send queued prompt now"}
                 onClick={() => onSendNow(item.id)}
               >
                 <span className="prompt-queue-up-icon" aria-hidden>

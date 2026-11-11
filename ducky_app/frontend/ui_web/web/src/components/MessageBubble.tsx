@@ -146,6 +146,12 @@ function subscribeTts(onChange: () => void): () => void {
 
 // User messages render via EditableUserMessage (as sticky group headers); this
 // component now only renders assistant bubbles (streamed answers + reasoning).
+/** What a turn the person stopped carries: "Stopped" from this window's Stop, "Cancelled"
+ *  once the saved copy is loaded. */
+export function stoppedByPerson(error?: string | null): boolean {
+  return error === "Stopped" || error === "Cancelled";
+}
+
 export const MessageBubble = memo(function MessageBubble({
   role,
   text: fullText,
@@ -249,10 +255,15 @@ export const MessageBubble = memo(function MessageBubble({
         {attachments?.length ? <ReplyPictures attachments={attachments} /> : null}
         {tours?.length && !isStreaming ? <TourOffer ids={tours} /> : null}
         {incomplete && !isStreaming ? (
-          <div className="message-bubble-interrupted" role="alert">
-            <span className="message-bubble-interrupted-icon" aria-hidden="true">⚠</span>
+          // The person pressing Stop is not an error: a quiet "Stopped", never the red alert
+          // (it flashed "Interrupted: Stopped" for a second before the next message went out).
+          <div
+            className={`message-bubble-interrupted${stoppedByPerson(error) ? " message-bubble-interrupted--stopped" : ""}`}
+            role={stoppedByPerson(error) ? "status" : "alert"}
+          >
+            <span className="message-bubble-interrupted-icon" aria-hidden="true">{stoppedByPerson(error) ? "■" : "⚠"}</span>
             <span className="message-bubble-interrupted-msg">
-              {error ? `Interrupted: ${error}` : "Interrupted before finishing"}
+              {stoppedByPerson(error) ? "Stopped" : error ? `Interrupted: ${error}` : "Interrupted before finishing"}
             </span>
             {error?.includes("AI_FILE_PROTECTION:") ? <FileProtectionRecovery /> : null}
             {onContinue ? (

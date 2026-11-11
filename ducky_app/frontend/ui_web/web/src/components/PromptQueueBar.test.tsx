@@ -37,4 +37,23 @@ describe("PromptQueueBar", () => {
     expect(text.getAttribute("title")).toBe("Send now (the agent reads it at its next step)");
     expect(files.getAttribute("title")).toBe("Send now (stops current turn)");
   });
+
+  it("shows a prompt handed to the running agent, and its button then interrupts", () => {
+    const onSendNow = vi.fn();
+    const items = [
+      makeQueuedPrompt("why one by one?", { id: "q1", mode: "agent", model: "m" })!,
+      makeQueuedPrompt("later", { id: "q2", mode: "agent", model: "m" })!,
+    ];
+    const view = render(<PromptQueueBar items={items} onEdit={vi.fn()} onSendNow={onSendNow} onDelete={vi.fn()} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Send queued prompt now" })).toHaveLength(2);
+
+    view.rerender(<PromptQueueBar items={items} steeringId="q1" onEdit={vi.fn()} onSendNow={onSendNow} onDelete={vi.fn()} />);
+    expect(screen.getByRole("status").textContent).toBe("Goes in at the agent's next step");
+    const interrupt = screen.getByRole("button", { name: "Stop the current step and send this now" });
+    expect(interrupt.classList.contains("is-armed")).toBe(true);
+    expect(screen.getAllByRole("button", { name: "Send queued prompt now" })).toHaveLength(1); // the other prompt
+    fireEvent.click(interrupt);
+    expect(onSendNow).toHaveBeenCalledExactlyOnceWith("q1");
+  });
 });

@@ -154,3 +154,31 @@ describe("MessageBubble generated media", () => {
     expect(seen[0].detail).toEqual({ action: "export", kind: "motion", name: "intro.html", path: "C:/g/intro.html" });
   });
 });
+
+describe("MessageBubble for a turn the person stopped", () => {
+  afterEach(() => cleanup());
+
+  it("shows a quiet Stopped, not the red interrupted alert", () => {
+    for (const error of ["Stopped", "Cancelled"]) {
+      const { container, unmount } = render(
+        <MessageBubble role="assistant" text="partial" incomplete error={error} onContinue={() => {}} />,
+      );
+      const note = container.querySelector(".message-bubble-interrupted")!;
+      expect(note.classList.contains("message-bubble-interrupted--stopped")).toBe(true);
+      expect(note.getAttribute("role")).toBe("status");
+      expect(note.querySelector(".message-bubble-interrupted-msg")?.textContent).toBe("Stopped");
+      expect(screen.queryByText(/Interrupted/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
+      unmount();
+    }
+  });
+
+  it("keeps the alert for a real failure", () => {
+    const { container } = render(<MessageBubble role="assistant" text="" incomplete error="Claude Code exited with code 1" />);
+    const note = container.querySelector(".message-bubble-interrupted")!;
+    expect(note.getAttribute("role")).toBe("alert");
+    expect(note.classList.contains("message-bubble-interrupted--stopped")).toBe(false);
+    expect(note.textContent).toContain("Interrupted: Claude Code exited with code 1");
+  });
+});
+

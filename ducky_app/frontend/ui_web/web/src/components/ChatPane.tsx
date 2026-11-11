@@ -292,6 +292,12 @@ export function ChatPane({
   const [liveVoice, setLiveVoice] = useState(false);
   const [liveVoiceHandlers, setLiveVoiceHandlers] = useState<LiveVoiceUiHandlers | null>(null);
   const [promptQueue, setPromptQueueState] = useState<QueuedPrompt[]>(() => getPromptQueue(chat.id));
+  // The queued prompt Send now handed to the running agent (PromptQueueBar shows it waiting).
+  const [steeringId, setSteeringId] = useState<string | null>(null);
+  useEffect(() => {
+    // The agent took it (user_steered drops it from the queue) or the turn ended.
+    if (steeringId && (!agentRunning || !promptQueue.some((p) => p.id === steeringId))) setSteeringId(null);
+  }, [steeringId, agentRunning, promptQueue]);
   useEffect(() => {
     setPromptQueueState(getPromptQueue(chat.id));
     return subscribePromptQueue(chat.id, () => setPromptQueueState(getPromptQueue(chat.id)));
@@ -1084,6 +1090,7 @@ export function ChatPane({
           <div className="chat-pane-input-area">
         <PromptQueueBar
           items={promptQueue}
+          steeringId={steeringId}
           onEdit={(id) => {
             const item = takePromptForEdit(chat.id, id);
             if (!item) return;
@@ -1105,12 +1112,17 @@ export function ChatPane({
             setPromptQueue(chat.id, movePromptToFront(promptQueue, id));
             if (agentRunning) {
               const item = promptQueue.find((p) => p.id === id);
-              if (item?.attachments.length) {
+              if (item?.attachments.length || steeringId === id) {
                 // Pictures/files need a turn of their own. Waiting for this one to end left
                 // "Send now" doing nothing (Oct 25): stop it, and the idle drain sends this
-                // prompt first.
+                // prompt first. The same for a second press: the agent is inside one long
+                // step (deleting 10,000 actors) and the person wants in now, not after it.
+                setSteeringId(null);
                 handleStop();
               } else if (item?.text) {
+                // Shown on the prompt ("Goes in at the agent's next step"): pressed with no
+                // sign of it, the button looked dead while a long step ran.
+                setSteeringId(id);
                 void getApi()?.steer_message?.(chat.id, item.id, item.text);
               }
               return;

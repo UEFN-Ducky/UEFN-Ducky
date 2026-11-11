@@ -739,6 +739,15 @@
   background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 
+/* Send now was pressed while the agent works: the prompt waits for its next step. */
+.prompt-queue-meta--steering {
+  color: var(--accent, #4f8cff);
+}
+
+.prompt-queue-icon-btn.is-armed {
+  color: var(--danger, #e85d5d);
+}
+
 .prompt-queue-icon-btn:disabled {
   opacity: 0.35;
   cursor: default;
@@ -2999,6 +3008,13 @@
   color: var(--danger, #e5484d);
   font-size: 12px;
   line-height: 1.4;
+}
+
+/* Stopped by the person: a quiet note, not an alert. */
+.message-bubble-interrupted--stopped {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--fg-muted, var(--text-secondary, var(--fg)));
 }
 
 .message-bubble-interrupted-msg {
