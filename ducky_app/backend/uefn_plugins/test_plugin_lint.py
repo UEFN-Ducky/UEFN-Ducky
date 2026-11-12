@@ -374,3 +374,39 @@ def test_the_store_icon_is_one_the_store_takes_and_set_icon_makes_one(tmp_path: 
     _write(draft, "assets/icon.svg", "<svg xmlns='http://www.w3.org/2000/svg'/>")
     out = panel_ai_plugins.set_ai_plugin_icon("demo", str(wide))
     assert not out["ok"] and "assets/icon.svg is the Store icon" in out["error"]
+
+
+def test_data_sync_marks_doc_key_prefixes_of_a_log_as_batched() -> None:
+    from backend.uefn_plugins.plugin_lint import check_manifest
+    from backend.uefn_plugins.store import data_sync
+
+    good = {"data_sharing": True, "data_sync": {"act.": "batched", "feed.": "log"}}
+    assert check_manifest(good) == [] and data_sync(good) == ("act.", "feed.")
+    assert check_manifest({"data_sync": ["act."]}) == [
+        'plugin.json "data_sync" must be an object: {"<doc key prefix>": "batched"}.']
+    text = "\n".join(check_manifest({"data_sync": {"Act.": "batched", "": "batched", "log.": "often", "ok.": "batched"}}))
+    assert "key 'Act.' isn't the start of a doc key" in text and "key ''" in text
+    assert "'log.' is 'often': use \"batched\"" in text and len(text.splitlines()) == 3
+    assert data_sync({"data_sync": {"Act.": "batched", "log.": "often", "ok.": "batched"}}) == ("ok.",)
+    assert check_manifest({"data_sharing": False, "data_sync": {"act.": "batched"}}) == [
+        'plugin.json has "data_sync" but "data_sharing": false: nothing is shared, so remove one.']
+    assert data_sync({"data_sharing": False, "data_sync": {"act.": "batched"}}) == ()
+
+
+def test_many_small_docs_under_one_prefix_are_named_with_the_fix() -> None:
+    from backend.uefn_plugins import data_shape
+
+    strokes = [(f"op.d1.{i:08d}", 240) for i in range(651)]
+    undo = [(f"assetundo.{i}", 400) for i in range(5640)]
+    cards = [(f"card.b1.{i}", 900) for i in range(40)]  # few: fine
+    media = [(f"media.{i}", 30_000) for i in range(500)]  # many, but each a real record's worth
+    found = data_shape.small_item_groups([*strokes, *undo, *cards, *media])
+    assert found == [("assetundo.", 5640, 400), ("op.", 651, 240)]
+    # This PC's own items and a declared log are the plugin's answer already.
+    assert data_shape.small_item_groups([*strokes, *undo], skip=("assetundo.", "op.")) == []
+    assert data_shape.small_item_groups([(f"act.b1.{i}", 120) for i in range(299)]) == []
+    assert data_shape.key_group("op.d1.00000007") == "op." and data_shape.key_group("settings") == "settings"
+    text = data_shape.message("op.", 651, 240)
+    assert text.startswith('651 small items under "op." (about 240 bytes each)')
+    assert '"data_local"' in text and '"data_sync": {"op.": "batched"}' in text
+    assert data_shape.warnings("p", {"data_sharing": False}) == []  # nothing is shared: no team to flood

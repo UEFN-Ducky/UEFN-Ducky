@@ -658,6 +658,12 @@ def validate_ai_plugin(plugin_id: str) -> dict[str, Any]:
     # Not an error while building (installs keep working); a Store build refuses the errors.
     store_errors, store_warnings = check_store_ready(root, manifest, pid)
     warnings.extend(store_errors + store_warnings)
+    try:  # how its records look on this PC: thousands of small items flood a team
+        from backend.uefn_plugins import data_shape
+
+        warnings.extend(data_shape.warnings(pid, manifest))
+    except Exception:  # noqa: BLE001 — no data store here: the file checks stand on their own
+        pass
     if errors:
         return {"ok": False, "id": pid, "errors": errors, **({"warnings": warnings} if warnings else {})}
     return {

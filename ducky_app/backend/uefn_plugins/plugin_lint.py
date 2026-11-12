@@ -14,7 +14,8 @@ each problem with a message that says how to fix it.
   installed plugins can be compiled, and those files are gone then.
 - ``plugin.json``: ``data_sharing`` is true or false, ``data_locks`` maps doc key or
   file path prefixes to ``auto`` or ``required``, ``data_local`` lists prefixes of this
-  PC's own items, and each ``team_folders`` entry has an
+  PC's own items, ``data_sync`` maps doc key prefixes of a log to ``batched``, and each
+  ``team_folders`` entry has an
   id, a root under ``{LOCALAPPDATA}/UEFN-Ducky/`` or ``{PROJECT}/``, a unit of ``*``, ``.``
   or ``file`` and relative globs.
 - Ready for the Store and for teams (:func:`check_store_ready`; validate warns, a Store

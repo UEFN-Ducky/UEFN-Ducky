@@ -177,6 +177,34 @@ code for it; these rules decide how well it works for people editing together.
   what waits to go out or come in, and the conflicts. `ducky_plugin_data_scope` gives
   the same for a shared copy.
 
+## Few items, not thousands
+
+A team gets **one change per item** (a doc or a file): each is listed in the Team menu, kept
+in history and fetched by every teammate. A plugin that keeps one small doc per event fills
+all three with thousands of entries. So:
+
+- **One item per thing a person edits** (a card, a canvas, a level), never one per event (a
+  stroke, a log line, a step). Gather events into the thing they belong to: pages of about 50
+  (`ops.<id>.000003` holding `{"ops": [{"id": …}, …]}`; arrays of objects with an `id` merge
+  by `id`), or one list with a cap. AI Art Studio keeps 50 strokes to a page this way.
+- **Undo steps, job progress, diagnostics, "last run"** are this PC's own: put their prefix in
+  `data_local`.
+- **A log or activity feed teammates read:** `"data_sync": {"act.": "batched"}` at the top of
+  `plugin.json` (a doc key prefix → `"batched"`). Those docs go out together every few
+  minutes as log rows, not as changes of their own, and a teammate who joins later gets the
+  recent ones only: never use it for records. Cap the feed (Kanban keeps the newest 200).
+- **Anything that only grows gets a cap:** delete the oldest when adding the newest.
+- **What can be made again stays home:** previews by the hundred, indexes and caches go in
+  `api.local_dir()` or under `data_local`; share the source they are made from.
+- **Write only what changed.** A `put` of the same value is free (`changed: false`), but a
+  shared doc holding a timestamp or counter that moves on every save is a new change every
+  time: keep such fields out of shared docs.
+- **Many docs in one action are one change:** write them in the same tool call or RPC.
+- **Big values are files** (`put_file`), one per thing, never sliced into many small docs.
+
+`ducky_plugin_validate` warns when a copy on this PC holds 300 or more small docs under one
+key prefix of a shared plugin, names the prefix and says which of these fixes fit.
+
 ## The plugin's own folders (`team_folders`)
 
 Only when files must stay real files on disk (another program reads them, a scene

@@ -145,6 +145,11 @@ free ones too. See `plugin_publishing`.
       `PermissionError` (locked or read-only) and returns `{"ok": False, "error": …}`;
       panels show that message.
     - **Per-PC state** (last opened, window layout, diagnostics) under `data_local`.
+    - **Few items, not thousands:** a team gets one change per item, so never one doc per
+      event (a stroke, a log line, an undo step). Gather events into pages or a capped list,
+      keep undo steps and job progress under `data_local`, mark a feed
+      `"data_sync": {"act.": "batched"}` and cap it (`plugin_data`, "Few items, not
+      thousands"; `ducky_plugin_validate` warns at 300 small docs under one prefix).
     - **Teammates' changes:** panels handle `plugin_scope_changed` — `synced`: merge the
       `keys` that changed and keep the open item, selection and scroll (Kanban re-reads
       quietly, never while a drag runs); `switched`: start over. A backend cache registers
@@ -209,7 +214,7 @@ Top level: `id`, `"kind": "plugin"`, `version`, `label`, `description`,
 settings), `contributes`, `"backend": {"entry": "backend", "register": "register"}`.
 `"data_sharing"`: `true` (teammates can share its data) or `false` (always Local); a
 Store build refuses a plugin without it (rule 8). Optional `data_locks`, `data_local`,
-`team_folders` (`plugin_data`), `tool_concurrency` (see "Many agents at once").
+`data_sync`, `team_folders` (`plugin_data`), `tool_concurrency` (see "Many agents at once").
 
 | `contributes` key | What | Example in |
 |---|---|---|
