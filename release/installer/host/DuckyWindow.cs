@@ -82,12 +82,31 @@ namespace DuckySetup
             catch (Exception ex)
             {
                 Engine.LogHostError(ex);
-                MessageBox.Show(
-                    this,
-                    Text + " could not start its window.\n\n" + ex.Message,
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                if (Stats.IsWebView2Missing(ex.GetType().Name + ": " + ex.Message))
+                {
+                    // Setup's own window needs the runtime too. Tools that remove Microsoft Edge
+                    // take it out, and "could not start its window" told nobody what to install.
+                    var open = MessageBox.Show(
+                        this,
+                        Stats.WebView2MissingText,
+                        Text,
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Error);
+                    if (open == DialogResult.Yes)
+                    {
+                        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Stats.WebView2Page) { UseShellExecute = true }); }
+                        catch { /* no browser to open it: the address is in the message */ }
+                    }
+                }
+                else
+                {
+                    MessageBox.Show(
+                        this,
+                        Text + " could not start its window.\n\n" + ex.Message,
+                        Text,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
                 Environment.ExitCode = 1;
                 Close();
             }

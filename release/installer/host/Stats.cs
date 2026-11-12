@@ -63,8 +63,28 @@ namespace DuckySetup
             return "more";
         }
 
-        // An engine or uninstaller exit code as an error code ("ok" for 0).
-        public static string ExitCode(int code) => code == 0 ? "ok" : code > 0 ? "exit_" + code : "exit_neg";
+        // An engine or uninstaller exit code as an error code ("ok" for 0). A negative code is
+        // Windows ending the process: exit_killed (ended from outside: Ctrl+C, sign-out, shutdown,
+        // End task), exit_crashed (it faulted), exit_neg for any other. "exit_neg" alone (a failed
+        // web update on Nov 10 2026) could not tell a kill from a crash.
+        public static string ExitCode(int code)
+        {
+            if (code >= 0)
+                return code == 0 ? "ok" : "exit_" + code;
+            switch (unchecked((uint)code))
+            {
+                case 0xC000013A: // STATUS_CONTROL_C_EXIT
+                case 0x40010004: // DBG_TERMINATE_PROCESS
+                    return "exit_killed";
+                case 0xC0000005: // access violation
+                case 0xC0000409: // stack buffer overrun / fail fast
+                case 0xC000001D: // illegal instruction
+                case 0xC00000FD: // stack overflow
+                    return "exit_crashed";
+                default:
+                    return "exit_neg";
+            }
+        }
 
         // Why the engine failed, from the end of its Inno Setup log ("" when it doesn't say).
         // exit_4 alone ("a fatal error during installation", 1 of 5 installs on Oct 28 2026)
@@ -118,6 +138,23 @@ namespace DuckySetup
             return current;
         }
 
+        // Microsoft Edge WebView2 Runtime is not on the PC (removed with Edge by a "debloat" tool,
+        // or never installed): Setup's window and the app's both need it.
+        public const string WebView2Page = "https://developer.microsoft.com/microsoft-edge/webview2/";
+        public const string WebView2MissingText =
+            "UEFN Ducky needs Microsoft Edge WebView2 Runtime to show its window, and this PC doesn't have it. "
+            + "Tools that remove Microsoft Edge take it out too.\n\n"
+            + "Get the Evergreen installer from Microsoft: " + WebView2Page + "\n"
+            + "Install it, then run this Setup again.\n\n"
+            + "Open Microsoft's download page now?";
+
+        // True for the error WebView2 raises when no runtime is installed (type name or its text).
+        public static bool IsWebView2Missing(string? error)
+        {
+            var t = (error ?? "").ToLowerInvariant();
+            return t.Contains("webview2runtimenotfoundexception") || t.Contains("compatible webview2 runtime");
+        }
+
         // Why the downloaded Setup itself gave up before or around its engine, from its setup-host.log.
         // exit_1 alone (2 of 10 new web installs on Oct 29 2026) could be any of these.
         public static string HostFailReason(string? hostLog)
@@ -125,6 +162,8 @@ namespace DuckySetup
             var t = (hostLog ?? "").ToLowerInvariant();
             if (t.Length == 0)
                 return "";
+            if (IsWebView2Missing(t))
+                return "webview2_missing";
             if (t.Contains("virus") || t.Contains("potentially unwanted"))
                 return "antivirus";
             if (t.Contains("web installer, not the full setup"))

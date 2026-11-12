@@ -306,6 +306,10 @@ namespace DuckySetup.Tests
                 && Stats.AgeBucket(20 * 86400) == "month1" && Stats.AgeBucket(90 * 86400) == "older", "install age buckets");
             Check(Stats.TookBucket(30) == "1m" && Stats.TookBucket(200) == "5m" && Stats.TookBucket(900) == "20m" && Stats.TookBucket(5000) == "more", "install time buckets");
             Check(Stats.ExitCode(0) == "ok" && Stats.ExitCode(5) == "exit_5" && Stats.ExitCode(-2) == "exit_neg", "exit codes");
+            // Nov 10 2026: a failed web update sent exit_neg and nothing said whether Setup was ended or crashed.
+            Check(Stats.ExitCode(unchecked((int)0xC000013A)) == "exit_killed" && Stats.ExitCode(-1073741510) == "exit_killed"
+                && Stats.ExitCode(unchecked((int)0xC0000005)) == "exit_crashed" && Stats.ExitCode(unchecked((int)0xC0000409)) == "exit_crashed"
+                && Stats.FailCode(unchecked((int)0xC0000005), "access_denied") == "exit_crashed.access_denied", "exit codes: ended from outside vs crashed");
             Check(Stats.Outcome(true, true) == "ok" && Stats.Outcome(false, true) == "cancel" && Stats.Outcome(false, false) == "fail", "outcomes");
             Check(Stats.FailReason("2026-10-28 DeleteFile failed; code 32.\r\nThe process cannot access the file because it is being used by another process.") == "file_in_use", "locked file");
             Check(Stats.FailReason("CopyFile failed; code 5.\nAccess is denied.") == "access_denied", "no permission");
@@ -313,6 +317,11 @@ namespace DuckySetup.Tests
             Check(Stats.FailCode(4, "file_in_use") == "exit_4.file_in_use" && Stats.FailCode(4, "") == "exit_4" && Stats.FailCode(0, "file_in_use") == "ok", "fail codes");
             Check(Stats.HostFailReason("System.ComponentModel.Win32Exception (225): Operation did not complete successfully because the file contains a virus or potentially unwanted software.") == "antivirus", "exit_1: antivirus");
             Check(Stats.HostFailReason("System.InvalidOperationException: The Store's download is a web installer, not the full Setup: stopping here.") == "web_child", "exit_1: web child");
+            // A PC with Microsoft Edge removed: Setup's window cannot start, and it says what to install.
+            Check(Stats.IsWebView2Missing("WebView2RuntimeNotFoundException: Couldn't find a compatible Webview2 Runtime installation to host WebViews.")
+                && Stats.HostFailReason("Microsoft.Web.WebView2.Core.WebView2RuntimeNotFoundException: Couldn't find a compatible Webview2 Runtime installation to host WebViews.") == "webview2_missing"
+                && !Stats.IsWebView2Missing("System.IO.FileNotFoundException: Microsoft.Web.WebView2.Core.dll")
+                && Stats.WebView2MissingText.Contains(Stats.WebView2Page), "exit_1: WebView2 runtime missing");
             Check(Stats.HostFailReason("System.UnauthorizedAccessException: Access to the path 'C:\\x\\Setup-engine.exe' is denied.") == "access_denied", "exit_1: no permission");
             Check(Stats.HostFailReason("System.IO.IOException: There is not enough space on the disk.") == "disk_full", "exit_1: full disk");
             Check(Stats.HostFailReason("System.InvalidOperationException: Could not start Setup-engine.exe") == "engine_start", "exit_1: engine start");
