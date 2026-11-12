@@ -113,7 +113,7 @@ def epic_not_found_hint(text: str) -> str:
     parts: list[str] = []
     renamed = _EPIC_RENAMED.get(wanted, "")
     if renamed:
-        parts.append(f"Renamed in 43.00: use {renamed} (PascalCase tool names; unreal__describe_toolset lists them).")
+        parts.append(f"Renamed: use {renamed} (PascalCase tool names; unreal__describe_toolset lists them).")
     else:
         # "…scene.SceneTools" -> "scene": the listed toolsets that are about the same thing.
         stem = re.sub(r"(Toolset|Tools)$", "", wanted.rsplit(".", 1)[-1]).lower()

@@ -17,7 +17,8 @@ _SCENE_REPLY = (
 
 def test_an_old_toolset_name_gets_the_43_00_name_and_the_capture_tool() -> None:
     hint = epic_not_found_hint(_SCENE_REPLY)
-    assert "Renamed in 43.00: use EditorToolset.LevelToolset" in hint
+    assert "Renamed: use EditorToolset.LevelToolset" in hint
+    assert "43." not in hint  # no release number: the hint has to stay true after the next update
     assert "take_high_res_screenshot" in hint and "\n" not in hint
     assert "ValkyrieFortniteToolset.SessionToolset" in epic_not_found_hint(
         "Toolset 'ValkyrieToolset.SessionToolset' not found. Available toolsets: ValkyrieFortniteToolset.SessionToolset")
