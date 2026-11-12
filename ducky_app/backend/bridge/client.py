@@ -761,6 +761,12 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
             _discovered_port = None
         if _is_refused(e):
             raise _offline_error(port) from e  # UEFN closed: status, not an Errors-tab failure
+        if command == "reload_listener" and isinstance(getattr(e, "reason", e), (ConnectionResetError, ConnectionAbortedError)):
+            # The listener restarts its own server: a cut connection is the reload happening,
+            # not a lost command. It was an error row whenever two reloads met (Nov 11 2026:
+            # an update's reload, then a plugin update's a second later). A reload that never
+            # answers (a timeout) is still an error.
+            return {"ok": True, "reloaded": True, "note": "The listener restarted before it could answer."}
         if _was_delivered(e):
             _record_bridge_error(f"No reply in time for '{command}' (it reached UEFN): {e}", command)
             raise TimeoutError(

@@ -178,18 +178,27 @@ def revive_listener(port: int) -> dict[str, Any]:
     }
 
 
+# After a failed auto restart the next tries come this long after the one before. One try per
+# offline spell left the listener down until the person pressed Restart listener, which then
+# worked (Nov 11 2026 feedback, after Ducky updated itself: the first try met a busy editor).
+AUTO_REVIVE_RETRY_AFTER_SEC = (120.0, 300.0)
+
+
 class AutoRevive:
-    """Panel-poll watchdog: one revive per offline spell while UEFN MCP is up.
+    """Panel-poll watchdog: revives the listener while it is offline and UEFN MCP is up, at
+    most ``1 + len(AUTO_REVIVE_RETRY_AFTER_SEC)`` times per offline spell.
 
     A spell ends when the listener comes online or UEFN MCP goes away (UEFN closed or
-    switching island), so the next island gets its own try.
+    switching island), so the next island gets its own tries.
     """
 
     def __init__(self, *, grace_sec: float = AUTO_REVIVE_GRACE_SEC) -> None:
         self._grace = grace_sec
         self._lock = threading.Lock()
         self._offline_since = 0.0
-        self._tried = False
+        self._tries = 0
+        self._next_try = 0.0
+        self._running = False
 
     def observe(self, status: dict[str, Any], port: int, *, now: float | None = None) -> bool:
         """Feed a listener status; starts a background revive when due. True when it did."""
@@ -198,15 +207,27 @@ class AutoRevive:
         with self._lock:
             if not down:
                 self._offline_since = 0.0
-                self._tried = False
+                self._tries = 0
+                self._next_try = 0.0
                 return False
             if not self._offline_since:
                 self._offline_since = t
-            if self._tried or t - self._offline_since < self._grace:
+                self._next_try = t + self._grace
+            if self._running or self._tries > len(AUTO_REVIVE_RETRY_AFTER_SEC) or t < self._next_try:
                 return False
-            self._tried = True
-        threading.Thread(target=self._run, args=(port,), name="ducky-listener-revive", daemon=True).start()
+            retry_after = AUTO_REVIVE_RETRY_AFTER_SEC[self._tries:self._tries + 1]
+            self._tries += 1
+            self._next_try = t + retry_after[0] if retry_after else float("inf")
+            self._running = True
+        threading.Thread(target=self._try, args=(port,), name="ducky-listener-revive", daemon=True).start()
         return True
+
+    def _try(self, port: int) -> None:
+        try:
+            self._run(port)
+        finally:
+            with self._lock:
+                self._running = False
 
     @staticmethod
     def _run(port: int) -> None:

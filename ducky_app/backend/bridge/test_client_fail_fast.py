@@ -83,6 +83,34 @@ def test_a_lost_reply_is_not_called_offline(monkeypatch: pytest.MonkeyPatch, rea
     assert "not running" not in str(got.value) and "Do not send it again" in str(got.value)
 
 
+def test_a_reload_cut_off_by_the_listener_restarting_is_the_reload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nov 11 2026: an update's reload and a plugin update's met a second apart; the second got
+    WinError 10054 from the restarting listener and was filed as bridge_timeout.reload_listener."""
+    monkeypatch.setattr(bridge, "_pinned_port", 4200)
+    monkeypatch.setattr(bridge, "_discovered_port", 4200)
+    monkeypatch.setattr(bridge, "configured_listener_port", lambda: 4200)
+    logged: list[str] = []
+    monkeypatch.setattr(bridge, "_record_bridge_error", lambda msg, *a: logged.append(msg))
+    state = {"reason": ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")}
+
+    def _lost(*_a, **_k):
+        raise urllib.error.URLError(state["reason"])
+
+    monkeypatch.setattr(bridge, "_post_json_locked", _lost)
+    bridge._invalidate_cache()
+    out = bridge.send_command("reload_listener", timeout=6.0)
+    assert out["ok"] is True and out["reloaded"] is True and logged == []
+
+    # A reload that never answers is still an error, and so is any other command cut off.
+    state["reason"] = TimeoutError("timed out")
+    with pytest.raises(TimeoutError):
+        bridge.send_command("reload_listener", timeout=6.0)
+    state["reason"] = ConnectionResetError(10054, "reset")
+    with pytest.raises(TimeoutError):
+        bridge.send_command("spawn_actor", {})
+    assert len(logged) == 2
+
+
 def test_expected_offline_is_not_logged(monkeypatch: pytest.MonkeyPatch) -> None:
     logged: list[str] = []
     monkeypatch.setattr(

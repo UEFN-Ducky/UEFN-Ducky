@@ -120,7 +120,9 @@ def test_uefn_closed(epic) -> None:
     assert out["action"] == "uefn_offline" and calls == []
 
 
-def test_auto_revive_once_per_offline_spell(monkeypatch) -> None:
+def test_auto_revive_tries_again_later_in_the_same_offline_spell(monkeypatch) -> None:
+    """Nov 11 2026: after Ducky updated itself the one auto restart failed and the listener
+    stayed offline until the person pressed Restart listener (which worked)."""
     runs: list[int] = []
     monkeypatch.setattr(revive.AutoRevive, "_run", staticmethod(lambda port: runs.append(port)))
 
@@ -136,14 +138,39 @@ def test_auto_revive_once_per_offline_spell(monkeypatch) -> None:
     down = {"online": False, "epic_mcp_online": True}
     assert not auto.observe(down, 4200, now=100)
     assert not auto.observe(down, 4200, now=150)
-    assert auto.observe(down, 4200, now=161)
+    assert auto.observe(down, 4200, now=161)  # first try, after the grace
+    assert not auto.observe(down, 4200, now=200)  # not yet
+    assert auto.observe(down, 4200, now=281)  # 120 s later
     assert not auto.observe(down, 4200, now=500)
-    assert runs == [4200]
-    # UEFN closed / next island: a fresh spell gets its own try.
-    auto.observe({"online": False, "epic_mcp_online": False}, 4200, now=600)
-    auto.observe(down, 4200, now=700)
-    assert auto.observe(down, 4200, now=761)
-    assert runs == [4200, 4200]
+    assert auto.observe(down, 4200, now=581)  # 300 s after that
+    assert not auto.observe(down, 4200, now=5000)  # three tries, then it is the person's call
+    assert runs == [4200, 4200, 4200]
+    # UEFN closed / next island: a fresh spell gets its own tries.
+    auto.observe({"online": False, "epic_mcp_online": False}, 4200, now=6000)
+    auto.observe(down, 4200, now=6100)
+    assert auto.observe(down, 4200, now=6161)
+    assert runs == [4200] * 4
+
+
+def test_auto_revive_never_runs_two_tries_at_once(monkeypatch) -> None:
+    started: list[object] = []
+
+    class _Thread:
+        def __init__(self, target, args, **_):
+            started.append((target, args))
+
+        def start(self):
+            pass  # the try is still running
+
+    monkeypatch.setattr(revive.threading, "Thread", _Thread)
+    auto = revive.AutoRevive(grace_sec=0)
+    down = {"online": False, "epic_mcp_online": True}
+    assert auto.observe(down, 4200, now=10)
+    assert not auto.observe(down, 4200, now=10 + revive.AUTO_REVIVE_RETRY_AFTER_SEC[0] + 1)
+    monkeypatch.setattr(revive.AutoRevive, "_run", staticmethod(lambda port: None))
+    target, args = started[0]
+    target(*args)  # the first try ends
+    assert auto.observe(down, 4200, now=10 + revive.AUTO_REVIVE_RETRY_AFTER_SEC[0] + 2)
 
 
 def test_dead_epic_session_is_dropped_and_tried_once_more(monkeypatch) -> None:
