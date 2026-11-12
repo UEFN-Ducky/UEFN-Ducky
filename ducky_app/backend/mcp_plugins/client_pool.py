@@ -85,6 +85,46 @@ def epic_not_found(text: str) -> bool:
     return bool(_EPIC_NOT_FOUND.match(str(text or "")))
 
 
+# 42.40 toolset names agents still send, and what 43.00 calls them (uefn skill: epic_toolsets).
+_EPIC_RENAMED = {
+    "editor_toolset.toolsets.scene.SceneTools": "EditorToolset.LevelToolset",
+    "editor_toolset.toolsets.actor.ActorTools": "EditorToolset.ActorToolset",
+    "editor_toolset.toolsets.asset.AssetTools": "EditorToolset.AssetToolset",
+    "editor_toolset.toolsets.static_mesh.StaticMeshTools": "EditorToolset.StaticMeshToolset",
+    "ValkyrieToolset.DeviceToolset": "ValkyrieFortniteToolset.DeviceToolset",
+    "ValkyrieToolset.SessionToolset": "ValkyrieFortniteToolset.SessionToolset",
+    "ValkyrieToolset.VerseToolset": "VerseToolset.VerseToolset",
+    "EditorToolset.LogsToolset": "ConsoleToolset.LogsToolset",
+}
+_EPIC_TOOLSET_MISSING = re.compile(r"Toolset '([^']+)' not found")
+_EPIC_AVAILABLE = re.compile(r"Available toolsets:\s*(.+)", re.S)
+
+
+def epic_not_found_hint(text: str) -> str:
+    """One line naming what to call instead of a toolset Epic does not have, "" when nothing
+    close is known. Nov 12 2026: a Codex scene capture named the 42.40
+    ``editor_toolset.toolsets.scene.SceneTools`` and the agent had only Epic's long list to go on."""
+    missing = _EPIC_TOOLSET_MISSING.search(str(text or ""))
+    if not missing:
+        return ""
+    wanted = missing.group(1)
+    listed = _EPIC_AVAILABLE.search(text)
+    names = [n.strip() for n in listed.group(1).split(",") if "." in n and " " not in n.strip()] if listed else []
+    parts: list[str] = []
+    renamed = _EPIC_RENAMED.get(wanted, "")
+    if renamed:
+        parts.append(f"Renamed in 43.00: use {renamed} (PascalCase tool names; unreal__describe_toolset lists them).")
+    else:
+        # "…scene.SceneTools" -> "scene": the listed toolsets that are about the same thing.
+        stem = re.sub(r"(Toolset|Tools)$", "", wanted.rsplit(".", 1)[-1]).lower()
+        close = [n for n in names if stem and stem in n.lower()][:3]
+        if close:
+            parts.append(f"Closest available: {', '.join(close)}.")
+    if any(word in wanted.lower() for word in ("scene", "capture", "screenshot")):
+        parts.append("For a picture of the level, take_high_res_screenshot (Ducky's own tool) needs no Epic toolset.")
+    return " ".join(parts)
+
+
 def mcp_http_client(headers: dict[str, Any] | None = None, timeout: Any = None, auth: Any = None) -> Any:
     """The MCP SDK's client factory, with HTTPS verified by Windows (frontend/ssl_boot.py)."""
     import httpx
@@ -783,7 +823,8 @@ class PluginClientPool:
         if epic_call and epic_not_found(text):
             # Fail loudly so callers fall back instead of treating "not found" as success.
             # Keep the "Available toolsets: ..." list: it is how the agent finds the right name.
-            raise RuntimeError(f"Epic MCP: {text.strip()[:4000]}")
+            hint = epic_not_found_hint(text)
+            raise RuntimeError(f"Epic MCP: {text.strip()[:4000]}" + (f"\nHint: {hint}" if hint else ""))
         if not getattr(raw, "isError", False):
             try:
                 # What the call made (a Blender render, an export…) goes into Storage under this server.
