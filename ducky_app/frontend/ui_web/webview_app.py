@@ -994,6 +994,10 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     from frontend.webview2_repair import ensure as _ensure_webview2_dlls
 
     _ensure_webview2_dlls()  # an interrupted Setup can leave webview/lib without its DLLs
+    from frontend import webview2_runtime
+
+    # No WebView2 runtime: say so, instead of a window on the IE engine stuck on "loading".
+    webview2_runtime.require()
     webview.start(
         _after_gui_start,
         debug=is_dev_panel(),

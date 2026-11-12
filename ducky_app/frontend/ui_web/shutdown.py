@@ -195,9 +195,17 @@ def _ports_blocked(exc: BaseException | str) -> bool:
     return bind_refused(exc)
 
 
+def _webview2_missing(exc: BaseException | str) -> bool:
+    from frontend.webview2_runtime import WebView2Missing
+
+    return isinstance(exc, WebView2Missing)
+
+
 def _format_fatal_message(exc: BaseException | str) -> str:
     if isinstance(exc, str):
         return exc
+    if _webview2_missing(exc):
+        return str(exc)  # already the whole message, in plain words
     msg = "".join(traceback.format_exception_only(type(exc), exc)).strip()
     if not msg:
         msg = repr(exc)
@@ -252,7 +260,12 @@ def fatal_error_and_exit(
 
         detail = (exc if isinstance(exc, str)
                   else "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
-        record_error("startup", detail)
+        if _webview2_missing(exc):
+            from frontend.webview2_runtime import ERROR_CODE
+
+            record_error(ERROR_CODE, str(exc).split("\n", 1)[0])  # counted apart from other startup errors
+        else:
+            record_error("startup", detail)
     except Exception:
         pass
     try:
@@ -275,7 +288,16 @@ def fatal_error_and_exit(
             owns_root = True
         try:
             title = PORTS_BLOCKED_TITLE if _ports_blocked(exc) else "UEFN Ducky"
-            messagebox.showerror(title, message, parent=root)
+            if _webview2_missing(exc):
+                # The fix is one install from Microsoft: offer to open its page.
+                if messagebox.askyesno(title, message + "\n\nOpen Microsoft's download page now?", parent=root, icon="error"):
+                    import webbrowser
+
+                    from frontend.webview2_runtime import DOWNLOAD_PAGE
+
+                    webbrowser.open(DOWNLOAD_PAGE)
+            else:
+                messagebox.showerror(title, message, parent=root)
         finally:
             if owns_root:
                 try:
