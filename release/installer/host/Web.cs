@@ -149,14 +149,18 @@ namespace DuckySetup
                 }
             }
             ct.ThrowIfCancellationRequested();
-            var last = WebRelease.FetchWithRetries(
-                () => Fetch(release, part, progress, ct),
-                () => File.Exists(part) ? new FileInfo(part).Length : 0,
-                seconds =>
-                {
-                    ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds));
-                    ct.ThrowIfCancellationRequested();
-                });
+            Func<long> have = () => File.Exists(part) ? new FileInfo(part).Length : 0;
+            Action<int> wait = seconds =>
+            {
+                ct.WaitHandle.WaitOne(TimeSpan.FromSeconds(seconds));
+                ct.ThrowIfCancellationRequested();
+            };
+            var last = WebRelease.FetchWithRetries(() => Fetch(release.InstallerUrl, release, part, progress, ct), have, wait);
+            // The usual storage host kept failing: the same file from the Store's second
+            // one, going on from the bytes already on disk.
+            var second = WebRelease.AltUrl(release.InstallerUrl);
+            if (last != null && second.Length > 0 && WebRelease.WorthSecondHost(last))
+                last = WebRelease.FetchWithRetries(() => Fetch(second, release, part, progress, ct), have, wait);
             if (!File.Exists(part) || new FileInfo(part).Length != release.Size)
                 throw new SetupFailure(
                     WebRelease.DownloadErrorCode(last),
@@ -176,13 +180,13 @@ namespace DuckySetup
             return final;
         }
 
-        static void Fetch(StoreRelease release, string part, Action<long, long>? progress, CancellationToken ct)
+        static void Fetch(string url, StoreRelease release, string part, Action<long, long>? progress, CancellationToken ct)
         {
             var have = File.Exists(part) ? new FileInfo(part).Length : 0;
             var from = WebRelease.ResumeFrom(have, release.Size);
             if (from == release.Size)
                 return;
-            var req = (HttpWebRequest)WebRequest.Create(release.InstallerUrl);
+            var req = (HttpWebRequest)WebRequest.Create(url);
             req.UserAgent = UserAgent();
             req.AllowAutoRedirect = true;
             req.Timeout = 30000;

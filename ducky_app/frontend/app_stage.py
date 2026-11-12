@@ -109,11 +109,15 @@ def _request(url: str, *, start: int | None = None, end: int | None = None, time
 def fetch(url: str) -> bytes:
     """The whole of ``url``; a dropped connection continues where it stopped (Range).
     Callers check it against the signed update (manifest sha256, per-file sha256)."""
-    from frontend.update_network import backoff, download_resumable
+    from frontend.update_network import backoff, download_resumable, with_alt
 
     buf = io.BytesIO()
-    download_resumable(url, buf, headers={"User-Agent": f"UEFN-Ducky/{__version__}"}, timeout=60.0, delay=backoff,
-                       content_checked=True)
+
+    def run(link: str) -> None:  # a second try, on storage's other host, goes on from the bytes it has
+        download_resumable(link, buf, headers={"User-Agent": f"UEFN-Ducky/{__version__}"}, timeout=60.0,
+                           delay=backoff, content_checked=True)
+
+    with_alt(url, run)
     return buf.getvalue()
 
 
@@ -130,12 +134,19 @@ def fetch_range(url: str, start: int, end: int) -> bytes | None:
 
     A span is up to 32 MB. A connection that drops part way (TLS EOF, reset, short body)
     asks for the rest only, and every try that got new bytes starts the count again; it
-    gives up after ATTEMPTS tries in a row with nothing new, waiting longer each time.
+    gives up after ATTEMPTS tries in a row with nothing new, waiting longer each time,
+    and then tries once more on storage's second host (``update_network.with_alt``).
     """
+    from frontend.update_network import with_alt
+
+    buf = bytearray()  # kept across the two hosts: the second goes on where the first stopped
+    return with_alt(url, lambda link: _fetch_range(link, start, end, buf))
+
+
+def _fetch_range(url: str, start: int, end: int, buf: bytearray) -> bytes | None:
     from frontend.update_network import ATTEMPTS, MAX_TRIES, backoff, retryable
 
     want = end - start
-    buf = bytearray()
     misses = 0
     for _ in range(MAX_TRIES):
         before = len(buf)

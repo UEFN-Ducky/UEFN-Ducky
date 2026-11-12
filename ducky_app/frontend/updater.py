@@ -646,21 +646,27 @@ def _launch_setup_until_handoff(
 def _download(url: str, dest: Path, *, timeout: float = 120.0) -> str | None:
     """Retry interrupted transfers, resuming from the bytes already on disk; expose a
     complete file only after an atomic move."""
-    from frontend.update_network import ATTEMPTS, MAX_TRIES, retryable, retry_delay
+    from frontend.update_network import (ATTEMPTS, MAX_TRIES, host_order, host_worked, note_download_fail,
+                                         retryable, retry_delay)
 
     partial = dest.with_suffix(dest.suffix + ".part")
     _unlink_quiet(partial)
     misses = 0
+    # The usual link, then the same file on storage's second host when this one's
+    # connection keeps failing (the bytes already on disk are kept).
+    links = host_order(url)
     try:
         for _ in range(MAX_TRIES):
             if _cancelled():
                 return _CANCELLED
             before = partial.stat().st_size if partial.exists() else 0
             try:
-                _download_once(url, partial, timeout=timeout)
+                _download_once(links[0], partial, timeout=timeout)
                 if _cancelled():
                     return _CANCELLED
                 os.replace(partial, dest)
+                if links[0] != url or len(links) > 1:
+                    host_worked(url, links[0])
                 return None
             except (OSError, ValueError, http.client.HTTPException) as exc:
                 if _cancelled():
@@ -669,6 +675,10 @@ def _download(url: str, dest: Path, *, timeout: float = 120.0) -> str | None:
                 # still finishes, a dead one stops after ATTEMPTS empty tries.
                 got = partial.stat().st_size if partial.exists() else 0
                 misses = 0 if got > before else misses + 1
+                if misses >= ATTEMPTS and retryable(exc) and len(links) > 1:
+                    note_download_fail(exc, url=url, tried=links[0], what="setup")
+                    links, misses = links[1:], 0
+                    continue
                 if misses >= ATTEMPTS or not retryable(exc):
                     return str(exc)
                 if _cancel.wait(retry_delay(misses)):

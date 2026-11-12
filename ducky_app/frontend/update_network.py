@@ -7,9 +7,10 @@ import ssl
 import time
 import urllib.error
 import urllib.request
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO, Callable, TypeVar
 
 ATTEMPTS = 5
+T = TypeVar("T")
 
 
 def retryable(exc: BaseException) -> bool:
@@ -207,3 +208,84 @@ def download_resumable(url: str, out: BinaryIO, **kwargs: Any) -> None:
                 raise
             time.sleep(delay(misses))
     raise http.client.IncompleteRead(b"")
+
+
+# ---- the second storage host
+#
+# The site's download routes redirect to a link on its storage host. Some networks cut
+# that host as the connection starts ("SSL: UNEXPECTED_EOF_WHILE_READING"); asked with
+# ``?alt=1`` the same routes redirect to storage's second host, which those networks
+# usually still reach. A site with one host answers ``?alt=1`` like any other request.
+
+ALT_KEEP_S = 24 * 3600.0  # the host that worked is tried first this long
+_ALT_PATHS = ("/api/v1/files/",)
+_alt_until = 0.0
+
+
+def alt_url(url: str) -> str:
+    """``url`` asking for the second storage host, or ``""`` when it is not one of the
+    site's download routes (a direct link, another site's) or already asks for it."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return ""
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    if not parts.path.startswith(_ALT_PATHS) or any(k == "alt" for k, _ in query):
+        return ""
+    return urlunsplit(parts._replace(query=urlencode([*query, ("alt", "1")])))
+
+
+def host_order(url: str) -> list[str]:
+    """The links to try for ``url``, in order: the usual one and its second-host twin, the
+    twin first for a day after it was the one that worked."""
+    other = alt_url(url)
+    if not other:
+        return [url]
+    return [other, url] if time.time() < _alt_until else [url, other]
+
+
+def host_worked(url: str, tried: str) -> None:
+    """``tried`` (one of :func:`host_order` of ``url``) finished a download."""
+    global _alt_until
+    _alt_until = time.time() + ALT_KEEP_S if tried != url else 0.0
+
+
+def fail_stage(exc: BaseException) -> str:
+    """Where a download failed: ``http`` (the server answered an error), ``read`` (cut part
+    way), else ``connect`` (DNS, TCP or the TLS handshake)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return "http"
+    return "read" if isinstance(exc, http.client.IncompleteRead) else "connect"
+
+
+def note_download_fail(exc: BaseException, *, url: str, tried: str, what: str) -> None:
+    """Count an update download that gave up on one host (anonymous: which host, where it
+    failed, the pack or Setup). Never raises."""
+    try:
+        from frontend import usage_stats
+
+        usage_stats.track("update.download_fail", host="alt" if tried != url else "main", stage=fail_stage(exc),
+                          what=what)
+    except Exception:  # noqa: BLE001 — counting never gets in the way of an update
+        pass
+
+
+def with_alt(url: str, run: Callable[[str], T], *, what: str = "pack") -> T:
+    """``run(link)`` for the usual link; when its connection keeps failing, once more for
+    the second storage host. ``run`` may be called twice with different links for the same
+    file, so a download that keeps its bytes goes on from them."""
+    order = host_order(url)
+    try:
+        out = run(order[0])
+    except Exception as exc:
+        if len(order) < 2 or not retryable(exc):
+            raise
+        note_download_fail(exc, url=url, tried=order[0], what=what)
+        out = run(order[1])
+        host_worked(url, order[1])
+        return out
+    if len(order) > 1:
+        host_worked(url, order[0])
+    return out

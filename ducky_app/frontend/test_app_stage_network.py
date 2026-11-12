@@ -286,3 +286,37 @@ def test_a_tampered_update_is_still_refused_without_certificate_checks(release, 
     server = untrusted_server({"/pack": bytes(pack), "/manifest": release["manifest_zip"].read_bytes()})
     with pytest.raises(app_stage.StageError):
         app_stage.stage(release["update"], base_url=server.url)
+
+
+FILE_ROUTE = "/api/v1/files/0198/content"
+
+
+@pytest.fixture()
+def _hosts(monkeypatch) -> list[tuple[str, dict]]:
+    from frontend import update_network
+
+    monkeypatch.setattr(update_network, "_alt_until", 0.0)
+    counted: list[tuple[str, dict]] = []
+    monkeypatch.setattr("frontend.usage_stats.track", lambda name, **props: counted.append((name, props)) or True)
+    return counted
+
+
+def test_a_storage_host_that_never_answers_falls_back_to_the_second_one(tls_server, _hosts) -> None:
+    # Every handshake for the usual link is cut; asked with ?alt=1 the site sends the
+    # download to its second storage host, which answers.
+    server = tls_server({FILE_ROUTE + "?alt=1": BODY}, lambda n: "eof" if n < ATTEMPTS else "ok")
+    assert app_stage.fetch_range(server.url + FILE_ROUTE, 1000, 600_000) == BODY[1000:600_000]
+    assert [r[0] for r in server.requests] == [""] * ATTEMPTS + [FILE_ROUTE + "?alt=1"]
+    assert _hosts == [("update.download_fail", {"host": "main", "stage": "connect", "what": "pack"})]
+    # From then on the host that worked is asked first.
+    again = tls_server({FILE_ROUTE + "?alt=1": BODY}, lambda n: "ok")
+    assert app_stage.fetch(again.url + FILE_ROUTE) == BODY
+    assert [r[0] for r in again.requests] == [FILE_ROUTE + "?alt=1"]
+
+
+def test_the_second_host_goes_on_from_the_bytes_the_first_delivered(tls_server, _hosts) -> None:
+    files = {FILE_ROUTE: BODY, FILE_ROUTE + "?alt=1": BODY}
+    server = tls_server(files, lambda n: 300_000 if n == 0 else ("eof" if n <= ATTEMPTS else "ok"))
+    assert app_stage.fetch(server.url + FILE_ROUTE) == BODY
+    assert server.requests[0][:2] == (FILE_ROUTE, 0)
+    assert server.requests[-1][:2] == (FILE_ROUTE + "?alt=1", 300_000), "resumed on the second host, never restarted"

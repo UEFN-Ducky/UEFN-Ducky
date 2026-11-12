@@ -94,6 +94,9 @@ REVISION_REASONS = REVISION_BLOCKS + tuple(k for k in ERROR_KINDS if k not in RE
 TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "plugin",
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 
+# Which of the site's two storage hosts a download used: its usual one, or the second.
+STORAGE_HOSTS = ("main", "alt")
+
 # name -> {prop: enum tuple | ("bucket", Buckets, source numeric prop) | ("slug",) | ("version",)}
 EVENTS: dict[str, dict[str, Any]] = {
     "app.open": {
@@ -111,6 +114,10 @@ EVENTS: dict[str, dict[str, Any]] = {
         "window_ms": ("bucket", WINDOW_MS, "window_ms"),
     },
     "update.installed": {"from": ("version",), "to": ("version",)},
+    # A download whose connection kept failing on one storage host (the other is tried next):
+    # which host, where it failed, and for an update whether it was the pack or Setup.
+    "update.download_fail": {"host": STORAGE_HOSTS, "stage": ("connect", "read", "http"), "what": ("pack", "setup")},
+    "sync.download_fail": {"host": STORAGE_HOSTS, "stage": ("connect", "read")},
     "update.check": {
         "status": ("none", "no_release", "up_to_date", "update_available", "paused", "error"),
         "channel": ("installed", "portable", "dev"),

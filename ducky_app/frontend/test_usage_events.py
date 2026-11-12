@@ -70,3 +70,20 @@ def test_track_keeps_launcher_start(monkeypatch: pytest.MonkeyPatch) -> None:
     assert us.track("launcher.start", mode="native", fallback="none", painted_ms=900, window_ms=80) is True
     assert rows[0]["name"] == "launcher.start"
     assert rows[0]["props"] == {"mode": "native", "fallback": "none", "painted_ms": "1100ms", "window_ms": "100ms"}
+
+
+def test_failed_downloads_are_counted_by_host_and_stage_and_nothing_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    from frontend import usage_stats as us
+
+    assert ev.validate("sync.download_fail", {"host": "alt", "stage": "connect"}) == {"host": "alt", "stage": "connect"}
+    assert ev.validate("update.download_fail", {"host": "main", "stage": "read", "what": "setup"}) == {
+        "host": "main", "stage": "read", "what": "setup"}
+    # A host name, a path or an account never fits: props outside the lists are dropped.
+    kept = ev.validate("sync.download_fail", {"host": "duckyos-bucket-01.fly.storage.tigris.dev", "stage": "connect",
+                                              "path": "team-repo/t1/c/ab", "account": "ana@x.org"})
+    assert kept == {"stage": "connect"}
+    rows: list = []
+    monkeypatch.setattr(us, "enabled", lambda: True)
+    monkeypatch.setattr(us, "_enqueue", lambda row: rows.append(row) or len(rows))
+    assert us.track("sync.download_fail", host="main", stage="connect") is True
+    assert rows[0]["name"] == "sync.download_fail" and rows[0]["props"] == {"host": "main", "stage": "connect"}

@@ -554,3 +554,48 @@ def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypa
     finally:
         srv.shutdown()
         _reset_progress()
+
+
+def test_setup_download_falls_back_to_the_second_storage_host(monkeypatch) -> None:
+    """The usual link's connection is cut every time; the same file on the second host
+    (``?alt=1``) downloads, going on from what is already on disk."""
+    from frontend import update_network
+
+    _reset_progress()
+    monkeypatch.setattr(update_network, "_alt_until", 0.0)
+    monkeypatch.setattr(update_network, "retry_delay", lambda attempt: 0)
+    counted: list[tuple[str, dict]] = []
+    monkeypatch.setattr("frontend.usage_stats.track", lambda name, **props: counted.append((name, props)) or True)
+    payload = b"s" * (1024 * 300)
+    seen: list[tuple[str, str]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            seen.append((self.path, self.headers.get("Range") or ""))
+            if "alt=1" not in self.path:
+                self.connection.close()  # cut before any answer
+                return
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A003
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "setup-test.bin"
+            url = f"http://127.0.0.1:{server.server_address[1]}/api/v1/files/app-release/latest"
+            assert updater._download(url, dest) is None
+            assert dest.read_bytes() == payload
+            paths = [p for p, _ in seen]
+            assert paths == ["/api/v1/files/app-release/latest"] * update_network.ATTEMPTS + [
+                "/api/v1/files/app-release/latest?alt=1"]
+            assert counted == [("update.download_fail", {"host": "main", "stage": "connect", "what": "setup"})]
+            assert update_network.host_order(url)[0].endswith("?alt=1"), "the host that worked goes first next time"
+    finally:
+        server.shutdown()
+        _reset_progress()

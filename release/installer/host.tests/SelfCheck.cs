@@ -204,6 +204,15 @@ namespace DuckySetup.Tests
 
             Check(WebRelease.ResumeFrom(0, 100) == 0 && WebRelease.ResumeFrom(40, 100) == 40 && WebRelease.ResumeFrom(100, 100) == 100, "resume from the part's length");
             Check(WebRelease.ResumeFrom(101, 100) == 0, "a part longer than the file starts over");
+            Check(WebRelease.AltUrl("https://uefnducky.org/api/v1/files/app-release/latest") == "https://uefnducky.org/api/v1/files/app-release/latest?alt=1", "second storage host for the latest Setup");
+            Check(WebRelease.AltUrl("https://uefnducky.org/api/v1/files/01a1/content?v=2") == "https://uefnducky.org/api/v1/files/01a1/content?v=2&alt=1", "second host keeps the link's own query");
+            Check(WebRelease.AltUrl("https://uefnducky.org/api/v1/files/01a1/content?alt=1") == "", "a link that asks already has no other");
+            Check(WebRelease.AltUrl("https://cdn.example/a.exe") == "" && WebRelease.AltUrl("not a url") == "", "only the Store's download routes have a second host");
+            Check(WebRelease.WorthSecondHost(new WebException("cut", WebExceptionStatus.SecureChannelFailure)), "a cut TLS handshake tries the second host");
+            Check(WebRelease.WorthSecondHost(new WebException("cut", WebExceptionStatus.ConnectionClosed)), "a closed connection tries the second host");
+            Check(WebRelease.WorthSecondHost(new System.IO.IOException("cut", new System.Net.Sockets.SocketException(10054))), "a reset mid-download tries the second host");
+            Check(!WebRelease.WorthSecondHost(new WebException("404", WebExceptionStatus.ProtocolError)), "an answer from the server does not");
+            Check(!WebRelease.WorthSecondHost(new System.IO.IOException("The download is bigger than the Store said.")) && !WebRelease.WorthSecondHost(null), "a disk or size problem does not");
 
             Check(WebRelease.DownloadPercent(0, 100) == 0 && WebRelease.DownloadPercent(50, 100) == 35 && WebRelease.DownloadPercent(100, 100) == WebRelease.DownloadShare, "download fills the first part of the bar");
             Check(WebRelease.DownloadPercent(5, 0) == 0 && WebRelease.DownloadPercent(200, 100) == WebRelease.DownloadShare, "download percent clamped");

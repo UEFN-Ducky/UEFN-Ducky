@@ -165,6 +165,35 @@ namespace DuckySetup
         // bytes starts the waits over, so a slow but moving download keeps going.
         public static readonly int[] DownloadRetryWaits = { 2, 5, 10, 20, 30 };
 
+        // The same download from the Store's second storage host: its download routes take
+        // ?alt=1 and redirect there. Some networks cut the usual host as the connection
+        // starts and still reach the other. "" for a link that is not one of those routes,
+        // or that asks already.
+        public static string AltUrl(string url)
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u))
+                return "";
+            if (!u.AbsolutePath.StartsWith("/api/v1/files/", StringComparison.Ordinal))
+                return "";
+            var query = u.Query.TrimStart('?');
+            foreach (var pair in query.Split('&'))
+            {
+                if (pair == "alt" || pair.StartsWith("alt=", StringComparison.Ordinal))
+                    return "";
+            }
+            return new UriBuilder(u) { Query = query.Length > 0 ? query + "&alt=1" : "alt=1" }.Uri.AbsoluteUri;
+        }
+
+        // Whether a download that gave up is worth one more pass on the second storage
+        // host: its connection failed. An answer from the server (404, 403) or a full disk
+        // would fail there the same way.
+        public static bool WorthSecondHost(Exception? last)
+        {
+            if (last is WebException w)
+                return w.Status != WebExceptionStatus.ProtocolError;
+            return last is IOException io && io.InnerException is System.Net.Sockets.SocketException;
+        }
+
         // Runs fetch until it returns; on a network / disk error waits and resumes.
         // have() is the bytes on disk. Returns null when a fetch returned, else the last error.
         public static Exception? FetchWithRetries(Action fetch, Func<long> have, Action<int> wait)
