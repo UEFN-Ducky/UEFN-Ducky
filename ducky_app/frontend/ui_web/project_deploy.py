@@ -18,10 +18,31 @@ from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
 from frontend.ui_web.known_projects import known_project_roots
 from frontend.ui_web.project_switch import mark_deployed
 
+# Island path -> the failure last reported for it. A deploy that keeps failing the same way
+# is reported once, not on every pass (Nov 11 2026: one PC sent 115 deploy errors in a day,
+# 64% of that day's error rows). A new error, or a pass that works, clears it.
+_reported: dict[str, str] = {}
+
+
+def _report_once(path: str, msg: str) -> None:
+    """Error-log row plus one alert for a failure this island has not shown before."""
+    if _reported.get(path) == msg:
+        return
+    _reported[path] = msg
+    record_error("deploy", msg)
+    try:
+        from frontend import notifications
+
+        notifications.alert(
+            "UEFN Ducky", "Ducky can't set up an island's UEFN link.", level="error", detail=msg,
+        )
+    except Exception:
+        pass
+
 
 def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> list[str]:
     """Refresh the listener hooks on every known island (every start; a write refused before
-    lands now)."""
+    lands now). A failure is reported once per island and error (``_report_once``)."""
     lines: list[str] = []
     paths: list[str] = []
     seen: set[str] = set()
@@ -42,6 +63,7 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
             root = resolve_uefn_project_root(Path(path))
             project_lines = deploy_listener(root, UEFN_LISTENER_PORT, shared=(i == 0))
             mark_deployed(path)
+            _reported.pop(path, None)
             for ln in project_lines:
                 lines.append(ln)
                 if log:
@@ -53,7 +75,7 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
 
                 msg = f"{msg} {refusal_hint(getattr(e, 'filename', None) or path)}".rstrip()
             lines.append(msg)
-            record_error("deploy", msg)
+            _report_once(path, msg)
             if log:
                 log(msg)
 

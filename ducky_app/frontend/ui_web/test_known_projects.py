@@ -117,6 +117,42 @@ def test_the_boot_deploy_refreshes_every_island_selected_first(docs: Path, monke
     assert [shared for _, shared in calls] == [True, False, False]
 
 
+def test_a_deploy_that_keeps_failing_is_reported_once(docs: Path, monkeypatch) -> None:
+    """Nov 11 2026: one PC sent 115 deploy errors in a day, the same island failing every pass."""
+    from frontend import notifications
+    from frontend.ui_web import project_deploy
+
+    island = _island(docs / "Fortnite Projects", "ReadOnly")
+    state = {"error": "disk is read-only"}
+    rows: list[str] = []
+    alerts: list[str] = []
+
+    def failing(_root, _port, **_kw):
+        if state["error"]:
+            raise OSError(state["error"])
+        return []
+
+    monkeypatch.setattr(project_deploy, "_reported", {})
+    monkeypatch.setattr(project_deploy, "deploy_listener", failing)
+    monkeypatch.setattr(project_deploy, "record_error", lambda code, msg: rows.append(msg))
+    monkeypatch.setattr(notifications, "alert", lambda *a, **kw: alerts.append(kw.get("detail", "")) or True)
+
+    for _ in range(3):
+        lines = project_deploy.deploy_all_recent_projects()
+        assert any(str(island) in ln and "read-only" in ln for ln in lines)  # still in the log
+    assert len(rows) == 1 and len(alerts) == 1
+
+    state["error"] = "access denied"  # a different failure is news
+    project_deploy.deploy_all_recent_projects()
+    assert len(rows) == 2 and "access denied" in rows[1]
+
+    state["error"] = ""  # it works: the next failure is reported again
+    project_deploy.deploy_all_recent_projects()
+    state["error"] = "access denied"
+    project_deploy.deploy_all_recent_projects()
+    assert len(rows) == 3
+
+
 def test_a_plugin_source_adds_a_tab_and_claims_its_folders(docs: Path, tmp_path: Path, monkeypatch) -> None:
     from frontend.ui_web.recent_projects import add_recent_project
 
