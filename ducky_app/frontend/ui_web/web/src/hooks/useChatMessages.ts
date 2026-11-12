@@ -240,7 +240,23 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
     if (becameVisible && Date.now() - lastLoadedAtRef.current >= 60_000 && s.status === "idle" && s.atBottom && !s.stopped) {
       void load();
     }
+    // Back on screen mid-run: while it was away the app sent this chat a status line, not
+    // its tool rows. The saved copy of the turn fills them in (mergeCommitted).
+    if (becameVisible && isRunActive(s)) void load();
   }, [visible, load]);
+
+  // The same when the whole window was covered or minimized and is shown again: the pane
+  // stayed mounted, so nothing else reloads it, and the turn showed only "Working · 462s".
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onShown = () => {
+      if (!document.hidden && visibleRef.current && isRunActive(stateRef.current)) void load();
+    };
+    document.addEventListener("visibilitychange", onShown);
+    return () => document.removeEventListener("visibilitychange", onShown);
+  }, [load]);
 
   // Command channel: the reducer bumps reloadToken whenever a transition wants the
   // canonical backend copy pulled (context change, run finished at bottom,

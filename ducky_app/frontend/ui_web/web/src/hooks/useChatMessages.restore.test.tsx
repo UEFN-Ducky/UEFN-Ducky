@@ -165,6 +165,29 @@ describe("open chat visibility", () => {
     await waitFor(() => expect(api.load_messages).toHaveBeenCalledTimes(2));
   });
 
+  it("pulls the saved tool rows when the covered window is shown again mid-run", async () => {
+    // Nov 12 2026: the window was covered while a chat's tools ran, the app sent it only
+    // status lines, and the chat showed "Working · 462s" with no tools until the turn ended.
+    api.list_running_agents.mockResolvedValue(["covered"]);
+    api.load_messages.mockResolvedValue([]);
+    const view = renderHook(() => useChatMessages("covered", true, true));
+    await waitFor(() => expect(view.result.current.hydrated).toBe(true));
+    act(() => {
+      view.result.current.appendUserMessage("find the disk space");
+      view.result.current.setActiveRunId("run-7");
+    });
+    const saved: ChatMessage[] = [
+      { id: 1, role: "user", text: "find the disk space" },
+      { id: 2, role: "tool", text: "", tool: { name: "ducky_terminal_run", arguments: {}, status: "pending" } },
+    ];
+    api.load_messages.mockResolvedValue(saved);
+    const before = api.load_messages.mock.calls.length;
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); }); // shown again
+    await waitFor(() => expect(api.load_messages.mock.calls.length).toBe(before + 1));
+    await waitFor(() => expect(view.result.current.messages).toEqual(saved));
+    expect(view.result.current.agentRunning).toBe(true);
+  });
+
   it("does not refresh a scrolled-up reader merely because the pane reappears", async () => {
     let now = 100000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -211,6 +234,52 @@ describe("mergeCommitted while a run is live", () => {
       view = mergeCommitted(view, growing);
     }
     expect(view.map((m) => m.text)).toEqual(["hi", "hey", "Inspect Tycoony", "I'll open the file.", ""]);
+  });
+
+  // What the app saved of the turn in flight: three tools, the third still running, and
+  // the empty bubble of the reply being written.
+  const savedTurn: ChatMessage[] = [
+    ...history,
+    { id: 3, role: "user", text: "Inspect Tycoony" },
+    { id: 4, role: "tool", text: "", tool: { name: "ducky_rename_self", arguments: {}, status: "pending" } },
+    { id: 5, role: "success", text: "", tool: { name: "ducky_rename_self", arguments: {}, status: "success" } },
+    { id: 6, role: "tool", text: "", tool: { name: "ducky_terminal_open", arguments: {}, status: "pending" } },
+    { id: 7, role: "success", text: "", tool: { name: "ducky_terminal_open", arguments: {}, status: "success" } },
+    { id: 8, role: "tool", text: "", tool: { name: "ducky_terminal_run", arguments: {}, status: "pending" } },
+    { id: 9, role: "assistant", text: "", incomplete: true },
+  ];
+
+  it("shows the saved tool rows of a turn whose tools ran while the chat was not on screen", () => {
+    // The app sent this chat only status lines meanwhile: the pane still has just the prompt.
+    const away: ChatMessage[] = [...history, { id: "opt-0", role: "user", text: "Inspect Tycoony" }];
+    const merged = mergeCommitted(away, savedTurn);
+    expect(merged.map((m) => m.tool?.name ?? m.text)).toEqual([
+      "hi", "hey", "Inspect Tycoony",
+      "ducky_rename_self", "ducky_rename_self", "ducky_terminal_open", "ducky_terminal_open", "ducky_terminal_run",
+    ]);
+    expect(merged.some((m) => m.incomplete)).toBe(false); // the reply in progress stays with the live stream
+  });
+
+  it("fills the hole when only part of the turn was seen live", () => {
+    const partly: ChatMessage[] = [
+      ...history,
+      { id: 3, role: "user", text: "Inspect Tycoony" },
+      { id: "opt-1", role: "tool", text: "", tool: { name: "ducky_rename_self", arguments: {} } },
+      { id: "opt-2", role: "success", text: "", tool: { name: "ducky_rename_self", arguments: {} } },
+    ];
+    expect(mergeCommitted(partly, savedTurn).filter((m) => m.tool).map((m) => m.id)).toEqual([4, 5, 6, 7, 8]);
+  });
+
+  it("keeps the live rows when the saved copy is behind them", () => {
+    const ahead: ChatMessage[] = [
+      ...history,
+      { id: "opt-0", role: "user", text: "Inspect Tycoony" },
+      ...savedTurn.slice(3, 8).map((m, k) => ({ ...m, id: `opt-${k + 1}` })),
+      { id: "opt-9", role: "success", text: "", tool: { name: "ducky_terminal_run", arguments: {}, status: "success" } },
+    ];
+    const merged = mergeCommitted(ahead, savedTurn);
+    expect(merged.filter((m) => m.tool).map((m) => m.id)).toEqual(["opt-1", "opt-2", "opt-3", "opt-4", "opt-5", "opt-9"]);
+    expect(merged[2]).toEqual({ id: 3, role: "user", text: "Inspect Tycoony" });
   });
 
   it("puts a background-started run's prompt in order after the history", () => {

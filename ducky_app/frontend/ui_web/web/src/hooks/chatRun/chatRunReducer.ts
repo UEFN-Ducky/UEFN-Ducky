@@ -133,6 +133,21 @@ function isOptimistic(m: ChatMessage): boolean {
   return String(m.id).startsWith("opt-");
 }
 
+/** Rows that are a tool call or its result. */
+function toolRows(rows: readonly ChatMessage[]): number {
+  let n = 0;
+  for (const m of rows) if (m.tool && m.role !== "assistant" && m.role !== "user") n++;
+  return n;
+}
+
+/** The saved copy up to the turn's last finished row: the reply still being written
+ *  (a trailing checkpoint bubble) stays out, the live stream shows that. */
+function withoutReplyInProgress(incoming: ChatMessage[], lastUser: number): ChatMessage[] {
+  let end = incoming.length;
+  while (end > lastUser + 1 && incoming[end - 1].role === "assistant" && (incoming[end - 1].incomplete || incoming[end - 1].checkpoint)) end--;
+  return end === incoming.length ? incoming : incoming.slice(0, end);
+}
+
 /** While a run is live, keep the live (optimistic) tail on screen and take
  *  everything before it from the backend, in the backend's order.
  *
@@ -144,7 +159,14 @@ function isOptimistic(m: ChatMessage): boolean {
  *  This used to prepend every backend row the pane didn't have. A tab that came
  *  back mid-run then showed the agent's newer output ABOVE the user's message,
  *  and each reload stacked another copy of the checkpoint, whose row ids shift as
- *  it grows. */
+ *  it grows.
+ *
+ *  One case takes the saved copy of the turn instead: it has more tool rows than the
+ *  pane does. The app sends a chat that is not on screen (another tab in front, the
+ *  window covered or minimized) one status line a second and none of its tool rows
+ *  (agent_host/batching.py), so the live tail has holes that only the saved copy can
+ *  fill. Nov 12 2026: a chat whose first three tools ran while the window was covered
+ *  showed "Working · 462s" and nothing else for the whole turn. */
 export function mergeCommitted(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   let tailStart = existing.length;
   while (tailStart > 0 && isOptimistic(existing[tailStart - 1])) tailStart--;
@@ -164,7 +186,9 @@ export function mergeCommitted(existing: ChatMessage[], incoming: ChatMessage[])
     // copy and the live rows after it; until then the backend only has history.
     // (A matching fingerprint stops a second copy of the same user bubble.)
     if (lastUser >= 0 && isUserTwin(incoming[lastUser], tail[0])) {
-      return [...incoming.slice(0, lastUser + 1), ...tail.slice(1)];
+      const live = tail.slice(1);
+      if (toolRows(incoming.slice(lastUser + 1)) > toolRows(live)) return withoutReplyInProgress(incoming, lastUser);
+      return [...incoming.slice(0, lastUser + 1), ...live];
     }
     return [...incoming, ...tail];
   }
@@ -173,7 +197,9 @@ export function mergeCommitted(existing: ChatMessage[], incoming: ChatMessage[])
   // that prompt, plus any later rows already on screen, then the live tail.
   const onScreen = new Set(existing.slice(0, tailStart).map((m) => String(m.id)));
   const kept = incoming.filter((m, i) => i <= lastUser || onScreen.has(String(m.id)));
-  return [...kept, ...tail];
+  const merged = [...kept, ...tail];
+  if (toolRows(incoming.slice(lastUser + 1)) > toolRows(merged.slice(lastUser + 1))) return withoutReplyInProgress(incoming, lastUser);
+  return merged;
 }
 
 /** A late event belongs to the current run when: we haven't been stopped, and it
