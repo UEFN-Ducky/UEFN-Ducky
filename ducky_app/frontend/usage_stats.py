@@ -877,10 +877,14 @@ def error(source: str, message: str = "", at: str = "", kind: str = "") -> None:
 _net_fail_sent: set[tuple[str, str]] = set()
 
 
-def net_fail(code: str, stage: str, proxy: str) -> None:
+def net_fail(code: str, stage: str, proxy: str, status: int = 0) -> None:
     """The app couldn't reach the site (code: what it tried). Once per UTC day per PC per code
     and stage: the day is kept in ducky.db meta, so every process on the PC shares it (one
-    1.2.483 PC sent 7 timeout rows in a day, one per process)."""
+    1.2.483 PC sent 7 timeout rows in a day, one per process).
+
+    status: the site's HTTP answer when it did answer (stage "http"), sent as reason
+    ``http_<status>``. Nov 10 2026: 8 update checks got an error answer from the Store itself
+    and nothing said whether it was a 429, a 5xx or a 4xx."""
     if (code, stage) in _net_fail_sent:
         return
     _net_fail_sent.add((code, stage))
@@ -888,9 +892,11 @@ def net_fail(code: str, stage: str, proxy: str) -> None:
     if _meta_get(key) == today:
         return
     _meta_set(key, today)
-    kind = "timeout" if stage == "timeout" else "offline" if stage in ("dns", "connect", "proxy") else "other"
+    kind = ("timeout" if stage == "timeout" else "offline" if stage in ("dns", "connect", "proxy")
+            else "rate_limit" if status == 429 else "server_error" if 500 <= status <= 599 else "other")
+    answered = {"reason": f"http_{int(status)}"} if stage == "http" and 100 <= int(status or 0) <= 599 else {}
     track("error.code", code=ev.code_of(code), where="store", kind=kind, version=_app_version(),
-          net_stage=stage, proxy=proxy)
+          net_stage=stage, proxy=proxy, **answered)
 
 
 def agent_crash(provider: str) -> None:

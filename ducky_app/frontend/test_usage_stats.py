@@ -147,6 +147,23 @@ def test_net_fail_says_where_the_route_died_once_per_session(meta) -> None:
     assert ev.validate("error.code", {"net_stage": "carrier_pigeon", "proxy": "10.0.0.1:8080"}) == {}
 
 
+def test_net_fail_names_the_sites_http_answer(meta) -> None:
+    """Nov 10 2026: 8 update checks got an error answer from the Store and nothing said which."""
+    for stage, status in (("http", 503), ("timeout", 0)):
+        us._net_fail_sent.clear()
+        us.net_fail("update_check", stage, "none", status=status)
+    us._net_fail_sent.clear()
+    meta.clear()
+    us.net_fail("update_check", "http", "none", status=429)
+    rows, _ = us._take(100)
+    errors = [r["props"] for r in rows if r["name"] == "error.code"]
+    assert [(e["net_stage"], e["kind"], e.get("reason")) for e in errors] == [
+        ("http", "server_error", "http_503"),
+        ("timeout", "timeout", None),  # no answer: no status
+        ("http", "rate_limit", "http_429"),
+    ]
+
+
 def test_error_source_becomes_a_code_never_a_message() -> None:
     assert ev.code_of("Agent stream") == "agent_stream"
     assert ev.where_of("uefn listener") == "bridge"
@@ -450,6 +467,26 @@ def test_a_failed_turn_carries_the_app_version_and_a_fixed_list_reason(monkeypat
     assert all(t["v"] == "1.2.488" for t in turns)
     assert turns[0]["kind"] == "offline" and turns[0]["outcome"] == "error"
     assert not any("Users" in str(t) or "1234" in str(t) for t in turns)
+
+
+@pytest.mark.parametrize(("detail", "want"), [
+    # What the Cursor gateway says when a turn dies at start (Nov 11 2026: 35 of them read "other").
+    ("No Cursor model selected. Pick Auto or a concrete model (e.g. Composer 2.5) for this chat or Ducky profile.", "no_model"),
+    ("Ducky tools unavailable: the Cursor SDK was not found and could not be set up. Ensure Node.js 22.13+ and npm are on PATH", "sdk_setup"),
+    ("Ducky tools unavailable: Node.js 22.13+ and npm were not found on PATH. Install both, then retry", "sdk_setup"),
+    ("Cursor SDK request failed: this Cursor plan does not include that model or has no usage left (402 payment required). Check", "plan"),
+    ("Cursor SDK request failed: Cursor's rate or usage limit was hit (429 rate limit). Check the Cursor API key", "rate_limit"),
+    ("Cursor SDK request failed: the model was not found for this account; pick Auto or another model. Check", "model_not_found"),
+    ("Cursor SDK request failed: Cursor answered HTTP 409. Check the Cursor API key in Settings, then retry.", "http_409"),
+    ("Cursor SDK request failed: network error reaching Cursor (connection refused or reset). Check", "network"),
+    ("Cursor SDK request failed. Check SDK connectivity and the Cursor API key in Settings, then retry.", "sdk_request"),
+    ("Ducky's tools didn't connect", "mcp_connect"),
+])
+def test_a_gateways_own_start_up_failure_has_its_own_reason_word(detail, want) -> None:
+    from frontend import usage_events as ev
+
+    assert ev.turn_reason(detail) == want
+    assert want.split("_")[0] in {r.split("_")[0] for r in ev.TURN_REASONS}
 
 
 def test_a_stuck_report_carries_the_app_version(monkeypatch) -> None:

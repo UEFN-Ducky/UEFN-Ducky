@@ -255,7 +255,8 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
                 try:
                     from frontend import usage_stats
 
-                    usage_stats.net_fail("update_check", last_net_stage, proxy_mode())
+                    usage_stats.net_fail("update_check", last_net_stage, proxy_mode(),
+                                         status=int(getattr(exc, "code", 0) or 0))
                 except Exception:
                     pass
                 return None, f"Can't reach the update server. {text}"

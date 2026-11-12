@@ -168,7 +168,8 @@ EVENTS: dict[str, dict[str, Any]] = {
                    # net_fail only: where the request to the site died (net_access.NET_STAGES) and how the PC routes.
                    "net_stage": ("dns", "connect", "tls", "proxy", "timeout", "http", "other"),
                    "proxy": ("none", "static", "pac"),
-                   # usage_batch_refused only: the Store's one-word reason (usage_stats.reason_token).
+                   # usage_batch_refused: the Store's one-word reason (usage_stats.reason_token).
+                   # net_fail with net_stage http: the site's answer, http_<status>.
                    "reason": ("slug",)},
     # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",),
@@ -398,23 +399,34 @@ _TURN_REASONS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
                         r"|could not connect to (ducky|mcp)"),
         ("session_resume", r"no conversation found|resum(e|ing) (the )?session|session .{0,20}resume|--resume"),
         ("context_full", r"context.?(window|length)|prompt is too long|too many tokens|maximum context"),
-        ("cli_exit", r"exit(ed)? (unsuccessfully )?\(?(with )?code:? ?-?(\d+)"),
+        ("cli_exit", r"exit(ed)? (unsuccessfully )?\(?(with )?code:? ?-?(?P<code>\d+)"),
         ("network", r"not reachable|offline|network|connection (refused|reset|aborted)|econnreset|getaddrinfo"
                     r"|winerror 100(54|61)"),
         ("auth", r"\b40[13]\b|unauthori[sz]ed|not logged in|authentication|invalid api key"),
         ("empty", r"no captured reply|empty (reply|response)|no output"),
+        # A gateway's own start-up failures (Nov 11 2026: 35 Cursor turns failed within 10 s and
+        # every one read "other"). The specific ones first; "sdk request failed" is what is left.
+        ("no_model", r"no \w* ?model selected"),
+        ("sdk_setup", r"sdk was not found|could not be set up|node\.js .{0,40}not found"),
+        ("plan", r"payment required|plan does not include|no usage left"),
+        ("rate_limit", r"\b429\b|rate.?limit|usage limit"),
+        ("model_not_found", r"model was not found|model .{0,40}not (found|available)"),
+        ("http", r"\bhttp (?P<code>[1-5]\d\d)\b"),
+        ("sdk_request", r"sdk request failed"),
     )
 )
-TURN_REASONS = ("mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty", "other")
+TURN_REASONS = ("mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty",
+                "no_model", "sdk_setup", "plan", "rate_limit", "model_not_found", "http", "sdk_request", "other")
 
 
 def turn_reason(detail: str) -> str:
-    """A failed turn's end detail as one TURN_REASONS word; cli_exit becomes cli_exit_<code>."""
+    """A failed turn's end detail as one TURN_REASONS word; cli_exit and http carry their number
+    (cli_exit_<code>, http_<status>)."""
     text = (detail or "").lower()
     for reason, rule in _TURN_REASONS:
         m = rule.search(text)
         if m:
-            return f"cli_exit_{m.group(4)[:12]}" if reason == "cli_exit" else reason
+            return f"{reason}_{m.group('code')[:12]}" if reason in ("cli_exit", "http") else reason
     return "other"
 
 
