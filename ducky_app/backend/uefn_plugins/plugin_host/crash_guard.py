@@ -15,6 +15,10 @@ the window skip the plugin: "UEFN Ducky closed while loading Ducky Account 1.1.8
 where nothing had crashed. Records from then are not trusted: they are dropped once, so a
 plugin skipped for no reason loads again (one that really crashes is found again on the
 next launch).
+
+Exiting on purpose is no crash either: Quit, an update and a newer version taking over end
+the process at once, with the start's loads possibly still running. ``boot_report.mark``
+calls :func:`closing_on_purpose` first, which drops this process's markers.
 """
 
 from __future__ import annotations
@@ -32,6 +36,7 @@ _OLD_CRASHED_FILE = "crashed.json"  # also counted tool servers ended mid-load: 
 _APP_ROLE = "app"
 _crash_lock = threading.Lock()
 _crash_checked = False
+_closing = False  # this process is exiting on purpose (closing_on_purpose)
 
 
 def _markers_dir() -> Path:
@@ -195,9 +200,25 @@ def _start_crash_heal() -> None:
     threading.Thread(target=heal_crashed_plugins, name="uefn-plugin-crash-heal", daemon=True).start()
 
 
+def closing_on_purpose() -> None:
+    """Ducky is exiting on purpose (Quit, an update, a newer version taking over): the loads
+    still running end with it and are no crash. Their markers go, and no new one is left
+    while the exit runs (it flushes sync for up to 5 s before the process ends)."""
+    global _closing
+    _closing = True
+    try:
+        for marker in _markers_dir().glob(f"*.{os.getpid()}.json"):
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def _load_marker_begin(pid: str, version: str) -> Path | None:
-    if not is_app():
-        return None  # a tool server or agent host ending mid-load is not Ducky closing
+    if _closing or not is_app():
+        return None  # a tool server or agent host ending mid-load, or Ducky quitting, is no crash
     path = _markers_dir() / f"{pid}.{os.getpid()}.json"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

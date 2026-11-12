@@ -1077,9 +1077,24 @@ def stage(name: str) -> None:
     _write_state()
 
 
+def _end_plugin_loads() -> None:
+    """Exiting on purpose ends the plugin loads still running. Quit, an update and a newer
+    version taking over all end this process at once, so a load in flight would leave its
+    marker, and the next start would read it as "UEFN Ducky closed while loading" and skip
+    that plugin. Only when the plugin host was loaded: nothing is imported while exiting."""
+    guard = sys.modules.get("backend.uefn_plugins.plugin_host.crash_guard")
+    try:
+        if guard is not None:
+            guard.closing_on_purpose()
+    except Exception:
+        pass
+
+
 def mark(state: str, *, error: str = "") -> None:
     """``ok`` once the window is shown, ``handoff`` when another Ducky took over,
     ``closed`` on a normal exit, ``fatal`` with the error a startup failure showed."""
+    if state in ("handoff", "closed"):
+        _end_plugin_loads()
     if not _state:
         return
     if _state.get("state") == "fatal" and state == "closed":

@@ -13,6 +13,7 @@ from backend.uefn_plugins.plugin_host import crash_guard
 def markers(tmp_path, monkeypatch):
     monkeypatch.setattr(crash_guard, "_markers_dir", lambda: tmp_path)
     monkeypatch.setattr(crash_guard, "_crash_checked", False)
+    monkeypatch.setattr(crash_guard, "_closing", False)
     return tmp_path
 
 
@@ -68,3 +69,22 @@ def test_records_made_while_tool_servers_counted_are_dropped_once(markers, monke
         json.dumps({"plugin": "account", "version": "1.1.82", "process": 4243, "role": "app"}))
     assert crash_guard.plugin_crashed_ducky("account", "1.1.82") is True
     assert json.loads((markers / "crashed-app.json").read_text()) == {"account": "1.1.82"}
+
+
+def test_quitting_or_updating_while_a_plugin_loads_is_no_crash(markers, monkeypatch) -> None:
+    # Quit, an update and a newer version taking over end the process at once (TerminateProcess),
+    # with the start's loads still running: boot_report.mark("closed") says so first.
+    from frontend import boot_report
+
+    path = crash_guard._load_marker_begin("account", "1.1.82")
+    other = markers / "account.4242.json"  # another window's load: not this exit's to end
+    other.write_text(json.dumps({"plugin": "account", "version": "1.1.82", "process": 4242, "role": "app"}))
+    assert path is not None and path.exists()
+    boot_report.mark("closed")
+    assert not path.exists() and other.exists()
+    assert crash_guard._load_marker_begin("kanban", "1.0.4") is None  # the exit is running: nothing new is left
+    # The next start: this process is gone, and nothing blames the plugin it was loading.
+    other.unlink()
+    monkeypatch.setattr(crash_guard, "_closing", False)
+    monkeypatch.setattr(crash_guard, "_process_alive", lambda pid: False)
+    assert crash_guard.plugin_crashed_ducky("account", "1.1.82") is False

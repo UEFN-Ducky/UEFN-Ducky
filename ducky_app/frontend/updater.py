@@ -742,8 +742,20 @@ def _mark_closed() -> None:
         pass
 
 
+def _plugin_loads_end() -> None:
+    """The update ends this Ducky (itself in a moment, or Setup before that): a plugin load
+    still running is no crash for the next start to find."""
+    try:
+        from frontend import boot_report
+
+        boot_report._end_plugin_loads()
+    except Exception:
+        pass
+
+
 def _shutdown_after_delay() -> None:
     """Reap the panel and IDE bridge workers so the installer can replace files."""
+    _plugin_loads_end()
 
     def _shutdown() -> None:
         try:
@@ -767,6 +779,7 @@ def _shutdown_after_delay() -> None:
 
 def _exit_self_after_delay() -> None:
     """Leave after a successful Setup wait without killing a relaunched panel."""
+    _plugin_loads_end()
 
     def _exit() -> None:
         try:
