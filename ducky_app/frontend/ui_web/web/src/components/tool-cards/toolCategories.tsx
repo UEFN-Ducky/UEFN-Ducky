@@ -115,6 +115,11 @@ export function isPictureSearch(toolName: string, args?: Record<string, unknown>
   return toolName === "web_search" && Boolean(args?.images);
 }
 
+/** Looking at a picture (view_image, also as mcp__uefn__view_image): a read, not a made picture. */
+export function isLookAtPicture(toolName: string): boolean {
+  return /(^|__)view_image$/.test(toolName);
+}
+
 /**
  * File writes, captures, ask-user and picture searches stay as standalone rows.
  * Reads / search / bash / web lookups / verse diagnostics fold into the "N tools"
@@ -123,8 +128,10 @@ export function isPictureSearch(toolName: string, args?: Record<string, unknown>
 export function isStandaloneToolCard(toolName: string, args?: Record<string, unknown>): boolean {
   return (
     isFileWriteTool(toolName) ||
-    // Every picture (made, captured or looked at) stays in the chat, never folded away.
-    isCaptureTool(toolName) ||
+    // Looking at a picture is a read: it folds with the other tools and its row opens on the
+    // picture. Left standalone and open (Nov 11-12 2026) it split every tools list in two
+    // and filled the chat with pictures the agent only checked.
+    (isCaptureTool(toolName) && !isLookAtPicture(toolName)) ||
     toolName === "ducky_ask_user" ||
     isPictureSearch(toolName, args)
   );

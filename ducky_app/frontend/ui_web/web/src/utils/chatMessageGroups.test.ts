@@ -53,6 +53,21 @@ describe("coalesceActivityRows", () => {
     expect(rows[1].items.map((i) => i.id)).toEqual(["2", "3", "4", "5"]);
   });
 
+  it("pictures the agent looked at stay inside the tools list with the tools around them", () => {
+    // Nov 12 2026: two renders then two Look at picture calls showed as "2 tools" plus two
+    // open picture cards under it.
+    const rows = coalesceActivityRows([
+      tool("1", "blender_render"),
+      tool("2", "blender_render"),
+      tool("3", "mcp__uefn__view_image"),
+      tool("4", "view_image"),
+      tool("5", "Read"),
+    ]);
+    expect(rows.map((r) => r.kind)).toEqual(["activity"]);
+    if (rows[0].kind !== "activity") throw new Error("expected activity");
+    expect(rows[0].items.map((i) => i.id)).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
   it("keeps any tool with fileEdit meta outside the accordion", () => {
     const editWithDiff: ChatRow = {
       kind: "tool",

@@ -69,8 +69,10 @@ describe("resolveToolCategory", () => {
     // A picture an agent looked at or made shows in its card, not as raw JSON.
     expect(resolveToolCategory("view_image").id).toBe("screenshot");
     expect(resolveToolCategory("ducky_generate_image").id).toBe("screenshot");
-    // Every picture stays in the chat, never inside the folded tools list.
-    expect(isStandaloneToolCard("view_image")).toBe(true);
+    // Looking at a picture is a read: it folds into the tools list, under any server prefix.
+    // A made picture stays in the chat.
+    expect(isStandaloneToolCard("view_image")).toBe(false);
+    expect(isStandaloneToolCard("mcp__uefn__view_image")).toBe(false);
     expect(isStandaloneToolCard("ducky_generate_image")).toBe(true);
   });
 

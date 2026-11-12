@@ -15,7 +15,7 @@ import { DefaultBody } from "./tool-cards/bodies/DefaultBody";
 import { FileProtectionRecovery } from "./FileProtectionRecovery";
 import { walkthroughStepsFromTool } from "./tool-cards/bodies/WalkthroughBody";
 import { replayShowMe, showMeLabel, showMeRequestFromTool } from "./tool-cards/bodies/ShowMeBody";
-import { isPictureSearch, resolveToolCategory, webToolIcon } from "./tool-cards/toolCategories";
+import { isLookAtPicture, isPictureSearch, resolveToolCategory, webToolIcon } from "./tool-cards/toolCategories";
 import { ToolInlineView, ToolOpenChip, openTargetFor } from "./tool-cards/ToolInlineView";
 import { bareToolName, hasViewContent, toolViewSpec } from "./tool-cards/toolView";
 import { FinishedTerminalTail, LiveTerminalTail, terminalRunOutput } from "./TerminalTail";
@@ -186,9 +186,9 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const Body = category.Body ?? DefaultBody;
   const isAskUser = meta.name === "ducky_ask_user";
   const isCapture = category.id === "screenshot";
-  // Every picture shows open in the chat; a failed read shows the error rather than an
-  // empty photo frame.
-  const lookedAtPicture = /(^|__)view_image$/.test(meta.name);
+  // A picture the agent looked at sits folded in the tools list: its row opens on the
+  // picture, and a failed read shows the error rather than an empty photo frame.
+  const lookedAtPicture = isLookAtPicture(meta.name);
   const captureBody = isCapture && !(lookedAtPicture && !isSuccess);
   const [askSession, setAskSession] = useState(() =>
     convId ? getAskUserSessionForConv(convId) : null,
@@ -492,7 +492,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {captureBody && !isCancelled && !isGuardBlocked && !isRunning ? (
+        {captureBody && (!lookedAtPicture || expanded) && !isCancelled && !isGuardBlocked && !isRunning ? (
           <div className="tool-execution-card-body">
             <Body
               toolName={meta.name}
