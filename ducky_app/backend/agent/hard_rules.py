@@ -162,11 +162,12 @@ ISLAND_RULES = (
     '`skill_read_subskill("verse", "sys_architecture")`.\n'
     "- **New Verse APIs (HARD):** voice = `voice_channel` (`IsMemberSpeaking`, never "
     "`IsSpeaking`); punch = `Unarmed_Creative_V1_Common{}`; entitlements = "
-    "`/UnrealEngine.com/Marketplace`; LLM NPCs = `persona_component` (never "
-    "`AppendToPersonality` / `RegisterPromptBinding`); text chat = `text_channel` (Verse "
-    "cannot send messages); `ability_context.Instigator` is `?entity`; 43.00 `event(t)` is "
+    "`/UnrealEngine.com/Marketplace`; NPCs that talk (AI / LLM NPCs) = the `conversations` "
+    "skill: persona in the NPC definition's Persona Modifier, `persona_component` in Verse "
+    "(never `AppendToPersonality` / `RegisterPromptBinding`); text chat = `text_channel` (Verse "
+    "cannot send messages); `ability_context.Instigator` is `?entity`; `event(t)` is "
     "subscribable — never write your own `Subscribe`. Read the section first: "
-    "`sys_chat_channels`, `sys_conversations`, `sys_text_chat`, `custom_abilities`, "
+    "`sys_chat_channels`, `sys_text_chat`, `custom_abilities`, "
     "`umg_verse_field_events`, `events_subscriptions`.\n"
     "- **Persistence `weak_map` (HARD):** never remove player keys once added; replace values "
     'via rebuild+`set`. Field changes: `skill_read_subskill("verse","persistence")`.\n'
