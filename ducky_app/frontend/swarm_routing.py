@@ -2,7 +2,8 @@
 
 Jobs are decided when a swarm is created. Each job kind has its own model: the person's
 pick in Settings (``swarm_job_models``), else the template profile's own model, else the
-kind's suggested model. Pure functions; nothing here starts a chat.
+kind's suggested model when this PC can run it, else the lead's own model. Pure functions;
+nothing here starts a chat.
 """
 
 from __future__ import annotations
@@ -91,8 +92,24 @@ def _profile_model(profile: Mapping[str, Any] | None) -> str:
     return next((str(m).strip() for m in favs if str(m).strip()), "") if isinstance(favs, list) else ""
 
 
-def _agent_may_use(model: str, settings: Any) -> bool:
-    """False when *model* bills a pay-per-token API key agents may not start chats on."""
+def can_run(model: str, settings: Any, lead_provider: str = "") -> bool:
+    """True when *model* is one this PC can run and an agent may seat: a signed-in coding
+    agent or a provider offers it, and it is no API key closed to agents. A kind's suggested
+    model is a Claude name; a person with only a Gemini key has nothing that runs it."""
+    from frontend import favorite_models as fm
+
+    try:
+        result = fm.resolve_model_strict([model], settings)
+    except Exception:
+        return True  # unresolvable here: the spawn reports it
+    if not isinstance(result, fm.ResolveOk):
+        return False
+    return isinstance(fm.refuse_paid_api_for_agent(result, settings, lead_provider), fm.ResolveOk)
+
+
+def _agent_may_use(model: str, settings: Any, lead_provider: str = "") -> bool:
+    """False when *model* bills a pay-per-token API key agents may not start chats on
+    (``lead_provider``: the key the lead itself runs on, which its team may use)."""
     from frontend import favorite_models as fm
 
     selection = fm.parse_selection(model)
@@ -106,18 +123,18 @@ def _agent_may_use(model: str, settings: Any) -> bool:
             result = fm.resolve_model_strict([model], settings)
         except Exception:
             return True  # unresolvable here: the spawn reports it
-    refused = fm.refuse_paid_api_for_agent(result, settings)
+    refused = fm.refuse_paid_api_for_agent(result, settings, lead_provider)
     return not (isinstance(refused, fm.ResolveErr) and refused.code == "api_key_blocked")
 
 
-def job_model(kind: str, profile: Mapping[str, Any] | None, settings: Any) -> str:
+def job_model(kind: str, profile: Mapping[str, Any] | None, settings: Any, lead_provider: str = "") -> str:
     """The model a job of *kind* runs on: Settings' ``swarm_job_models[kind]``, else the
     template profile's own model, else ''. Never a paid API model agents may not use."""
     picks = getattr(settings, "swarm_job_models", None) or {}
     key = (kind or "").strip().lower()
     for model in (str(picks.get(key) or "").strip() if isinstance(picks, Mapping) else "", _profile_model(profile)):
         if model:
-            return model if _agent_may_use(model, settings) else ""
+            return model if _agent_may_use(model, settings, lead_provider) else ""
     return ""
 
 
@@ -127,13 +144,17 @@ def route(
     *,
     settings: Any = None,
     profiles: Iterable[Mapping[str, Any]] | None = None,
+    lead_model: str = "",
+    lead_provider: str = "",
 ) -> dict[str, str]:
     """Route one job (its name and task) to {kind, profile_id, model, why}.
 
     An explicit *kind* wins, else keyword match on *text*, else 'developer'. A kind with no
     specialist profile runs on Developer and keeps its own name and model. *profiles* (the
     available ducky profiles) lets a missing specialist fall back to Developer; *settings*
-    applies the person's model per kind.
+    applies the person's model per kind. *lead_model* (the lead's own ``backend:model``) is
+    what the job gets when its kind's suggested model can't run on this PC; *lead_provider*
+    is the API key the lead runs on, which its team may use.
     """
     explicit = (kind or "").strip().lower()
     row = job_kind(explicit) if explicit else None
@@ -153,11 +174,13 @@ def route(
         profile_id = FALLBACK_PROFILE
     profile = by_id.get(profile_id) if by_id is not None else None
     if settings is not None:
-        model = job_model(out_kind, profile, settings)
+        model = job_model(out_kind, profile, settings, lead_provider)
     else:
         model = _profile_model(profile)
     if not model:
         model = row.model if row else ""
+        if lead_model and settings is not None and not (model and can_run(model, settings, lead_provider)):
+            model = lead_model
     return {"kind": out_kind, "profile_id": profile_id, "model": model, "why": why}
 
 

@@ -188,7 +188,10 @@ def _probe_agent(settings: Any, agent_id: str) -> dict[str, Any] | None:
     return box.get("info")
 
 
-def _available_agent_models(settings: Any, backend: str = "") -> dict[str, set[str]]:
+def _available_agent_models(settings: Any, backend: str = "", signed_in_only: bool = False) -> dict[str, set[str]]:
+    """Live model ids per installed coding agent. ``signed_in_only`` leaves out an agent that
+    says it is signed out: one Ducky picks by itself (a bare model name, a hint) must be able
+    to run."""
     from backend.agent import coding_agents
 
     out: dict[str, set[str]] = {}
@@ -223,6 +226,8 @@ def _available_agent_models(settings: Any, backend: str = "") -> dict[str, set[s
         if aid not in agents:
             continue
         if not info.get("enabled", True) or not info.get("available", False):
+            continue
+        if signed_in_only and info.get("logged_in") is False:
             continue
         models = {
             str(m.get("id") or "").strip()
@@ -300,19 +305,64 @@ def billing_kind(coding_agent: str, provider: str, model: str = "") -> str:
     return "local" if prov in ("ollama", "lmstudio", "llamacpp") else "api_key"
 
 
-def refuse_paid_api_for_agent(result: ResolveResult, settings: Any) -> ResolveResult:
+def chat_api_provider(conv: Any) -> str:
+    """The provider whose API key this chat bills per token ("" for a coding agent's own login,
+    a local model, the Ducky account, or no chat)."""
+    if conv is None:
+        return ""
+    provider = str(getattr(conv, "provider", "") or "").strip().lower()
+    agent = str(getattr(conv, "coding_agent", "") or "ducky")
+    if not provider or billing_kind(agent, provider, str(getattr(conv, "model", "") or "")) != "api_key":
+        return ""
+    return provider
+
+
+def like_lead(model: str, lead: Any, settings: Any) -> str:
+    """A bare model name a lead asked for, tied to the lead's own agent or provider when that
+    one has it. Otherwise the name goes to the first coding agent whose list has it, and a
+    lead on a Gemini key that asked for "gemini-3.5-pro" got its team on another program."""
+    wanted = (model or "").strip()
+    if not wanted or ":" in wanted or lead is None:
+        return wanted
+    agent = str(getattr(lead, "coding_agent", "") or "").strip().lower().replace("-", "_")
+    provider = str(getattr(lead, "provider", "") or "").strip().lower()
+    backend = agent if agent and agent != "ducky" else provider
+    if not backend:
+        return wanted
+    if wanted == str(getattr(lead, "model", "") or "").strip():
+        return qualify(backend, wanted)
+    if backend == agent:
+        return qualify(backend, wanted) if wanted in (_available_agent_models(settings, backend=backend).get(backend) or ()) else wanted
+    ids = _available_api_models().get(provider)
+    if ids is not None:
+        return qualify(provider, wanted) if wanted in ids else wanted
+    try:
+        from backend.agent.model_pricing import infer_provider
+
+        return qualify(provider, wanted) if infer_provider(wanted) == provider else wanted
+    except Exception:
+        return wanted
+
+
+def refuse_paid_api_for_agent(result: ResolveResult, settings: Any, lead_provider: str = "") -> ResolveResult:
     """An agent seating or spawning a chat never puts it on a pay-per-token API key the
-    person has not opened to agents (Settings → LLMs → the provider's key)."""
+    person has not opened to agents (Settings → LLMs → the provider's key).
+
+    ``lead_provider`` (``chat_api_provider`` of the chat doing the seating): that chat already
+    runs on this key because the person put it there, so its own team may use it too. Without
+    this a person whose only AI is an API key could not have a team on it: the lead was told
+    to pick another agent's model, and its members sat on a program nobody had asked for."""
     if not isinstance(result, ResolveOk) or result.coding_agent != "ducky" or not result.model:
         return result
     if billing_kind("ducky", result.provider, result.model) != "api_key":
         return result
     allowed = {str(p).strip().lower() for p in (getattr(settings, "agent_api_keys", None) or [])}
-    if result.provider.strip().lower() in allowed:
+    provider = result.provider.strip().lower()
+    if provider in allowed or (lead_provider and provider == lead_provider.strip().lower()):
         return result
-    offered = sorted(aid for aid, ids in _available_agent_models(settings).items() if result.model in ids)
+    offered = sorted(aid for aid, ids in _available_agent_models(settings, signed_in_only=True).items() if result.model in ids)
     hint = (f" Use {offered[0]}:{result.model}, which runs on that subscription." if offered
-            else " Pick a subscription coding agent's model (e.g. codex:…) or a local model.")
+            else " Tell the person and let them choose; do not seat it on a model or program they did not ask for.")
     return ResolveErr(
         code="api_key_blocked",
         message=(f"{result.selection.qualified} bills the person's {result.provider} API key per token, "
@@ -365,7 +415,7 @@ def _resolve_model_strict(favorite_models: Any, settings: Any) -> ResolveResult:
         bare = requested.strip()
         # A bare id a logged-in coding agent offers runs there, on its subscription: an
         # agent that wrote "gpt-6.1-sol" got OpenAI's per-token API instead of Codex.
-        subscribed = sorted(aid for aid, ids in _available_agent_models(settings).items() if bare in ids)
+        subscribed = sorted(aid for aid, ids in _available_agent_models(settings, signed_in_only=True).items() if bare in ids)
         if subscribed:
             selection = FavoriteSelection(backend=subscribed[0], model_id=bare)
     if selection is None:

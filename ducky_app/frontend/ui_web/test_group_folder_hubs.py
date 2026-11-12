@@ -487,7 +487,7 @@ def test_a_seat_gets_the_model_it_was_invited_with(monkeypatch, tmp_path):
                          selection=FavoriteSelection(backend=backend, model_id=model_id))
 
     monkeypatch.setattr(pa, "resolve_model_selection", resolve)
-    monkeypatch.setattr("frontend.favorite_models.refuse_paid_api_for_agent", lambda result, _s: result)
+    monkeypatch.setattr("frontend.favorite_models.refuse_paid_api_for_agent", lambda result, _s, *_a: result)
     out = api.group_invite(team["id"], "tester", model="codex:gpt-5-mini", name="Tester", for_agent=True)
     assert out["ok"], out
     assert out["member"]["model"] == "codex:gpt-5-mini"
@@ -564,3 +564,42 @@ def test_a_moved_lane_that_overlaps_the_new_team_is_reported_not_forced(monkeypa
 
     assert out["ok"] and out["lane_warning"].startswith("Lane not kept: Lane overlaps")
     assert _lane(out, mover.id) is None and _lane(out, owner.id) == ["ducky_app/frontend/**"]
+
+
+def test_a_team_may_use_the_api_key_its_lead_already_runs_on(monkeypatch, tmp_path):
+    """A person whose only AI is a Gemini key asked their lead for a Gemini team. Members were
+    refused the key ("pick a subscription coding agent's model") and ended up on another program
+    that never ran. The lead's own key is the person's choice, so its team may use it; another
+    provider's key stays closed until the person opens it."""
+    import frontend.agent_profiles as profiles
+    import frontend.ui_web.panel_api as pa
+    from frontend import favorite_models as fm
+    from frontend.favorite_models import FavoriteSelection, ResolveOk
+
+    api, settings, root, team, _new = _two_teams(monkeypatch, tmp_path)
+    settings.agent_api_keys = []
+    monkeypatch.setattr(profiles, "get_agent_profile", lambda pid: {"id": "tester", "name": "Tester"})
+    monkeypatch.setattr(fm, "billing_kind", lambda agent, provider, model="": "api_key" if provider else "subscription")
+    monkeypatch.setattr(fm, "_available_agent_models", lambda _s, **_k: {})
+    monkeypatch.setattr(fm, "_available_api_models", lambda: {"gemini": {"gemini-3.5-flash", "gemini-3.5-pro"}, "openai": {"gpt-6"}})
+
+    def resolve(favorites, _settings):
+        backend, model_id = favorites[0].split(":", 1)
+        return ResolveOk(coding_agent="ducky", model=model_id, provider=backend,
+                         selection=FavoriteSelection(backend=backend, model_id=model_id))
+
+    monkeypatch.setattr(pa, "resolve_model_selection", resolve)
+    lead = create_conversation(settings, team["folder_id"], title="Producer", parent_conv_id=team["id"],
+                               project_root=root, model="gemini-3.5-flash", provider="gemini", coding_agent="ducky")
+    assert api.group_add_member(team["id"], lead.id, as_leader=True, move_folder=False)["ok"]
+
+    same = api.group_invite(team["id"], "tester", model="gemini:gemini-3.5-flash", name="3D Modeler lead", for_agent=True)
+    assert same["ok"], same
+    assert same["member"]["model"] == "gemini:gemini-3.5-flash"
+    # The lead wrote only the model's name: it stays on the lead's own key.
+    bare = api.group_invite(team["id"], "tester", model="gemini-3.5-pro", name="Material Artist lead", for_agent=True)
+    assert bare["ok"] and bare["member"]["model"] == "gemini:gemini-3.5-pro", bare
+    other = api.group_invite(team["id"], "tester", model="openai:gpt-6", name="Verse lead", for_agent=True)
+    assert not other["ok"]
+    assert "openai API key" in other["error"] and "Tell the person" in other["error"]
+    assert "subscription coding agent" not in other["error"]

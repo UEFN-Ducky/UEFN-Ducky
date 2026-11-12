@@ -385,7 +385,7 @@ def test_cold_cache_probe_is_bounded(monkeypatch):
 
 
 def _catalogs(monkeypatch, *, agents: dict, apis: dict) -> None:
-    monkeypatch.setattr("frontend.favorite_models._available_agent_models", lambda settings, backend="": agents)
+    monkeypatch.setattr("frontend.favorite_models._available_agent_models", lambda settings, backend="", **_k: agents)
     monkeypatch.setattr("frontend.favorite_models._available_api_models", lambda: apis)
 
 
@@ -491,3 +491,60 @@ def test_chat_model_choice_prefers_the_default_then_a_gateway_fallback(monkeypat
     choice, error = fm.chat_model_choice(SimpleNamespace(default_model="codex:gpt-6-astra"))
     assert choice is None
     assert error == "Your Default Model codex:gpt-6-astra isn't available. Pick a model below and this ducky uses it."
+
+
+def test_a_lead_on_an_api_key_may_seat_its_team_on_that_key_only(monkeypatch):
+    from frontend.favorite_models import chat_api_provider, refuse_paid_api_for_agent
+
+    _catalogs(monkeypatch, agents={}, apis={"gemini": {"gemini-3.5-flash"}, "openai": {"gpt-6.1-sol"}})
+    monkeypatch.setattr("backend.agent.model_fetch.get_model_info", lambda p, m: None)
+    shut = SimpleNamespace(default_model="", agent_api_keys=[])
+    lead = SimpleNamespace(coding_agent="ducky", provider="Gemini", model="gemini-3.5-flash")
+    assert chat_api_provider(lead) == "gemini"
+    assert chat_api_provider(SimpleNamespace(coding_agent="codex", provider="", model="gpt-6")) == ""
+    assert chat_api_provider(None) == ""
+    seat = resolve_model_strict(["gemini:gemini-3.5-flash"], shut)
+    assert refuse_paid_api_for_agent(seat, shut, chat_api_provider(lead)) is seat
+    other = resolve_model_strict(["openai:gpt-6.1-sol"], shut)
+    refused = refuse_paid_api_for_agent(other, shut, chat_api_provider(lead))
+    assert isinstance(refused, ResolveErr) and refused.code == "api_key_blocked"
+    # No signed-in agent offers it: the lead is told to ask, never to pick another program.
+    assert "Tell the person" in refused.message and "subscription coding agent" not in refused.message
+
+
+def test_a_bare_model_name_stays_with_the_lead(monkeypatch):
+    from frontend.favorite_models import like_lead
+
+    _catalogs(monkeypatch, agents={"cursor": {"gemini-3.5-pro"}, "codex": {"gpt-6", "gpt-6-mini"}},
+              apis={"gemini": {"gemini-3.5-flash", "gemini-3.5-pro"}})
+    s = SimpleNamespace(default_model="")
+    on_key = SimpleNamespace(coding_agent="ducky", provider="gemini", model="gemini-3.5-flash")
+    assert like_lead("gemini-3.5-flash", on_key, s) == "gemini:gemini-3.5-flash"
+    assert like_lead("gemini-3.5-pro", on_key, s) == "gemini:gemini-3.5-pro"  # not Cursor, which lists it too
+    assert like_lead("gpt-6", on_key, s) == "gpt-6"  # not the lead's: the usual rules decide
+    assert like_lead("cursor:gemini-3.5-pro", on_key, s) == "cursor:gemini-3.5-pro"  # an exact pick is kept
+    on_codex = SimpleNamespace(coding_agent="codex", provider="", model="gpt-6")
+    assert like_lead("gpt-6-mini", on_codex, s) == "codex:gpt-6-mini"
+    assert like_lead("gemini-3.5-pro", on_codex, s) == "gemini-3.5-pro"
+    assert like_lead("gpt-6", None, s) == "gpt-6" and like_lead("", on_key, s) == ""
+
+
+def test_a_bare_model_never_lands_on_a_signed_out_agent(monkeypatch):
+    """Cursor was installed but signed out and listed the model too: the seat went there and failed."""
+    from backend.agent import coding_agents
+    from frontend import favorite_models
+
+    payload = {"agents": [
+        {"id": "cursor", "available": True, "logged_in": False, "models": [{"id": "gemini-3.5-flash"}]},
+        {"id": "codex", "available": True, "logged_in": True, "models": [{"id": "gpt-6"}]},
+        {"id": "opencode", "available": True, "logged_in": None, "models": [{"id": "auto"}]},
+    ]}
+    monkeypatch.setattr(favorite_models, "coding_agent_backends", lambda: frozenset({"cursor", "codex", "opencode"}))
+    monkeypatch.setattr(coding_agents, "detect_all", lambda *_a: payload)
+    s = SimpleNamespace()
+    assert set(favorite_models._available_agent_models(s)) == {"cursor", "codex", "opencode"}
+    assert set(favorite_models._available_agent_models(s, signed_in_only=True)) == {"codex", "opencode"}
+    monkeypatch.setattr(favorite_models, "_available_api_models", lambda: {"gemini": {"gemini-3.5-flash"}})
+    monkeypatch.setattr(favorite_models, "known_backends", lambda: frozenset({"gemini", "cursor", "codex", "opencode"}))
+    out = resolve_model_strict(["gemini-3.5-flash"], SimpleNamespace(default_model=""))
+    assert isinstance(out, ResolveOk) and out.coding_agent == "ducky" and out.provider == "gemini"

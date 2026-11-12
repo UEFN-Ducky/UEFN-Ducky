@@ -212,7 +212,7 @@ def group_seat_profile(
             wait_for_idle(cid, 3.0)
         if not is_agent_running(cid):
             if for_agent:
-                blocked = self._agent_api_key_refusal(cid)
+                blocked = self._agent_api_key_refusal(cid, _lead_api_provider(group))
                 if blocked:
                     return {"ok": False, "error": blocked}
             return {
@@ -231,9 +231,19 @@ def group_seat_profile(
     return seated
 
 
-def _agent_api_key_refusal(conv_id: str) -> str:
+def _lead_api_provider(group: Any) -> str:
+    """The provider whose API key the group's leader bills per token ("" otherwise): its own
+    team may run on that key too (favorite_models.refuse_paid_api_for_agent)."""
+    from frontend.favorite_models import chat_api_provider
+
+    leader_id = (getattr(group, "leader_conv_id", None) or "").strip()
+    return chat_api_provider(_pa.load_conversation(leader_id)) if leader_id else ""
+
+
+def _agent_api_key_refusal(conv_id: str, lead_provider: str = "") -> str:
     """Why an agent may not run work in this chat ("" = it may): the chat bills an API
-    key per token that the person has not opened to agents."""
+    key per token that the person has not opened to agents. ``lead_provider``: the key the
+    group's leader itself runs on, which its team may use."""
     from frontend.favorite_models import billing_kind
 
     conv = _pa.load_conversation(conv_id)
@@ -244,12 +254,11 @@ def _agent_api_key_refusal(conv_id: str) -> str:
     if billing_kind(agent, provider, str(getattr(conv, "model", "") or "")) != "api_key":
         return ""
     allowed = {str(p).strip().lower() for p in (_pa.PanelSettings.load().agent_api_keys or [])}
-    if provider.strip().lower() in allowed:
+    if provider.strip().lower() in allowed or (lead_provider and provider.strip().lower() == lead_provider):
         return ""
     return (f"Chat {conv.title!r} runs on the person's {provider} API key (billed per token); agents may "
-            "not use it. Seat a ducky whose profile model is a subscription model (e.g. "
-            "codex:…) instead, or ask the person to switch that chat's model or allow agents "
-            "to use this key in Settings → LLMs.")
+            "not use it. Tell the person: they can switch that chat's model or allow agents to use "
+            "this key in Settings → LLMs. Do not seat a model or program they did not ask for.")
 
 
 def group_invite(
@@ -300,18 +309,23 @@ def group_invite(
             return {"ok": False, "error": "That ducky is already in this group"}
         name = _copy_name(profile, existing)
     settings = _pa.PanelSettings.load()
+    leader_id = (getattr(group, "leader_conv_id", None) or "").strip()
+    leader = _pa.load_conversation(leader_id) if leader_id else None
     override = (model or "").strip()
+    if for_agent:
+        from frontend.favorite_models import like_lead
+
+        override = like_lead(override, leader, settings)  # a bare name stays with the lead's own agent or key
     favorites = [override] if override else profile.get("favorite_models")
     result = allow_create_without_model(
         _pa.resolve_model_selection(favorites, settings)
     )
-    leader_id = (getattr(group, "leader_conv_id", None) or "").strip()
-    if isinstance(result, ResolveErr) and leader_id:
-        result = _leader_agent_ok(result, _pa.load_conversation(leader_id)) or result
+    if isinstance(result, ResolveErr) and leader is not None:
+        result = _leader_agent_ok(result, leader) or result
     if for_agent:
-        from frontend.favorite_models import refuse_paid_api_for_agent
+        from frontend.favorite_models import chat_api_provider, refuse_paid_api_for_agent
 
-        result = refuse_paid_api_for_agent(result, settings)
+        result = refuse_paid_api_for_agent(result, settings, chat_api_provider(leader))
     if isinstance(result, ResolveErr):
         return {"ok": False, "error": result.message}
     disabled_packs = profile.get("disabled_packs")

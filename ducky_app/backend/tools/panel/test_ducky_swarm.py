@@ -671,3 +671,31 @@ def test_unknown_key_warns_and_changes_nothing():
     plain, odd = _edited(), _edited({"wiggle": 1}, {"seat": "Verse lead", "colour": "red"})
     assert any("wiggle" in w for w in odd["warnings"]) and any("colour" in w for w in odd["warnings"])
     assert {k: v for k, v in odd.items() if k != "warnings"} == plain
+
+
+def test_seats_nobody_picked_a_model_for_follow_the_lead_when_the_suggestion_cant_run(monkeypatch):
+    """A lead on a Gemini key: the preview showed (and the build seated) Claude names for every
+    job. Seats still on their job's suggestion take the lead's model; a picked model is kept."""
+    from types import SimpleNamespace
+
+    from frontend import swarm_routing as sr
+
+    lead = SimpleNamespace(coding_agent="ducky", provider="gemini", model="gemini-3.5-flash")
+    monkeypatch.setattr(sw, "lead_chat", lambda api=None: lead)
+    monkeypatch.setattr("frontend.favorite_models.chat_api_provider", lambda conv: "gemini")
+    monkeypatch.setattr(sw, "_routing_context", lambda: (SimpleNamespace(), None))
+    monkeypatch.setattr(sr, "can_run", lambda model, settings, lead_provider="": model.startswith("gemini:"))
+    monkeypatch.setattr(sr, "job_model", lambda kind, profile, settings, lead_provider="": "")
+
+    jobs = _jobs(["Modeling: props", "Texture: props", "Verse: combat"], model="")
+    jobs[2]["model"] = "codex:gpt-6"  # the lead's own pick for this job
+    out = sw.swarm_create("Game", jobs, "auto", 8, 5, detail=2, api=FakeApi())
+    # Two jobs have no model yet, so the person is asked: the offered one is the lead's, not Claude.
+    assert out["status"] == "needs_answers"
+    asked = [q for q in out["questions"] if q["id"].startswith("model:")]
+    assert [q["options"][0]["id"] for q in asked] == ["gemini:gemini-3.5-flash", "gemini:gemini-3.5-flash"]
+    assert sorted(s["model"] for s in out["seats"]) == ["codex:gpt-6", "gemini:gemini-3.5-flash", "gemini:gemini-3.5-flash"]
+    # With no lead to read, the suggestions stay as they were.
+    monkeypatch.setattr(sw, "lead_chat", lambda api=None: None)
+    plain = sw.swarm_create("Game", _jobs(["Modeling: props"], model=""), "auto", 8, 5, detail=2, api=FakeApi())
+    assert [s["model"] for s in plain["seats"]] == ["claude-sonnet-5-5"]

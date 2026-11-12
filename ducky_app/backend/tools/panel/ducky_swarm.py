@@ -38,11 +38,58 @@ def _routing_context() -> tuple[Any, Any]:
         return None, None
 
 
-def normalize_jobs(jobs: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
-    """Jobs with their route (kind, profile, suggested model) filled in."""
+def lead_chat(api: Any = None) -> Any:
+    """The calling (lead) chat, or None when it can't be read: a seat nobody picked a model
+    for follows the lead's."""
+    try:
+        from frontend.ui_web.chats.conversations import load_conversation
+
+        wrapped = api or PanelSwarmApi()
+        lead = wrapped.caller()
+        return load_conversation(lead, wrapped.project_root() or None) if lead else None
+    except Exception:
+        return None
+
+
+def lead_model(lead: Any) -> tuple[str, str]:
+    """(the lead's own ``backend:model``, the API key provider it bills per token or '')."""
+    if lead is None:
+        return "", ""
+    from frontend.favorite_models import chat_api_provider, qualify
+
+    model = str(getattr(lead, "model", "") or "").strip()
+    agent = str(getattr(lead, "coding_agent", "") or "").strip()
+    backend = agent if agent and agent != "ducky" else str(getattr(lead, "provider", "") or "").strip()
+    return (qualify(backend, model) if model and backend else ""), chat_api_provider(lead)
+
+
+def settle_models(preview: dict[str, Any], lead: Any) -> dict[str, Any]:
+    """A seat still on its job's suggested model takes the lead's own when this PC can't run
+    the suggestion (a re-routed job and the integrator get theirs after routing). A model the
+    person or the lead picked is never changed: a bad pick still errors at the build."""
+    mine, provider = lead_model(lead)
+    settings, _ = _routing_context()
+    if not mine or settings is None:
+        return preview
+    from frontend.swarm_routing import can_run
+
+    jobs = preview.get("jobs") or {}
+    for seat in walk_seats(preview["tree"]):
+        job = jobs.get(seat["name"]) or {}
+        model = str(seat.get("model") or "")
+        if job.get("model") or not model or model != job.get("suggested_model") or can_run(model, settings, provider):
+            continue
+        seat["model"] = mine
+    return preview
+
+
+def normalize_jobs(jobs: list[dict[str, Any]] | None, lead: Any = None) -> list[dict[str, Any]]:
+    """Jobs with their route (kind, profile, suggested model) filled in. *lead* (the calling
+    chat) gives the model a job falls back to when its kind's usual one can't run here."""
     from frontend.swarm_routing import route
 
     settings, profiles = _routing_context()
+    mine, provider = lead_model(lead)
     out = []
     for raw in jobs or []:
         if not isinstance(raw, dict):
@@ -52,7 +99,8 @@ def normalize_jobs(jobs: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
             continue
         purpose = str(raw.get("purpose") or "").strip()
         task = str(raw.get("task") or "").strip()
-        routed = route(f"{name}: {purpose} {task}", str(raw.get("kind") or ""), settings=settings, profiles=profiles)
+        routed = route(f"{name}: {purpose} {task}", str(raw.get("kind") or ""), settings=settings, profiles=profiles,
+                       lead_model=mine, lead_provider=provider)
         out.append({
             "name": name,
             "purpose": purpose,
@@ -461,16 +509,18 @@ def swarm_create(goal: str, jobs: list[dict[str, Any]] | None, agents: Any = "",
     goal = (goal or "").strip()
     if not goal:
         raise ValueError("goal is required")
-    routed = normalize_jobs(jobs)
+    lead = lead_chat(api)
+    routed = normalize_jobs(jobs, lead)
     if not routed:
         raise ValueError("jobs is required: [{name, purpose, task, steps[], paths[], kind?, model?}]")
     detail = int(detail or 0)
     questions = questions_for(routed, agents, int(max_agents or 0), int(per_group or 0), detail)
     if questions:
         # The card shows the suggested answers' preview; the agent still asks the questions.
-        draft = build_preview(goal, routed, agents if _parse_agents(agents) != "" else "auto",
-                              int(max_agents or 0) or SUGGESTED_MAX_AGENTS, int(per_group or 0) or SUGGESTED_PER_GROUP,
-                              edits, detail if detail in DETAILS else SUGGESTED_DETAIL)
+        draft = settle_models(build_preview(
+            goal, routed, agents if _parse_agents(agents) != "" else "auto",
+            int(max_agents or 0) or SUGGESTED_MAX_AGENTS, int(per_group or 0) or SUGGESTED_PER_GROUP,
+            edits, detail if detail in DETAILS else SUGGESTED_DETAIL), lead)
         return {
             **card("needs_answers", draft),
             "questions": questions,
@@ -480,7 +530,7 @@ def swarm_create(goal: str, jobs: list[dict[str, Any]] | None, agents: Any = "",
             "routes": [{"job": j["name"], "kind": j["kind"], "profile": j["profile"],
                         "suggested_model": j["suggested_model"]} for j in routed],
         }
-    preview = build_preview(goal, routed, agents, int(max_agents), int(per_group), edits, detail)
+    preview = settle_models(build_preview(goal, routed, agents, int(max_agents), int(per_group), edits, detail), lead)
     if not confirm:
         return {
             **card("needs_confirm", preview),

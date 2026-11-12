@@ -89,7 +89,7 @@ def backends(monkeypatch):
     monkeypatch.setattr(fm, "known_backends", lambda: frozenset({"anthropic", "claude_code"}))
     monkeypatch.setattr(fm, "coding_agent_backends", lambda: frozenset({"claude_code"}))
     monkeypatch.setattr(fm, "billing_kind", lambda agent, provider, model="": "api_key")
-    monkeypatch.setattr(fm, "_available_agent_models", lambda settings, backend="": {})
+    monkeypatch.setattr(fm, "_available_agent_models", lambda settings, backend="", **_k: {})
 
 
 def _settings(**picks):
@@ -225,3 +225,27 @@ def test_split_never_changes_the_input():
     for level in (1, 2, 3, 4):
         sr.split_jobs(REQUEST, level)
     assert REQUEST == before
+
+
+def test_a_job_falls_back_to_the_leads_model_when_its_usual_one_cant_run_here(monkeypatch):
+    """Every kind's suggested model is a Claude name. A person with only a Gemini key was
+    offered (and seated on) Claude: each invite failed and the lead then picked another program."""
+    monkeypatch.setattr(fm, "known_backends", lambda: frozenset({"gemini", "claude_code"}))
+    monkeypatch.setattr(fm, "coding_agent_backends", lambda: frozenset({"claude_code"}))
+    monkeypatch.setattr("backend.agent.model_fetch.get_model_info", lambda p, m: None)
+    monkeypatch.setattr(fm, "_available_api_models", lambda: {"gemini": {"gemini-3.5-flash"}})
+    monkeypatch.setattr(fm, "_available_agent_models", lambda settings, backend="", **_k: {})
+    settings = SimpleNamespace(swarm_job_models={}, agent_api_keys=[], default_model="")
+    lead = {"lead_model": "gemini:gemini-3.5-flash", "lead_provider": "gemini"}
+
+    assert not sr.can_run("claude-sonnet-5-5", settings, "gemini")
+    assert sr.can_run("gemini:gemini-3.5-flash", settings, "gemini")
+    assert not sr.can_run("gemini:gemini-3.5-flash", settings), "another lead's team may not use that key"
+    got = sr.route("Modeling: build the pet meshes in Blender", settings=settings, profiles=[], **lead)
+    assert (got["kind"], got["model"]) == ("modeling", "gemini:gemini-3.5-flash")
+    # No lead known: the suggestion stays, as before.
+    assert sr.route("Modeling: build the pet meshes", settings=settings, profiles=[])["model"] == "claude-sonnet-5-5"
+    # Claude Code signed in here: the kind keeps its usual model, whoever leads.
+    monkeypatch.setattr(fm, "_available_agent_models",
+                        lambda settings, backend="", **_k: {"claude_code": {"claude-sonnet-5-5", "claude-opus-5-5"}})
+    assert sr.route("Modeling: build the pet meshes", settings=settings, profiles=[], **lead)["model"] == "claude-sonnet-5-5"

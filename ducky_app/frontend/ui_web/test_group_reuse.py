@@ -137,7 +137,7 @@ def test_an_agent_inviting_a_second_ducky_of_a_profile_gets_a_numbered_copy(monk
     monkeypatch.setattr(pa, "resolve_model_selection", lambda favorites, settings: None)
     chosen = SimpleNamespace(model="gpt-6-luna", provider="", coding_agent="codex")
     monkeypatch.setattr("frontend.favorite_models.allow_create_without_model", lambda result: chosen)
-    monkeypatch.setattr("frontend.favorite_models.refuse_paid_api_for_agent", lambda result, settings: chosen)
+    monkeypatch.setattr("frontend.favorite_models.refuse_paid_api_for_agent", lambda result, settings, *_a: chosen)
     monkeypatch.setattr("frontend.ui_web.group_orchestrator._group_folder_id", lambda gid: "f1")
     titles: list[str] = []
 
