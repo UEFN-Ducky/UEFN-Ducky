@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({
   api: {
     coding_agent_login: vi.fn(),
     coding_agent_login_status: vi.fn(),
+    coding_agent_login_submit: vi.fn(),
     copy_text: vi.fn(),
   },
 }));
@@ -14,7 +15,34 @@ vi.mock("../../hooks/usePanelApi", () => ({ getApi: () => fake.api, isRemote: ()
 
 import { CodingAgentLoginModal } from "./CodingAgentsSection";
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+it("Claude: the code box cleans the paste, refuses a pasted link and shows the CLI's own refusal", async () => {
+  fake.api.coding_agent_login.mockResolvedValue({ ok: true, auth_url: "https://claude.ai/oauth/authorize?x=1" });
+  fake.api.coding_agent_login_status.mockResolvedValue({ ok: true, logged_in: false });
+  fake.api.coding_agent_login_submit.mockResolvedValue({ ok: false, logged_in: false, error: "Invalid code. Try again." });
+  const onLoggedIn = vi.fn();
+  render(<CodingAgentLoginModal agentId="claude_code" title="Log in to Claude Code" onClose={() => {}} onLoggedIn={onLoggedIn} />);
+
+  const box = (await screen.findByPlaceholderText("Paste the login code")) as HTMLInputElement;
+  expect(screen.getByText(/in the box below, not in the terminal/)).toBeTruthy();
+
+  // The sign-in link pasted back is not a code: nothing goes to the CLI.
+  fireEvent.change(box, { target: { value: "https://claude.ai/oauth/authorize?x=1" } });
+  fireEvent.click(screen.getByText("Submit"));
+  expect(await screen.findByText(/That is a link, not the code/)).toBeTruthy();
+  expect(fake.api.coding_agent_login_submit).not.toHaveBeenCalled();
+
+  // A copy with a line break and spaces around it goes in whole, both halves kept.
+  fireEvent.change(box, { target: { value: "  abc123\n#state456 \n" } });
+  fireEvent.click(screen.getByText("Submit"));
+  await waitFor(() => expect(fake.api.coding_agent_login_submit).toHaveBeenCalledWith("claude_code", "abc123#state456"));
+  expect(await screen.findByText("Invalid code. Try again.")).toBeTruthy();
+  expect(onLoggedIn).not.toHaveBeenCalled();
+});
 
 it("shows Codex's one-time code to type at the link, with no box to paste a code into", async () => {
   fake.api.coding_agent_login.mockResolvedValue({

@@ -10,7 +10,7 @@ import { usePluginContributions } from "../../hooks/usePluginContributions";
 import type { CodingAgentDto } from "../../types/panel";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { targetRef } from "../../ui-targets/registry";
-import { loginCanRetry, loginLinkPrompt } from "./codingAgentLoginCopy";
+import { cleanLoginCode, loginCanRetry, loginLinkPrompt } from "./codingAgentLoginCopy";
 
 function BotIcon() {
   return (
@@ -206,12 +206,19 @@ export function CodingAgentLoginModal({
     const api = getApi();
     if (!isRemote() && api?.open_external_url) void api.open_external_url(url);
     else window.open(url, "_blank", "noopener");
+    // The code comes back to this box, not to the Claude Login terminal tab.
+    codeRef.current?.focus();
   };
 
   const submit = async () => {
     const api = getApi();
-    const token = code.trim();
-    if (!api?.coding_agent_login_submit || !token || submitting) return;
+    if (!api?.coding_agent_login_submit || !code.trim() || submitting) return;
+    const cleaned = cleanLoginCode(code);
+    if (!cleaned.code) {
+      setError(cleaned.error);
+      return;
+    }
+    const token = cleaned.code;
     setSubmitting(true);
     setError("");
     try {
@@ -263,7 +270,7 @@ export function CodingAgentLoginModal({
           ? "Open the link on any device (your phone works), sign in, and enter this code. This window closes by itself once you're signed in."
           : loginUi === "browser"
             ? "Open the link in a browser on the PC running Ducky and sign in. This window closes by itself once you're signed in."
-            : "Click the link to sign in, then paste the code Claude shows you. The Claude Login tab in the terminal list closes when you cancel or finish."}
+            : "Click the link to sign in, then paste the code Claude shows you in the box below, not in the terminal. The Claude Login tab in the terminal list closes when you cancel or finish."}
       </p>
       {authUrl ? (
         <button
