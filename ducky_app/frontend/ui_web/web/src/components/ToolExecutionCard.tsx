@@ -263,8 +263,13 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
 
   const collapseScope = useChatCollapseScope();
   const [expanded, setExpanded] = useChatCollapseState(chatCollapseKey(collapseScope, "tool-card"), false);
+  const [minimized, setMinimized] = useChatCollapseState(chatCollapseKey(collapseScope, "tool-card-min"), false);
 
-  useEffect(() => { if (target?.toolId === toolId) setExpanded(true); }, [target, toolId, setExpanded]);
+  useEffect(() => {
+    if (target?.toolId !== toolId) return;
+    setExpanded(true);
+    setMinimized(false);
+  }, [target, toolId, setExpanded, setMinimized]);
 
   const replayWalkthrough = (e: MouseEvent | KeyboardEvent) => {
     e.stopPropagation();
@@ -276,6 +281,13 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   // A repeat-guard block isn't a real tool result — render it as a compact "skipped"
   // note (no presenter, no raw toggle, no token badge) instead of a full result card.
   const isGuardBlocked = !isRunning && meta.hint === "repeat-call guard";
+  // What a card shows the person without a click (a made picture, a screenshot, a picture
+  // search's pictures, the questions it asked) starts open, and its header minimizes it.
+  // Nov 12 2026: these bodies ignored the header, so an open card could never be closed.
+  const selfShown = !isCancelled && !isGuardBlocked
+    && (isAskUser || ((webInline || (captureBody && !lookedAtPicture)) && !isRunning));
+  const open = selfShown ? !minimized : expanded;
+  const toggleOpen = () => (selfShown ? setMinimized((v) => !v) : setExpanded((v) => !v));
   // Successful writes already have the full diff card — the empty "Edit file 32ms"
   // accordion is a duplicate. Keep the shell for errors / cancel / guard skips, and for a
   // command that changed files (its row shows the command).
@@ -353,8 +365,9 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
       >
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className={`tool-execution-card-toggle${expanded ? " tool-execution-card-toggle--expanded" : ""}`}
+          onClick={toggleOpen}
+          aria-expanded={open}
+          className={`tool-execution-card-toggle${open ? " tool-execution-card-toggle--expanded" : ""}`}
         >
           <span className="tool-execution-card-toggle-icon">
             <span className="tool-execution-card-toggle-icon-badge" aria-hidden="true">
@@ -428,7 +441,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
             </span>
           ) : null}
           <span
-            className={`tool-execution-card-toggle-chevron${expanded ? " tool-execution-card-toggle-chevron--expanded" : ""}`}
+            className={`tool-execution-card-toggle-chevron${open ? " tool-execution-card-toggle-chevron--expanded" : ""}`}
           >
             <Icons.ChevronDown />
           </span>
@@ -468,8 +481,8 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {/* Ask-user Q&A stays visible in the chat stream (not behind expand). */}
-        {isAskUser && !isCancelled && !isGuardBlocked ? (
+        {/* Ask-user Q&A stays visible in the chat stream (not behind expand) until minimized. */}
+        {isAskUser && !isCancelled && !isGuardBlocked && !minimized ? (
           <div className="tool-execution-card-body tool-execution-card-body--ask-user">
             {liveAsk || isRunning ? (
               <div className="tool-execution-card-waiting-row ask-user-tool-hint">
@@ -492,7 +505,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {captureBody && (!lookedAtPicture || expanded) && !isCancelled && !isGuardBlocked && !isRunning ? (
+        {captureBody && (lookedAtPicture ? expanded : !minimized) && !isCancelled && !isGuardBlocked && !isRunning ? (
           <div className="tool-execution-card-body">
             <Body
               toolName={meta.name}
@@ -509,7 +522,7 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
           </div>
         ) : null}
 
-        {webInline && !isCancelled && !isGuardBlocked && !isRunning ? (
+        {webInline && !minimized && !isCancelled && !isGuardBlocked && !isRunning ? (
           <div className="tool-execution-card-body tool-execution-card-body--web">
             <Body
               toolName={meta.name}

@@ -48,6 +48,45 @@ it("shows a picture search's pictures without opening it", () => {
   expect(container.querySelector('img[src="https://example.com/f.jpg"]')).not.toBeNull();
 })
 
+it("minimizes an open picture search from its header, and opens it again", () => {
+  const intent = { id: 1, role: "tool", text: "", tool: { name: "web_search", arguments: { query: "flags", images: true }, status: "pending" } } as ChatMessage;
+  const done = { ...intent, id: 2, role: "success", tool: { ...intent.tool!, status: "success", result: JSON.stringify({ ok: true, results: [], images: [{ title: "Flag", url: "https://example.com/f", thumb: "https://example.com/f.jpg" }] }) } } as ChatMessage;
+  const { container } = renderCard(intent, done);
+  const toggle = container.querySelector(".tool-execution-card-toggle")!;
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(toggle);
+  expect(container.querySelector("img")).toBeNull();
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(container.querySelector('img[src="https://example.com/f.jpg"]')).not.toBeNull();
+});
+
+it.each(["ducky_generate_image", "take_high_res_screenshot"])("shows what %s made without a click, and its header minimizes it", (name) => {
+  const url = "http://127.0.0.1:4199/tool-captures/made_1.png";
+  const intent = { id: 1, role: "tool", text: "", tool: { name, arguments: {}, status: "pending" } } as ChatMessage;
+  const done = { ...intent, id: 2, role: "success", tool: { ...intent.tool!, status: "success", result: JSON.stringify({ ok: true, path: "C:/x/made_1.png", media_url: url }) } } as ChatMessage;
+  const { container } = renderCard(intent, done);
+  const toggle = container.querySelector(".tool-execution-card-toggle")!;
+  expect(container.querySelector(".tool-card-screenshot-img")).not.toBeNull();
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(toggle);
+  expect(container.querySelector("img")).toBeNull();
+  fireEvent.click(toggle);
+  expect(container.querySelector(".tool-card-screenshot-img")).not.toBeNull();
+});
+
+it("keeps a looked-at picture closed until its row is opened", () => {
+  const url = "http://127.0.0.1:4199/chat-attachments/c1/viewed_1.png";
+  const intent = { id: 1, role: "tool", text: "", tool: { name: "mcp__uefn__view_image", arguments: {}, status: "pending" } } as ChatMessage;
+  const done = { ...intent, id: 2, role: "success", tool: { ...intent.tool!, status: "success", result: JSON.stringify({ path: "C:/x/viewed_1.png", bytes: 9, media_url: url }) } } as ChatMessage;
+  const { container } = renderCard(intent, done);
+  const toggle = container.querySelector(".tool-execution-card-toggle")!;
+  expect(container.querySelector("img")).toBeNull();
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(toggle);
+  expect(container.querySelector(".tool-card-screenshot-img")).not.toBeNull();
+});
+
 it("renders query-only native completion as unavailable details, not an empty search", () => {
   const { container } = card("success", "Codex MCP", { query: "Codex MCP" });
   expect(container.textContent).toContain("Result details unavailable.");
