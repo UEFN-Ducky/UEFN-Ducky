@@ -51,6 +51,8 @@ def pc(monkeypatch):
     monkeypatch.setattr("frontend.self_health.free_ducky_memory",
                         lambda beat=None: state["freed"].append(beat) or dict(state["frees"]))
     monkeypatch.setattr(low_memory, "_recent", low_memory.deque())
+    state["warnings_on"] = True  # the person's "PC memory warnings" switch
+    monkeypatch.setattr(low_memory, "warnings_on", lambda: state["warnings_on"])
     clock = [1000.0]
     monkeypatch.setattr(low_memory.time, "monotonic", lambda: clock[0])
     state["clock"] = clock
@@ -233,6 +235,59 @@ def test_a_grown_uefn_on_top_adds_the_restart_line_and_a_fresh_one_does_not(pc) 
     assert "restart UEFN" not in low_memory.describe(0.6, 16, rows=top)
     pc["growth"] = {"grown_gb": 6.2, "limit_gb": 4.0}  # grown, but chrome is the biggest user
     assert "restart UEFN" not in low_memory.describe(0.6, 16, rows=top[1:])
+
+
+def test_a_warning_says_where_to_turn_it_off_and_a_click_opens_that_tab(pc) -> None:
+    """Nov 11 2026 feedback: PC resource notifications with no visible way to stop them."""
+    _beat(pc, 1.1)
+    _, extra = pc["alerts"][0]
+    assert extra["detail"].endswith("Turn these warnings off in Settings > General.")
+    assert (extra["kind"], extra["target_id"]) == ("settings", "General")
+
+
+def test_with_the_switch_off_no_ram_or_graphics_warning_shows(pc, monkeypatch) -> None:
+    pc["warnings_on"] = False
+    _beat(pc, 1.1)
+    _beat(pc, 0.4, after_s=60)  # not even the critical one
+    assert pc["alerts"] == [] and pc["events"] == []
+    assert len(pc["freed"]) == 1  # Ducky still frees its own leftovers
+
+    monkeypatch.setattr(low_memory, "_gpu_warned", False)
+    monkeypatch.setattr("frontend.gpu_memory.read", lambda *a, **k: {"full": True})
+    monkeypatch.setattr("frontend.gpu_memory.full", lambda info: True)
+    monkeypatch.setattr("frontend.gpu_memory.describe", lambda info: ("Graphics memory is 97% full.", "Close a program."))
+    low_memory.check_gpu()
+    assert pc["alerts"] == []
+
+    pc["warnings_on"] = True  # back on: the next spell warns again
+    monkeypatch.setattr(low_memory, "_gpu_warned", False)
+    low_memory.check_gpu()
+    assert [a[0][1] for a in pc["alerts"]] == ["Graphics memory is almost full."]
+    _beat(pc, 0.4, after_s=low_memory.RUN_EVERY_S)
+    assert pc["alerts"][-1][0][1] == "Your PC is almost out of RAM."
+
+
+def test_the_switch_is_the_pc_memory_warnings_setting_read_every_few_seconds(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from frontend.settings import PanelSettings
+
+    assert PanelSettings().pc_memory_warnings is True
+    saved = {"on": False, "reads": 0}
+
+    def load(cls, **_):
+        saved["reads"] += 1
+        return SimpleNamespace(pc_memory_warnings=saved["on"])
+
+    clock = [5000.0]
+    monkeypatch.setattr(low_memory.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(low_memory, "_warnings_on", (0.0, True))
+    monkeypatch.setattr(PanelSettings, "load", classmethod(load))
+    assert low_memory.warnings_on() is False
+    saved["on"] = True
+    assert low_memory.warnings_on() is False and saved["reads"] == 1  # inside the read window
+    clock[0] += low_memory._WARNINGS_READ_EVERY_S
+    assert low_memory.warnings_on() is True and saved["reads"] == 2
 
 
 def test_the_usage_event_carries_only_the_free_memory_bucket() -> None:

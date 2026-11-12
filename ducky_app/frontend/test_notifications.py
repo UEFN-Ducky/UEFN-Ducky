@@ -42,6 +42,16 @@ def test_one_batch_one_row_per_target_newest_wins(hub) -> None:
     assert all(r["push"] for r in rows)
 
 
+def test_a_settings_alert_opens_its_tab_on_this_pc_and_names_no_target_to_the_account(hub) -> None:
+    notifications.alert("UEFN Ducky", "Your PC is running low on RAM.", level="error",
+                        kind="settings", target_id="General", detail="Low RAM: 1.1 GB free.")
+    hub["clicks"][0]()
+    assert hub["opened"] == [("settings", "General")]
+    notifications.flush_for_tests()
+    row = hub["batches"][0][0]
+    assert (row["kind"], row["id"], row["body"]) == ("", "", "Your PC is running low on RAM.")
+
+
 def test_the_same_alert_twice_is_one(hub) -> None:
     assert notifications.alert("Roguelike", "Failed.", level="error") is True
     assert notifications.alert("Roguelike", "Failed.", level="error") is False

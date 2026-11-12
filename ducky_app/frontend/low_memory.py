@@ -46,6 +46,13 @@ _FREE_BUCKETS = ((0.5, "under_0_5gb"), (1.0, "under_1gb"), (1.5, "under_1_5gb"),
 
 FREE_EVERY_S = 300.0  # Ducky frees its own leftovers at most this often, and once per low spell
 
+# The person can turn the while-running warnings off (Settings > General > PC memory warnings;
+# Nov 11 2026 feedback: no way to stop them). The launch message is not one of them.
+WARNINGS_TAB = "General"
+WHERE_TO_TURN_OFF = "Turn these warnings off in Settings > General."
+_WARNINGS_READ_EVERY_S = 10.0
+_warnings_on: tuple[float, bool] = (0.0, True)
+
 _last_alert = 0.0  # the last critical alert
 _last_freed = 0.0  # when Ducky last freed its own leftovers
 _freed_this_spell = False  # reset when free memory is back above the warning level
@@ -253,6 +260,32 @@ def _freed_text(freed: dict[str, Any]) -> str:
     return f"Ducky already freed{amount}" + (f" ({', '.join(did)})" if did else "") + ". "
 
 
+def warnings_on() -> bool:
+    """The ``pc_memory_warnings`` setting (on unless the person turned it off), read at most
+    every ``_WARNINGS_READ_EVERY_S``. An unreadable setting keeps the warnings."""
+    global _warnings_on
+    read_at, on = _warnings_on
+    now = time.monotonic()
+    if read_at and now - read_at < _WARNINGS_READ_EVERY_S:
+        return on
+    try:
+        from frontend.settings import PanelSettings
+
+        on = bool(getattr(PanelSettings.load(), "pc_memory_warnings", True))
+    except Exception:
+        on = True
+    _warnings_on = (now, on)
+    return on
+
+
+def _warn(status: str, detail: str) -> None:
+    """One PC memory warning; a click on it opens the tab that holds its switch."""
+    from frontend import notifications
+
+    notifications.alert("UEFN Ducky", status, level="error", kind="settings", target_id=WARNINGS_TAB,
+                        detail=f"{detail} {WHERE_TO_TURN_OFF}")
+
+
 def check_gpu() -> None:
     """One alert per spell when the graphics card's memory is nearly full, naming what fills it."""
     global _gpu_warned
@@ -267,11 +300,10 @@ def check_gpu() -> None:
         if _gpu_warned:
             return
         _gpu_warned = True
+        if not warnings_on():
+            return
         what, fix = gpu_memory.describe(info)
-        from frontend import notifications
-
-        notifications.alert("UEFN Ducky", "Graphics memory is almost full.", level="error",
-                            detail=f"{what} {fix} Save your work in UEFN.")
+        _warn("Graphics memory is almost full.", f"{what} {fix} Save your work in UEFN.")
     except Exception:
         pass
 
@@ -326,19 +358,15 @@ def _check_ram(beat: dict[str, Any]) -> None:
     _last_warn = now
     if critical:
         _last_alert = now
+    if not warnings_on():
+        return
     cause = describe(float(free), beat.get("total_gb"), freed=freed, falling=dropped and not critical)
-    from frontend import notifications
-
     if critical:
-        notifications.alert(
-            "UEFN Ducky", "Your PC is almost out of RAM.", level="error",
-            detail=(f"{cause} Save your work in UEFN now, and close a program you "
-                    "don't need, or Ducky may close by itself."),
-        )
+        _warn("Your PC is almost out of RAM.",
+              f"{cause} Save your work in UEFN now, and close a program you "
+              "don't need, or Ducky may close by itself.")
     else:
-        notifications.alert(
-            "UEFN Ducky", "Your PC is running low on RAM.", level="error",
-            detail=(f"{cause} Save your work in UEFN, and close a program you "
-                    "don't need before RAM runs out."),
-        )
+        _warn("Your PC is running low on RAM.",
+              f"{cause} Save your work in UEFN, and close a program you "
+              "don't need before RAM runs out.")
     _count_warning(float(free))

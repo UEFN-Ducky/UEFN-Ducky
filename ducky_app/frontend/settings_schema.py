@@ -399,6 +399,10 @@ FIELD_META: dict[str, FieldMeta] = {
         "Start with Windows", "General", settable=True,
         description="Ducky opens hidden in the tray when you sign in, so opening it is instant.",
     ),
+    "pc_memory_warnings": FieldMeta(
+        "PC memory warnings", "General", settable=True,
+        description="Notify when the PC is low on RAM or graphics memory while Ducky runs. The low-memory message at launch always shows.",
+    ),
     "starter_llm_gateways_seeded": FieldMeta(
         "Starter LLM gateways seeded", "internal",
         description="First-run Store install of every starter gateway already ran once.",

@@ -99,6 +99,7 @@ class PanelApiSettingsMixin:
             "first_open_tours": bool(getattr(s, "first_open_tours", True)),
             "show_me_autoplay": bool(getattr(s, "show_me_autoplay", True)),
             "start_with_windows": bool(getattr(s, "start_with_windows", True)),
+            "pc_memory_warnings": bool(getattr(s, "pc_memory_warnings", True)),
         }
 
     def get_appearance(self) -> dict[str, Any]:
@@ -665,10 +666,9 @@ class PanelApiSettingsMixin:
             s.follow_code_split_beside_chat = _pa._patch_bool(
                 patch.get("follow_code_split_beside_chat")
             )
-        if "first_open_tours" in patch:
-            s.first_open_tours = bool(patch.get("first_open_tours"))
-        if "show_me_autoplay" in patch:
-            s.show_me_autoplay = bool(patch.get("show_me_autoplay"))
+        for key in ("first_open_tours", "show_me_autoplay", "pc_memory_warnings"):
+            if key in patch:
+                setattr(s, key, bool(patch.get(key)))
         if "start_with_windows" in patch:
             s.start_with_windows = bool(patch.get("start_with_windows"))
             try:

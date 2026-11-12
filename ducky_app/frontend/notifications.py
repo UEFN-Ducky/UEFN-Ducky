@@ -42,7 +42,10 @@ SITE_BATCH_S = 8.0
 SITE_BATCH_MAX = 20
 
 LEVELS = ("ok", "error", "ask", "info")
-KINDS = ("chat", "workflow")
+# What a clicked notification opens. "settings" (id = the Settings tab) stays on this PC:
+# the account only lists chats and workflows.
+KINDS = ("chat", "workflow", "settings")
+SITE_KINDS = ("chat", "workflow")
 
 ToastFn = Callable[[str, str, Callable[[], None] | None], bool]
 OpenFn = Callable[[str, str], None]
@@ -152,12 +155,13 @@ def alert(
         away = idle is None or idle >= AWAY_S
         if not in_front:
             _queue_toast({"title": title, "text": _clip(detail, 240) or status, "kind": kind, "id": target_id, "level": level})
+        on_site = kind in SITE_KINDS
         _queue_site({
             "title": title,
             "body": status,
             "level": level,
-            "kind": kind,
-            "id": target_id,
+            "kind": kind if on_site else "",
+            "id": target_id if on_site else "",
             "push": away,
             "at": int(time.time()),
         })

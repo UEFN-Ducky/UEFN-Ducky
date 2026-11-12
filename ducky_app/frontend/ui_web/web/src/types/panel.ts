@@ -1690,6 +1690,8 @@ export interface PanelSettingsDto {
   show_me_autoplay?: boolean;
   /** Open hidden in the tray at Windows sign-in so opening is instant. Missing key stays on. */
   start_with_windows?: boolean;
+  /** Low RAM / graphics memory notifications while Ducky runs. Missing key stays on. */
+  pc_memory_warnings?: boolean;
   coding_agents?: Record<
     string,
     {

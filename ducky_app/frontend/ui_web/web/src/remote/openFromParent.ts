@@ -8,6 +8,7 @@ import { subscribePanelPush } from "../hooks/usePanelPushBus";
 import { requestFocusGraph } from "../hooks/graphActivity";
 import { requestOpenChatTab } from "../navigation/openChatReference";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
+import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { getFocusedChatForAsk, onFocusedChatChange } from "../ask-user/focusedChatForAsk";
 
 export const UD_OPEN_TARGET = "ud-open-target";
@@ -92,6 +93,11 @@ export function installOpenFromNotification(): () => void {
   let cancel = () => {};
   const stop = subscribePanelPush((event) => {
     if (event.type !== "open_target") return;
+    // A PC memory warning opens the Settings tab that holds its switch.
+    if (event.kind === "settings") {
+      if (event.id === "General") requestOpenSettings("General");
+      return;
+    }
     const target = parseOpenTarget({ type: UD_OPEN_TARGET, kind: event.kind, id: event.id });
     if (!target) return;
     cancel();

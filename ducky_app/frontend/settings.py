@@ -525,6 +525,10 @@ class PanelSettings:
     start_with_windows: bool = True
     """Open hidden in the tray at Windows sign-in (frontend/autostart.py), so opening is instant."""
 
+    pc_memory_warnings: bool = True
+    """Warn when the PC is low on RAM or graphics memory while Ducky runs (frontend/low_memory.py).
+    Off: no such notification; the low-memory message at launch still shows."""
+
     starter_llm_gateways_seeded: bool = False
     """First-run Store install of every starter gateway already attempted."""
 
@@ -737,6 +741,7 @@ class PanelSettings:
             or not self.first_open_tours
             or not self.show_me_autoplay
             or not self.start_with_windows
+            or not self.pc_memory_warnings
             or not self.chat_mentions_enabled
             or not self.chat_slash_references_enabled
             or self.chat_title_model.strip()

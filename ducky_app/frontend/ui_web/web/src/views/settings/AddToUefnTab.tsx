@@ -117,6 +117,33 @@ export function StartWithWindowsSwitch() {
   );
 }
 
+/** Low RAM / graphics memory notifications while Ducky runs. On unless switched off. */
+export function PcMemoryWarningsSwitch() {
+  const [on, setOn] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => onApiReady(() => {
+    void Promise.resolve(getApi()?.get_settings?.()).then((settings) => {
+      setOn((settings as { pc_memory_warnings?: boolean } | undefined)?.pc_memory_warnings !== false);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }), []);
+  return (
+    <div className="general-tab-toggle-card">
+      <SettingsToggleRow
+        id="toggle-pc-memory-warnings"
+        label="PC memory warnings"
+        description="Tell me when this PC is low on RAM or graphics memory while Ducky runs."
+        checked={on}
+        disabled={!loaded}
+        onChange={(value) => {
+          setOn(value);
+          void getApi()?.save_agent_settings({ pc_memory_warnings: value });
+        }}
+      />
+    </div>
+  );
+}
+
 export function AddToUefnTab() {
   const {
     showHiddenFiles,
@@ -151,6 +178,7 @@ export function AddToUefnTab() {
 
       <AppSection />
       <StartWithWindowsSwitch />
+      <PcMemoryWarningsSwitch />
 
       <hr className="general-tab-divider" />
 
