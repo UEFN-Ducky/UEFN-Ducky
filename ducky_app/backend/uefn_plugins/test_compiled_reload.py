@@ -65,3 +65,46 @@ def test_a_loaded_compiled_backend_is_never_executed_again(monkeypatch, tmp_path
     assert _CountingLoader.runs == 1
     assert state._RESTART_PENDING == {pid: "Restart UEFN Ducky to finish updating Fake Compiled"}
     sys.modules.pop(name, None)
+
+
+def test_a_new_version_loads_next_to_the_running_one_without_restart(monkeypatch, tmp_path) -> None:
+    # Nov 12 2026: every Discord update said "Restart UEFN Ducky to finish updating" and the app
+    # kept running the old code. A build named per version loads fresh next to the old one.
+    import importlib.machinery
+
+    from backend.uefn_plugins.plugin_host import backends, lifecycle, loader, state
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+
+    pid = "fakev"
+    base = loader.backend_module_name(pid)
+    v1, v2 = loader.compiled_module_name(pid, 1001000), loader.compiled_module_name(pid, 1002000)
+    assert (v1, v2) == ("uefn_plugin_fakev_v1001000", "uefn_plugin_fakev_v1002000")
+    monkeypatch.setattr(importlib.machinery, "ExtensionFileLoader", _CountingLoader)
+    monkeypatch.setattr(_CountingLoader, "runs", 0)
+    patch_host(monkeypatch, "_COMPILED_LOADED", {})
+    patch_host(monkeypatch, "_RESTART_PENDING", {})
+    patch_host(monkeypatch, "_restore_compiled_from_quarantine", lambda *_a: None)
+    patch_host(monkeypatch, "is_plugin_enabled", lambda _pid: True)
+    for n in (base, v1, v2):
+        monkeypatch.delitem(sys.modules, n, raising=False)
+
+    (tmp_path / f"{v1}.pyd").write_bytes(b"v1")
+    m1 = {"label": "Fake V", "backend": {"compiled": f"{v1}.pyd", "module": v1}}
+    first = backends._import_compiled_backend(pid, tmp_path, m1)
+    assert _CountingLoader.runs == 1 and sys.modules[base] is first
+
+    # The Store update: new file, new name -> its own init runs, nothing waits for a restart.
+    lifecycle._drop_plugin_runtime(pid, base)
+    assert base not in sys.modules and sys.modules[v1] is first  # the running copy stays mapped
+    (tmp_path / f"{v1}.pyd").unlink()
+    (tmp_path / f"{v2}.pyd").write_bytes(b"v2")
+    m2 = {"label": "Fake V", "backend": {"compiled": f"{v2}.pyd", "module": v2}}
+    second = backends._import_compiled_backend(pid, tmp_path, m2)
+    assert second is not first and _CountingLoader.runs == 2
+    assert sys.modules[base] is second and state._RESTART_PENDING == {}
+
+    # Enabling again without an update reuses the running copy (no second init).
+    assert backends._import_compiled_backend(pid, tmp_path, m2) is second
+    assert _CountingLoader.runs == 2
+    for n in (base, v1, v2):
+        sys.modules.pop(n, None)

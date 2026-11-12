@@ -51,21 +51,27 @@ def _pyd_identity(pyd: Path) -> str:
 def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> Any:
     """Load a plugin's Nuitka-compiled backend extension module.
 
-    The .pyd is loaded under ``uefn_plugin_<id>`` from the plugin root, so its
-    ``__file__``-relative data paths resolve to the plugin folder exactly as the
-    source package did. An ABI it was not built for is refused with a plain message.
+    The .pyd is loaded from the plugin root under the name it was built with: its own
+    ``uefn_plugin_<id>_v<rank>`` (``backend.module``), or ``uefn_plugin_<id>`` for builds
+    before that. Its ``__file__``-relative data paths resolve to the plugin folder exactly
+    as the source package did. A versioned build loads fresh next to an older running
+    copy (a Store update, no restart); ``uefn_plugin_<id>`` then points at the newest so
+    unload() reaches it. An ABI it was not built for is refused with a plain message.
     """
     from backend.uefn_plugins.store import plugin_dir
 
-    module_name = backend_module_name(pid)
+    base_name = backend_module_name(pid)
+    module_name = _built_module_name(manifest) or base_name
     loaded = _COMPILED_LOADED.get(module_name)
     if loaded is not None:
         mod, loaded_pyd = loaded
-        pyd = _compiled_backend_pyd(root, manifest, module_name)
+        pyd = _compiled_backend_pyd(root, manifest, base_name)
         if pyd is not None and _pyd_identity(pyd) != loaded_pyd:
+            # Same name, new file (a rebuild of the same version): its init can't run again.
             label = str(manifest.get("label") or pid)
             _RESTART_PENDING[pid] = f"Restart UEFN Ducky to finish updating {label}"
         sys.modules[module_name] = mod
+        sys.modules[base_name] = mod
         return mod
     if module_name in sys.modules:
         return sys.modules[module_name]
@@ -79,7 +85,7 @@ def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> 
     # A newer version's .pyd may still be waiting in quarantine after a disable/update
     # while the old copy was mapped — restore it so the enabled plugin can load.
     _restore_compiled_from_quarantine(pid, plugin_dir(pid))
-    pyd = _compiled_backend_pyd(root, manifest, module_name)
+    pyd = _compiled_backend_pyd(root, manifest, base_name)
     if pyd is None:
         raise RuntimeError(f"compiled backend .pyd not found for {pid}")
 
@@ -93,7 +99,13 @@ def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> 
     sys.modules[module_name] = mod
     _COMPILED_LOADED[module_name] = (mod, _pyd_identity(pyd))  # before exec: a failed init is still mapped
     spec.loader.exec_module(mod)
+    sys.modules[base_name] = mod  # the plugin's unload()/lookups reach the newest copy
     return mod
+
+
+def _built_module_name(manifest: dict[str, Any]) -> str:
+    backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
+    return str(backend.get("module") or "").strip()
 
 
 def _import_backend(pid: str, root: Path, entry: str) -> Any:

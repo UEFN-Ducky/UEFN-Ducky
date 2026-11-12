@@ -22,6 +22,16 @@ def backend_module_name(plugin_id: str) -> str:
     return "uefn_plugin_" + str(plugin_id or "").replace("-", "_")
 
 
+def compiled_module_name(plugin_id: str, version_rank: int) -> str:
+    """A compiled build's own module name, ``uefn_plugin_<id>_v<rank>``.
+
+    CPython runs an extension's init once per name per process, so an update built under
+    the old shared name could only load after a restart. A name per version loads next to
+    the running copy; ``sys.modules[backend_module_name(id)]`` then points at the newest.
+    """
+    return f"{backend_module_name(plugin_id)}_v{int(version_rank)}"
+
+
 def _read_manifest(path: Path) -> dict[str, Any] | None:
     try:
         import json

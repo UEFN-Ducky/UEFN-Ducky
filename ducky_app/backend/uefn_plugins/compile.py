@@ -37,7 +37,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.uefn_plugins.plugin_host.loader import backend_module_name
+from backend.uefn_plugins.plugin_host.loader import compiled_module_name
 from backend.uefn_plugins.plugin_version import plugin_version_rank
 from backend.uefn_plugins.signing import (
     SigningKeyError,
@@ -328,8 +328,9 @@ def _stage_backend_package(pkg_src: Path, staged: Path) -> tuple[list[tuple[Path
     return data_files, foreign_files
 
 
-# First app that loads compiled plugins one at a time (an overlapping load aborted the app).
-COMPILED_MIN_APP = "1.2.357"
+# First app that loads a compiled build under its own per-version module name
+# (``backend.module``); an older app would look for ``PyInit_uefn_plugin_<id>`` and fail.
+COMPILED_MIN_APP = "1.2.501"
 
 
 def _at_least(version: str, floor: str) -> str:
@@ -565,10 +566,12 @@ def build_plugin(
     if not isinstance(manifest, dict):
         raise CompileError("plugin.json must be an object")
     pid = normalize_plugin_id(str(manifest.get("id") or ""))
-    mod_name = backend_module_name(pid)
     version = manifest.get("version")
     version_str = store_version(version)
     verrank = plugin_version_rank(version)
+    # One module name per version: CPython never runs an extension's init twice under one
+    # name, so a Store update loads its new name next to the running copy, no restart.
+    mod_name = compiled_module_name(pid, verrank)
     backend_cfg = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     entry = str(backend_cfg.get("entry") or "backend").strip() or "backend"
     register_name = str(backend_cfg.get("register") or "register").strip() or "register"
@@ -594,7 +597,7 @@ def build_plugin(
     _check_kit_abi(kpy)
     esbuild = _kit_esbuild(kit)
 
-    final_pyd_name = f"{mod_name}.v{verrank}.{PY_ABI}.pyd"
+    final_pyd_name = f"{mod_name}.{PY_ABI}.pyd"
     warnings: list[str] = ([personal_path_message(personal)] if personal else []) + store_errors + store_warnings
     try:
         from backend.uefn_plugins.plugin_lint import check_findability
@@ -635,6 +638,7 @@ def build_plugin(
         out_backend = dict(backend_cfg)
         out_backend["register"] = register_name
         out_backend["compiled"] = final_pyd_name
+        out_backend["module"] = mod_name
         # entry no longer points at .py source; keep it for reference/debuggability.
         out_backend["entry"] = entry
         out_manifest["backend"] = out_backend
