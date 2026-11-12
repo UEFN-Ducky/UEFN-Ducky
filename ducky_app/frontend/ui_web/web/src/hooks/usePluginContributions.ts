@@ -179,6 +179,8 @@ export type PluginLlmProvider = {
   key_optional?: boolean;
   /** Where to get an API key (https only); the API keys table links it. */
   key_url?: string;
+  /** Setup's Connect AI shows the API key before the plan sign-in (the plugin says the key is the way that works). */
+  key_first?: boolean;
   icon_data_url?: string;
   /** False keeps the row on Settings → LLMs and out of the chat model picker. */
   chat?: boolean;

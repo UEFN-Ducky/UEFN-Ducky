@@ -717,6 +717,13 @@ function RowBody({ open, children }: { open: boolean; children: ReactNode }) {
   );
 }
 
+/** Opens a provider's key page in the person's browser (the window can't navigate away). */
+function openKeyPage(url: string) {
+  const api = getApi();
+  if (api?.open_external_url) void api.open_external_url(url);
+  else window.open(url, "_blank", "noopener");
+}
+
 function ProviderRow({
   provider,
   agents,
@@ -766,6 +773,66 @@ function ProviderRow({
     }
   };
 
+  // The plugin says the key is the way that works for most people (Google: Gemini CLI refuses
+  // personal accounts; 9 of 12 Setup checks on Nov 10 2026 found Gemini not signed in).
+  const keyFirst = Boolean(provider.key_first) && provider.kind === "secret";
+  const planWay = agents.length ? (
+    <section className="setup-wizard-way" aria-label={`${provider.label}: your plan`}>
+      <h4>
+        <Icons.Terminal /> {keyFirst ? "Or your plan" : "Your plan"}{" "}
+        <HelpTip
+          label={`About ${provider.label} plans`}
+          text={`Use the ${provider.label} plan you already pay for: no key, no extra bill. Connect also sets up Ducky's tools (MCP) in ${ide?.label || "that app"}, so it can work on your island too.`}
+        />
+      </h4>
+      <ul className="setup-wizard-agents" aria-label={`${provider.label} coding agents`}>
+        {agents.map((a) => (
+          <AgentRow key={a.id} agent={a} ide={ide} ideReady={ideReady} onChanged={onSaved} />
+        ))}
+      </ul>
+    </section>
+  ) : null;
+  const keyWay = provider.kind === "secret" ? (
+    <section className="setup-wizard-way" aria-label={`${provider.label}: API key`}>
+      <h4>
+        <Icons.Key /> {agents.length && !keyFirst ? "Or an API key" : "API key"}
+        {saved ? (
+          <span className="setup-wizard-pill is-ok" aria-label={`${provider.label} API key: Key saved`}>
+            <Icons.Check /> Saved
+          </span>
+        ) : provider.key_url ? (
+          <button type="button" className="link-btn" onClick={() => openKeyPage(provider.key_url || "")}>
+            Get a key
+          </button>
+        ) : null}
+      </h4>
+      <div className="setup-wizard-key-row">
+        <input
+          type="password"
+          className="setup-wizard-input"
+          placeholder={saved ? "Saved. Paste a new one to replace it" : `Paste your ${provider.label} API key`}
+          aria-label={`${provider.label} API key`}
+          autoComplete="off"
+          spellCheck={false}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void testAndSave();
+          }}
+        />
+        <button
+          type="button"
+          className="setup-wizard-btn"
+          disabled={!draft.trim() || !!state?.pending}
+          onClick={() => void testAndSave()}
+        >
+          {state?.pending ? "Testing…" : "Test & save"}
+        </button>
+      </div>
+      {state ? <p className={`setup-wizard-key-status${state.ok ? "" : " is-error"}`}>{state.text}</p> : null}
+    </section>
+  ) : null;
+
   return (
     <li className={`setup-wizard-provider${connected ? " is-connected" : ""}${open ? " is-open" : ""}`}>
       <button type="button" className="setup-wizard-provider-head" aria-expanded={open} onClick={onToggle}>
@@ -790,58 +857,8 @@ function ProviderRow({
         </span>
       </button>
       <RowBody open={open}>
-          {agents.length ? (
-            <section className="setup-wizard-way" aria-label={`${provider.label}: your plan`}>
-              <h4>
-                <Icons.Terminal /> Your plan{" "}
-                <HelpTip
-                  label={`About ${provider.label} plans`}
-                  text={`Use the ${provider.label} plan you already pay for: no key, no extra bill. Connect also sets up Ducky's tools (MCP) in ${ide?.label || "that app"}, so it can work on your island too.`}
-                />
-              </h4>
-              <ul className="setup-wizard-agents" aria-label={`${provider.label} coding agents`}>
-                {agents.map((a) => (
-                  <AgentRow key={a.id} agent={a} ide={ide} ideReady={ideReady} onChanged={onSaved} />
-                ))}
-              </ul>
-            </section>
-          ) : null}
-          {provider.kind === "secret" ? (
-            <section className="setup-wizard-way" aria-label={`${provider.label}: API key`}>
-              <h4>
-                <Icons.Key /> {agents.length ? "Or an API key" : "API key"}
-                {saved ? (
-                  <span className="setup-wizard-pill is-ok" aria-label={`${provider.label} API key: Key saved`}>
-                    <Icons.Check /> Saved
-                  </span>
-                ) : null}
-              </h4>
-              <div className="setup-wizard-key-row">
-                <input
-                  type="password"
-                  className="setup-wizard-input"
-                  placeholder={saved ? "Saved. Paste a new one to replace it" : `Paste your ${provider.label} API key`}
-                  aria-label={`${provider.label} API key`}
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void testAndSave();
-                  }}
-                />
-                <button
-                  type="button"
-                  className="setup-wizard-btn"
-                  disabled={!draft.trim() || !!state?.pending}
-                  onClick={() => void testAndSave()}
-                >
-                  {state?.pending ? "Testing…" : "Test & save"}
-                </button>
-              </div>
-              {state ? <p className={`setup-wizard-key-status${state.ok ? "" : " is-error"}`}>{state.text}</p> : null}
-            </section>
-          ) : null}
+          {keyFirst ? keyWay : planWay}
+          {keyFirst ? planWay : keyWay}
       </RowBody>
     </li>
   );

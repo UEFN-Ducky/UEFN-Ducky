@@ -26,6 +26,7 @@ const fake = vi.hoisted(() => {
     duckyos_cancel_login: vi.fn(),
     get_memory_settings: vi.fn(),
     set_memory_settings: vi.fn(),
+    open_external_url: vi.fn(),
   };
   return { api, runBridgeJob: vi.fn(), providers: [] as unknown[], saveVoice: vi.fn() };
 });
@@ -566,6 +567,25 @@ describe("SetupWizard", () => {
       fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     });
     expect(fake.api.apply_ide).toHaveBeenCalledWith("codex");
+  });
+
+  it("a provider whose plugin says key first shows the API key before the plan, with a Get a key link", async () => {
+    // Google: Gemini CLI refuses personal accounts, so the key is the way that works (Nov 10 2026).
+    fake.providers = [{
+      id: "gemini", label: "Google", kind: "secret" as const, secret_key: "gemini", plugin_id: "google", order: 30,
+      key_url: "https://aistudio.google.com/apikey", key_first: true,
+    }];
+    fake.api.list_coding_agents.mockResolvedValue({
+      agents: [{ id: "gemini_cli", label: "Gemini CLI", plugin_id: "google", available: true, logged_in: false, enabled: true, status: "" }],
+    });
+    wizard({ step: "ai" });
+    const key = await screen.findByRole("region", { name: "Google: API key", hidden: true });
+    const plan = await screen.findByRole("region", { name: "Google: your plan", hidden: true });
+    expect(key.compareDocumentPosition(plan) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(key.textContent).not.toContain("Or an API key");
+    expect(plan.textContent).toContain("Or your plan");
+    fireEvent.click(screen.getByRole("button", { name: "Get a key", hidden: true }));
+    expect(fake.api.open_external_url).toHaveBeenCalledWith("https://aistudio.google.com/apikey");
   });
 
   it("asks for an AI before a default can be picked", async () => {
