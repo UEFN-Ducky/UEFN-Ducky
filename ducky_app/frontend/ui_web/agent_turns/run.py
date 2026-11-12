@@ -4,6 +4,7 @@ helpers a turn's start uses (who started it, video frames, resume payload)."""
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -217,7 +218,12 @@ async def _run_agent_loop(
     write_failures: list[str] = []
     tools_run = 0
     asked_user = False
+    # Plan steps this turn ticked, and what was already done before its first tick: ticks in a
+    # turn whose reply invents files are undone at its end (tick_claim_guard).
+    ticked_steps: list[str] = []
+    done_before: set[str] | None = None
     turn_started = time.time()  # pictures made for this chat from now on show in the reply
+    from backend.agent.coding_agents import tick_claim_guard
     from backend.agent.coding_agents.runner import _TurnCheckpoint
     from backend.agent.toolsets import effective_tool_name
     from frontend.ui_web.chats.saves import upsert_in_flight_assistant
@@ -244,6 +250,8 @@ async def _run_agent_loop(
                 t_first = time.monotonic()
             if event.kind == "tool_start" and event.tool:
                 rec = event.tool
+                if done_before is None and tick_claim_guard.is_tick_tool(rec):
+                    done_before = tick_claim_guard.completed_steps(conv.id)
                 if rec.name in ("ducky_spawn_chat", "ducky_send_chat_message"):
                     delegation_tools_called.add(rec.name)
                 if effective_tool_name(rec.name, rec.arguments) == "ducky_ask_user":
@@ -267,6 +275,7 @@ async def _run_agent_loop(
                 rec = event.tool
                 tools_run += 1
                 record_write_from_tool(rec, written_relpaths, write_failures)
+                ticked_steps.extend(tick_claim_guard.ticked_steps(rec))
                 if plan_filter and not is_plan_safe_tool(rec.name):
                     continue
                 _push_tool_done(push, conv.id, rec)
@@ -369,6 +378,11 @@ async def _run_agent_loop(
                 if write_warning:
                     assistant_msg = append_write_claim_warning(assistant_msg, write_warning)
                     push({"type": "delegation_warning", "text": write_warning, "conv_id": conv.id})
+                    undone = _undo_unearned_ticks(conv.id, run_id, ticked_steps, done_before, assistant_msg,
+                                                  written_relpaths)
+                    if undone:
+                        assistant_msg = append_verify_warning(assistant_msg, undone, title="Not done")
+                        push({"type": "delegation_warning", "text": undone, "conv_id": conv.id})
                 verify_warning = fake_verify_warning(assistant_msg)
                 if verify_warning:
                     assistant_msg = append_verify_warning(assistant_msg, verify_warning)
@@ -402,6 +416,25 @@ async def _run_agent_loop(
         from frontend.ui_web.live_agent_runs import discard_live_run_id
 
         discard_live_run_id(run_id)
+
+
+def _undo_unearned_ticks(conv_id: str, run_id: str, ticked: list[str], done_before: set[str] | None,
+                         assistant_msg: dict[str, Any], written: set[str]) -> str | None:
+    """Reopen the steps this turn ticked when its reply lists files that are not in the project
+    and the turn changed nothing (tick_claim_guard). The line for the reply, else None. Never raises."""
+    mine = [s for s in ticked if s not in (done_before or set())]
+    if not mine:
+        return None
+    try:
+        text = "\n".join([str(assistant_msg.get("content") or "")] + [
+            str(b.get("text") or b.get("content") or "") for b in assistant_msg.get("blocks") or []
+            if isinstance(b, dict) and b.get("type") == "text"])
+        from backend.agent.coding_agents import tick_claim_guard
+
+        return tick_claim_guard.undo_unearned_ticks(conv_id, run_id, mine, text, written)
+    except Exception:
+        logging.getLogger(__name__).warning("tick claim guard failed", exc_info=True)
+        return None
 
 
 def _note_run_starter(conv_id: str, parent: str, started_by: str | None) -> None:
