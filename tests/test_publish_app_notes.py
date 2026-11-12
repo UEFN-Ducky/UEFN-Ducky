@@ -104,3 +104,22 @@ def test_notes_file_is_read_and_checked(tmp_path):
         path.write_text(json.dumps(bad), encoding="utf-8")
         with pytest.raises(SystemExit):
             pub.load_note_items(path)
+
+
+def test_notes_written_for_this_version_replace_the_drafts_and_no_other_version(tmp_path):
+    """The release workflow's upload step takes no notes: a file names them for one version."""
+    pub = _load()
+    path = tmp_path / "release_notes.json"
+    items = [{"kind": "fix", "text": "Agents keep their Ducky tools after Ducky restarts"}]
+    path.write_text(json.dumps({"version": "1.2.499", "notes": "Agents keep their tools.", "items": items}), encoding="utf-8")
+    assert pub.written_notes("1.2.499", path) == ("Agents keep their tools.", items)
+    assert pub.written_notes("1.2.500", path) is None  # left behind: the next release drafts its own
+    assert pub.written_notes("1.2.499", tmp_path / "missing.json") is None
+    path.write_text("not json", encoding="utf-8")
+    assert pub.written_notes("1.2.499", path) is None
+
+    for bad in ({"notes": "", "items": items}, {"notes": "two\nlines", "items": items}, {"notes": "ok", "items": []},
+                {"notes": "ok", "items": [{"kind": "fix", "text": "x" * 71}]}):
+        path.write_text(json.dumps({"version": "1.2.499", **bad}), encoding="utf-8")
+        with pytest.raises(SystemExit):
+            pub.written_notes("1.2.499", path)

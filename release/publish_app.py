@@ -344,18 +344,47 @@ def load_note_items(path: Path) -> list[dict[str, str]]:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise SystemExit(f"--notes-file {path}: {exc}") from exc
+    return check_note_items(raw, "--notes-file")
+
+
+def check_note_items(raw: object, where: str) -> list[dict[str, str]]:
+    """The short changes the What's new window takes, or a refusal that names ``where``."""
     if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_NOTE_ITEMS:
-        raise SystemExit(f"--notes-file: a list of 1 to {MAX_NOTE_ITEMS} changes")
+        raise SystemExit(f"{where}: a list of 1 to {MAX_NOTE_ITEMS} changes")
     items: list[dict[str, str]] = []
     for row in raw:
         kind = str(row.get("kind") or "").strip() if isinstance(row, dict) else ""
         text = str(row.get("text") or "").strip() if isinstance(row, dict) else ""
         if kind not in _NOTE_KINDS:
-            raise SystemExit(f"--notes-file: kind must be one of {', '.join(_NOTE_KINDS)}")
+            raise SystemExit(f"{where}: kind must be one of {', '.join(_NOTE_KINDS)}")
         if not text or "\n" in text or len(text) > MAX_NOTE_ITEM_CHARS:
-            raise SystemExit(f"--notes-file: \"{text}\" must be one line of at most {MAX_NOTE_ITEM_CHARS} characters")
+            raise SystemExit(f"{where}: \"{text}\" must be one line of at most {MAX_NOTE_ITEM_CHARS} characters")
         items.append({"kind": kind, "text": text})
     return items
+
+
+# Notes someone wrote for one release:
+#   {"version": "1.2.499", "notes": "One line for the toast.", "items": [{"kind": "fix", "text": "…"}]}
+# The release workflow's upload step takes no notes (it runs --notes-from-git), so its drafts
+# from commit subjects went live unread. A release that drafts its notes uses this file
+# instead when its version is the one being published; a file for any other version is
+# ignored, so one left behind never labels a later release.
+WRITTEN_NOTES = Path.home() / ".duckyos" / "release_notes.json"
+
+
+def written_notes(version: str, path: Path | None = None) -> tuple[str, list[dict[str, str]]] | None:
+    """``(notes, items)`` written for exactly ``version``, or None to keep the drafts."""
+    path = path or WRITTEN_NOTES
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict) or str(raw.get("version") or "").strip() != version:
+        return None
+    notes = str(raw.get("notes") or "").strip()
+    if not notes or "\n" in notes:
+        raise SystemExit(f"{path}: \"notes\" must be one line of text")
+    return notes, check_note_items(raw.get("items"), str(path))
 
 
 def write_version(version: str) -> None:
@@ -1198,6 +1227,7 @@ def main() -> None:
         preflight_store_signing_key()
         preflight_signing(require=args.require_sign)
 
+    drafted_notes = args.notes_from_git and not args.notes.strip() and args.notes_file is None
     if args.notes_from_git and not args.notes.strip():
         args.notes = notes_from_git()
         print(f"notes: {args.notes or '(no commits since the last release)'}")
@@ -1301,6 +1331,13 @@ def main() -> None:
         print(f"build-only {exe_path}")
         print(f"VERSION={version}")
         return
+
+    # Notes written for exactly this version replace the drafts from commit subjects.
+    if drafted_notes and (written := written_notes(version)):
+        args.notes, args.note_items = written
+        print(f"notes written for {version} ({WRITTEN_NOTES}): {args.notes}")
+        for item in args.note_items:
+            print(f"  What's new · {item['kind']}: {item['text']}")
 
     from commit_before_store import commit_and_push_before_publish
 
