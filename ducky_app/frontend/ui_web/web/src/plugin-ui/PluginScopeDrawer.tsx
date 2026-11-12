@@ -307,7 +307,6 @@ export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownT
   }, [tab, v2, pluginId, head]);
 
   // ---------------------------------------------------------------- mode
-  const setMode = (mode: "auto" | "manual") => act(async () => api?.plugin_scope_mode?.(pluginId, mode));
   const push = async () => {
     if (await act(async () => api?.plugin_scope_push?.(pluginId, message.trim()))) setMessage("");
   };
@@ -612,16 +611,6 @@ export function PluginScopeDrawer({ pluginId, status, onChanged, id, tab: shownT
   const settingsTab = (
     <>
       <Row name="Copy shown here" sub={`${scope?.kind === "shared" ? `${label}'s team copy` : "Local: only on this PC"}. Change it under Your team in Team settings.`} />
-      {v2 && !lost && api?.plugin_scope_mode ? (
-        <Row name="Sending"
-          sub={manual ? "Changes go out and come in only when you send or get them." : "Changes go out and come in by themselves."}
-          actions={<span className="plugin-scope-seg" role="radiogroup" aria-label="Sending">
-            <button type="button" role="radio" aria-checked={!manual} className="plugin-scope-btn plugin-scope-btn--row" disabled={busy}
-              onClick={() => { if (manual) void setMode("auto"); }}>Auto</button>
-            <button type="button" role="radio" aria-checked={manual} className="plugin-scope-btn plugin-scope-btn--row" disabled={busy}
-              onClick={() => { if (!manual) void setMode("manual"); }}>Manual</button>
-          </span>} />
-      ) : null}
       {storage ? (
         <Row name="Team storage" sub={storage.note || undefined}
           side={<span className={`plugin-scope-storage plugin-scope-storage--${storage.level}`}>

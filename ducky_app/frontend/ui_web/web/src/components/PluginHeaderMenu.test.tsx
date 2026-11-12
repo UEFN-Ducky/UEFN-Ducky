@@ -74,7 +74,7 @@ describe("PluginMenuButton (contributes.header.menus)", () => {
     await call("header_menu_size", { height: 300 });
     expect(box().style.height).toBe("300px");
     await call("header_menu_size", { height: 5000 });
-    expect(parseInt(box().style.height, 10)).toBe(Math.max(120, Math.min(640, window.innerHeight - 96)));
+    expect(parseInt(box().style.height, 10)).toBe(Math.max(120, Math.min(860, window.innerHeight - 96)));
     await call("header_menu_size", { height: 40 });
     expect(box().style.height).toBe("120px");
     await call("header_menu_size", { height: "x" });
@@ -84,7 +84,9 @@ describe("PluginMenuButton (contributes.header.menus)", () => {
   it("headerMenuHeight clamps to 120 px and the window", async () => {
     const { headerMenuHeight } = await import("./PluginHeaderMenu");
     expect(headerMenuHeight(300, 900)).toBe(300);
-    expect(headerMenuHeight(900, 900)).toBe(640);
+    expect(headerMenuHeight(900, 900)).toBe(804);
+    expect(headerMenuHeight(900, 1080)).toBe(860);
+    expect(headerMenuHeight(900, 600)).toBe(504);
     expect(headerMenuHeight(500, 500)).toBe(404);
     expect(headerMenuHeight(10, 900)).toBe(120);
   });

@@ -545,12 +545,11 @@ describe("source control tabs", () => {
     await waitFor(() => expect(api.plugin_scope_retry).toHaveBeenLastCalledWith("forge"));
   });
 
-  it("Sending: Auto or Manual in Settings; Manual sends with an optional message, and gets in Incoming", async () => {
-    const view = drawer(status());
+  it("Send and Get only: no Auto choice in Settings; Send takes an optional message, Get is in Incoming", async () => {
+    const view = drawer(status({ mode: "manual" }));
     go("Settings");
-    expect(screen.getByRole("radio", { name: "Auto" }).getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(screen.getByRole("radio", { name: "Manual" }));
-    await waitFor(() => expect(api.plugin_scope_mode).toHaveBeenCalledWith("forge", "manual"));
+    expect(screen.queryByRole("radiogroup", { name: "Sending" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Auto" })).toBeNull();
     view.unmount();
 
     drawer(status({ mode: "manual" }));
@@ -562,9 +561,7 @@ describe("source control tabs", () => {
     go(/^Incoming/);
     fireEvent.click(screen.getByRole("button", { name: "Get now" }));
     await waitFor(() => expect(api.plugin_scope_pull).toHaveBeenCalledWith("forge"));
-    go("Settings");
-    fireEvent.click(screen.getByRole("radio", { name: "Auto" }));
-    await waitFor(() => expect(api.plugin_scope_mode).toHaveBeenLastCalledWith("forge", "auto"));
+    expect(api.plugin_scope_mode).not.toHaveBeenCalled();
   });
 
   it("Settings: the copy, storage and who's signed in", () => {

@@ -12,9 +12,10 @@ import { DropdownPanel } from "./DropdownPanel";
  * button's dot and count current (bridge `header_menu_badge`) and close the menu
  * (`header_menu_close`) after an item that opens a tab.
  */
-/** The page's reported height, kept inside 120 px and the window (past that the page scrolls). */
+/** The page's reported height, kept inside 120 px and the window (past that the page scrolls). A tall
+ * window lets a menu with a lot to show (the Team menu's changes) reach 860 px. */
 export function headerMenuHeight(height: number, viewport: number = typeof window === "undefined" ? 800 : window.innerHeight): number {
-  const max = Math.max(120, Math.min(640, viewport - 96));
+  const max = Math.max(120, Math.min(860, viewport - 96));
   return Math.round(Math.min(max, Math.max(120, height)));
 }
 
