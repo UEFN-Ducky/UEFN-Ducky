@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import json
+import re
 import sys
 import threading
 import time
@@ -364,7 +365,7 @@ async def ducky_call_tool(
     straight here; ducky_get_tools only for a schema you don't have. Always pass arguments.
     """
     from backend.agent.run_context import current_mode
-    from backend.agent.tools import execute_tool, list_mcp_tools
+    from backend.agent.tools import GUESSED_TOOL_NAMES, execute_tool, list_mcp_tools
     from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
     from backend.agent.toolsets.plan_safe import mode_tool_block_reason
 
@@ -413,23 +414,58 @@ async def ducky_call_tool(
     # description is for the model/UI only — not passed through.
     _ = (description or "").strip()
     result = await execute_tool(tool_name, args)
+    ran = str(getattr(result, "tool", "") or tool_name)
+    # A guessed name that ran as the tool it meant: say so, or the model guesses again next time.
+    renamed = f"{tool_name} is not a tool: this ran {ran}. Use that name." if tool_name in GUESSED_TOOL_NAMES and ran != tool_name else ""
     if result.ok:
         from backend.agent.tool_spills import inline_or_spill
 
         data = result.data if isinstance(result.data, str) else tool_json(result.data)
-        data = inline_or_spill(tool_name, data)
+        data = inline_or_spill(ran, data)
         if data.strip().startswith(("{", "[")):
-            return data
-        return tool_json({"ok": True, "tool": tool_name, "data": data}, pretty=pretty)
-    return tool_json(
-        {
-            "ok": False,
-            "tool": tool_name,
-            "error": result.error,
-            "hint": result.hint or "",
-        },
-        pretty=pretty,
-    )
+            return _with_tool_note(data, renamed)
+        return tool_json({"ok": True, "tool": ran, "data": data, **({"tool_note": renamed} if renamed else {})}, pretty=pretty)
+    payload: dict[str, Any] = {"ok": False, "tool": ran, "error": result.error, "hint": result.hint or ""}
+    if renamed:
+        payload["tool_note"] = renamed
+    if str(result.error or "").startswith("Unknown tool:"):
+        payload.update(await _unknown_tool_help(tool_name))
+    return tool_json(payload, pretty=pretty)
+
+
+def _with_tool_note(data: str, note: str) -> str:
+    """``data`` (a tool's JSON answer) with ``tool_note`` added when it is a JSON object."""
+    if not note:
+        return data
+    try:
+        parsed = json.loads(data)
+    except ValueError:
+        return data
+    if not isinstance(parsed, dict):
+        return data
+    return tool_json({**parsed, "tool_note": note})
+
+
+async def _unknown_tool_help(name: str) -> dict[str, Any]:
+    """For a name that is no tool: the closest real names (so one retry is enough) and the
+    usage word that keeps a guessed name apart from a tool that broke. Never raises."""
+    from backend.agent.tools import list_mcp_tools
+    from backend.agent.toolsets.excluded import EXCLUDED_TOOLS
+
+    close: list[str] = []
+    try:
+        tools = [t for t in await list_mcp_tools() if t.name not in EXCLUDED_TOOLS]
+        by_name = {t.name: t for t in tools}
+        words = " ".join(part for part in re.split(r"[^A-Za-z0-9]+", name) if part and part.lower() not in ("mcp", "ducky"))
+        close = (await asyncio.to_thread(_ranked_tool_names, tools, by_name, words or name, 3))[:3]
+    except Exception:
+        close = []
+    out: dict[str, Any] = {"fail": "not_found"}
+    if close:
+        out["close_matches"] = close
+        out["hint"] = (f"No tool has that name. Closest: {', '.join(close)}. Call one of them, "
+                       "or search with ducky_get_tools(pattern=...) in plain words.")
+    return out
 
 
 async def ducky_find_tools(query: str, limit: int = 20, pretty: bool = False, offset: int = 0) -> str:

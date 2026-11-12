@@ -1158,9 +1158,26 @@ _INVENTED_TOOL_HINT = (
 )
 
 
+# Names agents keep guessing for a tool that has another name (Nov 10 2026: ducky_memory_get
+# 14 times and eight more such names in one day, each a failed call and a lost turn). Used
+# only when the guessed name is not a registered tool itself.
+GUESSED_TOOL_NAMES: dict[str, str] = {
+    "ducky_memory_get": "project_memory_get",
+    "ducky_memory_search": "project_memory_list",
+    "ducky_memory_get_all": "project_memory_list",
+    "ducky_memory_list": "project_memory_list",
+    "ducky_read_file": "workspace_read_file",
+    "ducky_read": "workspace_read_file",
+    "ducky_list_files": "workspace_find",
+    "ducky_skill_read": "skill_read_subskill",
+    "ducky_read_subskill": "skill_read_subskill",
+}
+
+
 def resolve_invented_tool_name(name: str, known: set[str]) -> str | None:
     """Map one invented MCP name onto the single registered tool it means.
 
+    A name in ``GUESSED_TOOL_NAMES`` is the tool it stands for.
     ``mcp__uefn__<tool>`` is this app, so the tool is ``<tool>``.
     ``mcp__<prefix>__<tool>`` is ``<prefix>__<tool>``.
     A hyphenated ``mcp-…-<tail>`` matches only when one registered name is
@@ -1169,6 +1186,9 @@ def resolve_invented_tool_name(name: str, known: set[str]) -> str | None:
     raw = (name or "").strip()
     if not raw or raw in known:
         return None
+    guessed = GUESSED_TOOL_NAMES.get(raw)
+    if guessed and guessed in known:
+        return guessed
     found: list[str] = []
     if raw.startswith("mcp__"):
         rest = raw[len("mcp__") :]
