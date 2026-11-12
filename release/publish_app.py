@@ -266,13 +266,17 @@ def commit_subjects_since_release() -> list[str]:
 
 # Internal team-sync engine work is never described in release notes.
 _PRIVATE_SUBJECT = re.compile(r"team[ _-]?engine|sync[ -]engine", re.IGNORECASE)
+# Nor is anything a commit marks as internal, or the app's own counting: a subject that
+# opens "Internal: …" or "Usage: …" stays out (1.2.497's notes told people "a new PC's
+# first open is sent right away").
+_INTERNAL_SUBJECT = re.compile(r"^\s*(internal|usage|usage stats|analytics)\s*:", re.IGNORECASE)
 
 
 def public_subjects(subjects: list[str]) -> list[str]:
-    """The subjects release notes may show: internal engine work left out, each once."""
+    """The subjects release notes may show: internal work left out, each once."""
     out: list[str] = []
     for s in subjects:
-        if s.strip() and not _PRIVATE_SUBJECT.search(s) and s not in out:
+        if s.strip() and not _PRIVATE_SUBJECT.search(s) and not _INTERNAL_SUBJECT.search(s) and s not in out:
             out.append(s)
     return out
 

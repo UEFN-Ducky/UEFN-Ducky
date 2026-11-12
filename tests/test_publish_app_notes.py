@@ -76,6 +76,23 @@ def test_internal_engine_commits_and_repeats_stay_out_of_the_notes():
     ]) == ["General fixes and improvements", "Open chats with the newest 80 rows"]
 
 
+def test_commits_marked_internal_or_about_the_apps_own_counting_stay_out_of_the_notes():
+    pub = _load()
+    subjects = pub.public_subjects([
+        "Usage: a new PC's first open is sent right away, not a minute in",
+        "Internal: Setup says whether the app came up after \"Open UEFN Ducky\"",
+        "analytics : the first start is counted once",
+        "Memory usage: the chat list no longer keeps closed chats",
+        "Teams: members get the model the person asked for, not another program",
+    ])
+    assert subjects == [
+        "Memory usage: the chat list no longer keeps closed chats",
+        "Teams: members get the model the person asked for, not another program",
+    ]
+    assert "sent right away" not in pub.first_sentences(subjects)
+    assert all("sent right away" not in item["text"] for item in pub.short_note_items(subjects)[0])
+
+
 def test_notes_file_is_read_and_checked(tmp_path):
     pub = _load()
     good = tmp_path / "notes.json"
