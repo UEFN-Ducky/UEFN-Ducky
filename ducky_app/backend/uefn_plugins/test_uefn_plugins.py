@@ -1060,7 +1060,8 @@ def _crash_marker(plugin: str, version: str, process: int) -> Path:
     folder = crash_guard._markers_dir()
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{plugin}.{process}.json"
-    path.write_text(json.dumps({"plugin": plugin, "version": version, "process": process}), encoding="utf-8")
+    path.write_text(json.dumps({"plugin": plugin, "version": version, "process": process, "role": "app"}),
+                    encoding="utf-8")
     return path
 
 

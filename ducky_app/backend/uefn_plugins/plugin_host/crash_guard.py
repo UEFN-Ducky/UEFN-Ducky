@@ -3,9 +3,18 @@ updated as soon as the Store has a newer one.
 
 A plugin whose load takes the whole process down (a compiled backend crashing in native
 code) would otherwise do it again on every launch, and Ducky could never open. Each load
-leaves a marker named after this process; a marker whose process is gone means that load
-crashed Ducky, and that plugin version is skipped until it updates or the user turns it
-on again.
+in the window leaves a marker named after its process; a marker whose process is gone
+means that load crashed Ducky, and that plugin version is skipped until it updates or the
+user turns it on again.
+
+Only the window (:func:`backend.process_role.is_app`) leaves markers. A tool server or an
+agent host loads the same plugins and is ended by whoever started it at any moment (a chat
+that stops, a coding agent closing its tools), most often right after a plugin update, when
+every such process loads the new version itself. Until Nov 12 2026 one ended mid-load made
+the window skip the plugin: "UEFN Ducky closed while loading Ducky Account 1.1.82" on PCs
+where nothing had crashed. Records from then are not trusted: they are dropped once, so a
+plugin skipped for no reason loads again (one that really crashes is found again on the
+next launch).
 """
 
 from __future__ import annotations
@@ -18,7 +27,9 @@ from pathlib import Path
 from backend.process_role import is_app
 
 _LOAD_MARKERS = ".loading"
-_CRASHED_FILE = "crashed.json"
+_CRASHED_FILE = "crashed-app.json"  # made from the window's own markers only
+_OLD_CRASHED_FILE = "crashed.json"  # also counted tool servers ended mid-load: dropped, never read
+_APP_ROLE = "app"
 _crash_lock = threading.Lock()
 _crash_checked = False
 
@@ -71,6 +82,10 @@ def _promote_dead_markers() -> dict[str, str]:
         folder = _markers_dir()
         if not folder.is_dir():
             return crashed
+        try:
+            (folder / _OLD_CRASHED_FILE).unlink(missing_ok=True)
+        except OSError:
+            pass
         changed = False
         for marker in folder.glob("*.json"):
             if marker.name == _CRASHED_FILE:
@@ -81,8 +96,9 @@ def _promote_dead_markers() -> dict[str, str]:
             except (OSError, ValueError, TypeError, AttributeError):
                 owner, info = 0, {}
             if owner and owner != os.getpid() and _process_alive(owner):
-                continue  # another live Ducky process (the MCP bridge) is loading it now
-            plugin = str(info.get("plugin") or "")
+                continue  # another live window is loading it now
+            # A marker with no role is a leftover of a version where tool servers left them too.
+            plugin = str(info.get("plugin") or "") if info.get("role") == _APP_ROLE else ""
             if plugin:
                 crashed[plugin] = str(info.get("version") or "")
                 changed = True
@@ -180,10 +196,13 @@ def _start_crash_heal() -> None:
 
 
 def _load_marker_begin(pid: str, version: str) -> Path | None:
+    if not is_app():
+        return None  # a tool server or agent host ending mid-load is not Ducky closing
     path = _markers_dir() / f"{pid}.{os.getpid()}.json"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"plugin": pid, "version": version, "process": os.getpid()}), encoding="utf-8")
+        path.write_text(json.dumps({"plugin": pid, "version": version, "process": os.getpid(), "role": _APP_ROLE}),
+                        encoding="utf-8")
         return path
     except OSError:
         return None
