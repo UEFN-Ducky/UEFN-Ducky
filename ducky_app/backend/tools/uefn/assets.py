@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from backend.bridge import send_command
@@ -106,6 +107,49 @@ def _lore_after_gone(asset_path: str) -> dict:
     return after_asset_gone(root, asset_path)
 
 
+# (chat, asset path) -> (when, how many times in a row) the editor said no. Nov 11 2026: 46
+# such answers in a day, agents asking again for the same asset. Each ask still goes to the
+# editor (the asset may have been relinked since); from the second one on the answer says
+# that nothing changed. Cleared when the asset is removed.
+_SAME_ANSWER_S = 600.0
+_said_no: dict[tuple[str, str], tuple[float, int]] = {}
+
+
+def _chat_key(asset_path: str) -> tuple[str, str]:
+    chat = ""
+    try:
+        from backend.workspace import identity
+
+        chat = str(getattr(identity.resolve_context(), "conv_id", "") or "")
+    except Exception:
+        chat = ""
+    return chat, (asset_path or "").strip().rstrip("/").lower()
+
+
+def _no_answer(asset_path: str, error: str, now: float | None = None) -> dict | None:
+    """The answer for a delete the editor would not do: its one-line reason, the next move,
+    and (asked again with nothing changed) that asking again won't help. None when ``error``
+    is not such a refusal (UEFN closed, a timeout): that stays an error."""
+    line = next((ln.strip() for ln in str(error).splitlines() if "Refused:" in ln), "")
+    if not line:
+        return None
+    reason = line[line.index("Refused:") + len("Refused:"):].strip()
+    now = time.monotonic() if now is None else now
+    key = _chat_key(asset_path)
+    at, times = _said_no.get(key, (0.0, 0))
+    times = times + 1 if at and now - at < _SAME_ANSWER_S else 1
+    _said_no[key] = (now, times)
+    if len(_said_no) > 500:
+        for stale in [k for k, (t, _n) in _said_no.items() if now - t >= _SAME_ANSWER_S]:
+            _said_no.pop(stale, None)
+    answer = {"ok": False, "fail": "refused", "asset_path": asset_path, "error": reason,
+              "hint": "Relink or fix what still uses it, then ask once more. If the person did not ask for this delete, leave it."}
+    if times > 1:
+        answer["hint"] = (f"Asked {times} times, same answer: nothing changed since the last try. "
+                          "Stop asking; relink what uses it first, or leave it and tell the person.")
+    return answer
+
+
 @plugin_mcp_tool("uefn")
 def delete_asset(asset_path: str, pretty: bool = False) -> str:
     """Delete one unreferenced project asset. Never call it unless the user asked to delete it.
@@ -115,8 +159,15 @@ def delete_asset(asset_path: str, pretty: bool = False) -> str:
     Already-gone still drops a Lore pending add so CheckIn cannot rehash a missing file.
     Whole character folder: ``delete_project_folder``.
     """
-    result = send_command("delete_asset", {"asset_path": asset_path})
+    try:
+        result = send_command("delete_asset", {"asset_path": asset_path})
+    except RuntimeError as exc:
+        answer = _no_answer(asset_path, str(exc))
+        if answer is None:
+            raise
+        return tool_json(answer, pretty=pretty)
     if result.get("ok"):
+        _said_no.pop(_chat_key(asset_path), None)
         result = {**result, "lore": _lore_after_gone(asset_path)}
     return tool_json(result, pretty=pretty)
 
