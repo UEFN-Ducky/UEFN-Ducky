@@ -270,3 +270,20 @@ def test_settings_switches_save_and_read_back():
     assert got["first_open_tours"] is False and got["show_me_autoplay"] is False
     api.save_agent_settings({"first_open_tours": True})
     assert api.get_settings()["first_open_tours"] is True
+
+
+def test_the_pc_memory_warnings_switch_saves_reads_back_and_reaches_the_warning_code(monkeypatch):
+    from frontend import low_memory
+    from frontend.settings import PanelSettings
+    from frontend.ui_web.panel_api import PanelApi
+
+    api = PanelApi.__new__(PanelApi)
+    assert PanelSettings().pc_memory_warnings is True and api.get_settings()["pc_memory_warnings"] is True
+    api.save_agent_settings({"pc_memory_warnings": False})
+    assert api.get_settings()["pc_memory_warnings"] is False
+    assert PanelSettings.load().pc_memory_warnings is False  # kept on disk, not only in this object
+    monkeypatch.setattr(low_memory, "_warnings_on", (0.0, True))
+    assert low_memory.warnings_on() is False
+    api.save_agent_settings({"pc_memory_warnings": True})
+    monkeypatch.setattr(low_memory, "_warnings_on", (0.0, False))
+    assert low_memory.warnings_on() is True
