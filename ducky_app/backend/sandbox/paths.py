@@ -115,13 +115,23 @@ def dir_size(path: Path, *, cap_files: int = 200_000) -> int:
     return total
 
 
+def is_chat_sandbox(path: Path) -> bool:
+    """A folder this service made for a chat: its marker, or its own layout (older ones have
+    no marker). The release workflows keep folders of their own beside the sandboxes
+    (``duckyos-deploy``, ``release-store-plugin-<id>``: git worktrees made from a terminal).
+    They belong to no chat, so they are never a sandbox: until Nov 12 2026 the hourly prune
+    took each one for the sandbox of a deleted chat and deleted it, also in the middle of a
+    deploy ("awk: cannot open file 'duckyos/Cargo.toml'", core 0.1.806)."""
+    return (path / _TOUCH).is_file() or all((path / sub).is_dir() for sub in ("work", "home", "logs"))
+
+
 def list_sandboxes() -> list[dict[str, Any]]:
     base = root()
     if not base.is_dir():
         return []
     out: list[dict[str, Any]] = []
     for child in sorted(base.iterdir()):
-        if child.is_dir() and _CONV_ID.fullmatch(child.name):
+        if child.is_dir() and _CONV_ID.fullmatch(child.name) and is_chat_sandbox(child):
             out.append({"conv_id": child.name, "path": str(child), "last_used": last_used(child)})
     return out
 

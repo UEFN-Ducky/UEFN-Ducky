@@ -302,6 +302,27 @@ def test_clear_deletes_the_sandbox_and_stale_ones_are_pruned():
     assert built.exists()
 
 
+def test_a_workflows_own_folder_beside_the_sandboxes_is_never_pruned():
+    # Nov 12 2026: the hourly prune deleted the release's git worktree in the middle of a core
+    # deploy. Its folder name is no chat's id, so it read as the sandbox of a deleted chat.
+    deploy = paths.root() / "duckyos-deploy"
+    (deploy / "duckyos").mkdir(parents=True)
+    (deploy / "duckyos" / "Cargo.toml").write_text('version = "0.1.806"', encoding="utf-8")
+    target = paths.root() / "duckyos-deploy-target"
+    (target / "debug").mkdir(parents=True)
+    old = time.time() - paths.PRUNE_AFTER_S - 10
+    for folder in (deploy, target):
+        os.utime(folder, (old, old))
+    chat = paths.sandbox_dir("gone-chat", create=True)
+    assert not paths.is_chat_sandbox(deploy) and paths.is_chat_sandbox(chat)
+    assert [row["conv_id"] for row in paths.list_sandboxes() if row["conv_id"].startswith(("duckyos", "gone"))] == ["gone-chat"]
+    assert service.prune(chat_exists=lambda cid: False) == ["gone-chat"]
+    assert (deploy / "duckyos" / "Cargo.toml").is_file() and (target / "debug").is_dir()
+    assert not chat.exists()
+    shutil.rmtree(deploy)
+    shutil.rmtree(target)
+
+
 @needs_windows
 def test_a_port_named_in_args_is_filled_in():
     # Oct 31 2026: "python -m http.server %PORT%" got the text "%PORT%" and quit at once.
