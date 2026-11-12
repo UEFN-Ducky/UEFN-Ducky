@@ -787,6 +787,94 @@ def test_an_adapter_reconnects_when_the_daemon_dies(monkeypatch, tmp_path) -> No
     assert len(replacements) == 1  # closing stdin did not start another daemon
 
 
+def test_an_adapter_outlives_a_long_ducky_restart(monkeypatch, tmp_path) -> None:
+    """Nov 11 2026: Ducky updated itself, no tool server answered within 30 s, the adapter
+    exited, and the open Codex session had no Ducky tools until Codex was restarted."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.0.0")
+    state_dir = tmp_path / "UEFN-Ducky"
+    state_dir.mkdir()
+    first = _FrameDaemon(state_dir, "first", answer=1)
+    asked: list[list[str]] = []
+    monkeypatch.setattr(ad, "_spawn_daemon", lambda args: asked.append(args))  # the app is down: nothing starts
+    monkeypatch.setattr(ad, "_FIRST_WAIT_S", 0.3)
+    monkeypatch.setattr(ad, "_WATCH_S", 20.0)
+    monkeypatch.setattr(ad, "_HOLD_CALL_S", 0.2)
+    monkeypatch.setattr(ad.os, "_exit", lambda code: pytest.fail("adapter gave up"))
+
+    in_r, in_w = os.pipe()
+    out_r, out_w = os.pipe()
+    monkeypatch.setattr(ad.sys, "stdin", SimpleNamespace(buffer=os.fdopen(in_r, "rb", buffering=0)))
+    monkeypatch.setattr(ad.sys, "stdout", SimpleNamespace(buffer=os.fdopen(out_w, "wb", buffering=0)))
+    writer = os.fdopen(in_w, "wb", buffering=0)
+    reader = os.fdopen(out_r, "rb", buffering=0)
+    replies: list[dict] = []
+
+    def _read_replies() -> None:
+        buf = b""
+        while chunk := reader.read(65536):
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                replies.append(json.loads(line))
+
+    threading.Thread(target=_read_replies, daemon=True).start()
+    relay = threading.Thread(target=ad.run, args=(["--port", "4200"],), daemon=True)
+    relay.start()
+
+    def _send(msg: dict) -> None:
+        writer.write(json.dumps(msg).encode() + b"\n")
+
+    def _wait_for(n: int) -> dict:
+        deadline = time.time() + 8
+        while len(replies) < n and time.time() < deadline:
+            time.sleep(0.02)
+        return {r["id"]: r for r in replies}
+
+    second: _FrameDaemon | None = None
+    try:
+        _send({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        _wait_for(1)
+        first.kill()  # Ducky closes to update itself
+        time.sleep(0.8)  # past the first wait: no tool server yet, and the adapter is still here
+        assert relay.is_alive()
+        _send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "x", "arguments": {}}})
+        down = _wait_for(2)[2]
+        assert down["result"]["isError"] is True and "not running or is restarting" in down["result"]["content"][0]["text"]
+        _send({"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}})  # waits for the server
+        time.sleep(0.3)
+        assert 3 not in {r["id"] for r in replies}
+
+        second = _FrameDaemon(state_dir, "second", answer=9)  # the updated app starts its own
+        assert _wait_for(3)[3]["result"] == {"from": "second"}
+        _send({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "x", "arguments": {}}})
+        assert _wait_for(4)[4]["result"] == {"from": "second"}
+    finally:
+        writer.close()
+        relay.join(timeout=5)
+        if second is not None:
+            second.kill()
+    assert not relay.is_alive()
+    assert len(asked) == 1  # asked for a tool server once, not once per try
+
+
+def test_an_adapter_asks_the_app_on_the_port_it_moved_to(monkeypatch, tmp_path) -> None:
+    """A restarted app may sit on another port pair: the port file names it."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("UEFN_DUCKY_PANEL_PORT", raising=False)
+    monkeypatch.setattr(ad, "_PANEL_PORT", 4199)
+    assert ad._panel_port() == 4199  # no port file: the port it started with
+    (tmp_path / "UEFN-Ducky").mkdir()
+    (tmp_path / "UEFN-Ducky" / "panel_port.json").write_text(json.dumps({"port": 4300}), encoding="utf-8")
+    assert ad._panel_port() == 4299
+    monkeypatch.setenv("UEFN_DUCKY_PANEL_PORT", "4568")  # a pinned test or sandbox port wins
+    assert ad._panel_port() == 4199
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows process tree")
 def test_stopping_an_agent_leaves_the_shared_daemon_running(monkeypatch, tmp_path) -> None:
     import subprocess

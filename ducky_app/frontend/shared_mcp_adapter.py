@@ -46,6 +46,18 @@ _RESTARTED = (
     "Ducky's tool server restarted while this call was running, so it may not have finished. "
     "Check whether it took effect, then call it again if needed."
 )
+# Ducky is closed, restarting or updating itself. Nov 11 2026: a restart that took over 30 s
+# made this adapter exit, and Codex (which never restarts an MCP server) had no Ducky tools
+# for the rest of its session. The adapter now stays up and joins the tool server when it is
+# back; a call that arrives in between hears this instead of hanging.
+_DOWN = (
+    "UEFN Ducky is not running or is restarting, so this did not run. Its tools come back by "
+    "themselves once Ducky is up: try again in a minute."
+)
+_FIRST_WAIT_S = 30.0  # the usual restart: a fresh tool server answers within this
+_HOLD_CALL_S = 45.0  # a tool call that arrives during a restart waits this long for it
+_WATCH_S = 120.0  # then watch for one someone else starts (the app coming back up) this long...
+_RESPAWN_WAIT_S = 30.0  # ...before asking for, or starting, one again
 _IDENTITY_ENV = (
     ("DUCKY_RUN_ID", "run_id"),
     ("DUCKY_CONV_ID", "conv_id"),
@@ -232,6 +244,15 @@ def _record_fallback(reason: str) -> int:
     return count
 
 
+def _panel_port() -> int:
+    """The app's panel port now. A restarted app may sit on another pair than the one this
+    adapter started with (Windows reserved 4199/4200): the port file names it."""
+    if os.environ.get("UEFN_DUCKY_PANEL_PORT"):
+        return _PANEL_PORT
+    moved = _moved_panel_port()
+    return moved - 1 if moved else _PANEL_PORT
+
+
 def _ask_app_to_start() -> bool:
     """Have the running app start the daemon, so it is the app's child.
 
@@ -242,7 +263,7 @@ def _ask_app_to_start() -> bool:
 
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     req = urllib.request.Request(
-        f"http://127.0.0.1:{_PANEL_PORT}/__panel_shared_mcp",
+        f"http://127.0.0.1:{_panel_port()}/__panel_shared_mcp",
         data=b"{}",
         method="POST",
         headers={"Content-Type": "application/json"},
@@ -308,16 +329,36 @@ def connect(bridge_args: list[str], timeout_s: float = 30.0) -> socket.socket | 
     return None
 
 
+def _watch_for_daemon(timeout_s: float, stop: threading.Event | None = None) -> socket.socket | None:
+    """Join a daemon someone else starts (the app coming back up). Never starts one."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline and not (stop is not None and stop.is_set()):
+        state = _read_state()
+        if state and not _stale(state) and (sock := _try_hello(state)):
+            return sock
+        time.sleep(0.25)
+    return None
+
+
 def _request_frame(msg: dict) -> dict:
     return {"op": "mcp", "id": msg.get("id"), "method": msg.get("method"), "params": msg.get("params") or {}}
+
+
+def _cannot_run(request: dict, text: str) -> dict:
+    """The answer for a request that did not run (or may not have): a failed tool result for
+    a tool call, a JSON-RPC error for anything else."""
+    if request.get("method") == "tools/call":
+        return {"jsonrpc": "2.0", "id": request.get("id"),
+                "result": {"content": [{"type": "text", "text": text}], "isError": True}}
+    return {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": -32000, "message": text}}
 
 
 def run(bridge_args: list[str]) -> bool:
     """Relay stdio <-> daemon until the IDE closes stdin. False = no daemon (use dedicated).
 
-    If the daemon goes away mid-session this reconnects to a fresh one. Agents never
-    reconnect an MCP server themselves, so exiting here left them without Ducky tools
-    for the rest of the run ("Transport closed").
+    If the daemon goes away mid-session this joins a fresh one, however long that takes:
+    agents never reconnect an MCP server themselves, so exiting here left them without
+    Ducky tools for the rest of the run ("Transport closed"; Codex after a Ducky update).
     """
     first = connect(bridge_args)
     if first is None:
@@ -327,9 +368,11 @@ def run(bridge_args: list[str]) -> bool:
     stdout = sys.stdout.buffer
     out_lock = threading.Lock()
     link_lock = threading.Lock()  # guards the socket swap and every write
-    link = {"sock": first}
+    link: dict[str, socket.socket | None] = {"sock": first}  # None while no daemon answers
     pending: dict[str, dict] = {}  # request id (as JSON) -> request, until answered
     closing = threading.Event()  # the IDE closed stdin: a dropped socket is ours, not a dead daemon
+    up = threading.Event()  # a daemon is joined
+    up.set()
 
     def _emit(msg: dict) -> None:
         with out_lock:
@@ -337,15 +380,28 @@ def run(bridge_args: list[str]) -> bool:
             stdout.flush()
 
     def _send(frame: dict, request: dict | None = None) -> None:
+        if request is not None and request.get("method") not in _RESENDABLE and not up.is_set():
+            up.wait(_HOLD_CALL_S)  # a quick restart: the call goes to the fresh tool server
         with link_lock:
+            sock = link["sock"]
+            if sock is None:
+                # No tool server yet; the pump is bringing one back. What can be sent again
+                # waits for it, a tool call hears why it did not run.
+                if request is not None and request.get("method") in _RESENDABLE:
+                    pending[json.dumps(request.get("id"))] = request
+                elif request is not None:
+                    _emit(_cannot_run(request, _DOWN))
+                return
             if request is not None:
                 pending[json.dumps(request.get("id"))] = request
             try:
-                _write_frame(link["sock"], frame)
+                _write_frame(sock, frame)
             except OSError:
                 pass  # the pump reconnects and settles what is pending
 
     def _reconnect(dead: socket.socket) -> bool:
+        """Join a fresh daemon. False only when the IDE closed stdin: with none to reach this
+        keeps trying for as long as the IDE holds the server."""
         with link_lock:
             if closing.is_set():
                 return False
@@ -355,23 +411,34 @@ def run(bridge_args: list[str]) -> bool:
                 dead.close()
             except OSError:
                 pass
-            fresh = connect(bridge_args)
-            if fresh is None:
+            link["sock"] = None
+            up.clear()
+            # A call that was running may or may not have finished: say so now, not after
+            # however long the restart takes.
+            for key, request in list(pending.items()):
+                if request.get("method") not in _RESENDABLE:
+                    pending.pop(key, None)
+                    _emit(_cannot_run(request, _RESTARTED))
+        fresh = connect(bridge_args, _FIRST_WAIT_S)
+        while fresh is None and not closing.is_set():
+            # A slow restart or an update: join the app's own tool server when it shows up,
+            # and only now and then ask for (or start) one, never one per try.
+            fresh = _watch_for_daemon(_WATCH_S, closing)
+            if fresh is None and not closing.is_set():
+                fresh = connect(bridge_args, _RESPAWN_WAIT_S)
+        if fresh is None:
+            return False
+        with link_lock:
+            if closing.is_set():
+                fresh.close()
                 return False
             link["sock"] = fresh
-            for key, request in list(pending.items()):
-                if request.get("method") in _RESENDABLE:
-                    try:
-                        _write_frame(fresh, _request_frame(request))
-                    except OSError:
-                        pass
-                    continue
-                pending.pop(key, None)
-                _emit({
-                    "jsonrpc": "2.0",
-                    "id": request.get("id"),
-                    "result": {"content": [{"type": "text", "text": _RESTARTED}], "isError": True},
-                })
+            for request in list(pending.values()):  # only what is safe to send again is left
+                try:
+                    _write_frame(fresh, _request_frame(request))
+                except OSError:
+                    pass
+        up.set()
         return True
 
     def _pump_daemon() -> None:
@@ -379,13 +446,13 @@ def run(bridge_args: list[str]) -> bool:
             with link_lock:
                 sock = link["sock"]
             try:
+                if sock is None:
+                    raise OSError("no daemon")
                 frame = _read_frame(sock)
             except (OSError, ValueError, EOFError):
-                if _reconnect(sock):
+                if sock is not None and _reconnect(sock):
                     continue
-                if closing.is_set():
-                    return
-                os._exit(0)  # no daemon could be started: let the IDE restart this server
+                return  # the IDE closed stdin
             if frame.get("op") != "mcp":
                 continue
             if frame.get("method") and "id" not in frame:
@@ -421,11 +488,13 @@ def run(bridge_args: list[str]) -> bool:
         pass
     finally:
         closing.set()
+        up.set()  # nothing waits on a restart once the IDE is gone
         with link_lock:
             sock = link["sock"]
-            try:
-                _write_frame(sock, {"op": "bye"})
-            except OSError:
-                pass
-            sock.close()
+            if sock is not None:
+                try:
+                    _write_frame(sock, {"op": "bye"})
+                except OSError:
+                    pass
+                sock.close()
     return True
