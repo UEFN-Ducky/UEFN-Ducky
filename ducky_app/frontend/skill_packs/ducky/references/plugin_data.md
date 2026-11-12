@@ -254,6 +254,14 @@ team, synced with history, undo, locks and conflicts).
 - People: Storage → General storage → Add files.
 - When the person says "save it to General storage" (or "keep it in my storage"), use these,
   never a folder of your own.
+- **What a tool makes is kept there by itself.** Every picture, video, sound, 3D or project
+  file a plugin tool's result names (a full path the call created or changed) is copied to
+  `<plugin label>/<date>/` with no plugin code, and follows Your team like the rest. A file
+  made again under the same name that day replaces the one kept (its history keeps the
+  earlier one), so name outputs after the thing they are, not after the try. A plugin whose
+  tools write working files (test frames, screenshots to look at, previews) says
+  `"keep_outputs": false` at the top of `plugin.json`: dozens of those a day would each be
+  one change for the whole team. People turn it off for everything in Settings.
 
 ## Sensitive data
 
