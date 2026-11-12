@@ -798,8 +798,11 @@ def test_an_adapter_outlives_a_long_ducky_restart(monkeypatch, tmp_path) -> None
     state_dir.mkdir()
     first = _FrameDaemon(state_dir, "first", answer=1)
     asked: list[list[str]] = []
+    app_asks: list[int] = []
     monkeypatch.setattr(ad, "_spawn_daemon", lambda args: asked.append(args))  # the app is down: nothing starts
+    monkeypatch.setattr(ad, "_ask_app_to_start", lambda: app_asks.append(1) and False)  # nobody answers
     monkeypatch.setattr(ad, "_FIRST_WAIT_S", 0.3)
+    monkeypatch.setattr(ad, "_ASK_EVERY_S", 0.2)
     monkeypatch.setattr(ad, "_WATCH_S", 20.0)
     monkeypatch.setattr(ad, "_HOLD_CALL_S", 0.2)
     monkeypatch.setattr(ad.os, "_exit", lambda code: pytest.fail("adapter gave up"))
@@ -846,6 +849,9 @@ def test_an_adapter_outlives_a_long_ducky_restart(monkeypatch, tmp_path) -> None
         _send({"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}})  # waits for the server
         time.sleep(0.3)
         assert 3 not in {r["id"] for r in replies}
+        deadline = time.time() + 30  # a try at a dead port takes Windows about 2 s
+        while len(app_asks) < 2 and time.time() < deadline:
+            time.sleep(0.05)
 
         second = _FrameDaemon(state_dir, "second", answer=9)  # the updated app starts its own
         assert _wait_for(3)[3]["result"] == {"from": "second"}
@@ -857,7 +863,73 @@ def test_an_adapter_outlives_a_long_ducky_restart(monkeypatch, tmp_path) -> None
         if second is not None:
             second.kill()
     assert not relay.is_alive()
-    assert len(asked) == 1  # asked for a tool server once, not once per try
+    assert len(asked) == 1  # started one from here once, not once per try
+    assert len(app_asks) >= 2  # and kept asking a running app, which is cheap
+
+
+def test_an_adapter_keeps_asking_a_running_app_that_said_starting(monkeypatch, tmp_path) -> None:
+    """Seen live Nov 12 2026: the app answers "starting" for 45 s after it started a tool server,
+    also when that one has since died. One ask and a two-minute wait left agents without tools
+    for 150 s; asking every few seconds gets the next one as soon as the app starts it."""
+    from frontend import shared_mcp_adapter as ad
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.0.0")
+    state_dir = tmp_path / "UEFN-Ducky"
+    state_dir.mkdir()
+    first = _FrameDaemon(state_dir, "first", answer=1)
+    replacements: list[_FrameDaemon] = []
+    asks: list[int] = []
+
+    def app_start() -> bool:
+        asks.append(1)
+        if len(asks) == 3:  # the hold is over: the app starts one now
+            replacements.append(_FrameDaemon(state_dir, "second", answer=9))
+        return True  # {"ok": true, "starting": true} until then
+
+    monkeypatch.setattr(ad, "_spawn_daemon", lambda args: app_start())
+    monkeypatch.setattr(ad, "_ask_app_to_start", app_start)
+    monkeypatch.setattr(ad, "_FIRST_WAIT_S", 0.3)
+    monkeypatch.setattr(ad, "_ASK_EVERY_S", 0.2)
+    monkeypatch.setattr(ad, "_HOLD_CALL_S", 0.2)
+    monkeypatch.setattr(ad.os, "_exit", lambda code: pytest.fail("adapter gave up"))
+
+    in_r, in_w = os.pipe()
+    out_r, out_w = os.pipe()
+    monkeypatch.setattr(ad.sys, "stdin", SimpleNamespace(buffer=os.fdopen(in_r, "rb", buffering=0)))
+    monkeypatch.setattr(ad.sys, "stdout", SimpleNamespace(buffer=os.fdopen(out_w, "wb", buffering=0)))
+    writer = os.fdopen(in_w, "wb", buffering=0)
+    reader = os.fdopen(out_r, "rb", buffering=0)
+    replies: list[dict] = []
+
+    def _read_replies() -> None:
+        buf = b""
+        while chunk := reader.read(65536):
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                replies.append(json.loads(line))
+
+    threading.Thread(target=_read_replies, daemon=True).start()
+    relay = threading.Thread(target=ad.run, args=(["--port", "4200"],), daemon=True)
+    relay.start()
+    try:
+        writer.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}).encode() + b"\n")
+        deadline = time.time() + 8
+        while len(replies) < 1 and time.time() < deadline:
+            time.sleep(0.02)
+        first.kill()
+        writer.write(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}).encode() + b"\n")
+        deadline = time.time() + 40  # a try at a dead port takes Windows about 2 s
+        while len(replies) < 2 and time.time() < deadline:
+            time.sleep(0.02)
+        assert {r["id"]: r for r in replies}[2]["result"] == {"from": "second"}
+    finally:
+        writer.close()
+        relay.join(timeout=5)
+        for daemon in replacements:
+            daemon.kill()
+    assert len(asks) == 3 and len(replacements) == 1  # joined as soon as the app started one
 
 
 def test_an_adapter_asks_the_app_on_the_port_it_moved_to(monkeypatch, tmp_path) -> None:

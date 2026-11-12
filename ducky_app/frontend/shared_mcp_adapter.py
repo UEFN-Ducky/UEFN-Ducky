@@ -56,8 +56,13 @@ _DOWN = (
 )
 _FIRST_WAIT_S = 30.0  # the usual restart: a fresh tool server answers within this
 _HOLD_CALL_S = 45.0  # a tool call that arrives during a restart waits this long for it
-_WATCH_S = 120.0  # then watch for one someone else starts (the app coming back up) this long...
-_RESPAWN_WAIT_S = 30.0  # ...before asking for, or starting, one again
+# After that: watch for a tool server (the app coming back starts its own) and ask a running
+# app for one this often. Asking is cheap: the app starts at most one, and answers "starting"
+# for 45 s after it did (seen live Nov 12 2026: a tool server ended 10 s after its start, the
+# first ask was inside those 45 s, and the next one came two minutes later).
+_ASK_EVERY_S = 15.0
+_WATCH_S = 120.0  # with no app to ask: start one from here at most this often
+_RESPAWN_WAIT_S = 30.0
 _IDENTITY_ENV = (
     ("DUCKY_RUN_ID", "run_id"),
     ("DUCKY_CONV_ID", "conv_id"),
@@ -420,12 +425,18 @@ def run(bridge_args: list[str]) -> bool:
                     pending.pop(key, None)
                     _emit(_cannot_run(request, _RESTARTED))
         fresh = connect(bridge_args, _FIRST_WAIT_S)
+        started_here = time.time()
         while fresh is None and not closing.is_set():
-            # A slow restart or an update: join the app's own tool server when it shows up,
-            # and only now and then ask for (or start) one, never one per try.
-            fresh = _watch_for_daemon(_WATCH_S, closing)
-            if fresh is None and not closing.is_set():
+            # A slow restart or an update: join the app's own tool server when it shows up.
+            fresh = _watch_for_daemon(_ASK_EVERY_S, closing)
+            if fresh is not None or closing.is_set():
+                break
+            if not _slot() and _ask_app_to_start():
+                continue  # the app is up and has one coming (or just started one): keep watching
+            if time.time() - started_here >= _WATCH_S:
+                # No app to ask for this long: start one from here, never one per try.
                 fresh = connect(bridge_args, _RESPAWN_WAIT_S)
+                started_here = time.time()
         if fresh is None:
             return False
         with link_lock:
