@@ -33,6 +33,11 @@ PLUGIN_CALL_LIMIT_S = 900.0
 # Nov 9 2026: 38 unreal__call_tool calls were agent.stuck past 5 min with no answer.
 EPIC_CALL_LIMIT_S = 120.0
 EPIC_HEAVY_LIMIT_S = 300.0
+# Ducky-listener tools that drive one long editor operation. Nov 11 2026: import_asset sat
+# past 5 min 10 times, execute_python 6, take_high_res_screenshot 2, with no word to the
+# agent. They get the heavy Epic deadline: at it the agent hears why (stall_reason) and that
+# the editor's work goes on, so it checks the result instead of sending the job again.
+EDITOR_HEAVY_TOOLS = frozenset({"import_asset", "execute_python", "take_high_res_screenshot"})
 # A Verse build answers within this, or the agent hears it is still building / behind a popup.
 # Nov 9 2026: 26 Verse build/check calls ran past 5 min.
 VERSE_BUILD_LIMIT_S = 180.0
@@ -52,6 +57,8 @@ def call_limit(name: str, inner: str) -> float | None:
         return QUICK_READ_LIMIT_S
     if inner in QUICK_TOOLS:
         return QUICK_TOOL_LIMIT_S
+    if inner in EDITOR_HEAVY_TOOLS:
+        return EPIC_HEAVY_LIMIT_S
     if inner.startswith("unreal__"):
         return None
     if name == "ducky_call_tool" and inner != name and inner not in WAITS_BY_DESIGN:
@@ -140,7 +147,10 @@ def wait_job(job: Job, limit: float, check_every: float,
 
 
 def timed_out_message(inner: str, limit: float) -> str:
-    """What the agent hears when a call is stopped at its limit."""
+    """What the agent hears when a call is stopped at its limit. An editor job is not stopped,
+    only no longer waited for: the agent hears what holds it (a popup, a busy editor)."""
+    if inner in EDITOR_HEAVY_TOOLS:
+        return str(stall_reason(inner, limit).get("message") or f"{inner} did not answer in {limit:.0f} s.")
     return (f"{inner} did not answer within {limit:.0f} s and was stopped. If this chat asked "
             "the person a question, tools wait for that answer first. Otherwise call it once "
             "more; if it stops again, carry on without it and tell the person.")

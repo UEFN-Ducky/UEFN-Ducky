@@ -102,6 +102,20 @@ def test_a_plugin_tool_behind_ducky_call_tool_is_stopped_at_its_limit(quick, mon
     assert not asyncio.run(shared_mcp._call_tool(mcp, "ducky_call_tool", ask, _ident())).get("isError")
 
 
+def test_a_long_editor_job_behind_ducky_call_tool_answers_at_the_editor_deadline(quick, monkeypatch) -> None:
+    monkeypatch.setattr(call_limits, "EPIC_HEAVY_LIMIT_S", 0.6)
+    monkeypatch.setattr(call_limits, "blocking_popup", lambda: None)
+    monkeypatch.setattr(call_limits, "_editor_answers", lambda: False)
+    mcp = WatchMcp(sync=set())
+    hung = {"name": "import_asset", "arguments": {"seconds": 30}}
+    started = time.monotonic()
+    result = asyncio.run(shared_mcp._call_tool(mcp, "ducky_call_tool", hung, _ident()))
+    assert time.monotonic() - started < 5
+    text = _text(result)
+    assert result["isError"] is True and "import_asset did not answer in 1 s" in text
+    assert "UEFN's game thread is busy" in text and "was stopped" not in text
+
+
 def test_a_long_call_is_recorded_once_and_still_finishes(quick) -> None:
     from backend.store.repos import events
 
