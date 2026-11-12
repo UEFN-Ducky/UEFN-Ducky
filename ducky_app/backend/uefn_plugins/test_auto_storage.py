@@ -64,7 +64,7 @@ def test_a_tool_render_is_kept_under_the_plugin_folder(who, tmp_path: Path) -> N
     assert [r["name"] for r in gs.items("adobe")] == ["Title Frame.png"]
 
 
-def test_the_same_file_is_kept_once_and_a_new_one_gets_a_number(who, tmp_path: Path) -> None:
+def test_the_same_file_is_kept_once_and_made_again_it_replaces_the_one_kept(who, tmp_path: Path) -> None:
     who.be("ana@x.org")
     since = time.time()
     out = tmp_path / "render.png"
@@ -76,8 +76,13 @@ def test_the_same_file_is_kept_once_and_a_new_one_gets_a_number(who, tmp_path: P
     assert auto_storage.keep_outputs("blender", "Blender", "render", answer, since) == []  # same bytes
     out.write_bytes(b"TWO")
     second = auto_storage.keep_outputs("blender", "Blender", "render", answer, time.time())
-    assert [r["name"] for r in second] == ["render 2.png"]
-    assert sorted(r["name"] for r in gs.items("blender")) == ["render 2.png", "render.png"]
+    # One item per thing made, not one per try: a team gets one change per item.
+    assert [r["name"] for r in second] == ["render.png"]
+    assert [r["name"] for r in gs.items("blender")] == ["render.png"]
+    assert gs.get(second[0]["id"], with_data=True)["data"] == b"TWO"
+    out.write_bytes(b"THREE")
+    assert len(auto_storage.keep_outputs("blender", "Blender", "render", answer, time.time())) == 1
+    assert [r["name"] for r in gs.items("blender")] == ["render.png"]
 
 
 def test_it_lands_in_the_team_copy(who, fake_spaces: FakeSpaces, tmp_path: Path) -> None:

@@ -7,6 +7,11 @@ names is copied into General storage under ``<plugin label>/<YYYY-MM-DD>/``, mar
 plugin and the tool. General storage follows the copy the app is on, so it lands in Local or
 the team, synced, with history.
 
+A team gets one change per item, so a file made again under the same name that day replaces
+the one kept (its history keeps the earlier one): an export tried three times is one item,
+not three. Until Nov 12 2026 each try was kept beside the others as ``name 2.ext``,
+``name 3.ext``, which tripled a day of Blender exports in one team's storage.
+
 Off for everyone with the ``keep_plugin_outputs`` setting; off for one plugin with
 ``"keep_outputs": false`` in its manifest. Runs on a background thread: the tool answers first.
 """
@@ -149,8 +154,9 @@ def _folder_name(label: str) -> str:
 
 
 def keep_file(path: Path, *, owner: str, label: str, tool: str, when: float | None = None) -> dict[str, Any] | None:
-    """Copy one file into General storage under ``<label>/<date>``. A different file with the
-    same name that day gets ``name 2.ext``; the very same bytes are never kept twice."""
+    """Copy one file into General storage under ``<label>/<date>``. A file made again under the
+    same name that day replaces the one kept (its history keeps the earlier one); the very
+    same bytes are never kept twice."""
     from backend.uefn_plugins import general_storage as gs
 
     data = path.read_bytes()
@@ -160,15 +166,10 @@ def keep_file(path: Path, *, owner: str, label: str, tool: str, when: float | No
     stem, suffix = path.stem, path.suffix
     if path.name.lower().endswith(".motion.html"):
         stem, suffix = path.name[: -len(".motion.html")], ".motion.html"
-    for n in range(1, 50):
-        name = f"{stem}{suffix}" if n == 1 else f"{stem} {n}{suffix}"
-        existing = gs.find(name, folder)
-        if existing is None:
-            break
-        if existing.get("sha1") == digest:
-            return None  # kept already
-    else:
-        return None
+    name = f"{stem}{suffix}"
+    existing = gs.find(name, folder)
+    if existing is not None and existing.get("sha1") == digest:
+        return None  # kept already
     res = gs.put_file(name, data, folder=folder, by=owner,
                       extra={"sha1": digest, "tool": tool, "source_path": str(path)})
     return res.get("item") if isinstance(res, dict) else None
