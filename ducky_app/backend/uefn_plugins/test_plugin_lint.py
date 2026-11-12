@@ -378,7 +378,7 @@ def test_the_store_icon_is_one_the_store_takes_and_set_icon_makes_one(tmp_path: 
 
 def test_data_sync_marks_doc_key_prefixes_of_a_log_as_batched() -> None:
     from backend.uefn_plugins.plugin_lint import check_manifest
-    from backend.uefn_plugins.store import data_sync
+    from backend.uefn_plugins.data_shape import data_sync
 
     good = {"data_sharing": True, "data_sync": {"act.": "batched", "feed.": "log"}}
     assert check_manifest(good) == [] and data_sync(good) == ("act.", "feed.")

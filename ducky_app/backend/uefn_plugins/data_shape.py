@@ -8,10 +8,46 @@ names such a key prefix and the fix (:func:`warnings`).
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
 MANY = 300  # docs under one key prefix, in one copy, before it is worth a word
 SMALL_BYTES = 2048  # ... when half of them are no bigger than this
+
+
+# Manifest ``"data_sync": {"<doc key prefix>": "batched"}``: log-style docs (an activity feed,
+# records nobody watches being typed). A team gets one change per item, so the plugin that
+# shares the space sends these together every few minutes, as log rows and not as changes of
+# their own. ``"log"`` means the same.
+DATA_SYNC_MODES = ("batched", "log")
+_DATA_SYNC_PREFIX_RE = re.compile(r"^[a-z0-9._-]{1,128}$")
+
+
+def data_sync_errors(manifest: dict[str, Any]) -> list[str]:
+    if "data_sync" not in manifest:
+        return []
+    sync = manifest.get("data_sync")
+    if not isinstance(sync, dict):
+        return ['plugin.json "data_sync" must be an object: {"<doc key prefix>": "batched"}.']
+    errors = []
+    for prefix, mode in sync.items():
+        if not _DATA_SYNC_PREFIX_RE.match(str(prefix)):
+            errors.append(f'plugin.json "data_sync" key {prefix!r} isn\'t the start of a doc key: use a-z, 0-9, '
+                          "and . _ - (1 to 128).")
+        elif mode not in DATA_SYNC_MODES:
+            errors.append(f'plugin.json "data_sync" {prefix!r} is {mode!r}: use "batched".')
+    if sync and manifest.get("data_sharing") is False:
+        errors.append('plugin.json has "data_sync" but "data_sharing": false: nothing is shared, so remove one.')
+    return errors
+
+
+def data_sync(manifest: dict[str, Any]) -> tuple[str, ...]:
+    """The doc key prefixes a manifest's ``data_sync`` marks as a log (sent together, as log rows)."""
+    sync = manifest.get("data_sync")
+    if not isinstance(sync, dict) or manifest.get("data_sharing") is False:
+        return ()
+    return tuple(sorted(p for p, mode in sync.items()
+                        if isinstance(p, str) and _DATA_SYNC_PREFIX_RE.match(p) and mode in DATA_SYNC_MODES))
 
 
 def key_group(key: str) -> str:
@@ -55,7 +91,7 @@ def warnings(plugin_id: str, manifest: dict[str, Any]) -> list[str]:
         return []
     from backend.store.repos import plugin_data as repo
     from backend.uefn_plugins import scopes
-    from backend.uefn_plugins.store import data_local, data_sync
+    from backend.uefn_plugins.store import data_local
 
     skip = (*data_local(manifest), *data_sync(manifest))
     account = scopes.account_id()

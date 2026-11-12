@@ -90,41 +90,6 @@ _DATA_LOCK_PREFIX_RE = re.compile(r"^[a-z0-9._/-]{0,256}$")
 # shows, never sync, and never count as team activity. A prefix is never '' (that would be
 # all of the plugin's data: use ``"data_sharing": false`` for that).
 _DATA_LOCAL_PREFIX_RE = re.compile(r"^[a-z0-9._/-]{1,256}$")
-# Manifest ``"data_sync": {"<doc key prefix>": "batched"}``: log-style docs (an activity feed,
-# records nobody watches being typed). A team gets one change per item, so the plugin that
-# shares the space sends these together every few minutes, as log rows and not as changes of
-# their own. ``"log"`` means the same.
-DATA_SYNC_MODES = ("batched", "log")
-_DATA_SYNC_PREFIX_RE = re.compile(r"^[a-z0-9._-]{1,128}$")
-
-
-def _data_sync_errors(manifest: dict[str, Any]) -> list[str]:
-    if "data_sync" not in manifest:
-        return []
-    sync = manifest.get("data_sync")
-    if not isinstance(sync, dict):
-        return ['plugin.json "data_sync" must be an object: {"<doc key prefix>": "batched"}.']
-    errors = []
-    for prefix, mode in sync.items():
-        if not _DATA_SYNC_PREFIX_RE.match(str(prefix)):
-            errors.append(f'plugin.json "data_sync" key {prefix!r} isn\'t the start of a doc key: use a-z, 0-9, '
-                          "and . _ - (1 to 128).")
-        elif mode not in DATA_SYNC_MODES:
-            errors.append(f'plugin.json "data_sync" {prefix!r} is {mode!r}: use "batched".')
-    if sync and manifest.get("data_sharing") is False:
-        errors.append('plugin.json has "data_sync" but "data_sharing": false: nothing is shared, so remove one.')
-    return errors
-
-
-def data_sync(manifest: dict[str, Any]) -> tuple[str, ...]:
-    """The doc key prefixes a manifest's ``data_sync`` marks as a log (sent together, as log rows)."""
-    sync = manifest.get("data_sync")
-    if not isinstance(sync, dict) or manifest.get("data_sharing") is False:
-        return ()
-    return tuple(sorted(p for p, mode in sync.items()
-                        if isinstance(p, str) and _DATA_SYNC_PREFIX_RE.match(p) and mode in DATA_SYNC_MODES))
-
-
 def _data_local_errors(manifest: dict[str, Any]) -> list[str]:
     if "data_local" not in manifest:
         return []
@@ -156,7 +121,9 @@ def manifest_data_errors(manifest: dict[str, Any]) -> list[str]:
         )
     errors += declaration_errors(manifest)
     errors += _data_local_errors(manifest)
-    errors += _data_sync_errors(manifest)
+    from backend.uefn_plugins.data_shape import data_sync_errors
+
+    errors += data_sync_errors(manifest)
     if "data_live" in manifest and not isinstance(manifest.get("data_live"), bool):
         errors.append(f'plugin.json "data_live" is {manifest.get("data_live")!r}: leave it out (teammates live in '
                       "one group get each change at once, over the group's link) or use false (changes go with sync "
