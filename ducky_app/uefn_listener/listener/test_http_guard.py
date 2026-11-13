@@ -69,6 +69,39 @@ def test_request_trusted_rules(runtime):
     assert not request_trusted({"X-Ducky-Listener": "1"}, post=True)  # no Host
 
 
+def _health(port: int) -> dict:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3) as resp:
+        return json.loads(resp.read())
+
+
+def test_health_names_the_running_command_and_the_window_that_holds_it(runtime):
+    """Nov 13 2026: create_physics_asset_for_mesh sat 7 minutes behind UEFN's "Message" [OK]
+    box. Health said busy and named get_skeletal_mesh_info, the command that ran before it."""
+    import time
+
+    unreal = sys.modules["unreal"]
+    from listener.state import metrics
+
+    port = runtime
+    metrics["last_command"] = "get_skeletal_mesh_info"
+    unreal._mcp_in_flight = True
+    unreal._mcp_in_flight_since = time.time() - 426
+    unreal._mcp_dispatching = True
+    unreal._mcp_current_command = "create_physics_asset_for_mesh"
+    health = _health(port)
+    assert health["current_command"] == "create_physics_asset_for_mesh"
+    assert health["in_window_sec"] == 0  # working: no tick has run inside it
+
+    unreal._mcp_nested_since = time.time() - 400  # the editor has ticked inside it for 400 s
+    unreal._mcp_nested_last = time.time()
+    assert 399 <= _health(port)["in_window_sec"] <= 402
+
+    unreal._mcp_nested_last = time.time() - 30  # no tick inside it since: the window closed
+    assert _health(port)["in_window_sec"] == 0
+    unreal._mcp_in_flight = unreal._mcp_dispatching = False
+    assert _health(port)["current_command"] == ""
+
+
 def test_server_refuses_untrusted_requests(runtime):
     port = runtime
     assert _status(port, "GET", {}) == 200

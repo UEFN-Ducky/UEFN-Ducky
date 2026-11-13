@@ -176,6 +176,17 @@ def _clear_in_flight() -> None:
         unreal._mcp_in_flight = False
         unreal._mcp_in_flight_since = 0.0
         unreal._mcp_dispatching = False
+        unreal._mcp_current_command = ""
+
+
+def _note_nested_tick(now: float) -> None:
+    """This tick runs while a command is still inside dispatch(): the editor ticks Slate from
+    a nested loop, so that command opened a window that waits for an answer. Nov 13 2026:
+    create_physics_asset_for_mesh sat 7 minutes behind a "Message" [OK] box while health
+    said only "busy" and named the command before it."""
+    if not float(getattr(unreal, "_mcp_nested_since", 0.0) or 0.0):
+        unreal._mcp_nested_since = now
+    unreal._mcp_nested_last = now
 
 
 def _refresh_project_cache() -> None:
@@ -256,6 +267,8 @@ def tick_handler(delta_time: float) -> None:
 def _tick(delta_time: float) -> None:
     # Heartbeat for zero-cost GET health (status polls must never POST ping).
     unreal._mcp_last_tick_at = time.time()
+    if getattr(unreal, "_mcp_dispatching", False):
+        _note_nested_tick(unreal._mcp_last_tick_at)
     lookup.invalidate()
     scene_graph.invalidate()
     _self_heal_stuck_inflight()
@@ -298,6 +311,8 @@ def _tick(delta_time: float) -> None:
         t0 = time.time()
         mem_before = _read_mem()
         cap = None
+        unreal._mcp_current_command = command
+        unreal._mcp_nested_since = 0.0
         unreal._mcp_dispatching = True
         try:
             # Read the state this command is about to overwrite, so the host can
@@ -320,6 +335,7 @@ def _tick(delta_time: float) -> None:
             metrics["last_error"] = str(e)
         finally:
             unreal._mcp_dispatching = False
+            unreal._mcp_nested_since = 0.0
 
         try:
             memory_ledger.record(metrics, command, mem_before, _read_mem())

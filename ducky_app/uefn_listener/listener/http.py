@@ -22,6 +22,8 @@ _CONN_ERRORS = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)
 # which this server never answers, so a browser can never run a command here.
 LISTENER_HEADER = "X-Ducky-Listener"
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
+# A window's loop ticks every frame; a last nested tick older than this means it closed.
+IN_WINDOW_FRESH_SEC = 2.0
 
 
 def request_trusted(headers: Any, *, post: bool) -> bool:
@@ -113,8 +115,16 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             since = float(getattr(unreal, "_mcp_in_flight_since", 0.0) or 0.0)
             in_flight_age = (now - since) if in_flight and since > 0 else 0.0
             last_tick = float(getattr(unreal, "_mcp_last_tick_at", 0.0) or 0.0)
-            current_command = str(metrics.get("last_command") or "") if (in_flight or dispatching) else ""
+            # The command accepted or running now. metrics["last_command"] is the one that
+            # finished before it: health named get_skeletal_mesh_info for 7 minutes while
+            # create_physics_asset_for_mesh was the one stuck (Nov 13 2026).
+            current_command = str(getattr(unreal, "_mcp_current_command", "") or "") if (in_flight or dispatching) else ""
+            nested_since = float(getattr(unreal, "_mcp_nested_since", 0.0) or 0.0)
+            nested_last = float(getattr(unreal, "_mcp_nested_last", 0.0) or 0.0)
         tick_age = (now - last_tick) if last_tick > 0 else -1.0
+        # Seconds the running command has sat inside a window it opened (a message box, a
+        # prompt): the editor still ticks, from that window's own loop. 0 when it has not.
+        in_window = (now - nested_since) if dispatching and nested_since > 0 and now - nested_last < IN_WINDOW_FRESH_SEC else 0.0
         started = float(metrics.get("started_at") or 0.0)
         uptime = (now - started) if started > 0 else 0.0
         project = getattr(unreal, "_mcp_project_cache", None) or {}
@@ -133,6 +143,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             "tick_age_sec": round(tick_age, 2) if tick_age >= 0 else None,
             "uptime_sec": round(uptime, 1),
             "current_command": current_command,
+            "in_window_sec": round(in_window, 1),
             "project_name": str(project.get("project_name") or ""),
             "project_dir": str(project.get("project_dir") or ""),
             "content_root": str(project.get("content_root") or ""),
@@ -210,6 +221,7 @@ class MCPRequestHandler(BaseHTTPRequestHandler):
             # Tick self-heals orphaned in_flight after STUCK_INFLIGHT_SEC when idle.
             unreal._mcp_in_flight = True
             unreal._mcp_in_flight_since = time.time()
+            unreal._mcp_current_command = str(command)
             command_queue.put((req_id, command, params))
 
         if not done.wait(timeout=HTTP_TIMEOUT_SEC):

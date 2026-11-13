@@ -22,7 +22,7 @@ def hung_epic(monkeypatch):
     """A pool whose Epic session never answers; returns (pool, state)."""
     from backend.tools.core import uefn_modal, uefn_popups
 
-    state = {"cancelled": False, "popups": [], "ping_ok": False}
+    state = {"cancelled": False, "popups": [], "ping_ok": False, "in_window": None}
     rebuild_plugin_prefix_cache([{"id": epic.EPIC_MCP_SERVER_ID, "tool_prefix": "unreal"}])
     monkeypatch.setattr(client_pool, "ensure_plugin_prefix_cache", lambda: None)
     monkeypatch.setattr(client_pool, "_EPIC_POPUP_LOOK_SEC", 60.0)  # only the deadline ends it
@@ -30,6 +30,7 @@ def hung_epic(monkeypatch):
     monkeypatch.setattr(uefn_modal, "save_modal_watchdog", lambda _op: nullcontext([]))
     monkeypatch.setattr(uefn_popups, "list_popups", lambda: state["popups"])
     monkeypatch.setattr(call_limits, "_editor_answers", lambda: state["ping_ok"])
+    monkeypatch.setattr(call_limits, "_command_in_window", lambda: state["in_window"])
     monkeypatch.setattr(call_limits, "EPIC_CALL_LIMIT_S", 0.2)
 
     class Session:
@@ -73,6 +74,17 @@ def test_a_hung_call_behind_a_popup_names_it(hung_epic) -> None:
     out = _reason(pool, state)
     assert out["ok"] is False and out["reason"] == "popup"
     assert out["hwnd"] == "0x1234" and out["title"] == "Message Log"
+
+
+def test_a_hung_call_behind_a_ducky_commands_own_dialog_says_popup_not_wait(hung_epic) -> None:
+    """Nov 13 2026: create_physics_asset_for_mesh put up UEFN's "Message" [OK] box, which leaves
+    the main window enabled. The Epic call behind it read "game thread is busy ... Wait"."""
+    pool, state = hung_epic
+    state["popups"] = [{"hwnd": 0x98, "title": "Message", "blocking": False, "dialog": True}]
+    state["in_window"] = {"command": "create_physics_asset_for_mesh", "seconds": 426.0}
+    out = _reason(pool, state)
+    assert out["reason"] == "popup" and out["command"] == "create_physics_asset_for_mesh"
+    assert "426 s" in out["message"] and "uefn_popups" in out["message"] and "Do not wait" in out["message"]
 
 
 def test_a_hung_call_with_a_busy_game_thread_says_editor_busy(hung_epic) -> None:

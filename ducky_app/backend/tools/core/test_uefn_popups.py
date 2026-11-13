@@ -237,6 +237,54 @@ def test_unable_to_refresh_is_a_lone_ok_message_box() -> None:
     assert not popups.is_lone_button_popup(box, popups.find_buttons(_img("data_loss_warning")))  # a choice
 
 
+def test_uefns_own_message_box_is_pressed_though_the_editor_window_stays_enabled(monkeypatch) -> None:
+    """Nov 13 2026: "Message: Must specify a valid skeletal mesh for the physics asset to
+    target." [OK] held the editor for 7 minutes. A Slate dialog leaves the main window
+    enabled, so it read blocking=False and the lone-button pass skipped it."""
+    buttons = popups.find_buttons(_img("unable_to_refresh"))
+    box = _box("Message", blocking=False, dialog=True)
+    assert popups.is_lone_button_popup(box, buttons)
+    assert not popups.is_lone_button_popup({**box, "dialog": False}, buttons)  # a resizable tool window
+    assert not popups.is_lone_button_popup({**box, "enabled": False}, buttons)
+
+    clicks: list[int] = []
+    up = [dict(box)]
+    monkeypatch.setattr(popups, "list_popups", lambda: list(up))
+    monkeypatch.setattr(popups, "_grab", lambda rect, hwnd=0: _img("unable_to_refresh"))
+    monkeypatch.setattr(popups, "_save_capture", lambda img, found: "")
+    monkeypatch.setattr(popups, "_retry", {})
+    monkeypatch.setattr("frontend.window_view.inject_pointer",
+                        lambda hwnd, kind, nx, ny, **_: (clicks.append(hwnd), up.clear()) if kind == "up" else None)
+    assert [d["title"] for d in popups.press_lone_button_popups()] == ["Message"]
+    assert clicks == [515]
+
+
+def test_a_dialog_holds_the_editor_only_while_a_command_sits_inside_a_window(monkeypatch) -> None:
+    dialog = _box("Message", blocking=False, dialog=True)
+    tool_window = _box("Message Log", hwnd=77, blocking=False, dialog=False)
+    monkeypatch.setattr(popups, "list_popups", lambda: [dict(tool_window), dict(dialog)])
+    monkeypatch.setattr(popups, "command_in_window", lambda: None)
+    assert popups.holding_popups() == []  # a dialog the person has open, the editor works
+    assert "may be behind a popup" in popups.blocked_call_hint()
+
+    monkeypatch.setattr(popups, "command_in_window", lambda: {"command": "create_physics_asset_for_mesh", "seconds": 9.0})
+    assert [p["title"] for p in popups.holding_popups()] == ["Message"]
+    assert "holds the editor ('Message')" in popups.blocked_call_hint()
+
+
+def test_a_command_counts_as_inside_a_window_after_three_seconds(monkeypatch) -> None:
+    from backend.bridge import client
+
+    health = {"in_window_sec": 1.2, "current_command": "import_asset"}
+    monkeypatch.setattr(client, "configured_listener_port", lambda: 4200)
+    monkeypatch.setattr(client, "listener_get_health", lambda port, timeout=1.0: dict(health))
+    assert popups.command_in_window() is None  # a progress bar's redraw, not a held window
+    health["in_window_sec"] = 426.0
+    assert popups.command_in_window() == {"command": "import_asset", "seconds": 426.0}
+    monkeypatch.setattr(client, "listener_get_health", lambda port, timeout=1.0: None)  # UEFN away
+    assert popups.command_in_window() is None
+
+
 @pytest.fixture()
 def uefn_popup(monkeypatch):
     """A fake UEFN showing one blocking popup until any of its buttons is clicked."""

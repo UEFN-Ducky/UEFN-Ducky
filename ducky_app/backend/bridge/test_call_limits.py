@@ -34,6 +34,7 @@ def test_long_listener_tools_answer_at_the_heavy_editor_deadline() -> None:
 
 def test_a_late_editor_job_says_what_holds_it_and_never_to_send_it_again(monkeypatch) -> None:
     monkeypatch.setattr(call_limits, "blocking_popup", lambda: None)
+    monkeypatch.setattr(call_limits, "_command_in_window", lambda: None)
     monkeypatch.setattr(call_limits, "_editor_answers", lambda: False)
     busy = call_limits.timed_out_message("import_asset", 300)
     assert "import_asset did not answer in 300 s and UEFN's game thread is busy" in busy

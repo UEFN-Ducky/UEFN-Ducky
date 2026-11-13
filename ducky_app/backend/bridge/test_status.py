@@ -17,6 +17,21 @@ def _patch_epic(monkeypatch, *, online: bool = False) -> None:
     )
 
 
+def test_a_command_held_by_a_popup_says_so_and_names_it(monkeypatch):
+    """Nov 13 2026: status read "busy (editor command running · get_skeletal_mesh_info)" for 7
+    minutes while create_physics_asset_for_mesh sat behind UEFN's "Message" [OK] box."""
+    _patch_epic(monkeypatch, online=True)
+    monkeypatch.setattr(
+        "backend.bridge.status.listener_get_health",
+        lambda _port: {"status": "ok", "busy": True, "uptime_sec": 400, "tick_age_sec": 0.01,
+                       "current_command": "create_physics_asset_for_mesh", "in_window_sec": 426.2},
+    )
+    status = fetch_listener_status(4200, state=ListenerStatusState(), version="test")
+    assert status["in_window_sec"] == 426.2 and status["wedged"] is False
+    assert "held by a UEFN popup for 426 s · create_physics_asset_for_mesh" in status["status_text"]
+    assert "uefn_popups" in status["status_text"]
+
+
 def test_busy_listener_stays_online(monkeypatch):
     _patch_epic(monkeypatch, online=True)
     monkeypatch.setattr(

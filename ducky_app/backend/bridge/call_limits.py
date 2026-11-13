@@ -92,6 +92,16 @@ def _editor_answers() -> bool:
         return False
 
 
+def _command_in_window() -> dict[str, Any] | None:
+    """The Ducky command that sits inside a UEFN window it opened, else None. Never raises."""
+    try:
+        from backend.tools.core.uefn_popups import command_in_window
+
+        return command_in_window()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def stall_reason(op: str, limit: float) -> dict[str, Any]:
     """Why an editor call has not answered within ``limit``: popup | editor_busy | no_answer."""
     popup = blocking_popup()
@@ -99,6 +109,16 @@ def stall_reason(op: str, limit: float) -> dict[str, Any]:
         return {"ok": False, "reason": "popup", "hwnd": hex(int(popup.get("hwnd") or 0)),
                 "title": str(popup.get("title") or ""),
                 "message": f"{op} is held by a UEFN popup: call uefn_popups, then uefn_popup_press(hwnd, n)."}
+    # One of UEFN's own dialogs leaves the main window enabled, so it is no "blocking" popup
+    # above; the listener knows its command sits inside a window. Nov 13 2026: this read
+    # "game thread is busy ... Wait" for 7 minutes behind a "Message" [OK] box.
+    held = _command_in_window()
+    if held:
+        what = f"`{held['command']}`" if held.get("command") else "an editor command"
+        return {"ok": False, "reason": "popup", "command": str(held.get("command") or ""),
+                "message": f"{op} waits behind {what}, which has sat inside a UEFN window for "
+                           f"{float(held.get('seconds') or 0):.0f} s. Do not wait: call uefn_popups, "
+                           "then uefn_popup_press(hwnd, n)."}
     if not _editor_answers():
         return {"ok": False, "reason": "editor_busy",
                 "message": f"{op} did not answer in {limit:.0f} s and UEFN's game thread is busy: "

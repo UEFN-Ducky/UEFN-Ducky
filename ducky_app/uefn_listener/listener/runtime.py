@@ -26,6 +26,8 @@ def abort_pending_commands(reason: str) -> int:
         unreal._mcp_in_flight = False
         unreal._mcp_in_flight_since = 0.0
         unreal._mcp_dispatching = False
+        unreal._mcp_current_command = ""
+        unreal._mcp_nested_since = 0.0
     with responses_lock:
         for req_id, ev in list(response_events.items()):
             responses[req_id] = {"success": False, "error": reason}

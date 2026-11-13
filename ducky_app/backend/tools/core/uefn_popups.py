@@ -176,8 +176,10 @@ def list_popups() -> list[dict[str, Any]]:
     import ctypes
 
     windows = _enum_uefn_windows()
-    # A modal popup disables the main editor window: that is what "blocking" means.
-    # Floating tool windows (Message Log) leave it enabled.
+    # A Windows-native modal (a file picker, a system message box) disables the main editor
+    # window: that is "blocking". UEFN's own Slate dialogs do NOT: the "Message" [OK] box
+    # of Nov 13 2026 held the editor for 7 minutes with the main window still enabled, so
+    # it read "not blocking" and nothing pressed it. Those are told by shape (``dialog``).
     main = [w for w in windows if str(w.get("title") or "").strip().lower() == _MAIN_TITLE]
     blocked = bool(main) and not ctypes.windll.user32.IsWindowEnabled(int(main[0]["hwnd"]))
     out = []
@@ -189,8 +191,54 @@ def list_popups() -> list[dict[str, Any]]:
         if rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0:
             continue
         out.append({"hwnd": int(win["hwnd"]), "title": title, "rect": rect, "blocking": blocked,
+                    "dialog": bool(win.get("owned")) and _fixed_size(int(win["hwnd"])),
                     "enabled": bool(ctypes.windll.user32.IsWindowEnabled(int(win["hwnd"])))})
     return out
+
+
+_WS_SIZABLE = 0x00040000 | 0x00020000 | 0x00010000  # WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+
+
+def _fixed_size(hwnd: int) -> bool:
+    """A window with no sizing frame and no minimize / maximize box: a dialog or message box.
+    A floating tool window (Message Log, Output Log) can be resized and is not one."""
+    import ctypes
+
+    try:
+        style = int(ctypes.windll.user32.GetWindowLongW(int(hwnd), -16))  # GWL_STYLE
+    except Exception:
+        return False
+    return bool(style) and not style & _WS_SIZABLE
+
+
+# A command inside a window it opened for this long is held by that window, not working.
+_IN_WINDOW_MIN_S = 3.0
+
+
+def command_in_window() -> dict[str, Any] | None:
+    """The Ducky command that sits inside a UEFN window it opened (``{command, seconds}``),
+    as the listener reports it; None when none does or UEFN is away. Never raises."""
+    try:
+        from backend.bridge.client import configured_listener_port, listener_get_health
+
+        health = listener_get_health(configured_listener_port(), timeout=0.5) or {}
+        seconds = float(health.get("in_window_sec") or 0.0)
+        if seconds < _IN_WINDOW_MIN_S:
+            return None
+        return {"command": str(health.get("current_command") or ""), "seconds": seconds}
+    except Exception:
+        return None
+
+
+def holding_popups() -> list[dict[str, Any]]:
+    """The popups that hold the editor now, for telling an agent where to look: a native modal
+    (``blocking``), or a dialog on screen while a Ducky command sits inside a window."""
+    on_screen = list_popups()
+    held = [p for p in on_screen if p.get("blocking")]
+    if held:
+        return held
+    dialogs = [p for p in on_screen if p.get("dialog") and p.get("enabled", True)]
+    return dialogs if dialogs and command_in_window() else []
 
 
 def _print_window(hwnd: int, width: int, height: int) -> Any | None:
@@ -401,10 +449,11 @@ _LONE_MAX_H = 900
 
 
 def is_lone_button_popup(popup: dict[str, Any], buttons: list[dict[str, Any]]) -> bool:
-    """A blocking message box whose only button is the blue default (OK / Close)."""
+    """A message box whose only button is the blue default (OK / Close): a native modal
+    (``blocking``) or one of UEFN's own dialogs (``dialog``: owned by the editor, fixed size)."""
     title = str(popup.get("title") or "").strip().lower()
-    if not popup.get("blocking") or not popup.get("enabled", True):
-        return False  # the modal itself is the one enabled window
+    if not (popup.get("blocking") or popup.get("dialog")) or not popup.get("enabled", True):
+        return False  # a tool window, or a window behind the modal
     if not title or title in KNOWN_POPUPS or is_conflict_dialog_title(title) or _LONE_REJECT_RE.search(title):
         return False
     rect = popup.get("rect") or {}
@@ -462,7 +511,7 @@ def find_conflict_dialog() -> dict[str, Any] | None:
 def blocked_call_hint() -> str:
     """What a hung or timed-out editor call tells the agent: look at UEFN and act."""
     try:
-        titles = [p["title"] for p in list_popups() if p.get("blocking")]
+        titles = [p["title"] for p in holding_popups()]
     except Exception:
         titles = []
     act = (

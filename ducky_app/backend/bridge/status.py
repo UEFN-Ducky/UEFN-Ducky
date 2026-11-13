@@ -248,6 +248,11 @@ def fetch_listener_status(
     current_command = (
         str(health.get("current_command") or "") if get_ok and isinstance(health, dict) else ""
     )
+    # Seconds the running command has sat inside a UEFN window it opened (a message box).
+    try:
+        in_window = float(health.get("in_window_sec") or 0.0) if get_ok and isinstance(health, dict) else 0.0
+    except (TypeError, ValueError):
+        in_window = 0.0
 
     if get_ok:
         online = True
@@ -295,7 +300,11 @@ def fetch_listener_status(
         status_text = "Listener wedged — call reload_listener once, then stay on workspace_*"
     elif online and busy:
         cmd = f" · {current_command}" if current_command else ""
-        status_text = f"Online · busy (editor command running{cmd})"
+        if in_window >= 3.0:
+            status_text = (f"Online · held by a UEFN popup for {in_window:.0f} s{cmd}: "
+                           "call uefn_popups, then uefn_popup_press")
+        else:
+            status_text = f"Online · busy (editor command running{cmd})"
     elif online and uptime:
         status_text = f"Online · up {_sec_to_uptime(uptime)}"
     elif online:
@@ -382,6 +391,7 @@ def fetch_listener_status(
         "port": port,
         "tick_age_sec": tick_age,
         "current_command": current_command,
+        "in_window_sec": in_window,
         "epic_mcp_online": epic_online,
         "epic_mcp_reason": epic_reason,
         "epic_mcp_url": str(epic.get("epic_mcp_url") or ""),

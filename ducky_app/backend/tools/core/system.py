@@ -121,15 +121,17 @@ def uefn_popups(pretty: bool = False) -> str:
     Continue). After that the level is not saved until Verse builds clean (Ducky reloads
     the map then). A button outside the numbered row: uefn_window_click on the capture.
     """
-    from backend.tools.core.uefn_popups import describe_popup, list_popups
+    from backend.tools.core.uefn_popups import describe_popup, holding_popups, list_popups
 
     # The capture asks UEFN's window to draw itself (PrintWindow), which waits on a busy
     # editor thread: past a few seconds the popup is listed without its capture.
     def uncaptured(popup: dict[str, Any]) -> Callable[[], dict[str, Any]]:
         return lambda: {**popup, "capture": "timed out: UEFN is not drawing (editor thread busy)"}
 
+    # One of UEFN's own dialogs holds the editor without disabling its main window.
+    held = {p["hwnd"] for p in holding_popups()}
     popups = [team_waits.call_within(team_waits.POPUP_CAPTURE_S, describe_popup, p, fallback=uncaptured(p))
-              for p in list_popups()]
+              for p in ({**q, "blocking": bool(q.get("blocking")) or q["hwnd"] in held} for q in list_popups())]
     return tool_json({"ok": True, "popups": popups, "count": len(popups)}, pretty=pretty)
 
 
