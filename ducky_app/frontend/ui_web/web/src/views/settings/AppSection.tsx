@@ -147,6 +147,12 @@ export function AppSection() {
     }
   }, [updateState.stage, updateState.error]);
 
+  // An installer download that failed earlier is old news once the update is here and ready:
+  // left on screen under "is downloaded", it read as the update still failing (Nov 13 2026).
+  useEffect(() => {
+    if (auto?.phase === "ready") setErrorText(null);
+  }, [auto?.phase]);
+
   const refreshStatus = async () => {
     const api = getApi();
     if (!api || typeof api.get_app_update_status !== "function") return null;
