@@ -680,12 +680,30 @@ def _download(url: str, dest: Path, *, timeout: float = 120.0) -> str | None:
                     links, misses = links[1:], 0
                     continue
                 if misses >= ATTEMPTS or not retryable(exc):
-                    return str(exc)
+                    return _download_error(exc)
                 if _cancel.wait(retry_delay(misses)):
                     return _CANCELLED
         return "Update download failed."
     finally:
         _unlink_quiet(partial)
+
+
+def _download_error(exc: BaseException) -> str:
+    """A Setup download that gave up, in words a person can act on. It read
+    "<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of
+    protocol (_ssl.c:1032)>" and nothing else (Nov 13 2026)."""
+    try:
+        import urllib.error
+
+        from frontend.net_access import explain
+        from frontend.version_check import download_page_url
+
+        browser = f"You can also get the installer in your browser: {download_page_url()}"
+        if isinstance(exc, urllib.error.HTTPError):
+            return f"The download server answered with an error (HTTP {exc.code}). Try again in a minute. {browser}"
+        return f"{explain(exc, 'the download server')[1]} {browser}"
+    except Exception:  # noqa: BLE001 — the raw error still says something
+        return str(exc)
 
 
 def _track_response(resp: Any | None) -> None:

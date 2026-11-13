@@ -181,6 +181,74 @@ def test_diagnose_reports_each_hop_without_raising(monkeypatch):
     assert out["ok"] is False and out["proxy"] == "direct" and out["proxy_mode"] == "none"
 
 
+def test_an_address_that_cut_a_secure_handshake_is_tried_last_for_a_while(monkeypatch):
+    """Nov 13 2026: the storage host's first address (IPv6) cut every handshake and the retries
+    went back to it five times."""
+    calls = []
+    monkeypatch.setattr(na, "_tls_cut", {})
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [V6A, V4A])
+    monkeypatch.setattr(na, "_orig_create_connection",
+                        lambda addr, timeout=None, source=None, **_: calls.append(addr[0]) or _Sock(timeout))
+    na.create_connection(("bucket.fly.storage.tigris.dev", 443), 8)
+    na.note_tls_cut(("2606:4700::1", 443, 0, 0))
+    na.create_connection(("bucket.fly.storage.tigris.dev", 443), 8)
+    assert calls == ["2606:4700::1", "104.21.73.49"]
+
+    later = na.time.monotonic() + na.TLS_CUT_S + 1
+    monkeypatch.setattr(na.time, "monotonic", lambda: later)
+    na.create_connection(("bucket.fly.storage.tigris.dev", 443), 8)
+    assert calls[-1] == "2606:4700::1"  # ten minutes on it gets its turn again
+
+
+def test_one_family_with_a_cut_address_moves_to_the_next_one(monkeypatch):
+    v4b = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("172.67.140.152", 443))
+    calls = []
+    monkeypatch.setattr(na, "_tls_cut", {})
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [V4A, v4b])
+    monkeypatch.setattr(na, "_orig_create_connection",
+                        lambda addr, timeout=None, source=None, **_: calls.append(addr[0]) or _Sock(timeout))
+    na.note_tls_cut(("104.21.73.49", 443))
+    na.create_connection(("uefnducky.org", 443), 8)
+    assert calls == ["172.67.140.152"]
+
+
+def test_only_a_cut_handshake_counts_never_a_certificate():
+    import ssl
+
+    assert na.handshake_cut(ssl.SSLEOFError(8, "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"))
+    assert na.handshake_cut(ConnectionResetError(10054, "reset"))
+    assert not na.handshake_cut(ssl.SSLCertVerificationError(1, "certificate verify failed"))
+    assert not na.handshake_cut(TimeoutError("timed out"))
+
+
+def test_the_network_test_checks_the_host_the_download_comes_from(monkeypatch):
+    """The site answered and plugins installed while every update download died on storage."""
+    import urllib.error
+
+    def leg(url, timeout=5.0):
+        second = "alt=1" in url
+        cut = {"ok": False, "stage": "cut", "error": "EOF occurred in violation of protocol"}
+        return {"host": "bucket.t3.storage.dev" if second else "bucket.fly.storage.tigris.dev", "ok": second,
+                "ipv4": {"ok": True, "ms": 80} if second else cut, "ipv6": {"ok": None}}
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [V4A])
+    monkeypatch.setattr(na, "_orig_create_connection", lambda addr, timeout=None, *a, **k: socket.socket())
+    monkeypatch.setattr(na, "_HANDLER", _handler(lambda *_: "", cfg={}))
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
+
+    class Opener:
+        def open(self, req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 405, "no HEAD", {}, None)  # the site answered
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *h: Opener())
+    monkeypatch.setattr(na, "download_leg", leg)
+    out = na.diagnose("https://uefnducky.org/", download_url="https://uefnducky.org/api/v1/files/app-release/latest")
+    assert out["ok"] is True  # the site is fine
+    assert out["download"]["ok"] is False and out["download"]["ipv4"]["stage"] == "cut"
+    assert out["download_alt"]["host"] == "bucket.t3.storage.dev" and out["download_alt"]["ok"] is True
+    assert "download" not in na.diagnose("https://uefnducky.org/")  # asked for the site only
+
+
 def test_no_auto_config_uses_the_fixed_proxy(monkeypatch):
     monkeypatch.setattr(urllib.request, "getproxies", lambda: {"https": "http://corp:3128"})
     monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)

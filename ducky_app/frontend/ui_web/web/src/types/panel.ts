@@ -28,6 +28,17 @@ export interface NetworkTest {
   ipv4: { ok: boolean | null; ms?: number; error?: string };
   ipv6: { ok: boolean | null; ms?: number; error?: string };
   https: { ok: boolean; status?: number; ms?: number; stage?: string; error?: string };
+  /** The storage host update downloads come from, and the site's second one when it has one. */
+  download?: NetworkDownloadLeg;
+  download_alt?: NetworkDownloadLeg;
+}
+
+export interface NetworkDownloadLeg {
+  ok: boolean;
+  host: string;
+  error?: string;
+  ipv4?: { ok: boolean | null; ms?: number; stage?: string; error?: string };
+  ipv6?: { ok: boolean | null; ms?: number; stage?: string; error?: string };
 }
 
 export interface AppUpdateStatus {

@@ -601,11 +601,13 @@ class PanelApiWindowMixin:
         return get_app_update_status()
 
     def run_network_test(self) -> dict[str, Any]:
-        """Settings → App Info "Test network": DNS, IPv4, IPv6, proxy and HTTPS to the site."""
+        """Settings → App Info "Test network": DNS, IPv4, IPv6, proxy and HTTPS to the site, and
+        a secure connection to the storage host the update downloads come from."""
         from frontend.net_access import diagnose
         from frontend.version_check import update_base_url
 
-        return diagnose(update_base_url() + "/")
+        base = update_base_url()
+        return diagnose(base + "/", download_url=base + "/api/v1/files/app-release/latest")
 
     def get_app_patch_notes(self) -> dict[str, Any]:
         from frontend.version_check import get_app_patch_notes

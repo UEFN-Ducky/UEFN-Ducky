@@ -34,4 +34,26 @@ describe("networkTestLines", () => {
     expect(lines).toContain("Proxy: none");
     expect(lines.at(-1)).toBe("HTTPS: ok (200, 150 ms)");
   });
+
+  it("shows the download server apart from the site: the site can answer while downloads are cut", () => {
+    // Nov 13 2026: plugins installed (the site serves them) while every update download failed.
+    const lines = networkTestLines({
+      ok: true, host: "uefnducky.org", proxy_mode: "none", proxy: "direct",
+      dns: { ok: true, ms: 5, ipv4: 2, ipv6: 2 }, ipv4: { ok: true, ms: 18 }, ipv6: { ok: true, ms: 19 },
+      https: { ok: true, status: 200, ms: 150 },
+      download: {
+        ok: false, host: "bucket.fly.storage.tigris.dev",
+        ipv4: { ok: false, stage: "cut", error: "EOF occurred in violation of protocol" }, ipv6: { ok: null },
+      },
+      download_alt: { ok: true, host: "bucket.t3.storage.dev", ipv4: { ok: true, ms: 82 }, ipv6: { ok: null } },
+    });
+    expect(lines.slice(6)).toEqual([
+      "Update downloads (bucket.fly.storage.tigris.dev): NOT reachable",
+      "  IPv4: failed (EOF occurred in violation of protocol)",
+      "  IPv6: not offered",
+      "Second download server (bucket.t3.storage.dev): reachable",
+      "  IPv4: ok (82 ms)",
+      "  IPv6: not offered",
+    ]);
+  });
 });

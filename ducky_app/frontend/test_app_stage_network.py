@@ -320,3 +320,85 @@ def test_the_second_host_goes_on_from_the_bytes_the_first_delivered(tls_server, 
     assert app_stage.fetch(server.url + FILE_ROUTE) == BODY
     assert server.requests[0][:2] == (FILE_ROUTE, 0)
     assert server.requests[-1][:2] == (FILE_ROUTE + "?alt=1", 300_000), "resumed on the second host, never restarted"
+
+
+# ---- one address of the storage host cuts every handshake
+#
+# Nov 13 2026: "<urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation
+# of protocol (_ssl.c:1032)>" on every update download, on PCs where plugins (served by the
+# site itself) installed fine. The storage host has an IPv6 and an IPv4 address. A connect
+# that works never moves on to the host's next address, so five retries were five handshakes
+# with the same one.
+
+
+@pytest.fixture()
+def two_addresses(tmp_path, monkeypatch):
+    """A host with two addresses: the first cuts every secure handshake, the second serves.
+    Requests go out the way the installed app sends them (net_access.install)."""
+    from frontend import net_access as na
+
+    cut = FlakyTls(tmp_path, {"/pack": BODY}, lambda n: "eof")
+    good = FlakyTls(tmp_path, {"/pack": BODY}, lambda n: "ok")
+    real = socket.getaddrinfo
+
+    def resolve(host, port, *args, **kwargs):
+        if host == "127.0.0.1" and port == cut.port:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", p)) for p in (cut.port, good.port)]
+        return real(host, port, *args, **kwargs)
+
+    class Handler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(na.FallbackHTTPSConnection, req, context=good.client_ctx)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(socket, "create_connection", na.create_connection)
+    monkeypatch.setattr(na, "_tls_cut", {})
+    monkeypatch.setattr(urllib.request, "_opener", urllib.request.build_opener(Handler()))
+    yield cut, good, f"https://127.0.0.1:{cut.port}/pack"
+    cut.close()
+    good.close()
+
+
+def test_the_cut_is_the_error_people_saw(two_addresses) -> None:
+    from frontend import net_access as na
+
+    cut, _good, _url = two_addresses
+    raw = socket.create_connection(("127.0.0.1", cut.port), 5)
+    with pytest.raises(OSError) as err:
+        ssl.create_default_context().wrap_socket(raw, server_hostname="127.0.0.1")
+    assert na.handshake_cut(err.value), repr(err.value)
+    assert na.stage_of(err.value) == "tls"
+    plain = na.explain(urllib.error.URLError(err.value), "the download server")[1]
+    assert "was cut while it was being set up" in plain and "clock" not in plain
+
+
+def test_an_address_that_cuts_the_handshake_is_left_for_the_hosts_next_one(two_addresses, _no_waits) -> None:
+    cut, good, url = two_addresses
+    assert app_stage.fetch_range(url, 1000, 600_000) == BODY[1000:600_000]
+    assert [r[2] for r in cut.requests] == ["eof"] and [r[2] for r in good.requests] == ["ok"]
+    assert _no_waits == []  # the same try went on: no failure, no wait
+    # The next connections start with the address that works.
+    assert app_stage.fetch_range(url, 0, 100) == BODY[:100]
+    assert app_stage.fetch(url) == BODY
+    assert len(cut.requests) == 1 and len(good.requests) == 3
+
+
+def test_setup_downloads_past_an_address_that_cuts_the_handshake(two_addresses, tmp_path) -> None:
+    from frontend import updater
+
+    cut, _good, url = two_addresses
+    dest = tmp_path / "Setup.exe"
+    assert updater._download(url, dest) is None
+    assert dest.read_bytes() == BODY and len(cut.requests) == 1
+
+
+def test_a_host_whose_every_address_cuts_still_fails_in_plain_words(two_addresses, tmp_path, monkeypatch) -> None:
+    from frontend import updater
+
+    _cut, good, url = two_addresses
+    good.plan = lambda n: "eof"
+    monkeypatch.setattr("frontend.version_check.download_page_url", lambda: "https://uefnducky.org/download")
+    error = updater._download(url, tmp_path / "Setup.exe")
+    assert error and "urlopen error" not in error
+    assert "was cut while it was being set up" in error and "https://uefnducky.org/download" in error
+    assert not (tmp_path / "Setup.exe").exists()

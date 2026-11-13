@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { getApi } from "../../hooks/usePanelApi";
 import { onApiReady } from "../../hooks/onApiReady";
-import type { AppUpdateStatus, AutoUpdateStatus, DuckyOSStorePatchNote, NetworkTest } from "../../types/panel";
+import type {
+  AppUpdateStatus,
+  AutoUpdateStatus,
+  DuckyOSStorePatchNote,
+  NetworkDownloadLeg,
+  NetworkTest,
+} from "../../types/panel";
 import {
   getAppUpdateState,
   startAppUpdate,
@@ -40,6 +46,17 @@ function step(label: string, r: { ok: boolean | null; ms?: number; error?: strin
   return r.ok ? `${label}: ok${r.ms != null ? ` (${r.ms} ms)` : ""}` : `${label}: failed${r.error ? ` (${r.error})` : ""}`;
 }
 
+/** The storage host the update downloads come from: the site answering says nothing about it. */
+function downloadLines(label: string, leg: NetworkDownloadLeg | undefined): string[] {
+  if (!leg) return [];
+  if (leg.error) return [`${label}: failed (${leg.error})`];
+  return [
+    `${label} (${leg.host}): ${leg.ok ? "reachable" : "NOT reachable"}`,
+    ...(leg.ipv4 ? [`  ${step("IPv4", leg.ipv4)}`] : []),
+    ...(leg.ipv6 ? [`  ${step("IPv6", leg.ipv6)}`] : []),
+  ];
+}
+
 /** One line per check, plain enough to paste into a support message. */
 export function networkTestLines(t: NetworkTest): string[] {
   return [
@@ -49,6 +66,8 @@ export function networkTestLines(t: NetworkTest): string[] {
     step("IPv6", t.ipv6),
     `Proxy: ${t.proxy_mode === "none" ? "none" : `${t.proxy_mode} → ${t.proxy}`}`,
     t.https.ok ? `HTTPS: ok (${t.https.status}, ${t.https.ms} ms)` : `HTTPS: failed at ${t.https.stage} · ${t.https.error ?? ""}`,
+    ...downloadLines("Update downloads", t.download),
+    ...downloadLines("Second download server", t.download_alt),
   ];
 }
 
@@ -399,7 +418,8 @@ export function AppSection() {
       {errorText && !updating ? (
         <p className="general-tab-section-note general-tab-section-note--error">{errorText}</p>
       ) : null}
-      {checkResult === "error" && !updating ? (
+      {/* Also after a download that failed: the check can pass while the download host is cut. */}
+      {(checkResult === "error" || errorText) && !updating ? (
         <div className="general-tab-section-note">
           <button type="button" className="settings-btn" disabled={netTest === "running"} onClick={() => void handleNetworkTest()}>
             {netTest === "running" ? "Testing network…" : "Test network"}
