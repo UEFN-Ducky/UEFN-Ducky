@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -59,3 +60,25 @@ def test_the_compiler_runs_without_a_console_window(monkeypatch, tmp_path: Path)
     # From the app (no console) each build step opened its own window, and closing one
     # stopped the build.
     assert flags == [getattr(subprocess, "CREATE_NO_WINDOW", 0)]
+
+
+def test_nuitka_always_builds_with_zig(monkeypatch, tmp_path: Path) -> None:
+    cmds: list[list[str]] = []
+    paths: list[str] = []
+
+    def fake_run(cmd, **kwargs):
+        cmds.append(list(cmd))
+        paths.append((kwargs.get("env") or {}).get("PATH", ""))
+        out = tmp_path / "out"
+        out.mkdir(exist_ok=True)
+        (out / "uefn_plugin_demo.cp313-win_amd64.pyd").write_bytes(b"")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(build_engine.subprocess, "run", fake_run)
+    build_engine._run_nuitka(Path("python.exe"), tmp_path, "uefn_plugin_demo")
+    # With Visual Studio installed Nuitka chose MSVC, which ignores -mcpu=x86_64, and the
+    # .pyd came out with xgetbv (XSAVE): every Store build on that PC was refused.
+    assert "--zig" in cmds[0]
+    # the kit's pinned zig comes first on PATH, so Nuitka doesn't fetch another one
+    kit_zig = str(Path("python.exe").parent / "Lib" / "site-packages" / "ziglang")
+    assert paths[0].split(os.pathsep)[0] == kit_zig
