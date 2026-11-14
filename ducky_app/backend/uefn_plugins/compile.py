@@ -426,6 +426,10 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
         str(kpy), "-m", "nuitka",
         "--module", mod_name,
         f"--include-package={mod_name}",
+        # zig, always: on a PC with Visual Studio, Nuitka picked MSVC, which ignores
+        # BASELINE_CPU_FLAGS ("D9002: unknown option -mcpu=x86_64") and links its CPU
+        # probe (XSAVE xgetbv), so _assert_runs_on_every_cpu refused the build.
+        "--zig",
         f"--output-dir={out_dir}",
         "--remove-output",
         "--assume-yes-for-downloads",
@@ -438,6 +442,10 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     if jobs.isdigit() and int(jobs) > 0:
         cmd += [f"--jobs={int(jobs)}", "--low-memory"]
     env = dict(os.environ, CFLAGS=BASELINE_CPU_FLAGS, LDFLAGS=BASELINE_CPU_FLAGS)
+    # --zig finds zig on PATH; without the kit's own (ZIGLANG_SPEC) there, Nuitka downloaded
+    # a newer one of its own.
+    zig_dir = kpy.parent / "Lib" / "site-packages" / "ziglang"
+    env["PATH"] = str(zig_dir) + os.pathsep + env.get("PATH", "")
     # zig's shared cache (%LOCALAPPDATA%\zig) kept entries whose files were gone, and every
     # zig cc that hit one failed with "failed to link with LLD: FileNotFound" (Forge 1.2.10).
     # Each build gets its own cache, deleted with the work dir.
