@@ -173,6 +173,7 @@ def _reset_overlay_env_state(bo) -> None:
     bo._panes.clear()
     bo._env_bootstrap_started = False
     bo._ensure_inflight = False
+    bo._ensure_owner = None
 
 
 def test_second_pane_queues_while_first_boots() -> None:
@@ -231,6 +232,99 @@ def test_second_pane_queues_while_ensure_inflight() -> None:
         bo._create_control(second)
         assert second.control is None
         assert second in bo._pending_env_panes
+    finally:
+        _reset_overlay_env_state(bo)
+
+
+def _ui_window():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(native=SimpleNamespace(InvokeRequired=False, Controls=SimpleNamespace(Remove=lambda c: None)))
+
+
+def test_closing_a_starting_pane_frees_the_slot(monkeypatch) -> None:
+    """A tab closed while its WebView2 started never fires on_init: the slot stayed taken and
+    every later tab sat on 'Connecting to the browser pane…' for the rest of the run."""
+    from types import SimpleNamespace
+
+    from frontend.ui_web import browser_overlay as bo
+
+    started: list = []
+    monkeypatch.setattr(bo, "_create_control", started.append)
+    win = _ui_window()
+    _reset_overlay_env_state(bo)
+    first = bo._Pane(pane_id="a", window=win, control=SimpleNamespace(Dispose=lambda: None))
+    second = bo._Pane(pane_id="b", window=win)
+    bo._panes.update(a=first, b=second)
+    bo._ensure_inflight, bo._ensure_owner, bo._env_bootstrap_started = True, first, True
+    bo._pending_env_panes.append(second)
+    try:
+        bo.close_pane("a")
+        assert not bo._ensure_inflight and bo._ensure_owner is None
+        assert not bo._env_bootstrap_started  # nobody opened the profile: the next pane does
+        assert started == [second]
+    finally:
+        _reset_overlay_env_state(bo)
+
+
+def test_closing_a_ready_pane_leaves_another_panes_start_alone(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from frontend.ui_web import browser_overlay as bo
+
+    win = _ui_window()
+    _reset_overlay_env_state(bo)
+    done = bo._Pane(pane_id="a", window=win, control=SimpleNamespace(Dispose=lambda: None), ready=True)
+    booting = bo._Pane(pane_id="b", window=win, control=object())
+    bo._panes.update(a=done, b=booting)
+    bo._ensure_inflight, bo._ensure_owner = True, booting
+    try:
+        bo.close_pane("a")
+        assert bo._ensure_inflight and bo._ensure_owner is booting
+    finally:
+        _reset_overlay_env_state(bo)
+
+
+def test_a_pane_that_never_starts_times_out_and_opens_again(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from frontend.ui_web import browser_overlay as bo
+
+    pushed: list = []
+    started: list = []
+    monkeypatch.setattr(bo, "_push_state", pushed.append)
+    monkeypatch.setattr(bo, "_create_control", started.append)
+    win = _ui_window()
+    monkeypatch.setattr(bo, "_window_for_wid", lambda _wid: win)
+    monkeypatch.setattr(bo.sys, "platform", "win32")
+    _reset_overlay_env_state(bo)
+    pane = bo._Pane(pane_id="a", window=win, control=SimpleNamespace(Dispose=lambda: None),
+                    pending_url="https://uefnducky.org")
+    bo._panes["a"] = pane
+    bo._ensure_inflight, bo._ensure_owner = True, pane
+    try:
+        bo._boot_timed_out(pane)
+        assert pane.control is None and "didn't start" in pane.failed and pushed == [pane]
+        assert not bo._ensure_inflight and bo._ensure_owner is None
+        res = bo.open_pane("a", "")  # the page reconnects (tab shown again, new tab, reload)
+        assert res["ok"] and started == [pane] and pane.failed == ""
+        assert pane.pending_url == "https://uefnducky.org"
+    finally:
+        _reset_overlay_env_state(bo)
+
+
+def test_open_pane_refuses_a_window_with_no_form(monkeypatch) -> None:
+    """A pane registered with nothing to start it in sat on 'Connecting…' with no error."""
+    from types import SimpleNamespace
+
+    from frontend.ui_web import browser_overlay as bo
+
+    monkeypatch.setattr(bo, "_window_for_wid", lambda _wid: SimpleNamespace(native=None))
+    monkeypatch.setattr(bo.sys, "platform", "win32")
+    _reset_overlay_env_state(bo)
+    try:
+        assert bo.open_pane("a", "https://uefnducky.org")["ok"] is False
+        assert "a" not in bo._panes
     finally:
         _reset_overlay_env_state(bo)
 

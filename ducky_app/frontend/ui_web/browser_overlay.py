@@ -45,6 +45,8 @@ _pending_env_panes: list[_Pane] = []
 _env_bootstrap_started: bool = False
 # True while EnsureCoreWebView2Async is in flight — serialize ALL pane boots.
 _ensure_inflight: bool = False
+_ensure_owner: _Pane | None = None  # the pane holding that slot; only it frees the slot
+_BOOT_TIMEOUT_S = 45.0  # a pane that hasn't started by then frees the slot (never every tab stuck)
 
 _SELF_EMBED_MSG = "Cannot navigate to the app's own UI (self-embed blocked)"
 
@@ -579,34 +581,11 @@ def evaluate(pane_id: str, expression: str, timeout_s: float = 30.0) -> dict[str
 
 
 def _await_cookie_task(task: Any, timeout_s: float = 2.0) -> tuple[list[dict[str, Any]], str]:
-    """Wait for GetCookiesAsync off the UI thread.
-
-    Blocking GetResult/Wait on the WinForms UI thread deadlocks (cookie completion
-    needs that same thread) — padlock then hits the plugin bridge 6s timeout and
-    the whole app stops taking clicks.
-    """
+    """GetCookiesAsync, waited for off the UI thread (blocking there deadlocks the padlock)."""
     if task is None:
         return [], ""
-    box: dict[str, Any] = {"v": None, "e": ""}
-    done = threading.Event()
-
-    def worker() -> None:
-        try:
-            if hasattr(task, "GetAwaiter"):
-                box["v"] = task.GetAwaiter().GetResult()
-            else:
-                box["v"] = getattr(task, "Result", None)
-        except Exception as exc:
-            box["e"] = str(exc)
-        finally:
-            done.set()
-
-    threading.Thread(target=worker, name="browser-cookies", daemon=True).start()
-    if not done.wait(timeout_s):
-        return [], "cookie read timed out"
-    if box["e"]:
-        return [], str(box["e"])
-    return _cookie_rows(box["v"]), ""
+    cookies, err = _await_task(task, timeout_s, "browser-cookies")
+    return ([], err) if err else (_cookie_rows(cookies), "")
 
 
 def site_security_info(pane_id: str = "") -> dict[str, Any]:
@@ -1012,22 +991,36 @@ def _drain_pending_env_panes() -> None:
             break
     if nxt is None:
         return
-    try:
-        _create_control(nxt)
-    except Exception:
-        _log.exception("queued browser pane create failed: %s", nxt.pane_id)
+    _ui(nxt.window, lambda: _create_control(nxt))  # its own window's UI thread
 
 
-def _finish_ensure() -> None:
-    """Clear the Ensure slot and start the next queued pane."""
-    global _ensure_inflight
-    _ensure_inflight = False
+def _finish_ensure(pane: _Pane | None = None, why: str = "") -> None:
+    """Free the Ensure slot (a pane that doesn't hold it changes nothing) and start the next
+    queued pane. A holder closed or timed out mid-start never fires on_init: without this every
+    later tab queued forever ("Connecting to the browser pane…", no browser process)."""
+    global _ensure_inflight, _ensure_owner, _env_bootstrap_started
+    with _lock:
+        if pane is not None and _ensure_owner is not None and pane is not _ensure_owner:
+            return
+        _ensure_inflight, _ensure_owner = False, None
+        if pane is not None and not pane.ready and _shared_env is None:
+            _env_bootstrap_started = False  # the next pane opens the profile again
+    if why and pane is not None:
+        pane.failed = why
+        _push_state(pane)
     _drain_pending_env_panes()
+
+
+def _boot_timed_out(pane: _Pane) -> None:
+    if pane.ready or pane is not _ensure_owner:
+        return
+    _log.warning("browser pane %s did not start in %.0f s", pane.pane_id, _BOOT_TIMEOUT_S)
+    _destroy_pane_control(pane, f"The page didn't start in {_BOOT_TIMEOUT_S:.0f} s. Open a new tab to try again.")
 
 
 def _create_control(pane: _Pane) -> None:
     """UI thread: build the WebView2 control and wire CoreWebView2 events."""
-    global _shared_env, _env_bootstrap_started, _ensure_inflight, _mode
+    global _shared_env, _env_bootstrap_started, _ensure_inflight, _ensure_owner, _mode
     if pane.control is not None:
         return
     if not _mode:
@@ -1074,7 +1067,10 @@ def _create_control(pane: _Pane) -> None:
         except Exception:
             pass
         pane.control = control
-        _ensure_inflight = True
+        _ensure_inflight, _ensure_owner = True, pane
+        watchdog = threading.Timer(_BOOT_TIMEOUT_S, _boot_timed_out, (pane,))
+        watchdog.daemon = True
+        watchdog.start()
         form.Controls.Add(control)
         _apply_bounds(pane)
 
@@ -1159,6 +1155,8 @@ def _create_control(pane: _Pane) -> None:
         def on_init(sender: Any, args: Any) -> None:
             global _shared_env, _env_bootstrap_started
             try:
+                if pane.control is not control:
+                    return  # closed or timed out while it started
                 if not bool(args.IsSuccess):
                     pane.failed = "WebView2 runtime failed to initialize"
                     try:
@@ -1245,7 +1243,7 @@ def _create_control(pane: _Pane) -> None:
                 pane.failed = "browser pane init failed"
                 _push_state(pane)
             finally:
-                _finish_ensure()
+                _finish_ensure(pane)
 
         pane._handlers.extend(
             [on_source_changed, on_title_changed, on_history_changed, on_nav_starting,
@@ -1264,9 +1262,8 @@ def _create_control(pane: _Pane) -> None:
         pane.failed = "WebView2 control could not be created (runtime missing?)"
         if pane.control is None and _shared_env is None:
             _env_bootstrap_started = False
-        _ensure_inflight = False
         _push_state(pane)
-        _drain_pending_env_panes()
+        _finish_ensure(pane)
 
 
 def open_pane(pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:
@@ -1279,7 +1276,7 @@ def open_pane(pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:
     if target and is_app_ui_url(target):
         return {"ok": False, "error": _SELF_EMBED_MSG}
     window = _window_for_wid(wid)
-    if window is None:
+    if window is None or getattr(window, "native", None) is None:  # never a pane nothing will start
         return {"ok": False, "error": "no host window"}
     if not _on_ui_thread(window):
         profile_mode()  # before the first control opens a profile (it may ask Windows Hello)
@@ -1295,6 +1292,10 @@ def open_pane(pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:
             _panes[pid] = pane
             _ui(window, lambda: _create_control(pane))
             return {"ok": True, **_state_dict(pane)}
+    if pane.control is None and not pane.ready:  # never started (or timed out): start it again
+        pane.failed, pane.pending_url = "", target or pane.pending_url or pane.url
+        _ui(window, lambda: _create_control(pane))
+        return {"ok": True, **_state_dict(pane)}
     # Existing pane: empty url = reconnect only (tab remount). Non-empty = go there
     # (popup / explicit open). Never treat "" as "navigate to homepage".
     if target and target != pane.url:
@@ -1424,7 +1425,7 @@ def get_state(pane_id: str) -> dict[str, Any]:
     return {"ok": True, **_state_dict(pane)}
 
 
-def _destroy_pane_control(pane: _Pane) -> None:
+def _destroy_pane_control(pane: _Pane, why: str = "") -> None:
     control = pane.control
     window = pane.window
     if control is None:
@@ -1442,6 +1443,7 @@ def _destroy_pane_control(pane: _Pane) -> None:
     _ui(window, op)
     pane.control = None
     pane.ready = False
+    _finish_ensure(pane, why)  # a pane closed mid-start frees the slot itself
 
 
 def close_pane(pane_id: str) -> dict[str, Any]:
@@ -1519,30 +1521,6 @@ def hide_all_panes() -> dict[str, Any]:
     return {"ok": True, "hidden": len(panes)}
 
 
-def _await_clear_task(task: Any, timeout_s: float = 8.0) -> str:
-    """Wait for ClearBrowsingDataAsync off the UI thread. Empty string = ok."""
-    if task is None:
-        return "no clear task"
-    box: dict[str, Any] = {"e": ""}
-    done = threading.Event()
-
-    def worker() -> None:
-        try:
-            if hasattr(task, "GetAwaiter"):
-                task.GetAwaiter().GetResult()
-            else:
-                _ = getattr(task, "Result", None)
-        except Exception as exc:
-            box["e"] = str(exc)
-        finally:
-            done.set()
-
-    threading.Thread(target=worker, name="browser-clear", daemon=True).start()
-    if not done.wait(timeout_s):
-        return "clear timed out"
-    return str(box["e"] or "")
-
-
 def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
     """Clear WebView2 profile data under the shared browser UserDataFolder.
 
@@ -1592,7 +1570,8 @@ def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
             return {"ok": False, "error": str(exc), "kinds": kind, "via": "webview2"}
         if task_box["err"]:
             return {"ok": False, "error": task_box["err"], "kinds": kind, "via": "webview2"}
-        err = _await_clear_task(task_box.get("task"))
+        task = task_box.get("task")
+        err = _await_task(task, 8.0, "browser-clear")[1] if task is not None else "no clear task"
         if err:
             return {"ok": False, "error": err, "kinds": kind, "via": "webview2"}
         return {"ok": True, "via": "webview2", "kinds": kind}
