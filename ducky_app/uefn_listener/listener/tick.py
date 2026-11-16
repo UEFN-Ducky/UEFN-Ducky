@@ -342,6 +342,7 @@ def _tick(delta_time: float) -> None:
         except Exception:
             pass
         elapsed_ms = (time.time() - t0) * 1000
+        response["ms"] = round(elapsed_ms, 2)  # the host subtracts it from its own wait: the queue time
         metrics["total_requests"] += 1
         metrics["last_request_at"] = time.time()
         metrics["last_command"] = command

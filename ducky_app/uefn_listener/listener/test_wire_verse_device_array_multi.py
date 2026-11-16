@@ -103,7 +103,7 @@ def _load(monkeypatch, targets: dict[str, _Actor]):
         "lookup": lookup,
         "_require_field_for_wire": lambda a, f: (device, script, "__verse_0xABCD_Markers"),
         "_is_array_field": lambda a, f: True,
-        "_wrapper_spec_for_field": lambda a, f: ("/Script/Fortnite.ButtonDevice", "SavedActor"),
+        "_wrapper_spec_for_field": lambda a, f, t=None: ("/Script/Fortnite.ButtonDevice", "SavedActor"),
         "_load_verse_class": lambda p: object(),
     }
     _exec_fn("wire_verse_device_array", ns)
@@ -141,3 +141,45 @@ def test_replace_empty_clears_the_array(monkeypatch):
     out = fn("MyDevice", "Markers", [], True)
     assert out["count"] == 0
     assert script.props["__verse_0xABCD_Markers"] == []
+
+
+def test_a_device_type_outside_the_table_takes_its_wrapper_from_the_targets_plugin():
+    """Nov 2026: 65 'Cannot infer wrapper type for array field' failures (ApplauseSounds,
+    Spotlights, TechTriggers): the table has 11 types and an empty array has no element to read.
+    Checked in UEFN: /CreativeCoreDevices/_Verse.trigger_device loads, the trigger actor's own mount."""
+    from typing import Optional, Tuple
+
+    target_cls = types.SimpleNamespace(get_path_name=lambda: "/CreativeCoreDevices/Device_Trigger_V2.Device_Trigger_V2_C")
+    target = types.SimpleNamespace(get_class=lambda: target_cls)
+    loadable = {"/CreativeCoreDevices/_Verse.trigger_device"}
+    ns: dict = {
+        "Any": Any, "Optional": Optional, "Tuple": Tuple,
+        "unreal": types.SimpleNamespace(Actor=object, load_class=lambda _o, path: path in loadable),
+        "_verse_script": lambda a: _Script(),
+        "_script_verse_properties": lambda s: {},
+        "_infer_field_type": lambda a, f: "trigger_device",
+        "_wrapper_spec_for_type": lambda t: None,
+        "_resolve_field_prop": lambda s, f: None,
+    }
+    _exec_fn("_wrapper_spec_for_field", ns)
+    spec = ns["_wrapper_spec_for_field"]
+    assert spec(object(), "TechTriggers", target) == ("/CreativeCoreDevices/_Verse.trigger_device", "SavedActor")
+    assert spec(object(), "TechTriggers") is None  # no target, no guess
+    loadable.clear()
+    assert spec(object(), "TechTriggers", target) is None  # a class that does not load is never returned
+
+
+def test_a_string_array_never_fails_the_wrapper_lookup():
+    """get_verse_editables failed whole on a []string field: reading element 0 raised
+    'VerseStringProperty conversion not implemented' outside the try."""
+    from typing import Optional, Tuple
+
+    class _StringArray(list):
+        def __getitem__(self, i):
+            raise TypeError("Array: Failed to convert element property (VerseStringProperty)")
+
+    script = _Script()
+    script.props["__verse_0x1_MarkNames"] = _StringArray(["a"])
+    ns: dict = {"Any": Any, "Optional": Optional, "Tuple": Tuple}
+    _exec_fn("_wrapper_spec_from_script_value", ns)
+    assert ns["_wrapper_spec_from_script_value"](script, "__verse_0x1_MarkNames") is None

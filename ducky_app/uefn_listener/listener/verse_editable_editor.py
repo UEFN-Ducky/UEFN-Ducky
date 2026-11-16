@@ -664,14 +664,16 @@ def _suggest_similar_fields(script: Any, field: str, verse_fields: List[str]) ->
 def _wrapper_spec_from_script_value(script: Any, prop: str) -> Optional[Tuple[str, str]]:
     try:
         val = script.get_editor_property(prop)
+        if val is not None and hasattr(val, "__len__") and not isinstance(val, (str, bytes)):
+            if len(val) == 0:
+                return None
+            # Reading an element of a []string raises ("VerseStringProperty conversion not
+            # implemented"): outside this try it failed the whole get_verse_editables call.
+            val = val[0]
     except Exception:
         return None
     if val is None:
         return None
-    if hasattr(val, "__len__") and not isinstance(val, (str, bytes)):
-        if len(val) == 0:
-            return None
-        val = val[0]
     if not getattr(val, "get_class", None):
         return None
     cls = val.get_class()
@@ -741,7 +743,7 @@ def _wrapper_spec_for_type(verse_type: str) -> Optional[Tuple[str, str]]:
     return _WRAPPER_REGISTRY.get(base)
 
 
-def _wrapper_spec_for_field(actor: unreal.Actor, field: str) -> Optional[Tuple[str, str]]:
+def _wrapper_spec_for_field(actor: unreal.Actor, field: str, target: Any = None) -> Optional[Tuple[str, str]]:
     script = _verse_script(actor)
     props = _script_verse_properties(script)
     prop = props.get(field)
@@ -754,6 +756,16 @@ def _wrapper_spec_for_field(actor: unreal.Actor, field: str) -> Optional[Tuple[s
         spec = _wrapper_spec_for_type(verse_type)
         if spec:
             return spec
+        # Not in _WRAPPER_REGISTRY (11 types): a device's wrapper class lives in the same
+        # plugin as its actor (/CreativeCoreDevices/_Verse.trigger_device), so the target's
+        # class names the mount. Empty arrays of other devices could not be wired at all.
+        if target is not None and verse_type.endswith("_device"):
+            path = f"/{target.get_class().get_path_name().strip('/').split('/')[0]}/_Verse.{verse_type}"
+            try:
+                if unreal.load_class(None, path):
+                    return path, "SavedActor"
+            except Exception:
+                pass
     prop = prop or _resolve_field_prop(script, field)
     if not prop:
         return None
@@ -922,7 +934,7 @@ def wire_verse_device_ref(
     if target.get_class().get_name() == "VerseDevice_C":
         return set_verse_editable(actor_path, field, target_path=target_path)
 
-    spec = _wrapper_spec_for_field(actor, field)
+    spec = _wrapper_spec_for_field(actor, field, target)
     if not spec:
         raise ValueError(
             f"Cannot infer wrapper type for {field!r}. "
@@ -983,13 +995,12 @@ def wire_verse_device_array(
             "Use wire_verse_device_ref for each scalar field "
             f"(e.g. NPCSpawnerStaging, NPCSpawner1…). Similar: {similar or verse_fields[:8]}."
         )
-    spec = _wrapper_spec_for_field(actor, field)
+    targets = [lookup.require_actor(p) for p in target_paths]
+    spec = _wrapper_spec_for_field(actor, field, targets[0] if targets else None)
     if not spec:
         raise ValueError(f"Cannot infer wrapper type for array field {field!r}")
     cls_path, link_prop = spec
     cls = _load_verse_class(cls_path)
-
-    targets = [lookup.require_actor(p) for p in target_paths]
     links = []
 
     with unreal.ScopedEditorTransaction(f"MCP Wire {field} array"):

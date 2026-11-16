@@ -588,12 +588,17 @@ def _post_command_to_listener(
     try:
         from frontend.perf_trace import trace
 
+        # queue_ms: the wait for the editor's game thread to pick the command up (the reply's
+        # own "ms" is the work). One build_widget_tree was 11.7 s here and 2.0 s in the editor.
+        editor_ms = body.get("ms")
         trace(
             "listener_cmd",
             command,
             http_ms,
             lock_wait_ms=round(lock_wait_ms, 3),
             port=port,
+            **({"editor_ms": editor_ms, "queue_ms": round(max(http_ms - editor_ms, 0.0), 1)}
+               if isinstance(editor_ms, (int, float)) else {}),
         )
     except Exception:
         pass
@@ -787,12 +792,15 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
     try:
         from frontend.perf_trace import trace
 
+        editor_ms = body.get("ms")  # see _post_command_to_listener
         trace(
             "listener_cmd",
             command,
             http_ms,
             lock_wait_ms=round(lock_wait_ms, 3),
             port=port,
+            **({"editor_ms": editor_ms, "queue_ms": round(max(http_ms - editor_ms, 0.0), 1)}
+               if isinstance(editor_ms, (int, float)) and http_ms else {}),
         )
     except Exception:
         pass
@@ -809,7 +817,11 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
     _record_editor_change(command, params, body, ok=True)
 
     if command not in _READ_COMMANDS:
-        _invalidate_cache()
+        # A write drops every cached read but get_project_info: no editor command changes which
+        # island is open, and dropped it queued on the game thread after every write (one took 8 s).
+        with _cache_lock:
+            for stale in [k for k in _response_cache if k[0] != "get_project_info"]:
+                del _response_cache[stale]
     elif cache_ttl is not None:
         _remember_response(key, result, cache_ttl)
 

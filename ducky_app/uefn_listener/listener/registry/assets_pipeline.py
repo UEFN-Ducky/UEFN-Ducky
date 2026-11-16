@@ -117,6 +117,10 @@ def validate_uefn_asset(asset_path: str, usecase: str = "MANUAL") -> dict:
     if not path:
         raise ValueError("asset_path is required")
     if not unreal.EditorAssetLibrary.does_asset_exist(path):
+        # 36 failures in 30 days, many of them a folder path answered "Asset not found".
+        if unreal.EditorAssetLibrary.does_directory_exist(path):
+            raise ValueError(f"{path} is a folder: validate one asset at a time. "
+                             f"list_assets(directory={path!r}) lists the assets in it.")
         raise ValueError(f"Asset not found: {path}")
 
     sub_cls = getattr(unreal, "EditorValidatorSubsystem", None)

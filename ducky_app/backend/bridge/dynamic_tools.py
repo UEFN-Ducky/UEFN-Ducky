@@ -397,7 +397,15 @@ def _make_passthrough(command: str, doc: str, param_list: list[dict]) -> Callabl
                 lambda: send_command(command, params or {}), tool_name=command
             )
             return tool_json(result, pretty=pretty)
-        return tool_json(send_command(command, params or {}), pretty=pretty)
+        try:
+            return tool_json(send_command(command, params or {}), pretty=pretty)
+        except RuntimeError as exc:
+            # Arguments passed beside `params` never reach the command: the agent read a bare
+            # "cmd_spawn_layout() missing 1 required positional argument: 'path'".
+            if "required positional argument" not in str(exc):
+                raise
+            raise ValueError(f"{command} got no arguments: put them inside `params`, e.g. "
+                             f"params={{...}} with keys: {arg_names}. ({str(exc).splitlines()[0]})") from None
 
     _tool.__name__ = command
     _tool.__doc__ = (
