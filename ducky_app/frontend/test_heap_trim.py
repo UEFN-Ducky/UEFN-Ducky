@@ -59,6 +59,20 @@ def test_at_most_every_five_minutes(monkeypatch) -> None:
     assert calls == ["compact", "compact"]
 
 
+def test_a_trim_that_freed_nothing_is_not_tried_again_for_an_hour(monkeypatch) -> None:
+    """Nov 16 2026: 650 MB stayed free in a fragmented heap, so the 1 s gc pass ran every
+    five minutes all day and gave nothing back."""
+    calls = _fake(monkeypatch, 700)
+    monkeypatch.setattr(heap_trim, "_private_bytes", lambda: 1000 * heap_trim.MB)  # nothing comes back
+    assert heap_trim.maybe_trim(now=1000.0)
+    _join()
+    assert not heap_trim.maybe_trim(now=1000.0 + heap_trim.EVERY_S + 1)
+    assert not heap_trim.maybe_trim(now=1000.0 + heap_trim.BACKOFF_S - 1)
+    assert heap_trim.maybe_trim(now=1000.0 + heap_trim.BACKOFF_S + 1)
+    _join()
+    assert calls == ["compact", "compact"]
+
+
 def test_skips_when_little_heap_is_free(monkeypatch) -> None:
     calls = _fake(monkeypatch, heap_trim.FREE_OVER_MB - 1)
     assert not heap_trim.maybe_trim(now=1000.0)

@@ -20,6 +20,11 @@ from typing import Any
 
 EVERY_S = 300.0
 FREE_OVER_MB = 200.0
+# A trim that gave back less than POINTLESS_MB is not tried again for BACKOFF_S: a fragmented
+# heap stays over FREE_OVER_MB for good (Nov 16 2026: 650 MB free after a day of trims), and
+# each try is a full gc pass that holds the GIL about a second, every five minutes, for 0 MB.
+POINTLESS_MB = 20.0
+BACKOFF_S = 3600.0
 MB = 1024 * 1024
 
 _lock = threading.Lock()  # one trim at a time
@@ -140,9 +145,10 @@ def trim() -> dict[str, Any]:
 
 
 def _run() -> None:
-    global _running
+    global _running, _last
     try:
-        trim()
+        if float(trim().get("freed_mb") or 0.0) < POINTLESS_MB:
+            _last += BACKOFF_S - EVERY_S
     finally:
         _running = False
 

@@ -18,9 +18,22 @@ export type UiPerfEntry = {
   delivered?: number;
   /** The long frame's slowest script: who called it and where it lives. */
   source?: string;
+  /** Where a long frame's time went: all its scripts, layout forced from script, and the
+   *  render phase after them. A row with no source and a big render_ms is layout or paint. */
+  script_ms?: number;
+  layout_ms?: number;
+  render_ms?: number;
 };
 
-type LoafScript = { duration?: number; invoker?: string; sourceFunctionName?: string; sourceURL?: string };
+type LoafScript = {
+  duration?: number;
+  invoker?: string;
+  sourceFunctionName?: string;
+  sourceURL?: string;
+  /** Offset in the bundle: the function name is minified ("P"), this finds it in the source map. */
+  sourceCharPosition?: number;
+  forcedStyleAndLayoutDuration?: number;
+};
 
 /** "invoker fn @file:line" for a long animation frame's slowest script; undefined for a plain long task. */
 export function stallSource(entry: PerformanceEntry): string | undefined {
@@ -28,7 +41,8 @@ export function stallSource(entry: PerformanceEntry): string | undefined {
   if (!Array.isArray(scripts) || !scripts.length) return undefined;
   const top = scripts.reduce((a, b) => ((b.duration ?? 0) > (a.duration ?? 0) ? b : a));
   const file = (top.sourceURL || "").split(/[?#]/)[0].split("/").pop() || "";
-  const text = [top.invoker, top.sourceFunctionName, file && `@${file}`].filter(Boolean).join(" ");
+  const at = file && `@${file}${(top.sourceCharPosition ?? -1) >= 0 ? `:${top.sourceCharPosition}` : ""}`;
+  const text = [top.invoker, top.sourceFunctionName, at].filter(Boolean).join(" ");
   return text ? text.slice(0, 160) : undefined;
 }
 
@@ -111,12 +125,22 @@ export function installPerfMonitor() {
         for (const entry of list.getEntries()) {
           if (entry.duration >= LONGTASK_MS) {
             const source = stallSource(entry);
+            // 1481 stalls an hour (Nov 16 2026) and most rows had no source: without the
+            // split, script time, forced layout and paint all read the same.
+            const frame = entry as PerformanceEntry & { renderStart?: number; scripts?: LoafScript[] };
+            const scripts = Array.isArray(frame.scripts) ? frame.scripts : [];
+            const scriptMs = Math.round(scripts.reduce((ms, s) => ms + (s.duration ?? 0), 0));
+            const layoutMs = Math.round(scripts.reduce((ms, s) => ms + (s.forcedStyleAndLayoutDuration ?? 0), 0));
+            const renderMs = frame.renderStart ? Math.round(entry.startTime + entry.duration - frame.renderStart) : 0;
             enqueue({
               kind: "ui_stall",
               name: entry.name || "longtask",
               duration_ms: entry.duration,
               peak_pending: peakPending,
               ...(source ? { source } : {}),
+              ...(scriptMs > 0 ? { script_ms: scriptMs } : {}),
+              ...(layoutMs > 0 ? { layout_ms: layoutMs } : {}),
+              ...(renderMs > 0 ? { render_ms: renderMs } : {}),
             });
           }
         }

@@ -160,6 +160,30 @@ it("names the slowest script of a long animation frame", async () => {
   });
 });
 
+it("says where a long frame's time went and where the minified function sits", async () => {
+  const { installPerfMonitor } = await import("./perfMonitor");
+  installPerfMonitor();
+  const entry = {
+    name: "long-animation-frame",
+    startTime: 1000,
+    duration: 400,
+    renderStart: 1310,
+    scripts: [
+      { duration: 60, invoker: "TimerHandler:setTimeout", sourceFunctionName: "a", sourceURL: "http://127.0.0.1/assets/index-abc.js", forcedStyleAndLayoutDuration: 5 },
+      { duration: 240, invoker: "MessagePort.onmessage", sourceFunctionName: "P", sourceURL: "http://127.0.0.1/assets/index-abc.js", sourceCharPosition: 1482211, forcedStyleAndLayoutDuration: 35 },
+    ],
+  };
+  // No script at all: the frame was layout or paint, and the row still says so.
+  const paint = { name: "long-animation-frame", startTime: 2000, duration: 120, renderStart: 2010, scripts: [] };
+  FakeObserver.instances[0].callback({ getEntries: () => [entry, paint] });
+  await vi.advanceTimersByTimeAsync(5000);
+  const rows = api.report_ui_perf.mock.calls[0][0];
+  expect(rows[0]).toMatchObject({
+    source: "MessagePort.onmessage P @index-abc.js:1482211", script_ms: 300, layout_ms: 40, render_ms: 90,
+  });
+  expect(rows[1]).toEqual({ kind: "ui_stall", name: "long-animation-frame", duration_ms: 120, peak_pending: 0, render_ms: 110 });
+});
+
 it("falls back to long tasks where long animation frames are not reported", async () => {
   FakeObserver.supportedEntryTypes = ["longtask"];
   try {

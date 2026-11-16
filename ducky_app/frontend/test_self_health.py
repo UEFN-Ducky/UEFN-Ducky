@@ -110,6 +110,19 @@ def test_core_wait_percentiles():
     assert self_health.core_wait_stats([])["samples"] == 0
 
 
+def test_the_core_wait_meter_stops_when_no_health_check_asks_for_it(monkeypatch):
+    """perf.sample hot:core_wait (Nov 16 2026): once started it woke 100 times a second for good."""
+    monkeypatch.setattr(self_health, "CORE_WAIT_KEEP_S", 0.2)
+    self_health.start_core_wait()
+    thread = self_health._CoreWait.thread
+    assert thread is not None and thread.is_alive()
+    thread.join(5)
+    assert not thread.is_alive()
+    self_health.start_core_wait()  # the next health check starts it again
+    assert self_health._CoreWait.thread is not thread and self_health._CoreWait.thread.is_alive()
+    self_health._CoreWait.thread.join(5)
+
+
 def test_core_wait_findings():
     def severity(p95):
         snap = _base()

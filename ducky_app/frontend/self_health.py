@@ -99,13 +99,20 @@ class _CoreWait:
     baseline: float | None = None
     thread: threading.Thread | None = None
     start_lock = threading.Lock()
+    # The meter runs until this perf_counter time; each health check moves it out. Started
+    # once and never stopped, it woke 100 times a second for the rest of the run and showed
+    # up as the hot thread of an idle app (perf.sample hot:core_wait, Nov 16 2026).
+    until: float = 0.0
+
+
+CORE_WAIT_KEEP_S = 180.0
 
 
 def _core_wait_loop() -> None:
     # No logging, no locks: one deque append per wake, so the meter never adds to the wait.
     perf, sleep, push = time.perf_counter, time.sleep, _CoreWait.samples.append
     first: list[float] = []
-    while True:
+    while perf() < _CoreWait.until:
         t = perf()
         sleep(0.010)
         late = (perf() - t - 0.010) * 1000
@@ -120,6 +127,9 @@ def _core_wait_loop() -> None:
 def start_core_wait() -> None:
     """Start the core-wait meter (one daemon thread per process; later calls do nothing)."""
     with _CoreWait.start_lock:
+        # ponytail: a thread that ends between this line and is_alive() leaves one check without
+        # samples; the next check starts it again.
+        _CoreWait.until = time.perf_counter() + CORE_WAIT_KEEP_S
         if _CoreWait.thread is None or not _CoreWait.thread.is_alive():
             _CoreWait.thread = threading.Thread(target=_core_wait_loop, name="core-wait", daemon=True)
             _CoreWait.thread.start()
