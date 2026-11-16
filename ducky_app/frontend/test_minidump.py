@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import struct
+import threading
 import time
 from pathlib import Path
 
@@ -174,8 +175,11 @@ def test_heartbeats_write_boot_json_and_never_more_than_every_30_s(monkeypatch, 
     monkeypatch.setattr(boot_report, "_state", {"state": "ok", "started": time.time()})
     monkeypatch.setattr(boot_report, "_heartbeat", {"thread": None})
     sleeps: list[float] = []
+    real_sleep = time.sleep
 
     def fake_sleep(seconds: float) -> None:
+        if threading.current_thread().name != "boot-heartbeat":  # another test's thread, still polling
+            return real_sleep(seconds)
         sleeps.append(seconds)
         boot_report._state["state"] = "closed"  # one beat, then a clean exit ends the loop
 

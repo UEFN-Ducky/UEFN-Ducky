@@ -75,7 +75,10 @@ def test_capture_list_shield_blanks_launcher_titles(monkeypatch):
         assert seen and os.getppid() in seen[0]
 
 
-def test_native_capture_refuses_fast_so_the_page_falls_back():
+def test_native_capture_refuses_fast_so_the_page_falls_back(monkeypatch):
+    from frontend.ui_web import native_capture_bridge
+
+    monkeypatch.setattr(native_capture_bridge, "_host", {})  # a WebView2 an earlier test left registered
     out = _Api().native_capture_start("monitor:1", 30)
     assert out == {"ok": False, "error": "no main WebView2"}
     assert _Api().native_capture_stop("monitor:1") is False
