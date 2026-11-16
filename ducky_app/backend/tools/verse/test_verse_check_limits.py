@@ -19,6 +19,23 @@ def test_check_uses_the_project_the_agent_writes_into(monkeypatch, tmp_path: Pat
     assert Path(vd._project_root()) == chat_project
 
 
+def test_the_error_stats_name_only_files_an_error_line_points_at() -> None:
+    """Nov 16 2026: the 'top error files' were PlayerCore, Economy and ten Biomes files, each in
+    100+ failing builds. They had no errors: the build's answer lists every project file."""
+    answer = json.dumps({
+        "compile": {"numErrors": 2, "log": [
+            "C:/Users/x/Fortnite Projects/Isle/Content/Verse/Progression/progression_hud.verse(40,24, 40,37): "
+            "Script error 3600: Object archetype must initialize data member `RankColor`.",
+            "C:\\Isle\\Content\\Verse\\HUD\\score.verse(7,1, 7,9) : Script error 3506: Unknown identifier `Scor`.",
+            "C:/Isle/Fortnite.digest.verse(1,1, 1,2): Script error 3506: never a project file",
+        ]},
+        "diagnostics": {"files": [{"path": "content/biomes/alley/alley_meshes.verse", "errors": 0},
+                                  {"path": "content/verse/playercore/player_manager.verse", "errors": 0}]},
+    })
+    files = sorted(f for f in set(vd._ERROR_FILE_RE.findall(answer)) if "digest" not in f.lower())
+    assert sorted(Path(f.replace("\\\\", "/")).name for f in files) == ["progression_hud.verse", "score.verse"]
+
+
 def test_a_stuck_scan_is_stopped_and_reported(monkeypatch, tmp_path: Path) -> None:
     from frontend.ui_web.verse_editor.lsp import diagnostics_cache, diagnostics_scan
 

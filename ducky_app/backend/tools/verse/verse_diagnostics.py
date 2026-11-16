@@ -28,7 +28,11 @@ OFFLINE_SCAN_NOTE = (
 WORKFLOW_NOT_CONNECTED = (
     "UEFN Workflow Server not connected — open the project in UEFN, then retry once"
 )
-_VERSE_FILE_RE = re.compile(r"[\w\-./\\]+\.verse\b")
+# A file an error line names: `…/progression_hud.verse(40,24, 40,37): Script error 3600: …`.
+# The stats used every .verse path in the build's answer, which lists the whole project: the
+# "top error files" were the first 50 names in the alphabet (Content/Biomes, PlayerCore,
+# Economy), in every failing build, with no error in them (Nov 16 2026).
+_ERROR_FILE_RE = re.compile(r"([\w\-./\\]+\.verse)\([\d, ]+\)\s*:\s*Script error")
 
 
 # An agent's check answers within this; a slow or stuck verse-lsp never holds its turn.
@@ -353,7 +357,7 @@ def workspace_compile_verse(pretty: bool = False) -> str:
         )
         try:
             codes = {h["code"]: h["count"] for h in payload["hints"]}
-            files = sorted(f for f in set(_VERSE_FILE_RE.findall(compile_text)) if "digest" not in f.lower())
+            files = sorted(f for f in set(_ERROR_FILE_RE.findall(compile_text)) if "digest" not in f.lower())
             record_compile(codes, files)
         except Exception:  # noqa: BLE001 — telemetry must never break the tool
             pass
