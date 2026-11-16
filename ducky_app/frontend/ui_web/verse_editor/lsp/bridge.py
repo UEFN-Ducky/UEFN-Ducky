@@ -20,6 +20,10 @@ from frontend.ui_web.verse_editor.lsp.verse_workspace import workspace_folder_fi
 
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _STDERR_RING_MAX = 80
+# The editor's verse-lsp is stopped this long after its client went away with nobody
+# reattaching. It used to live until the next build or app exit, connected to no one:
+# Nov 16 2026 one held 1,458 MB at 96% of a core. A reload reattaches within seconds.
+_IDLE_STOP_S = 300.0
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
 
@@ -350,6 +354,12 @@ class LspBridge:
                     pass
         self._stop.clear()
 
+    def _stop_if_unattached(self, proc: subprocess.Popen[bytes]) -> None:
+        """The idle timer's end: stop ``proc`` when it is still ours and no listener came back."""
+        with self._start_lock:
+            if self._proc is proc and self._server_sock is None:
+                self._stop_locked()
+
     def _watch_proc_exit(self, proc: subprocess.Popen[bytes]) -> None:
         try:
             code = proc.wait()
@@ -551,3 +561,8 @@ class LspBridge:
                 with self._lock:
                     self._port = 0
                 self._server_sock = None
+                if client is not None:  # a client was attached and left: see _IDLE_STOP_S
+                    timer = threading.Timer(_IDLE_STOP_S, self._stop_if_unattached, args=(proc,))
+                    timer.daemon = True
+                    timer.name = "verse-lsp-idle-stop"
+                    timer.start()
