@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -239,11 +240,14 @@ def _disk_files(project_root: str) -> dict[str, Path]:
     if not content.is_dir():
         return {}
     out: dict[str, Path] = {}
-    for path in content.rglob("*.verse"):
-        if not path.is_file():
-            continue
-        rel = str(path.relative_to(Path(project_root))).replace("\\", "/")
-        out[_norm_key(rel)] = path
+    # os.walk, and never into __ExternalActors__ / __ExternalObjects__ (one .uasset per actor,
+    # no Verse): rglob over a big island was still running when a build's 2-minute mark came.
+    for folder, dirs, names in os.walk(content):
+        dirs[:] = [d for d in dirs if not d.startswith("__External")]
+        for name in names:
+            if name.lower().endswith(".verse"):
+                path = Path(folder) / name
+                out[_norm_key(str(path.relative_to(Path(project_root))).replace("\\", "/"))] = path
     return out
 
 

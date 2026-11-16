@@ -63,6 +63,8 @@ _READ_COMMANDS = frozenset(
         "get_project_info",
         "get_level_info",
         "get_viewport_camera",
+        # A status read: as a write it queued behind another chat's editor lease for 2 minutes.
+        "revision_status",
     }
 )
 

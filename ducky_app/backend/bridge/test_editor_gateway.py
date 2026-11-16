@@ -128,6 +128,28 @@ def test_reads_and_chatless_calls_never_wait(clock, monkeypatch) -> None:
     assert editor_gateway.call("", "save_current_level", True, lambda: "person") == "person"
 
 
+def test_a_call_that_waits_the_whole_limit_hears_who_holds_the_editor(clock, monkeypatch) -> None:
+    """Nov 2026: execute_python sat in take_lease past 2 minutes 18 times with no word."""
+    from backend.bridge.client import is_read_command
+
+    editor_gateway.call("lead", "import_asset", True, lambda: None)
+    waits: list[float] = []
+    monkeypatch.setattr(editor_gateway, "_sleep", waits.append)  # lead keeps the lease
+    monkeypatch.setattr(editor_gateway, "_chat_title", lambda chat_id: "Lead chat")
+    with pytest.raises(editor_gateway.EditorInUse, match=r"`execute_python` did not run: UEFN is in use by another chat"):
+        editor_gateway.call("trio", "execute_python", True, lambda: pytest.fail("must not run"))
+    assert sum(waits) == editor_gateway.LEASE_WAIT_SEC
+    assert editor_gateway.lease_holder()["chat_id"] == "lead"
+
+    async def _epic():
+        return await editor_gateway.acall("trio", "unreal__call_tool", True, lambda: pytest.fail("must not run"))
+
+    monkeypatch.setattr(editor_gateway, "LEASE_WAIT_SEC", 0.0)
+    with pytest.raises(editor_gateway.EditorInUse):
+        asyncio.run(_epic())
+    assert is_read_command("revision_status")  # a status read never queues for the lease
+
+
 def test_lease_renews_on_each_call_and_lapses_after_idle(clock) -> None:
     editor_gateway.call("lead", "a", True, lambda: None)
     clock[0] += 50

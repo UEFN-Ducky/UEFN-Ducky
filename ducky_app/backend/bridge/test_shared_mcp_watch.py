@@ -140,6 +140,23 @@ def test_a_wait_by_design_is_recorded_but_not_counted_as_stuck(quick, monkeypatc
     assert [r["source"] for r in events.newest("tool_stuck", limit=5)][:2] == ["slow_render", "slow_render"]
 
 
+def test_the_stuck_count_is_sent_when_the_call_ends_with_how_long_it_ran(quick, monkeypatch) -> None:
+    """Nov 13-16 2026: all 337 reports read "5m": the count went out at the 2-minute check,
+    so a call that answered a second later and one that never did looked the same."""
+    counted: list[tuple[float, str]] = []
+    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds, tool="": counted.append((seconds, tool)))
+    mcp = WatchMcp(sync=set())
+    asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 1.0}, _ident()))
+    assert len(counted) == 1 and 0.6 < counted[0][0] < 3  # the whole run, not the 0.3 s check
+    # Stopped at its limit: counted once, with the limit as its length.
+    asyncio.run(shared_mcp._call_tool(mcp, "ducky_find_tools", {}, _ident()))
+    assert [tool for _s, tool in counted] == ["slow_render", "ducky_find_tools"]
+    # Still running at STUCK_COUNT_BY_S: counted then, and the call goes on to its answer.
+    monkeypatch.setattr(shared_mcp, "STUCK_COUNT_BY_S", 0.5)
+    result = asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 1.0}, _ident()))
+    assert _text(result) == "slow_render done" and len(counted) == 3
+
+
 def test_a_sync_tool_runs_on_its_own_thread_with_the_calls_identity(quick) -> None:
     from backend.store.repos import events
 

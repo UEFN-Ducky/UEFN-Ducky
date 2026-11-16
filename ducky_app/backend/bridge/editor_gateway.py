@@ -70,6 +70,21 @@ class EditorTimeout(TimeoutError):
 
 # How often a call waiting for another chat's lease looks again.
 LEASE_POLL_SEC = 0.5
+# How long a call waits for another chat's lease before its agent hears who holds it.
+# Nov 2026: 23 of 200 stuck calls (execute_python 18) sat here past 2 minutes with no word.
+LEASE_WAIT_SEC = 90.0
+
+
+class EditorInUse(RuntimeError):
+    """Another chat kept the editor lease for the whole wait."""
+
+    def __init__(self, op: str) -> None:
+        held = lease_holder()
+        super().__init__(
+            f"`{op}` did not run: UEFN is in use by another chat ({held.get('title') or 'unknown'}, "
+            f"last call {held.get('op') or '?'}) and stayed in use for {LEASE_WAIT_SEC:.0f} s. Nothing is "
+            "wrong with the editor. Do the work that does not need UEFN now, then call this again."
+        )
 _sleep = time.sleep
 
 
@@ -167,8 +182,12 @@ def take_lease(chat_id: str, op: str) -> None:
     """Take the editor lease for ``chat_id``, waiting while another chat holds it."""
     # ponytail: polls the shared lease file, not a strict arrival-order queue; a ticket
     # list in the lease file if two waiting chats ever need first-come-first-served.
+    waited = 0.0
     while not try_lease(chat_id, op):
+        if waited >= LEASE_WAIT_SEC:
+            raise EditorInUse(op)
         _sleep(LEASE_POLL_SEC)
+        waited += LEASE_POLL_SEC
 
 
 def release_lease(chat_id: str) -> None:
@@ -494,8 +513,12 @@ async def acall(
     cancels the wait), then awaits ``fn()`` until UEFN answers. Only the caller's own
     ``timeout`` stops it early (:class:`EditorTimeout`)."""
     if mutating:
+        waited = 0.0
         while not try_lease(chat_id, op):
+            if waited >= LEASE_WAIT_SEC:
+                raise EditorInUse(op)
             await asyncio.sleep(LEASE_POLL_SEC)
+            waited += LEASE_POLL_SEC
     _note_heavy(op, heavy)
     result = fn()
     if inspect.isawaitable(result):

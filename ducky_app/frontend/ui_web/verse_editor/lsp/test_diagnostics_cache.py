@@ -218,3 +218,12 @@ def test_external_disk_rewrite_reloads_memory(tmp_path: Path, monkeypatch):
     ui = diagnostics_cache.load_for_ui(str(root))
     assert ui["files"][0]["errors"] == 0
     assert ui["stale_count"] == 0
+
+
+def test_verse_files_are_found_in_subfolders_but_never_in_external_actor_folders(tmp_path: Path):
+    root = _make_project(tmp_path, ["a.verse"])
+    for folder in ("Verse/HUD", "__ExternalActors__/Map/0", "__ExternalObjects__/Map"):
+        (root / "Content" / folder).mkdir(parents=True)
+    (root / "Content" / "Verse" / "HUD" / "Score.VERSE").write_text("#\n", encoding="utf-8")
+    (root / "Content" / "__ExternalActors__" / "Map" / "0" / "x.verse").write_text("#\n", encoding="utf-8")
+    assert sorted(diagnostics_cache._disk_files(str(root))) == ["content/a.verse", "content/verse/hud/score.verse"]

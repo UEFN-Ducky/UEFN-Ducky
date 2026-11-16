@@ -82,6 +82,10 @@ _QUICK_THREADS = 8
 # Any other call still running this long: where it waits is recorded (events kind
 # "tool_stuck") and it keeps running, since workflows, renders and questions take minutes.
 STUCK_REPORT_S = 120.0
+# The anonymous agent.stuck count is sent when the call ends, with how long it really ran.
+# Sent at the first check, every report read "5m" (Nov 13-16 2026: 337 of them) whether the
+# call answered at 121 s or never. A call still running this long is counted then ("more").
+STUCK_COUNT_BY_S = 1201.0
 
 
 def enabled(settings: Any | None = None) -> bool:
@@ -736,14 +740,27 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
         if not done:
-            _report_stuck(name, first, work, thread, ident, waits, arguments)
-            if limit is not None and limit > first:
-                done, _ = await asyncio.wait({work}, timeout=limit - first)
-            if not done and limit is not None:
-                work.cancel()
-                raise _CallTimedOut(await asyncio.to_thread(call_limits.timed_out_message, inner, limit))
-            if not done:
-                await asyncio.wait({work})
+            counted = _report_stuck(name, first, work, thread, ident, waits, arguments)
+            seen = time.monotonic()
+            try:
+                if limit is not None and limit > first:
+                    done, _ = await asyncio.wait({work}, timeout=limit - first)
+                if not done and limit is not None:
+                    work.cancel()
+                    raise _CallTimedOut(await asyncio.to_thread(call_limits.timed_out_message, inner, limit))
+                if not done:
+                    done, _ = await asyncio.wait({work}, timeout=max(STUCK_COUNT_BY_S - first, 0.0))
+                if not done:
+                    await asyncio.wait({work})
+            finally:
+                if counted:
+                    try:
+                        from frontend import usage_stats
+
+                        usage_stats.stuck(str(getattr(ident, "coding_agent", "") or ""),
+                                          first + time.monotonic() - seen, tool=inner)
+                    except Exception:  # noqa: BLE001 — a count never breaks the call
+                        pass
     except asyncio.CancelledError:
         work.cancel()  # the agent cancelled the call
         raise
@@ -803,8 +820,9 @@ def _call_stack(work: Any, thread: dict[str, Any]) -> list[str]:
 
 
 def _report_stuck(name: str, seconds: float, work: Any, thread: dict[str, Any], ident: Any,
-                  waits: dict[str, Any] | None = None, arguments: dict[str, Any] | None = None) -> None:
+                  waits: dict[str, Any] | None = None, arguments: dict[str, Any] | None = None) -> bool:
     """One events row (kind ``tool_stuck``) with where the call waits. Never raises.
+    True when the call also counts as an anonymous agent.stuck (not a wait by design).
     ducky_call_tool reports as the tool it ran, as _usage_tool_done counts it: 9 of 15
     stuck calls on Oct 31 2026 said ducky_call_tool and hid the plugin."""
     try:
@@ -843,13 +861,9 @@ def _report_stuck(name: str, seconds: float, work: Any, thread: dict[str, Any], 
                    else f"{name} still running after {seconds:.0f} s")
         events.insert("tool_stuck", ts=now, source=name, message=message, payload=payload)
         events.trim("tool_stuck", older_than=now - 30 * 86400, keep=200)
-        if name in call_limits.WAITS_BY_DESIGN or waiting.get("panel_rpc") == "ask_user":
-            return
-        from frontend import usage_stats
-
-        usage_stats.stuck(str(getattr(ident, "coding_agent", "") or ""), float(seconds), tool=name)
+        return not (name in call_limits.WAITS_BY_DESIGN or waiting.get("panel_rpc") == "ask_user")
     except Exception:  # noqa: BLE001 — a report never breaks the call
-        pass
+        return False
 
 
 _REFUSED = re.compile(r'^\s*(?:\{\s*"ok"\s*:\s*false\b|ERROR\b)')
