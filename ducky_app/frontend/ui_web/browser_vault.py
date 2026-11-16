@@ -230,7 +230,7 @@ class _Hello:
 
 
 def _user_sid() -> str:
-    out = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True,
+    out = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True, errors="replace",
                          timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     sid = out.stdout.strip().rsplit(",", 1)[-1].strip().strip('"')
     if not sid.startswith("S-1-"):

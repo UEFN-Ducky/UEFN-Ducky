@@ -37,7 +37,7 @@ def _trial(ffmpeg: str, enc: str) -> bool:
             [ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi",
              "-i", "color=s=256x256:d=0.04", "-frames:v", "1", "-pix_fmt", "yuv420p",
              "-c:v", enc, "-f", "null", "-"],
-            capture_output=True, text=True, timeout=30, check=False, creationflags=_NO_WINDOW,
+            capture_output=True, text=True, errors="replace", timeout=30, check=False, creationflags=_NO_WINDOW,
         ).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
@@ -48,7 +48,7 @@ def _probe() -> str:
     try:
         out = subprocess.run(
             [ffmpeg, "-hide_banner", "-encoders"],
-            capture_output=True, text=True, timeout=30, check=False, creationflags=_NO_WINDOW,
+            capture_output=True, text=True, errors="replace", timeout=30, check=False, creationflags=_NO_WINDOW,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return FALLBACK

@@ -33,7 +33,7 @@ MAX_PACKAGES = 3
 
 def _git(cwd: str, *args: str) -> str:
     try:
-        out = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=10.0,
+        out = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10.0,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except Exception:  # noqa: BLE001 - no git, no guard
         return ""

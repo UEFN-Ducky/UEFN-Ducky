@@ -274,7 +274,7 @@ def _launcher_processes() -> list[tuple[int, str]]:
         completed = subprocess.run(
             ["tasklist", "/FI", f"IMAGENAME eq {LAUNCHER_EXE_NAME}", "/FO", "CSV", "/NH"],
             capture_output=True,
-            text=True,
+            text=True, errors="replace",
             creationflags=flags,
             timeout=10.0,
         )
@@ -488,7 +488,7 @@ def _running_image_names() -> set[str] | None:
         completed = subprocess.run(
             ["tasklist", "/FO", "CSV", "/NH"],
             capture_output=True,
-            text=True,
+            text=True, errors="replace",
             creationflags=flags,
             timeout=10.0,
         )

@@ -17,7 +17,7 @@ def _git_out(repo: str, *args: str) -> str:
     if not shutil.which("git"):
         return ""
     try:
-        out = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, timeout=15,
+        out = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15,
                              stdin=subprocess.DEVNULL, creationflags=0x08000000 if sys.platform == "win32" else 0)
     except (OSError, subprocess.SubprocessError):
         return ""

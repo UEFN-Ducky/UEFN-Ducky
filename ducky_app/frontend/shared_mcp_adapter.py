@@ -174,7 +174,7 @@ def _stop_bridge_pid(pid: int) -> None:
     try:
         listed = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, timeout=5, creationflags=flags,
+            capture_output=True, text=True, errors="replace", timeout=5, creationflags=flags,
         )
     except (OSError, subprocess.TimeoutExpired):
         return

@@ -481,6 +481,14 @@ def test_a_failed_turn_carries_the_app_version_and_a_fixed_list_reason(monkeypat
     ("Cursor SDK request failed: network error reaching Cursor (connection refused or reset). Check", "network"),
     ("Cursor SDK request failed. Check SDK connectivity and the Cursor API key in Settings, then retry.", "sdk_request"),
     ("Ducky's tools didn't connect", "mcp_connect"),
+    # Texts from one PC's agent-crash log that all read "other" (Nov 13 2026: 133 of 228 failed turns did).
+    ("Ducky AI is busy (server) — retry in 5s", "busy"),
+    ("You've used your Ducky AI for now. It's back in 4 h 34 min.", "plan"),
+    ("LLM request timed out after 120s (still waiting on the first token)", "timeout"),
+    ("400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'property is not defined'}}", "bad_request"),
+    ("IncompleteRead(0 bytes read)", "network"),
+    ("API Error: 500 {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"Internal server error\"}}", "server_error"),
+    ("Ducky stopped this turn: it was stuck on \"login check\" for 120s before the agent started. Send your message again.", "stuck_start"),
 ])
 def test_a_gateways_own_start_up_failure_has_its_own_reason_word(detail, want) -> None:
     from frontend import usage_events as ev

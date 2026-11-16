@@ -279,7 +279,7 @@ def _kill_uefn_editor() -> bool:
     subprocess.run(
         kill_uefn_cmd(),
         capture_output=True,
-        text=True,
+        text=True, errors="replace",
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if not was:
@@ -354,7 +354,7 @@ def _uefn_running() -> bool:
         r = subprocess.run(
             ["tasklist", "/FI", f"IMAGENAME eq {image}", "/NH", "/FO", "CSV"],
             capture_output=True,
-            text=True,
+            text=True, errors="replace",
             creationflags=flags,
         )
         if image.lower() in (r.stdout or "").lower():

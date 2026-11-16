@@ -308,7 +308,7 @@ def authenticode_ok(exe: Path) -> bool:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
             capture_output=True,
-            text=True,
+            text=True, errors="replace",
             timeout=60,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         ).stdout

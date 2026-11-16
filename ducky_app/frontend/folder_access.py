@@ -117,7 +117,7 @@ def protection_mode() -> int:
         out = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
              "(Get-MpPreference).EnableControlledFolderAccess"],
-            capture_output=True, text=True, timeout=30, creationflags=0x08000000,  # no window
+            capture_output=True, text=True, errors="replace", timeout=30, creationflags=0x08000000,  # no window
         )
         return int((out.stdout or "").strip() or 0)
     except (OSError, ValueError, subprocess.SubprocessError):

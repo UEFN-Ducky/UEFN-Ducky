@@ -294,7 +294,7 @@ MAX_CMD_CHARS = 24_000  # Windows caps a command line at 32,767 characters
 
 
 def _git(root: Path, *args: str) -> list[str]:
-    done = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+    done = subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True)
     return [line.strip() for line in done.stdout.splitlines() if line.strip()]
 
 

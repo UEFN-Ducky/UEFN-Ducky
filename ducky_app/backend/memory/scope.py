@@ -34,7 +34,7 @@ def _inside(child: str, parent: Path) -> bool:
 
 def _common_repo(cwd: str) -> str:
     out = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                         capture_output=True, text=True, timeout=5, creationflags=_NO_WINDOW,
+                         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, creationflags=_NO_WINDOW,
                          stdin=subprocess.DEVNULL)
     if out.returncode != 0 or not out.stdout.strip():
         return ""

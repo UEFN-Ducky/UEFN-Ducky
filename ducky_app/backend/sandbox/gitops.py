@@ -93,7 +93,7 @@ def _known_repo(repo_path: str) -> Path:
     roots = [*workspace_roots(), *_recent_project_roots()]
     if not any(paths.is_inside(full, r) for r in roots):
         raise GitError("A worktree comes from one of your projects (open, recent or configured in Ducky).")
-    out = subprocess.run(["git", "-C", full, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+    out = subprocess.run(["git", "-C", full, "rev-parse", "--show-toplevel"], capture_output=True, text=True, encoding="utf-8", errors="replace",
                          creationflags=_NO_WINDOW, stdin=subprocess.DEVNULL) if shutil.which("git") else None
     if out is None or out.returncode != 0:
         raise GitError(f"{full} isn't a git repository (or git isn't installed).")

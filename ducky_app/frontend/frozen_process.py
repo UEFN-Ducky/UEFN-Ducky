@@ -85,7 +85,7 @@ def _run_hidden(args: list[str], *, timeout: float = 30.0) -> subprocess.Complet
         return subprocess.run(
             args,
             capture_output=True,
-            text=True,
+            text=True, errors="replace",
             creationflags=flags,
             startupinfo=si,
             timeout=timeout,

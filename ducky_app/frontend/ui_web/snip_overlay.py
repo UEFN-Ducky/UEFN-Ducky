@@ -118,7 +118,7 @@ def _clipper_running() -> bool:
         completed = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq ScreenClippingHost.exe", "/NH"],
             capture_output=True,
-            text=True,
+            text=True, errors="replace",
             timeout=5,
             creationflags=_CREATE_NO_WINDOW,
         )

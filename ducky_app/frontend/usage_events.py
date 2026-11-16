@@ -401,22 +401,25 @@ _TURN_REASONS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("context_full", r"context.?(window|length)|prompt is too long|too many tokens|maximum context"),
         ("cli_exit", r"exit(ed)? (unsuccessfully )?\(?(with )?code:? ?-?(?P<code>\d+)"),
         ("network", r"not reachable|offline|network|connection (refused|reset|aborted)|econnreset|getaddrinfo"
-                    r"|winerror 100(54|61)"),
+                    r"|winerror 100(54|61)|incompleteread"),
         ("auth", r"\b40[13]\b|unauthori[sz]ed|not logged in|authentication|invalid api key"),
         ("empty", r"no captured reply|empty (reply|response)|no output"),
         # A gateway's own start-up failures (Nov 11 2026: 35 Cursor turns failed within 10 s and
         # every one read "other"). The specific ones first; "sdk request failed" is what is left.
         ("no_model", r"no \w* ?model selected"),
         ("sdk_setup", r"sdk was not found|could not be set up|node\.js .{0,40}not found"),
-        ("plan", r"payment required|plan does not include|no usage left"),
+        ("plan", r"payment required|plan does not include|no usage left|used your ducky ai"),
         ("rate_limit", r"\b429\b|rate.?limit|usage limit"),
         ("model_not_found", r"model was not found|model .{0,40}not (found|available)"),
         ("http", r"\bhttp (?P<code>[1-5]\d\d)\b"),
         ("sdk_request", r"sdk request failed"),
+        # runner.py: a setup step (login check, prompt build) that never finished.
+        ("stuck_start", r"stuck on .{0,80}before the agent started"),
     )
 )
 TURN_REASONS = ("mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty",
-                "no_model", "sdk_setup", "plan", "rate_limit", "model_not_found", "http", "sdk_request", "other")
+                "no_model", "sdk_setup", "plan", "rate_limit", "model_not_found", "http", "sdk_request",
+                "stuck_start", *(k for k in ERROR_KINDS if k not in ("auth", "rate_limit", "other")), "other")
 
 
 def turn_reason(detail: str) -> str:
@@ -427,7 +430,10 @@ def turn_reason(detail: str) -> str:
         m = rule.search(text)
         if m:
             return f"{reason}_{m.group('code')[:12]}" if reason in ("cli_exit", "http") else reason
-    return "other"
+    # No rule: the error's kind is still a word (busy, timeout, server_error, bad_request...).
+    # Nov 13 2026: 133 of 228 failed turns read "other", among them every "Ducky AI is busy",
+    # "LLM request timed out" and "API Error: 500".
+    return kind_of(text)
 
 
 _CMD_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
