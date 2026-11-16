@@ -101,3 +101,25 @@ def test_a_hung_call_on_an_answering_editor_says_no_answer(hung_epic) -> None:
 def test_heavy_calls_get_the_longer_limit() -> None:
     assert call_limits.epic_call_limit(False) == 120.0
     assert call_limits.epic_call_limit(True) == 300.0
+
+
+def test_an_answer_the_server_marked_as_failed_reaches_the_agent_as_a_failure(hung_epic, monkeypatch) -> None:
+    """Nov 16 2026, asked directly on :8000: Epic's SetProperties with a property that does
+    not exist answers isError=true. This pool returned its text as a normal answer, so the
+    agent read "could not be set" as a result and carried on (98 times in 30 days)."""
+    pool, _state = hung_epic
+    text = "SetObjectProperties on '/Isle/A.A' (SoundWave): the following properties could not be set:\n  - no such property"
+    answers = [SimpleNamespace(isError=True, content=[SimpleNamespace(type="text", text=text)]),
+               SimpleNamespace(isError=False, content=[SimpleNamespace(type="text", text='{"returnValue":true}')])]
+
+    class Session:
+        async def call_tool(self, _name, _args):
+            return answers.pop(0)
+
+    async def ensure_session(_conn):
+        return Session()
+
+    monkeypatch.setattr(pool, "_ensure_session", ensure_session)
+    with pytest.raises(RuntimeError, match="failed: SetObjectProperties on .* could not be set"):
+        asyncio.run(pool.call_tool("unreal__call_tool", _CALL))
+    assert "returnValue" in asyncio.run(pool.call_tool("unreal__call_tool", _CALL))  # a real answer still returns

@@ -825,6 +825,12 @@ class PluginClientPool:
             # Keep the "Available toolsets: ..." list: it is how the agent finds the right name.
             hint = epic_not_found_hint(text)
             raise RuntimeError(f"Epic MCP: {text.strip()[:4000]}" + (f"\nHint: {hint}" if hint else ""))
+        if getattr(raw, "isError", False):
+            # The server marked the call as failed: the agent must see a failure, not text that
+            # reads like an answer. Nov 16 2026, asked directly: Epic's SetProperties with a
+            # property that does not exist answers isError=true ("... could not be set"); this
+            # method returned that text as a success 98 times in 30 days.
+            raise RuntimeError(f"{plugin_id} {original_name} failed: {text.strip()[:4000]}")
         if not getattr(raw, "isError", False):
             try:
                 # What the call made (a Blender render, an export…) goes into Storage under this server.
