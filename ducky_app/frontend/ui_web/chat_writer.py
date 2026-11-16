@@ -237,10 +237,14 @@ class ChatWriter:
         results: dict[str, BaseException | None] = {}
         retry: dict[str, list[Any]] = {}
         written = 0
+        lock_ms = 0.0
         t0 = time.perf_counter()
         try:
             conn = self._connect()
             with db.write_txn(conn):
+                # The wait for the write lock, apart from the writes: batches of 6-15 s that
+                # wrote 0 bytes (Nov 16 2026) could not be told from slow saves.
+                lock_ms = (time.perf_counter() - t0) * 1000.0
                 for cid, entry in batch.items():
                     if entry[2] != here:  # a test repointed the app folder meanwhile
                         results[cid] = RuntimeError("the chat database changed before this save was written")
@@ -275,7 +279,8 @@ class ChatWriter:
         if not retry:
             self._last_write = self._clock()
             self._truncated = False
-            _trace("chat_writer_batch", str(len(batch)), (time.perf_counter() - t0) * 1000.0, bytes=written)
+            _trace("chat_writer_batch", str(len(batch)), (time.perf_counter() - t0) * 1000.0, bytes=written,
+                   lock_ms=round(lock_ms, 1))
             if written // PAGE_BYTES > BIG_BATCH_PAGES:
                 self._checkpoint(conn, "PASSIVE")  # before the futures: a flush returns after it
         for cid, exc in results.items():

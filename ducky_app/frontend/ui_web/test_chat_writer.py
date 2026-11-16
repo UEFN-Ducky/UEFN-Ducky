@@ -282,6 +282,21 @@ def test_a_small_batch_runs_none() -> None:
         writer.close()
 
 
+def test_a_batch_traces_how_long_it_waited_for_the_write_lock(monkeypatch) -> None:
+    """Nov 16 2026: batches of 15.7 s, 9.8 s and 6.0 s wrote 0 bytes; the trace had one total."""
+    traced: list[dict] = []
+    monkeypatch.setattr(chat_writer, "_trace", lambda kind, name, ms=0.0, **meta: traced.append({"ms": ms, **meta}))
+    writer = ChatWriter(lambda cid, item: None, connect=db.connect)
+    try:
+        with db._write_lock:  # another writer of this process holds the database
+            writer.submit("waits", 1)
+            time.sleep(0.5)
+        writer.flush()
+        assert traced and traced[0]["lock_ms"] >= 250 and traced[0]["ms"] >= traced[0]["lock_ms"]
+    finally:
+        writer.close()
+
+
 def test_30_idle_seconds_truncate_the_wal_once() -> None:
     now = [100.0]
     writer = ChatWriter(lambda cid, item: None, connect=db.connect, clock=lambda: now[0])

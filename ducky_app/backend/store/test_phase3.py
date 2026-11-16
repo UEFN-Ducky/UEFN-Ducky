@@ -98,6 +98,18 @@ def test_blob_sweep_keeps_referenced_rows(island: Path, journal: FileChangeJourn
         runtime.reset_for_tests(None)
 
 
+def test_the_blob_sweep_reads_the_blob_indexes_not_the_whole_entry_table() -> None:
+    """Nov 16 2026: the sweep scanned all of run_entries (635 MB) inside the write
+    transaction at the end of every agent turn; chat saves waited up to 15.7 s behind it."""
+    from backend.store import db
+
+    plan = " | ".join(str(r[3]) for r in db.connect().execute(
+        "EXPLAIN QUERY PLAN DELETE FROM blobs WHERE hash NOT IN (SELECT before_blob FROM run_entries WHERE before_blob<>'') "
+        "AND hash NOT IN (SELECT after_blob FROM run_entries WHERE after_blob<>'') "
+        "AND hash NOT IN (SELECT content_hash FROM file_versions)"))
+    assert "ix_entries_before_blob" in plan and "ix_entries_after_blob" in plan, plan
+
+
 def test_file_history_parity(backend: str, island: Path) -> None:
     from frontend.ui_web.verse_editor import file_history as fh
 
