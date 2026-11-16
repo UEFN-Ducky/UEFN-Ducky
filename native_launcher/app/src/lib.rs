@@ -54,7 +54,7 @@ pub fn run(args: Vec<OsString>) -> u8 {
     if let Some(spawn) = instead {
         // A hop that can't start still gets the user a window: the Python one beside us.
         let started =
-            spawn.start().or_else(|_| repoint::Spawn::python(repoint::sibling_stub(&exe), &args).start());
+            spawn.start().or_else(|_| repoint::Spawn::python(repoint::sibling_stub(&exe), &args, "hop_failed").start());
         return if started.is_ok() { exit::OK } else { exit::START_ERROR };
     }
     let mut host = ui::UiHost::new(args);

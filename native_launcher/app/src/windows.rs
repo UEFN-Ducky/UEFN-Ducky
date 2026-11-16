@@ -430,6 +430,20 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
             note_hidden(!IsWindowVisible(hwnd).as_bool());
         }
         WM_CLOSE => save_bounds(hwnd),
+        // Shutdown or sign-out: Windows ends this process right after this returns. The
+        // backend marks its run closed only on a graceful exit (the Python window did that in
+        // its own WM_ENDSESSION), so with this window every PC shutdown with Ducky open was
+        // counted as app_unclean_exit (Nov 2026: a quarter of each day's installs). Same
+        // steps as `UiHost::stop_backend`: ask the backend to quit and wait for it.
+        WM_ENDSESSION if wp.0 != 0 => {
+            let (tx, thread) = with(|u| (u.to_sup.take(), u.sup_thread.take())).unwrap_or((None, None));
+            if let Some(tx) = tx {
+                let _ = tx.send(super::ToSup::Quit);
+            }
+            if let Some(t) = thread {
+                let _ = t.join();
+            }
+        }
         WM_DESTROY => {
             with(|u| {
                 u.main = None;

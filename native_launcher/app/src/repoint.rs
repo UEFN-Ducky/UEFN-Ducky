@@ -19,6 +19,10 @@ pub const LAUNCHER_EXE: &str = "Ducky-Launcher.exe";
 pub const STUB_EXE: &str = "UEFN-Ducky.exe";
 /// Tells `UEFN-Ducky.exe` to use the Python window and never start a launcher.
 pub const NO_NATIVE_ENV: &str = "UEFN_DUCKY_NO_NATIVE";
+/// Why this launcher started the Python window instead (`native_switch.NO_NATIVE_WHY_ENV`):
+/// no_pointer | hop_failed | start_failed | setting. Nov 16 2026: 7 of 14 launches were
+/// "launcher_fallback" and nothing said which of these it was.
+pub const NO_NATIVE_WHY_ENV: &str = "UEFN_DUCKY_NO_NATIVE_WHY";
 /// Set by `native_switch.run_native`: Python decided and handles any fallback itself.
 pub const NATIVE_CHILD_ENV: &str = "UEFN_DUCKY_NATIVE_CHILD";
 /// Set on every hop: the next launcher runs here (or the Python window), never hops again.
@@ -188,8 +192,13 @@ impl Spawn {
     }
 
     /// To a stub as the Python window: NO_NATIVE, so it never starts a launcher again.
-    pub fn python(exe: PathBuf, args: &[OsString]) -> Spawn {
-        Spawn { exe, args: args.to_vec(), env: vec![(NO_NATIVE_ENV.into(), "1".into()), (HOP_ENV.into(), "1".into())] }
+    pub fn python(exe: PathBuf, args: &[OsString], why: &str) -> Spawn {
+        let env = vec![
+            (NO_NATIVE_ENV.into(), "1".into()),
+            (HOP_ENV.into(), "1".into()),
+            (NO_NATIVE_WHY_ENV.into(), why.into()),
+        ];
+        Spawn { exe, args: args.to_vec(), env }
     }
 
     /// Start it and let it run on its own (this launcher exits right after).
@@ -245,13 +254,13 @@ pub fn before_start(
     let mode = setting();
     // Only `auto` reads the crash-loop hold, as in `native_switch.decide`.
     if !wants_native(&mode, mode == "auto" && crash_loop_active()) {
-        return Some(Spawn::python(sibling_stub(exe), args));
+        return Some(Spawn::python(sibling_stub(exe), args, "setting"));
     }
     match root_decision(exe, hopped, app_data, own_version) {
         Root::RunHere => None,
         Root::Exec(target) => Some(Spawn::hop(target, args)),
         // No usable pointer: one Python window, never a launcher again.
-        Root::Stub(stub) => Some(Spawn::python(stub, args)),
+        Root::Stub(stub) => Some(Spawn::python(stub, args, "no_pointer")),
     }
 }
 
@@ -402,7 +411,8 @@ mod tests {
                 l.pointer(t);
             }
             let s = l.start(&args(), false, false, "on").expect(name);
-            assert_eq!(s, Spawn::python(l.root.join(STUB_EXE), &args()), "{name}");
+            assert_eq!(s, Spawn::python(l.root.join(STUB_EXE), &args(), "no_pointer"), "{name}");
+            assert!(s.env.contains(&(NO_NATIVE_WHY_ENV.to_string(), "no_pointer".to_string())), "{name}");
             assert!(s.env.contains(&(NO_NATIVE_ENV.to_string(), "1".to_string())), "{name}");
             // Started again in the chain (by native_switch, or after a hop): runs here, no
             // second stub start, so the old loop can't happen.
@@ -512,9 +522,16 @@ mod tests {
         }
         let args: Vec<OsString> =
             ["--background", "C:/a b.verse", "uefn-ducky://x?y=1", "--after-update", "42"].map(OsString::from).to_vec();
-        let p = Spawn::python(PathBuf::from("C:/v/UEFN-Ducky.exe"), &args);
+        let p = Spawn::python(PathBuf::from("C:/v/UEFN-Ducky.exe"), &args, "start_failed");
         assert_eq!(p.args, args);
-        assert_eq!(p.env, [(NO_NATIVE_ENV.to_string(), "1".to_string()), (HOP_ENV.to_string(), "1".to_string())]);
+        assert_eq!(
+            p.env,
+            [
+                (NO_NATIVE_ENV.to_string(), "1".to_string()),
+                (HOP_ENV.to_string(), "1".to_string()),
+                (NO_NATIVE_WHY_ENV.to_string(), "start_failed".to_string()),
+            ]
+        );
         let h = Spawn::hop(PathBuf::from("C:/v/Ducky-Launcher.exe"), &args);
         assert_eq!(h.args, args);
         assert_eq!(h.env, [(HOP_ENV.to_string(), "1".to_string())]);

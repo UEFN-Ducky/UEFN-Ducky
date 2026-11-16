@@ -537,6 +537,27 @@ def test_no_native_hook_runs_python_and_drops_the_env(no_native: None, launcher_
     assert not ns.crash_loop_path().exists()
 
 
+def test_the_launchers_reason_for_the_python_window_is_sent_as_an_error_code(
+        no_native: None, launcher_present: Path, no_spawn: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nov 16 2026: 7 of 14 launches were "launcher_fallback" and nothing said which case."""
+    import os
+    import threading
+
+    from frontend import usage_events as ev, usage_stats
+
+    sent: list[tuple[str, dict]] = []
+    _sync_records(monkeypatch)
+    monkeypatch.setattr(usage_stats, "track", lambda name, **props: sent.append((name, props)))
+    monkeypatch.setenv(ns.NO_NATIVE_WHY_ENV, "no_pointer")
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
+    for thread in [t for t in threading.enumerate() if t.name == "launcher-why"]:
+        thread.join(5)
+    assert ns.NO_NATIVE_WHY_ENV not in os.environ  # children never inherit it
+    codes = [props["code"] for name, props in sent if name == "error.code"]
+    assert codes == ["launcher_python.no_pointer"]
+    assert ev.validate("error.code", {"code": codes[0], "where": "ui"})["code"] == codes[0]  # a slug the Store takes
+
+
 def test_no_native_dropped_even_when_off(no_native: None, no_spawn: list) -> None:
     import os
 

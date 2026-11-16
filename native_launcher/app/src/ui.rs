@@ -345,7 +345,7 @@ impl Host for UiHost {
         let app_data = with(|u| u.app_data.clone()).unwrap_or_default();
         let _ = crate::starts::record(&app_data, false, None, None, &crate::starts::fallback_reason(code, error));
         let exe = std::env::current_exe().unwrap_or_default();
-        let started = repoint::Spawn::python(repoint::sibling_stub(&exe), &self.args).start();
+        let started = repoint::Spawn::python(repoint::sibling_stub(&exe), &self.args, "start_failed").start();
         with(|u| {
             u.record.stage(if started.is_ok() { "fallback_python" } else { "fallback_python_failed" });
             u.record.stage(&format!("fallback_code_{code}"));
