@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import unreal
 
-from listener import lookup
+from listener import asset_resolve, lookup
 from listener.save_coalesce import request_level_save
 from listener.serialize import is_live
 
@@ -667,9 +667,7 @@ def _wrapper_spec_from_script_value(script: Any, prop: str) -> Optional[Tuple[st
         if val is not None and hasattr(val, "__len__") and not isinstance(val, (str, bytes)):
             if len(val) == 0:
                 return None
-            # Reading an element of a []string raises ("VerseStringProperty conversion not
-            # implemented"): outside this try it failed the whole get_verse_editables call.
-            val = val[0]
+            val = val[0]  # raises for a []string (VerseStringProperty): must stay inside the try
     except Exception:
         return None
     if val is None:
@@ -753,19 +751,9 @@ def _wrapper_spec_for_field(actor: unreal.Actor, field: str, target: Any = None)
             return spec
     verse_type = _infer_field_type(actor, field)
     if verse_type:
-        spec = _wrapper_spec_for_type(verse_type)
+        spec = _wrapper_spec_for_type(verse_type) or asset_resolve.wrapper_in_target_plugin(target, verse_type)
         if spec:
             return spec
-        # Not in _WRAPPER_REGISTRY (11 types): a device's wrapper class lives in the same
-        # plugin as its actor (/CreativeCoreDevices/_Verse.trigger_device), so the target's
-        # class names the mount. Empty arrays of other devices could not be wired at all.
-        if target is not None and verse_type.endswith("_device"):
-            path = f"/{target.get_class().get_path_name().strip('/').split('/')[0]}/_Verse.{verse_type}"
-            try:
-                if unreal.load_class(None, path):
-                    return path, "SavedActor"
-            except Exception:
-                pass
     prop = prop or _resolve_field_prop(script, field)
     if not prop:
         return None

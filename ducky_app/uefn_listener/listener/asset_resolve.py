@@ -174,3 +174,19 @@ def resolve_asset_class(asset_path: str, asset_class: str = "") -> Tuple[str, Op
     if dest_cls.lower() == "objectredirector":
         return "ObjectRedirector", resolved_path if resolved_path != asset_path else None
     return dest_cls, resolved_path
+
+
+def wrapper_in_target_plugin(target: Any, verse_type: str) -> Optional[Tuple[str, str]]:
+    """(wrapper VerseClass path, link property) for a creative device type the wiring table
+    (verse_editable_editor._WRAPPER_REGISTRY, 11 types) does not list. The wrapper class lives
+    in the same plugin as the device's actor: a trigger actor in /CreativeCoreDevices/ has
+    /CreativeCoreDevices/_Verse.trigger_device (checked in UEFN). Without this an empty array
+    of any other device could not be wired (65 "Cannot infer wrapper type" failures).
+    None when there is no target, the type is not a device, or that class does not load."""
+    if target is None or not verse_type.endswith("_device"):
+        return None
+    path = f"/{target.get_class().get_path_name().strip('/').split('/')[0]}/_Verse.{verse_type}"
+    try:
+        return (path, "SavedActor") if unreal.load_class(None, path) else None
+    except Exception:
+        return None

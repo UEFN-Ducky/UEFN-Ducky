@@ -152,9 +152,14 @@ def test_a_device_type_outside_the_table_takes_its_wrapper_from_the_targets_plug
     target_cls = types.SimpleNamespace(get_path_name=lambda: "/CreativeCoreDevices/Device_Trigger_V2.Device_Trigger_V2_C")
     target = types.SimpleNamespace(get_class=lambda: target_cls)
     loadable = {"/CreativeCoreDevices/_Verse.trigger_device"}
+    fake_unreal = types.SimpleNamespace(Actor=object, load_class=lambda _o, path: path in loadable)
+    resolve: dict = {"Any": Any, "Optional": Optional, "Tuple": Tuple, "unreal": fake_unreal}
+    source = (Path(__file__).resolve().parent / "asset_resolve.py").read_text(encoding="utf-8")
+    exec(re.search(r"\ndef wrapper_in_target_plugin\(.*", source, flags=re.S).group(0), resolve)
     ns: dict = {
         "Any": Any, "Optional": Optional, "Tuple": Tuple,
-        "unreal": types.SimpleNamespace(Actor=object, load_class=lambda _o, path: path in loadable),
+        "unreal": fake_unreal,
+        "asset_resolve": types.SimpleNamespace(wrapper_in_target_plugin=resolve["wrapper_in_target_plugin"]),
         "_verse_script": lambda a: _Script(),
         "_script_verse_properties": lambda s: {},
         "_infer_field_type": lambda a, f: "trigger_device",
