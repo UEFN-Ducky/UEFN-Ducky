@@ -340,7 +340,11 @@ def workspace_compile_verse(pretty: bool = False) -> str:
         # Builds only re-check changed/stale files, within the agent's limit: an unbounded
         # scan here held the build's answer past 5 minutes.
         complete = _scan_within_limit(root, False) if stale_keys(root) else True
-        scan = {"files": files_for_ui(load(root)), "with_errors": 0, "with_warnings": 0}
+        # Only files with something to fix: every clean file's row made a build answer ~9K chars
+        # that stayed in the agent's thread (Nov 17 2026 token audit: 256 builds, ~$22 of re-reads).
+        every = files_for_ui(load(root))
+        scan = {"files": [f for f in every if f.get("errors") or f.get("warnings")],
+                "files_checked": len(every), "with_errors": 0, "with_warnings": 0}
         if not complete:
             scan["complete"] = False
             scan["unchecked"] = sorted(stale_keys(root))[:50]
