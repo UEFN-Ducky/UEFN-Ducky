@@ -593,12 +593,18 @@ def _image_path(path: str) -> str:
 
 
 @mcp.tool()
-def view_image(path: str, full_size: bool = False, pretty: bool = False) -> Any:
+def view_image(path: str, full_size: bool = False, pretty: bool = False, force: bool = False) -> Any:
     """Look at a picture: one the person attached, a screenshot Ducky saved, or an image file in
     a project (png, jpg, gif, webp, bmp). Pass the absolute path given in the chat, or a project
     path. Returns the picture itself, so you see it, at most 1280 px wide; full_size=true sends
-    up to 1920 px when fine text or small detail matters."""
+    up to 1920 px when fine text or small detail matters. The same unchanged picture twice in one
+    turn answers "unchanged"; force=true sends it again."""
     full = _image_path(path)
+    from backend.tools.core.read_ledger import repeat_note
+
+    note = repeat_note("view_image", full, (bool(full_size),), force=force)
+    if note:
+        return tool_json({"path": full.replace("\\", "/"), "unchanged": True, "note": note}, pretty=pretty)
     out: dict[str, Any] = {"path": full.replace("\\", "/"), "bytes": os.path.getsize(full)}
     url = _picture_url(full)
     if url:
