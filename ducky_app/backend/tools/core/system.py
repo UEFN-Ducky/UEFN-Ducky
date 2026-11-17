@@ -411,6 +411,25 @@ def workspace_read_file(
     return tool_json(payload, pretty=pretty)
 
 
+REWRITE_TIP_CHARS = 8_000
+
+
+def rewrite_tip(content: str, lines_added: int, lines_removed: int) -> str:
+    """A note when a big existing file was rewritten whole to change a small part of it.
+
+    What an agent writes into a tool call stays in its thread and is re-read on every later
+    call: Nov 17 2026 audit, agent-written tool inputs were the largest re-read cost ($210 of
+    $2.4K in 9 days), whole-file rewrites the biggest single kind."""
+    if len(content) < REWRITE_TIP_CHARS or not lines_removed:
+        return ""  # a small or new file
+    total = content.count("\n") + 1
+    changed = max(lines_added, lines_removed)
+    if changed * 10 >= total * 3:
+        return ""
+    return (f"Only {changed} of {total} lines changed: next time use workspace_edit_file / "
+            "workspace_multi_edit. A whole-file write stays in your context and is re-read on every call.")
+
+
 @mcp.tool()
 def workspace_write_file(relative_path: str = "", *, content: str, pretty: bool = False, path: str = "") -> str:
     """Create or replace a whole text file; never for a small change (use workspace_edit_file).
@@ -440,6 +459,9 @@ def workspace_write_file(relative_path: str = "", *, content: str, pretty: bool 
     for key in ("changeset", "in_lane", "warning"):
         if key in extra:
             payload[key] = extra[key]
+    tip = rewrite_tip(content, result.lines_added, result.lines_removed)
+    if tip:
+        payload["tip"] = tip
     if result.path.lower().endswith(".verse"):
         # Findings only — never blocks the write. Catches the effect/using/API
         # mistakes the offline LSP scan cannot see.

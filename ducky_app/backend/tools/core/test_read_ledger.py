@@ -56,6 +56,19 @@ def test_new_run_person_and_embedded_ducky_always_get_the_text(run, tmp_path: Pa
         identity.reset(token)
 
 
+@pytest.mark.parametrize("chars,added,removed,want", [
+    (10_000, 2, 2, True),      # 2 of ~400 lines: should have been an edit
+    (10_000, 200, 200, False),  # half the file changed: a rewrite is fine
+    (10_000, 400, 0, False),   # a new file
+    (2_000, 1, 1, False),      # small file: not worth a note
+])
+def test_a_big_rewrite_of_a_few_lines_gets_the_edit_tip(chars, added, removed, want) -> None:
+    from backend.tools.core.system import rewrite_tip
+
+    content = ("x" * 24 + "\n") * (chars // 25)
+    assert bool(rewrite_tip(content, added, removed)) is want
+
+
 def test_workspace_read_file_answers_unchanged_then_force(run, tmp_path: Path, monkeypatch) -> None:
     from backend.tools.core import system
 
