@@ -74,8 +74,13 @@ def inject_bootstrap_if_stale(
     *,
     app_version: str,
     session_id: str = "",
+    agent_id: str = "",
 ) -> str:
     """Prepend the live EXE bootstrap once per version on coding-agent resume.
+
+    Claude Code gets ``system_prompt`` on every launch (--append-system-prompt-file), so a
+    paste only doubles it, and the copy stays in the thread: 36 pastes of ~9.5K tokens were
+    re-read on every later call (Nov 17 2026 token audit). Claude chats are only stamped.
 
     Cursor / Codex / Grok only send ``system_prompt`` on the first turn. After
     an EXE update, paste the current bootstrap onto the user prompt and stamp
@@ -86,7 +91,7 @@ def inject_bootstrap_if_stale(
     if stamped == str(app_version):
         return prompt_text
     conv.rules_app_version = str(app_version)
-    if not (session_id or "").strip():
+    if not (session_id or "").strip() or agent_id == "claude_code":
         return prompt_text
     body = (system_prompt or "").strip()
     if not body:
@@ -1027,6 +1032,7 @@ def _run_coding_agent_message(
         system_prompt,
         app_version=__version__,
         session_id=session_id,
+        agent_id=agent_id,
     )
     if fresh_handoff:
         prompt_text = fresh_handoff + prompt_text

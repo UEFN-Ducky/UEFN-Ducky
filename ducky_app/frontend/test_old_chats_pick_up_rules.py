@@ -109,3 +109,17 @@ def test_inject_bootstrap_stamps_new_session_without_dup():
     )
     assert out == "user said hi"
     assert conv.rules_app_version == "2.0.0"
+
+
+def test_claude_resume_is_stamped_not_pasted():
+    """Claude Code re-appends the system prompt every launch: a paste would be a second copy."""
+    from backend.agent.coding_agents.runner import inject_bootstrap_if_stale
+
+    conv = SimpleNamespace(rules_app_version="1.0.0")
+    out = inject_bootstrap_if_stale(conv, "next", "FULL BOOTSTRAP", app_version="2.0.0",
+                                    session_id="sess-1", agent_id="claude_code")
+    assert out == "next"
+    assert conv.rules_app_version == "2.0.0"
+    codex = SimpleNamespace(rules_app_version="1.0.0")
+    assert "FULL BOOTSTRAP" in inject_bootstrap_if_stale(codex, "next", "FULL BOOTSTRAP", app_version="2.0.0",
+                                                         session_id="sess-1", agent_id="codex")
