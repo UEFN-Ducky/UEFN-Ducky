@@ -47,7 +47,8 @@ export interface WalkthroughRuntimeState {
 export interface PluginWalkthroughManifest {
   id: string;
   title?: string;
-  auto_start?: "first_enable" | "never";
+  /** first_pick: the first time the person picks this gateway's model in a chat. */
+  auto_start?: "first_enable" | "never" | "first_pick";
   /** Settings sidebar tab to open before the first step. */
   settings_tab?: string;
   /** LLMs provider row id when it differs from plugin id (e.g. google → gemini). */

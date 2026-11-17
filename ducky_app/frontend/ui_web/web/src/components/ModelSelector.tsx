@@ -37,6 +37,7 @@ import {
 } from "./GatewayUsageFooter";
 import { catalogThinkingMenu, effortInMenu, effortSuffix } from "./thinkingMenu";
 import { openCodingAgentLoginUi } from "../walkthrough/openCodingAgentLogin";
+import { MODEL_PICKED_EVENT } from "../walkthrough/firstPick";
 import { openDefaultModelSettings, openLlmsProviderSettings } from "../navigation/openSettingsTab";
 import { LlmPluginSlot } from "../plugin-ui/llmPluginSlots";
 
@@ -792,6 +793,8 @@ export function ModelSelector({
         const pk = providerKey || row.providerKey || "";
         if (api && convId && api.set_conversation_coding_agent) {
           void api.set_conversation_coding_agent(convId, "ducky", row.id, pk);
+          // A gateway's first-pick tour (contributes.walkthrough auto_start "first_pick").
+          window.dispatchEvent(new CustomEvent(MODEL_PICKED_EVENT, { detail: { providerKey: pk, model: row.id, convId } }));
         } else if (api && !convId) {
           void api.set_model(row.id, pk);
         }

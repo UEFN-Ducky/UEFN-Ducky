@@ -853,7 +853,15 @@ export function AgentTab() {
                 </div>
                 {selected.settings_panel ? (
                   // The gateway's own editor (Ducky Auto's model-per-task rules), right on its page.
-                  <PluginSettingsEmbed pluginId={selected.plugin_id} panelId={selected.settings_panel} />
+                  <div
+                    ref={targetRef("settings.llms.provider.panel", {
+                      kind: "settings_field",
+                      label: `${selected.label} settings`,
+                      route: "settings.llms",
+                    })}
+                  >
+                    <PluginSettingsEmbed pluginId={selected.plugin_id} panelId={selected.settings_panel} />
+                  </div>
                 ) : null}
                 <LlmPluginSlot
                   surface="settings"

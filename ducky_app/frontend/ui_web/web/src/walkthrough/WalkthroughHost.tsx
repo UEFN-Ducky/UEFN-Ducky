@@ -18,6 +18,8 @@ import { WalkthroughOverlay } from "./WalkthroughOverlay";
 import { openCodingAgentLoginUi } from "./openCodingAgentLogin";
 import { newlyEnabledForWalkthrough, rememberEnabledPlugin } from "./firstEnable";
 import { didFirstRunSetupShow, FIRST_RUN_TOUR_ID, whenFirstRunSetupDone } from "./firstRunSetup";
+import { installFirstPickTours } from "./firstPick";
+import type { PluginWalkthroughManifest } from "./types";
 
 const registeredPluginTourIds = new Set<string>();
 
@@ -25,6 +27,10 @@ export function WalkthroughHost() {
   const contrib = usePluginContributions();
   const shellArmed = useRef(false);
   const [tourAttempt, setTourAttempt] = useState(0);
+  const walkthroughRows = useRef<PluginWalkthroughManifest[]>([]);
+
+  // A gateway's first-pick tour starts when the person first picks its model in a chat.
+  useEffect(() => installFirstPickTours(() => walkthroughRows.current), []);
 
   useEffect(() => {
     registerBuiltinTours(registerTour);
@@ -47,6 +53,7 @@ export function WalkthroughHost() {
   useEffect(() => {
     if (!contrib.ready) return;
     const rows = parsePluginWalkthroughs(contrib.walkthroughs);
+    walkthroughRows.current = rows;
     const nextIds = new Set<string>();
     for (const row of rows) {
       const tour = pluginManifestToTour(expandGatewayManifest(row, contrib));

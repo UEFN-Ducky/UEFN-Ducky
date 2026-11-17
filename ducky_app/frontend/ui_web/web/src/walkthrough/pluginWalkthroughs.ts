@@ -19,6 +19,7 @@ function wait(ms: number): Promise<void> {
 }
 
 const LLM_DETAIL_TARGETS = new Set([
+  "settings.llms.provider.panel",
   "settings.llms.provider.key",
   "settings.llms.provider.save",
   "settings.llms.provider.key_section",
@@ -299,7 +300,7 @@ export function parsePluginWalkthroughs(rows: unknown): PluginWalkthroughManifes
     out.push({
       id,
       title: typeof r.title === "string" ? r.title : undefined,
-      auto_start: r.auto_start === "never" ? "never" : "first_enable",
+      auto_start: r.auto_start === "never" || r.auto_start === "first_pick" ? r.auto_start : "first_enable",
       settings_tab: typeof r.settings_tab === "string" ? r.settings_tab : undefined,
       provider_id: typeof r.provider_id === "string" ? r.provider_id : undefined,
       steps: r.steps as PluginWalkthroughManifest["steps"],
