@@ -12,13 +12,18 @@ from pathlib import Path
 from typing import Any
 
 MAX_SIDE = 1920
+# What a tool sends unless asked for full size. A picture stays in the thread and is re-read on
+# every later call: 1280 px costs ~23% fewer tokens than the model's own ~1568 px downscale
+# (Nov 17 2026 token audit: 2,036 pictures, ~$113 of re-reads in 9 days).
+MODEL_SIDE = 1280
 MAX_BYTES = 3_500_000  # about 4.7 MB once base64: under Anthropic's 5 MB
 _AS_IS = (".png", ".jpg", ".jpeg", ".webp")
 
 
-def model_picture(path: str | Path) -> Any:
+def model_picture(path: str | Path, max_side: int = MODEL_SIDE) -> Any:
     """A FastMCP Image of ``path``: the file itself when it already fits, otherwise scaled to
-    MAX_SIDE as PNG (JPEG when the PNG is still over MAX_BYTES)."""
+    ``max_side`` (at most MAX_SIDE) as PNG (JPEG when the PNG is still over MAX_BYTES)."""
+    side = max(1, min(int(max_side), MAX_SIDE))
     from mcp.server.fastmcp import Image as ToolImage
     from PIL import Image
 
@@ -26,10 +31,10 @@ def model_picture(path: str | Path) -> Any:
     try:
         with Image.open(source) as img:
             if (source.suffix.lower() in _AS_IS and source.stat().st_size <= MAX_BYTES
-                    and max(img.size) <= MAX_SIDE):
+                    and max(img.size) <= side):
                 return ToolImage(path=source)
             img.load()
-            img.thumbnail((MAX_SIDE, MAX_SIDE), Image.Resampling.LANCZOS)
+            img.thumbnail((side, side), Image.Resampling.LANCZOS)
             picture = img.convert("RGBA" if "A" in img.getbands() else "RGB")
     except (OSError, ValueError) as exc:
         raise ValueError(f"Not a picture Ducky can open: {source.name}") from exc

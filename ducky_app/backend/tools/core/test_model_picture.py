@@ -25,11 +25,23 @@ def test_a_small_png_goes_as_it_is(tmp_path: Path) -> None:
     assert picture.path == path and picture.to_image_content().mimeType == "image/png"
 
 
-def test_a_4k_screenshot_is_scaled_to_the_many_picture_limit(tmp_path: Path) -> None:
+def test_a_4k_screenshot_is_sent_at_1280_unless_full_size_is_asked(tmp_path: Path) -> None:
     path = tmp_path / "window.png"
     Image.new("RGB", (3840, 2160), "blue").save(path)
     img, mime = _sent(mp.model_picture(path))
-    assert img.size == (1920, 1080) and mime == "image/png"
+    assert img.size == (1280, 720) and mime == "image/png"
+    img, _ = _sent(mp.model_picture(path, mp.MAX_SIDE))
+    assert img.size == (1920, 1080)
+    img, _ = _sent(mp.model_picture(path, 99999))  # never past the many-picture limit
+    assert img.size == (1920, 1080)
+
+
+def test_a_1920_capture_is_scaled_but_a_1280_one_goes_as_it_is(tmp_path: Path) -> None:
+    big, small = tmp_path / "big.png", tmp_path / "small.png"
+    Image.new("RGB", (1920, 1080), "blue").save(big)
+    Image.new("RGB", (1280, 720), "blue").save(small)
+    assert _sent(mp.model_picture(big))[0].size == (1280, 720)
+    assert mp.model_picture(small).path == small
 
 
 def test_a_bmp_is_sent_as_png_not_octet_stream(tmp_path: Path) -> None:

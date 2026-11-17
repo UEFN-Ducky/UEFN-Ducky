@@ -593,18 +593,19 @@ def _image_path(path: str) -> str:
 
 
 @mcp.tool()
-def view_image(path: str, pretty: bool = False) -> Any:
+def view_image(path: str, full_size: bool = False, pretty: bool = False) -> Any:
     """Look at a picture: one the person attached, a screenshot Ducky saved, or an image file in
     a project (png, jpg, gif, webp, bmp). Pass the absolute path given in the chat, or a project
-    path. Returns the picture itself, so you see it."""
+    path. Returns the picture itself, so you see it, at most 1280 px wide; full_size=true sends
+    up to 1920 px when fine text or small detail matters."""
     full = _image_path(path)
     out: dict[str, Any] = {"path": full.replace("\\", "/"), "bytes": os.path.getsize(full)}
     url = _picture_url(full)
     if url:
         out["media_url"] = url  # the chat's tool card shows the picture
-    from backend.tools.core.model_picture import model_picture
+    from backend.tools.core.model_picture import MAX_SIDE, MODEL_SIDE, model_picture
 
-    return [tool_json(out, pretty=pretty), model_picture(full)]
+    return [tool_json(out, pretty=pretty), model_picture(full, MAX_SIDE if full_size else MODEL_SIDE)]
 
 
 _CHAT_PICTURE = re.compile(r"[\\/]conversations[\\/]([^\\/]+)[\\/]attachments[\\/]([^\\/]+\.(?:png|jpe?g|webp))$", re.IGNORECASE)
