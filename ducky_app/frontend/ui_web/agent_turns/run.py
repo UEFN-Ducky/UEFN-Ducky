@@ -287,6 +287,8 @@ async def _run_agent_loop(
                 }
                 if event.percent is not None:
                     payload["percent"] = event.percent
+                if getattr(event, "routed_model", ""):
+                    payload["routed_model"] = event.routed_model
                 push(payload)
             elif event.kind == "text_delta":
                 push({"type": "text_delta", "text": event.text, "conv_id": conv.id})

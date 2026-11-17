@@ -409,6 +409,8 @@ class AgentEvent:
     partial_message: dict[str, Any] | None = None
     # Optional 0–100 for kind="status" (prompt-eval progress).
     percent: float | None = None
+    # kind="status" from a router gateway: "gateway:model" that runs this step.
+    routed_model: str = ""
 
 
 ApprovalCallback = Callable[[list[ToolCallRecord]], bool]
@@ -1112,6 +1114,7 @@ class AgentRunner:
                             kind="status",
                             text=event.text,
                             percent=event.percent,
+                            routed_model=getattr(event, "routed_model", "") or "",
                         )
                         continue
                     if event.kind == StreamEventKind.TEXT_DELTA:

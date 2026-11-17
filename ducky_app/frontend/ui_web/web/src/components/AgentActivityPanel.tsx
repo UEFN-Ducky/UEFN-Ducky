@@ -8,6 +8,7 @@ import {
 } from "../utils/agentActivity";
 import { ElapsedTimer } from "./ElapsedTimer";
 import { formatElapsedMs } from "../hooks/chatTurnTimer";
+import { routedModelLabel, useRoutedModel } from "../hooks/routedModel";
 
 const DRAG_THRESHOLD_PX = 4;
 const COLLAPSED_MAX_LINES = 5;
@@ -50,6 +51,7 @@ export const AgentActivityPanel = memo(function AgentActivityPanel({
   showIdleTimer = false,
 }: AgentActivityPanelProps) {
   const [expanded, setExpanded] = useState(autoExpand);
+  const routed = useRoutedModel(chatId);
   const [duckPreviewPos, setDuckPreviewPos] = useState<{ left: number; top: number } | null>(null);
   const pointerStart = useRef({ x: 0, y: 0, dragging: false });
   const duckRef = useRef<HTMLDivElement>(null);
@@ -171,8 +173,14 @@ export const AgentActivityPanel = memo(function AgentActivityPanel({
                 <span className="agent-activity-panel-thinking-dots" aria-hidden="true" />
               ) : null}
             </span>
-            {quiet || (chatId && showIdleTimer) ? (
+            {quiet || (chatId && showIdleTimer) || routed ? (
               <span className="agent-activity-panel-meta">
+                {/* Only a router gateway (Ducky Auto) names the model it ran the step on. */}
+                {routed ? (
+                  <span className="agent-activity-panel-routed" title={`Ducky Auto ran this on ${routed}`}>
+                    via {routedModelLabel(routed)}
+                  </span>
+                ) : null}
                 {quiet ? (
                   <span className="agent-activity-panel-quiet" title={QUIET_HINT}>
                     {formatElapsedMs(quietMs)} quiet

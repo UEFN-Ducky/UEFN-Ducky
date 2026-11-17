@@ -2219,6 +2219,8 @@ export interface AgentEvent {
   expected_ms?: number;
   /** status: the once-a-second line of a chat not on screen (not proof the turn still runs). */
   heartbeat?: boolean;
+  /** status from a router gateway (Ducky Auto): "gateway:model" that runs this step. */
+  routed_model?: string;
   /** status heartbeat: seconds the turn (or its running tool) has run. */
   elapsed_s?: number;
   /** run_expect: expected_ms is the median of this command's past runs, not the agent's own figure. */

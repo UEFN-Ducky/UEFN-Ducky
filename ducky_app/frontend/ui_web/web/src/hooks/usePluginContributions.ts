@@ -188,6 +188,8 @@ export type PluginLlmProvider = {
   chat?: boolean;
   /** How the gateway's turns are paid, from its plugin (e.g. "account"). */
   billing?: string;
+  /** Its plugin's ui.panels id, embedded on the gateway's Settings → LLMs page. */
+  settings_panel?: string;
 };
 
 export type PluginContributions = {

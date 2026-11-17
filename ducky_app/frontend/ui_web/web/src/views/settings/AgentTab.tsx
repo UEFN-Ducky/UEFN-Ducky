@@ -18,6 +18,7 @@ import { ProviderCodingAgents } from "./CodingAgentsSection";
 import { ProviderIdeHookup } from "./ProviderIdeHookup";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { PluginSettingsSections } from "./PluginSettingsSections";
+import { PluginSettingsEmbed } from "../../plugin-ui/PluginSettingsEmbed";
 import { SettingsToggleRow } from "./SettingsToggleRow";
 import { AgentApiKeyToggle } from "./AgentApiKeyToggle";
 import { GatewayAccounts } from "./GatewayAccounts";
@@ -850,6 +851,10 @@ export function AgentTab() {
                 >
                   <PluginSettingsSections pluginId={selected.plugin_id} compact />
                 </div>
+                {selected.settings_panel ? (
+                  // The gateway's own editor (Ducky Auto's model-per-task rules), right on its page.
+                  <PluginSettingsEmbed pluginId={selected.plugin_id} panelId={selected.settings_panel} />
+                ) : null}
                 <LlmPluginSlot
                   surface="settings"
                   open

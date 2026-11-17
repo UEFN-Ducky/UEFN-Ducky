@@ -559,6 +559,9 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         key_url = str(prov.get("key_url") or "").strip()
         if key_url.startswith("https://"):
             entry["key_url"] = key_url  # where to get a key: the API keys table links it
+        settings_panel = str(prov.get("settings_panel") or "").strip().lower()
+        if settings_panel:
+            entry["settings_panel"] = settings_panel  # its ui.panels id, shown on its LLMs page
         if prov.get("key_first") is True:
             # Setup's Connect AI shows this provider's API key before its plan sign-in: the key is
             # the way that works for most people (Google: Gemini CLI refuses personal accounts).

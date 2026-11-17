@@ -34,6 +34,9 @@ class StreamEvent:
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
     # Optional 0–100 progress for STATUS events (Ollama prompt-eval, etc.).
     percent: float | None = None
+    # STATUS from a router gateway (Ducky Auto): "gateway:model" that runs this step. The chat
+    # shows it beside the turn's ducky; plain gateways leave it empty.
+    routed_model: str = ""
 
 
 from backend.agent.message_attachment import MessageAttachment

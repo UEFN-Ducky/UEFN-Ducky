@@ -3174,6 +3174,12 @@
   max-width: 100%;
 }
 
+.agent-activity-panel-routed {
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 .agent-activity-panel-quiet {
   min-width: 0;
   font-size: 11px;

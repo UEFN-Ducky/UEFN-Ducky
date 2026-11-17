@@ -15,6 +15,7 @@ import {
 } from "./chatRun/chatRunReducer";
 import { installBackgroundRuns, markChatMounted, snapshotOf } from "./chatRun/backgroundRuns";
 import { markChatTurnIdle, markChatTurnRunning } from "./chatTurnTimer";
+import { setRoutedModel } from "./routedModel";
 import { prefixSpeaker } from "../utils/agentActivity";
 
 /**
@@ -330,6 +331,7 @@ export function useChatMessages(chatId: string, visible: boolean, isAgentRunning
       if (event.conv_id && event.conv_id !== chatId) return;
       // A write warning is for the chat that wrote; one with no chat (a disk change) is no chat's.
       if (event.type === "file_guard" && event.conv_id !== chatId) return;
+      if (event.type === "status" && event.routed_model) setRoutedModel(chatId, event.routed_model);
       dispatch({ type: "agentEvent", event });
     },
     [chatId, load],
