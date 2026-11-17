@@ -42,6 +42,7 @@ const RESERVED_PROVIDER_IDS = new Set([
   "plugin",
   "back",
   "key_section",
+  "panel",
 ]);
 
 export function isLlmsProviderRowTarget(target: string): boolean {

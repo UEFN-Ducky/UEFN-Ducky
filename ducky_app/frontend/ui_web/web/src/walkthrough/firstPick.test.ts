@@ -2,7 +2,12 @@
 import { afterEach, expect, it, vi } from "vitest";
 
 import { firstPickTourFor, installFirstPickTours, MODEL_PICKED_EVENT } from "./firstPick";
-import { parsePluginWalkthroughs, pluginManifestToTour } from "./pluginWalkthroughs";
+import {
+  expandGatewayManifest,
+  isLlmsProviderRowTarget,
+  parsePluginWalkthroughs,
+  pluginManifestToTour,
+} from "./pluginWalkthroughs";
 import { _resetWalkthroughServiceForTests, getWalkthroughState, registerTour, skipTour } from "./WalkthroughService";
 
 afterEach(() => {
@@ -26,6 +31,11 @@ it("keeps first_pick and finds the tour for that gateway only", () => {
   expect(firstPickTourFor(rows, "ducky-auto")).toBe("plugin.ducky-auto");
   expect(firstPickTourFor(rows, "anthropic")).toBe(""); // first_enable tours never start on a pick
   expect(firstPickTourFor(rows, "")).toBe("");
+});
+
+it("treats the gateway's panel as a page target, not a provider row (no key steps added)", () => {
+  expect(isLlmsProviderRowTarget("settings.llms.provider.panel")).toBe(false);
+  expect(expandGatewayManifest(rows[0]).steps.map((s) => s.target)).toEqual(["settings.llms.provider.panel"]);
 });
 
 it("starts once on the first pick, never after it was finished or skipped", async () => {
