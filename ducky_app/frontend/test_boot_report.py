@@ -249,6 +249,28 @@ def test_the_report_is_kept_before_the_pop_up_asks(crash, monkeypatch) -> None:
     assert [[r["sent"] for r in reports] for reports in seen] == [[False]]
 
 
+def test_an_unanswered_pop_up_closes_itself_and_the_start_goes_on(monkeypatch) -> None:
+    """Nov 16 2026: an update restarted Ducky with nobody at the PC, and the start waited
+    9 hours behind this pop-up before it opened a window."""
+    import tkinter
+
+    class Root:
+        def after(self, ms, fn) -> None:
+            self.ms, self.fn = ms, fn
+
+        def mainloop(self) -> None:
+            self.fn()
+
+        def destroy(self) -> None:
+            self.gone = True
+
+    root = Root()
+    monkeypatch.setattr(tkinter, "Tk", lambda: root)
+    monkeypatch.setattr(boot_report, "_fill_popup", lambda *a, **k: None)
+    assert boot_report._ask_to_send({}) is False  # not sent: the report stays kept
+    assert root.ms == boot_report.ASK_WAIT_S * 1000 and root.gone
+
+
 def test_the_launchers_backend_asks_after_hello_not_before(crash) -> None:
     import threading
 

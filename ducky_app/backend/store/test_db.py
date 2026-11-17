@@ -710,6 +710,35 @@ def test_upgrade_retries_take_one_pre_migrate_copy(tmp_path: Path, monkeypatch) 
     assert len(copies) == 1
 
 
+def test_the_pre_migrate_copy_keeps_saying_it_is_still_copying(monkeypatch) -> None:
+    """The launcher ends a backend that is silent for 20 s; a 3.3 GB database copies for longer."""
+    import time
+
+    conn = db.connect()
+    ticks: list[int] = []
+    monkeypatch.setattr(db, "_premigrate_done", set())
+    monkeypatch.setattr(db, "COPY_TICK_S", 0.01)
+    monkeypatch.setattr(db, "still_copying", lambda: ticks.append(1))
+    monkeypatch.setattr(db, "_vacuum_into", lambda *a, **k: time.sleep(0.3))
+    db._pre_migrate_copy(conn, 7)
+    assert ticks
+    seen = len(ticks)
+    time.sleep(0.1)
+    assert len(ticks) <= seen + 1  # it stops with the copy
+
+
+def test_a_copy_its_process_never_finished_is_not_reused(tmp_path: Path, monkeypatch) -> None:
+    conn = db.connect()
+    folder = db.snapshot_dir(tmp_path / "UEFN-Ducky")
+    folder.mkdir(parents=True, exist_ok=True)
+    half = folder / "ducky-20261116-212514-pre-migrate-v7.db"
+    half.write_bytes(b"half")
+    half.with_name(half.name + "-journal").write_bytes(b"j")
+    monkeypatch.setattr(db, "_premigrate_done", set())
+    db._pre_migrate_copy(conn, 7)
+    assert len(list(folder.glob("ducky-*-pre-migrate-v7*.db"))) == 2
+
+
 def test_a_source_checkout_never_upgrades_the_real_database(tmp_path: Path, monkeypatch) -> None:
     # Oct 16 2026: repo code opened the owner's live ducky.db and took it from schema 15 to
     # 18; the installed app then refuses the file on its next start.

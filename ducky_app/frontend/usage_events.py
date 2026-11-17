@@ -79,7 +79,7 @@ ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth
                "other")
 # boot_report stages (webview_app._boot_trace names); a run's last one is sent with app_unclean_exit.
 BOOT_STAGES = ("launch", "handoff", "handoff_exit", "reclaim_claim", "webview_import_patches",
-               "import_panel_api", "panel_api_init", "http_server", "create_window",
+               "import_panel_api", "db_backup", "panel_api_init", "http_server", "create_window",
                "ready_for_webview_start", "window_shown", "page_started", "other")
 # Why a tool call failed: run_agent_command's "fail" word, refused = answered {"ok": false} / "ERROR".
 TOOL_FAILS = ("exit_nonzero", "busy", "not_approved", "timeout", "not_found", "refused", "error")

@@ -26,7 +26,7 @@ import time
 from collections import deque
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 DB_NAME = "ducky.db"
 SIDECAR_NAMES = (DB_NAME + "-wal", DB_NAME + "-shm")
@@ -1013,6 +1013,11 @@ def _refuse_source_upgrade_of_real_db(conn: sqlite3.Connection, current: int, he
 
 
 _premigrate_done: set[tuple[str, int]] = set()
+# Called every COPY_TICK_S while the pre-upgrade copy runs. The launcher ends a backend that
+# says nothing for 20 s, and copying a 3.3 GB database took longer (Nov 16 2026: ended
+# mid-copy, a half-written snapshot left behind, and the start fell back to the Python window).
+still_copying: Callable[[], None] | None = None
+COPY_TICK_S = 5.0
 
 
 def _pre_migrate_copy(conn: sqlite3.Connection, current: int) -> None:
@@ -1031,9 +1036,24 @@ def _pre_migrate_copy(conn: sqlite3.Connection, current: int) -> None:
     recent = [
         p for p in snapshot_dir(folder).glob(f"ducky-*-{label}*.db")
         if time.time() - p.stat().st_mtime < 2 * OPEN_LOCK_WAIT_S
+        and not p.with_name(p.name + "-journal").exists()  # a copy its process never finished
     ]
     if not recent:
-        _vacuum_into(conn, folder, label=label)
+        done = threading.Event()
+
+        def tick() -> None:
+            while not done.wait(COPY_TICK_S):
+                try:
+                    if still_copying is not None:
+                        still_copying()
+                except Exception:
+                    pass
+
+        threading.Thread(target=tick, daemon=True, name="db-copy-tick").start()
+        try:
+            _vacuum_into(conn, folder, label=label)
+        finally:
+            done.set()
     _premigrate_done.add(mark)
 
 

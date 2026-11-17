@@ -62,6 +62,10 @@ _native_file: Any = None
 # begin(ask=False): the kept report the pop-up asks about once ask_pending() runs.
 _pending: dict[str, Any] = {}
 HEARTBEAT_S = 30.0
+# The crash pop-up closes itself (report kept, not sent) after this long with no answer. A
+# start that asks before its window waited for the answer for good: after an update with
+# nobody at the PC, Ducky stayed off for 9 hours (Nov 16 2026).
+ASK_WAIT_S = 300.0
 _heartbeat: dict[str, Any] = {"thread": None}
 # The window's page: started = its main script ran; errors = what it hit before that.
 # webview = the first window's WebView2 start result ({ok, error}); None until it comes.
@@ -563,6 +567,7 @@ def _ask_to_send(body: dict[str, str]) -> bool:
     choice = {"send": False}
     _fill_popup(root, body, lambda send: choice.update(send=send))
     try:
+        root.after(int(ASK_WAIT_S * 1000), root.destroy)
         root.mainloop()
     except Exception:
         pass

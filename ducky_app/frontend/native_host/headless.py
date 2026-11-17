@@ -381,6 +381,11 @@ def run_backend(
     from backend.store import db as store_db
 
     store_db.allow_rebuild()
+    try:
+        # A stage line every few seconds of the copy before a database upgrade: not silence.
+        store_db.still_copying = lambda: boot_report.stage("db_backup")
+    except Exception:
+        pass
     from frontend.open_files import cli_deep_links, cli_open_paths, enqueue_deep_links, enqueue_open_paths
     from frontend.native_host import lifecycle
     from frontend.ui_web import webview_app as panel
