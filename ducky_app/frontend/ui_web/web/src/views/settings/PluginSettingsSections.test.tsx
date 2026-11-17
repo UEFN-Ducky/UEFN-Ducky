@@ -14,6 +14,13 @@ vi.mock("../../hooks/usePluginUiPrefs", () => ({
   usePluginUiPrefs: () => ({ prefs: {}, setPref: vi.fn(), setPrefs: vi.fn(), getBool: () => false }),
 }));
 vi.mock("./PluginWalkthroughReplayButton", () => ({ PluginWalkthroughReplayButton: () => null }));
+const pickerProps: Array<Record<string, unknown>> = [];
+vi.mock("../../components/ducky/DuckyModelPicker", () => ({
+  DuckyModelPicker: (props: Record<string, unknown>) => {
+    pickerProps.push(props);
+    return <span>{String(props.placeholder)}</span>;
+  },
+}));
 const { PluginSettingsSections } = await import("./PluginSettingsSections");
 
 const account = {
@@ -82,6 +89,25 @@ it("asks for an app update when the bridge has no plugin_call", async () => {
   await waitFor(() =>
     expect(screen.getByRole("status").textContent).toBe("Update the app to use this button"),
   );
+});
+
+it("renders a model property with the chat's model picker, API models only", () => {
+  pickerProps.length = 0;
+  sections = [
+    {
+      id: "routes",
+      tab: "LLMs",
+      plugin_id: "ducky-auto",
+      title: "Model per task",
+      properties: [
+        { id: "route_coding", type: "model", label: "Coding", placeholder: "Auto", hide_providers: ["ducky_auto"] },
+      ],
+    },
+  ];
+  render(<PluginSettingsSections tabId="LLMs" />);
+  expect(screen.getByText("Coding")).toBeTruthy();
+  expect(screen.getByText("Auto")).toBeTruthy();
+  expect(pickerProps.at(-1)).toMatchObject({ model: "", apiOnly: true, hideProviders: ["ducky_auto"] });
 });
 
 it("renders a collapsed section as a closed accordion", async () => {

@@ -66,7 +66,7 @@ export type PluginUiPanel = {
 
 export type PluginSettingsProperty = {
   id: string;
-  /** "boolean" (default) | "secret" | "string" | "select" | "action". */
+  /** "boolean" (default) | "secret" | "string" | "select" | "action" | "model" (the chat's model picker; saves "backend:model", "" = the plugin's own default). */
   type?: string;
   default?: boolean | string | number;
   label?: string;
@@ -82,6 +82,8 @@ export type PluginSettingsProperty = {
   status_rpc?: string;
   /** "action": button label once the status says connected. */
   connected_label?: string;
+  /** "model": gateway ids left out of the picker (e.g. the plugin's own router gateway). */
+  hide_providers?: string[];
   /** "action": panel RPC the button calls once connected. */
   connected_rpc?: string;
 };

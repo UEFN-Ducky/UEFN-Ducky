@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { ChoiceDropdown } from "../../components/ChoiceDropdown";
+import { DuckyModelPicker } from "../../components/ducky/DuckyModelPicker";
 import { getApi } from "../../hooks/usePanelApi";
 import { Icons } from "../../icons/Icons";
 import {
@@ -31,6 +32,46 @@ function isPrefFieldProp(p: PluginSettingsProperty): boolean {
 
 function isActionProp(p: PluginSettingsProperty): boolean {
   return (p.type || "").toLowerCase() === "action";
+}
+
+function isModelProp(p: PluginSettingsProperty): boolean {
+  return (p.type || "").toLowerCase() === "model";
+}
+
+/**
+ * The chat composer's own model picker (every gateway, search, effort). Saves the qualified
+ * `backend:model` id to the plugin's prefs; empty (the × button) is the plugin's own choice,
+ * named by `placeholder` (e.g. "Auto").
+ */
+function ModelField({
+  pluginId,
+  prop,
+  compact,
+}: {
+  pluginId: string;
+  prop: PluginSettingsProperty;
+  compact?: boolean;
+}) {
+  const { prefs, setPref } = usePluginUiPrefs(pluginId);
+  const cur = prefs[prop.id];
+  const value = typeof cur === "string" ? cur : typeof prop.default === "string" ? prop.default : "";
+  return (
+    <div className="voice-settings-row" data-plugin-model-field={prop.id}>
+      <label className="voice-settings-label">{prop.label || prop.id}</label>
+      {!compact && prop.description ? <p className="general-tab-section-desc">{prop.description}</p> : null}
+      <DuckyModelPicker
+        model={value}
+        onChange={(next) => setPref(prop.id, next)}
+        label=""
+        hint=""
+        placeholder={prop.placeholder || "Default model"}
+        menuPlacement="bottom"
+        apiOnly
+        hideProviders={prop.hide_providers}
+        labeled
+      />
+    </div>
+  );
 }
 
 /**
@@ -346,7 +387,8 @@ function sectionHasFields(section: PluginSettingsSection): boolean {
     section.properties.some(isBoolProp) ||
     section.properties.some(isActionProp) ||
     section.properties.some(isSecretProp) ||
-    section.properties.some(isPrefFieldProp)
+    section.properties.some(isPrefFieldProp) ||
+    section.properties.some(isModelProp)
   );
 }
 
@@ -363,6 +405,7 @@ function SectionFields({
   const boolProps = section.properties.filter(isBoolProp);
   const secretProps = section.properties.filter(isSecretProp);
   const prefFieldProps = section.properties.filter(isPrefFieldProp);
+  const modelProps = section.properties.filter(isModelProp);
 
   return (
     <>
@@ -392,6 +435,9 @@ function SectionFields({
       ))}
       {prefFieldProps.map((prop) => (
         <PrefField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />
+      ))}
+      {modelProps.map((prop) => (
+        <ModelField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />
       ))}
     </>
   );

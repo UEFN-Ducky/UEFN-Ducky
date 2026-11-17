@@ -32,6 +32,10 @@ interface DuckyModelPickerProps {
   /** A full-width button naming the model and its gateway (forms) instead of the logo. */
   labeled?: boolean;
   menuZIndex?: number;
+  /** API models only: no coding agents (a plugin setting that a gateway runs). */
+  apiOnly?: boolean;
+  /** Gateway ids whose models are left out. */
+  hideProviders?: string[];
 }
 
 function normalizeAgentModelId(_agentId: string, modelId: string): string {
@@ -76,6 +80,8 @@ export function DuckyModelPicker({
   convId,
   labeled = false,
   menuZIndex,
+  apiOnly = false,
+  hideProviders,
 }: DuckyModelPickerProps) {
   const value = (model || "").trim();
   const contrib = usePluginContributions();
@@ -138,6 +144,8 @@ export function DuckyModelPicker({
       convId={convId}
       labeled={labeled}
       menuZIndex={menuZIndex}
+      apiOnly={apiOnly}
+      hideProviders={hideProviders}
     />
   );
 
