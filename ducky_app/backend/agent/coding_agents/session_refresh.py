@@ -14,6 +14,12 @@ import time
 from typing import Any
 
 FRESH_SESSION_TOKENS = 2_000_000
+# A solo chat on an agent whose ``context_tokens`` is the last step's window (not a thread
+# total like Codex's ``cumulative_thread``) starts fresh past this. Claude Code is left to its
+# own auto-compact (the Anthropic plugin defaults it to 300K); Nov 17 2026 audit: 56% of spend
+# was turns re-reading 400K+.
+SOLO_FRESH_TOKENS = 350_000
+_WINDOW_AGENTS = frozenset({"cursor"})
 # Below this a cold resume costs little; compacting would lose more than it saves.
 COLD_COMPACT_TOKENS = 200_000
 _LAST_REPLIES = 5
@@ -41,10 +47,18 @@ def _turn_tokens(conv: Any) -> int:
         return 0
 
 
+def _agent(conv: Any) -> str:
+    stats = getattr(conv, "coding_agent_stats", None)
+    return str(stats.get("coding_agent") or "") if isinstance(stats, dict) else ""
+
+
 def needs_fresh_session(conv: Any) -> bool:
     if not str(getattr(conv, "upstream_session_id", "") or "").strip():
         return False
-    if _turn_tokens(conv) < FRESH_SESSION_TOKENS:
+    tokens = _turn_tokens(conv)
+    if _agent(conv) in _WINDOW_AGENTS and tokens >= SOLO_FRESH_TOKENS:
+        return True
+    if tokens < FRESH_SESSION_TOKENS:
         return False
     return _team_chat(str(getattr(conv, "id", "") or ""))
 

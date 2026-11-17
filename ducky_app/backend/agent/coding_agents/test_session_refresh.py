@@ -73,6 +73,21 @@ def test_small_sessions_new_sessions_and_solo_chats_keep_going(in_team, monkeypa
     assert sr.fresh_session_handoff(_conv(5_300_000)) == ""
 
 
+@pytest.mark.parametrize("agent,tokens,want", [
+    ("cursor", 360_000, True),        # its context_tokens is the last step's window
+    ("cursor", 340_000, False),
+    ("codex", 900_000, False),        # a thread total, not a window: never solo-refreshed
+    ("claude_code", 600_000, False),  # Claude Code compacts itself (300K by default)
+    ("", 600_000, False),
+])
+def test_solo_chats_refresh_only_where_the_number_is_a_window(monkeypatch, agent, tokens, want) -> None:
+    monkeypatch.setattr(sr, "_team_chat", lambda conv_id: False)
+    conv = _conv(tokens)
+    conv.coding_agent_stats["coding_agent"] = agent
+    assert sr.needs_fresh_session(conv) is want
+    assert (sr.fresh_session_handoff(conv) != "") is want
+
+
 def test_an_agent_is_told_when_its_chat_allows_everything(monkeypatch) -> None:
     # Oct 11 2026: the team lead asked the person to approve a command twice after they had
     # turned on Allow everything for the whole team.
