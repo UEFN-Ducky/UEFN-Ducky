@@ -31,6 +31,22 @@ fn env_is(name: &str, value: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v.trim() == value)
 }
 
+const BROWSER_ARGS_ENV: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+
+/// The running Ducky notes how full the graphics card is every 30 s (`launcher/gpu.json`,
+/// `frontend/busy_pc.py`: same 90% and 10 minutes there). True when the note is that fresh
+/// and says the card was full: this start draws its window without the card, because a
+/// window drawn on a full card froze 127 times in an hour (Nov 17 2026).
+pub fn gpu_was_full(note: &str, now: f64) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(note) else {
+        return false;
+    };
+    let (Some(share), Some(at)) = (v["share"].as_f64(), v["at"].as_f64()) else {
+        return false;
+    };
+    share >= 0.90 && (-60.0..600.0).contains(&(now - at))
+}
+
 /// Run a normal launch with the user's arguments (argv[0] removed, order kept).
 /// Returns the process exit code (see [`exit`]).
 #[cfg(windows)]
@@ -57,6 +73,11 @@ pub fn run(args: Vec<OsString>) -> u8 {
             spawn.start().or_else(|_| repoint::Spawn::python(repoint::sibling_stub(&exe), &args, "hop_failed").start());
         return if started.is_ok() { exit::OK } else { exit::START_ERROR };
     }
+    // Before any WebView2 starts, and inherited by the backend (its browser panes).
+    let note = std::fs::read_to_string(app_data.join("launcher").join("gpu.json")).unwrap_or_default();
+    if std::env::var_os(BROWSER_ARGS_ENV).is_none() && gpu_was_full(&note, supervisor::policy::unix_now()) {
+        std::env::set_var(BROWSER_ARGS_ENV, format!("{} --disable-gpu", window::config::DEFAULT_ENV_BROWSER_ARGS));
+    }
     let mut host = ui::UiHost::new(args);
     let plan = host.plan();
     start::launch(&mut host, &plan, !native_child)
@@ -65,4 +86,19 @@ pub fn run(args: Vec<OsString>) -> u8 {
 #[cfg(not(windows))]
 pub fn run(_args: Vec<OsString>) -> u8 {
     exit::START_ERROR
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gpu_was_full;
+
+    #[test]
+    fn a_fresh_note_of_a_full_card_draws_without_it() {
+        assert!(gpu_was_full(r#"{"share": 0.96, "at": 1000.0}"#, 1030.0));
+        assert!(!gpu_was_full(r#"{"share": 0.61, "at": 1000.0}"#, 1030.0)); // room on the card
+        assert!(!gpu_was_full(r#"{"share": 0.96, "at": 1000.0}"#, 1700.0)); // an old note
+        assert!(!gpu_was_full(r#"{"share": 0.96, "at": 9000.0}"#, 1030.0)); // from the future
+        assert!(!gpu_was_full("", 1030.0));
+        assert!(!gpu_was_full(r#"{"share": "x"}"#, 1030.0));
+    }
 }

@@ -1048,6 +1048,9 @@ class PanelApi(
                     for k, v in entry.items()
                     if k not in ("kind", "name", "duration_ms") and v is not None
                 }
+                from frontend import busy_pc
+
+                meta.update(busy_pc.freeze_meta(kind, duration_ms))
                 trace(kind, name, duration_ms, **meta)
                 if kind == "boot" and name == "ui_drawn":  # the startup logo went: the app is drawn
                     from frontend import boot_report

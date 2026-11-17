@@ -57,6 +57,7 @@ _last_alert = 0.0  # the last critical alert
 _last_freed = 0.0  # when Ducky last freed its own leftovers
 _freed_this_spell = False  # reset when free memory is back above the warning level
 _gpu_warned = False  # one graphics-memory alert per spell: reset when the GPU is under FULL_SHARE again
+last_gpu_share: float | None = None  # of the card's memory in use at the last check (busy_pc reads it)
 _last_warn = 0.0  # the last warning or critical alert
 _recent: deque[tuple[float, float]] = deque()  # (monotonic, free GB) within DROP_WINDOW_S
 
@@ -288,11 +289,13 @@ def _warn(status: str, detail: str) -> None:
 
 def check_gpu() -> None:
     """One alert per spell when the graphics card's memory is nearly full, naming what fills it."""
-    global _gpu_warned
+    global _gpu_warned, last_gpu_share
     try:
         from frontend import gpu_memory
 
         info = gpu_memory.read()
+        share = (info or {}).get("share")
+        last_gpu_share = float(share) if isinstance(share, (int, float)) else None
         if not gpu_memory.full(info):
             if info:
                 _gpu_warned = False

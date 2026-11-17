@@ -491,6 +491,12 @@ def run_backend(
         from frontend import boot_report
         from frontend.ui_web.agent_turns.state import list_running_agents
 
+        # As the Python window (webview_app): the PC-memory and graphics-memory warnings never
+        # showed under the launcher's window, because nothing listened here.
+        from frontend import busy_pc, low_memory
+
+        boot_report.on_heartbeat(low_memory.on_heartbeat)
+        boot_report.on_heartbeat(busy_pc.on_heartbeat)
         boot_report.start_heartbeat(lambda: len(list_running_agents()))
     except Exception:
         _log.warning("crash heartbeat did not start", exc_info=True)

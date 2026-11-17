@@ -634,7 +634,8 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
     if stalls > UI_STALLS_PER_HOUR or (stalls >= 20 and float(ui.get("ui_stall_p95_ms") or 0) >= 1000):
         out.append({"severity": "high" if stalls > 5 * UI_STALLS_PER_HOUR else "medium",
                     "what": f"Ducky's window froze {stalls} times in the last hour (p95 {ui.get('ui_stall_p95_ms', 0):.0f} ms).",
-                    "why": "The UI thread is kept busy: a loop or a flood of bridge replies.",
+                    "why": ("The UI thread is kept busy: a loop or a flood of bridge replies. "
+                            + str(ui.get("ui_stall_pc") or "")).strip(),
                     "fix": "ducky_perf_report: per_process names the busiest calls and slowest scripts."})
     for method, n in ui.get("top_ui_calls") or []:
         if int(n) > UI_CALLS_PER_HOUR:
