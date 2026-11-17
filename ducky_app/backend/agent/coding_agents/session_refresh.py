@@ -106,6 +106,35 @@ def _last_replies(conv: Any) -> list[str]:
     return list(reversed(rows))
 
 
+_HANDOFF_FILES = 15
+_HANDOFF_SKILLS = 10
+
+
+def _recent_work(conv: Any) -> tuple[list[str], list[str]]:
+    """Files this chat changed and skill sections it read, newest first, from its own tool
+    steps: after a fresh start the agent knows them without reading them all again."""
+    files: list[str] = []
+    skills: list[str] = []
+    for message in reversed(list(getattr(conv, "messages", None) or [])):
+        if not isinstance(message, dict):
+            continue
+        for block in reversed(list(message.get("blocks") or [])):
+            if not isinstance(block, dict) or block.get("type") != "tool_call":
+                continue
+            for edit in block.get("file_edits") or []:
+                path = str((edit or {}).get("path") or "").removeprefix("abs:")
+                if path and path not in files and len(files) < _HANDOFF_FILES:
+                    files.append(path)
+            if str(block.get("name") or "").endswith("skill_read_subskill"):
+                args = block.get("arguments") or {}
+                pack = args.get("pack_id") or args.get("pack") or args.get("skill") or ""
+                sub = args.get("subskill_id") or args.get("subskill") or ""
+                label = "/".join(str(p) for p in (pack, sub) if p) + (f" › {args['section']}" if args.get("section") else "")
+                if label and label not in skills and len(skills) < _HANDOFF_SKILLS:
+                    skills.append(label)
+    return files, skills
+
+
 def _plan_outline(conv_id: str) -> list[str]:
     try:
         from backend.agent.coding_agents.plans import load_plan, outline_numbers
@@ -137,6 +166,12 @@ def fresh_session_handoff(conv: Any) -> str:
     replies = _last_replies(conv)
     if replies:
         parts += ["", "Where you were (your own last replies, newest last):", *replies]
+    files, skills = _recent_work(conv)
+    if files:
+        parts += ["", "Files you changed (newest first; read one again only if you need its text):",
+                  *[f"- {path}" for path in files]]
+    if skills:
+        parts += ["", "Skill sections you already read: " + "; ".join(skills)]
     outline = _plan_outline(str(getattr(conv, "id", "") or ""))
     if outline:
         parts += ["", "Your plan:", *outline]

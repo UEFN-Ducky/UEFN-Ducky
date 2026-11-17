@@ -66,6 +66,29 @@ def test_a_big_team_session_starts_fresh_with_its_own_last_replies_and_plan(in_t
     assert sr.fresh_session_handoff(conv) == ""  # the new session is not refreshed again
 
 
+def test_the_handoff_names_changed_files_and_skills_already_read(in_team) -> None:
+    conv = _conv(5_300_000)
+    conv.messages += [
+        {"role": "assistant", "text": "", "blocks": [
+            {"type": "tool_call", "name": "mcp__uefn__skill_read_subskill",
+             "arguments": {"pack_id": "verse", "subskill_id": "persistence", "section": "weak_map"}},
+            {"type": "tool_call", "name": "workspace_edit_file",
+             "file_edits": [{"path": "abs:C:/Island/Content/Verse/Shop/shop.verse"}]},
+        ]},
+        {"role": "assistant", "text": "", "blocks": [
+            {"type": "tool_call", "name": "workspace_write_file",
+             "file_edits": [{"path": "abs:C:/Island/Content/Verse/Shop/prices.verse"},
+                            {"path": "abs:C:/Island/Content/Verse/Shop/shop.verse"}]},
+        ]},
+    ]
+    handoff = sr.fresh_session_handoff(conv)
+    files = handoff.split("Files you changed")[1]
+    assert files.index("prices.verse") < files.index("shop.verse")  # newest first
+    assert files.count("shop.verse") == 1 and "abs:" not in files
+    assert "Skill sections you already read: verse/persistence › weak_map" in handoff
+    assert len(handoff) < 4000
+
+
 def test_small_sessions_new_sessions_and_solo_chats_keep_going(in_team, monkeypatch) -> None:
     assert sr.fresh_session_handoff(_conv(400_000)) == ""
     assert sr.fresh_session_handoff(_conv(5_300_000, session="")) == ""
