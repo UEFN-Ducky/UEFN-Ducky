@@ -44,6 +44,8 @@ def trees(request, monkeypatch, tmp_path) -> dict[str, Any]:
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.delenv(av.NO_HOP_ENV, raising=False)
     monkeypatch.delenv(av.LAUNCHER_ENV, raising=False)
+    # A Ducky started hidden passes this to every shell it opens: a test that wants it sets it.
+    monkeypatch.delenv(av.START_HIDDEN_ENV, raising=False)
     monkeypatch.setattr(sys, "executable", str(install / "UEFN-Ducky.exe"))
     return {
         "launcher": with_launcher,
