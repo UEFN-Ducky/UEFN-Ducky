@@ -332,7 +332,6 @@ def workspace_read_file(
     line_numbers: bool = False,
     format: str = "text",
     pretty: bool = False,
-    force: bool = False,
 ) -> str:
     """Read one text file; use instead of shell cat / Get-Content, never to list a folder.
 
@@ -344,7 +343,6 @@ def workspace_read_file(
     2000 lines come back, with a note where the rest starts. line_numbers=true prefixes each
     line with its number (for workspace_replace_lines). For a big file, read its
     workspace_file_outline first and then only the lines you need.
-    The same unchanged read twice in one turn answers "unchanged"; force=true reads it again.
     """
     rel_in = _file_arg(relative_path, path)
     if not rel_in:
@@ -385,11 +383,6 @@ def workspace_read_file(
             except OSError:
                 pass
         raise ValueError(f"Not a file: {file_path}. {hint}")
-    from backend.tools.core.read_ledger import repeat_note
-
-    note = repeat_note("workspace_read_file", file_path, (start_line, end_line, line_numbers, format), force=force)
-    if note:
-        return tool_json({"path": file_path, "unchanged": True, "note": note}, pretty=pretty) if format == "json" else note
     part = read_lines(file_path, start_line, end_line, line_numbers)
     text = part.pop("_full_text")
     rel = relative_path.strip().replace("\\", "/")
