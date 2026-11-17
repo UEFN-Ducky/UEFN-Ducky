@@ -13,6 +13,7 @@ from backend.tools.core import web_video  # noqa: F401
 from backend.tools.core import web_github  # noqa: F401
 from backend.tools.core import sandbox_tools  # noqa: F401
 from backend.tools.core import self_care_tools  # noqa: F401
+from backend.tools.core import token_audit  # noqa: F401
 from backend.tools.panel import ducky_finish_team  # noqa: F401
 from backend.tools.panel import ducky_panel  # noqa: F401
 from backend.tools.panel import ducky_swarm  # noqa: F401
