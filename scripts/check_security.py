@@ -167,6 +167,26 @@ def _npm_summary(raw: str) -> str:
     return line
 
 
+# Advisories let through with a WARNING on every run, and only while `npm audit --omit=dev`
+# is clean: the package is in build and test tools, not in what ships. Remove an entry as
+# soon as its package publishes a fix.
+ALLOWED_DEV_ADVISORIES = {
+    # picomatch <=4.0.7, ReDoS on a hostile glob. No fixed version on Nov 17 2026 (4.0.7 is
+    # the newest); it comes in through vite, vitest and typescript-eslint only.
+    "GHSA-fc5q-39xc-vjpf": "picomatch has no fixed version yet",
+}
+
+
+def _npm_advisories(raw: str) -> set[str]:
+    """The advisory ids (GHSA-...) an ``npm audit --json`` report names."""
+    ids: set[str] = set()
+    for info in (json.loads(raw).get("vulnerabilities") or {}).values():
+        for item in info.get("via") or []:
+            if isinstance(item, dict):
+                ids.add(str(item.get("url") or "").rstrip("/").rsplit("/", 1)[-1] or f"source-{item.get('source')}")
+    return ids
+
+
 def _npm_audit(root: Path) -> tuple[str, bool]:
     pkgs = _npm_targets(root)
     if not pkgs:
@@ -175,6 +195,7 @@ def _npm_audit(root: Path) -> tuple[str, bool]:
     if not npm:
         return "npm not on PATH", False
     failed: list[str] = []
+    allowed: list[str] = []
     ok_n = 0
     for pkg in pkgs:
         # Full tree, including devDependencies. --omit=dev hid the critical
@@ -184,13 +205,23 @@ def _npm_audit(root: Path) -> tuple[str, bool]:
             ok_n += 1
             continue
         rel = pkg.parent.relative_to(root) if pkg.parent != root else Path(".")
+        out = out[out.find("{"): out.rfind("}") + 1] or out  # npm's own notices around the report
+        try:
+            ids = _npm_advisories(out)
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            ids = set()
+        if ids and ids <= set(ALLOWED_DEV_ADVISORIES) and _run([npm, "audit", "--omit=dev", "--json"], cwd=pkg.parent)[0] == 0:
+            ok_n += 1
+            allowed += [f"{rel}: {i} ({ALLOWED_DEV_ADVISORIES[i]})" for i in sorted(ids)]
+            continue
         try:
             detail = _npm_summary(out)
         except (json.JSONDecodeError, TypeError, KeyError):
             detail = out.splitlines()[-1] if out else f"exit {code}"
         failed.append(f"{rel}: {detail}")
     if not failed:
-        return f"ok ({ok_n})", True
+        warning = f" WARNING: allowed, build and test tools only: {'; '.join(allowed)}" if allowed else ""
+        return f"ok ({ok_n}){warning}", True
     return "\n".join(failed), False
 
 
@@ -214,6 +245,12 @@ def _self_check() -> None:
     )
     assert "brace-expansion (high)" in _npm_summary(sample)
     assert "monaco-languageclient" not in _npm_summary(sample)
+    report = json.dumps({"vulnerabilities": {
+        "picomatch": {"via": [{"source": 1, "url": "https://github.com/advisories/GHSA-fc5q-39xc-vjpf"}]},
+        "vite": {"via": ["picomatch"]}}})
+    assert _npm_advisories(report) == {"GHSA-fc5q-39xc-vjpf"} <= set(ALLOWED_DEV_ADVISORIES)
+    other = json.dumps({"vulnerabilities": {"x": {"via": [{"url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"}]}}})
+    assert not _npm_advisories(other) <= set(ALLOWED_DEV_ADVISORIES)  # any other advisory still fails
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         for rel in ("package.json", "vendor/bundle/package.json", "vendor/locked/package.json"):
@@ -243,6 +280,7 @@ def main() -> int:
         print(f"WARN: no plugin clones under {PLUGINS_ROOT}", file=sys.stderr)
 
     failed: list[str] = []
+    warned: list[str] = []
     for name, root in targets:
         print(f"== {name}")
         checks = (
@@ -257,13 +295,17 @@ def main() -> int:
             if not ok:
                 print(msg)
                 failed.append(f"{name}/{label}")
+            elif "WARNING:" in msg:
+                warned.append(f"{name}/{label}:{msg.split('WARNING:', 1)[1]}")
         print()
 
     print(f"scanned {len(targets)} repos ({'app only' if args.app_only else 'app + org plugins'})")
     if failed:
         print("FAIL: " + ", ".join(failed))
         return 1
-    print("ok: no secrets, no known dep CVEs")
+    for line in warned:
+        print(f"WARNING: {line}")
+    print("ok: no secrets, no known dep CVEs" + (f" except {len(warned)} allowed above" if warned else ""))
     return 0
 
 
