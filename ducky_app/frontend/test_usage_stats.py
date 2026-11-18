@@ -843,6 +843,7 @@ def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) 
     from frontend import __version__, boot_report, error_log
 
     monkeypatch.setattr(boot_report, "_state", {"started": time.time() - 20, "stages": [["launch", 0.0], ["window_shown", 1.2]]})
+    monkeypatch.setattr(boot_report, "previous_end", "")  # an earlier test's begin() may have set it
 
     meta: dict[str, str] = {us.META_LAST_VERSION: "1.2.400"}
     monkeypatch.setattr(us, "_meta_get", meta.get)
@@ -921,6 +922,7 @@ def test_an_unclean_exit_carries_the_agents_memory_bucket_when_the_heartbeat_had
     state = {"started": time.time() - 20, "stages": [["launch", 0.0]],
              "heartbeat": {"agents_n": 6, "agents_mb": 1050, "top_other": [["chrome", 4500]]}}
     monkeypatch.setattr(boot_report, "_state", state)
+    monkeypatch.setattr(boot_report, "previous_end", "")
     us.app_opened()
     assert json_loads(meta[us.META_LAST_SEEN])["agents_mb"] == 1050
     us.app_opened()   # the run above never closed

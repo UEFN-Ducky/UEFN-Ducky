@@ -320,7 +320,8 @@ def _last_boot_event() -> float:
              "(Provider[@Name='Microsoft-Windows-Kernel-Boot'] and EventID=27)]]")
     try:
         out = subprocess.run(["wevtutil", "qe", "System", f"/q:{query}", "/rd:true", "/c:1", "/f:xml"],
-                             capture_output=True, text=True, timeout=5, creationflags=0x08000000).stdout
+                             capture_output=True, text=True, errors="replace", timeout=5,
+                             creationflags=0x08000000).stdout
         hit = re.search(r"SystemTime=['\"](\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", out or "")
         return datetime.strptime(hit.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() if hit else 0.0
     except Exception:
