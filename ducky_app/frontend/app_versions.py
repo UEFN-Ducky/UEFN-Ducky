@@ -466,6 +466,12 @@ def _kill_with_me(proc: subprocess.Popen) -> None:
     _jobs.append(job)
 
 
+def kill_with_me(proc: subprocess.Popen) -> None:
+    """End ``proc`` when this process ends, however it ends (the job above). For the tool
+    server frontend.shared_mcp_adapter starts for an agent whose host is not answering."""
+    _kill_with_me(proc)
+
+
 def _std(stream: Any) -> Any:
     try:
         return stream.fileno() if stream is not None else None

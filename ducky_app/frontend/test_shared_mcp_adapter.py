@@ -506,3 +506,44 @@ def test_the_hosts_answers_are_kept_as_they_came_and_written_once(monkeypatch, a
         assert len(writes) == 2  # the initialize and the tool list, once each, by the first agent
     finally:
         host.close()
+
+
+def test_a_tool_server_of_its_own_that_never_answers_is_ended_and_the_host_joined_again(monkeypatch, app_data) -> None:
+    """A child that started but stays silent used to be waited on for good: every tool call
+    then ran into its hold and nothing looked for the host any more."""
+    import sys
+    import time
+
+    _short_waits(monkeypatch)  # no shared_mcp-h0.json yet: this host serves nothing
+    _kept(app_data)
+    monkeypatch.setattr(ad, "_CHILD_INIT_S", 0.4)
+    monkeypatch.setattr(ad, "_START_HOLD_S", 8.0)
+    monkeypatch.setattr(ad, "_child_command",
+                        lambda args: ([sys.executable, "-c", "import sys\nfor line in sys.stdin: pass"], None))
+
+    def _serve(n: int, conn) -> None:
+        with conn:
+            ad._read_frame(conn)
+            ad._write_frame(conn, {"op": "hello_ok"})
+            while True:
+                try:
+                    msg = ad._read_frame(conn)
+                except (OSError, EOFError, ValueError):
+                    return
+                if msg.get("method") == "tools/call":
+                    ad._write_frame(conn, {"op": "mcp", "id": msg["id"], "result": {"content": [{"type": "text", "text": "host"}]}})
+
+    agent = _Agent(monkeypatch)
+    host = None
+    try:
+        agent.say({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+        assert agent.hear()["result"] == _INIT
+        agent.say({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "alpha", "arguments": {}}})
+        time.sleep(1.6)  # no host, a child that says nothing: it is ended after _CHILD_INIT_S
+        host = _host(app_data, _serve)  # the host is back
+        answer = agent.hear(timeout=8)
+        assert answer == {"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "host"}]}}
+    finally:
+        agent.close()
+        if host is not None:
+            host.close()

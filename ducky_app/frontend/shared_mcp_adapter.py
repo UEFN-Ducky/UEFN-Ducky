@@ -43,6 +43,9 @@ _SLOT_WAIT_S = 5.0
 # whose host has not answered in this long starts from the saved answers instead of waiting.
 _QUICK_HELLO_S = 1.5
 _START_HOLD_S = 90.0  # a tool call made during such a start waits this long for a tool server
+# A tool server of the agent's own answers initialize within a couple of seconds, plugins
+# still loading. One that has not by now is ended, and the adapter goes back to its host.
+_CHILD_INIT_S = 60.0
 # Requests this adapter makes itself: never an id an agent uses (those are numbers).
 _VERIFY_ID = "ducky-adapter-catalog"
 _CHILD_INIT_ID = "ducky-adapter-initialize"
@@ -240,7 +243,7 @@ def _hello_attempt(state: dict, read_timeout: float = _HELLO_TIMEOUT_S) -> tuple
         reply = _read_frame(sock)
     except (socket.timeout, TimeoutError):
         sock.close()
-        _note_miss(f"it took the connection but did not answer in {read_timeout:.0f} s (pid {state.get('pid') or '?'})")
+        _note_miss(f"it took the connection but did not answer in {read_timeout:g} s (pid {state.get('pid') or '?'})")
         return None, True
     except (OSError, ValueError, EOFError):
         sock.close()
@@ -561,9 +564,9 @@ def _start_child(bridge_args: list[str], client_init: dict | None) -> subprocess
     except OSError:
         return None
     try:
-        from frontend.app_versions import _kill_with_me
+        from frontend.app_versions import kill_with_me
 
-        _kill_with_me(proc)  # it never outlives this adapter
+        kill_with_me(proc)  # it never outlives this adapter
     except Exception:  # noqa: BLE001 - without the job it still ends when its stdin closes
         pass
     params = (client_init or {}).get("params")
@@ -783,6 +786,18 @@ def run(bridge_args: list[str]) -> bool:
             _pump_daemon()
 
     def _pump_child(child: subprocess.Popen) -> None:
+        answered = threading.Event()
+
+        def _give_up() -> None:
+            if not answered.is_set():
+                try:
+                    child.kill()  # its stdout ends, and the loop below with it
+                except OSError:
+                    pass
+
+        deadline = threading.Timer(_CHILD_INIT_S, _give_up)
+        deadline.daemon = True
+        deadline.start()
         for raw in child.stdout:  # type: ignore[union-attr]
             try:
                 msg = json.loads(raw)
@@ -792,6 +807,8 @@ def run(bridge_args: list[str]) -> bool:
                 continue
             if msg.get("id") == _CHILD_INIT_ID and "method" not in msg:
                 # Its answer to this adapter's initialize: the agent already has the kept one.
+                answered.set()
+                deadline.cancel()
                 with link_lock:
                     if closing.is_set():
                         break
@@ -805,6 +822,7 @@ def run(bridge_args: list[str]) -> bool:
             if "id" in msg and "method" not in msg:
                 pending.pop(json.dumps(msg.get("id")), None)
             _emit(msg)
+        deadline.cancel()
         with link_lock:
             link["child"] = None
             up.clear()
