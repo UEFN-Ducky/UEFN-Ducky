@@ -4,6 +4,7 @@ on Ducky's own agent or a coding agent, and send a message and wait for its repl
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 import uuid
@@ -60,6 +61,8 @@ from frontend.ui_web.agent_turns.state import (
 from frontend.ui_web.chats.conversations import load_conversation
 from frontend.ui_web.chats.saves import append_message, save_conversation
 
+_log = logging.getLogger(__name__)
+
 _ASK_SUFFIX = "\n\n[Mode: Ask] Read, search and discover evidence, then answer. Do not modify projects, plans, settings or assets, rename chats, delegate, or execute code."
 
 _PLAN_SUFFIX = (
@@ -78,6 +81,24 @@ _AGENT_SUFFIX = (
     f"{PLAN_PROTOCOL} "
     "Never replace the tool plan with chat prose."
 )
+
+
+def _last_reply_text(conv_id: str) -> str:
+    """The chat's last non-empty reply. The row store reads just the tail (queued saves are
+    written first); loading a long chat to read it decoded every message."""
+    try:
+        from backend.store.switch import use_db
+
+        if use_db("chats"):
+            from backend.store.repos import chats as chat_rows
+            from frontend.ui_web.chats.saves import flush_chat_saves
+
+            flush_chat_saves(conv_id)
+            return chat_rows.last_reply(conv_id)[0]
+    except Exception:
+        _log.warning("could not read the last reply of %s from the rows", conv_id, exc_info=True)
+    conv = load_conversation(conv_id)
+    return _last_assistant_text(conv) if conv else ""
 
 
 def run_message_and_wait(
@@ -160,10 +181,9 @@ def run_message_and_wait(
         if kind == "linked_agent" and event.get("child_conv_id") == conv_id:
             status = str(event.get("status") or "")
             if status in ("done", "error", "cancelled", "timeout"):
-                conv = load_conversation(conv_id)
                 result["status"] = "cancelled" if status == "cancelled" else ("error" if status != "done" else "done")
                 if status == "done":
-                    result["assistant_text"] = _last_assistant_text(conv) if conv else ""
+                    result["assistant_text"] = _last_reply_text(conv_id)
                 elif status == "timeout":
                     result["error"] = f"No reply within {timeout_sec}s"
                 elif status == "cancelled":
@@ -175,16 +195,14 @@ def run_message_and_wait(
         if event.get("conv_id") != conv_id:
             return
         if kind == "assistant_done":
-            conv = load_conversation(conv_id)
             result["status"] = "done"
-            result["assistant_text"] = _last_assistant_text(conv) if conv else ""
+            result["assistant_text"] = _last_reply_text(conv_id)
             done.set()
         elif kind == "agent_stopped":
             reason = str(event.get("reason") or "error")
             result["status"] = "cancelled" if reason == "cancelled" else ("done" if reason == "done" else "error")
             if result["status"] == "done":
-                conv = load_conversation(conv_id)
-                result["assistant_text"] = _last_assistant_text(conv) if conv else ""
+                result["assistant_text"] = _last_reply_text(conv_id)
             elif result["status"] == "cancelled":
                 result["error"] = "Cancelled"
             else:
