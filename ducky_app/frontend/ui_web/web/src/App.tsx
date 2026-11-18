@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { ConfirmModalProvider } from "./contexts/ConfirmModalContext";
 import { PluginModelPickerHost } from "./plugin-ui/PluginModelPickerHost";
 import { installTerminalApprovals } from "./terminal/terminalApprovals";
@@ -21,8 +21,7 @@ import { VerseDiagnosticsSettingsProvider } from "./contexts/VerseDiagnosticsSet
 import { TerminalsSettingsProvider } from "./contexts/TerminalsSettingsContext";
 import { ProjectFilesSettingsProvider } from "./contexts/ProjectFilesSettingsContext";
 import { Header } from "./components/Header";
-import { RemoteWindowLaunching, RemoteWindowOverlay, useUeFnLaunching } from "./components/RemoteWindowView";
-import { RemoteTrackpad } from "./components/RemoteTrackpad";
+import { useUeFnLaunching } from "./components/useUeFnLaunching";
 import { initialRemoteView, REMOTE_TRACKPAD_ID } from "./components/remoteTrackpadMath";
 import { RemoteWindowSender } from "./components/RemoteWindowSender";
 import { installDirectPeerOnDesktop } from "./remote/directPeer";
@@ -75,6 +74,12 @@ import { GatewaySetupNotice } from "./components/GatewaySetupNotice";
 // App-level ErrorBoundary lives in main.tsx.
 
 import { decodeFocusParam } from "./hooks/useFocusWindow";
+
+// Remote view (phone watching the PC): its own chunk, loaded the first time it shows.
+const remoteView = () => import("./components/RemoteWindowView");
+const RemoteWindowOverlay = lazy(() => remoteView().then((m) => ({ default: m.RemoteWindowOverlay })));
+const RemoteWindowLaunching = lazy(() => remoteView().then((m) => ({ default: m.RemoteWindowLaunching })));
+const RemoteTrackpad = lazy(() => import("./components/RemoteTrackpad").then((m) => ({ default: m.RemoteTrackpad })));
 
 const focusId = decodeFocusParam(new URLSearchParams(window.location.search).get("focus") ?? "");
 const NOOP = () => {};
@@ -285,13 +290,15 @@ export default function App() {
 
         <main className="app-main">{mainContent}</main>
         {!isRemote() ? <RemoteWindowSender /> : null}
-        {watchWindowId === REMOTE_TRACKPAD_ID ? (
-          <RemoteTrackpad />
-        ) : watchWindowId ? (
-          <RemoteWindowOverlay hwnd={watchWindowId} />
-        ) : uefnLaunching ? (
-          <RemoteWindowLaunching label={uefnLaunching} />
-        ) : null}
+        <Suspense fallback={null}>
+          {watchWindowId === REMOTE_TRACKPAD_ID ? (
+            <RemoteTrackpad />
+          ) : watchWindowId ? (
+            <RemoteWindowOverlay hwnd={watchWindowId} />
+          ) : uefnLaunching ? (
+            <RemoteWindowLaunching label={uefnLaunching} />
+          ) : null}
+        </Suspense>
       </div>
       {versionCheck.status?.remote_version && !(versionCheck.status.update_pack && versionCheck.status.channel === "installed") && (
         <UpdateAvailableModal

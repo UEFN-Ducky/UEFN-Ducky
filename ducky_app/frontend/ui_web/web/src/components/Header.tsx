@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Icons } from "../icons/Icons";
 import { ProjectSelector } from "./ProjectSelector";
 import { ConnectionStatusDropdown } from "./ConnectionStatusDropdown";
@@ -42,9 +42,12 @@ import { ContextMenu, useContextMenuState, type ContextMenuItem } from "./Contex
 import { targetRef, useUiTarget } from "../ui-targets/registry";
 import { ChoiceTriggerFace } from "./ChoiceDropdown";
 import { DropdownPanel } from "./DropdownPanel";
-import { RemoteTypeToggle, RemoteWindowSelect } from "./RemoteWindowView";
 import { REMOTE_TRACKPAD_ID } from "./remoteTrackpadMath";
 import type { PluginHeaderButton } from "../hooks/usePluginContributions";
+
+// Phone-only header controls: the remote view's chunk loads when they first show.
+const RemoteTypeToggle = lazy(() => import("./RemoteWindowView").then((m) => ({ default: m.RemoteTypeToggle })));
+const RemoteWindowSelect = lazy(() => import("./RemoteWindowView").then((m) => ({ default: m.RemoteWindowSelect })));
 
 interface HeaderProps {
   variant?: "main" | "focus";
@@ -775,14 +778,16 @@ export function Header({
         </>
         )}
 
-        {isRemote() && onWatchWindowId && watchWindowId && watchWindowId !== REMOTE_TRACKPAD_ID ? <RemoteTypeToggle /> : null}
-        {isRemote() && onWatchWindowId ? (
-          <RemoteWindowSelect
-            value={watchWindowId}
-            onChange={onWatchWindowId}
-            projectName={project.path?.trim() ? project.name : undefined}
-          />
-        ) : null}
+        <Suspense fallback={null}>
+          {isRemote() && onWatchWindowId && watchWindowId && watchWindowId !== REMOTE_TRACKPAD_ID ? <RemoteTypeToggle /> : null}
+          {isRemote() && onWatchWindowId ? (
+            <RemoteWindowSelect
+              value={watchWindowId}
+              onChange={onWatchWindowId}
+              projectName={project.path?.trim() ? project.name : undefined}
+            />
+          ) : null}
+        </Suspense>
 
         {isRemote() ? null : (
         <div className="window-controls">

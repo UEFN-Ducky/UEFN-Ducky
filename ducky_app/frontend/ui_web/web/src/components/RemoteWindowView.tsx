@@ -32,8 +32,10 @@ import { REMOTE_TRACKPAD_ID } from "./remoteTrackpadMath";
 import { getDirectTransport } from "../remote/directTransport";
 import { setRemotePicture } from "../remote/remotePicture";
 import { setVisibleInterval } from "../utils/visibleInterval";
+import { setUeFnLaunching } from "./useUeFnLaunching";
 
 export { contentRect } from "./remoteWindowMath";
+export { useUeFnLaunching } from "./useUeFnLaunching";
 
 export type WindowViewRow = { id: string; title: string; kind?: string };
 
@@ -367,30 +369,6 @@ export function RemoteTypeToggle() {
     >
       <Icons.Chat />
     </button>
-  );
-}
-
-let uefnLaunchLabel = "";
-const launchSubs = new Set<() => void>();
-
-function emitLaunch() {
-  launchSubs.forEach((fn) => fn());
-}
-
-function setUeFnLaunching(label: string) {
-  if (uefnLaunchLabel === label) return;
-  uefnLaunchLabel = label;
-  emitLaunch();
-}
-
-export function useUeFnLaunching(): string {
-  return useSyncExternalStore(
-    (onChange) => {
-      launchSubs.add(onChange);
-      return () => launchSubs.delete(onChange);
-    },
-    () => uefnLaunchLabel,
-    () => uefnLaunchLabel,
   );
 }
 
