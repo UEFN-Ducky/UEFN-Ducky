@@ -305,7 +305,16 @@ namespace DuckySetup.Tests
             Check(Stats.AgeBucket(-1) == "unknown" && Stats.AgeBucket(3600) == "day0" && Stats.AgeBucket(3 * 86400) == "week1"
                 && Stats.AgeBucket(20 * 86400) == "month1" && Stats.AgeBucket(90 * 86400) == "older", "install age buckets");
             Check(Stats.TookBucket(30) == "1m" && Stats.TookBucket(200) == "5m" && Stats.TookBucket(900) == "20m" && Stats.TookBucket(5000) == "more", "install time buckets");
-            Check(Stats.ExitCode(0) == "ok" && Stats.ExitCode(5) == "exit_5" && Stats.ExitCode(-2) == "exit_neg", "exit codes");
+            Check(Stats.ExitCode(0) == "ok" && Stats.ExitCode(5) == "exit_5" && Stats.ExitCode(-2) == "exit_neg_fffffffe", "exit codes");
+            Check(Stats.ExitCode(unchecked((int)0xC0000142)) == "exit_neg_c0000142"
+                && Stats.FailCode(unchecked((int)0xC0000142), "file_in_use").Length <= 48, "exit_neg keeps the Windows status");
+            Check(WebRelease.DohAddress("{\"Status\":0,\"Answer\":[{\"name\":\"uefnducky.org\",\"type\":5,\"data\":\"x.cdn.\"},{\"name\":\"x.cdn\",\"type\":1,\"TTL\":60,\"data\":\"104.21.3.4\"}]}") == "104.21.3.4"
+                && WebRelease.DohAddress("{\"Status\":3}") == "" && WebRelease.DohAddress(null) == ""
+                && WebRelease.DohAddress("{\"Answer\":[{\"type\":1,\"data\":\"not an ip\"}]}") == "", "DoH answer: the A record");
+            var retries = 0;
+            for (var run = 0; run < 3 && Stats.RetryLockedFile("file_in_use", retries > 0); run++)
+                retries++;
+            Check(retries == 1 && !Stats.RetryLockedFile("access_denied", false), "file_in_use retries exactly once");
             // Nov 10 2026: a failed web update sent exit_neg and nothing said whether Setup was ended or crashed.
             Check(Stats.ExitCode(unchecked((int)0xC000013A)) == "exit_killed" && Stats.ExitCode(-1073741510) == "exit_killed"
                 && Stats.ExitCode(unchecked((int)0xC0000005)) == "exit_crashed" && Stats.ExitCode(unchecked((int)0xC0000409)) == "exit_crashed"

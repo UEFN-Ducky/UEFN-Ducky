@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace DuckySetup
@@ -143,6 +144,22 @@ namespace DuckySetup
 
         // Seconds between tries of the Store's version request: 4 tries in all.
         public static readonly int[] StoreRetryWaits = { 1, 3, 9 };
+
+        // The first IPv4 A record in a DNS-over-HTTPS JSON answer
+        // ({"Answer":[{"type":5,"data":"cname."},{"type":1,"data":"1.2.3.4"}]}), "" when none.
+        public static string DohAddress(string? json)
+        {
+            foreach (Match m in Regex.Matches(json ?? "", @"\{[^{}]*\}"))
+            {
+                if (!Regex.IsMatch(m.Value, @"""type""\s*:\s*1\s*[,}]"))
+                    continue;
+                var data = Regex.Match(m.Value, @"""data""\s*:\s*""([^""]*)""");
+                if (data.Success && IPAddress.TryParse(data.Groups[1].Value, out var ip)
+                    && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    return ip.ToString();
+            }
+            return "";
+        }
 
         // setup.result code when the Store stayed unreachable, named after why.
         public static string StoreErrorCode(WebExceptionStatus status, int httpStatus)

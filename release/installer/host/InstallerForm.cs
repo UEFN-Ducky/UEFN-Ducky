@@ -329,7 +329,7 @@ namespace DuckySetup
             if (code != 0 && !_cancelled && reason.Length == 0)
                 reason = Stats.UnknownReason(engineLog);
             // A running UEFN Ducky the engine could not close kept a file locked: close it, try once more.
-            if (reason == "file_in_use" && !_retried && _lastArgs != null)
+            if (Stats.RetryLockedFile(reason, _retried) && _lastArgs != null)
             {
                 _retried = true;
                 Post(new { type = "progress", percent = 0, status = "Closing UEFN Ducky and trying again…" });

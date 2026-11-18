@@ -65,8 +65,8 @@ namespace DuckySetup
 
         // An engine or uninstaller exit code as an error code ("ok" for 0). A negative code is
         // Windows ending the process: exit_killed (ended from outside: Ctrl+C, sign-out, shutdown,
-        // End task), exit_crashed (it faulted), exit_neg for any other. "exit_neg" alone (a failed
-        // web update on Nov 10 2026) could not tell a kill from a crash.
+        // End task), exit_crashed (it faulted), exit_neg_<status hex> for any other (exit_neg_c0000142).
+        // "exit_neg" alone (a failed web update on Nov 10 2026) could not tell a kill from a crash.
         public static string ExitCode(int code)
         {
             if (code >= 0)
@@ -82,7 +82,7 @@ namespace DuckySetup
                 case 0xC00000FD: // stack overflow
                     return "exit_crashed";
                 default:
-                    return "exit_neg";
+                    return "exit_neg_" + unchecked((uint)code).ToString("x8");
             }
         }
 
@@ -187,6 +187,9 @@ namespace DuckySetup
                 return host;
             return engineLog.Trim().Length == 0 ? "no_log" : "";
         }
+
+        // A locked file: Setup closes UEFN Ducky and runs the engine once more, never twice.
+        public static bool RetryLockedFile(string reason, bool retried) => reason == "file_in_use" && !retried;
 
         // exit_4 plus its reason when the log names one: exit_4.file_in_use.
         public static string FailCode(int code, string reason) => ExitCode(code) + (code != 0 && reason.Length > 0 ? "." + reason : "");

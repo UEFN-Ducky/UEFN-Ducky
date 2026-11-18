@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -52,6 +54,7 @@ namespace DuckySetup
         {
             var baseUrl = BaseUrl;
             string json;
+            var triedDoh = false;
             for (var attempt = 0; ; attempt++)
             {
                 try
@@ -61,6 +64,18 @@ namespace DuckySetup
                 }
                 catch (Exception ex) when (ex is WebException || ex is IOException)
                 {
+                    // The PC's DNS can't find the Store: ask DNS over HTTPS once, like the app does.
+                    if (!triedDoh && (ex as WebException)?.Status == WebExceptionStatus.NameResolutionFailure
+                        && baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        triedDoh = true;
+                        try
+                        {
+                            json = PostFeedViaDoh(baseUrl);
+                            break;
+                        }
+                        catch (Exception) { /* the usual retries and error below */ }
+                    }
                     if (attempt < WebRelease.StoreRetryWaits.Length)
                     {
                         Thread.Sleep(TimeSpan.FromSeconds(WebRelease.StoreRetryWaits[attempt]));
@@ -106,6 +121,42 @@ namespace DuckySetup
             using var resp = (HttpWebResponse)req.GetResponse();
             using var reader = new StreamReader(resp.GetResponseStream()!, Encoding.UTF8);
             return reader.ReadToEnd();
+        }
+
+        // PostFeed to the address Cloudflare's DNS over HTTPS gives for the Store's host. TLS still
+        // names and validates the real host (SNI and certificate), only the lookup is skipped.
+        // ponytail: HTTP/1.0 by hand (no chunked bodies, no redirects); the feed answers 200 + JSON.
+        static string PostFeedViaDoh(string baseUrl)
+        {
+            var feed = new Uri(WebRelease.FeedUrl(baseUrl));
+            var dns = (HttpWebRequest)WebRequest.Create("https://1.1.1.1/dns-query?name=" + Uri.EscapeDataString(feed.Host) + "&type=A");
+            dns.Accept = "application/dns-json";
+            dns.UserAgent = UserAgent();
+            dns.Timeout = 10000;
+            string answer;
+            using (var resp = dns.GetResponse())
+            using (var r = new StreamReader(resp.GetResponseStream()!, Encoding.UTF8))
+                answer = r.ReadToEnd();
+            var ip = WebRelease.DohAddress(answer);
+            if (ip.Length == 0)
+                throw new WebException("DNS over HTTPS found no address.", WebExceptionStatus.NameResolutionFailure);
+            using var tcp = new TcpClient { ReceiveTimeout = 20000, SendTimeout = 20000 };
+            tcp.Connect(IPAddress.Parse(ip), feed.Port);
+            using var ssl = new SslStream(tcp.GetStream(), false);
+            ssl.AuthenticateAsClient(feed.Host);
+            var head = "POST " + feed.PathAndQuery + " HTTP/1.0\r\nHost: " + feed.Host
+                + "\r\nUser-Agent: " + UserAgent() + "\r\nAccept: application/json\r\nContent-Type: application/json\r\nOrigin: " + baseUrl
+                + "\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+            var bytes = Encoding.ASCII.GetBytes(head);
+            ssl.Write(bytes, 0, bytes.Length);
+            using var all = new MemoryStream();
+            ssl.CopyTo(all);
+            var text = Encoding.UTF8.GetString(all.ToArray());
+            var split = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+            var status = text.Split(' ');
+            if (split < 0 || status.Length < 2 || status[1] != "200")
+                throw new WebException("The Store answered " + (status.Length > 1 ? status[1] : "nothing") + ".", WebExceptionStatus.ProtocolError);
+            return text.Substring(split + 4);
         }
 
         // Downloads paused on the Store (5 of 9 web updates on Nov 6 2026 stopped here): ask
