@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -70,3 +71,23 @@ def test_a_failed_quick_check_runs_the_full_one(monkeypatch) -> None:
     with pytest.raises(Restored):
         db.open_checked()
     assert len(full) == 1  # the full check ran at once, then the recovery path
+
+
+def test_a_failed_backup_is_logged_and_reported(tmp_path, monkeypatch, caplog) -> None:
+    conn = db.connect()
+    head = db.head_version()
+    extra = tmp_path / f"{head + 1:04d}_probe.sql"
+    extra.write_text("CREATE TABLE probe_after_upgrade(x INTEGER);\n", encoding="utf-8")
+    files = db.migration_files()
+    monkeypatch.setattr(db, "migration_files", lambda: [*files, (head + 1, extra)])
+
+    def full_disk(conn, current):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(db, "_pre_migrate_copy", full_disk)
+    with caplog.at_level("WARNING", logger=db._log.name):
+        assert db.migrate(conn) == head + 1
+    assert any(r.getMessage() == "pre-migration backup failed" and r.exc_info for r in caplog.records)
+    note = json.loads(conn.execute("SELECT value FROM meta WHERE key=?", (db.BACKUP_FAILED_KEY,)).fetchone()[0])
+    assert note["from"] == head and note["to"] == head + 1 and "No space" in note["error"]
+    assert conn.execute("SELECT name FROM sqlite_master WHERE name='probe_after_upgrade'").fetchone()

@@ -879,8 +879,11 @@ def migrate(conn: sqlite3.Connection) -> int:
         # and deadlock on _guard (1.2.90 hung every upgraded panel at boot).
         try:
             _pre_migrate_copy(conn, current)
-        except Exception:
-            pass
+        except Exception as exc:
+            # The upgrade still runs (a full disk must not keep the app from starting),
+            # but never silently: the log and a meta row the Database tab can show.
+            _log.warning("pre-migration backup failed", exc_info=True)
+            _record_backup_failure(conn, current, head, exc)
     for number, path in migration_files():
         if number <= current:
             continue
@@ -900,6 +903,22 @@ def migrate(conn: sqlite3.Connection) -> int:
         conn.execute("COMMIT")
         current = number
     return current
+
+
+BACKUP_FAILED_KEY = "pre_migrate_backup_failed"
+
+
+def _record_backup_failure(conn: sqlite3.Connection, current: int, head: int, exc: BaseException) -> None:
+    """Meta row ``pre_migrate_backup_failed``: no backup was made before this update."""
+    note = {"from": current, "to": head, "error": f"{type(exc).__name__}: {exc}", "ts": time.time()}
+    try:
+        with write_txn(conn):
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value, updated) VALUES (?, ?, ?)",
+                (BACKUP_FAILED_KEY, json.dumps(note), time.time()),
+            )
+    except sqlite3.Error:
+        _log.warning("could not record the failed pre-migration backup", exc_info=True)
 
 
 def _split_statements(sql: str) -> list[str]:
