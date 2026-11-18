@@ -550,21 +550,22 @@ def run_message(
     except Exception:
         pass
 
+    session.prepare_run(run_id)
+    base_push = _wrap_push_for_linked_child(
+        push, parent_conv_id=parent_conv_id, child_conv_id=conv_id, child_title=child_title
+    )
+    push = _make_run_scoped_push(base_push, session, conv_id, run_id)
+    if parent_conv_id:
+        _push_linked_agent(push, parent_conv_id, conv_id, child_title, "running")
+        # Group roundtables must not auto-open member tabs (breaks immersion).
+        from frontend.ui_web.group_orchestrator import is_group_conversation
+
+        parent_conv = load_conversation(parent_conv_id)
+        if not (parent_conv and is_group_conversation(parent_conv)):
+            notify_chats_changed(conv_id, child_title, conv.folder_id, push=push)
+
     if external:
         # BYOA path: Claude Code / Codex / Cursor — no embedded AgentRunner.
-        session.prepare_run(run_id)
-        base_push = _wrap_push_for_linked_child(
-            push, parent_conv_id=parent_conv_id, child_conv_id=conv_id, child_title=child_title
-        )
-        push = _make_run_scoped_push(base_push, session, conv_id, run_id)
-        if parent_conv_id:
-            _push_linked_agent(push, parent_conv_id, conv_id, child_title, "running")
-            # Group roundtables must not auto-open member tabs (breaks immersion).
-            from frontend.ui_web.group_orchestrator import is_group_conversation
-
-            parent_conv = load_conversation(parent_conv_id)
-            if not (parent_conv and is_group_conversation(parent_conv)):
-                notify_chats_changed(conv_id, child_title, conv.folder_id, push=push)
         cancel_event = session._cancel
         # This process's copy of the chat, for a turn it runs itself. Dropped once an agent
         # host has the turn: the host works from the stored chat, and here the copy only sat
@@ -661,19 +662,6 @@ def run_message(
 
         session.start(work_external, run_id)
         return run_id
-
-    session.prepare_run(run_id)
-    base_push = _wrap_push_for_linked_child(
-        push, parent_conv_id=parent_conv_id, child_conv_id=conv_id, child_title=child_title
-    )
-    push = _make_run_scoped_push(base_push, session, conv_id, run_id)
-    if parent_conv_id:
-        _push_linked_agent(push, parent_conv_id, conv_id, child_title, "running")
-        from frontend.ui_web.group_orchestrator import is_group_conversation
-
-        parent_conv = load_conversation(parent_conv_id)
-        if not (parent_conv and is_group_conversation(parent_conv)):
-            notify_chats_changed(conv_id, child_title, conv.folder_id, push=push)
 
     def work() -> None:
         # Scope MCP plugin + built-in tool group availability to this chat for

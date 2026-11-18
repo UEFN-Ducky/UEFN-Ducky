@@ -29,6 +29,24 @@ EVENTS = {
 }
 
 
+def test_a_linked_child_gets_the_same_preamble_on_both_paths() -> None:
+    """One copy of the linked-child set-up, before the external / in-app split: both turns
+    run the same statements."""
+    import ast
+    import inspect
+    import textwrap
+
+    fn = ast.parse(textwrap.dedent(inspect.getsource(inspect.unwrap(routing.run_message)))).body[0]
+    names = ("_wrap_push_for_linked_child", "_push_linked_agent", "_make_run_scoped_push", "prepare_run")
+    calls = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+             and (getattr(n.func, "id", "") or getattr(n.func, "attr", "")) in names]
+    assert len(calls) == len(names)  # each once
+    split = max(i for i, s in enumerate(fn.body)  # the split into the two turn paths
+                if isinstance(s, ast.If) and getattr(s.test, "id", "") == "external")
+    before_split = {id(n) for s in fn.body[:split] for n in ast.walk(s)}
+    assert all(id(c) in before_split for c in calls)
+
+
 @pytest.mark.parametrize("messages", [ENDS_IN_TOOL, ENDS_IN_TEXT], ids=["tool", "text"])
 @pytest.mark.parametrize("event", sorted(EVENTS))
 def test_the_last_reply_is_read_without_a_chat_load(monkeypatch, messages, event) -> None:
