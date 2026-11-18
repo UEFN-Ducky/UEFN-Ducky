@@ -384,9 +384,99 @@ def list_ai_plugin_drafts(plugin_id: str = "") -> dict[str, Any]:
     return {"ok": True, "id": pid, "path": str(draft), "files": files}
 
 
-def write_ai_plugin_file(plugin_id: str, path: str, content: str, *, max_chars: int | None = _MAX_FILE_CHARS) -> dict[str, Any]:
+# Several agents share one draft. A whole-file write from a stale copy (read before a
+# teammate's edit, or copied from the repo) used to wipe that edit without a word. Same rule
+# as the project write pipeline: an agent overwrites only the version it saw.
+# (conv id, lock key) -> hash of the file as this agent last read or wrote it.
+# ponytail: in-process; a restarted tool server forgets it and falls back to the writer note.
+_seen: dict[tuple[str, str], str] = {}
+
+
+def _me() -> tuple[str, str]:
+    from backend.workspace import identity
+
+    ctx = identity.resolve_context()
+    if ctx is None:
+        return "", "the person"
+    return ctx.conv_id, ctx.ducky_name or (ctx.conv_id[:8] or "an agent")
+
+
+def _lock_key(target: Path) -> str:
+    # Same key the project writer locks on, so both pipelines share one OS lock per file.
+    return os.path.normcase(os.path.realpath(str(target)))
+
+
+def _file_hash(target: Path) -> str:
+    from backend.workspace.paths import content_hash
+
+    try:
+        return content_hash(target.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return ""
+
+
+def _note_path(key: str) -> Path:
+    import hashlib
+
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")
+    return Path(base) / "UEFN-Ducky" / "locks" / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".who.json")
+
+
+def _last_writer(key: str) -> dict[str, Any]:
+    try:
+        note = json.loads(_note_path(key).read_text(encoding="utf-8"))
+        return note if isinstance(note, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _ago(ts: Any) -> str:
+    import time
+
+    try:
+        mins = int((time.time() - float(ts)) // 60)
+    except (TypeError, ValueError):
+        return ""
+    return "just now" if mins < 1 else f"{mins} min ago" if mins < 120 else f"{mins // 60} h ago"
+
+
+def _who(note: dict[str, Any]) -> dict[str, str]:
+    """Who last saved the file, for the agent and the person to read."""
+    if not note:
+        return {"name": "someone outside the plugin tools (the person, a shell copy or another program)"}
+    return {"name": str(note.get("name") or "another agent"), "chat_id": str(note.get("conv_id") or ""),
+            "when": _ago(note.get("ts"))}
+
+
+def _stale_reason(key: str, found: str, expected: str | None) -> tuple[str, dict[str, str]]:
+    """(why overwriting now would erase someone's change, who) — ("", {}) when it would not."""
+    if not found:
+        return "", {}  # a new file
+    conv, _name = _me()
+    base = expected if expected is not None else _seen.get((conv, key))
+    note = _last_writer(key)
+    mine = note.get("conv_id") == conv and note.get("hash") == found
+    if base is not None:
+        if base == found:
+            return "", {}
+        who = _who({} if mine or note.get("hash") != found else note)
+        return "changed it after you last read it", who
+    # Never read here: refuse only over a version another agent wrote (scaffold, the
+    # person and the shell leave no note, so their files stay writable as before).
+    if note and not mine and note.get("hash") == found:
+        return "saved this version, and you have not read it yet", _who(note)
+    return "", {}
+
+
+def write_ai_plugin_file(plugin_id: str, path: str, content: str, *, max_chars: int | None = _MAX_FILE_CHARS,
+                         expected_hash: str | None = None) -> dict[str, Any]:
     """``max_chars``: the most an agent may write in one go (None: an edit of a file the
-    draft already has, judged by what it adds instead)."""
+    draft already has, judged by what it adds instead). ``expected_hash``: overwrite only
+    this version (the ``hash`` a read returned); otherwise the version this agent last saw."""
+    import time
+
+    from backend.workspace.paths import content_hash
+    from backend.workspace.writer import _process_file_lock
     from backend.uefn_plugins.store import normalize_plugin_id
 
     try:
@@ -416,13 +506,37 @@ def write_ai_plugin_file(plugin_id: str, path: str, content: str, *, max_chars: 
             return {"ok": False, "error": "plugin.json must be an object"}
         data["id"] = pid
         text = json.dumps(data, indent=2) + "\n"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    text = text if text.endswith("\n") else text + "\n"
     try:
         rel = target.relative_to(root_res).as_posix()
     except ValueError:
         rel = path
-    return {"ok": True, "id": pid, "path": rel, "bytes": len(text.encode("utf-8"))}
+    key = _lock_key(target)
+    conv, name = _me()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with _process_file_lock(key):
+        found = _file_hash(target)
+        why, who = _stale_reason(key, found, expected_hash)
+        if why:
+            _seen.pop((conv, key), None)
+            by = who["name"] + (f" (chat {who['chat_id']})" if who.get("chat_id") else "")
+            when = f" {who['when']}" if who.get("when") else ""
+            return {"ok": False, "stale": True, "id": pid, "path": rel, "hash": found, "changed_by": who,
+                    "error": (
+                        f"NOT SAVED: {by}{when} {why}: {rel}. Saving would erase their work. "
+                        f"Do this: 1) ducky_plugin_read_file {rel} again, 2) make your change on top "
+                        "of theirs with ducky_plugin_edit_file. To replace their version on purpose, "
+                        f"pass expected_hash=\"{found}\".")}
+        tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)  # atomic: a reader never sees half a file
+        new_hash = content_hash(text)
+        _seen[(conv, key)] = new_hash
+        note = _note_path(key)
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text(json.dumps({"conv_id": conv, "name": name, "hash": new_hash, "ts": time.time()}),
+                        encoding="utf-8")
+    return {"ok": True, "id": pid, "path": rel, "bytes": len(text.encode("utf-8")), "hash": new_hash}
 
 
 def read_ai_plugin_file(plugin_id: str, path: str, *, start_line: int = 0, end_line: int = 0) -> dict[str, Any]:
@@ -447,7 +561,27 @@ def read_ai_plugin_file(plugin_id: str, path: str, *, start_line: int = 0, end_l
         return {"ok": False, "error": "file is not UTF-8 text"}
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
+    from backend.workspace.paths import content_hash
+
     rel = path.replace("\\", "/")
+    key = _lock_key(target)
+    conv, _name = _me()
+    full_hash = content_hash(content)
+    _seen[(conv, key)] = full_hash
+    note = _last_writer(key)
+    busy = {}
+    if note and note.get("conv_id") != conv and note.get("hash") == full_hash:
+        # Tell the reader up front that a teammate is in this file, before it plans a rewrite.
+        busy = {"last_changed_by": _who(note),
+                "note": f"{note.get('name') or 'Another agent'} changed this file {_ago(note.get('ts'))}: "
+                        "edit it with ducky_plugin_edit_file, never rewrite it whole."}
+    content_out = _read_slice(pid, rel, content, start_line, end_line)
+    if content_out.get("ok"):
+        content_out.update({"hash": full_hash, **busy})
+    return content_out
+
+
+def _read_slice(pid: str, rel: str, content: str, start_line: int, end_line: int) -> dict[str, Any]:
     lines = content.splitlines()
     if start_line or end_line:
         first = max(1, int(start_line or 1))
@@ -474,29 +608,37 @@ def edit_ai_plugin_file(plugin_id: str, path: str, old_string: str, new_string: 
                         replace_all: bool = False) -> dict[str, Any]:
     """Replace an exact snippet in a draft file (unique unless ``replace_all``)."""
     from backend.uefn_plugins.store import normalize_plugin_id
+    from backend.workspace.paths import content_hash
 
     if not old_string:
         return {"ok": False, "error": "old_string is empty: to create a file use ducky_plugin_write_file"}
-    try:
-        pid = normalize_plugin_id(plugin_id)
-        target = _resolve_jailed(_draft_root(pid), path)
-        text = target.read_text(encoding="utf-8")
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
-    except (OSError, UnicodeDecodeError):
-        return {"ok": False, "error": f"file not found or not UTF-8 text: {path}"}
-    count = text.count(old_string)
-    if count == 0:
-        return {"ok": False, "error": "old_string was not found: read those lines again (start_line/end_line) and copy them exactly"}
-    if count > 1 and not replace_all:
-        return {"ok": False, "error": f"old_string is in the file {count} times: add surrounding lines so it is unique, or pass replace_all=true"}
     if len(new_string) > _MAX_FILE_CHARS:
         return {"ok": False, "error": f"new_string exceeds {_MAX_FILE_CHARS} chars"}
-    # An edit is judged by what it adds: a file already past the limit (Island Media Kit's
-    # plugin.json is 17k lines) could otherwise never be changed by a line.
-    result = write_ai_plugin_file(pid, path, text.replace(old_string, new_string), max_chars=None)
-    if result.get("ok"):
-        result["replacements"] = count if replace_all else 1
+    result: dict[str, Any] = {}
+    for _attempt in range(3):  # another agent saved between our read and write: redo on theirs
+        try:
+            pid = normalize_plugin_id(plugin_id)
+            target = _resolve_jailed(_draft_root(pid), path)
+            text = target.read_text(encoding="utf-8")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        except (OSError, UnicodeDecodeError):
+            return {"ok": False, "error": f"file not found or not UTF-8 text: {path}"}
+        count = text.count(old_string)
+        if count == 0:
+            return {"ok": False, "error": "old_string was not found: read those lines again (start_line/end_line) and copy them exactly"}
+        if count > 1 and not replace_all:
+            return {"ok": False, "error": f"old_string is in the file {count} times: add surrounding lines so it is unique, or pass replace_all=true"}
+        # An edit is judged by what it adds: a file already past the limit (Island Media Kit's
+        # plugin.json is 17k lines) could otherwise never be changed by a line. The snippet
+        # match is the edit's own check, so it overwrites exactly the text it just read.
+        result = write_ai_plugin_file(pid, path, text.replace(old_string, new_string), max_chars=None,
+                                      expected_hash=content_hash(text))
+        if result.get("ok"):
+            result["replacements"] = count if replace_all else 1
+            return result
+        if not result.get("stale"):
+            return result
     return result
 
 
@@ -1008,13 +1150,18 @@ def ducky_plugin_write_file(
     id: str,
     path: str,
     content: str,
+    expected_hash: str = "",
     pretty: bool = False,
 ) -> str:
     """Write a UTF-8 file inside an AI plugin draft (path-jailed to the draft folder).
 
-    Cannot touch core app files. Refuses .dat/.env/.pem/.key.
+    Cannot touch core app files. Refuses .dat/.env/.pem/.key. Teammates share drafts: an
+    existing file is replaced only if it is still the version you last read (or
+    ``expected_hash``, the ``hash`` a read returned); otherwise nothing is saved and the
+    reply names who changed it. Never copy files into a draft with the shell: that
+    skips this check and erases their work.
     """
-    return tool_json(write_ai_plugin_file(id, path, content), pretty=pretty)
+    return tool_json(write_ai_plugin_file(id, path, content, expected_hash=expected_hash or None), pretty=pretty)
 
 
 @mcp.tool()
