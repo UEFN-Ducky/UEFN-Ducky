@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from frontend import self_health
 
@@ -389,14 +390,20 @@ def test_a_look_reads_the_process_table_not_each_process(monkeypatch):
     monkeypatch.setattr(psutil, "process_iter", refuse)
     tables = []
     real = proc_table.table
-    monkeypatch.setattr(proc_table, "table", lambda: (tables.append(1), real())[1])
+    monkeypatch.setattr(proc_table, "table", lambda: (tables.append(real()), tables[-1])[1])
     asked = []
     monkeypatch.setattr(self_health, "_cmdline", lambda pid: (asked.append(pid), ([], ""))[1])
     snap = self_health.snapshot()
     assert snap["ok"] and snap["app"]["threads"] > 0 and snap["pc"]["processes"] > 20
     assert len(tables) == 2
-    ducky = [p for p in real().values() if p.name.lower().startswith("uefn-ducky")]
-    assert len(asked) <= min(20, len(ducky))
+    # Judge by the tables the snapshot read (processes come and go after it): only Ducky's
+    # own processes (at most 20 rows) and Python children in its tree (plugin workers).
+    seen = {**tables[0], **tables[1]}
+    ducky = {pid for pid, p in seen.items() if self_health._ducky_named(p)}
+    workers = {pid for pid in proc_table.tree(seen, os.getpid())
+               if seen[pid].name.lower().startswith(("python", "pythonw"))}
+    assert set(asked) <= ducky | workers
+    assert len(asked) <= min(20, len(ducky)) + len(workers)
 
 
 def test_tools_ask_the_window_from_an_agents_tool_server(monkeypatch):

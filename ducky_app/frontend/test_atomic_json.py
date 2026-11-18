@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,17 @@ def test_plain_writer_makes_no_backup(tmp_path: Path) -> None:
     assert [p.name for p in target.parent.iterdir()] == ["state.json"]
 
 
+def _read_while_replaced(target: Path) -> str:
+    """Windows refuses an open for the instant os.replace swaps the file in (a reader's
+    share violation, not a failed write): try that open again; any other error raises."""
+    for _ in range(50):
+        try:
+            return target.read_text(encoding="utf-8")
+        except PermissionError:
+            time.sleep(0.002)
+    return target.read_text(encoding="utf-8")
+
+
 def test_eight_threads_writing_one_file_never_fail(tmp_path: Path) -> None:
     target = tmp_path / "d" / "shared.json"
     errors: list[BaseException] = []
@@ -42,7 +54,7 @@ def test_eight_threads_writing_one_file_never_fail(tmp_path: Path) -> None:
         try:
             for i in range(50):
                 write_json_plain(target, {"thread": n, "i": i})
-                json.loads(target.read_text(encoding="utf-8"))
+                json.loads(_read_while_replaced(target))  # every read is whole, valid JSON
         except BaseException as exc:  # noqa: BLE001 - collected for the assert
             errors.append(exc)
 
