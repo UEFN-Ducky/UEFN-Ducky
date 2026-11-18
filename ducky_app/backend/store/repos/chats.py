@@ -30,7 +30,8 @@ from collections import OrderedDict
 from typing import Any, Callable
 
 from backend.store import account_rows, db
-from backend.store.repos.chat_seal import seal_stored_messages  # noqa: F401  (re-export)
+from backend.store.repos import chat_seal
+from backend.store.repos.chat_seal import prepare_run_message, prepare_save, seal_stored_messages  # noqa: F401
 
 _log = logging.getLogger("uefn_ducky.store")
 
@@ -820,13 +821,13 @@ def conv_save(
     if messages is not None:
         rows, tail = _dirty_span(messages, dirty_from, dirty_rows)
         if "messages" in prepared:
-            pre, prepped = _still_prepared(prepared, messages)
+            pre, prepped = chat_seal.still_prepared(prepared, messages)
             sealed = prepared["sealed"]  # named by content: never stale
         else:
             pre, prepped, sealed = _encode_rows(conn, str(doc["id"]), messages, rows, tail, account, key, base_hashes)
     meta = prepared.get("meta")
-    if meta is None or not _meta_still(meta, doc):
-        meta = _prepare_meta(conn, doc, account)
+    if meta is None or not chat_seal.meta_still(meta, doc):
+        meta = chat_seal.prepare_meta(conn, doc, account)
     with db.write_txn(conn):
         owner = conn.execute(
             "SELECT account_id, title, state, msg_rev FROM conversations WHERE id=?", (doc["id"],)
@@ -944,65 +945,6 @@ def _dirty_span(messages: list[Any], dirty_from: int | None, dirty_rows: list[in
         return [], 0
     tail = max(0, min(int(dirty_from), len(messages)))
     return sorted({int(s) for s in dirty_rows or () if 0 <= int(s) < tail}), tail
-
-
-def prepare_save(
-    doc: dict[str, Any], messages: list[Any] | None = None, *, dirty_from: int | None = None,
-    dirty_rows: list[int] | None = None, base_hashes: list[str] | None = None,
-) -> dict[str, Any]:
-    """What ``conv_save`` encodes and seals before its write lock (title, state, snapshot
-    hash; with *messages*, each row's JSON, hash, parts, seal and search text), for a
-    caller that calls conv_save inside a write transaction of its own (the chat writer's
-    batch): pass it back as ``prepared=``. Whatever changed since is done again there."""
-    account = account_rows.current()
-    key = account_rows.ready(account)
-    conn = db.connect()
-    out: dict[str, Any] = {"account": account, "meta": _prepare_meta(conn, doc, account)}
-    if messages is not None:
-        rows, tail = _dirty_span(messages, dirty_from, dirty_rows)
-        pre, prepped, sealed = _encode_rows(conn, str(doc["id"]), messages, rows, tail, account, key, base_hashes)
-        out.update(messages=list(messages), pre=pre, prepped=prepped, sealed=sealed)
-    return out
-
-
-def _prepare_meta(conn, doc: dict[str, Any], account: str) -> dict[str, Any]:
-    """The chat row's sealed title and state against what is stored now (``seen``), and
-    the snapshot hash; the transaction seals again only if ``seen`` moved."""
-    state = {k: v for k, v in doc.items() if k not in _STATE_EXCLUDED}
-    title, state_text = str(doc.get("title") or ""), _dumps(state)
-    snapshot = str(doc.get("skill_snapshot") or "")
-    seen = conn.execute("SELECT title, state FROM conversations WHERE id=?", (doc["id"],)).fetchone()
-    seen = ("", "") if seen is None else (str(seen[0] or ""), str(seen[1] or ""))
-    return {
-        "title": title, "state": state, "state_text": state_text, "snapshot": snapshot,
-        "snap_hash": _hash(snapshot) if snapshot else "", "seen": seen,
-        "sealed": (_sealed_as(seen[0], title, account), _sealed_as(seen[1], state_text, account)),
-    }
-
-
-def _meta_still(meta: dict[str, Any], doc: dict[str, Any]) -> bool:
-    """*meta* was prepared from a doc with this title, state and snapshot (no encoding)."""
-    return (
-        meta["title"] == str(doc.get("title") or "")
-        and meta["snapshot"] == str(doc.get("skill_snapshot") or "")
-        and meta["state"] == {k: v for k, v in doc.items() if k not in _STATE_EXCLUDED}
-    )
-
-
-def _still_prepared(
-    prepared: dict[str, Any], messages: list[Any]
-) -> tuple[dict[int, tuple[str, str]], dict[int, tuple]]:
-    """*prepared*'s rows whose message is still the same object; a row changed since is
-    encoded again in the transaction."""
-    was = prepared["messages"]
-
-    def same(seq: int) -> bool:
-        return seq < len(messages) and seq < len(was) and messages[seq] is was[seq]
-
-    return (
-        {s: v for s, v in prepared["pre"].items() if same(s)},
-        {s: v for s, v in prepared["prepped"].items() if same(s)},
-    )
 
 
 def _encode_rows(
@@ -1125,17 +1067,6 @@ def _write_row(
         message_id = int(cur.lastrowid)
     if parts or row is not None:
         _write_parts(conn, message_id, parts, account, sealed)
-
-
-def prepare_run_message(message: dict[str, Any]) -> tuple:
-    """The row work ``upsert_run_message`` does before its write lock; pass it back as
-    ``prepared=`` (see :func:`prepare_save`)."""
-    account = account_rows.current()
-    key = account_rows.ready(account)
-    body = _dumps(message)
-    h = _hash(body)
-    prep = _prep_row(message, body, h, account, key, functools.partial(account_rows.part_digest, key=key))
-    return message, account, h, prep, _seal_new_parts(db.connect(), prep[3], account)
 
 
 def upsert_run_message(
