@@ -130,8 +130,10 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
+    from frontend.atomic_json import write_text_atomic
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    write_text_atomic(path, json.dumps(data, indent=2) + "\n")
 
 
 def _is_win_lock_error(exc: BaseException) -> bool:

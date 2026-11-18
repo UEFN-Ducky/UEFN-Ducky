@@ -57,6 +57,24 @@ def test_a_bad_signature_is_refused_as_before(signed_store) -> None:
     assert not store.plugin_dir("verifydemo").exists()
 
 
+def test_a_crash_mid_write_keeps_the_old_json(tmp_path, monkeypatch) -> None:
+    from frontend import atomic_json
+
+    path = tmp_path / "d" / "plugin.json"
+    store._write_json(path, {"id": "old"})
+    assert path.read_bytes() == (json.dumps({"id": "old"}, indent=2) + "\n").encode()
+
+    def boom(src, dst):
+        raise OSError("killed mid-write")
+
+    monkeypatch.setattr(atomic_json.os, "replace", boom)
+    monkeypatch.setattr(atomic_json.time, "sleep", lambda _s: None)
+    with pytest.raises(OSError):
+        store._write_json(path, {"id": "new"})
+    assert store._read_json(path) == {"id": "old"}
+    assert sorted(p.name for p in path.parent.iterdir()) == ["plugin.json"]
+
+
 def test_a_local_draft_without_a_record_installs_as_before(signed_store) -> None:
     out = store.import_plugin_from_bytes(_zip("verifydemo"), source="local", signed_record=None)
     assert out.get("ok"), out
