@@ -68,10 +68,9 @@ def _write_crashed(crashed: dict[str, str]) -> None:
         if not crashed:
             path.unlink(missing_ok=True)
             return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(crashed), encoding="utf-8")
-        tmp.replace(path)
+        from frontend.atomic_json import write_json_plain
+
+        write_json_plain(path, crashed)
     except OSError:
         _log.debug("could not save plugin crash record", exc_info=True)
 

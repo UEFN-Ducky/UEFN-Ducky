@@ -445,9 +445,9 @@ def _save_saved(storage: Path, seen: dict[str, dict[str, Any]]) -> None:
 
         repo.watch_replace(storage.name, payload)
         return
-    tmp = storage / (_INDEX_NAME + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
-    tmp.replace(storage / _INDEX_NAME)
+    from frontend.atomic_json import write_json_plain
+
+    write_json_plain(storage / _INDEX_NAME, payload, indent=1)
 
 
 def _canon_watch_key(rel: str) -> str:

@@ -9,7 +9,6 @@ plugin's sensitive tools; the person's own clicks (no agent run bound) always pa
 from __future__ import annotations
 
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -57,11 +56,9 @@ def set_allowed_models(plugin_id: str, models: list[Any]) -> list[str]:
             data[pid] = clean
         else:
             data.pop(pid, None)
-        path = _path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        os.replace(tmp, path)
+        from frontend.atomic_json import write_json_plain
+
+        write_json_plain(_path(), data, indent=2)
     return clean
 
 

@@ -30,9 +30,9 @@ def directory(workflow_id: str):
 
 def archive_file(doc: dict[str, Any]) -> None:
     path = directory(doc["id"]) / f"{uuid.uuid4()}.json"
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(snapshot(doc), ensure_ascii=False), encoding="utf-8")
-    temporary.replace(path)
+    from frontend.atomic_json import write_json_plain
+
+    write_json_plain(path, snapshot(doc), ensure_ascii=False)
 
 
 def list_versions(workflow_id: str) -> list[dict[str, Any]]:

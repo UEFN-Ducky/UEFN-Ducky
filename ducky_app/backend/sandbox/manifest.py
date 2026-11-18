@@ -7,11 +7,12 @@ session never grows it without bound.
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from frontend.atomic_json import write_json_plain
 
 MAX_EVENTS = 300
 _MAX_FIELD = 600
@@ -47,12 +48,10 @@ def record(sandbox: Path, kind: str, **fields: Any) -> None:
         events = [e for e in data.get("events") or [] if isinstance(e, dict)]
         events.append({"at": round(time.time(), 1), "kind": kind, **_short(fields)})
         data["events"] = events[-MAX_EVENTS:]
-        tmp = _file(sandbox).with_suffix(".json.part")
         try:
-            tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
-            os.replace(tmp, _file(sandbox))
+            write_json_plain(_file(sandbox), data, indent=1)
         except OSError:
-            tmp.unlink(missing_ok=True)
+            pass
 
 
 def summary(sandbox: Path, last: int = 25) -> dict[str, Any]:
