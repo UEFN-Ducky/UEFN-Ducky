@@ -35,7 +35,7 @@ class WaitingMcp(FakeMcp):
 @pytest.fixture
 def daemon(monkeypatch, tmp_path):
     monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
-    monkeypatch.setattr(shared_mcp, "_report_stuck", lambda *a, **k: None)
+    monkeypatch.setattr("backend.bridge.stuck_watch._report_stuck", lambda *a, **k: None)
     mcp = WaitingMcp()
     thread = serve(mcp, monkeypatch, tmp_path)
     try:

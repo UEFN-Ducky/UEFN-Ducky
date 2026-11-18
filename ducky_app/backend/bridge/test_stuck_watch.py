@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.bridge import call_limits, shared_mcp
+from backend.bridge import call_limits, shared_mcp, stuck_watch
 
 
 class WatchMcp:
@@ -70,7 +70,7 @@ def _text(result: dict) -> str:
 @pytest.fixture
 def quick(monkeypatch):
     monkeypatch.setattr(call_limits, "QUICK_TOOL_LIMIT_S", 0.3)
-    monkeypatch.setattr(shared_mcp, "STUCK_REPORT_S", 0.3)
+    monkeypatch.setattr(stuck_watch, "STUCK_REPORT_S", 0.3)
 
 
 def test_a_quick_tool_that_never_answers_is_stopped_and_says_where_it_waited(quick) -> None:
@@ -152,7 +152,7 @@ def test_the_stuck_count_is_sent_when_the_call_ends_with_how_long_it_ran(quick, 
     asyncio.run(shared_mcp._call_tool(mcp, "ducky_find_tools", {}, _ident()))
     assert [tool for _s, tool in counted] == ["slow_render", "ducky_find_tools"]
     # Still running at STUCK_COUNT_BY_S: counted then, and the call goes on to its answer.
-    monkeypatch.setattr(shared_mcp, "STUCK_COUNT_BY_S", 0.5)
+    monkeypatch.setattr(stuck_watch, "STUCK_COUNT_BY_S", 0.5)
     result = asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 1.0}, _ident()))
     assert _text(result) == "slow_render done" and len(counted) == 3
 
@@ -237,6 +237,6 @@ def test_a_frozen_apps_idle_loop_stack_is_seen_as_idle() -> None:
     frozen = ['  File "asyncio\\windows_events.py", line 775, in _poll\n'.replace("\\", shared_mcp.os.sep)]
     source = [f'  File "C:{shared_mcp.os.sep}Py{shared_mcp.os.sep}asyncio{shared_mcp.os.sep}windows_events.py", line 775, in _poll\n']
     busy = ['  File "backend\\tools\\panel\\ducky_panel.py", line 470, in ducky_get_status\n']
-    assert shared_mcp._idle_in_loop(frozen)
-    assert shared_mcp._idle_in_loop(source)
-    assert not shared_mcp._idle_in_loop(busy)
+    assert stuck_watch._idle_in_loop(frozen)
+    assert stuck_watch._idle_in_loop(source)
+    assert not stuck_watch._idle_in_loop(busy)

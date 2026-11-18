@@ -1023,7 +1023,9 @@ def stuck_events(monkeypatch):
     from backend.panel import rpc
     from backend.store.repos import events
 
-    monkeypatch.setattr(shared_mcp, "STUCK_REPORT_S", 0.2)
+    from backend.bridge import stuck_watch
+
+    monkeypatch.setattr(stuck_watch, "STUCK_REPORT_S", 0.2)
     monkeypatch.setattr(shared_mcp, "_calling_mode", lambda ident: "agent")
 
     def fake_http(method, url, body, timeout):
