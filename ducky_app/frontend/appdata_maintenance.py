@@ -386,6 +386,9 @@ _EMPTY_LEFTOVER_ROOTS = (
 )
 
 
+_PROMPT_TMP_MAX_AGE_S = 24 * 3600
+
+
 def prune_empty_leftover_dirs(app_root: Path | None = None) -> int:
     """Delete empty leftover folders and build scratch that does not belong in AppData."""
     if app_root is None:
@@ -396,6 +399,20 @@ def prune_empty_leftover_dirs(app_root: Path | None = None) -> int:
         removed += 1
     tmp = app_root / "coding_agents" / "tmp"
     if tmp.is_dir():
+        # Prompt files hold the text of the person's messages; a turn removes its own,
+        # a killed host leaves them. A day old is no running turn's; a locked one stays.
+        cutoff = time.time() - _PROMPT_TMP_MAX_AGE_S
+        try:
+            entries = list(tmp.iterdir())
+        except OSError:
+            entries = []
+        for entry in entries:
+            try:
+                if entry.is_file() and entry.stat().st_mtime < cutoff:
+                    entry.unlink()
+                    removed += 1
+            except OSError:
+                pass
         try:
             empty = not any(tmp.iterdir())
         except OSError:
