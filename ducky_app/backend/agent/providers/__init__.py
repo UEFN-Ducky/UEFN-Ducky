@@ -181,6 +181,15 @@ class _UsageTrackingProvider:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
 
+    def _count(self, what: str, *args: Any, **kwargs: Any) -> None:
+        """One gateway.* counter (usage_stats.gateway_<what>); never breaks the turn."""
+        try:
+            from frontend import usage_stats
+
+            getattr(usage_stats, f"gateway_{what}")(self._provider, *args, **kwargs)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _log(self, *, usage: dict[str, Any] | None = None, estimate_chars: int = 0, agent: str = "") -> None:
         try:
             from frontend.ui_web.provider_usage_log import log_gateway_usage
@@ -209,8 +218,10 @@ class _UsageTrackingProvider:
             return len(system) + msg_chars + text_chars
 
         tried = {self._account} if self._account else set()
+        first_tried = len(tried)
         started = False
         transient_tries = 0
+        failed: str | None = None  # the turn's last error, counted once at its end
 
         def _transient(text: str) -> bool:
             return (
@@ -241,8 +252,11 @@ class _UsageTrackingProvider:
                         if kind == StreamEventKind.DONE:
                             self._log(usage=usage or None, estimate_chars=_estimate())
                             logged = True
-                        elif kind == StreamEventKind.ERROR and started and self._quota(event.error):
-                            self._switch_account(set(tried))  # next turn starts on the next account
+                            self._count("response", getattr(event, "stop_reason", ""))
+                        elif kind == StreamEventKind.ERROR:
+                            failed = str(event.error or "")
+                            if started and self._quota(event.error):
+                                self._switch_account(set(tried))  # next turn starts on the next account
                         yield event
                 except Exception as exc:
                     if not self._quota(str(exc)):
@@ -271,14 +285,26 @@ class _UsageTrackingProvider:
                 if quota_event is None:
                     return
                 if not self._switch_account(tried):
+                    failed = str(quota_event.error or "")
                     yield quota_event
                     return
+        except Exception as exc:
+            failed = str(exc)
+            raise
         finally:
             if not logged:
                 self._log(usage=usage or None, estimate_chars=_estimate())
+            if failed is not None:
+                self._count("turn_fail", failed, started=started, retried=transient_tries,
+                            switched=len(tried) > first_tried)
 
     async def test_connection(self) -> tuple[bool, str]:
-        ok, detail = await self._inner.test_connection()
+        try:
+            ok, detail = await self._inner.test_connection()
+        except Exception as exc:
+            self._count("connect", False, str(exc))
+            raise
+        self._count("connect", ok, str(detail or ""))
         if ok:
             self._log(estimate_chars=0, agent="key_test")
         return ok, detail

@@ -375,6 +375,25 @@ def test_chat_turn_counts_its_tools_and_first_message_once() -> None:
     assert not any("Cube" in str(r) for r in rows)
 
 
+def test_gateway_counters_send_words_only(monkeypatch) -> None:
+    monkeypatch.setattr(us, "_gateway_v", lambda provider: "1.0.57")
+    us.gateway_connect("gemini", True)
+    us.gateway_connect("gemini", False, "401 Unauthorized: key AIza-secret is wrong")
+    us.gateway_connect("gemini", False, "403 Forbidden: project my_secret has no access")
+    us.gateway_connect("gemini", False, "connection reset by peer")
+    us.gateway_response("gemini", "SAFETY")
+    us.gateway_response("gemini", "end_turn")  # a normal end: not counted
+    us.gateway_turn_fail("gemini", "tool server restarted while this call was running", started=True,
+                         retried=1, switched=True)
+    rows, _ = us._take(100)
+    got = [(r["name"], r["props"]) for r in rows if r["name"].startswith("gateway.")]
+    assert [p["result"] for n, p in got if n == "gateway.connect"] == ["ok", "bad_key", "no_access", "network"]
+    assert ("gateway.response", {"provider": "gemini", "stop": "safety", "plugin_v": "1.0.57"}) in got
+    assert ("gateway.turn_fail", {"provider": "gemini", "stage": "after_output", "reason": "tool_restart",
+                                  "retried": "1", "switched": "y", "plugin_v": "1.0.57"}) in got
+    assert len(got) == 6 and "secret" not in str(got)
+
+
 def test_gpu_full_sends_words_and_buckets_only() -> None:
     assert ev.validate("pc.gpu_full", {"total_gb": 8.0, "top": "uefn", "uefn_gb": 8.1, "ducky_gb": 0.1,
                                        "muted": "n"}) == {

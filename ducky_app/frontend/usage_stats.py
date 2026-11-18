@@ -971,9 +971,52 @@ def net_fail(code: str, stage: str, proxy: str, status: int = 0) -> None:
           net_stage=stage, proxy=proxy, **answered)
 
 
-def agent_crash(provider: str) -> None:
+def agent_crash(provider: str, error: str = "", first_token: bool | None = None) -> None:
+    kind = ev.kind_of(error)
+    token = {} if first_token is None else {"first_token": "y" if first_token else "n"}
     track("error.code", code="agent_crash_" + (ev.slug(provider) or "other"), where="agent",
-          kind="crash", version=_app_version())
+          kind="crash" if kind == "other" else kind, version=_app_version(), **token)
+
+
+def _gateway_v(provider: str) -> str:
+    try:
+        from backend.uefn_plugins.plugin_host.gateways import get_llm_provider_registration
+        from backend.uefn_plugins.store import load_plugin_manifest
+
+        reg = get_llm_provider_registration(provider) or {}
+        return str((load_plugin_manifest(reg.get("plugin_id") or "") or {}).get("version") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def gateway_connect(provider: str, ok: bool, detail: str = "") -> None:
+    reason = "ok" if ok else ev.turn_reason(detail)
+    if reason == "auth":
+        reason = "no_access" if re.search(r"\b403\b|forbidden|permission", (detail or "").lower()) else "bad_key"
+    elif reason in ("timeout", "offline"):
+        reason = "network"
+    track("gateway.connect", provider=provider, result=reason if reason in ev.GATEWAY_RESULTS else "other",
+          plugin_v=_gateway_v(provider))
+
+
+def gateway_turn_fail(provider: str, error: str, *, started: bool, retried: int, switched: bool) -> None:
+    track("gateway.turn_fail", provider=provider, stage="after_output" if started else "before_output",
+          reason=ev.turn_reason(error), retried=str(min(max(int(retried), 0), 3)), switched="y" if switched else "n",
+          plugin_v=_gateway_v(provider))
+
+
+# A reply's normal ends; any other stop_reason is counted (gateway.response).
+_NORMAL_STOPS = frozenset({"", "end_turn", "stop", "tool_use", "tool_calls", "stop_sequence", "function_call"})
+
+
+def gateway_response(provider: str, stop_reason: str) -> None:
+    stop = str(stop_reason or "").strip().lower()
+    if stop in _NORMAL_STOPS:
+        return
+    word = ("safety" if re.search(r"safety|content_filter|refusal|blocked|prohibited", stop)
+            else "max_tokens" if re.search(r"max_tokens|length", stop)
+            else "recitation" if "recitation" in stop else "other")
+    track("gateway.response", provider=provider, stop=word, plugin_v=_gateway_v(provider))
 
 
 def ui_crash(code: str) -> None:

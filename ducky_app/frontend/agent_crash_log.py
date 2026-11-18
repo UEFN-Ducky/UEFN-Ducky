@@ -71,7 +71,7 @@ def record_crash(
     try:
         from frontend import usage_stats
 
-        usage_stats.agent_crash(provider)
+        usage_stats.agent_crash(provider, error, first_token=first_token_s is not None)
     except Exception:
         pass
     if _use_db():

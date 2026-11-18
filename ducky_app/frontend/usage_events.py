@@ -76,6 +76,7 @@ SETUP_SOURCES = ("youtube", "tiktok", "discord", "x", "reddit", "google", "epic_
 SETUP_STARS = ("0", "1", "2", "3", "4", "5")
 MODEL_FAMILIES = ("claude", "gpt", "gemini", "ollama", "ducky_ai", "other")
 YES_NO = ("yes", "no")
+GATEWAY_RESULTS = ("ok", "bad_key", "no_access", "network", "rate_limit", "plan", "other")
 WHERE = ("agent", "ui", "bridge", "uefn", "store", "sync", "workflow", "other")
 # What kind of failure an error was, read from its message on the PC (the message never leaves).
 ERROR_KINDS = ("session_dead", "busy", "timeout", "offline", "rate_limit", "auth", "too_long", "bad_picture",
@@ -167,6 +168,8 @@ EVENTS: dict[str, dict[str, Any]] = {
     # stage, uptime: app_unclean_exit only (the dead run's last boot stage and how long it ran).
     "error.code": {"code": ("slug",), "where": WHERE, "kind": ERROR_KINDS, "version": ("version",), "at": ("slug",),
                    "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s"),
+                   # agent_crash only: whether the reply had started streaming.
+                   "first_token": ("y", "n"),
                    # app_unclean_exit: the dead run's app and WebView2 memory at its last heartbeat.
                    "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb"),
                    # ...and every agent process Ducky started (boot.json heartbeat agents_mb), a bucket only.
@@ -212,6 +215,14 @@ EVENTS: dict[str, dict[str, Any]] = {
                     "top": ("uefn", "ducky", "browser", "game", "overlay", "other"),
                     "uefn": ("bucket", GPU_UEFN_GB, "uefn_gb"), "ducky": ("bucket", GPU_DUCKY_GB, "ducky_gb"),
                     "muted": ("y", "n")},
+    # API gateways (providers._UsageTrackingProvider): a key test, a turn that failed, a reply
+    # that stopped for a reason other than its end. plugin_v: the gateway plugin's version.
+    "gateway.connect": {"provider": ("slug",), "result": GATEWAY_RESULTS, "plugin_v": ("version",)},
+    "gateway.turn_fail": {"provider": ("slug",), "stage": ("before_output", "after_output"),
+                          "reason": ("slug",), "retried": ("0", "1", "2", "3"), "switched": ("y", "n"),
+                          "plugin_v": ("version",)},
+    "gateway.response": {"provider": ("slug",), "stop": ("safety", "max_tokens", "recitation", "other"),
+                         "plugin_v": ("version",)},
     "perf.sample": {
         "startup": ("bucket", STARTUP_S, "startup_s"),
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),
@@ -407,6 +418,9 @@ def kind_of(message: str) -> str:
 _TURN_REASONS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (reason, re.compile(pattern))
     for reason, pattern in (
+        # Gemini's 400 when a turn's tool answers do not match its tool calls.
+        ("fc_mismatch", r"function response parts"),
+        ("tool_restart", r"tool server restarted while this call"),
         ("mcp_connect", r"mcp server .{0,40}fail|mcp (server )?(failed|error)|tools didn.t connect"
                         r"|could not connect to (ducky|mcp)"),
         ("session_resume", r"no conversation found|resum(e|ing) (the )?session|session .{0,20}resume|--resume"),
@@ -429,7 +443,7 @@ _TURN_REASONS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("stuck_start", r"stuck on .{0,80}before the agent started"),
     )
 )
-TURN_REASONS = ("mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty",
+TURN_REASONS = ("fc_mismatch", "tool_restart", "mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty",
                 "no_model", "sdk_setup", "plan", "rate_limit", "model_not_found", "http", "sdk_request",
                 "stuck_start", *(k for k in ERROR_KINDS if k not in ("auth", "rate_limit", "other")), "other")
 
