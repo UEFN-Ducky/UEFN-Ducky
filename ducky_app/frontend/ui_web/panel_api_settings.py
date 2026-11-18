@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Callable
 
 from frontend.settings import DEFAULT_MAKER_SETTINGS
 from frontend.ui_web.gateway_accounts_changed import accounts_changed as _accounts_changed  # noqa: E402
+
+_log = logging.getLogger(__name__)
 
 
 def _accounts_call(fn: Callable[[str], Any], provider: str, changed: Any = None) -> dict[str, Any]:
@@ -452,7 +455,7 @@ class PanelApiSettingsMixin:
         """Server member sidebar — gateway cache when warm, else REST fallback."""
         return self._discord_plugin_call("list_members", bot_id=str(bot_id or ""))
 
-    def save_agent_settings(self, patch: dict[str, Any]) -> str:
+    def save_agent_settings(self, patch: dict[str, Any]) -> str | dict[str, Any]:
         protection_keys = {"ai_ignore_patterns", "ai_ignore_strict"}
         if protection_keys.intersection(patch):
             if set(patch) - protection_keys:
@@ -635,20 +638,21 @@ class PanelApiSettingsMixin:
         for key in ("first_open_tours", "show_me_autoplay", "pc_memory_warnings"):
             if key in patch:
                 setattr(s, key, bool(patch.get(key)))
+        autostart_error = ""
         if "start_with_windows" in patch:
-            s.start_with_windows = bool(patch.get("start_with_windows"))
             try:
                 from frontend.autostart import apply as apply_autostart
 
-                apply_autostart(s.start_with_windows)
+                if not apply_autostart(bool(patch.get("start_with_windows"))):
+                    raise OSError("the Windows sign-in entry was not updated")
+                s.start_with_windows = bool(patch.get("start_with_windows"))  # saved only once Windows matches
             except Exception:
-                pass
+                _log.warning("Start with Windows change failed", exc_info=True)
+                autostart_error = "Could not change start with Windows"
         if "walkthrough_completed" in patch:
             raw = patch.get("walkthrough_completed")
             if isinstance(raw, dict):
-                s.walkthrough_completed = {
-                    str(k): True for k, v in raw.items() if v
-                }
+                s.walkthrough_completed = {str(k): True for k, v in raw.items() if v}
             else:
                 s.walkthrough_completed = {}
         s.validate()
@@ -674,12 +678,8 @@ class PanelApiSettingsMixin:
                 from backend.uefn_plugins.plugin_host.lifecycle import is_plugin_enabled
 
                 if is_plugin_enabled("discord"):
-                    tok = ""
-                    if isinstance(keys, dict):
-                        tok = str(keys.get("discord") or "").strip()
-                    guild = ""
-                    if isinstance(keys, dict):
-                        guild = str(keys.get("discord_guild") or "").strip()
+                    tok = str(keys.get("discord") or "").strip() if isinstance(keys, dict) else ""
+                    guild = str(keys.get("discord_guild") or "").strip() if isinstance(keys, dict) else ""
                     listed = self.plugin_call("discord", "list_bots", {})
                     bots = listed.get("bots") if isinstance(listed, dict) else None
                     create = not (isinstance(bots, list) and bots)
@@ -724,7 +724,7 @@ class PanelApiSettingsMixin:
             or any(str(k) in ("discord", "discord_guild") for k in (patch.get("keys") or {}))
         ):
             self._push_panel({"type": "discord_changed"})
-        return "Saved — keys encrypted in credentials.dat"
+        return {"ok": False, "error": autostart_error} if autostart_error else "Saved — keys encrypted in credentials.dat"
 
     def list_coding_agents(self) -> dict[str, Any]:
         from backend.agent.coding_agents import detect_all
