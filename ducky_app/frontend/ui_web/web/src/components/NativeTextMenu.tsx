@@ -15,7 +15,8 @@ export function nativeMenuItems(rows: NativeMenuRow[], onPick: (commandId: numbe
     row.separator
       ? { id: `sep-${i}`, label: "", separator: true }
       : {
-          id: `cmd-${row.id}`,
+          // Spelling fixes all carry id -1: the row's place keeps each item's key its own.
+          id: `cmd-${row.id}-${i}`,
           label: row.label || "",
           disabled: row.enabled === false,
           onClick: () => {

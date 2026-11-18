@@ -11,6 +11,8 @@ pub mod start;
 pub mod starts;
 pub mod trim;
 #[cfg(windows)]
+mod spell;
+#[cfg(windows)]
 mod ui;
 
 use std::ffi::OsString;

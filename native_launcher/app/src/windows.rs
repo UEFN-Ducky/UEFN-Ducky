@@ -18,7 +18,7 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::trim;
+use crate::{spell, trim};
 
 use super::{drain_backend, hook_page, ms_since, note_hidden, on_page_host, with, TITLE, WM_WAKE};
 
@@ -181,9 +181,43 @@ fn menu_rows(items: &[MenuRow]) -> Vec<Value> {
     out
 }
 
+/// The pick id for Add to dictionary (`webview_native_menu.ADD_WORD`).
+const ADD_WORD: i32 = -2;
+
+/// The word Chromium selected under the right-click, when WebView2 sent no spelling rows of
+/// its own (`webview_native_menu._misspelled_word`): with Windows' spell checker they arrive
+/// after this event, so the menu relayed to the page never has them.
+fn misspelled_word(items: &[MenuRow], selection: &str) -> Option<String> {
+    if items.iter().any(|i| matches!(i, MenuRow::Command { name, .. } if name == "addToDictionary")) {
+        return None;
+    }
+    let word = selection.trim();
+    let len = word.chars().count();
+    (len > 0 && len <= 64 && !word.chars().any(char::is_whitespace)).then(|| word.to_string())
+}
+
+/// The rows above WebView2's own (`webview_native_menu.spelling_rows`): Windows' fixes (the
+/// page types a picked one over the selected word), Add to dictionary and a separator. None
+/// when the word is spelled right.
+fn spelling_rows(fixes: Option<&[String]>) -> Vec<Value> {
+    let Some(fixes) = fixes else {
+        return Vec::new();
+    };
+    let mut rows: Vec<Value> =
+        fixes.iter().map(|fix| json!({"id": -1, "label": fix, "enabled": true, "replace": fix})).collect();
+    if rows.is_empty() {
+        rows.push(json!({"id": -1, "label": "No suggestions", "enabled": false}));
+    }
+    rows.push(json!({"separator": true}));
+    rows.push(json!({"id": ADD_WORD, "label": "Add to dictionary", "enabled": true}));
+    rows.push(json!({"separator": true}));
+    rows
+}
+
 thread_local! {
-    /// The one menu the page has open: its token, WebView2's event and its deferral.
-    static MENU: RefCell<Option<(String, ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Deferral)>> =
+    /// The one menu the page has open: its token, WebView2's event, its deferral, and the
+    /// misspelled word its spelling rows are for (empty: none).
+    static MENU: RefCell<Option<(String, ICoreWebView2ContextMenuRequestedEventArgs, ICoreWebView2Deferral, String)>> =
         const { RefCell::new(None) };
     static MENU_SEQ: Cell<u64> = const { Cell::new(0) };
 }
@@ -214,9 +248,11 @@ unsafe fn read_menu(items: &ICoreWebView2ContextMenuItemCollection) -> windows::
 }
 
 /// Right-click on text you can edit: WebView2's own menu goes to the page (Ducky's
-/// `NativeTextMenu`), the pick comes back as `native_menu_pick` ([`menu_pick`]).
+/// `NativeTextMenu`), topped with Windows' spelling fixes for the word under the click; the
+/// pick comes back as `native_menu_pick` ([`menu_pick`]).
 /// `hide_others`: no browser menu (Back, Reload, Inspect) anywhere else.
-/// ponytail: no spelling fixes (Python's win_spellcheck); add an ISpellChecker call if asked.
+/// Nov 18 2026: a misspelled word had its red underline but the menu only Cut / Copy / Paste;
+/// the fixes were in the Python window alone (`webview_native_menu.py`).
 pub(super) fn hook_menu(webview: &ICoreWebView2, hide_others: bool) -> windows::core::Result<()> {
     let wv11: ICoreWebView2_11 = webview.cast()?;
     let handler = ContextMenuRequestedEventHandler::create(Box::new(
@@ -225,20 +261,31 @@ pub(super) fn hook_menu(webview: &ICoreWebView2, hide_others: bool) -> windows::
                 return Ok(());
             };
             unsafe {
+                let target = args.ContextMenuTarget()?;
                 let mut editable = BOOL::default();
-                args.ContextMenuTarget()?.IsEditable(&mut editable)?;
-                let rows = if editable.as_bool() { menu_rows(&read_menu(&args.MenuItems()?)?) } else { Vec::new() };
+                target.IsEditable(&mut editable)?;
+                let items = if editable.as_bool() { read_menu(&args.MenuItems()?)? } else { Vec::new() };
+                let mut rows = menu_rows(&items);
                 if !rows.iter().any(|r| r.get("id").is_some()) {
                     if hide_others {
                         args.SetHandled(true)?;
                     }
                     return Ok(());
                 }
+                let mut selection = PWSTR::null();
+                let word = match target.SelectionText(&mut selection) {
+                    Ok(()) if !selection.is_null() => misspelled_word(&items, &take_pwstr(selection)),
+                    _ => None,
+                };
+                let spelling = spelling_rows(word.as_deref().and_then(spell::fixes).as_deref());
+                let word = if spelling.is_empty() { String::new() } else { word.unwrap_or_default() };
+                rows.splice(0..0, spelling);
                 let deferral = args.GetDeferral()?;
                 args.SetHandled(true)?;
                 let token = format!("m{}", MENU_SEQ.with(|s| s.replace(s.get() + 1)));
                 // One menu at a time: one left open gives WebView2 its event back.
-                if let Some((_, _, old)) = MENU.with(|m| m.borrow_mut().replace((token.clone(), args, deferral))) {
+                let open = (token.clone(), args, deferral, word);
+                if let Some((_, _, old, _)) = MENU.with(|m| m.borrow_mut().replace(open)) {
                     let _ = old.Complete();
                 }
                 let payload = json!({"type": "native_menu", "token": token, "items": rows});
@@ -253,8 +300,9 @@ pub(super) fn hook_menu(webview: &ICoreWebView2, hide_others: bool) -> windows::
     unsafe { wv11.add_ContextMenuRequested(&handler, &mut token) }
 }
 
-/// The page's answer to menu `token`: run WebView2's `command_id` (Paste...) or nothing
-/// (-1). False when that menu is not the open one.
+/// The page's answer to menu `token`: run WebView2's `command_id` (Paste...), add the word to
+/// the dictionary ([`ADD_WORD`]), or nothing (-1: a spelling fix the page typed itself). False
+/// when that menu is not the open one.
 fn menu_pick(token: &str, command_id: i32) -> bool {
     let open = MENU.with(|m| {
         let mut m = m.borrow_mut();
@@ -264,12 +312,14 @@ fn menu_pick(token: &str, command_id: i32) -> bool {
             None
         }
     });
-    let Some((_, args, deferral)) = open else {
+    let Some((_, args, deferral, word)) = open else {
         return false;
     };
     unsafe {
         if command_id >= 0 {
             let _ = args.SetSelectedCommandId(command_id);
+        } else if command_id == ADD_WORD && !word.is_empty() {
+            spell::add_word(&word);
         }
         let _ = deferral.Complete();
     }
@@ -598,6 +648,45 @@ mod tests {
             ])
         );
         assert!(menu_rows(&[MenuRow::Separator, cmd("reload", "Reload", 3)]).is_empty());
+    }
+
+    #[test]
+    fn spelling_rows_match_python_spelling_rows() {
+        let fixes = ["read".to_string(), "red".to_string()];
+        assert_eq!(
+            Value::Array(spelling_rows(Some(&fixes))),
+            json!([
+                {"id": -1, "label": "read", "enabled": true, "replace": "read"},
+                {"id": -1, "label": "red", "enabled": true, "replace": "red"},
+                {"separator": true},
+                {"id": -2, "label": "Add to dictionary", "enabled": true},
+                {"separator": true},
+            ])
+        );
+        // Misspelled, and Windows has no fix for it.
+        assert_eq!(
+            Value::Array(spelling_rows(Some(&[]))),
+            json!([
+                {"id": -1, "label": "No suggestions", "enabled": false},
+                {"separator": true},
+                {"id": -2, "label": "Add to dictionary", "enabled": true},
+                {"separator": true},
+            ])
+        );
+        // Spelled right (or nothing can tell): only WebView2's own rows.
+        assert!(spelling_rows(None).is_empty());
+    }
+
+    #[test]
+    fn the_word_under_the_click_is_one_selected_word_webview2_gave_no_fixes_for() {
+        let own = [cmd("cut", "Cu&t", 50151), cmd("paste", "&Paste", 50153)];
+        assert_eq!(misspelled_word(&own, " reda "), Some("reda".to_string()));
+        assert_eq!(misspelled_word(&own, ""), None);
+        assert_eq!(misspelled_word(&own, "two words"), None); // a selection the person made
+        assert_eq!(misspelled_word(&own, &"x".repeat(65)), None);
+        // WebView2 brought its own spelling rows: nothing to add.
+        let with_fixes = [cmd("spellcheck", "read", 1), cmd("addToDictionary", "Add to dictionary", 2)];
+        assert_eq!(misspelled_word(&with_fixes, "reda"), None);
     }
 
     #[test]
