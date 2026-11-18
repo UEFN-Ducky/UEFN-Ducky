@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import re
 import shutil
 import time
@@ -17,6 +18,23 @@ _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _CONV_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
 _CHAT_FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|mp4|webm|mov|mkv)$", re.IGNORECASE)
 NO_CHAT_CAPTURE_ERROR = "Screenshot was not saved: no active chat."
+_log = logging.getLogger(__name__)
+
+
+class StoredAttachments(list):
+    """The rows :func:`persist_message_attachments` wrote, plus ``failed``: the names of
+    attachments it could not save (the message goes out without them)."""
+
+    # ponytail: a list with one extra attribute keeps every caller that expects a list working.
+    def __init__(self, rows=(), failed=()) -> None:
+        super().__init__(rows)
+        self.failed: list[str] = list(failed)
+
+
+def failed_attachments_line(stored: list[dict[str, Any]]) -> str:
+    """"Could not attach: a.png, b.png" for the message, or '' when all were saved."""
+    failed = getattr(stored, "failed", None) or []
+    return f"Could not attach: {', '.join(failed)}" if failed else ""
 
 
 def _safe_attachment_filename(name: str) -> str:
@@ -45,11 +63,12 @@ def persist_message_attachments(
     attachments: list[MessageAttachment],
     conversations_dir: Path,
     project_root: str | None = None,
-) -> list[dict[str, Any]]:
-    """Write attachment bytes/text under conversations/{conv_id}/attachments/."""
+) -> StoredAttachments:
+    """Write attachment bytes/text under conversations/{conv_id}/attachments/.
+    An image that can't be written is logged and named in the result's ``failed``."""
     del project_root  # reserved for future multi-root layouts
     if not attachments:
-        return []
+        return StoredAttachments()
     conv_path = conversation_dir(conv_id, None, conversations_dir)
     att_dir = conversation_attachments_dir(conv_id, None, conversations_dir)
     from backend.workspace.ai_ignore import DENIED, current_policy
@@ -57,7 +76,7 @@ def persist_message_attachments(
     policy = current_policy()
     policy.require(str(att_dir))
     att_dir.mkdir(parents=True, exist_ok=True)
-    out: list[dict[str, Any]] = []
+    out = StoredAttachments()
     ts_tag = int(message_ts * 1000)
     for i, att in enumerate(attachments):
         if policy.denied_hint(att.name):
@@ -71,6 +90,8 @@ def persist_message_attachments(
             try:
                 full.write_bytes(base64.b64decode(att.data_base64, validate=True))
             except Exception:
+                _log.warning("could not save attachment %s", safe, exc_info=True)
+                out.failed.append(att.name)
                 continue
             out.append({"kind": "image", "name": att.name, "mime": att.mime or "image/png", "path": rel})
         elif att.kind == "video" and att.file_path:
