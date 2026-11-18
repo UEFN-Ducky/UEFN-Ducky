@@ -486,6 +486,19 @@ def _policy_filtered(tools: list[Any]) -> list[Any]:
 
 def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
     """tools/list body. Caller thread — never queued behind a tool call."""
+    return _listed(mcp)[0]
+
+
+# Finished tools/list rows and their revision hash, by (mcp, catalog revision, the listed
+# objects' identities): building every row, lean_schema and the hash ran on every tools/list.
+# The identities catch a policy or lean-list change that moves no revision. Rows are shared:
+# callers only serialize them.
+_LISTED_MAX = 4
+_listed_cache: dict[tuple[int, int, tuple[int, ...]], tuple[Any, list[Any], list[dict[str, Any]], str]] = {}
+_listed_lock = threading.Lock()
+
+
+def _listed(mcp: Any) -> tuple[list[dict[str, Any]], str]:
     if not getattr(mcp, "_ducky_skip_plugin_wait", False) and not _plugins_ready():
         try:
             from backend.bridge.plugin_gate import wait_until_plugins_loaded
@@ -499,15 +512,31 @@ def list_tools_for_handshake(mcp: Any) -> list[dict[str, Any]]:
             wait_until_nested_proxies_synced(_LIST_WAIT_S)
         except Exception:
             pass
+    rev = _catalog_rev
     tools = _policy_filtered(_snapshot_tools(mcp))
+    key: tuple[int, int, tuple[int, ...]] | None = None
     if not isinstance(getattr(getattr(mcp, "_tool_manager", None), "_tools", None), dict):
-        tools = _run(_async_list_tools(mcp))
+        tools = _run(_async_list_tools(mcp))  # no registry to key on: built every time
+    else:
+        objects, ids = _catalog_marker(tools)
+        key = (id(mcp), rev, ids)
+        with _listed_lock:
+            hit = _listed_cache.get(key)
+        if hit is not None and hit[0] is mcp:
+            return hit[2], hit[3]
     from backend.bridge.plugin_gate import lean_schema
 
     rows = [_tool_row(t) for t in tools]
     for row in rows:
         row["inputSchema"] = lean_schema(row["inputSchema"])
-    return rows
+    digest = _catalog_revision(rows)
+    if key is not None:
+        with _listed_lock:
+            # Holding the marked objects keeps them alive, so their ids stay unique.
+            _listed_cache[key] = (mcp, objects, rows, digest)
+            while len(_listed_cache) > _LISTED_MAX:
+                _listed_cache.pop(next(iter(_listed_cache)))
+    return rows, digest
 
 
 def _catalog_revision(rows: list[dict[str, Any]]) -> str:
@@ -818,8 +847,8 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
     if method == "prompts/list":
         return {"prompts": []}
     if method == "tools/list":
-        rows = list_tools_for_handshake(mcp)
-        return {"tools": rows, "_meta": {"revision": _catalog_revision(rows)}}
+        rows, digest = _listed(mcp)
+        return {"tools": rows, "_meta": {"revision": digest}}
     if method == "tools/call":
         name = str(params.get("name") or "")
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
@@ -1258,6 +1287,8 @@ def reset_for_tests() -> None:
         _cancel_idle_timer()
     _shared_serving = False
     _inflight.clear()
+    with _listed_lock:
+        _listed_cache.clear()
     if _listen_sock is not None:
         close_handle(_listen_sock)
         _listen_sock = None

@@ -1318,3 +1318,50 @@ def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_age
     seen.clear()
     assert asyncio.run(tool_lanes.call_registered_tool(mcp, "city_a", {})) == "city_a"
     assert seen[0][2] == threading.current_thread().name
+
+
+def _listed_bytes(mcp) -> bytes:
+    body = shared_mcp._handle_mcp(mcp, {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                                  shared_mcp.identity_from_payload({}), 1)
+    return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+
+
+def test_the_cached_list_is_byte_identical(monkeypatch) -> None:
+    from backend.workspace import ai_ignore
+
+    monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=False))
+    mcp = FakeMcp()
+    shared_mcp.reset_for_tests()
+    _listed_bytes(mcp)  # its first imports may move the revision once
+    first = _listed_bytes(mcp)  # built
+    built = []
+    monkeypatch.setattr(shared_mcp, "_tool_row", lambda t: built.append(t) or {})
+    assert _listed_bytes(mcp) == first and built == []  # served from the cache, same bytes
+    monkeypatch.undo()
+    monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=False))
+    shared_mcp.reset_for_tests()
+    assert _listed_bytes(mcp) == first  # and a fresh build matches it
+    # A policy change moves no revision, yet the list follows it.
+    monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=True))
+    strict = [t["name"] for t in json.loads(_listed_bytes(mcp))["tools"]]
+    assert strict == [n for n in ("ping", "workspace_write_file") if n in ai_ignore.SAFE_TOOLS] != ["ping", "workspace_write_file"]
+
+
+def test_a_new_revision_rebuilds_the_list(monkeypatch) -> None:
+    from backend.workspace import ai_ignore
+
+    monkeypatch.setattr(ai_ignore, "current_policy", lambda: SimpleNamespace(strict=False))
+    mcp = FakeMcp()
+    shared_mcp.reset_for_tests()
+    before = json.loads(_listed_bytes(mcp))
+    # Edited in place (bridge_proxy's descriptions): no new object, only the revision moves.
+    mcp._tool_manager._tools["ping"].inputSchema["properties"]["x"] = {"type": "string"}
+    assert json.loads(_listed_bytes(mcp)) == before  # same revision: still the cached list
+    shared_mcp.bump_catalog_revision()
+    after = json.loads(_listed_bytes(mcp))
+    assert after["tools"][0]["inputSchema"]["properties"] == {"x": {"type": "string"}}
+    assert after["_meta"]["revision"] != before["_meta"]["revision"]
+    for _ in range(10):
+        shared_mcp.bump_catalog_revision()
+        _listed_bytes(mcp)
+    assert len(shared_mcp._listed_cache) <= shared_mcp._LISTED_MAX
