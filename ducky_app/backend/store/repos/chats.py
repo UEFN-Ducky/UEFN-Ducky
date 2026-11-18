@@ -1271,6 +1271,30 @@ def messages_since(conv_id: str, seq: int, *, with_hashes: bool = False) -> tupl
             conn.execute("COMMIT")
 
 
+def message_hashes_since(conv_id: str, seq: int) -> tuple[int | None, int, list[str]]:
+    """``(msg_rev, row count, row hash per seq from *seq* on)`` from one read snapshot,
+    reading no row body: what a checkpoint's follow-up needs. ``(None, 0, [])`` when the
+    chat isn't this account's."""
+    conn = db.connect()
+    own = not conn.in_transaction
+    if own:
+        conn.execute("BEGIN")
+    try:
+        rev = conv_msg_rev(conv_id)
+        if rev is None:
+            return None, 0, []
+        hashes = [
+            str(r[0])
+            for r in conn.execute(
+                "SELECT hash FROM messages WHERE conv_id=? AND seq>=? ORDER BY seq", (conv_id, max(0, int(seq)))
+            )
+        ]
+        return rev, _row_count(conn, conv_id), hashes
+    finally:
+        if own:
+            conn.execute("COMMIT")
+
+
 # Deleted chat and folder ids, kept in workspace_state (no new table: an older app must
 # still open this database) so a late save from any process can't re-create them.
 _DELETED_KEY = "deleted_chat:"

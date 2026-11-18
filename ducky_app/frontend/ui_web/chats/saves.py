@@ -679,7 +679,7 @@ def _write_run_row(conv_id: str, item: tuple[Any, ...]) -> dict[str, Any]:
     if result.get("seq") == idx and result.get("count") == n == len(msgs):
         # The row is stored; only the rev moved. Rev and row count come from one
         # snapshot: equal counts mean no other writer added or removed rows.
-        _, rev, count, hashes = _store._repo().messages_since(conv_id, idx, with_hashes=True)
+        rev, count, hashes = _store._repo().message_hashes_since(conv_id, idx)  # no row is decoded
         if rev is not None and count == n:
             origin._rev_step = (origin._msg_rev, rev)  # a save queued since builds on it
             origin._msg_rev = rev
