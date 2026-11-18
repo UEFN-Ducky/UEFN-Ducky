@@ -71,14 +71,14 @@ def _read_state(profile: Path) -> dict:
 
 def _write_atomic(path: Path, data: bytes) -> None:
     # ponytail: the only bytes writer, so it borrows atomic_json's retry; add write_bytes_atomic for a second one.
-    from frontend.atomic_json import _replace_with_retries
+    from frontend.atomic_json import replace_with_retries
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        _replace_with_retries(Path(tmp), path)
+        replace_with_retries(Path(tmp), path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise

@@ -135,7 +135,7 @@ def _resolve_jailed(root: Path, rel: str) -> Path:
     return target
 
 
-def _write_json(path: Path, data: dict[str, Any]) -> None:
+def write_json(path: Path, data: dict[str, Any]) -> None:
     from frontend.atomic_json import write_text_atomic
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -304,7 +304,7 @@ def scaffold_ai_plugin(
     manifest = _minimal_manifest(pid, label, description)
     if data_sharing is not None:
         manifest["data_sharing"] = bool(data_sharing)
-    _write_json(root / "plugin.json", manifest)
+    write_json(root / "plugin.json", manifest)
     backend = root / "backend"
     backend.mkdir(exist_ok=True)
     (backend / "__init__.py").write_text(_register_stub(pid), encoding="utf-8")
@@ -479,7 +479,7 @@ def write_ai_plugin_file(plugin_id: str, path: str, content: str, *, max_chars: 
     import time
 
     from backend.workspace.paths import content_hash
-    from backend.workspace.writer import _process_file_lock
+    from backend.workspace.writer import process_file_lock
     from backend.uefn_plugins.store import normalize_plugin_id
 
     try:
@@ -517,7 +517,7 @@ def write_ai_plugin_file(plugin_id: str, path: str, content: str, *, max_chars: 
     key = _lock_key(target)
     conv, name = _me()
     target.parent.mkdir(parents=True, exist_ok=True)
-    with _process_file_lock(key):
+    with process_file_lock(key):
         found = _file_hash(target)
         why, who = _stale_reason(key, found, expected_hash)
         if why:
@@ -1022,7 +1022,7 @@ def start_release_run(plugin_id: str, workflow_id: str, run_id: str, *, chat_id:
     pid = normalize_plugin_id(plugin_id)
     rec = {"plugin": pid, "workflow_id": workflow_id, "run_id": run_id,
            "chat_id": chat_id, "step_id": step_id, "clone": clone}
-    _write_json(_releases_dir() / f"{pid}.json", rec)
+    write_json(_releases_dir() / f"{pid}.json", rec)
     if chat_id and step_id:
         try:
             _append_step_note(chat_id, step_id, f"Release workflow run `{run_id}` started.")

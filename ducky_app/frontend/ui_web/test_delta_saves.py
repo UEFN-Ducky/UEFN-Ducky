@@ -143,10 +143,10 @@ def _record_saves(monkeypatch) -> list[dict]:
                       "theirs": result.get("theirs")})
         return result
 
-    def rows(conv, project_root, origin=None):
+    def rows(conv, project_root, origin=None, prepared=None):
         started = time.perf_counter()
         try:
-            return real_rows(conv, project_root, origin)
+            return real_rows(conv, project_root, origin, prepared)
         finally:
             calls[-1]["ms"] = (time.perf_counter() - started) * 1000
 

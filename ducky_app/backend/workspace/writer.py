@@ -714,12 +714,12 @@ class ProjectWriter:
         with ExitStack() as stack:
             for key in keys:
                 stack.enter_context(self._lock_for(key))
-                stack.enter_context(_process_file_lock(key))
+                stack.enter_context(process_file_lock(key))
             yield
 
 
 @contextmanager
-def _process_file_lock(path: str):
+def process_file_lock(path: str):
     """Lock a stable sidecar, never the target inode replaced by atomic writes.
 
     Sidecars stay on disk: unlinking them could split waiters across two locks.

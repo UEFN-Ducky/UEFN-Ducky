@@ -459,5 +459,9 @@ def run_streaming_process(
                 pass
         unregister_process(conv_id, proc)
 
+    # Stop came during a wait and a second Stop (terminate_conv_process) killed it first:
+    # the loop saw the exit, not the cancel, but the turn was still stopped.
+    if cancel is not None and cancel.is_set() and not result.timed_out:
+        result.cancelled = True
     result.returncode = proc.returncode if proc.returncode is not None else -1
     return result

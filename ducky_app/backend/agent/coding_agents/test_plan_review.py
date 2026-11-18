@@ -105,7 +105,11 @@ def test_two_sections_sharing_a_path_are_flagged_unless_one_hands_it_over() -> N
     assert plan_review(_plan(a, b)) == []
 
 
-def test_a_step_naming_another_lanes_file_is_flagged() -> None:
+def test_a_step_naming_another_lanes_file_is_flagged(monkeypatch) -> None:
+    from backend.agent.coding_agents import plan_review as review
+
+    # Lanes only: the real plans.py's size against its cap is test_plan_review_size_cap's job.
+    monkeypatch.setattr(review, "near_size_cap", lambda paths, app=None: [])
     step = {"id": "s", "content": "Fix X", "status": "pending",
             "body_markdown": _full("backend/agent/coding_agents/plan_review.py", "backend/agent/coding_agents/plans.py")}
     sec = _section("a", "P3 review", ["ducky_app/backend/agent/coding_agents/plan_review.py", "web/src/"], [step])

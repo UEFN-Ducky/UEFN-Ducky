@@ -182,7 +182,7 @@ def _write_temp(target: Path, payload: str, *, fsync: bool = True) -> Path:
     return Path(tmp_name)
 
 
-def _replace_with_retries(tmp: Path, target: Path) -> None:
+def replace_with_retries(tmp: Path, target: Path) -> None:
     last_err: OSError | None = None
     for attempt in range(12):
         try:
@@ -210,7 +210,7 @@ def write_json_atomic(target: Path, data: dict[str, Any], indent: int = 2) -> No
         tmp = _write_temp(target, payload)
         replaced = False
         try:
-            _replace_with_retries(tmp, target)
+            replace_with_retries(tmp, target)
             replaced = True
         finally:
             if not replaced and tmp.is_file():
@@ -227,7 +227,7 @@ def write_text_atomic(path: Path | str, text: str, *, fsync: bool = False) -> No
     with _lock_for(target):
         tmp = _write_temp(target, text, fsync=fsync)
         try:
-            _replace_with_retries(tmp, target)
+            replace_with_retries(tmp, target)
         except BaseException:
             _safe_unlink(tmp)
             raise

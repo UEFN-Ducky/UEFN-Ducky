@@ -28,11 +28,11 @@ def _folders() -> dict[str, Path]:
 def test_ai_plugin_json_write_keeps_the_old_file_on_a_crash(tmp_path, monkeypatch):
     import json
 
-    from backend.tools.panel.panel_ai_plugins import _write_json
+    from backend.tools.panel.panel_ai_plugins import write_json
     from frontend import atomic_json
 
     path = tmp_path / "d" / "plugin.json"
-    _write_json(path, {"id": "old"})
+    write_json(path, {"id": "old"})
     assert path.read_text(encoding="utf-8") == json.dumps({"id": "old"}, indent=2) + "\n"
 
     def boom(src, dst):
@@ -41,7 +41,7 @@ def test_ai_plugin_json_write_keeps_the_old_file_on_a_crash(tmp_path, monkeypatc
     monkeypatch.setattr(atomic_json.os, "replace", boom)
     monkeypatch.setattr(atomic_json.time, "sleep", lambda _s: None)
     with pytest.raises(OSError):
-        _write_json(path, {"id": "new"})
+        write_json(path, {"id": "new"})
     assert json.loads(path.read_text(encoding="utf-8")) == {"id": "old"}
     assert [p.name for p in path.parent.iterdir()] == ["plugin.json"]
 
@@ -59,7 +59,7 @@ def test_both_parsers_agree(text):
 def test_the_named_modules_agree_on_the_app_data_folder(monkeypatch, tmp_path, local_set):
     from backend.bridge import bridge_version
     from backend.util.file_lock import held_file_lock
-    from backend.workspace.writer import _process_file_lock
+    from backend.workspace.writer import process_file_lock
     from frontend.app_paths import resolve_app_data_dir
 
     monkeypatch.delenv(bridge_version.DIR_ENV, raising=False)
@@ -76,7 +76,7 @@ def test_the_named_modules_agree_on_the_app_data_folder(monkeypatch, tmp_path, l
     assert _folders() == {name: want for name in _folders()}
 
     # The two lock writers and backend.util.file_lock share one locks folder.
-    with _process_file_lock(str(tmp_path / "f.txt")), held_file_lock("probe", 0):
+    with process_file_lock(str(tmp_path / "f.txt")), held_file_lock("probe", 0):
         pass
     locks = want / "locks"
     assert any(p.suffix == ".lock" and p.stem != "probe" for p in locks.iterdir())
