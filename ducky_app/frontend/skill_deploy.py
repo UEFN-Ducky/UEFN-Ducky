@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -44,16 +45,11 @@ MANAGED_BY = "uefn-ducky"
 # folder we own even when its SKILL.md is gone/corrupt, so a pack that
 # disappears can never leave a stale copy an agent could still read.
 DEPLOY_LEDGER = ".ducky-skills.json"
-
-
-def seed_skill_appdata(force: bool = False) -> tuple[Path | None, bool]:
-    """Seed bundled skill packs into AppData. Returns ``(packs_dir, upgraded)``."""
-    logs = _seeding.seed_skill_packs(force=force)
-    dest = _discovery.appdata_skill_packs_dir()
-    upgraded = any("seeded" in ln for ln in logs)
-    if dest.is_dir():
-        return dest, upgraded
-    return None, False
+# SKILL.md path -> (mtime_ns, size, managed). Each turn start asks this of every folder in
+# the agent's skills root: a stat each, a read only when the file changed.
+_MANAGED: dict[str, tuple[int, int, bool]] = {}
+_MANAGED_MAX = 2000
+_MANAGED_LOCK = threading.Lock()
 
 
 def write_skill_beside_config(config_path: Path, text: str | None = None) -> Path | None:
@@ -121,14 +117,28 @@ def _deployed_skill_md(pack_id: str) -> str | None:
 
 
 def _is_managed_skill_dir(path: Path) -> bool:
-    raw = None
+    skill_md = path / PACK_FILE
+    key = str(skill_md)
     try:
-        raw = (path / PACK_FILE).read_text(encoding="utf-8")
+        st = skill_md.stat()
+        stamp = (st.st_mtime_ns, st.st_size)
+        hit = _MANAGED.get(key)
+        if hit is not None and hit[:2] == stamp:
+            return hit[2]
+        raw = skill_md.read_text(encoding="utf-8")
     except OSError:
+        with _MANAGED_LOCK:
+            _MANAGED.pop(key, None)
         return False
     meta, _ = parse_frontmatter(raw)
     md = meta.get("metadata")
-    return isinstance(md, dict) and md.get("managed_by") == MANAGED_BY
+    managed = isinstance(md, dict) and md.get("managed_by") == MANAGED_BY
+    with _MANAGED_LOCK:
+        # ponytail: a folder removed whole is never stat'ed again; the bound drops it (oldest first).
+        while len(_MANAGED) >= _MANAGED_MAX and key not in _MANAGED:
+            _MANAGED.pop(next(iter(_MANAGED)))
+        _MANAGED[key] = (*stamp, managed)
+    return managed
 
 
 def _write_if_changed(path: Path, data: bytes) -> bool:
