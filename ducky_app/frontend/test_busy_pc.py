@@ -21,6 +21,7 @@ def pc(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(busy_pc, "note_path", lambda: tmp_path / "launcher" / "gpu.json")
     monkeypatch.setattr(busy_pc, "pc_now", {})
     monkeypatch.setattr(busy_pc, "raise_window_priority", lambda: 0)
+    monkeypatch.setattr(busy_pc, "_room", {"beats": 0, "told": True})  # no real notice from a test run
     monkeypatch.setattr(low_memory, "last_gpu_share", None)
     return tmp_path
 
@@ -54,6 +55,30 @@ def test_a_start_just_after_a_full_card_draws_without_it(pc, monkeypatch) -> Non
     monkeypatch.setattr(low_memory, "last_gpu_share", 0.61)
     busy_pc.on_heartbeat({})
     assert not busy_pc.gpu_was_full() and busy_pc.browser_arguments() == busy_pc.BROWSER_ARGS
+
+
+def test_a_restart_does_not_carry_the_no_gpu_drawing(monkeypatch) -> None:
+    from frontend import app_versions
+
+    monkeypatch.setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", f"{busy_pc.BROWSER_ARGS} --disable-gpu")
+    assert app_versions.hand_off_env()["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] == busy_pc.BROWSER_ARGS
+    monkeypatch.setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu")
+    assert "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" not in app_versions.own_start_env()  # the next start decides
+
+
+def test_room_on_the_card_again_is_told_once(monkeypatch) -> None:
+    told = []
+    monkeypatch.setattr(busy_pc, "_room", {"beats": 0, "told": False})
+    monkeypatch.setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu")
+    say = lambda *a, **k: told.append(a)  # noqa: E731
+    assert not busy_pc.gpu_back(0.6, say)
+    assert not busy_pc.gpu_back(0.95, say)  # full again: the count starts over
+    assert not busy_pc.gpu_back(0.6, say)
+    assert busy_pc.gpu_back(0.6, say) and len(told) == 1
+    assert not busy_pc.gpu_back(0.6, say) and len(told) == 1  # once per session
+    monkeypatch.setattr(busy_pc, "_room", {"beats": 0, "told": False})
+    monkeypatch.setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", busy_pc.BROWSER_ARGS)
+    assert not busy_pc.gpu_back(0.1, say) and not busy_pc.gpu_back(0.1, say)  # drawn with the card: nothing to say
 
 
 def test_an_unknown_card_writes_no_note(pc) -> None:

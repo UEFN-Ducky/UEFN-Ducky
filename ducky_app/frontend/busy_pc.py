@@ -31,6 +31,26 @@ _NORMAL, _ABOVE_NORMAL = 0x20, 0x8000
 
 # {gpu: share of the card's memory in use, free_gb, cpu: percent of all cores}, 30 s old at most.
 pc_now: dict[str, float] = {}
+# Drawing without the card: samples in a row with room on it, and whether the person was told.
+ROOM_SHARE, ROOM_BEATS = 0.80, 2
+_room = {"beats": 0, "told": False}
+
+
+def gpu_back(share: float, alert: Any = None) -> bool:
+    """One notice per session when this window was started without the card and the card has had
+    room for ROOM_BEATS samples: only a new start draws with it again. True when it told."""
+    if _room["told"] or not drawing_without_gpu():
+        return False
+    _room["beats"] = _room["beats"] + 1 if share < ROOM_SHARE else 0
+    if _room["beats"] < ROOM_BEATS:
+        return False
+    _room["told"] = True
+    if alert is None:
+        from frontend.notifications import alert
+    alert("UEFN Ducky", "Drawing without the graphics card. Restart Ducky to use it again.", level="info",
+          detail=("The card was full when Ducky started, so its window (3D panels too) is drawn on the CPU. "
+                  f"It is {share * 100:.0f}% full now: close and reopen Ducky (not UEFN) for smooth 3D."))
+    return True
 
 
 def note_path() -> Path:
@@ -58,6 +78,19 @@ def browser_arguments() -> str:
 
 def drawing_without_gpu() -> bool:
     return SOFTWARE_ARG in os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+
+
+def without_software(env: dict[str, str]) -> dict[str, str]:
+    """``env`` (changed in place) with SOFTWARE_ARG taken out of the WebView2 arguments; the
+    variable goes when nothing else is left, so the next start decides afresh."""
+    key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+    if key in env:
+        rest = " ".join(a for a in env[key].split() if a != SOFTWARE_ARG)
+        if rest:
+            env[key] = rest
+        else:
+            env.pop(key)
+    return env
 
 
 def window_pids(procs: dict[int, Any], me: int, launcher: int = 0) -> list[int]:
@@ -123,6 +156,7 @@ def on_heartbeat(beat: dict[str, Any]) -> None:
         share = low_memory.last_gpu_share
         if share is not None:
             pc_now["gpu"] = float(share)
+            gpu_back(float(share))
             path = note_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps({"share": float(share), "at": time.time()}), encoding="utf-8")

@@ -388,6 +388,12 @@ def hand_off_env() -> dict[str, str]:
     # kept every updated Ducky off the fast launcher. No loop: the newer version's own
     # launcher falls back to its sibling EXE, which is the newest and hands off nowhere.
     env.pop("UEFN_DUCKY_NO_NATIVE", None)
+    # This start's no-GPU drawing (busy_pc: the card was full when it started) is not the next
+    # one's: passed on, the launcher kept it (it leaves a set variable alone) and every restart
+    # drew without the card for good (Nov 18 2026: a 3D panel at 14 fps).
+    from frontend.busy_pc import without_software
+
+    without_software(env)
     return env
 
 
