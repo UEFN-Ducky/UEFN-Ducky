@@ -47,8 +47,8 @@ cover (`test_*.py` beside the module).
 | `scripts/` | Verse/Epic asset extraction utility |
 | `docs/adr/` | Architecture decision records; `docs/architecture/` explains cross-cutting mechanisms |
 
-Desktop Store plugins live in the separate **UEFN-Ducky** plugins repo
-(`plugins/uefn-plugin-<id>/`). Domain MCP tools in this app are activated from
+Desktop Store plugins live in the separate **uefn-plugins** repo, checked out
+next to this one (`../uefn-plugins/uefn-plugin-<id>/`). Domain MCP tools in this app are activated from
 plugin `register()` via paths like `backend.tools.uefn.actors`.
 
 ## Pull requests

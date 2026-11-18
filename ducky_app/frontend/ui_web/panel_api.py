@@ -876,15 +876,7 @@ class PanelApi(
             pass
 
     def _start_plugins_load_async(self) -> None:
-        """Kick the first plugin load; a no-op once plugins are loaded.
-
-        ponytail: panel_httpd builds a PanelApi per HTTP request. Re-arming the
-        ready callback when plugins are already loaded fired it immediately and
-        pushed uefn_plugins_changed on every request; any remote viewer refetched
-        on that event over HTTP, which built another PanelApi — a 40 Hz feedback
-        loop that made the whole app sluggish and kept Remote View sessions from
-        ever settling.
-        """
+        """Kick the first plugin load; a no-op once plugins are loaded (re-arming would push uefn_plugins_changed again)."""
         try:
             from backend.uefn_plugins.plugin_host.boot import ensure_plugins_loaded_async, plugins_ready
 

@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 RELEASE = Path(__file__).resolve().parents[1]
-DUCKY = RELEASE.parent / "UEFN-Ducky"
+PLUGINS = RELEASE.parent / "uefn-plugins"
 DUCKYOS = RELEASE.parent / "DuckyOS"
 CANON = RELEASE / "LICENSE"
 SPDX = "LicenseRef-Ducky-SAL-1.0"
@@ -24,7 +24,6 @@ CLAIM_SCAN_ROOTS = [
     RELEASE / "CONTRIBUTING.md",
     RELEASE / "release" / "portable" / "START_HERE.txt",
     RELEASE / "release" / "installer" / "UEFN-Ducky.iss",
-    DUCKY / "README.md",
     DUCKYOS / "README.md",
     DUCKYOS / "duckyos" / "CONTRIBUTING.md",
 ]
@@ -38,7 +37,7 @@ def _md5(path: Path) -> str:
 
 
 def _collect_sal_paths() -> list[Path]:
-    paths: list[Path] = [CANON, DUCKY / "LICENSE"]
+    paths: list[Path] = [CANON]
     paths.append(RELEASE / "ducky_app" / "frontend" / "skill_packs" / "ducky" / "LICENSE.txt")
     paths.append(DUCKYOS / "LICENSE")
     paths.append(DUCKYOS / "duckyos" / "LICENSE")
@@ -47,7 +46,7 @@ def _collect_sal_paths() -> list[Path]:
 
 
 def _plugin_dirs() -> list[Path]:
-    return [p for p in sorted(DUCKY.glob("plugins/uefn-plugin-*")) if p.is_dir()]
+    return [p for p in sorted(PLUGINS.glob("uefn-plugin-*")) if p.is_dir()]
 
 
 def _collect_plugin_mit_paths() -> list[Path]:

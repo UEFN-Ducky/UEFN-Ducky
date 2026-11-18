@@ -49,17 +49,17 @@ test_validate_uefn_asset_tool` ×2, `tools/verse/test_wire_preflight` ×1,
 
 | L | proves | where |
 |---|---|---|
-| 1 | store core: pragmas, per-thread connections, migration ladder, FTS/JSON asserted, UNC refused, integrity + snapshot restore | `backend/store/test_db.py`, `test_migrations.py` |
+| 1 | store core: pragmas, per-thread connections, migration ladder, FTS/JSON asserted, UNC refused, integrity + snapshot restore | `backend/store/test_db.py`, `test_db_checks.py`, `test_upgrade_boot.py`, `test_fitness.py` |
 | 2 | repo parity on both backends | existing public-behaviour tests + `store_backend` |
 | 3 | importers on golden fixtures: counts, hashes, projection equality, idempotent, resumable | `backend/store/importers/test_*.py` |
-| 4 | shadow diff after every operation | `backend/store/test_shadow.py` |
-| 5 | concurrency + durability (real subprocesses) | `backend/store/test_concurrency.py`, `test_durability.py` |
+| 4 | migration phases and sealed leftovers | `backend/store/test_phase1.py` … `test_phase56.py`, `test_sealed_leftovers.py` |
+| 5 | repos: chats, messages, ledger, accounts, search | `backend/store/repos/test_*.py`, `test_local_chats.py`, `test_message_parts.py`, `test_message_rev.py`, `test_ledger_*.py`, `test_account_rows.py`, `test_search_store.py` |
 | 6 | RPC contract: frozen `PanelApi` method list + DTO fixtures | `ui_web/test_panel_api_methods.py`, `test_panel_api_dtos.py` |
 | 7 | 103 `ducky_*` MCP tools from a bridge with no panel | `backend/tools/panel/test_*.py` |
 | 8 | React on regenerated DTO fixtures | `ui_web/web/src/**/*.test.ts(x)` |
 | 9 | listener boundary and capture parity | `uefn_listener/listener/test_*.py`, `test_capture_parity.py` |
 | 10 | end-to-end on the frozen EXE, empty machine and real-AppData copy | `scripts/e2e/` |
-| 11 | performance budgets | `backend/store/test_perf_budgets.py`, `web/perf-chat` |
+| 11 | performance budgets | `web/perf-chat` |
 
 ## Existing tests by fate
 
