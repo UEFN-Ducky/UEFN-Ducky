@@ -183,6 +183,29 @@ type PaneInset = { left: number; top: number; right: number; bottom: number; vis
 const paneInsets = new Map<string, { iframe: HTMLIFrameElement; inset: PaneInset }>();
 const lastSentBounds = new Map<string, { key: string; at: number }>();
 
+/** Panes a panel opened or pinned (`browser.open` / `browser.bounds`): only an editor tab
+ * that owns one runs the per-frame re-pin loop (PluginWebviewPane). */
+const usedPanes = new Set<string>();
+const usedPaneListeners = new Set<() => void>();
+
+function setPaneUsed(paneId: string, used: boolean): void {
+  if (usedPanes.has(paneId) === used) return;
+  if (used) usedPanes.add(paneId);
+  else usedPanes.delete(paneId);
+  for (const fn of usedPaneListeners) fn();
+}
+
+/** True once this editor tab's panel opened or pinned a native browser pane that is still open. */
+export function hasOwnBrowserPane(tabId: string): boolean {
+  for (const id of usedPanes) if (ownsBrowserPane(tabId, id)) return true;
+  return false;
+}
+
+export function subscribeBrowserPaneUse(fn: () => void): () => void {
+  usedPaneListeners.add(fn);
+  return () => usedPaneListeners.delete(fn);
+}
+
 /** Resend an unchanged rect once a minute (self-heals native drift, missed messages).
  * A rect changed by >= 1 px sends at once; tab mounts clear the dedupe. */
 const BOUNDS_HEARTBEAT_MS = 60_000;
@@ -524,6 +547,7 @@ export function clearBrowserPaneBounds(tabId: string): void {
     lastSentBounds.delete(id);
     coverStates.delete(id);
   }
+  for (const id of [...usedPanes]) if (ownsBrowserPane(tabId, id)) setPaneUsed(id, false);
   lastSentBounds.delete(tabId);
   paneMountGen.delete(tabId);
   shownBeforeUnmount.delete(tabId);
@@ -729,6 +753,7 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
     const opened = await api.browser_pane_open(paneId, url, hostWindowWid());
     // A frame that pinned while the pane was still opening got "pane not open": pin again now.
     lastSentBounds.delete(paneId);
+    setPaneUsed(paneId, true);
     return opened;
   },
   "browser.bounds": (ctx, params) => {
@@ -753,6 +778,7 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
         visible: params.visible !== false,
       },
     });
+    setPaneUsed(tabId, true);
     pushBrowserPaneBounds(tabId, iframe);
     return { ok: true };
   },

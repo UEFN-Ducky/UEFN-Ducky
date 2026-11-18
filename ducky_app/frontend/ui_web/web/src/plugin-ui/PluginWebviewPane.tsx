@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import "./plugin-ui.css";
 import {
   PLUGIN_UI_SANDBOX,
@@ -7,10 +7,12 @@ import {
 import {
   beginBrowserPaneMount,
   handleBridgeRequest,
+  hasOwnBrowserPane,
   hideBrowserPaneOnUnmount,
   ownsBrowserPane,
   pushOwnBrowserPanes,
   shouldForwardPluginPush,
+  subscribeBrowserPaneUse,
   type HeaderMenuHost,
 } from "./bridge";
 import { usePluginThemePush } from "./pluginTheme";
@@ -262,10 +264,15 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true, headerMe
   // pushBrowserPaneBounds) — window resizes / sidebar toggles / split drags track
   // smoothly without waiting on the plugin's own (bridge round-trip) reports.
   // Native WebView2 panes are desktop-only (REMOTE_DENY); skip the rAF on stream.
-  // A hidden tab has no rect to pin to: no rAF until it shows again.
+  // A hidden tab has no rect to pin to: no rAF until it shows again. A panel that never
+  // opened a pane (browser.open / browser.bounds) runs no loop and no cover probe.
+  const hasPane = useSyncExternalStore(
+    subscribeBrowserPaneUse,
+    useCallback(() => hasOwnBrowserPane(tabId), [tabId]),
+  );
   useEffect(() => {
     if (isRemote()) return;
-    if (!visible) return;
+    if (!visible || !hasPane) return;
     let raf = 0;
     const tick = () => {
       pushOwnBrowserPanes(tabId, iframeRef.current);
@@ -273,7 +280,7 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true, headerMe
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [tabId, visible]);
+  }, [tabId, visible, hasPane]);
 
   useEffect(() => {
     if (!visible) return;
