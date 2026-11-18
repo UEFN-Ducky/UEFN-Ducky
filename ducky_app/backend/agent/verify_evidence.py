@@ -12,6 +12,7 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from contextvars import ContextVar
 from pathlib import Path
@@ -80,11 +81,48 @@ def _current_scope() -> tuple[str, str]:
     return _scope.get()
 
 
-def _receipt_path(scope: tuple[str, str]) -> Path:
+def _receipt_dir() -> Path:
     from frontend.app_paths import resolve_app_data_dir
 
+    return resolve_app_data_dir(for_write=True) / "verify-evidence"
+
+
+def _receipt_path(scope: tuple[str, str]) -> Path:
     key = hashlib.sha256("\0".join(scope).encode()).hexdigest()
-    return resolve_app_data_dir(for_write=True) / "verify-evidence" / (key + ".json")
+    return _receipt_dir() / (key + ".json")
+
+
+RECEIPT_MAX_AGE_DAYS = 7
+_pruned = False
+
+
+def prune_receipts(max_age_days: float = RECEIPT_MAX_AGE_DAYS) -> int:
+    """Delete receipts (and stray temp files) older than ``max_age_days``; how many went.
+    Never raises: a locked or vanished file is skipped. A run's receipt is rewritten on every
+    check, so a live run's file is never that old."""
+    cutoff = time.time() - max_age_days * 86400
+    removed = 0
+    try:
+        entries = list(os.scandir(_receipt_dir()))
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if entry.name.endswith((".json", ".tmp")) and entry.stat().st_mtime < cutoff:
+                os.unlink(entry.path)
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def _prune_once() -> None:
+    """The first recorded result of this process sweeps old receipts on a daemon thread."""
+    global _pruned
+    if _pruned:
+        return
+    _pruned = True
+    threading.Thread(target=prune_receipts, name="verify-receipt-prune", daemon=True).start()
 
 
 def bind_conversation(conv_id: str, run_id: str = "") -> object:
@@ -258,6 +296,7 @@ def _failed_payload(value: dict[str, Any]) -> bool:
 
 def record_result(name: str, arguments: dict[str, Any] | None, raw: Any) -> None:
     """Record actual successful check results before tool output is compacted."""
+    _prune_once()
     key = effective_tool_name(name, arguments)
     if not is_check_tool(name, arguments) and key not in _RESULT_CHECKS:
         return

@@ -21,6 +21,7 @@ from backend.workspace import identity
 def checks(monkeypatch, tmp_path):
     monkeypatch.setattr(ve, "_receipt_path", lambda scope: tmp_path / (
         hashlib.sha256("\0".join(scope).encode()).hexdigest() + ".json"))
+    monkeypatch.setattr(ve, "_receipt_dir", lambda: tmp_path)
     monkeypatch.setattr(ve, "_evidence", {})
     monkeypatch.setattr("backend.workspace.ai_ignore.require_safe_tool", lambda *_: None)
     monkeypatch.setattr("backend.panel.rpc.wait_for_question_answers", lambda *_: None)
@@ -295,3 +296,43 @@ def test_offline_verse_scan_ticks_verify_only_while_uefn_is_closed(checks, monke
     else:
         with pytest.raises(Exception, match="check tool"):
             call(checks, "ducky_plan_update_node", {"chat_id": "same-name-a"})
+
+
+def _receipts(folder, count, age_days):
+    import time
+
+    stamp = time.time() - age_days * 86400
+    paths = []
+    for i in range(count):
+        path = folder / f"{age_days}-{i}.json"
+        path.write_text("{}", encoding="utf-8")
+        os.utime(path, (stamp, stamp))
+        paths.append(path)
+    return paths
+
+
+def test_receipts_older_than_a_week_are_removed(monkeypatch, tmp_path):
+    monkeypatch.setattr(ve, "_receipt_dir", lambda: tmp_path)
+    old = _receipts(tmp_path, 115, 8)
+    new = _receipts(tmp_path, 5, 1)
+    assert ve.prune_receipts() == 115
+    assert not any(p.exists() for p in old) and all(p.exists() for p in new)
+    monkeypatch.setattr(ve, "_receipt_dir", lambda: tmp_path / "missing")
+    assert ve.prune_receipts() == 0  # no folder yet: nothing to do, no error
+
+
+def test_the_current_run_keeps_its_receipt(monkeypatch, tmp_path):
+    import threading
+
+    monkeypatch.setattr(ve, "_receipt_dir", lambda: tmp_path)
+    monkeypatch.setattr(ve, "_receipt_path", lambda scope: tmp_path / "current.json")
+    monkeypatch.setattr(ve, "_pruned", False)
+    monkeypatch.setattr(ve, "_current_scope", lambda: ("chat", "run"))
+    old = _receipts(tmp_path, 3, 30)
+    ve.record_result("changeset_list", {}, [{"type": "text", "text": '{"ok":true}'}])
+    for thread in threading.enumerate():
+        if thread.name == "verify-receipt-prune":
+            thread.join(2)
+    assert (tmp_path / "current.json").exists()
+    assert not any(p.exists() for p in old)
+    assert ve._pruned is True  # once per process
