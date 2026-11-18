@@ -480,7 +480,13 @@ class TurnFileChanges:
             shell = self._is_shell(tool.get("arguments"))
             pre = self._pre_call.pop(self._call_key(tool), {})
             name = str(tool.get("name") or "tool")
-            for root, repo in self.repos.items():
+            # A call with no command, not an edit tool, naming no file can claim nothing
+            # (its reach is empty): no git scan. Snapshots stay put, so the next call that
+            # can write still sees every change. Ducky's workspace_* writes name their path.
+            # ponytail: a pathless native edit after such calls also sees changes made during
+            # them; scan reads too if that attribution ever matters.
+            can_write = shell or name in _NATIVE_EDIT_TOOLS or bool(self._absolute(tool.get("arguments") or {}))
+            for root, repo in (self.repos.items() if can_write else ()):
                 for path, before, after in repo.changes():
                     if not owns(path, root, after):
                         continue
@@ -488,11 +494,11 @@ class TurnFileChanges:
                         self._record_unknown(root, path, before, after, name)
                         continue
                     edits.append(self._record(root, path, before, after, name))
-            for root, folder in self.folders.items():
+            for root, folder in (self.folders.items() if can_write else ()):
                 for path, before, after in folder.changes():
                     if owns(path, root, after):
                         edits.append(self._record(root, path, before, after, str(tool.get("name") or "tool")))
-            for path, before in self.files.items():
+            for path, before in (self.files.items() if can_write else ()):
                 after = _read(path)
                 if before is not None and after is not None and before.digest != after.digest and owns(path, path.parent, after):
                     edits.append(self._record(path.parent, path, before, after, str(tool.get("name") or "tool")))
