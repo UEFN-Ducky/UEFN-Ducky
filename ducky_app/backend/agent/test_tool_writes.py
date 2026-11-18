@@ -51,6 +51,74 @@ def test_the_result_is_the_same_as_before(monkeypatch, tmp_path) -> None:
     assert len(list(tmp_path.glob("demo__big_*.txt"))) == 2
 
 
+class _Stop:
+    """Like runner._CancelBridge: is_set() only."""
+
+    def __init__(self) -> None:
+        self._ev = threading.Event()
+
+    def is_set(self) -> bool:
+        return self._ev.is_set()
+
+
+def _count_wakeups(loop: asyncio.AbstractEventLoop) -> list[int]:
+    n = [0]
+    real = loop._run_once  # type: ignore[attr-defined]
+
+    def counted() -> None:
+        n[0] += 1
+        real()
+
+    loop._run_once = counted  # type: ignore[attr-defined]
+    return n
+
+
+def test_a_call_without_a_stop_event_never_wakes_early() -> None:
+    import pytest
+
+    def wakeups(wrap) -> int:
+        loop = asyncio.new_event_loop()
+        try:
+            woke = _count_wakeups(loop)
+            assert loop.run_until_complete(wrap(asyncio.sleep(1.5, "done"))) == "done"
+        finally:
+            loop.close()
+        return woke[0]
+
+    bare = wakeups(lambda coro: coro)  # the loop's own (Windows timers wake a little early)
+    for signal in (None, _Stop()):
+        wrapped = wakeups(lambda coro: tool_writes.await_cancellable(coro, cancel_event=signal))
+        assert wrapped <= bare + 3, (wrapped, bare)  # 0.2 s polling added 7 or more
+    with pytest.raises(asyncio.TimeoutError, match="timed out after 1"):
+        asyncio.run(tool_writes.await_cancellable(asyncio.sleep(5), cancel_event=None, timeout=1.0))
+
+
+def test_stop_still_ends_the_call_within_300_ms() -> None:
+    import time
+
+    import pytest
+
+    stop = _Stop()
+    ended = threading.Event()
+
+    async def long_call() -> None:
+        try:
+            await asyncio.sleep(30)
+        finally:
+            ended.set()
+
+    threading.Timer(0.2, stop._ev.set).start()
+    started = time.monotonic()
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(tool_writes.await_cancellable(long_call(), cancel_event=stop, timeout=60))
+    assert time.monotonic() - started < 0.2 + 0.3
+    assert ended.is_set()  # the call itself was stopped
+    assert not tool_writes._stops  # nothing left watched
+    # Already set: the call is stopped before it waits.
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(tool_writes.await_cancellable(asyncio.sleep(30), cancel_event=stop))
+
+
 def test_a_failing_journal_never_fails_the_tool(monkeypatch) -> None:
     def boom(*_a, **_k):
         raise OSError("disk full")

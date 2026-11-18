@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from backend.agent.tool_lanes import call_registered_tool
+from backend.agent.tool_writes import await_cancellable as _await_cancellable
 from backend.agent.tool_writes import off_loop, record_sidecar as _record_plugin_sidecar, spill_and_record
 
 if TYPE_CHECKING:
@@ -865,51 +866,6 @@ def _looks_like_tool_failure(name: str, text: str) -> bool:
         if obj.get("error") and obj.get("success") is not True and obj.get("ok") is not True:
             return True
     return False
-
-
-async def _await_cancellable(
-    coro: Any,
-    *,
-    cancel_event: Any | None,
-    timeout: float = 180.0,
-) -> Any:
-    """Await ``coro`` but bail as soon as ``cancel_event`` is set.
-
-    Polls every 200ms so Stop interrupts long MCP/listener waits without
-    waiting for the full tool timeout.
-    """
-    task = asyncio.ensure_future(coro)
-    deadline = time.time() + max(timeout, 1.0)
-    try:
-        while True:
-            if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                raise asyncio.CancelledError("Cancelled")
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-                raise asyncio.TimeoutError(f"Tool timed out after {timeout}s")
-            done, _ = await asyncio.wait({task}, timeout=min(0.2, remaining))
-            if task in done:
-                return task.result()
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        if not task.done():
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
-        raise
 
 
 def _tool_input_schema(name: str) -> Any:
