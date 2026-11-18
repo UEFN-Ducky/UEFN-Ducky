@@ -32,7 +32,8 @@ def _writer():
             from frontend.ui_web.chat_writer import ChatWriter
 
             _WRITER = ChatWriter(
-                _write_queued, write_checkpoint=_write_run_row, connect=db.connect, root=db.app_root
+                _write_queued, write_checkpoint=_write_run_row, prepare=_prepare_queued, connect=db.connect,
+                root=db.app_root,
             )
         return _WRITER
 
@@ -56,15 +57,30 @@ def _queued(conv_id: str) -> Conversation | None:
     return item[0] if item else None
 
 
-def _write_queued(conv_id: str, item: tuple[Any, ...]) -> dict[str, Any]:
-    """*item* is ``(snapshot, project_root, origin)``: origin is the caller's object, told
-    the chat's ``msg_rev`` after the write so its next save goes by delta."""
+def _prepare_queued(key: Any, item: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Chat-writer thread, before the batch's write lock: the item with its rows encoded
+    and sealed (``chats.prepare_save`` / ``prepare_run_message``) appended."""
+    repo = _store._repo()
+    if isinstance(key, tuple):  # a checkpoint: (payload, msgs, idx, n, now, origin)
+        return (*item[:6], repo.prepare_run_message(item[0]))
     conv, project_root, origin = (*item, None)[:3]
+    messages = list(getattr(conv, "messages", None) or []) or None
+    prepared = repo.prepare_save(
+        conv.to_dict(), messages, dirty_from=conv._dirty_from, dirty_rows=sorted(conv._dirty_rows),
+        base_hashes=conv._base_hashes,
+    )
+    return conv, project_root, origin, prepared
+
+
+def _write_queued(conv_id: str, item: tuple[Any, ...]) -> dict[str, Any]:
+    """*item* is ``(snapshot, project_root, origin[, prepared])``: origin is the caller's
+    object, told the chat's ``msg_rev`` after the write so its next save goes by delta."""
+    conv, project_root, origin, prepared = (*item, None, None)[:4]
     if conv._dirty_from == 0:
         with _row_stats_lock:  # turn end: a checkpoint written just before refilled it
             _PREFIX_STATS.pop(conv_id, None)
     try:
-        return _save_conversation_rows(conv, project_root, origin)
+        return _save_conversation_rows(conv, project_root, origin, prepared)
     except Exception:
         if origin is not None:
             origin.mark_all_dirty()  # this snapshot's changes never landed: the next save is whole
@@ -385,7 +401,8 @@ def _take_base(conv: Conversation, origin: Conversation, result: dict[str, Any],
 
 
 def _save_conversation_rows(
-    conv: Conversation, project_root: str | None, origin: Conversation | None = None
+    conv: Conversation, project_root: str | None, origin: Conversation | None = None,
+    prepared: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """ADR 0003: one row per message. A metadata stub (no messages) or a stub that
     lost the assistant row never blanks a stored transcript — same guard as the
@@ -430,11 +447,11 @@ def _save_conversation_rows(
         # Taken while this copy's previous save was being written: build on that write.
         expect = step[1]
     if messages is None:
-        result = repo.conv_save(project_id, doc, messages=None)
+        result = repo.conv_save(project_id, doc, messages=None, prepared=prepared)
     else:
         result = repo.conv_save(
             project_id, doc, messages=messages, dirty_from=conv._dirty_from, expect_rev=expect,
-            base_hashes=conv._base_hashes, dirty_rows=sorted(conv._dirty_rows),
+            base_hashes=conv._base_hashes, dirty_rows=sorted(conv._dirty_rows), prepared=prepared,
         )
     if result.get("skipped"):
         _forget_saved(conv.id)
@@ -648,11 +665,11 @@ def _upsert_run_row(conv: Conversation, payload: dict[str, Any], rid: str, proje
 def _write_run_row(conv_id: str, item: tuple[Any, ...]) -> dict[str, Any]:
     """Chat-writer thread: write a queued checkpoint, then tell its chat object the new
     rev so the next save (the turn end's) goes by delta."""
-    payload, msgs, idx, n, now, origin = item
+    payload, msgs, idx, n, now, origin = item[:6]
     try:
         result = _store._repo().upsert_run_message(
             conv_id, str(payload.get("run_id") or ""), payload, updated=now,
-            stats=_checkpoint_stats(conv_id, msgs, idx),
+            stats=_checkpoint_stats(conv_id, msgs, idx), prepared=item[6] if len(item) > 6 else None,
         )
     except Exception:
         origin.mark_all_dirty()  # the row never landed: the next save is whole

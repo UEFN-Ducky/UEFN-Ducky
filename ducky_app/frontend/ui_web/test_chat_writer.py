@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from typing import Any
 
 import pytest
 
@@ -387,6 +388,65 @@ def test_the_queue_writes_in_submit_order() -> None:
         assert order == [("save", 4), ("cp", 5)]
     finally:
         writer.close()
+
+
+def test_prepare_runs_before_the_batch_takes_the_write_lock() -> None:
+    seen: list[tuple[str, bool]] = []
+    written: list[Any] = []
+
+    def prepare(key, item):
+        seen.append((str(key), db._write_lock._is_owned()))
+        if item == "bad":
+            raise ValueError("cannot prepare")
+        return (item, "ready")
+
+    writer = ChatWriter(lambda cid, item: written.append(item), write_checkpoint=lambda cid, item: written.append(item),
+                        prepare=prepare, connect=db.connect, interval=5.0)
+    try:
+        writer.submit("a", "one")
+        writer.submit_checkpoint("a", "r", "two")
+        writer.submit("b", "bad")
+        assert writer.flush() is True
+    finally:
+        writer.close()
+    assert [owned for _, owned in seen] == [False, False, False]
+    assert written == [("one", "ready"), ("two", "ready"), "bad"]  # a failed prepare: written as it was
+
+
+def test_no_encoding_or_sealing_runs_inside_the_transaction(tmp_path, monkeypatch) -> None:
+    """Through the app's own save path: a checkpoint, then the turn end's save."""
+    from backend.store import account_rows
+
+    root = str(tmp_path)
+    conv = _turn(root)
+    flush_chat_saves()
+    under_lock: list[str] = []
+
+    def watch(owner, name):
+        fn = getattr(owner, name)
+
+        def wrapped(*a, **kw):
+            if db._write_lock._is_owned():
+                under_lock.append(name)
+            return fn(*a, **kw)
+
+        monkeypatch.setattr(owner, name, wrapped)
+
+    for name in ("_dumps", "_hash", "_prep_row", "_seal_part", "_sealed_as"):
+        watch(repo, name)
+    for name in ("seal", "seal_blob", "blind_text"):
+        watch(account_rows, name)
+    big = "spawner wiring " * 2000  # a part: compressed and sealed
+    chat_saves.upsert_in_flight_assistant(conv, {"role": "assistant", "content": big}, run_id="r1", project_root=root)
+    flush_chat_saves()
+    msgs = list(conv.messages)
+    msgs[-1] = {**msgs[-1], "content": "done " + big}
+    conv.swap_messages(msgs, len(msgs) - 1)
+    conv.title = "renamed"
+    save_conversation(conv, root, wait=True)
+    flush_chat_saves()
+    assert under_lock == []
+    assert _stored_reply(conv.id).startswith("done")
 
 
 def test_close_writes_pending_checkpoints() -> None:

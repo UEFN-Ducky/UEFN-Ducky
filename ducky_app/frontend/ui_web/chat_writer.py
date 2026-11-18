@@ -61,13 +61,19 @@ def _trace(kind: str, name: str, ms: float = 0.0, **meta: Any) -> None:
 
 class ChatWriter:
     """``write(conv_id, item)`` saves one chat on the writer thread and may return the
-    repo's result (its ``bytes`` count toward the big-batch checkpoint)."""
+    repo's result (its ``bytes`` count toward the big-batch checkpoint).
+
+    ``prepare(key, item) -> item`` (optional) runs for each batch entry before the batch
+    opens its write transaction (key is the conv id, or ``(conv_id, run_id)`` for a
+    checkpoint); the writes get what it returns, so encoding and sealing never hold the
+    lock. A prepare that fails is logged and its entry written unprepared."""
 
     def __init__(
         self,
         write: Callable[[str, Any], Any],
         *,
         write_checkpoint: Callable[[str, Any], Any] | None = None,
+        prepare: Callable[[Any, Any], Any] | None = None,
         connect: Callable[[], Any],  # db.connect: only backend/store imports sqlite3
         root: Callable[[], Any] = lambda: None,
         interval: float = INTERVAL_S,
@@ -76,6 +82,7 @@ class ChatWriter:
     ) -> None:
         self._write = write
         self._write_checkpoint = write_checkpoint
+        self._prepare = prepare
         self._connect = connect
         self._root = root
         self._interval = interval
@@ -239,18 +246,28 @@ class ChatWriter:
         written = 0
         lock_ms = 0.0
         t0 = time.perf_counter()
+        items = {cid: entry[0] for cid, entry in batch.items()}
+        if self._prepare is not None:
+            for cid, entry in batch.items():
+                if entry[2] != here:
+                    continue
+                try:
+                    items[cid] = self._prepare(cid, entry[0])
+                except Exception:
+                    _log.warning("chat save %s: preparing it failed; written unprepared", cid, exc_info=True)
+        t_lock = time.perf_counter()
         try:
             conn = self._connect()
             with db.write_txn(conn):
                 # The wait for the write lock, apart from the writes: batches of 6-15 s that
                 # wrote 0 bytes (Nov 16 2026) could not be told from slow saves.
-                lock_ms = (time.perf_counter() - t0) * 1000.0
+                lock_ms = (time.perf_counter() - t_lock) * 1000.0
                 for cid, entry in batch.items():
                     if entry[2] != here:  # a test repointed the app folder meanwhile
                         results[cid] = RuntimeError("the chat database changed before this save was written")
                         continue
                     try:
-                        result = self._write_key(cid, entry[0])
+                        result = self._write_key(cid, items[cid])
                         written += int((result or {}).get("bytes", 0) or 0)
                         results[cid] = None
                     except Exception as exc:
