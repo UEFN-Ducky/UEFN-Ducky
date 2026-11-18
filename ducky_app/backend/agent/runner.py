@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import logging
 import threading
 import time
 import uuid
@@ -53,6 +54,7 @@ from backend.agent.serialization import (
     set_tool_result_format,
 )
 
+_log = logging.getLogger(__name__)
 STREAM_TIMEOUT_SEC = 180
 # Local Ollama often spends many minutes on prompt eval (partial GPU offload).
 # The OpenAI client read timeout is open-ended; this host deadline must not kill
@@ -904,7 +906,7 @@ class AgentRunner:
 
                 save_conversation(self.config.conv, self.config.project_root or None)
             except Exception:
-                pass
+                _log.warning("chat save failed: %s", conv_id, exc_info=True)
         # Frozen/dynamic split is host-owned and unconditional. enable_cache
         # only adds provider markers. Volatile memory/plan/status is a tail message.
         system = prompt_cache.frozen_system

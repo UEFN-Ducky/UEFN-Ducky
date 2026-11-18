@@ -3,6 +3,7 @@ model, sends into a busy chat (queued, offered as a steer) and delivering them a
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -32,6 +33,8 @@ from frontend.ui_web.agent_turns.state import (
     wait_for_idle,
 )
 from frontend.ui_web.chats.saves import save_conversation
+
+_log = logging.getLogger(__name__)
 
 
 def _with_admission(fn):
@@ -145,7 +148,7 @@ def _take_chat_model(conv: Any, settings: PanelSettings, push: PushFn) -> tuple[
     try:
         save_conversation(conv)
     except Exception:
-        pass
+        _log.warning("chat save failed: %s", conv.id, exc_info=True)
     notify_chats_changed(conv.id, conv.title, conv.folder_id, push=push, open_tab=False)
     push({"type": "model_adopted", "conv_id": conv.id, "model": choice.model,
           "coding_agent": choice.coding_agent, "provider": choice.provider})

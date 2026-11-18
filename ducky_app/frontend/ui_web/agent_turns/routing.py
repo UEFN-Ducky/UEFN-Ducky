@@ -379,7 +379,7 @@ def run_message(
         try:
             save_conversation(conv)
         except Exception:
-            pass
+            _log.warning("chat save failed: %s", conv_id, exc_info=True)
     external = coding_agent != "ducky"
 
     if external:
@@ -395,7 +395,7 @@ def run_message(
             try:
                 save_conversation(conv)
             except Exception:
-                pass
+                _log.warning("chat save failed: %s", conv_id, exc_info=True)
         try:
             from backend.uefn_plugins.plugin_host.gateways import resolve_gateway_credential
 
@@ -424,7 +424,7 @@ def run_message(
         try:
             save_conversation(conv)
         except Exception:
-            pass
+            _log.warning("chat save failed: %s", conv_id, exc_info=True)
         history = list(conv.messages)
     else:
         try:
