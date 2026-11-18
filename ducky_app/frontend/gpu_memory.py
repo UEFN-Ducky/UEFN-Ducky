@@ -10,6 +10,7 @@ each program's share come from the GPU performance counters ("GPU Adapter Memory
 from __future__ import annotations
 
 import ctypes
+import os
 import re
 import sys
 from typing import Any
@@ -151,17 +152,31 @@ def _counters(luid: str) -> tuple[int | None, dict[int, int]]:
     return (adapter or None), per_pid
 
 
-def _names(procs: dict[int, Any] | None = None) -> dict[int, str]:
+def _table() -> dict[int, Any]:
     from backend.util import proc_table
 
-    procs = proc_table.table() if procs is None else procs
+    return proc_table.table()
+
+
+def _names(procs: dict[int, Any]) -> dict[int, str]:
     return {pid: re.sub(r"(?i)[.]exe$", "", p.name) for pid, p in procs.items()}
 
 
+def _mine(procs: dict[int, Any]) -> set[int]:
+    """This process and everything it started (its own WebView2 too, by parent pid; another
+    app's WebView2 is not in its tree)."""
+    try:
+        from backend.util import proc_table
+
+        return set(proc_table.tree(procs, os.getpid()))
+    except Exception:
+        return set()
+
+
 def read(top: int = 3, procs: dict[int, Any] | None = None) -> dict[str, Any] | None:
-    """``{adapter, total_gb, budget_gb, used_gb, share, top: [{name, gb}]}`` for the main GPU, or
-    None when Windows can't tell (no DXGI, no GPU counters, not Windows). Never raises.
-    ``procs``: a process table already read (names the programs without reading another)."""
+    """``{adapter, total_gb, budget_gb, used_gb, share, ducky_gb, top: [{name, gb}]}`` for the
+    main GPU, or None when Windows can't tell (no DXGI, no GPU counters, not Windows). Never
+    raises. ``procs``: a process table already read (names the programs without reading another)."""
     try:
         adapter = _adapter()
         if not adapter or not adapter.get("dedicated"):
@@ -171,7 +186,11 @@ def read(top: int = 3, procs: dict[int, Any] | None = None) -> dict[str, Any] | 
             used = sum(per_pid.values()) or None
         if used is None:
             return None
+        if per_pid and procs is None:
+            procs = _table()
         names = _names(procs) if per_pid else {}
+        mine = _mine(procs) if per_pid else set()
+        ducky = sum(size for pid, size in per_pid.items() if pid in mine)
         by_name: dict[str, int] = {}
         for pid, size in per_pid.items():
             name = names.get(pid) or f"pid {pid}"
@@ -180,7 +199,7 @@ def read(top: int = 3, procs: dict[int, Any] | None = None) -> dict[str, Any] | 
         total = int(adapter["dedicated"])
         return {"adapter": str(adapter.get("name") or ""), "total_gb": round(total / _GB, 1),
                 "budget_gb": round(int(adapter.get("budget") or 0) / _GB, 1), "used_gb": round(used / _GB, 1),
-                "share": round(used / total, 3), "top": [{"name": n, "gb": round(s / _GB, 1)} for n, s in rows]}
+                "share": round(used / total, 3), "ducky_gb": round(ducky / _GB, 2), "top": [{"name": n, "gb": round(s / _GB, 1)} for n, s in rows]}
     except Exception:
         return None
 
@@ -189,16 +208,18 @@ def full(info: dict[str, Any] | None) -> bool:
     return bool(info) and float(info.get("share") or 0) >= FULL_SHARE
 
 
+TITLE = "UEFN is nearly out of graphics memory"
+
+
 def describe(info: dict[str, Any]) -> tuple[str, str]:
-    """(what, fix): 'Graphics memory 7.6 / 8.0 GB: UnrealEditorFortnite 7.1 GB, msedgewebview2
-    0.3 GB.' and the fix, which names UEFN when it is the top user."""
+    """(title, body), the body under 160 characters: 'UEFN 7.1 of 8 GB dedicated (Ducky 0.1 GB).
+    Lower Engine Scalability or unload regions.' (the top user first, UEFN by that name)."""
     rows = info.get("top") or []
-    names = ", ".join(f"{r['name']} {float(r['gb']):g} GB" for r in rows)
-    what = f"Graphics memory {float(info['used_gb']):.1f} / {float(info['total_gb']):.1f} GB" + (f": {names}." if names else ".")
     lead = rows[0] if rows else {}
-    if str(lead.get("name") or "").lower().startswith(_UEFN):
-        fix = (f"UEFN uses {float(lead['gb']):g} of {float(info['total_gb']):g} GB graphics memory: unload World "
-               "Partition regions you aren't using, or lower Engine Scalability (High instead of Epic).")
-    else:
-        fix = "Close programs that use the GPU (games, video, browser tabs with 3D) before UEFN runs out of graphics memory."
-    return what, fix
+    name = str(lead.get("name") or "")
+    uefn = name.lower().startswith(_UEFN)
+    who, gb = ("UEFN" if uefn else name[:30] or "Graphics"), float(lead.get("gb") or info.get("used_gb") or 0)
+    fix = "Lower Engine Scalability or unload regions." if uefn else "Close games, video or 3D browser tabs."
+    body = (f"{who} {gb:g} of {float(info['total_gb']):g} GB dedicated "
+            f"(Ducky {float(info.get('ducky_gb') or 0):.1f} GB). {fix}")
+    return TITLE, body

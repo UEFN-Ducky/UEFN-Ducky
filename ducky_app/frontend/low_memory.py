@@ -56,7 +56,14 @@ _warnings_on: tuple[float, bool] = (0.0, True)
 _last_alert = 0.0  # the last critical alert
 _last_freed = 0.0  # when Ducky last freed its own leftovers
 _freed_this_spell = False  # reset when free memory is back above the warning level
-_gpu_warned = False  # one graphics-memory alert per spell: reset when the GPU is under FULL_SHARE again
+_gpu_warned = False  # one graphics-memory alert per spell: reset after GPU_CALM_S under GPU_CALM_SHARE
+# Nov 18 2026: a dip to 89% and back to 92% alerted again. The spell ends only after GPU_CALM_S
+# under GPU_CALM_SHARE, and alerts are at least GPU_EVERY_S apart.
+GPU_CALM_SHARE = 0.80
+GPU_CALM_S = 300.0
+GPU_EVERY_S = 1800.0
+_gpu_calm_since = 0.0  # when the card last went under GPU_CALM_SHARE (0: not under it)
+_gpu_last_alert = 0.0
 last_gpu_share: float | None = None  # of the card's memory in use at the last check (busy_pc reads it)
 _last_warn = 0.0  # the last warning or critical alert
 _recent: deque[tuple[float, float]] = deque()  # (monotonic, free GB) within DROP_WINDOW_S
@@ -279,34 +286,42 @@ def warnings_on() -> bool:
     return on
 
 
-def _warn(status: str, detail: str) -> None:
+def _warn(status: str, detail: str, *, title: str = "UEFN Ducky", level: str = "error") -> None:
     """One PC memory warning; a click on it opens the tab that holds its switch."""
     from frontend import notifications
 
-    notifications.alert("UEFN Ducky", status, level="error", kind="settings", target_id=WARNINGS_TAB,
+    notifications.alert(title, status, level=level, kind="settings", target_id=WARNINGS_TAB,
                         detail=f"{detail} {WHERE_TO_TURN_OFF}")
 
 
 def check_gpu() -> None:
     """One alert per spell when the graphics card's memory is nearly full, naming what fills it."""
-    global _gpu_warned, last_gpu_share
+    global _gpu_warned, last_gpu_share, _gpu_calm_since, _gpu_last_alert
     try:
         from frontend import gpu_memory
 
         info = gpu_memory.read()
         share = (info or {}).get("share")
         last_gpu_share = float(share) if isinstance(share, (int, float)) else None
+        now = time.monotonic()
         if not gpu_memory.full(info):
-            if info:
-                _gpu_warned = False
+            if last_gpu_share is not None and last_gpu_share < GPU_CALM_SHARE:
+                _gpu_calm_since = _gpu_calm_since or now
+                if now - _gpu_calm_since >= GPU_CALM_S:
+                    _gpu_warned = False
+            elif info:
+                _gpu_calm_since = 0.0
             return
-        if _gpu_warned:
+        _gpu_calm_since = 0.0
+        if _gpu_warned or (_gpu_last_alert and now - _gpu_last_alert < GPU_EVERY_S):
             return
         _gpu_warned = True
         if not warnings_on():
             return
-        what, fix = gpu_memory.describe(info)
-        _warn("Graphics memory is almost full.", f"{what} {fix} Save your work in UEFN.")
+        _gpu_last_alert = now
+        title, body = gpu_memory.describe(info)
+        # ponytail: notifications has no 'warning' level; 'info' is its calm one (not the red error).
+        _warn("Graphics memory is almost full.", f"{body} Save in UEFN.", title=title, level="info")
     except Exception:
         pass
 
