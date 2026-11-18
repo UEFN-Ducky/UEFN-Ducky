@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import functools
 import json
+import logging
 import threading
 import time
 from typing import Any
@@ -36,6 +37,7 @@ _KEYS: dict[str, bytes] = {}  # account id -> ADK, this process only
 _LAST_TRY: dict[str, float] = {}
 _MIGRATED: set[str] = set()
 _GUARD = threading.RLock()
+_log = logging.getLogger(__name__)
 
 
 class Locked(Exception):
@@ -144,7 +146,7 @@ def prefetch() -> None:
             # Locked still seals the other accounts' attachments; the rest waits for the key.
             account_rows.seal_pending(account)
         except Exception:
-            pass
+            _log.warning("sealing account rows failed", exc_info=True)
 
     threading.Thread(target=_work, name="account-data-key", daemon=True).start()
 
