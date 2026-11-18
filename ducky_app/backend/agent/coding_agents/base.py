@@ -223,6 +223,8 @@ class CodingAgentInfo:
             "can_login": can_login,
             "one_click_login": one_click_login,
             "can_logout": can_logout,
+            # The gateway's reason this account can't sign in here (Setup offers the key only).
+            "sign_in_unavailable": getattr(self, "sign_in_unavailable", "") or "",
             "capabilities": {
                 "terminal_agent": self.capabilities.terminal_agent,
                 "chat_api": self.capabilities.chat_api,

@@ -2064,6 +2064,8 @@ export interface CodingAgentDto {
   one_click_login?: boolean;
   /** Gateway registered a `logout` hook → Settings can sign the CLI out. */
   can_logout?: boolean;
+  /** Why this account can't sign in here (Google refused a personal account); Setup then offers the key only. */
+  sign_in_unavailable?: string;
   capabilities?: {
     terminal_agent?: boolean;
     chat_api?: boolean;

@@ -776,7 +776,10 @@ function ProviderRow({
   // The plugin says the key is the way that works for most people (Google: Gemini CLI refuses
   // personal accounts; 9 of 12 Setup checks on Nov 10 2026 found Gemini not signed in).
   const keyFirst = Boolean(provider.key_first) && provider.kind === "secret";
-  const planWay = agents.length ? (
+  // The provider refused sign-in for this account (Google: personal accounts): no dead-end
+  // sign-in, its reason above the key field instead.
+  const refused = agents.length > 0 && agents.every((a) => a.sign_in_unavailable);
+  const planWay = agents.length && !refused ? (
     <section className="setup-wizard-way" aria-label={`${provider.label}: your plan`}>
       <h4>
         <Icons.Terminal /> {keyFirst ? "Or your plan" : "Your plan"}{" "}
@@ -795,7 +798,7 @@ function ProviderRow({
   const keyWay = provider.kind === "secret" ? (
     <section className="setup-wizard-way" aria-label={`${provider.label}: API key`}>
       <h4>
-        <Icons.Key /> {agents.length && !keyFirst ? "Or an API key" : "API key"}
+        <Icons.Key /> {agents.length && !keyFirst && !refused ? "Or an API key" : "API key"}
         {saved ? (
           <span className="setup-wizard-pill is-ok" aria-label={`${provider.label} API key: Key saved`}>
             <Icons.Check /> Saved
@@ -806,6 +809,7 @@ function ProviderRow({
           </button>
         ) : null}
       </h4>
+      {refused ? <p className="setup-wizard-key-status">{agents[0].sign_in_unavailable}</p> : null}
       <div className="setup-wizard-key-row">
         <input
           type="password"
