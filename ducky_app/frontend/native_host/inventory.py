@@ -196,15 +196,13 @@ _JS_API: dict[str, str] = {
         write_project_file
     """,
     "PanelApiSettingsMixin": """
-        add_gateway_account add_task_phase adopt_default_model build_task_handoff
+        add_gateway_account adopt_default_model
         clear_chat_context_summary clear_errors clear_log coding_agent_login
         coding_agent_login_cancel coding_agent_login_status coding_agent_login_submit
         coding_agent_logout compress_chat_context copy_plan copy_support_dump copy_text
         create_plan create_plan_template create_task delete_appearance_profile
         delete_memory_entry delete_plan delete_plan_template detect_coding_agent_cli
-        discord_debug discord_delete_bot discord_list_bots discord_list_channels
-        discord_list_members discord_open_channel discord_open_portal discord_save_bot
-        discord_send discord_status ducky_health_snapshot ducky_self_care_run
+        discord_list_bots discord_list_channels discord_list_members ducky_health_snapshot ducky_self_care_run
         gateway_account_status gateway_account_usage get_appearance get_chat_account
         get_chat_context_memory get_ducky_usage get_errors get_gateway_usage get_key_status
         get_log get_log_counts get_memory_entry get_memory_settings get_models
@@ -212,7 +210,7 @@ _JS_API: dict[str, str] = {
         has_any_api_key import_sound_file instantiate_plan_template list_coding_agents
         list_gateway_accounts list_memory_entries list_plan_templates list_plans list_tasks
         load_appearance_profile login_gateway_account logout_gateway_account memory_report
-        plan_add_node plan_delete_node plan_move_node plan_update_node pull_editor_log
+        plan_add_node plan_delete_node plan_update_node pull_editor_log
         push_appearance_live remove_gateway_account rename_appearance_profile
         rename_gateway_account reorder_gateway_accounts sandbox_apps sandbox_call
         sandbox_delete sandbox_open_folder sandbox_relaunch sandbox_status
@@ -221,7 +219,7 @@ _JS_API: dict[str, str] = {
         set_conversation_coding_agent set_conversation_thinking_effort set_gateway_account
         set_gateway_account_key set_gateway_auto_switch set_memory_settings set_model
         submit_feedback team_keeper_status test_key update_active_appearance_profile
-        update_plan update_plan_template usage_track verify_task write_task_artifact
+        update_plan update_plan_template usage_track
     """,
     "PanelApiAutomationsMixin": """
         add_workflow_folder approve_workflow_node_code check_workflow_expression

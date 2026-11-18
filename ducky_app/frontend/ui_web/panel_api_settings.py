@@ -445,42 +445,8 @@ class PanelApiSettingsMixin:
     def discord_list_bots(self) -> dict[str, Any]:
         return self._discord_plugin_call("list_bots")
 
-    def discord_save_bot(self, patch: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Create or update a bot profile. Optional ``token``; blank keeps existing."""
-        return self._discord_plugin_call("save_bot", patch=patch if isinstance(patch, dict) else {})
-
-    def discord_delete_bot(self, bot_id: str) -> dict[str, Any]:
-        return self._discord_plugin_call("delete_bot", bot_id=str(bot_id or ""))
-
-    def discord_status(self, bot_id: str = "") -> dict[str, Any]:
-        return self._discord_plugin_call("status", bot_id=str(bot_id or ""))
-
     def discord_list_channels(self, bot_id: str = "") -> dict[str, Any]:
         return self._discord_plugin_call("list_channels", bot_id=str(bot_id or ""))
-
-    def discord_debug(self, bot_id: str = "") -> dict[str, Any]:
-        """Why aren't commands responding? Poller alive, watched channel, last message seen."""
-        return self._discord_plugin_call("debug", bot_id=str(bot_id or ""))
-
-    def discord_open_channel(self, channel_id: str, bot_id: str = "") -> dict[str, Any]:
-        """Load a channel's recent history AND point the poller at it (one round trip)."""
-        return self._discord_plugin_call(
-            "open_channel",
-            channel_id=str(channel_id or ""),
-            bot_id=str(bot_id or ""),
-        )
-
-    def discord_open_portal(self, bot_id: str = "") -> dict[str, Any]:
-        """Open the bot's Dev Portal page (name + avatar editing) in the browser."""
-        return self._discord_plugin_call("open_portal", bot_id=str(bot_id or ""))
-
-    def discord_send(self, channel_id: str, text: str, bot_id: str = "") -> dict[str, Any]:
-        return self._discord_plugin_call(
-            "send",
-            channel_id=str(channel_id or ""),
-            text=str(text or ""),
-            bot_id=str(bot_id or ""),
-        )
 
     def discord_list_members(self, bot_id: str = "") -> dict[str, Any]:
         """Server member sidebar — gateway cache when warm, else REST fallback."""
@@ -1171,37 +1137,6 @@ class PanelApiSettingsMixin:
         s = _pa.PanelSettings.load()
         return create_task(title, goal=goal, conv_ids=conv_ids, project_root=s.uefn_project_root)
 
-    def add_task_phase(self, task_id: str, title: str, plan: str = "") -> dict[str, Any]:
-        from backend.agent.coding_agents.epic import add_phase
-
-        s = _pa.PanelSettings.load()
-        return add_phase(task_id, title, plan=plan, project_root=s.uefn_project_root)
-
-    def write_task_artifact(self, task_id: str, name: str, content: str, kind: str = "spec") -> dict[str, Any]:
-        from backend.agent.coding_agents.epic import write_artifact
-
-        s = _pa.PanelSettings.load()
-        return write_artifact(task_id, name, content, kind=kind, project_root=s.uefn_project_root)
-
-    def build_task_handoff(self, task_id: str, phase_id: str = "") -> dict[str, Any]:
-        from backend.agent.coding_agents.epic import build_handoff_prompt
-
-        s = _pa.PanelSettings.load()
-        return {"ok": True, "prompt": build_handoff_prompt(task_id, phase_id=phase_id, project_root=s.uefn_project_root)}
-
-    def verify_task(
-        self, task_id: str, phase_id: str = "", implementation_summary: str = ""
-    ) -> dict[str, Any]:
-        from backend.agent.coding_agents.epic import verify_against_plan
-
-        s = _pa.PanelSettings.load()
-        return verify_against_plan(
-            task_id,
-            phase_id=phase_id,
-            implementation_summary=implementation_summary,
-            project_root=s.uefn_project_root,
-        )
-
     def team_keeper_status(self, chat_id: str) -> dict[str, Any]:
         """The team keeper's state for this lead's plan (the Plan bar's Keeper pill)."""
         from frontend.ui_web import team_keeper
@@ -1445,41 +1380,6 @@ class PanelApiSettingsMixin:
             plan = delete_node(
                 chat_id,
                 node_id,
-                project_root=root if not (template_id or "").strip() else None,
-                template_id=(template_id or "").strip() or None,
-            )
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if plan.get("kind") != "template":
-            push_plan_updated(plan)
-        return {
-            "ok": True,
-            "plan": plan,
-            "progress": todo_progress(plan) if plan.get("kind") != "template" else None,
-            "outline": [
-                {"n": lab, "id": n["id"], "content": n["content"], "status": n.get("status")}
-                for lab, n in outline_numbers(plan.get("nodes"))
-            ],
-        }
-
-    def plan_move_node(
-        self,
-        chat_id: str = "",
-        node_id: str = "",
-        parent_id: str = "",
-        index: int = 0,
-        project_root: str | None = None,
-        template_id: str = "",
-    ) -> dict[str, Any]:
-        from backend.agent.coding_agents.plans import move_node, outline_numbers, push_plan_updated, todo_progress
-
-        root = project_root if project_root is not None else _pa.PanelSettings.load().uefn_project_root
-        try:
-            plan = move_node(
-                chat_id,
-                node_id,
-                parent_id=parent_id,
-                index=index,
                 project_root=root if not (template_id or "").strip() else None,
                 template_id=(template_id or "").strip() or None,
             )

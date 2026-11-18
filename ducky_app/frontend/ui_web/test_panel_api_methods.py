@@ -6,7 +6,6 @@ from frontend.ui_web.panel_api import PanelApi
 
 # Frozen at the mixin split. If you add a PanelApi method, add it here too.
 _PUBLIC_METHODS = frozenset({
-    'add_task_phase',
     'adopt_tab_into_this_focus_window',
     'agent_broker_call',
     'agent_send',
@@ -52,7 +51,6 @@ _PUBLIC_METHODS = frozenset({
     'browser_pane_state',
     'browser_runtime_info',
     'browser_site_security',
-    'build_task_handoff',
     'cache_font',
     'cancel_agent',
     'cancel_update',
@@ -137,16 +135,9 @@ _PUBLIC_METHODS = frozenset({
     'gateway_account_status',
     'detect_coding_agent_cli',
     'disconnect_verse_workflow',
-    'discord_debug',
-    'discord_delete_bot',
     'discord_list_bots',
     'discord_list_channels',
     'discord_list_members',
-    'discord_open_channel',
-    'discord_open_portal',
-    'discord_save_bot',
-    'discord_send',
-    'discord_status',
     'dock_focus_window_beside_main',
     'draft_skill_pack',
     'draft_subskill',
@@ -396,7 +387,6 @@ _PUBLIC_METHODS = frozenset({
     'pick_project_path',
     'plan_add_node',
     'plan_delete_node',
-    'plan_move_node',
     'plan_update_node',
     'plugin_cache_clear',
     'plugin_cache_get',
@@ -607,7 +597,6 @@ _PUBLIC_METHODS = frozenset({
     'urc_commit',
     'urc_push',
     'uses_native_window_chrome',
-    'verify_task',
     'voice_create_realtime_token',
     'voice_lane_settings',
     'voice_lane_turn',
@@ -630,7 +619,6 @@ _PUBLIC_METHODS = frozenset({
     'window_spotlight_replay',
     'window_input',
     'write_project_file',
-    'write_task_artifact'
 })
 
 
