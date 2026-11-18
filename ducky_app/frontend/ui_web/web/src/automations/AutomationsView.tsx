@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+// Workflow-editor-only rules ride in this lazy chunk; shared ones are in automations-shared.css.
+import "../theme/styles/automations.css";
 import { createPortal } from "react-dom";
 import { useWorkflowHistory, editableWorkflow } from "./useWorkflowHistory";
 import { flushUnsavedWorkflow, flushWorkflowEdits, guardUnsavedWorkflow, registerWorkflowEditor, reloadUnsavedWorkflow, setUnsavedWorkflow, unsavedWorkflow, UnsavedWorkflowPrompt } from "./unsavedWorkflow";

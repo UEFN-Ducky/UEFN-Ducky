@@ -1,3 +1,5 @@
+// Changes-view-only rules ride in this lazy chunk; shared ones are in changes-shared.css.
+import "../../theme/styles/changes.css";
 import { failedActionCopyText, readableLabel } from './ledgerPresentation';
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 // Static: chat tool cards already load it at boot, so a lazy split saved nothing.
@@ -67,7 +69,7 @@ const LIVE_EVENT_TYPES = new Set([
 ]);
 
 const RUN_HEADER_HEIGHT = 38;
-/** Matches the changes-item-in/out keyframes in changes.css. */
+/** Matches the changes-item-in/out keyframes in changes-shared.css. */
 const RUN_SLIDE_MS = 180;
 const CHANGE_ROW_HEIGHT = 30;
 const STEP_ROW_HEIGHT = 22;

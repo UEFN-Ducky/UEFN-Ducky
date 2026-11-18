@@ -1,4 +1,6 @@
 import type { JSX } from "react";
+// Settings-only rules ride in this lazy chunk; rules other screens use are in settings-shared.css.
+import "../theme/styles/settings.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   readLastSettingsSections,

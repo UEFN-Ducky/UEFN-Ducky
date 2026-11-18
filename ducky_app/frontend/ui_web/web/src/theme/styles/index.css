@@ -2,7 +2,7 @@
 @import "./ducky-parade.css";
 @import "./quick-open.css";
 @import "./layout.css";
-@import "./settings.css";
+@import "./settings-shared.css";
 @import "./catalog-slide.css";
 @import "./store.css";
 @import "./chat.css";
@@ -15,5 +15,5 @@
 @import "./ask-user.css";
 @import "./waiting.css";
 @import "./provider-usage.css";
-@import "./changes.css";
-@import "./automations.css";
+@import "./changes-shared.css";
+@import "./automations-shared.css";

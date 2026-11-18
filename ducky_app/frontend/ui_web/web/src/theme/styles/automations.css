@@ -1,76 +1,3 @@
-.aw-root {
-  --aw-list-w: 220px;
-  /* Ctrl + scroll zooms each panel on its own (--aw-z-list, --aw-z-toolbar, … set by the view). */
-  --aw-bar-h: calc(42px * var(--aw-z-toolbar, 1));
-  /* Folded, the Workflows list is one square icon button the height of the top bar. */
-  --aw-list-folded-w: var(--aw-bar-h);
-  --aw-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  display: flex;
-  container-type: inline-size;
-  overflow: hidden;
-  overflow: clip;
-  height: 100%;
-  min-height: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-size: 12px;
-  position: relative;
-}
-.aw-list {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  position: absolute;
-  z-index: 5;
-  top: 12px;
-  left: 12px;
-  width: var(--aw-list-w);
-  height: calc(100% - 24px);
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--panel-header);
-  box-shadow: var(--shadow-md);
-  font-size: var(--wf-list-text-size);
-  transition: width 220ms var(--aw-ease), height 260ms var(--aw-ease) 180ms, top 280ms ease, left 280ms ease, transform 280ms ease;
-}
-.aw-root.is-list-collapsed .aw-list {
-  width: var(--aw-list-folded-w);
-  height: var(--aw-bar-h);
-  border-radius: 14px;
-  --aw-pz: var(--aw-z-toolbar, 1);  /* its icon zooms with the top bar, not the open list */
-  transition: height 220ms var(--aw-ease), width 220ms var(--aw-ease) 180ms, top 280ms ease, left 280ms ease, transform 280ms ease;
-}
-/* Just the icon (its name is in the tooltip), sized like the top bar's pills. */
-.aw-root.is-list-collapsed .aw-list-head { flex-basis: 100%; height: 100%; padding: 0; }
-.aw-root.is-list-collapsed .aw-list-toggle { justify-content: center; height: 100%; padding: 0; border-radius: 13px; }
-.aw-root.is-list-collapsed .aw-list-title strong,
-.aw-root.is-list-collapsed .aw-list-head .aw-accordion-chevron { display: none; }
-.aw-root.is-list-collapsed .aw-list-icon svg { width: 18px; height: 18px; }
-/* Nothing open: the list sits in the middle so it is the thing to pick. Selecting one slides it left. */
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list {
-  top: 50%;
-  left: 50%;
-  width: min(640px, calc(100% - 48px));
-  height: min(680px, calc(100% - 48px));
-  transform: translate(-50%, -50%);
-  font-size: calc(var(--wf-list-text-size) + 2px);
-}
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-title strong { font-size: 18px; }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-icon svg { width: 20px; height: 20px; }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-row { min-height: 38px; padding-top: 8px; padding-bottom: 8px; }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-trigger svg { width: 16px; height: 16px; }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-section-toggle strong { font-size: calc(var(--wf-list-text-size) + 4px); }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-state { flex-basis: 10px; width: 10px; height: 10px; }
-.aw-list-head,
-.aw-log-dock-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-}
 .aw-log-copy {
   margin-left: auto;
   padding: 0;
@@ -85,26 +12,17 @@
   color: var(--text-muted);
   cursor: default;
 }
-.aw-list-head { flex: 0 0 40px; box-sizing: border-box; gap: 4px; padding: 0 8px 0 4px; }
 .aw-list-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; }
 .aw-list-title strong { font-size: 13px; }
 .aw-list-icon { display: inline-flex; color: var(--accent); }
 .aw-list-icon svg { width: 16px; height: 16px; }
 .aw-list-toggle { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .aw-list-toggle:hover { background: var(--bg-hover); }
-.aw-root.is-list-collapsed .aw-list-head { border-bottom: 0; }
-/* Folders by owner: Local, then each shared space. */
-.aw-folder-icon { display: inline-flex; color: var(--text-muted); }
-.aw-folder--shared .aw-folder-icon { color: var(--blue); }
 .aw-folder-lock { display: grid; place-items: center; width: 30px; height: 30px; color: var(--text-muted); }
 .aw-sync-error { color: var(--amber); }
-.aw-list-name { flex: 1; min-width: 0; }
-.aw-trigger { display: inline-grid; place-items: center; flex-shrink: 0; width: 16px; height: 16px; color: var(--text-muted); }
-.aw-trigger svg { width: 14px; height: 14px; }
 .aw-trigger--schedule { color: var(--green); }
 .aw-trigger--event { color: var(--purple); }
 .aw-trigger--chat { color: var(--blue); }
-.aw-trigger.is-elsewhere { opacity: 0.55; }
 .aw-import-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0; padding: 6px 8px; border: 1px dashed var(--border); border-radius: 8px; color: var(--text-muted); }
 .aw-import-row button { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
 /* A space reset on the server: the reason on its own line, then Upload my copy / Clear my copy. */
@@ -112,64 +30,11 @@
 .aw-reset-row > span { flex: 1 1 100%; }
 .aw-list-hint { margin: 8px; color: var(--text-muted); font-size: 11px; }
 .aw-readonly-note { position: absolute; z-index: 5; bottom: 60px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; max-width: calc(100% - 48px); margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text-muted); }
-.aw-list-sections { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 4px 48px; }
-.aw-list-sections[hidden] { display: none; }
-.aw-workflow-section + .aw-workflow-section { border-top: 1px solid var(--border); }
-.aw-section-head { display: flex; align-items: center; gap: 4px; padding: 4px; }
-.aw-section-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; padding: 8px 4px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
-.aw-section-toggle small { margin-left: auto; color: var(--text-muted); }
-.aw-section-toggle strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aw-section-toggle small, .aw-section-toggle .aw-accordion-chevron, .aw-section-toggle .aw-folder-icon { flex-shrink: 0; }
 .aw-section-chevron { color: var(--text-muted); }
-.aw-section-toggle:hover, .aw-list-row:hover { background: var(--bg-hover); }
-.aw-section-empty { padding: 8px; color: var(--text-muted); }
-.aw-list-ul { list-style: none; margin: 0; padding: 0 4px 8px; }
-.aw-list-ul[hidden] { display: none; }
-.aw-list-row { position: relative; }
-.aw-list-row > .aw-list-name { min-width: 0; overflow: hidden; white-space: nowrap; -webkit-mask-image: linear-gradient(90deg, black calc(100% - 50px), transparent calc(100% - 30px)); mask-image: linear-gradient(90deg, black calc(100% - 50px), transparent calc(100% - 30px)); }
 .aw-row-end { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 7px; }
-/* On / off: a lit dot instead of the word. */
-.aw-list-state { --aw-light: var(--wf-light-off); flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--aw-light); box-shadow: 0 0 6px color-mix(in srgb, var(--aw-light) 65%, transparent); }
-.aw-list-state.is-on { --aw-light: var(--wf-light-on); }
 .aw-icon-button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; color: inherit; background: transparent; cursor: pointer; }
 .aw-icon-button:hover { background: var(--bg-hover); }
-.aw-list-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.aw-list-row.is-active { background: var(--blue-dim); }
-.aw-acc { margin: 0 0 8px; }
-.aw-acc summary { cursor: pointer; font-weight: 600; padding: 4px 0; color: var(--text); }
-.aw-tile {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  margin: 4px 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-.aw-tile small { display: block; color: var(--text-muted); font-size: 11px; line-height: 1.4; margin-top: 3px; }
 .aw-tile-text { min-width: 0; }
-.aw-tile strong { font-size: 13px; font-weight: 600; }
-.aw-tile:hover { background: var(--bg-hover); border-color: var(--accent); }
-.aw-tile:disabled { opacity: 0.4; cursor: default; }
 .aw-main {
   flex: 1;
   display: flex;
@@ -178,112 +43,7 @@
   min-height: 0;
   position: relative;
 }
-.aw-toolbar { position: absolute; z-index: 5; top: 12px; left: calc(var(--aw-list-w) + 24px); right: 12px; min-height: var(--aw-bar-h); box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 5px 0 10px; border: 1px solid var(--border); border-radius: 16px; background: var(--panel-header); box-shadow: var(--shadow-md); animation: aw-header-down 280ms ease; transition: left 220ms var(--aw-ease); }
-.aw-root.is-list-collapsed .aw-toolbar { left: calc(var(--aw-list-folded-w) + 24px); transition: left 220ms var(--aw-ease) 180ms; }
-@keyframes aw-header-down { from { opacity: 0; transform: translateY(-120%); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .aw-list, .aw-root.is-list-collapsed .aw-list, .aw-toolbar, .aw-root.is-list-collapsed .aw-toolbar { transition: none; animation: none; }
-}
-.aw-toolbar-fields { flex: 1 1 180px; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.aw-name { field-sizing: content; width: auto; max-width: 100%; min-width: 4ch; box-sizing: border-box; background: transparent; border: 0; border-radius: 6px; padding: 2px 6px; color: var(--text); font: inherit; font-size: 16px; font-weight: 700; letter-spacing: 0.01em; text-overflow: ellipsis; }
-.aw-name:focus { outline: 1px solid var(--accent); }
-.aw-name.aw-description { color: var(--text-muted); font-size: 11px; font-weight: 400; }
-.aw-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: auto; }
-.aw-toolbar button:disabled { opacity: 0.35; cursor: default; }
-.aw-toolbar button:focus-visible, .aw-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Every action, plain button or dropdown, is the same borderless 32px icon button. */
-.aw-toolbar .aw-toolbar-actions > button,
-.aw-toolbar .aw-toolbar-actions .choice-dropdown,
-.aw-toolbar .aw-toolbar-actions .choice-dropdown .choice-dropdown-trigger {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  margin: 0;
-}
-.aw-toolbar .aw-toolbar-actions > button,
-.aw-toolbar .aw-toolbar-actions .choice-dropdown .choice-dropdown-trigger {
-  flex-shrink: 0;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  box-shadow: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-}
-.aw-toolbar .aw-toolbar-actions > button:hover:not(:disabled),
-.aw-toolbar .aw-toolbar-actions .choice-dropdown .choice-dropdown-trigger:hover:not(:disabled),
-.aw-toolbar .aw-toolbar-actions .choice-dropdown .choice-dropdown-trigger.is-open { background: var(--bg-hover); color: var(--text); }
-.aw-toolbar .aw-toolbar-actions > button[aria-pressed="true"] { color: var(--accent); }
-.aw-toolbar .aw-toolbar-actions svg { width: 17px; height: 17px; }
-.aw-toolbar .aw-toolbar-actions .aw-run-picker .choice-dropdown-trigger { display: flex; gap: 1px; }
-.aw-toolbar .aw-toolbar-actions .aw-run-picker .choice-dropdown-trigger > svg:last-child { width: 10px; height: 10px; }
 .aw-spin { display: inline-grid; animation: spin-slow 0.8s linear infinite; }
-/* Save: orange with a dot while edits are unsaved, a spinner while saving, a check just
-   after, red when the save failed. The phone menu button carries the same dot. */
-.aw-toolbar .aw-toolbar-actions > .aw-save, .aw-toolbar .aw-more-toggle { position: relative; }
-.aw-toolbar .aw-toolbar-actions > .aw-save.is-dirty { background: var(--warn-dim); color: var(--warn); }
-.aw-toolbar .aw-toolbar-actions > .aw-save.is-dirty:hover:not(:disabled) { background: color-mix(in srgb, var(--warn) 24%, transparent); color: var(--warn); }
-.aw-toolbar .aw-toolbar-actions > .aw-save.is-saved { color: var(--green); }
-.aw-toolbar .aw-toolbar-actions > .aw-save.is-error,
-.aw-toolbar .aw-toolbar-actions > .aw-save.is-error:hover:not(:disabled) { color: var(--danger); }
-.aw-save-dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--warn);
-  box-shadow: 0 0 0 2px var(--panel-header);
-  pointer-events: none;
-}
-/* Canvas: an Unreal-style graph. Every color and size here is a --wf-* variable from
-   Settings → Appearance → Workflows. The grid moves and scales with the nodes (--aw-grid,
-   --aw-pan-x/y come from the view); the minor lines drop out when far away. */
-.aw-board {
-  --aw-grid: var(--wf-grid-size);
-  --aw-grid-minor: var(--wf-grid-minor);
-  touch-action: none;
-  cursor: grab;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  overflow: clip;
-  position: relative;
-}
-.aw-board, .aw-preview {
-  background-color: var(--wf-canvas);
-  background-image:
-    linear-gradient(var(--wf-grid-major) 1px, transparent 1px),
-    linear-gradient(90deg, var(--wf-grid-major) 1px, transparent 1px),
-    linear-gradient(var(--aw-grid-minor, var(--wf-grid-minor)) 1px, transparent 1px),
-    linear-gradient(90deg, var(--aw-grid-minor, var(--wf-grid-minor)) 1px, transparent 1px);
-  background-size:
-    calc(var(--aw-grid, var(--wf-grid-size)) * 8) calc(var(--aw-grid, var(--wf-grid-size)) * 8),
-    calc(var(--aw-grid, var(--wf-grid-size)) * 8) calc(var(--aw-grid, var(--wf-grid-size)) * 8),
-    var(--aw-grid, var(--wf-grid-size)) var(--aw-grid, var(--wf-grid-size)),
-    var(--aw-grid, var(--wf-grid-size)) var(--aw-grid, var(--wf-grid-size));
-  background-position: var(--aw-pan-x, 0) var(--aw-pan-y, 0);
-}
-.aw-board.is-overview { --aw-grid-minor: transparent; }
-/* Dots: every dot the same size and color; far out they space out instead of crowding. */
-.aw-board.is-grid-dots {
-  --aw-dot-step: var(--aw-grid, var(--wf-grid-size));
-  background-image: radial-gradient(circle, var(--wf-grid-major) 1.2px, transparent 1.7px);
-  background-size: var(--aw-dot-step) var(--aw-dot-step);
-  background-position: calc(var(--aw-pan-x, 0px) - var(--aw-dot-step) / 2) calc(var(--aw-pan-y, 0px) - var(--aw-dot-step) / 2);
-}
-.aw-board.is-grid-dots.is-overview { --aw-dot-step: calc(var(--aw-grid, var(--wf-grid-size)) * 4); }
-.aw-board.is-grid-none { background-image: none; }
-.aw-world { position: absolute; transform-origin: 0 0; }
-
-/* Colors by kind, shared by cards, their wires, panel tabs and headers. A node's own
-   color (its details panel) is --aw-tint and wins over its kind. */
-.aw-node, .aw-edge, .aw-insp-tab, .aw-swatches { --aw-role-color: var(--wf-node-action); }
 .aw-node--starter, .aw-edge--from-starter, .aw-insp-tab--starter, .aw-swatches--starter { --aw-role-color: var(--wf-node-starter); }
 .aw-node--function, .aw-edge--from-function, .aw-insp-tab--function, .aw-swatches--function { --aw-role-color: var(--wf-node-function); }
 .aw-node--logic, .aw-edge--from-logic, .aw-insp-tab--logic, .aw-swatches--logic { --aw-role-color: var(--wf-node-logic); }
@@ -294,107 +54,11 @@
 .aw-tint--green { --aw-tint: var(--green); }
 .aw-tint--blue { --aw-tint: var(--blue); }
 .aw-tint--purple { --aw-tint: var(--purple); }
-
-/* Wires: a soft glow, a thin line in the color of the node it leaves, and an arrow that
-   travels it from node to node (DuckyOS). Branch and loop routes keep their own colors. */
-.aw-wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
-.aw-edge { --aw-edge-color: var(--aw-tint, var(--aw-role-color)); cursor: pointer; }
 .aw-edge--true { --aw-edge-color: var(--wf-wire-true); }
 .aw-edge--false { --aw-edge-color: var(--wf-wire-false); }
-.aw-edge--each { --aw-edge-color: var(--wf-wire-each); }
 .aw-edge--done { --aw-edge-color: var(--wf-wire-done); }
-.aw-wire { fill: none; stroke: var(--aw-edge-color); stroke-width: var(--wf-wire-width); stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; transition: stroke-width 140ms ease; }
-.aw-edge--each .aw-wire { stroke-dasharray: 6 5; }
-.aw-edge-glow { fill: none; stroke: var(--aw-edge-color); stroke-width: var(--wf-wire-glow); stroke-linecap: round; vector-effect: non-scaling-stroke; opacity: 0.16; pointer-events: none; transition: opacity 140ms ease; }
 .aw-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; pointer-events: stroke; }
-.aw-edge-arrow { fill: var(--aw-edge-color); filter: drop-shadow(0 0 3px var(--aw-edge-color)); pointer-events: none; }
-.aw-edge:hover .aw-edge-glow, .aw-edge.is-hot .aw-edge-glow { opacity: 0.4; }
-.aw-edge.is-hot .aw-wire { stroke-width: calc(var(--wf-wire-width) + 1px); }
 .aw-wire--draft { stroke: var(--wf-select); stroke-width: var(--wf-wire-width); stroke-dasharray: 6 4; }
-@media (prefers-reduced-motion: reduce) {
-  .aw-edge-arrow { display: none; }
-}
-
-/* Nodes: Unreal Blueprint cards. A colored title bar, a dark body with what the node does,
-   and its icon on the right. Selected cards get the selection outline. */
-.aw-node {
-  --aw-node-color: var(--aw-tint, var(--aw-role-color));
-  position: absolute;
-  z-index: 1;
-  width: 240px;
-  height: 82px;
-  touch-action: none;
-}
-.aw-node.is-selected { z-index: 2; }
-.aw-node-card {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-  height: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 1px solid var(--wf-node-border);
-  border-radius: 9px;
-  background: linear-gradient(180deg, var(--wf-node-body), color-mix(in srgb, var(--wf-node-body) 70%, var(--wf-canvas)));
-  box-shadow: 0 8px 22px color-mix(in srgb, var(--wf-canvas) 80%, transparent);
-  color: var(--wf-node-text);
-  cursor: grab;
-  user-select: none;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
-}
-.aw-node-card:hover { border-color: color-mix(in srgb, var(--wf-node-text) 24%, var(--wf-node-border)); }
-.aw-node.is-selected .aw-node-card {
-  border-color: var(--wf-select);
-  box-shadow: 0 0 0 1px var(--wf-select), 0 0 18px color-mix(in srgb, var(--wf-select) 35%, transparent), 0 8px 22px color-mix(in srgb, var(--wf-canvas) 80%, transparent);
-}
-.aw-node.is-wiring .aw-node-card { outline: 1px dashed var(--wf-select); outline-offset: 2px; }
-.aw-node-title {
-  flex: 0 0 34px;
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding: 0 12px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--aw-node-color) 72%, var(--wf-node-body)) 0%, color-mix(in srgb, var(--aw-node-color) 36%, var(--wf-node-body)) 55%, color-mix(in srgb, var(--aw-node-color) 12%, var(--wf-node-body)) 100%);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wf-node-text) 20%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--wf-canvas) 60%, transparent);
-}
-.aw-node-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--wf-node-title-size); font-weight: 700; line-height: 1.2; letter-spacing: 0.01em; text-shadow: 0 1px 2px color-mix(in srgb, var(--wf-canvas) 70%, transparent); }
-.aw-node-body { flex: 1; min-height: 0; padding: 8px 12px; }
-.aw-node-sub { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--wf-node-muted); font-size: var(--wf-node-text-size); line-height: 1.35; }
-.aw-node-title > strong { flex: 1 1 auto; }
-/* The node's icon: a faint mark in the card's top-right corner, tinted by the node's
-   color, behind the name and the pin labels (DuckyOS cards). It stays in the corner
-   however tall the card grows. */
-.aw-node-mark {
-  position: absolute;
-  z-index: 1;
-  top: 3px;
-  right: -4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 46px;
-  color: color-mix(in srgb, var(--aw-node-color) 75%, var(--wf-node-text));
-  opacity: var(--wf-node-mark-opacity, 22%);
-  transform: rotate(-10deg);
-  pointer-events: none;
-}
-.aw-node-mark .aw-node-icon { flex: none; width: 100%; height: 100%; color: inherit; }
-/* An emoji becomes a flat silhouette in the node's color (transparent glyph + its shadow). */
-.aw-node-mark .aw-node-icon .plugin-contrib-emoji { font-size: 38px; line-height: 1; color: transparent; text-shadow: 0 0 0 color-mix(in srgb, var(--aw-node-color) 75%, var(--wf-node-text)); }
-.aw-node-mark .aw-node-icon img { filter: saturate(0.5); }
-.aw-node-mark .aw-node-icon svg { width: 72%; height: 72%; }
-/* Name, pins and values stay above the mark. */
-.aw-node-title > strong, .aw-node-title > .aw-lock-badge, .aw-node-body > * { position: relative; z-index: 2; }
-.aw-node.is-selected .aw-node-mark, .aw-node-card:hover .aw-node-mark { opacity: calc(var(--wf-node-mark-opacity, 22%) * 1.5); }
-/* Zoomed far out: a shorter card (72 high, NODE_HEIGHT_COMPACT): its name, big, over its icon. */
-.is-overview .aw-node { height: 72px; }
-.is-overview .aw-node-title { flex-basis: 100%; }
-.is-overview .aw-node-title strong { font-size: calc(var(--wf-node-title-size) * 2.2); line-height: 1.1; }
-.is-overview .aw-node-body { display: none; }
-.is-overview .aw-node-mark { top: 6px; width: 60px; height: 60px; right: -4px; opacity: calc(var(--wf-node-mark-opacity, 22%) * 1.3); }
-.is-overview .aw-node-mark .aw-node-icon .plugin-contrib-emoji { font-size: 50px; }
 .is-overview .aw-port { top: 36px; }
 
 /* Ports: Unreal exec pins on the card edges, hollow until a wire is attached. */
@@ -425,21 +89,6 @@
 .aw-port:focus-visible { outline: 2px solid var(--wf-select); }
 .aw-port--in { left: 0; }
 .aw-port--out { left: 100%; }
-
-/* Settings → Appearance → Workflows preview: the canvas in miniature. */
-.aw-preview { position: relative; height: 170px; overflow: hidden; border-radius: 10px; border: 1px solid var(--border); --aw-grid: calc(var(--wf-grid-size) * 0.6); }
-.aw-preview-world { position: absolute; left: 14px; top: 10px; transform: scale(0.6); transform-origin: 0 0; }
-.aw-insp-form { display: flex; flex-direction: column; gap: 14px; padding: 16px; }
-.aw-insp-form label { display: flex; flex-direction: column; gap: 4px; }
-.aw-insp-form input,
-.aw-insp-form textarea,
-.aw-insp-form select {
-  background: var(--bg);
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 7px;
-}
 .aw-danger {
   background: var(--red-dim);
   color: var(--danger);
@@ -453,32 +102,9 @@
   inset: 0;
   z-index: 40;
 }
-.aw-spawn-menu {
-  position: fixed;
-  z-index: 41;
-  width: min(320px, calc(100vw - 16px));
-  max-height: min(512px, calc(100vh - 16px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--dropdown-bg);
-  box-shadow: var(--shadow-dropdown);
-  transform-origin: var(--aw-spawn-origin, 0 0);
-  animation: aw-spawn-grow 180ms var(--aw-ease, ease-out);
-}
-.aw-spawn-menu.is-from-below { animation-name: aw-spawn-rise; animation-duration: 220ms; }
-@keyframes aw-spawn-grow { from { opacity: 0; transform: scale(0.55); } to { opacity: 1; transform: none; } }
-@keyframes aw-spawn-rise { from { opacity: 0; transform: translateY(18px) scale(0.97); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .aw-spawn-menu { animation: none; }
-}
 .aw-spawn-searchbar { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); cursor: text; }
 .aw-spawn-searchbar svg { flex: 0 0 auto; width: 17px; height: 17px; transition: color 120ms ease; }
 .aw-spawn-searchbar:focus-within svg { color: var(--accent); }
-.aw-spawn-search { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; outline: none; background: transparent; box-shadow: none; color: var(--text); font: inherit; font-size: 15px; }
-.aw-spawn-search::placeholder { color: var(--text-muted); }
 .aw-spawn-hint {
   margin: 0 10px 4px;
   color: var(--text-muted);
@@ -490,43 +116,6 @@
   overflow-y: auto;
   padding: 0 10px 10px;
 }
-.aw-canvas-controls .aw-log-toggle { position: relative; margin-right: 2px; }
-.aw-canvas-controls .aw-log-toggle.is-open { background: var(--blue-dim); }
-.aw-log-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--fg-inverse);
-  font-size: 9px;
-  line-height: 14px;
-}
-.aw-log-dock {
-  position: absolute;
-  left: var(--aw-canvas-center);
-  bottom: 64px;
-  z-index: 6;
-  opacity: 0;
-  visibility: hidden;
-  transform: translate(-50%, 12px) scale(0.9);
-  transform-origin: calc(50% - 48px) calc(100% + 30px);  /* the Run log button, below */
-  pointer-events: none;
-  transition: left 260ms var(--aw-ease), opacity 160ms ease, transform 220ms var(--aw-ease), visibility 0s linear 220ms;
-  display: flex;
-  flex-direction: column;
-  width: min(420px, calc(100% - 24px));
-  max-height: calc(100% - 148px);
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
-  box-shadow: var(--shadow-md);
-}
-.aw-log-dock.is-open { opacity: 1; visibility: visible; transform: translate(-50%, 0); pointer-events: auto; transition: left 260ms var(--aw-ease), opacity 160ms ease, transform 240ms var(--aw-ease), visibility 0s; }
 .aw-log-clear { margin-left: 12px; }
 .aw-log-resize {
   flex-shrink: 0;
@@ -555,76 +144,16 @@
   user-select: text;
   -webkit-user-select: text;
 }
-.aw-log-dock ol { margin: 6px 10px 0; padding-left: 18px; }
-.aw-log-dock .is-err { color: var(--danger); }
-.aw-log-dock p { color: var(--text-muted); padding: 8px 10px; margin: 0; }
-
-.aw-node-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; color: var(--text); }
-.aw-node-icon img, .aw-node-icon svg { width: 100%; height: 100%; object-fit: contain; }
-.aw-node-icon .plugin-contrib-emoji { font-size: 24px; }
-/* The bottom toolbar, run log and notes stay put: side panels opening, folding or resizing never move them. */
-.aw-root { --aw-canvas-center: 50%; }
-.aw-canvas-controls { position: absolute; bottom: 12px; left: var(--aw-canvas-center); transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-md); z-index: 4; }
-.aw-canvas-controls > button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 32px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background 120ms ease, color 120ms ease; }
-.aw-canvas-controls > button svg { width: 17px; height: 17px; }
-.aw-canvas-controls > button:hover:not(:disabled), .aw-canvas-controls > button[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
-.aw-canvas-controls > button:disabled { opacity: 0.4; cursor: default; }
-.aw-canvas-controls > .aw-tool[aria-pressed="true"] { background: var(--bg-hover); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-light); }
-.aw-controls-sep { flex: 0 0 1px; align-self: stretch; margin: 6px 3px; background: var(--border); }
-.aw-canvas-controls > .aw-zoom { gap: 2px; font: inherit; font-variant-numeric: tabular-nums; }
 .aw-zoom-label { display: inline-flex; align-items: center; gap: 2px; min-width: 52px; justify-content: center; }
 .aw-spawn-section { display: flex; align-items: center; justify-content: space-between; margin: 10px 16px 6px; color: var(--text-muted); font-size: 12px; }
 .aw-spawn-section button { border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; }
-.aw-acc summary { display: flex; align-items: center; gap: 10px; padding: 8px 10px; font-size: 14.5px; }
-.aw-acc summary .aw-node-icon { width: 18px; height: 18px; flex-basis: 18px; }
-.aw-acc summary .aw-node-icon .plugin-contrib-emoji { font-size: 16px; }
 .aw-acc-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aw-acc-count { flex-shrink: 0; min-width: 26px; margin-left: auto; padding: 2px 8px; border-radius: 999px; background: var(--bg-hover); color: var(--text-muted); font-size: 12px; font-weight: 600; text-align: center; }
-.aw-insp-form input, .aw-insp-form textarea, .aw-insp-form select { min-width: 0; max-width: 100%; box-sizing: border-box; }
-.aw-insp-form textarea { resize: vertical; }
 .aw-log-dock-body { overflow-wrap: anywhere; }
-.aw-insp-form p { margin: 0; color: var(--text-muted); line-height: 1.5; }
-.aw-insp-form summary { cursor: pointer; padding: 6px 0; }
-@container (max-width: 680px) {
-  .aw-list { width: 180px; }
-  .aw-root.has-workflow .aw-list { top: 148px; height: calc(100% - 160px); }
-  .aw-toolbar, .aw-root.is-list-collapsed .aw-toolbar { left: 12px; }
-  .aw-resize--list { display: none; }
-  .aw-list-head { padding: 8px 10px; }
-  .aw-list-row { min-height: 36px; }
-  .aw-toolbar { gap: 6px; }
-  .aw-toolbar-fields { flex-basis: 100%; }
-  .aw-name { font-size: 16px; }
-  .aw-toolbar button, .aw-canvas-controls > button { min-height: 40px; }
-  .aw-canvas-controls { z-index: 6; gap: 3px; bottom: 8px; padding: 4px; }
-  .aw-canvas-controls > button { min-width: 40px; }
-  .aw-spawn-menu { max-height: calc(100dvh - 16px); }
-  .aw-spawn-search { font-size: 16px; }
-}
-@media (pointer: coarse) {
-  .aw-tile, .aw-acc summary { min-height: 44px; }
-}
 
 .aw-field { display: flex; flex-direction: column; min-width: 0; gap: 6px; }
-.aw-insp-form .aw-field-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); }
-.aw-insp-form { gap: 14px; padding: 12px; }
-.aw-insp-form input, .aw-insp-form textarea, .aw-insp-form .choice-dropdown-trigger { width: 100%; min-height: 34px; padding: 8px 10px; border-radius: 8px; background: var(--bg); font: inherit; }
-.aw-insp-form input:focus, .aw-insp-form textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
-.aw-insp-form textarea { line-height: 1.5; }
-.aw-insp-form .choice-dropdown-trigger-label { font-size: 12px; }
 .aw-field-hint { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
-.aw-field-error, .aw-required { color: var(--amber); }
-.aw-insp-form .aw-json-input { font-family: var(--font-mono); }
-@media (pointer: coarse) {
-  .aw-insp-form input, .aw-insp-form textarea, .aw-insp-form .choice-dropdown-trigger-label { font-size: 16px; }
-}
-
-.aw-insp-form .choice-dropdown { max-width: none; }
 .aw-text-save-error { position: absolute; bottom: 60px; left: 12px; padding: 8px 12px; border-radius: 8px; background: var(--card); color: var(--danger); z-index: 5; }
-
-/* Groups are Unreal comment boxes: a tinted frame around their nodes, the name above it
-   (kept readable at any zoom), and a colour picked in the details panel. */
-.aw-board:focus { outline: none; }
 .aw-group {
   --aw-group-color: var(--wf-group);
   position: absolute;
@@ -643,38 +172,7 @@
 .aw-group.is-nested { border-style: dashed; }
 .aw-group.is-selected { border-style: solid; border-color: var(--wf-select); box-shadow: 0 0 0 1px var(--wf-select); background: color-mix(in srgb, var(--aw-group-color) 14%, transparent); }
 .aw-group:focus-visible { outline: 2px solid var(--wf-select); outline-offset: 4px; }
-.aw-group-title { position: absolute; left: 0; bottom: 100%; padding-bottom: 6px; transform-origin: bottom left; width: max-content; max-width: 320px; pointer-events: none; }
-.aw-group-title > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 4px 10px; border-radius: 6px; background: color-mix(in srgb, var(--aw-group-color) 32%, var(--wf-node-body)); color: var(--wf-node-text); font-size: 16px; font-weight: 700; line-height: 1.3; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--wf-node-text) 15%, transparent); }
 .aw-selection-box { position: absolute; box-sizing: border-box; z-index: 8; pointer-events: none; border: 1px solid var(--wf-select); background: color-mix(in srgb, var(--wf-select) 12%, transparent); }
-
-/* Details panel: slides in from the right while something is selected. Several selected
-   items each get a tab across its top. */
-.aw-root { --aw-insp-w: 340px; }
-.aw-inspector {
-  position: absolute;
-  z-index: 6;
-  top: calc(var(--aw-bar-h) + 24px);
-  right: 12px;
-  bottom: 12px;
-  width: var(--aw-insp-w);
-  max-width: calc(100% - 24px);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--panel-header);
-  box-shadow: var(--shadow-md);
-  transform: translateX(calc(100% + 24px));
-  visibility: hidden;
-  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s linear 260ms;
-}
-.aw-inspector.is-open { transform: none; visibility: visible; transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), visibility 0s; }
-.aw-canvas-controls { transition: left 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-@media (prefers-reduced-motion: reduce) {
-  .aw-inspector, .aw-inspector.is-open, .aw-canvas-controls, .aw-log-dock, .aw-log-dock.is-open { transition: none; }
-}
 .aw-insp-head { flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--border); }
 .aw-insp-head strong { font-size: 13px; }
 .aw-insp-head-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
@@ -696,29 +194,7 @@
 .aw-insp-head-actions .is-danger, .aw-insp-actions .is-danger { color: var(--danger); }
 .aw-insp-head-actions .is-danger:hover:not(:disabled), .aw-insp-actions .is-danger:hover { background: var(--red-dim); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .aw-insp-actions button svg { width: 14px; height: 14px; }
-.aw-inspector button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .aw-insp-tabs { position: relative; flex-shrink: 0; display: flex; gap: 4px; padding: 8px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: thin; }
-.aw-insp-tab {
-  --aw-tab-color: var(--aw-tint, var(--aw-role-color));
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 170px;
-  padding: 5px 10px 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  box-shadow: inset 0 2px 0 var(--aw-tab-color);
-  color: var(--text-muted);
-  font: inherit;
-  cursor: pointer;
-}
-.aw-insp-tab > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aw-insp-tab:hover { color: var(--text); background: var(--bg-hover); }
-.aw-insp-tab[aria-selected="true"] { color: var(--text); background: var(--bg-hover); border-color: color-mix(in srgb, var(--aw-tab-color) 60%, var(--border)); }
-.aw-insp-tab .aw-node-icon { flex: 0 0 16px; width: 16px; height: 16px; }
-.aw-insp-tab .aw-node-icon .plugin-contrib-emoji { font-size: 14px; }
 .aw-insp-tab--group, .aw-insp-tab--edge { --aw-tab-color: var(--text-muted); }
 .aw-insp-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 14px; padding: 12px; }
 /* Details header: plain text, the icon on the right; Edit turns the text itself editable. */
@@ -728,10 +204,6 @@
 .aw-insp-name { margin: 0; color: var(--text); font-size: 19px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
 .aw-insp-desc { margin: 2px 0 0; color: var(--fg-dim, var(--text)); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .aw-insp-desc.is-default { color: var(--text-muted); font-style: italic; }
-.aw-insp-top-icon { grid-column: 2; grid-row: 1; display: grid; place-items: center; width: 44px; height: 44px; color: var(--text-muted); }
-.aw-insp-top-icon .aw-node-icon { flex: 0 0 40px; width: 40px; height: 40px; }
-.aw-insp-top-icon .aw-node-icon svg { width: 26px; height: 26px; }
-.aw-insp-top-icon .aw-node-icon .plugin-contrib-emoji { font-size: 34px; }
 .aw-insp-top-error { grid-column: 1 / -1; margin: 0; }
 .aw-insp-top-actions { grid-column: 1 / -1; display: flex; gap: 8px; }
 .aw-insp-top-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
@@ -746,7 +218,6 @@
 .aw-insp-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .aw-insp-settings { padding-top: 12px; border-top: 1px solid var(--border); }
 .aw-insp-fold { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
-.aw-inspector .aw-insp-form { padding: 0; }
 .aw-insp-section .aw-field-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); }
 .aw-insp-section > .aw-field > input, .aw-insp-section > .aw-field > textarea {
   width: 100%;
@@ -776,36 +247,13 @@
 @media (pointer: coarse) { .aw-backend-setup .is-primary { min-height: 40px; } }
 .aw-swatch { width: 26px; height: 26px; padding: 0; border: 2px solid transparent; border-radius: 50%; background: var(--aw-tint, var(--aw-group-color, var(--aw-role-color))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wf-canvas) 30%, transparent); cursor: pointer; }
 .aw-swatch[aria-checked="true"] { border-color: var(--text); box-shadow: inset 0 0 0 2px var(--panel-header); }
-.aw-insp-members { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.aw-insp-members button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.aw-insp-members button:hover { background: var(--bg-hover); }
-.aw-insp-members .aw-node-icon { flex: 0 0 18px; width: 18px; height: 18px; }
-.aw-insp-members .aw-node-icon .plugin-contrib-emoji { font-size: 15px; }
 .aw-insp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border); }
-@container (max-width: 680px) {
-  .aw-inspector { top: auto; left: 12px; width: auto; height: min(62%, 460px); transform: translateY(calc(100% + 24px)); }
-}
 @media (pointer: coarse) {
   .aw-insp-tab, .aw-insp-actions button, .aw-insp-head-actions > button { min-height: 40px; }
   .aw-insp-section > .aw-field > input, .aw-insp-section > .aw-field > textarea { font-size: 16px; }
 }
-
-/* Consistent accordion rows and an easy-to-focus node search. */
-.aw-accordion-chevron { display: inline-flex; flex: 0 0 16px; width: 16px; height: 16px; color: var(--text-muted); transition: transform 140ms ease; }
-.aw-accordion-chevron svg { width: 16px; height: 16px; }
-[aria-expanded="false"] > .aw-accordion-chevron, .aw-acc:not([open]) > summary .aw-accordion-chevron { transform: rotate(-90deg); }
-.aw-section-toggle { min-height: 36px; gap: 8px; }
-.aw-acc summary { min-height: 42px; padding: 8px 10px; border-radius: 8px; list-style: none; }
-.aw-acc summary::before { display: none; }
-.aw-acc summary::-webkit-details-marker { display: none; }
-.aw-acc summary:hover { background: var(--bg-hover); }
-.aw-acc[open] > summary { background: var(--bg-hover); color: var(--text); }
-.aw-acc:not([open]) > summary { color: var(--text-muted); }
-.aw-tile { flex-direction: column; align-items: stretch; gap: 3px; border: 0; box-shadow: none; background: transparent; width: calc(100% - 22px); margin: 2px 0 2px 22px; padding: 8px 10px; border-radius: 8px; }
 .aw-tile-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .aw-tile-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aw-acc .aw-tile .aw-node-icon { width: 15px; height: 15px; flex: 0 0 15px; }
-.aw-acc .aw-tile .aw-node-icon .plugin-contrib-emoji { font-size: 13px; }
 .aw-acc .aw-tile strong { font-size: 14px; }
 .aw-acc .aw-tile small { margin: 0; font-size: 12.5px; line-height: 1.45; }
 .aw-tile:hover { background: var(--bg-hover); }
@@ -823,8 +271,6 @@
 .aw-named-row input { min-width: 0; }
 .aw-named-add { display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; border: 0; border-radius: 6px; padding: 4px 8px; background: transparent; color: var(--accent); font: inherit; cursor: pointer; }
 .aw-named-add:hover { background: var(--bg-hover); }
-.aw-call-pick { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.aw-call-pick .choice-dropdown { flex: 1; min-width: 0; }
 .aw-field-hint code { font-size: 11px; }
 .aw-log-substeps { margin: 2px 0 2px; padding-left: 18px; color: var(--text-muted); }
 .aw-log-returned { margin: 6px 0 0; color: var(--text-muted); }
@@ -832,48 +278,22 @@
 
 /* Folders in the Workflows list */
 .aw-tree-item { list-style: none; }
-.aw-workflow-section > .aw-list-ul { position: relative; }
-.aw-tree-children { position: relative; padding: 0; }
-.aw-list-ul > .aw-section-empty, .aw-tree-children > .aw-section-empty { padding-left: calc(14px + var(--aw-level, 1) * 16px); }
-.aw-tree-folder { position: relative; display: flex; align-items: center; }
-.aw-tree-toggle { flex: 1; min-width: 0; display: flex; align-items: center; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.aw-tree-toggle .aw-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aw-tree-toggle small { margin-left: auto; color: var(--text-muted); }
-/* Hover buttons like the Duckies tree's: plain icons that open up at the end of the row. */
-.aw-tree-actions { display: flex; flex-shrink: 0; align-items: center; gap: 4px; max-width: 0; overflow: hidden; opacity: 0; pointer-events: none; transition: opacity 0.15s ease, max-width 0.15s ease; }
-.aw-tree-folder:hover .aw-tree-actions, .aw-tree-folder:focus-within .aw-tree-actions,
-.aw-section-head:hover .aw-section-actions, .aw-section-head:focus-within .aw-section-actions { max-width: 100px; padding: 0 2px; opacity: 1; pointer-events: auto; }
 .aw-tree-actions .aw-icon-button { width: 22px; height: 22px; border-radius: 6px; color: var(--muted); }
 .aw-tree-actions .aw-icon-button:hover { background: var(--btn-hover); color: var(--fg); }
 .aw-tree-actions .aw-icon-button svg { width: 14px; height: 14px; }
 .aw-tree-input { flex: 1; min-width: 0; }
-.aw-list-row[draggable="true"] { cursor: grab; }
 @media (hover: none) {
   .aw-tree-actions { max-width: 100px; opacity: 1; pointer-events: auto; }
 }
 .aw-check { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
 .aw-check input { margin-top: 2px; }
 .aw-check small { display: block; }
-
-/* Resize handles: a thin bar on the panel's inner edge that lights up when grabbed. */
-.aw-resize { position: absolute; z-index: 7; width: 12px; cursor: ew-resize; touch-action: none; }
-.aw-resize::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 44px; transform: translate(-50%, -50%); border-radius: 3px; background: var(--border-light); opacity: 0; transition: opacity 140ms ease, background 140ms ease, height 140ms ease; }
-.aw-resize:hover::after, .aw-resize:focus-visible::after, .aw-root.is-resizing .aw-resize::after { opacity: 1; }
-.aw-root.is-resizing .aw-resize::after, .aw-resize:focus-visible::after { background: var(--accent); height: 72px; }
 .aw-resize:focus-visible { outline: none; }
 .aw-resize--list { top: 28px; bottom: 28px; left: calc(var(--aw-list-w) + 6px); }
 .aw-resize--inspector { top: calc(var(--aw-bar-h) + 40px); bottom: 28px; right: calc(var(--aw-insp-w) + 6px); }
-.aw-root.is-resizing { cursor: ew-resize; user-select: none; }
-.aw-root.is-resizing .aw-list, .aw-root.is-resizing .aw-toolbar, .aw-root.is-resizing .aw-inspector,
-.aw-root.is-resizing .aw-canvas-controls, .aw-root.is-resizing .aw-log-dock { transition: none; }
 @container (max-width: 680px) {
   .aw-resize--inspector { display: none; }
 }
-
-/* Tools: Select draws a box on empty canvas, Hand moves the view (also while Space is held). */
-.aw-board.is-tool-select { cursor: default; }
-.aw-board.is-tool-hand { cursor: grab; }
-.aw-board.is-tool-hand:active { cursor: grabbing; }
 
 /* A short note under the toolbar (e.g. why a locked node didn't move). */
 .aw-toast {
@@ -897,18 +317,7 @@
   animation: aw-toast-in 200ms var(--aw-ease, ease-out);
 }
 .aw-toast svg { flex: 0 0 auto; width: 15px; height: 15px; color: var(--wf-select); }
-@keyframes aw-toast-in { from { opacity: 0; transform: translate(-50%, -8px); } to { opacity: 1; transform: translateX(-50%); } }
-
-/* Locks: a padlock on the card, the group title and the details header. */
-.aw-lock-badge { display: inline-grid; place-items: center; flex: 0 0 auto; width: 20px; height: 20px; margin-left: auto; border-radius: 6px; background: color-mix(in srgb, var(--wf-canvas) 45%, transparent); color: var(--wf-node-text); }
-.aw-lock-badge svg { width: 12px; height: 12px; }
-.aw-group-title .aw-lock-badge { margin-left: 2px; }
-.aw-group-title > span { display: inline-flex; align-items: center; gap: 6px; }
 .aw-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aw-group-title .aw-node-icon { flex: 0 0 18px; width: 18px; height: 18px; }
-.aw-group-title .aw-node-icon .plugin-contrib-emoji { font-size: 16px; }
-.aw-node.is-locked .aw-node-card { cursor: not-allowed; }
-.aw-node.is-locked .aw-node-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wf-node-text) 18%, transparent); background: repeating-linear-gradient(135deg, transparent 0 9px, color-mix(in srgb, var(--wf-node-text) 4%, transparent) 9px 10px); }
 .aw-group.is-locked { cursor: not-allowed; border-style: solid; }
 .aw-tab-lock { display: inline-flex; color: var(--wf-select); }
 .aw-tab-lock svg { width: 12px; height: 12px; }
@@ -917,15 +326,6 @@
 /* Toolbar on/off: a lit dot instead of a check mark. */
 .aw-light { --aw-light: var(--wf-light-off); display: block; width: 12px; height: 12px; border-radius: 50%; background: var(--aw-light); box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-light) 18%, transparent), 0 0 9px color-mix(in srgb, var(--aw-light) 70%, transparent); transition: background 160ms ease, box-shadow 160ms ease; }
 .aw-light.is-on { --aw-light: var(--wf-light-on); }
-.aw-toolbar .aw-toolbar-actions > .aw-onoff[aria-pressed="true"], .aw-toolbar .aw-toolbar-actions > .aw-onoff[aria-pressed="false"] { color: inherit; }
-
-/* Panels over the canvas: see-through, heavily blurred (Appearance → Workflows: Panels, Panel blur). */
-.aw-list, .aw-toolbar, .aw-inspector, .aw-canvas-controls, .aw-log-dock {
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
-  background: var(--wf-panel);
-  -webkit-backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-  backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-}
 
 /* Details header: icon buttons only. The padlock is lit while locked; delete is red. */
 .aw-insp-head { min-height: 46px; box-sizing: border-box; padding: 6px 6px 6px 14px; }
@@ -944,7 +344,6 @@
 .aw-icon-pick { padding: 0; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: background 120ms ease, box-shadow 120ms ease; }
 .aw-icon-pick:hover, .aw-icon-pick[aria-expanded="true"] { background: var(--bg-hover); box-shadow: inset 0 0 0 1px var(--border-light); }
 .aw-icon-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.aw-icon-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
 .aw-icon-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; }
 .aw-icon-grid button { aspect-ratio: 1; padding: 0; border: 0; border-radius: 6px; background: transparent; font-size: 18px; line-height: 1; cursor: pointer; }
 .aw-icon-grid button:hover { background: var(--bg-hover); }
@@ -956,29 +355,8 @@
 .aw-icon-own button:disabled { opacity: 0.45; cursor: default; }
 .aw-icon-reset { align-self: flex-start; }
 .aw-icon-own button:hover:not(:disabled), .aw-icon-reset:hover { background: var(--bg-hover); }
-
-/* Fit and an agent's focus glide the camera; what an agent touched lights up for a moment. */
-.aw-board.is-gliding { transition: background-position 320ms var(--aw-ease), background-size 320ms var(--aw-ease); }
-.aw-board.is-gliding .aw-world, .aw-board.is-gliding .aw-group-title { transition: transform 320ms var(--aw-ease); }
-.aw-node.is-flash .aw-node-card { animation: aw-flash 1.2s ease-in-out 2; }
-@keyframes aw-flash {
-  0%, 100% { box-shadow: 0 8px 22px color-mix(in srgb, var(--wf-canvas) 80%, transparent); }
-  50% { box-shadow: 0 0 0 2px var(--wf-select), 0 0 26px color-mix(in srgb, var(--wf-select) 60%, transparent); }
-}
 .aw-toast--note { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 .aw-toast--note svg { color: var(--accent); }
-@media (prefers-reduced-motion: reduce) {
-  .aw-board.is-gliding, .aw-board.is-gliding .aw-world, .aw-board.is-gliding .aw-group-title { transition: none; }
-  .aw-node.is-flash .aw-node-card { animation: none; box-shadow: 0 0 0 2px var(--wf-select); }
-}
-
-/* Ctrl + scroll over a panel zooms only that panel; the badge shows its size. */
-.aw-list { --aw-pz: var(--aw-z-list, 1); }
-.aw-toolbar { --aw-pz: var(--aw-z-toolbar, 1); }
-.aw-inspector { --aw-pz: var(--aw-z-details, 1); }
-.aw-canvas-controls { --aw-pz: var(--aw-z-controls, 1); }
-.aw-log-dock { --aw-pz: var(--aw-z-log, 1); }
-.aw-list > *, .aw-toolbar > *, .aw-inspector > *, .aw-canvas-controls > *, .aw-log-dock > * { zoom: var(--aw-pz, 1); }
 .aw-panel-zoom {
   position: fixed;
   z-index: 60;
@@ -1015,9 +393,6 @@
   transform: translateX(-50%);
   animation: aw-canvas-menu-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.12) both;
 }
-/* Zooms out of its button and back into it, like every menu (menu-pop), kept centred on it. */
-@keyframes aw-canvas-menu-in { from { opacity: 0; transform: translateX(-50%) scale(0.35); } 60% { opacity: 1; } to { opacity: 1; transform: translateX(-50%) scale(1); } }
-@keyframes aw-canvas-menu-out { from { opacity: 1; transform: translateX(-50%) scale(1); } to { opacity: 0; transform: translateX(-50%) scale(0.35); } }
 .aw-canvas-menu.is-closing { animation: aw-canvas-menu-out 0.15s cubic-bezier(0.5, 0, 0.9, 0.5) both; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .aw-canvas-menu, .aw-canvas-menu.is-closing { animation-duration: 1ms; } }
 .aw-canvas-menu > button { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; transition: background 120ms ease, color 120ms ease; }
@@ -1026,12 +401,6 @@
 .aw-canvas-menu kbd { padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--text-muted); font: inherit; font-size: 11px; }
 .aw-canvas-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 @media (prefers-reduced-motion: reduce) { .aw-canvas-menu { animation: none; } }
-
-/* Outline (next to the name): the open workflow's groups and nodes as a tree. */
-.aw-outline-button { flex-shrink: 0; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); cursor: pointer; transition: background 120ms ease, color 120ms ease; }
-.aw-outline-button:hover, .aw-outline-button[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
-.aw-outline-button svg { width: 17px; height: 17px; }
-.aw-outline { display: flex; flex-direction: column; min-height: 0; }
 .aw-outline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 12px 6px; }
 .aw-outline-head strong { font-size: 13px; }
 .aw-outline-head small, .aw-outline-empty { color: var(--text-muted); font-size: 11.5px; }
@@ -1040,68 +409,15 @@
 .aw-outline-tree { padding: 0 6px 8px; }
 .aw-outline-children { position: relative; }
 .aw-outline-children::before { content: ""; position: absolute; top: 0; bottom: 4px; left: calc(var(--aw-level, 0) * 16px + 15.5px); width: 1px; background: var(--border-light); pointer-events: none; }
-.aw-outline-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; box-sizing: border-box; padding: 4px 8px 4px calc(8px + var(--aw-level, 0) * 16px); border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
-.aw-outline-row:hover { background: var(--bg-hover); }
-.aw-outline-row.is-selected { background: var(--blue-dim); }
 .aw-outline-row--group { font-weight: 600; }
-.aw-outline-row .aw-node-icon { flex: 0 0 16px; width: 16px; height: 16px; }
-.aw-outline-row .aw-node-icon .plugin-contrib-emoji { font-size: 14px; }
 .aw-outline-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aw-outline-row small { flex-shrink: 0; color: var(--text-muted); font-size: 11px; font-weight: 400; }
 .aw-outline-lock { display: inline-flex; flex-shrink: 0; color: var(--wf-select); }
 .aw-outline-lock svg { width: 12px; height: 12px; }
-
-/* Several workflows picked in the list (Ctrl / Shift + click). */
-.aw-list-row.is-picked { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
-.aw-list-row.is-picked:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
-
-/* A run as it happens: the current step glows yellow and its wire runs thick and bright,
-   finished steps glow grey and the wires the run took glow green
-   (Appearance → Workflows: Current step, Finished step, Wires the run took). */
-.aw-node.is-run-running .aw-node-card { border-color: var(--wf-run); box-shadow: 0 0 0 2px var(--wf-run), 0 0 26px color-mix(in srgb, var(--wf-run) 55%, transparent); animation: aw-run-pulse 1.1s ease-in-out infinite; }
-@keyframes aw-run-pulse { 50% { box-shadow: 0 0 0 3px var(--wf-run), 0 0 42px color-mix(in srgb, var(--wf-run) 72%, transparent); } }
-.aw-node.is-run-ok .aw-node-card { border-color: color-mix(in srgb, var(--wf-run-done) 75%, var(--wf-node-border)); box-shadow: 0 0 0 1px var(--wf-run-done), 0 0 20px color-mix(in srgb, var(--wf-run-done) 45%, transparent), 0 8px 22px color-mix(in srgb, var(--wf-canvas) 80%, transparent); }
-.aw-node.is-run-error .aw-node-card { border-color: var(--danger); box-shadow: 0 0 0 2px var(--danger), 0 0 22px color-mix(in srgb, var(--danger) 50%, transparent); }
-.aw-node.is-run-stopped .aw-node-card { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber); }
-.aw-edge.is-live { --aw-edge-color: var(--wf-run); }
-.aw-edge.is-live .aw-wire { stroke-width: calc(var(--wf-wire-width) * 2.6); }
-.aw-edge.is-live .aw-edge-glow { stroke-width: calc(var(--wf-wire-glow) * 3); opacity: 0.55; animation: aw-wire-glow 0.9s ease-in-out infinite; }
-.aw-edge.is-live .aw-edge-arrow { filter: drop-shadow(0 0 6px var(--wf-run)); }
-@keyframes aw-wire-glow { 50% { opacity: 0.22; } }
-.aw-edge.is-passed { --aw-edge-color: var(--wf-run-path); }
-.aw-edge.is-passed .aw-wire { stroke-width: calc(var(--wf-wire-width) + 1px); }
-.aw-edge.is-passed .aw-edge-glow { stroke-width: calc(var(--wf-wire-glow) * 2); opacity: 0.45; }
-.aw-edge.is-passed .aw-edge-arrow { filter: drop-shadow(0 0 4px var(--wf-run-path)); }
-/* Details: what the selected step is doing in this run. */
-.aw-node-live { display: grid; gap: 6px; margin: 10px 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--wf-run-done) 40%, transparent); border-radius: 8px; }
-.aw-node-live.is-running { border-color: color-mix(in srgb, var(--wf-run) 60%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--wf-run) 22%, transparent); }
-.aw-node-live.is-error { border-color: var(--danger); }
-.aw-node-live.is-stopped { border-color: var(--amber); }
-.aw-node-live > strong { font-size: 0.78em; color: var(--wf-node-muted); }
-.aw-node-live-state { display: flex; align-items: center; gap: 6px; margin: 0; font-variant-numeric: tabular-nums; }
-.aw-node-live.is-running .aw-node-live-state { color: var(--wf-run); }
-.aw-node-live.is-ok .aw-node-live-state { color: var(--wf-run-path); }
 .aw-node-live-state svg { width: 13px; height: 13px; }
 .aw-node-live-error { margin: 0; color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
-.aw-node-live .aw-terminal-output { padding: 0; }
 .aw-live-line.is-running { color: var(--wf-run); }
 .aw-live-line.is-stopped { color: var(--amber); }
-.aw-toolbar .aw-toolbar-actions > .aw-stop { color: var(--danger); }
-.aw-toolbar .aw-toolbar-actions > .aw-stop:hover:not(:disabled) { background: var(--red-dim); color: var(--danger); }
-@media (prefers-reduced-motion: reduce) {
-  .aw-node.is-run-running .aw-node-card, .aw-edge.is-live .aw-edge-glow { animation: none; }
-}
-
-/* Add-node menu, outline and icon picker: the same see-through, blurred look as the panels. */
-.aw-spawn-menu, .dropdown-panel:has(> .aw-outline), .dropdown-panel:has(> .aw-icon-panel) {
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
-  background: var(--dropdown-bg);
-  -webkit-backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-  backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-}
-
-/* Local / shared row: its buttons open up at the end of the row on hover, like a folder's. */
-.aw-section-head { position: relative; }
 
 /* On/off switch inside a bottom-toolbar menu (Snap to grid). */
 .aw-canvas-menu > .aw-canvas-menu-toggle { gap: 14px; }
@@ -1111,33 +427,8 @@
 .aw-switch.is-on > span { transform: translateX(13px); background: var(--fg-inverse, white); }
 .aw-insp-head-actions > .aw-edit-toggle.is-on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 
-/* Top bar: the name on its own on the left, the buttons in a pill as long as they are, on the right. */
-.aw-root .aw-toolbar { flex-wrap: nowrap; gap: 12px; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; pointer-events: none; }
-.aw-toolbar > .aw-toolbar-fields, .aw-toolbar > .aw-toolbar-actions {
-  pointer-events: auto;
-  flex: 0 1 auto;
-  min-height: 42px;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: 14px;
-  background: var(--wf-panel);
-  -webkit-backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-  backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-  box-shadow: var(--shadow-md);
-}
-.aw-toolbar > .aw-toolbar-fields { min-width: 0; padding: 0 8px; }
-.aw-toolbar > .aw-toolbar-actions { flex-shrink: 0; margin-left: auto; padding: 0 5px; }
-
 /* Zoom popup: a small heading over the grid choices. */
 .aw-canvas-menu-heading { padding: 6px 10px 2px; color: var(--text-muted); font-size: 11px; font-weight: 500; }
-
-/* Hover card for a workflow in the list (the Duckies list's card, with the graph in miniature). */
-.aw-hover-card { display: flex; flex-direction: column; gap: 10px; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.aw-hover-card-icon { width: 36px; height: 36px; border-radius: 10px; background: var(--bg-hover); }
-.aw-hover-card-icon .aw-trigger { width: 20px; height: 20px; }
-.aw-hover-card-icon .aw-trigger svg { width: 18px; height: 18px; }
 .aw-hover-card-preview { overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--wf-canvas); }
 .aw-mini { display: block; width: 100%; height: 120px; }
 .aw-mini--empty { display: grid; place-items: center; color: var(--text-muted); font-size: 11px; }
@@ -1146,8 +437,7 @@
 .aw-mini-group { fill: color-mix(in srgb, var(--wf-group) 10%, transparent); stroke: color-mix(in srgb, var(--wf-group) 55%, transparent); stroke-width: 2; }
 .aw-hover-card-desc { margin: 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .aw-hover-card-foot { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; }
-.aw-hover-card-where { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.editor-tab-hover-card:has(.aw-hover-card) { width: 300px; margin-left: 12px; }  /* clear of the list panel edge */
+.aw-hover-card-where { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }  /* clear of the list panel edge */
 
 /* Typed pins. A card grows a
    24-unit row per pin pair; inputs on the left, outputs on the right, coloured by what they carry. */
@@ -1162,10 +452,6 @@
 .aw-pin-type--video { --aw-pin: var(--wf-pin-video); }
 .aw-pin-type--mesh { --aw-pin: var(--wf-pin-mesh); }
 .aw-pin-type--svg, .aw-pin-type--pdf, .aw-pin-type--file { --aw-pin: var(--wf-pin-file); }
-.aw-node-body--pins { display: flex; flex-direction: column; padding: 0; }
-.aw-node.is-data .aw-node-body--pins { padding-top: 6px; }
-.aw-node-exec-row { flex: 0 0 36px; display: flex; align-items: center; min-width: 0; padding: 0 22px; }
-.aw-node-exec-row .aw-node-sub { -webkit-line-clamp: 1; }
 .aw-pin-row { flex: 0 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; padding: 0 14px; color: var(--wf-node-text); font-size: var(--wf-node-text-size); }
 .aw-pin-label { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .aw-pin-label--in { flex: 1 1 auto; }
@@ -1240,19 +526,11 @@
 .aw-pin-out-file img { width: 88px; height: 66px; object-fit: contain; border-radius: 4px; }
 .aw-pin-out-file > span { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aw-pin-out-file > svg { width: 22px; height: 22px; color: var(--text-muted); }
-
-/* New workflow picker: shelves by category, cards with a description, never cut off. */
-.vtm--workflows .vtm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@media (max-width: 640px) { .vtm--workflows .vtm-grid { grid-template-columns: minmax(0, 1fr); } }
-.vtm--workflows .vtm-card { align-items: flex-start; min-width: 0; }
-.vtm--workflows .vtm-card-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; color: var(--text-muted); font-size: 12px; line-height: 1.35; }
-.vtm--workflows .vtm-badge--warn { color: var(--accent); }
 .vtm-shelves { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .vtm-shelf { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
 .vtm-shelf:hover { border-color: var(--border-light); color: var(--text); }
 .vtm-shelf.is-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
 .vtm-shelf-count { color: var(--text-muted); font-size: 11px; }
-.vtm--workflows .vtm-section { margin-top: 18px; }
 .vtm-section-title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--text); font-size: 13px; font-weight: 600; }
 .vtm-section-title > span { color: var(--text-muted); font-size: 12px; font-weight: 500; }
 .vtm-footer-note { margin-right: auto; color: var(--text-muted); font-size: 12px; }
@@ -1268,11 +546,6 @@
 .vtm-tree-row > svg { flex: none; width: 13px; height: 13px; color: var(--text-muted); }
 .vtm-tree-row--workflow { color: var(--text-muted); }
 .vtm-creator-preview .vtm-tree { max-height: 180px; }
-/* Save as template: as tall as its fields, beside a preview of what gets saved. */
-.modal-panel.vtm-modal.vtm-modal--compact { height: auto; }
-.vtm--workflows .vtm-creator { height: auto; }
-.vtm--workflows .vtm-creator-body { display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr); gap: 20px; padding: 20px 24px; }
-@media (max-width: 640px) { .vtm--workflows .vtm-creator-body { grid-template-columns: minmax(0, 1fr); } }
 .vtm-creator-preview { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .vtm-creator-preview .aw-mini { width: 100%; height: 150px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
 .vtm-creator-preview small { color: var(--text-muted); font-size: 12px; line-height: 1.35; }
@@ -1282,71 +555,8 @@
 .vtm-creator-icon { font-size: 22px; line-height: 1; }
 .vtm-textarea { min-height: 56px; resize: vertical; font-family: inherit; }
 .vtm-form-error { margin: 0; color: var(--red); font-size: 12px; }
-
-/* The Workflows list is the Duckies tree: the same columns (chevron, icon, name) at the
-   same places, 26px rows, its colors, hover lines, selection and rename box, and indent
-   guides under each folder's chevron that show while the list is hovered. Local / a
-   shared space is a top-level folder; --aw-level counts the folders above a row. */
-.aw-list { --aw-tree-pad-x: 14px; --aw-tree-step: 16px; }
-.aw-list-sections { padding: 2px 0 48px; }
-.aw-list-ul { padding: 0 0 2px; }
-.aw-section-head { gap: 0; padding: 0; }
-.aw-list-row, .aw-tree-folder, .aw-tree-toggle, .aw-section-toggle { border-radius: 0; }
-.aw-list-row,
-.aw-tree-folder,
-.aw-section-toggle,
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-row {
-  min-height: 26px; gap: 4px;
-  padding: 2px 9px 2px calc(var(--aw-tree-pad-x) + var(--aw-level, 0) * var(--aw-tree-step));
-  color: var(--fg-dim); font: inherit; font-size: var(--wf-list-text-size); font-weight: 400; line-height: 22px;
-  transition: none;
-}
-.aw-tree-toggle { gap: 4px; padding: 0; line-height: 22px; }
-.aw-section-toggle strong,
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-section-toggle strong { font-size: var(--wf-list-text-size); font-weight: 400; }
-.aw-section-toggle small, .aw-tree-toggle small { color: var(--muted); font-size: 11px; }
 .aw-folder-lock { width: 22px; height: 26px; }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list { font-size: var(--wf-list-text-size); }
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-state { flex-basis: 8px; width: 8px; height: 8px; }
-/* 2px from chevron to icon, as in the Duckies tree's folder rows. */
-.aw-list-sections .aw-accordion-chevron { flex: 0 0 16px; width: 16px; height: 22px; margin-right: -2px; align-items: center; justify-content: center; color: var(--muted); transition: transform 0.2s ease; }
-.aw-list-sections .aw-accordion-chevron.is-closed { transform: rotate(-90deg); }
-/* The icon column: a 22px box with a 16px glyph, like a duck or a group in the Duckies tree. */
-.aw-list-sections .aw-folder-icon,
-.aw-list-row > .aw-trigger,
-.aw-tree-folder > .aw-trigger { flex: 0 0 22px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; }
-.aw-list-sections .aw-folder-icon svg,
-.aw-list-row > .aw-trigger svg,
-.aw-tree-folder > .aw-trigger svg,
-.aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-row > .aw-trigger svg { width: 16px; height: 16px; }
-/* The end padding keeps the name clear of the on/off light; a section's buttons sit
-   inside its row like a folder's. */
-.aw-list-row, .aw-root:not(.has-workflow):not(.is-list-collapsed) .aw-list-row { padding-right: 26px; }
-.aw-section-head { padding-right: 9px; }
-.aw-section-toggle { padding-right: 0; }
-.aw-list-row > .aw-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-mask-image: none; mask-image: none; }
-.aw-tree-folder--editing { padding-top: 2px; padding-bottom: 2px; }
-/* Hover: the fill and a faint line above and below; selected (open or Ctrl/Shift-picked)
-   is the trees' selected color, no side bar. */
-.aw-list-row.is-picked { box-shadow: none; }
-.aw-list-row:hover, .aw-tree-folder:not(.aw-tree-folder--editing):hover, .aw-section-head:hover { background: var(--tab-hover); color: var(--fg); box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border); }
-.aw-section-head:hover .aw-section-toggle { color: var(--fg); }
 .aw-section-toggle:hover { background: transparent; }
-.aw-list-row.is-active,
-.aw-list-row.is-picked,
-.aw-list-row.is-picked:hover { background: var(--tab-active); color: var(--fg); }
-.aw-list-row:hover > .aw-trigger--manual, .aw-list-row.is-active > .aw-trigger, .aw-list-row.is-picked > .aw-trigger,
-.aw-tree-folder:hover .aw-folder-icon, .aw-section-head:hover .aw-folder-icon { color: var(--accent); }
-/* Indent guides, under the chevron of the folder they belong to. */
-.aw-workflow-section > .aw-list-ul::before,
-.aw-tree-children::before {
-  content: ""; position: absolute; top: 0; bottom: 0; z-index: 0;
-  left: calc(var(--aw-tree-pad-x) + var(--aw-level, 0) * var(--aw-tree-step) + 8px);
-  width: 1px; background: color-mix(in srgb, var(--fg) 22%, transparent);
-  opacity: 0; transition: opacity 0.15s ease; pointer-events: none;
-}
-.aw-list:hover .aw-workflow-section > .aw-list-ul::before,
-.aw-list:hover .aw-tree-children::before { opacity: 1; }
 
 /* No workflows yet: one obvious way in, plus a few ready-made pipelines one click away. */
 .aw-empty-hero { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 10px 12px 14px; padding: 22px 16px 18px; border: 1px dashed var(--border-light); border-radius: 12px; text-align: center; }
@@ -1377,113 +587,6 @@
 .aw-list-foot { display: flex; justify-content: center; padding: 10px 12px 12px; border-top: 1px solid var(--border); }
 .aw-list-foot > .aw-new-button { width: 100%; }
 
-/* Phones (narrow editor). The toolbar actions fold into "⋯" and the canvas tools into one
-   button at the bottom right; each opens as a labeled list that stays inside the editor.
-   The Workflows list folds to one icon under the toolbar, and opens as a sheet. */
-.aw-more-toggle, .aw-canvas-fab { display: none; }
-@container (max-width: 680px) {
-  .aw-toolbar { flex-wrap: nowrap; }
-  .aw-toolbar-fields { flex: 1 1 0; flex-basis: 0; }
-  /* Its own pill, like the name's (the bar between them lets taps through to the canvas). */
-  .aw-toolbar .aw-more-toggle {
-    pointer-events: auto;
-    flex-shrink: 0;
-    display: inline-grid;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    margin-left: auto;
-    padding: 0;
-    box-sizing: border-box;
-    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-    border-radius: 14px;
-    background: var(--wf-panel);
-    -webkit-backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-    backdrop-filter: blur(var(--wf-panel-blur)) saturate(140%);
-    box-shadow: var(--shadow-md);
-    color: var(--text-muted);
-    cursor: pointer;
-  }
-  .aw-toolbar .aw-more-toggle[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
-  .aw-toolbar .aw-toolbar-actions.is-open { pointer-events: auto; }
-  .aw-toolbar .aw-more-toggle svg { width: 20px; height: 20px; }
-
-  /* Labeled lists: each button shows its name next to its icon. */
-  .aw-toolbar-actions:not(.is-open), .aw-canvas-controls:not(.is-open) { display: none; }
-  .aw-toolbar .aw-toolbar-actions.is-open,
-  .aw-canvas-controls.is-open {
-    position: absolute;
-    z-index: 9;
-    flex-direction: column;
-    flex-wrap: nowrap;
-    align-items: stretch;
-    gap: 2px;
-    width: min(260px, calc(100cqw - 24px));
-    max-height: min(70dvh, 520px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    box-sizing: border-box;
-    padding: 6px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--panel-header);
-    box-shadow: var(--shadow-md);
-  }
-  .aw-toolbar .aw-toolbar-actions.is-open { top: calc(100% + 8px); right: 0; margin: 0; }
-  /* No blur here: a blurred box becomes the frame its fixed menus (Zoom, Help, Outline)
-     are placed and clipped in; without it they open over the list, on screen. */
-  .aw-canvas-controls.is-open { left: auto; right: 12px; bottom: 72px; transform: none; transition: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
-  .aw-toolbar .aw-toolbar-actions.is-open > button,
-  .aw-toolbar .aw-toolbar-actions.is-open .choice-dropdown,
-  .aw-toolbar .aw-toolbar-actions.is-open .choice-dropdown .choice-dropdown-trigger,
-  .aw-canvas-controls.is-open > button,
-  .aw-canvas-controls.is-open > .aw-outline-button { width: 100%; min-width: 0; height: auto; min-height: 44px; }
-  .aw-toolbar .aw-toolbar-actions.is-open > button,
-  .aw-toolbar .aw-toolbar-actions.is-open .choice-dropdown .choice-dropdown-trigger,
-  .aw-canvas-controls.is-open > button {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 12px;
-    padding: 0 12px;
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-  }
-  .aw-toolbar .aw-toolbar-actions.is-open > button::after,
-  .aw-toolbar .aw-toolbar-actions.is-open .choice-dropdown-trigger::after,
-  .aw-canvas-controls.is-open > button::after { content: attr(aria-label); }
-  .aw-canvas-controls.is-open > .aw-zoom::after { content: "Zoom and grid"; }
-  .aw-canvas-controls.is-open .aw-controls-sep { flex: 0 0 1px; align-self: stretch; margin: 4px 6px; }
-  .aw-canvas-controls.is-open .aw-log-badge { position: static; order: 2; margin-left: auto; transform: none; }
-  .aw-toolbar .aw-toolbar-actions.is-open > .aw-save .aw-save-dot { position: static; order: 2; margin-left: auto; box-shadow: none; }
-
-  .aw-canvas-fab {
-    position: absolute;
-    z-index: 7;
-    right: 12px;
-    bottom: 12px;
-    display: inline-grid;
-    place-items: center;
-    width: 48px;
-    height: 48px;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--card);
-    color: var(--text);
-    box-shadow: var(--shadow-md);
-    cursor: pointer;
-  }
-  .aw-canvas-fab[aria-expanded="true"] { background: var(--bg-hover); }
-  .aw-canvas-fab svg { width: 20px; height: 20px; }
-  .aw-root.has-inspector .aw-canvas-fab { display: none; }  /* the details sheet covers the bottom */
-
-  /* The Workflows list: folded = one icon under the toolbar; open = a sheet over the canvas. */
-  .aw-root.has-workflow:not(.is-list-collapsed) .aw-list { z-index: 8; top: calc(var(--aw-bar-h) + 26px); left: 12px; width: calc(100% - 24px); height: calc(100% - var(--aw-bar-h) - 38px); }
-  .aw-root.has-workflow.is-list-collapsed .aw-list { top: calc(var(--aw-bar-h) + 26px); }
-}
-
 /* Preview card: keep the picture on screen (run the steps that take it) or make another. */
 .aw-preview-actions { display: flex; gap: 6px; margin: 0 10px 10px; }
 .aw-preview-actions > button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--wf-node-text) 18%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--wf-node-text) 6%, transparent); color: var(--wf-node-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
@@ -1506,10 +609,6 @@
 .aw-fold > summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); transition: transform 140ms ease; }
 .aw-fold[open] > summary::before { transform: rotate(45deg); }
 .aw-fold[open] > summary { margin-bottom: 8px; }
-.aw-terminal-output { padding: 8px; min-width: 0; color: var(--fg); }
-.aw-terminal-output > strong { display: block; font-size: 11px; margin-bottom: 4px; }
-.aw-terminal-output pre { margin: 0; padding: 8px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; background: var(--bg); font: 11px/1.4 monospace; }
-.aw-terminal-output.is-compact pre { height: 106px; max-height: 106px; }
 
 /* Node details: Settings | Code under the name. */
 .aw-insp-subtabs { flex-shrink: 0; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); }
@@ -1519,11 +618,6 @@
 .aw-insp-subpanel { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 @media (pointer: coarse) { .aw-insp-subtab { min-height: 40px; } }
 
-/* Custom code: the </> mark on cards, tabs and the Code strip. */
-.aw-code-badge { display: inline-grid; place-items: center; flex: 0 0 auto; padding: 0 5px; min-width: 22px; height: 18px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); font-family: var(--font-mono); font-size: 10px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
-.aw-node-title > .aw-code-badge { position: relative; z-index: 2; margin-left: 6px; background: color-mix(in srgb, var(--wf-canvas) 45%, transparent); color: var(--wf-node-text); }
-.aw-node-title > .aw-code-badge + .aw-lock-badge { margin-left: 4px; }
-
 /* Code tab: the strip, the editor, its buttons, Test. */
 .aw-code-tab { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .aw-code-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.45; }
@@ -1531,8 +625,6 @@
 .aw-code-strip > .aw-code-chip-wrap, .aw-code-strip > .aw-code-chip { margin-left: auto; }
 .aw-code-note, .aw-code-why { margin: 0; }
 .aw-code-editor { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); overflow: hidden; }
-.aw-code-monaco { height: 340px; }
-.aw-inspector.is-wide .aw-code-monaco { height: min(62vh, 640px); }
 .aw-code-plain { display: block; min-height: 280px; padding: 8px 10px; color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; tab-size: 2; white-space: pre; overflow: auto; resize: vertical; }
 .aw-code-plain:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 @media (pointer: coarse) { .aw-code-plain { font-size: 14px; } }
@@ -1603,66 +695,5 @@ button.aw-code-chip { cursor: pointer; }
 /* Run log: a failed custom code step opens its code. */
 .aw-log-step-link { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .aw-log-step-link:hover { text-decoration-style: solid; }
-
-/* ── Fit the app's floating layout: every panel over the canvas sits one app gap (6px) in
-   from the edges and from each other, with the app's card corners. ── */
-.aw-root { --aw-inset: 6px; --aw-radius: var(--radius-sm, 8px); }
-.aw-list { top: var(--aw-inset); left: var(--aw-inset); height: calc(100% - var(--aw-inset) * 2); border-radius: var(--aw-radius); }
-.aw-root.is-list-collapsed .aw-list { border-radius: var(--aw-radius); }
-.aw-toolbar { top: var(--aw-inset); left: calc(var(--aw-list-w) + var(--aw-inset) * 2); right: var(--aw-inset); }
-.aw-root.is-list-collapsed .aw-toolbar { left: calc(var(--aw-list-folded-w) + var(--aw-inset) * 2); }
-.aw-toolbar > .aw-toolbar-fields, .aw-toolbar > .aw-toolbar-actions { border-radius: var(--aw-radius); }
-.aw-canvas-controls { bottom: var(--aw-inset); border-radius: var(--aw-radius); }
-.aw-inspector {
-  top: calc(var(--aw-bar-h) + var(--aw-inset) * 2);
-  right: var(--aw-inset);
-  bottom: var(--aw-inset);
-  max-width: calc(100% - var(--aw-inset) * 2);
-  border-radius: var(--aw-radius);
-}
 .aw-log-dock { border-radius: var(--aw-radius); }
-
-/* The bottom toolbar, tighter: less room between the buttons and around the zoom. */
-.aw-canvas-controls { gap: 2px; padding: 4px; }
-.aw-canvas-controls > button { min-width: 30px; padding: 0 5px; }
-.aw-controls-sep { margin: 6px 2px; }
 .aw-zoom-label { min-width: 34px; }
-
-/* Touch screens pan and pick with fingers: no Select or Hand tool (or the line after them). */
-@media (pointer: coarse) {
-  .aw-canvas-controls > .aw-tool,
-  .aw-canvas-controls > .aw-tool + .aw-tool + .aw-controls-sep { display: none; }
-}
-
-@container (max-width: 680px) {
-  .aw-toolbar { left: var(--aw-inset); }
-  /* Folded, the list is one square button at the top left, on the name's row. */
-  .aw-root.is-list-collapsed .aw-toolbar { left: calc(var(--aw-list-folded-w) + var(--aw-inset) * 2); }
-  .aw-root.has-workflow.is-list-collapsed .aw-list {
-    top: var(--aw-inset);
-    left: var(--aw-inset);
-    width: var(--aw-list-folded-w);
-    height: var(--aw-bar-h);
-  }
-  /* Open, it is a sheet under the name. */
-  .aw-root.has-workflow:not(.is-list-collapsed) .aw-list {
-    top: calc(var(--aw-bar-h) + var(--aw-inset) * 2);
-    left: var(--aw-inset);
-    width: calc(100% - var(--aw-inset) * 2);
-    height: calc(100% - var(--aw-bar-h) - var(--aw-inset) * 3);
-  }
-  .aw-inspector { left: var(--aw-inset); }
-  .aw-toolbar .aw-more-toggle { border-radius: var(--aw-radius); }
-  /* The bottom toolbar stays as it is on a wide screen (not folded into one button), hidden
-     only while the details sheet covers the bottom. */
-  .aw-canvas-fab { display: none; }
-  .aw-canvas-controls:not(.is-open) { display: flex; }
-  .aw-root.has-inspector .aw-canvas-controls { display: none; }
-  .aw-canvas-controls { bottom: var(--aw-inset); gap: 2px; padding: 4px; }
-  .aw-canvas-controls > button { min-width: 34px; }
-  /* The top bar's labeled list: buttons count their padding, so nothing scrolls sideways. */
-  .aw-toolbar .aw-toolbar-actions.is-open { overflow-x: hidden; border-radius: var(--aw-radius); }
-  .aw-toolbar .aw-toolbar-actions.is-open > button,
-  .aw-toolbar .aw-toolbar-actions.is-open .choice-dropdown,
-  .aw-toolbar .aw-toolbar-actions.is-open .choice-dropdown .choice-dropdown-trigger { box-sizing: border-box; max-width: 100%; }
-}
