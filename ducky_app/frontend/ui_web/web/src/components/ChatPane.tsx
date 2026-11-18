@@ -12,6 +12,7 @@ import type {
   ChatTab,
   ContextUsage,
   FolderItem,
+  LinkedAgent,
   MessageAttachmentDto,
   SessionFile,
 } from "../types/panel";
@@ -91,6 +92,24 @@ import {
 } from "./ChatPlanCard";
 
 export { useChatPlan } from "./ChatPlanCard";
+
+const NO_LINKED: LinkedAgent[] = [];
+
+function sameLinked(a: LinkedAgent[], b: LinkedAgent[]): boolean {
+  return a.length === b.length && a.every((x, i) =>
+    x.childConvId === b[i].childConvId && x.title === b[i].title && x.status === b[i].status);
+}
+
+/** Running linked agents, the same array while its content is equal, so the memoized list holds. */
+export function useWaitingLinked(linkedAgents: LinkedAgent[], isGroup: boolean): LinkedAgent[] {
+  const last = useRef<LinkedAgent[]>(NO_LINKED);
+  return useMemo(() => {
+    const next = isGroup ? NO_LINKED : linkedAgents.filter((a) => a.status === "running");
+    if (sameLinked(next, last.current)) return last.current;
+    last.current = next.length ? next : NO_LINKED;
+    return last.current;
+  }, [linkedAgents, isGroup]);
+}
 export { COMPOSER_BUTTONS } from "./ChatComposer";
 
 interface ChatPaneProps {
@@ -276,9 +295,7 @@ export function ChatPane({
   const turnTimer = useChatTurnTimerState(chat.id);
   const linkedAgents = useLinkedAgents(chat.id, messages, allChats);
   // Group roundtables speak in-place — never park the feed on "waiting for linked".
-  const waitingLinked = chat.isGroup
-    ? []
-    : linkedAgents.filter((a) => a.status === "running");
+  const waitingLinked = useWaitingLinked(linkedAgents, Boolean(chat.isGroup));
   const isWaitingOnLinked = !chat.isGroup && agentRunning && waitingLinked.length > 0;
   // One cached roster per group (shared with the team bar and sidebar); the chat's own
   // copy shows until the store answers.
