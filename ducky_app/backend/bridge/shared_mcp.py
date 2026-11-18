@@ -28,6 +28,7 @@ from typing import Any
 from backend.bridge.call_limits import (  # noqa: F401 — re-exported for readers
     PLUGIN_CALL_LIMIT_S, QUICK_READ_LIMIT_S, QUICK_READS, QUICK_TOOL_LIMIT_S, QUICK_TOOLS, WAITS_BY_DESIGN,
 )
+from backend.bridge.call_mode import calling_mode as _calling_mode
 from backend.bridge.stuck_watch import _CallTimedOut, _watched
 
 _ENV = "UEFN_DUCKY_SHARED_MCP"
@@ -647,24 +648,6 @@ def _is_sync_tool(mcp: Any, name: str) -> bool:
     tools = getattr(getattr(mcp, "_tool_manager", None), "_tools", None) or {}
     tool = tools.get(name)
     return tool is not None and getattr(tool, "is_async", True) is False
-
-
-def _calling_mode(ident: Any) -> str:
-    """Read the host-written turn checkpoint, never a client-supplied mode."""
-    from frontend.ui_web.chats.conversations import load_conversation
-
-    conv_id = getattr(ident, "conv_id", "")
-    run_id = getattr(ident, "run_id", "")
-    external = getattr(ident, "coding_agent", "ducky") in {"codex", "claude_code", "cursor"}
-    if conv_id and run_id:
-        conv = load_conversation(conv_id)
-        for message in reversed(getattr(conv, "messages", []) or []):
-            if message.get("role") == "assistant" and message.get("run_id") == run_id:
-                # Older Agent checkpoints predate requested_mode.
-                return message.get("requested_mode") or "agent"
-    if external:
-        raise ValueError("Cannot determine calling chat mode: no matching host turn checkpoint")
-    return "agent"
 
 
 def _in_own_thread(fn: Any, thread: dict[str, Any], name: str) -> asyncio.Future[Any]:

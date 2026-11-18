@@ -4,9 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.bridge import shared_mcp
+from backend.bridge import call_mode, shared_mcp
 from backend.agent.run_context import current_mode
 from backend.agent.toolsets import plan_safe
+
+
+@pytest.fixture(autouse=True)
+def _fresh_modes(monkeypatch):
+    monkeypatch.setattr(call_mode, "_modes", {})
 
 
 class ModeMcp:
@@ -61,15 +66,17 @@ def test_external_mode_policy(monkeypatch, agent, mode, sync):
     asyncio.run(check())
 
 
-def test_mode_is_reloaded_for_every_call(monkeypatch):
+def test_each_run_reads_its_own_mode(monkeypatch):
     conv = SimpleNamespace(messages=[{"role": "assistant", "run_id": "run", "requested_mode": "agent"}])
     monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", lambda cid: conv)
     ident = shared_mcp.identity_from_payload({"conv_id": "chat", "run_id": "run", "coding_agent": "codex"})
     mcp = ModeMcp(["workspace_write_file"], False)
     async def check():
         assert not (await shared_mcp._call_tool(mcp, "workspace_write_file", {}, ident)).get("isError")
-        conv.messages[0]["requested_mode"] = "ask"
-        assert (await shared_mcp._call_tool(mcp, "workspace_write_file", {}, ident))["isError"]
+        # The next turn is a new run in Ask mode: its calls are held to Ask.
+        conv.messages.append({"role": "assistant", "run_id": "run2", "requested_mode": "ask"})
+        ask = shared_mcp.identity_from_payload({"conv_id": "chat", "run_id": "run2", "coding_agent": "codex"})
+        assert (await shared_mcp._call_tool(mcp, "workspace_write_file", {}, ask))["isError"]
         assert mcp.calls == [("workspace_write_file", "agent")]
     asyncio.run(check())
 
