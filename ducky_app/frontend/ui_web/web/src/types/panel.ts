@@ -3550,40 +3550,8 @@ export interface PanelApi {
     faultAction?: string;
   }): Promise<{ ok: boolean; path?: string; error?: string }>;
   duckyos_get_status(): Promise<DuckyOSAccountStatus>;
-  duckyos_agent_caps?(include_catalog?: boolean): Promise<{
-    ok?: boolean;
-    denied?: string[];
-    settings?: AgentCapsSettings;
-    denied_count?: number;
-    catalog?: {
-      categories?: Array<{
-        id?: string;
-        label?: string;
-        tools?: Array<{ name?: string; description?: string; destructive?: boolean }>;
-      }>;
-    };
-  }>;
-  duckyos_agent_caps_set?(
-    denied?: string[],
-    settings?: AgentCapsSettings,
-  ): Promise<{
-    ok?: boolean;
-    denied?: string[];
-    settings?: AgentCapsSettings;
-    denied_count?: number;
-    catalog?: {
-      categories?: Array<{
-        id?: string;
-        label?: string;
-        tools?: Array<{ name?: string; description?: string; destructive?: boolean }>;
-      }>;
-    };
-  }>;
   duckyos_login(base_url?: string): Promise<DuckyOSAccountStatus>;
   duckyos_cancel_login(): Promise<DuckyOSAccountStatus>;
-  /** @deprecated Verification happens in the browser. */
-  duckyos_submit_code(code?: string): Promise<DuckyOSAccountStatus>;
-  duckyos_logout(): Promise<DuckyOSAccountStatus>;
   duckyos_list_pcs?(): Promise<{
     ok?: boolean;
     error?: string;
@@ -3623,7 +3591,6 @@ export interface PanelApi {
   }>;
   /** Pull from your other UEFN Duckies now. */
   ducky_sync_now?(): Promise<{ ok?: boolean }>;
-  duckyos_open_admin(): Promise<void>;
   /** Opens a path of the signed-in account's website. */
   duckyos_open_site?(path?: string): Promise<{ ok?: boolean; url?: string; error?: string }>;
   remote_status?(): Promise<RemoteAccessStatus>;
@@ -3682,11 +3649,6 @@ export interface PanelApi {
     ok?: boolean;
     images?: Array<{ name: string; media_url?: string; prompt?: string; gateway?: string; model?: string }>;
   }>;
-  get_generated_image_attachment?(name: string): Promise<{
-    ok?: boolean;
-    error?: string;
-    attachment?: MessageAttachmentDto;
-  }>;
   list_workflow_templates?(): Promise<{ ok?: boolean; templates?: AutomationTemplateDto[] }>;
   save_workflow_template?(
     name: string,
@@ -3707,8 +3669,6 @@ export interface PanelApi {
   workflow_owners?(refresh?: boolean): Promise<WorkflowOwnersDto>;
   workflow_sync?(force?: boolean, space_id?: string, upload?: boolean): Promise<{ ok?: boolean; started?: boolean; error?: string }>;
   import_local_workflows?(): Promise<{ ok?: boolean; moved?: number; error?: string }>;
-  /** Opens the shared space's Workflows page on the web. */
-  workflow_open_web?(space_id: string): Promise<{ ok?: boolean; url?: string; error?: string }>;
   get_workflow?(workflow_id: string): Promise<{ ok?: boolean; error?: string; workflow?: AutomationDto }>;
   /** base_updated: the `updated` of the copy the editor changed; a newer stored one is
    *  kept and comes back with conflict: true instead of being overwritten. */
@@ -4039,7 +3999,6 @@ export interface PanelApi {
   get_changeset_entry_contents?(run_id: string, seq: number): Promise<{ path: string; before: string | null; after: string | null }>;
   revert_changeset_entry?(run_id: string, seq: number, force?: boolean, step?: boolean): Promise<ChangesetRevertResult>;
   revert_changeset?(run_id: string, force?: boolean, program?: string): Promise<ChangesetRevertResult>;
-  export_changeset?(run_id: string): Promise<Record<string, unknown>>;
   archive_changesets?(
     conv_id?: string,
     group_id?: string,
@@ -4118,52 +4077,9 @@ export interface PanelApi {
     error?: string;
     plugin_disabled?: boolean;
   }>;
-  discord_save_bot(patch: {
-    id?: string;
-    bot_id?: string;
-    create?: boolean;
-    label?: string;
-    guild_id?: string;
-    post_as?: string;
-    allowed_ids?: string;
-    prefix?: string;
-    enabled?: boolean;
-    show_offline?: boolean;
-    token?: string;
-  }): Promise<{
-    ok: boolean;
-    bot?: DiscordBotDto;
-    status?: DiscordStatusDto;
-    error?: string;
-  }>;
-  discord_delete_bot(bot_id: string): Promise<{ ok: boolean; id?: string; error?: string }>;
-  discord_status(bot_id?: string): Promise<DiscordStatusDto>;
   discord_list_channels(
     bot_id?: string,
   ): Promise<{ ok: boolean; bot_id?: string; channels?: DiscordChannelDto[]; error?: string }>;
-  discord_debug(bot_id?: string): Promise<{
-    bot_id?: string;
-    watching_channel_id?: string;
-    watching_channel_name?: string;
-    poller_alive?: boolean;
-    last_poll_age_s?: number | null;
-    last_seen?: { author?: string; content_len?: number; preview?: string; ts?: string } | null;
-  }>;
-  discord_open_channel(
-    channel_id: string,
-    bot_id?: string,
-  ): Promise<{
-    ok: boolean;
-    channel_id?: string;
-    bot_id?: string;
-    messages?: DiscordMessageDto[];
-    error?: string;
-  }>;
-  discord_send(
-    channel_id: string,
-    text: string,
-    bot_id?: string,
-  ): Promise<{ ok: boolean; message?: DiscordMessageDto; bot_id?: string; error?: string }>;
   discord_list_members(bot_id?: string): Promise<{
     ok: boolean;
     guild_id?: string;
@@ -4172,7 +4088,6 @@ export interface PanelApi {
     ready?: boolean;
     error?: string;
   }>;
-  discord_open_portal(bot_id?: string): Promise<{ ok: boolean; url?: string; bot_id?: string }>;
   save_agent_settings(
     patch: Partial<
       PanelSettingsDto & { keys?: Record<string, string>; discord_name?: string; discord_allowed_ids?: string }
@@ -4256,14 +4171,6 @@ export interface PanelApi {
   ): Promise<{ ok: boolean; logged_in?: boolean; message?: string; error?: string }>;
   list_tasks(): Promise<{ tasks: Record<string, unknown>[] }>;
   create_task(title: string, goal?: string, conv_ids?: string[]): Promise<Record<string, unknown>>;
-  add_task_phase(task_id: string, title: string, plan?: string): Promise<Record<string, unknown>>;
-  write_task_artifact(task_id: string, name: string, content: string, kind?: string): Promise<Record<string, unknown>>;
-  build_task_handoff(task_id: string, phase_id?: string): Promise<{ ok: boolean; prompt: string }>;
-  verify_task(
-    task_id: string,
-    phase_id?: string,
-    implementation_summary?: string,
-  ): Promise<Record<string, unknown>>;
   get_plan(
     chat_id: string,
     project_root?: string | null,
@@ -4345,20 +4252,6 @@ export interface PanelApi {
   plan_delete_node?(
     chat_id?: string,
     node_id?: string,
-    project_root?: string | null,
-    template_id?: string,
-  ): Promise<{
-    ok: boolean;
-    plan?: ChatPlan;
-    progress?: PlanProgress | null;
-    outline?: PlanOutlineRow[];
-    error?: string;
-  }>;
-  plan_move_node?(
-    chat_id?: string,
-    node_id?: string,
-    parent_id?: string,
-    index?: number,
     project_root?: string | null,
     template_id?: string,
   ): Promise<{
@@ -4603,8 +4496,6 @@ export interface PanelApi {
   direct_rtc_connect?(args: Record<string, unknown>): Promise<Record<string, unknown>>;
   /** Methods the desktop refuses over any remote transport. */
   remote_deny_methods?(): Promise<string[]>;
-  /** Viewer connect telemetry (state, reason, connect_ms, candidate). */
-  direct_rtc_report?(payload: Record<string, unknown>): Promise<void>;
   window_input?(hwnd: string | number, event: Record<string, unknown>): Promise<void>;
   window_box?(hwnd: string | number): Promise<WindowBox>;
   /** True when the watched window's thread is showing a text caret. */
@@ -4616,11 +4507,9 @@ export interface PanelApi {
   native_capture_stop?(view: string): Promise<boolean>;
   pick_project_path(): Promise<string | null>;
   deploy(project_path?: string): Promise<string[]>;
-  deploy_all_projects(): Promise<string[]>;
   apply_ide(kind: string): Promise<string>;
   test_ide(kind: string): Promise<{ ok: boolean; detail: string }>;
   get_ide_statuses(): Promise<Record<string, { ok: boolean; detail: string }>>;
-  apply_all_ides(): Promise<string[]>;
   get_log(): Promise<string[]>;
   clear_log(): Promise<string[]>;
   get_errors(): Promise<string[]>;
@@ -4654,8 +4543,6 @@ export interface PanelApi {
   search_query(text: string, kind?: "skills" | "tools", limit?: number): Promise<SearchQueryResult>;
   open_path_in_explorer(path: string): Promise<void>;
   open_project_path_in_explorer(relative_path: string): Promise<void>;
-  open_skills_folder(): Promise<void>;
-  open_skill_packs_folder(): Promise<void>;
   open_skill_pack_folder(pack_id: string): Promise<void>;
   get_skill_info(): Promise<SkillInfoDto>;
   get_conversation_skills(conv_id: string): Promise<ConversationSkillsDto>;
@@ -4670,10 +4557,7 @@ export interface PanelApi {
     enabled_packs: string[],
     enabled_subskills: Record<string, string[]>,
   ): Promise<ConversationSkillSelectionResultDto>;
-  save_skill(text: string): Promise<SkillSaveResultDto>;
-  save_skill_file(filename: string, text: string): Promise<SkillSaveResultDto>;
   save_subskill(pack_id: string, subskill_id: string, text: string): Promise<SkillSaveResultDto>;
-  create_skill(filename: string, text?: string): Promise<SkillCreateResultDto>;
   create_skill_pack(pack_id: string, label: string, description?: string): Promise<SkillPackCreateResultDto>;
   draft_skill_pack(description: string, model: string, provider?: string): Promise<SkillPackDraftResultDto>;
   /** Run allowlisted PanelApi work on a worker; poll with bridge_job_poll. */
@@ -4952,9 +4836,6 @@ export interface PanelApi {
     prefs?: Record<string, Record<string, unknown>>;
     error?: string;
   }>;
-  plugin_prefs_set_all?(
-    prefs: Record<string, Record<string, unknown>>,
-  ): Promise<{ ok: boolean; prefs?: Record<string, Record<string, unknown>>; error?: string }>;
   plugin_prefs_set?(
     plugin_id: string,
     prefs: Record<string, unknown>,
@@ -4987,10 +4868,8 @@ export interface PanelApi {
     parent_id?: string,
     load_condition?: string,
   ): Promise<{ ok: boolean; path: string; subskill_id: string }>;
-  delete_skill(filename: string): Promise<SkillDeleteResultDto>;
   delete_skill_pack(pack_id: string): Promise<SkillDeleteResultDto>;
   delete_subskill(pack_id: string, subskill_id: string): Promise<{ ok: boolean; error?: string }>;
-  reset_skill(): Promise<SkillSaveResultDto>;
   reset_skill_pack(pack_id: string): Promise<SkillSaveResultDto>;
   get_skill_pack_graph(pack_id: string): Promise<SkillPackGraphDto>;
   get_skill_pack_files?(pack_id: string): Promise<SkillPackFilesDto>;
@@ -5096,10 +4975,6 @@ export interface PanelApi {
   get_chat_mcp_plugins(
     conv_id: string,
   ): Promise<{ ok: boolean; error?: string; override?: string[] | null; plugins?: McpPluginDto[] }>;
-  set_chat_mcp_plugins(
-    conv_id: string,
-    plugin_ids: string[] | null,
-  ): Promise<{ ok: boolean; error?: string; override?: string[] | null }>;
   terminal_spawn(shell?: string, cwd?: string, title?: string): Promise<Record<string, unknown>>;
   terminal_kill(session_id: string): Promise<Record<string, unknown>>;
   terminal_busy(session_id: string): Promise<{ ok: boolean; busy?: boolean; running?: boolean; error?: string }>;
@@ -5108,7 +4983,6 @@ export interface PanelApi {
     states: Record<string, { ok: boolean; busy?: boolean; running?: boolean; error?: string }>;
   }>;
   terminal_list(): Promise<{ sessions: Record<string, unknown>[] }>;
-  terminal_write(session_id: string, data: string): Promise<Record<string, unknown>>;
   terminal_resize(session_id: string, cols: number, rows: number): Promise<Record<string, unknown>>;
   terminal_request_command(
     session_id: string,
