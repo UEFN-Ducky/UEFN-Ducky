@@ -678,7 +678,7 @@ def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> Non
     api = PanelApi.__new__(PanelApi)
 
     patch_host(monkeypatch, 'call_panel_rpc', lambda p, m, a: {'ok': True, 'rows': ['x' * 1000] * 100})
-    assert api.plugin_call('account', 'list_models', {})['ok']
+    assert api.plugin_call('account', 'list_models', {'_etag': ''})['ok']
     assert len(rows) == 1
     kind, name, meta = rows[0]
     assert kind == 'ui_js_big'
@@ -687,7 +687,7 @@ def test_big_plugin_call_reply_traced_with_plugin_and_method(monkeypatch) -> Non
 
     rows.clear()
     patch_host(monkeypatch, 'call_panel_rpc', lambda p, m, a: {'ok': True})
-    api.plugin_call('account', 'ping', {})
+    api.plugin_call('account', 'ping', {'_etag': ''})
     assert rows == []  # small replies trace nothing
 
 

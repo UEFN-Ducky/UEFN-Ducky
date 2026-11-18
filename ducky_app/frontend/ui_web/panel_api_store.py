@@ -1498,21 +1498,21 @@ class PanelApiStoreMixin:
         A panel that polls big data opts into version tokens by passing ``_etag`` in
         ``params`` ("" on its first call): the reply then carries ``etag``, and a repeat
         call with the same token gets ``{ok, unchanged, etag}`` instead of the data again.
-        ``_etag`` never reaches the plugin."""
+        ``_etag`` never reaches the plugin; without it the reply is not encoded again."""
         from backend.uefn_plugins.plugin_host.panel_rpc import call_panel_rpc
 
         kwargs = dict(params or {}) if isinstance(params, dict) else {}
-        wants_etag = "_etag" in kwargs
-        since = str(kwargs.pop("_etag", "") or "")
+        since = kwargs.pop("_etag", None)
         try:
             result = call_panel_rpc(str(plugin_id or ""), str(method or ""), kwargs)
             out = result if isinstance(result, dict) else {"ok": True, "result": result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
-        encoded = _encode_reply(out)
-        if wants_etag and encoded and out.get("ok", True) is not False:
+        if since is None:
+            return out
+        if (encoded := _encode_reply(out)) and out.get("ok", True) is not False:
             etag = reply_etag(encoded)
-            if since == etag:
+            if str(since) == etag:
                 return {"ok": True, "unchanged": True, "etag": etag}
             out = {**out, "etag": etag}
         _trace_big_plugin_reply(str(plugin_id or ""), str(method or ""), encoded)
