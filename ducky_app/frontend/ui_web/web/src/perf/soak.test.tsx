@@ -28,6 +28,8 @@ vi.mock("../plugin-ui/usePluginPage", () => ({
 }));
 
 import { PluginWebviewPane } from "../plugin-ui/PluginWebviewPane";
+import { handleBridgeRequest } from "../plugin-ui/bridge";
+import { BRIDGE_CHANNEL } from "../plugin-ui/constants";
 import { useActiveTeam, _resetActiveTeamForTests } from "../plugin-ui/activeTeamStore";
 import { VirtualChatMessageList } from "../components/VirtualChatMessageList";
 import { buildChatRows } from "../utils/chatMessageGroups";
@@ -43,7 +45,7 @@ const calls = new Map<string, number>();
 const reply = (method: string): unknown => {
   switch (method) {
     case "get_listener_status": return { ok: true };
-    // A plugin tab that never opened a browser pane (the 81439a9c flood). SOAK_BOUNDS_ERROR=other
+    // A plugin tab whose browser pane never really opened (the 81439a9c flood). SOAK_BOUNDS_ERROR=other
     // takes the pre-fix path (any failure clears the dedupe): the soak must fail then.
     case "browser_pane_set_bounds": return { ok: false, error: process.env.SOAK_BOUNDS_ERROR || "pane not open" };
     case "browser_pane_list": return { ok: true, panes: [] };
@@ -173,7 +175,15 @@ it("one simulated hour stays inside the call budget and does not leak", { timeou
     root = ReactDOM.createRoot(host);
     root.render(<Shell />);
   });
-  expect(host.querySelector("iframe")).not.toBeNull();
+  const iframe = host.querySelector("iframe");
+  expect(iframe).not.toBeNull();
+  // The frame loop runs only for a panel that asked for a pane (browser.open / browser.bounds).
+  await act(async () => {
+    await handleBridgeRequest(
+      { pluginId: PLUGIN, panelId: "main", tabId: TAB, iframe } as never,
+      { channel: BRIDGE_CHANNEL, id: "soak-open", method: "browser.open", params: {} } as never,
+    );
+  });
 
   await advance(10 * MINUTE);
   const at10 = { listeners: liveListeners, timers: vi.getTimerCount() };
