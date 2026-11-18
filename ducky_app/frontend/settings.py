@@ -234,10 +234,6 @@ class PanelSettings:
     """When true, editor changes (actors, assets, devices, Verse wiring) are recorded per run
     alongside file writes. Off means the listener does no capture work at all."""
 
-    editor_tracking_mode: str = "full"
-    """Editor capture depth: basic (known ops only) | full (also snapshot opaque ops such as
-    execute_python so the panel can show what they changed)."""
-
     show_hidden_project_files: bool = False
     """When true, show engine folders and binary assets hidden from the sidebar by default."""
 
@@ -682,7 +678,6 @@ class PanelSettings:
             or not self.changeset_journal_enabled
             or self.write_lanes_mode != "enforce"
             or not self.editor_tracking_enabled
-            or self.editor_tracking_mode != "full"
             or self.ai_ignore_patterns
             or self.ai_ignore_strict
             or self.show_hidden_project_files

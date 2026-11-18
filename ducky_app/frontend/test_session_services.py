@@ -78,6 +78,31 @@ def test_a_failed_listener_config_write_is_logged(monkeypatch, tmp_path, caplog)
     assert record.getMessage() == "listener config not written" and record.exc_info
 
 
+def test_an_old_row_with_editor_tracking_mode_still_loads(monkeypatch, tmp_path) -> None:
+    import json
+
+    from frontend.settings import PanelSettings
+
+    monkeypatch.setenv("DUCKY_STORE_BACKEND", "files")
+    monkeypatch.setattr("frontend.settings.default_app_data_dir", lambda: tmp_path)
+    (tmp_path / "panel_settings.json").write_text(
+        json.dumps({"web_access": "on", "editor_tracking_mode": "basic"}), encoding="utf-8"
+    )
+    s = PanelSettings.load()
+    assert s.web_access == "on" and not hasattr(s, "editor_tracking_mode")
+    s.save()
+    assert "editor_tracking_mode" not in json.loads((tmp_path / "panel_settings.json").read_text(encoding="utf-8"))
+
+
+def test_the_schema_no_longer_lists_it() -> None:
+    from frontend.settings_schema import FIELD_META, settings_schema
+
+    assert "editor_tracking_mode" not in FIELD_META
+    fields = settings_schema()["fields"]
+    assert "editor_tracking_mode" not in fields
+    assert "Editor capture depth" not in {f["label"] for f in fields.values()}
+
+
 def test_each_service_failure_is_logged_and_the_rest_still_start(monkeypatch, caplog) -> None:
     names = [name for name, _ in session_services.SERVICES]
     for bad in names:
