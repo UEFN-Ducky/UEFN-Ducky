@@ -61,7 +61,7 @@ describe("shell commands in the running status", () => {
 
   it("names a file by its short name, never its full path", () => {
     // Oct 22 2026: the live line showed "Look at picture · C:/Users/.../attachments/1792…jpg".
-    const path = "C:/Users/tas13/AppData/Local/UEFN-Ducky/chats/projects/x/attachments/1792723505876_0_1000008873.jpg";
+    const path = "C:/Users/someone/AppData/Local/UEFN-Ducky/chats/projects/x/attachments/1792723505876_0_1000008873.jpg";
     const pending = { id: 1, role: "tool", text: "", tool: { name: "mcp__uefn__view_image", arguments: { path }, status: "pending" } } as unknown as ChatMessage;
     const done = { id: 2, role: "success", text: "" } as unknown as ChatMessage;
     expect(activityPanelTitle(buildActivityLines([pending], ""), false, 0)).toBe("Looking at 1792723505876_0_1000008873.jpg");
