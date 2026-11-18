@@ -179,7 +179,7 @@ EVENTS: dict[str, dict[str, Any]] = {
                    "reason": ("slug",)},
     # tool: the call that hung (outside agents' calls; Ducky's own agent hangs as a whole turn).
     "agent.stuck": {"provider": PROVIDERS, "after": ("bucket", STUCK_S, "after_s"), "tool": ("slug",),
-                    "v": ("version",)},
+                    "v": ("version",), "where": ("lease", "connect", "call", "sequence")},
     "ui.crash": {"code": ("slug",)},
     # Source control (Unreal Revision Control): one per push or pull, never a path or a message.
     "revision.op": {"op": ("push", "pull"), "outcome": ("ok", "up_to_date", "blocked", "fail"),

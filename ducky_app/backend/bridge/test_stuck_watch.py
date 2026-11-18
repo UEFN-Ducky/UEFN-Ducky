@@ -130,7 +130,7 @@ def test_a_wait_by_design_is_recorded_but_not_counted_as_stuck(quick, monkeypatc
     from backend.store.repos import events
 
     counted: list[tuple[float, str]] = []
-    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds, tool="": counted.append((seconds, tool)))
+    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds, tool="", where="": counted.append((seconds, tool)))
     mcp = WatchMcp(sync=set())
     asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 0.6}, _ident()))
     assert len(counted) == 1 and counted[0][1] == "slow_render"  # the stat names the call that hung
@@ -144,7 +144,7 @@ def test_the_stuck_count_is_sent_when_the_call_ends_with_how_long_it_ran(quick, 
     """Nov 13-16 2026: all 337 reports read "5m": the count went out at the 2-minute check,
     so a call that answered a second later and one that never did looked the same."""
     counted: list[tuple[float, str]] = []
-    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds, tool="": counted.append((seconds, tool)))
+    monkeypatch.setattr("frontend.usage_stats.stuck", lambda _agent, seconds, tool="", where="": counted.append((seconds, tool)))
     mcp = WatchMcp(sync=set())
     asyncio.run(shared_mcp._call_tool(mcp, "slow_render", {"seconds": 1.0}, _ident()))
     assert len(counted) == 1 and 0.6 < counted[0][0] < 3  # the whole run, not the 0.3 s check

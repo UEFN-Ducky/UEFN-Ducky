@@ -42,9 +42,22 @@ _EPIC_POPUP_LOOK_SEC = 2.0
 
 
 class _EpicDeadline(Exception):
-    def __init__(self, limit: float) -> None:
+    def __init__(self, limit: float, done: int = 0, steps: int = 1) -> None:
         super().__init__(limit)
-        self.limit = limit
+        self.limit, self.done, self.steps = limit, done, steps
+
+
+def _mark_where(word: str) -> None:
+    """Name the stage this call waits in (lease | connect | call | sequence) for the stuck
+    watch: shared_mcp's waits record reaches this loop through the call's context."""
+    try:
+        from backend.panel import rpc
+
+        holder = rpc._WAITING.get()
+        if holder is not None:
+            holder["where"] = word
+    except Exception:  # noqa: BLE001 — a label never breaks the call
+        pass
 
 
 def _drop_late_answer(fut: asyncio.Future) -> None:
@@ -715,6 +728,7 @@ class PluginClientPool:
             epic_editor = str(epic.get("epic_mcp_editor") or "")
         # Empty-str exceptions (bare TimeoutError/ConnectionError) surface to agents as
         # "Error executing tool X:" with no detail — always raise with a real message.
+        _mark_where("connect")
         try:
             conn = await self._get_or_create(plugin_id)
             session = await self._ensure_session(conn)
@@ -749,12 +763,18 @@ class PluginClientPool:
 
             sequence = expand_epic_call(original_name, args) if epic_call else [args]
             last = None
+            # One deadline for the whole sequence: three steps used to wait three deadlines.
+            begun = time.monotonic()
             for index, step in enumerate(sequence):
+                _mark_where("sequence" if index else "call")
                 if uefn_call:
+                    remaining = deadline - (time.monotonic() - begun)
+                    if remaining <= 0:
+                        raise _EpicDeadline(deadline, index, len(sequence))
                     call = asyncio.ensure_future(session_obj.call_tool(original_name, step))
                     look = asyncio.ensure_future(_blocking_popup_stays())
                     try:
-                        await asyncio.wait({call, look}, timeout=deadline, return_when=asyncio.FIRST_COMPLETED)
+                        await asyncio.wait({call, look}, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
                     except BaseException:
                         look.cancel()
                         call.cancel()
@@ -763,7 +783,7 @@ class PluginClientPool:
                     look.cancel()
                     if not call.done() and not popup_stays:
                         call.add_done_callback(_drop_late_answer)
-                        raise _EpicDeadline(deadline)
+                        raise _EpicDeadline(deadline, index, len(sequence))
                     if not call.done():
                         call.cancel()
                     if not call.done() or call.cancelled():
@@ -791,6 +811,9 @@ class PluginClientPool:
             from backend.bridge.call_limits import stall_reason
 
             why = await asyncio.to_thread(stall_reason, namespaced_name, late.limit)
+            if late.steps > 1:
+                why["steps_finished"] = f"{late.done} of {late.steps}"
+                why["message"] = f"{why.get('message', '')} {late.done} of {late.steps} steps finished.".strip()
             raise RuntimeError(json.dumps(why)) from None
         except asyncio.TimeoutError:
             popup = ""

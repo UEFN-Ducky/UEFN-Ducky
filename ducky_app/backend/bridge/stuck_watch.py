@@ -18,6 +18,24 @@ STUCK_REPORT_S = 120.0
 # Sent at the first check, every report read "5m" (Nov 13-16 2026: 337 of them) whether the
 # call answered at 121 s or never. A call still running this long is counted then ("more").
 STUCK_COUNT_BY_S = 1201.0
+# An Epic UEFN call answers at its own deadline (call_limits.epic_call_limit) with why it
+# has not: its first check waits that long plus this, so a call that ended there is not stuck.
+EPIC_GRACE_S = 15.0
+
+
+def _first_check(inner: str, limit: float | None, arguments: dict[str, Any] | None) -> float:
+    if inner.startswith("unreal__"):
+        try:
+            from backend.mcp_plugins.epic import epic_tool_heavy
+
+            args = arguments if isinstance(arguments, dict) else {}
+            if isinstance(args.get("name"), str) and isinstance(args.get("arguments"), dict):
+                args = args["arguments"]  # ducky_call_tool(name, arguments)
+            heavy = epic_tool_heavy(inner[len("unreal__"):], args)
+        except Exception:  # noqa: BLE001 — the longer deadline never counts too early
+            heavy = True
+        return call_limits.epic_call_limit(heavy) + EPIC_GRACE_S
+    return min(limit, STUCK_REPORT_S) if limit is not None else STUCK_REPORT_S
 
 
 class _CallTimedOut(Exception):
@@ -34,10 +52,13 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
 
         inner = effective_tool_name(name, arguments if isinstance(arguments, dict) else {})
     limit = call_limits.call_limit(name, inner)
-    first = min(limit, STUCK_REPORT_S) if limit is not None else STUCK_REPORT_S
+    first = _first_check(inner, limit, arguments)
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
         if not done:
+            # Where it waits at the first check: client_pool marks connect / call / sequence;
+            # an Epic call not there yet waits for the editor lease.
+            where = str((waits or {}).get("where") or ("lease" if inner.startswith("unreal__") else ""))
             counted = _report_stuck(name, first, work, thread, ident, waits, arguments)
             seen = time.monotonic()
             try:
@@ -56,7 +77,7 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
                         from frontend import usage_stats
 
                         usage_stats.stuck(str(getattr(ident, "coding_agent", "") or ""),
-                                          first + time.monotonic() - seen, tool=inner)
+                                          first + time.monotonic() - seen, tool=inner, where=where)
                     except Exception:  # noqa: BLE001 — a count never breaks the call
                         pass
     except asyncio.CancelledError:

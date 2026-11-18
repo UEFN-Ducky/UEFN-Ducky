@@ -921,9 +921,11 @@ def tool_done(
         pass
 
 
-def stuck(coding_agent: str, seconds: float, tool: str = "") -> None:
+def stuck(coding_agent: str, seconds: float, tool: str = "", where: str = "") -> None:
     # v: one heavy PC on an old build told apart from a spread (ans7k2v9d4m1x), as tool.byv does.
-    track("agent.stuck", provider=ev.provider_of(coding_agent), after_s=seconds, tool=tool, v=_app_version())
+    # where: the stage an Epic call waited in at the first check (lease | connect | call | sequence).
+    track("agent.stuck", provider=ev.provider_of(coding_agent), after_s=seconds, tool=tool, v=_app_version(),
+          **({"where": where} if where else {}))
 
 
 # ----------------------------------------------------------------------------- reliability

@@ -1076,8 +1076,41 @@ def stuck_tracked(monkeypatch):
     from frontend import usage_stats
 
     seen: list[str] = []
-    monkeypatch.setattr(usage_stats, "stuck", lambda agent, seconds, tool="": seen.append(tool))
+    monkeypatch.setattr(usage_stats, "stuck", lambda agent, seconds, tool="", where="": seen.append(tool))
     return seen
+
+
+def _watch_epic(monkeypatch, seconds: float, waits: dict) -> list:
+    import asyncio
+
+    from backend.bridge import call_limits, stuck_watch
+    from frontend import usage_stats
+
+    monkeypatch.setattr(stuck_watch, "STUCK_REPORT_S", 0.1)
+    monkeypatch.setattr(stuck_watch, "EPIC_GRACE_S", 0.2)
+    monkeypatch.setattr(call_limits, "epic_call_limit", lambda heavy: 0.2)
+    seen: list = []
+    monkeypatch.setattr(usage_stats, "stuck", lambda agent, s, tool="", where="": seen.append((tool, where)))
+
+    async def run():
+        async def answer():
+            await asyncio.sleep(seconds)
+            return "ok"
+
+        ident = SimpleNamespace(coding_agent="claude_code", conv_id="c")
+        return await stuck_watch._watched(asyncio.ensure_future(answer()), "unreal__call_tool", {}, ident, waits, {})
+
+    assert asyncio.run(run()) == "ok"
+    return seen
+
+
+def test_stuck_epic_call_answered_at_its_deadline_is_not_counted(monkeypatch) -> None:
+    assert _watch_epic(monkeypatch, 0.3, {}) == []  # past the old 0.1 s check, inside deadline + grace
+
+
+def test_stuck_epic_call_names_where_it_waits(monkeypatch) -> None:
+    assert _watch_epic(monkeypatch, 0.6, {}) == [("unreal__call_tool", "lease")]
+    assert _watch_epic(monkeypatch, 0.6, {"where": "sequence"}) == [("unreal__call_tool", "sequence")]
 
 
 def test_stuck_call_tool_names_the_inner_tool(stuck_events, stuck_tracked) -> None:
