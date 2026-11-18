@@ -468,6 +468,23 @@ class AgentRunner:
             llm_content, model=self.config.model, provider=self.config.provider
         )
 
+    def _refuse(self, rec: ToolCallRecord, payload: str | None, error: str, hint: str,
+                blocks: list[dict[str, Any]], messages: list[ProviderMessage]) -> AgentEvent:
+        """Answer a call that does not run: *payload* is the JSON the model reads, None for one
+        the person rejected. Returns the ``tool_end`` event to yield."""
+        fmt = self.config.tool_result_format
+        if payload is None:
+            llm_content = format_rejected_tool_result(fmt=fmt)  # type: ignore[arg-type]
+        else:
+            llm_content = format_tool_result_for_llm(rec.name, payload, fmt=fmt)  # type: ignore[arg-type]
+            rec.status = "error"
+            rec.duration_ms = 0
+            rec.result = {"ok": False, "data": error, "hint": hint}
+        self._attach_llm_payload(rec, llm_content)
+        blocks.append(self._record_to_block(rec))
+        messages.append(ProviderMessage(role="tool", tool_call_id=rec.id, content=llm_content))
+        return AgentEvent(kind="tool_end", tool=rec)
+
     async def _iter_provider_stream(
         self,
         provider: Any,
@@ -1206,10 +1223,11 @@ class AgentRunner:
                         call.arguments = {}
             # File changes and destructive tools follow the chat's approval mode: one card
             # per call when it asks, a refusal where it never could ask before.
+            call_names = {id(r): effective_tool_name(r.name, r.arguments) for r in pending_records}
             for r in pending_records:
                 if blocked[id(r)]:
                     continue
-                gate = _tool_gate(self.config.conv_id, effective_tool_name(r.name, r.arguments))
+                gate = _tool_gate(self.config.conv_id, call_names[id(r)])
                 if gate == "run":
                     continue
                 approved: bool | None = False
@@ -1237,39 +1255,21 @@ class AgentRunner:
             heavy_executed = 0
             guarded: list[str] = []
             # The rename unblocks the other task tools of the same turn (require_self_name).
-            pending_records.sort(key=lambda r: effective_tool_name(r.name, r.arguments) != "ducky_rename_self")
+            pending_records.sort(key=lambda r: call_names[id(r)] != "ducky_rename_self")
             for rec in pending_records:
                 if bridge.is_set():
                     yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
                     return
                 if blocked[id(rec)]:
-                    result = ToolCallResult(ok=False, tool=rec.name, error=blocked[id(rec)])
-                    llm_content = format_tool_result_for_llm(
-                        rec.name, result.to_json_str(), fmt=self.config.tool_result_format
-                    )
-                    self._attach_llm_payload(rec, llm_content)
-                    rec.status = "error"
-                    rec.result = {"ok": False, "data": result.error, "hint": ""}
-                    assistant_blocks.append(self._record_to_block(rec))
-                    yield AgentEvent(kind="tool_end", tool=rec)
-                    provider_messages.append(ProviderMessage(role="tool", tool_call_id=rec.id, content=llm_content))
+                    error = blocked[id(rec)]
+                    payload = ToolCallResult(ok=False, tool=rec.name, error=error).to_json_str()
+                    yield self._refuse(rec, payload, error, "", assistant_blocks, provider_messages)
                     continue
                 if rec.status == "rejected":
-                    llm_content = format_rejected_tool_result(fmt=self.config.tool_result_format)  # type: ignore[arg-type]
-                    self._attach_llm_payload(rec, llm_content)
-                    block = self._record_to_block(rec)
-                    assistant_blocks.append(block)
-                    yield AgentEvent(kind="tool_end", tool=rec)
-                    provider_messages.append(
-                        ProviderMessage(
-                            role="tool",
-                            tool_call_id=rec.id,
-                            content=llm_content,
-                        )
-                    )
+                    yield self._refuse(rec, None, "", "", assistant_blocks, provider_messages)
                     continue
 
-                call_name = effective_tool_name(rec.name, rec.arguments)
+                call_name = call_names[id(rec)]
                 call_args = (
                     dict(rec.arguments.get("arguments") or {})
                     if rec.name == "ducky_call_tool" and isinstance(rec.arguments.get("arguments"), dict)
@@ -1289,48 +1289,20 @@ class AgentRunner:
                     else:
                         nudge, hint = _repeat_guard_message(call_name, len(prior)), "repeat-call guard"
                     payload_json = json.dumps({"ok": False, "tool": rec.name, "error": nudge}, ensure_ascii=False)
-                    llm_content = format_tool_result_for_llm(
-                        rec.name,
-                        payload_json,
-                        fmt=self.config.tool_result_format,  # type: ignore[arg-type]
-                    )
-                    self._attach_llm_payload(rec, llm_content)
-                    rec.status = "error"
-                    rec.duration_ms = 0
-                    rec.result = {"ok": False, "data": nudge, "hint": hint}
-                    block = self._record_to_block(rec)
-                    assistant_blocks.append(block)
-                    yield AgentEvent(kind="tool_end", tool=rec)
-                    provider_messages.append(
-                        ProviderMessage(role="tool", tool_call_id=rec.id, content=llm_content)
-                    )
+                    yield self._refuse(rec, payload_json, nudge, hint, assistant_blocks, provider_messages)
                     continue
 
-                effective_name = effective_tool_name(rec.name, rec.arguments)
-                if effective_name in HEAVY_MCP_TOOLS:
+                if call_name in HEAVY_MCP_TOOLS:
                     if heavy_executed >= _MAX_HEAVY_TOOLS_PER_STEP:
                         nudge = (
-                            f"Skipped — only one heavy editor tool per step ({effective_name}). "
+                            f"Skipped — only one heavy editor tool per step ({call_name}). "
                             f"{BUSY_HINT}"
                         )
                         payload_json = json.dumps(
                             {"ok": False, "tool": rec.name, "error": nudge}, ensure_ascii=False
                         )
-                        llm_content = format_tool_result_for_llm(
-                            rec.name,
-                            payload_json,
-                            fmt=self.config.tool_result_format,  # type: ignore[arg-type]
-                        )
-                        self._attach_llm_payload(rec, llm_content)
-                        rec.status = "error"
-                        rec.duration_ms = 0
-                        rec.result = {"ok": False, "data": nudge, "hint": "one-heavy-per-step"}
-                        block = self._record_to_block(rec)
-                        assistant_blocks.append(block)
-                        yield AgentEvent(kind="tool_end", tool=rec)
-                        provider_messages.append(
-                            ProviderMessage(role="tool", tool_call_id=rec.id, content=llm_content)
-                        )
+                        yield self._refuse(rec, payload_json, nudge, "one-heavy-per-step",
+                                           assistant_blocks, provider_messages)
                         continue
                     heavy_executed += 1
 
@@ -1356,7 +1328,7 @@ class AgentRunner:
                     sig,
                     llm_content,
                     ok=bool(result.ok),
-                    readonly=_is_readonly_tool(effective_tool_name(rec.name, rec.arguments)),
+                    readonly=_is_readonly_tool(call_name),
                 )
                 asked.note(call_name, bool(result.ok), llm_content)
                 block = self._record_to_block(rec)
@@ -1369,7 +1341,7 @@ class AgentRunner:
                         content=llm_content,
                     )
                 )
-                if effective_tool_name(rec.name, rec.arguments) == "ducky_ask_user" and not result.ok:
+                if call_name == "ducky_ask_user" and not result.ok:
                     # No answer: stop this run instead of asking the model to guess.
                     yield _cancelled_event(assistant_blocks, assistant_text, turn_text, turn_thinking, total_usage)
                     return
@@ -1382,7 +1354,7 @@ class AgentRunner:
                         )
 
                         caps = vision_attachments_from_capture_result(
-                            effective_tool_name(rec.name, rec.arguments),
+                            call_name,
                             result.data,
                         )
                         if caps:
