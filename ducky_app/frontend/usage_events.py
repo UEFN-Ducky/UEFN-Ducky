@@ -94,7 +94,9 @@ COMMAND_TOOLS = frozenset({"ducky_terminal_run", "sandbox_run"})
 # Why a push or pull did not go through: what stopped it before trying, else ERROR_KINDS.
 REVISION_BLOCKS = ("behind", "conflict_markers", "locked", "both_changed", "conflict_dialog", "needs_save",
                    "no_island", "repo_read")
-REVISION_REASONS = REVISION_BLOCKS + tuple(k for k in ERROR_KINDS if k not in REVISION_BLOCKS)
+# ...and why one that tried failed: the check-in itself, or the save before it.
+REVISION_REASONS = (REVISION_BLOCKS + ("check_in", "save_failed")
+                    + tuple(k for k in ERROR_KINDS if k not in REVISION_BLOCKS))
 TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "plugin",
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 

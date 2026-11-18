@@ -180,16 +180,34 @@ def test_push_retries_a_check_in_that_fails_right_after_saving(root) -> None:
     assert out["ok"] is True and out["checked_in"] == 1 and out["saved"] == 1
 
 
-def test_push_does_not_retry_when_nothing_was_saved(root) -> None:
+def test_push_retries_once_when_nothing_was_saved(root) -> None:
     lore = fake_lore()
     with patch.object(level_viewport, "_lore_cli", return_value=lore), \
-            patch.object(level_viewport.time, "sleep") as sleep, \
+            patch.object(level_viewport.time, "sleep"), \
+            patch.object(level_viewport, "send_command") as send:
+        send.side_effect = [
+            {"ok": False, "targets": ["/I/A"], "checked_in": [], "saved": [], "error": "check-in failed"},
+            {"ok": True, "targets": ["/I/A"], "checked_in": ["/I/A"], "saved": [], "error": ""},
+        ]
+        out = json.loads(level_viewport.revision_push("d"))
+    assert send.call_count == 2 and out["ok"] is True
+    with patch.object(level_viewport, "_lore_cli", return_value=lore), \
+            patch.object(level_viewport.time, "sleep"), \
             patch.object(level_viewport, "send_command") as send:
         send.return_value = {"ok": False, "targets": ["/I/A"], "checked_in": [], "saved": [], "error": "remote said no"}
         out = json.loads(level_viewport.revision_push("d"))
-    retry = [c for c in sleep.call_args_list if c.args == (level_viewport._CHECK_IN_RETRY_WAIT_S,)]
-    assert send.call_count == 1 and len(retry) == 0
+    assert send.call_count == 2  # once more, never a loop
     assert out["ok"] is False and out["error"] == "remote said no"
+
+
+def test_a_check_in_that_times_out_names_the_popup(root) -> None:
+    from backend.tools.core import uefn_popups
+
+    with patch.object(level_viewport, "_lore_cli", return_value=fake_lore()), \
+            patch.object(uefn_popups, "holding_popups", return_value=[{"title": "Conflicting Changes"}]), \
+            patch.object(level_viewport, "send_command", side_effect=TimeoutError("UEFN didn't answer in 180s")):
+        out = json.loads(level_viewport.revision_push("d"))
+    assert out["ok"] is False and "didn't answer" in out["error"] and "'Conflicting Changes'" in out["error"]
 
 
 def test_push_refuses_while_the_island_is_behind(root) -> None:

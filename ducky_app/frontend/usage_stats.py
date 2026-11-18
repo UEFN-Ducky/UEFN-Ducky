@@ -1025,6 +1025,9 @@ _REVISION_KEYS = (("conflict_markers", "conflict_markers"), ("locked_by_other", 
                   ("both_changed", "both_changed"), ("conflict_dialog", "conflict_dialog"), ("needs_save", "needs_save"))
 _REVISION_WORDS = (("pull them first", "behind"), ("no island open", "no_island"),
                    ("could not read the repository", "repo_read"), ("could not list pending", "repo_read"))
+# A push or pull that tried and failed: words in its error (Nov 16-17 2026: every failed push read "other").
+_REVISION_FAIL_WORDS = (("check-in failed", "check_in"), ("saving the dirty packages", "save_failed"),
+                        ("didn't answer", "timeout"))
 
 
 def revision(op: str, out: dict[str, Any], took_s: float) -> None:
@@ -1036,8 +1039,9 @@ def revision(op: str, out: dict[str, Any], took_s: float) -> None:
         error = str(out.get("error") or "")
         reason = next((r for k, r in _REVISION_KEYS if out.get(k)), "")
         reason = reason or next((r for w, r in _REVISION_WORDS if w in error.lower()), "")
+        failed = next((r for w, r in _REVISION_FAIL_WORDS if w in error.lower()), "")
         track("revision.op", op=op, outcome="blocked" if reason else "fail",
-              reason=reason or ev.kind_of(error), took_s=took_s)
+              reason=reason or failed or ev.kind_of(error), took_s=took_s)
     except Exception:
         pass
 

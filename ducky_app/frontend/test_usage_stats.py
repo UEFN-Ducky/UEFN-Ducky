@@ -391,6 +391,15 @@ def test_gpu_full_sends_words_and_buckets_only() -> None:
     ]
 
 
+def test_revision_failures_get_their_reason_word() -> None:
+    cases = (("check-in failed", "check_in"), ("Saving the dirty packages failed: X.umap", "save_failed"),
+             ("UEFN didn't answer revision_check_in in 180s: a popup may be open", "timeout"))
+    for error, _ in cases:
+        us.revision("push", {"ok": False, "error": error}, 5)
+    rows, _ = us._take(100)
+    assert [r["props"] for r in rows] == [{"op": "push", "outcome": "fail", "reason": w, "took": "10s"} for _, w in cases]
+
+
 def test_source_control_and_remote_view_report_words_only() -> None:
     us.revision("push", {"ok": True, "checked_in": 3}, 42)
     us.revision("pull", {"ok": True, "up_to_date": True}, 0.5)

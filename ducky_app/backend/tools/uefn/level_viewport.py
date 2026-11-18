@@ -171,23 +171,22 @@ def _push(description: str) -> dict:
             "error": f"{first['file'].rsplit('/', 1)[-1]} is being edited on the other PC by "
             f"{first['owner'] or 'someone else'}: wait until they push it, pull, then push again",
         }
-    result = send_command(
-        "revision_check_in",
-        {"files": list(pending.get("paths") or []), "description": description},
-        timeout=_REVISION_TIMEOUT,
-    )
-    saved = result.get("saved") or []
-    # Right after a save UEFN is still backing it up on its personal branch, and a
-    # check-in made then fails with no message; the same check-in passes seconds later.
-    for _ in range(_CHECK_IN_RETRIES):
-        if result.get("ok") or not saved or not result.get("targets"):
-            break
-        time.sleep(_CHECK_IN_RETRY_WAIT_S)
-        result = send_command(
-            "revision_check_in",
-            {"files": list(result["targets"]), "description": description},
-            timeout=_REVISION_TIMEOUT,
-        )
+    try:
+        result = _check_in(list(pending.get("paths") or []), description)
+        saved = result.get("saved") or []
+        # Right after a save UEFN is still backing it up on its personal branch, and a
+        # check-in made then fails with no message; the same check-in passes seconds later.
+        # One with nothing newly saved gets one more try too (Nov 16-17 2026: never retried).
+        for _ in range(_CHECK_IN_RETRIES if saved else 1):
+            if result.get("ok") or not result.get("targets"):
+                break
+            time.sleep(_CHECK_IN_RETRY_WAIT_S)
+            result = _check_in(list(result["targets"]), description)
+    except TimeoutError as exc:
+        # A conflict dialog (or any popup) holds the editor: name it, never wait it out.
+        from backend.tools.core.uefn_popups import blocked_call_hint
+
+        return {"ok": False, "error": f"{exc} {blocked_call_hint()}"}
     state = lore.repo_state(root)
     _wake_island_watch()
     return {
@@ -197,6 +196,11 @@ def _push(description: str) -> dict:
         **_remote_state(state),
         "error": result.get("error") or state.get("error") or "",
     }
+
+
+def _check_in(files: list, description: str) -> dict:
+    return send_command("revision_check_in", {"files": files, "description": description},
+                        timeout=_REVISION_TIMEOUT)
 
 
 @plugin_mcp_tool("uefn")
