@@ -18,6 +18,7 @@ def _fresh_module():
     us._conv_run.clear()
     us._last_failed.clear()
     us._mem_queue.clear()
+    us._pending.clear()
     us._refused_in_a_row = 0
     us.send_override = None
     us.registry_override = None
@@ -1013,3 +1014,70 @@ def test_a_new_pcs_first_open_is_sent_right_away(monkeypatch) -> None:
     us.app_opened()   # this PC has its id now
     assert sent == []
     assert [r["name"] for r in us._take(100)[0]] == ["app.open"]
+
+
+@pytest.fixture
+def db_queue(monkeypatch):
+    """The ducky.db queue, empty, with stats on."""
+    from backend.store.repos import events
+
+    monkeypatch.setattr(us, "_use_db", lambda: True)
+    monkeypatch.setattr(us, "enabled", lambda: True)
+    events.clear(us.KIND)
+    yield events
+    us._write_pending()
+    events.clear(us.KIND)
+
+
+def _written(events, n: int) -> None:
+    deadline = time.monotonic() + 10
+    while (us._pending or events.count(us.KIND) < n) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not us._pending and events.count(us.KIND) == n
+
+
+def test_tool_done_never_writes_on_the_calling_thread(db_queue, monkeypatch) -> None:
+    import threading
+
+    from backend.store import db
+
+    writers: list[str] = []
+    real = db.write_txn
+
+    def recorded(*a, **k):
+        writers.append(threading.current_thread().name)
+        return real(*a, **k)
+
+    monkeypatch.setattr(db, "write_txn", recorded)
+    for _ in range(3):
+        us.tool_done("spawn_actor", ok=True, duration_ms=5.0, conv_id="c1")
+    assert threading.current_thread().name not in writers
+    _written(db_queue, 3)
+    assert writers and set(writers) == {"usage-stats-writer"}
+
+
+def test_queued_rows_are_written_in_one_batch(db_queue, monkeypatch) -> None:
+    batches: list[int] = []
+    real = db_queue.insert_many
+
+    def counted(kind, rows):
+        batches.append(len(rows))
+        return real(kind, rows)
+
+    monkeypatch.setattr(db_queue, "insert_many", counted)
+    for i in range(300):
+        us._enqueue({"name": "tool.call", "props": {"tool": "x"}, "ts": time.time()})
+    _written(db_queue, 300)
+    assert sum(batches) == 300 and len(batches) <= 3
+
+
+def test_rows_are_flushed_at_exit(db_queue, monkeypatch) -> None:
+    monkeypatch.setattr(us, "_writer", object())  # no writer thread: only the exit hook writes
+    for _ in range(5):
+        us._enqueue({"name": "tool.call", "props": {"tool": "x"}, "ts": time.time()})
+    assert db_queue.count(us.KIND) == 0
+    us._write_pending()  # what atexit runs
+    assert db_queue.count(us.KIND) == 5
+    # A send reads the rows still queued too.
+    us._enqueue({"name": "app.close", "props": {}, "ts": time.time()})
+    assert [r["name"] for r in us._take(100)[0]][-1] == "app.close"

@@ -13,6 +13,7 @@ swallows its own errors: stats never break the app.
 
 from __future__ import annotations
 
+import atexit
 import json
 import re
 import secrets
@@ -36,6 +37,9 @@ QUEUE_MAX_AGE_S = 7 * 86400
 CLOSE_FLUSH_WAIT_S = 1.0
 PERF_SAMPLE_EVERY_S = 86400.0
 ENABLED_CACHE_S = 15.0
+# Queued rows reach ducky.db within this long, or at once past PENDING_FLUSH_ROWS.
+PENDING_WRITE_S = 2.0
+PENDING_FLUSH_ROWS = 200
 
 KIND = "usage_queue"
 META_INSTALL = "usage.install_id"
@@ -53,6 +57,14 @@ _thread: threading.Thread | None = None
 _stop = threading.Event()
 _wake = threading.Event()
 _mem_queue: list[dict[str, Any]] = []
+# Rows for ducky.db, written by the usage-stats-writer thread (_write_pending), never by the
+# caller. _stored: the table's row count at the last write.
+_pending: list[dict[str, Any]] = []
+_stored = 0
+_has_pending = threading.Event()
+_pending_full = threading.Event()
+_write_lock = threading.Lock()
+_writer: threading.Thread | None = None
 _enabled_cache: tuple[float, bool] | None = None
 _run_meta: dict[str, dict[str, Any]] = {}
 _conv_run: dict[str, str] = {}
@@ -245,17 +257,16 @@ def set_enabled(flag: bool) -> None:
 
 def _enqueue(row: dict[str, Any]) -> int:
     if _use_db():
-        try:
-            from backend.store.repos import events
-
-            events.insert(KIND, ts=float(row["ts"]), source=str(row["name"]), payload=row)
-            n = events.count(KIND)
-            if n > QUEUE_MAX_ROWS:
-                events.trim(KIND, older_than=time.time() - QUEUE_MAX_AGE_S, keep=QUEUE_MAX_ROWS)
-                n = QUEUE_MAX_ROWS
-            return n
-        except Exception:
-            return 0
+        # Never a database write here: tool calls queue from the loop every agent shares, and
+        # it waited on the process write lock behind chat saves (6-15 s recorded).
+        with _lock:
+            _pending.append(row)
+            n = _stored + len(_pending)
+            if len(_pending) >= PENDING_FLUSH_ROWS:
+                _pending_full.set()
+        _has_pending.set()
+        _start_writer()
+        return n
     with _lock:
         _mem_queue.append(row)
         if len(_mem_queue) > QUEUE_MAX_ROWS:
@@ -263,8 +274,53 @@ def _enqueue(row: dict[str, Any]) -> int:
         return len(_mem_queue)
 
 
+def _write_pending() -> None:
+    """Queued rows into ducky.db in one transaction; on the writer thread, a reader, or exit."""
+    global _stored
+    with _write_lock:
+        with _lock:
+            rows = list(_pending)
+            _pending.clear()
+        if not rows:
+            return
+        try:
+            from backend.store.repos import events
+
+            events.insert_many(KIND, [{"ts": float(r["ts"]), "source": str(r["name"]), "payload": r} for r in rows])
+            n = events.count(KIND)
+            if n > QUEUE_MAX_ROWS:
+                events.trim(KIND, older_than=time.time() - QUEUE_MAX_AGE_S, keep=QUEUE_MAX_ROWS)
+                n = QUEUE_MAX_ROWS
+            _stored = n
+        except Exception:
+            pass
+
+
+def _writer_loop() -> None:
+    while True:
+        _has_pending.wait()
+        _pending_full.wait(PENDING_WRITE_S)  # gather a batch; 200 rows go at once
+        _has_pending.clear()
+        _pending_full.clear()
+        _write_pending()
+
+
+def _start_writer() -> None:
+    global _writer
+    if _writer is not None:
+        return
+    with _lock:
+        if _writer is None:
+            _writer = threading.Thread(target=_writer_loop, name="usage-stats-writer", daemon=True)
+            _writer.start()
+
+
+atexit.register(_write_pending)  # rows still queued when the process exits
+
+
 def queued() -> int:
     if _use_db():
+        _write_pending()
         try:
             from backend.store.repos import events
 
@@ -276,6 +332,8 @@ def queued() -> int:
 
 
 def clear_queue() -> None:
+    with _lock:
+        _pending.clear()
     if _use_db():
         try:
             from backend.store.repos import events
@@ -290,6 +348,7 @@ def clear_queue() -> None:
 def _take(limit: int) -> tuple[list[dict[str, Any]], list[int]]:
     """Oldest queued events and the ids to delete once they are sent."""
     if _use_db():
+        _write_pending()
         try:
             from backend.store.repos import events
 
