@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 APP_DATA_DIR_NAME = "UEFN-Ducky"
-PROJECT_DOT_DIR = ".uefn-ducky"
 EXE_PREFIX = "UEFN-Ducky"
 
 
@@ -76,14 +75,6 @@ def foreign_profile_reason() -> str:
 def resolve_app_data_dir(*, for_write: bool = False) -> Path:
     """Return ``%LOCALAPPDATA%/UEFN-Ducky``."""
     path = local_app_data_base() / APP_DATA_DIR_NAME
-    if for_write:
-        path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def resolve_project_dot_dir(project_root: str, *, for_write: bool = False) -> Path:
-    """Per-project agent folder: ``<project>/.uefn-ducky``."""
-    path = Path(project_root) / PROJECT_DOT_DIR
     if for_write:
         path.mkdir(parents=True, exist_ok=True)
     return path

@@ -521,15 +521,6 @@ def create_conversation(
     return conv
 
 
-def bind_conversation_file_path(conv: Conversation, file_path: str) -> None:
-    """Attach a file scope to a ducky when it is not already bound."""
-    path = norm_file_path(file_path)
-    if not path or conv.file_path:
-        return
-    conv.file_path = path
-    save_conversation(conv)
-
-
 def remap_conversation_file_path(path: str, from_prefix: str, to_prefix: str) -> str:
     """Rewrite a stored file_path after a project file move/rename."""
     norm = norm_file_path(path)
@@ -566,16 +557,3 @@ def append_message(conv: Conversation, message: dict[str, Any]) -> None:
     conv.mark_dirty(len(conv.messages) - 1)
     save_conversation(conv)
 
-
-def strip_secrets_from_export(text: str) -> str:
-    import re
-
-    patterns = [
-        r"sk-ant-[A-Za-z0-9_-]+",
-        r"sk-[A-Za-z0-9_-]{20,}",
-        r"AIza[A-Za-z0-9_-]{20,}",
-    ]
-    out = text
-    for p in patterns:
-        out = re.sub(p, "[REDACTED]", out)
-    return out

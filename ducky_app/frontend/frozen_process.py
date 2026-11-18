@@ -10,7 +10,6 @@ from pathlib import Path
 from frontend.app_paths import (
     exe_name_matches,
     kill_process_ps_filter,
-    process_name_matches,
     resolve_app_data_dir,
 )
 from frontend.bundle_root import is_packaged_runtime
@@ -63,11 +62,6 @@ def is_launcher_side(pid: int) -> bool:
 
 def is_uefn_ducky_executable(path: Path | str) -> bool:
     return exe_name_matches(Path(path).name)
-
-
-def is_uefn_ducky_process_name(process_name: str) -> bool:
-    """Windows ``ProcessName`` has no ``.exe`` suffix."""
-    return process_name_matches(process_name)
 
 
 def panel_pid_path(*, for_write: bool = False) -> Path:
@@ -137,18 +131,6 @@ def kill_uefn_ducky_processes(*, include_self: bool = True, exclude_pid: int | N
     if include_self and is_packaged_runtime() and is_uefn_ducky_executable(sys.executable):
         return _kill_pid_tree(my_pid)
     return False
-
-
-def try_kill_all_uefn_ducky_exe() -> bool:
-    """
-    When running as a packaged ``UEFN-Ducky*.exe``, terminate every instance
-    (this panel and any IDE ``bridge`` workers).
-    """
-    if sys.platform != "win32" or not is_packaged_runtime():
-        return False
-    if not is_uefn_ducky_executable(sys.executable):
-        return False
-    return kill_uefn_ducky_processes(include_self=True)
 
 
 def reclaim_stale_panel_process() -> bool:

@@ -9,7 +9,6 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote
 
 FileKind = Literal["text", "image", "model", "audio", "video", "unreal_asset", "binary"]
 
@@ -275,10 +274,6 @@ def is_video_file_name(name: str) -> bool:
     return _suffix(name) in VIDEO_SUFFIXES
 
 
-def is_unreal_asset_name(name: str) -> bool:
-    return _suffix(name) in UNREAL_ASSET_SUFFIXES
-
-
 def is_binary_file_name(name: str) -> bool:
     return _suffix(name) in BINARY_FILE_SUFFIXES
 
@@ -437,7 +432,3 @@ def should_show_dot_entry(name: str, is_dir: bool, *, show_hidden: bool) -> bool
         return True
     return show_hidden
 
-
-def media_path_token(encoded_path: str) -> str:
-    """URL-safe token encoding a panel path for /project-media/<token>."""
-    return quote(encoded_path, safe="")

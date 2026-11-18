@@ -14,10 +14,8 @@ import hashlib
 import http.client
 import io
 import json
-import platform
 import re
 import secrets as secrets_mod
-import socket
 import threading
 import time
 import urllib.error
@@ -33,7 +31,6 @@ from frontend.site_keepalive import KeepAliveHTTPHandler, KeepAliveHTTPSHandler
 from frontend.ui_web.remote_link import mailbox, presence
 
 DEFAULT_BASE_URL = "https://uefnducky.org"
-DEVICE_SCOPE = "uefn-ducky.app"
 _CREDENTIALS_KEY = "duckyos_account"
 _USER_AGENT = f"UEFN-Ducky/{__version__}"
 
@@ -361,16 +358,6 @@ def _request(
         raise DuckyOSAccountError(f"Network error: {exc}", code="network") from exc
 
 
-def _device_key_name() -> str:
-    host = ""
-    try:
-        host = socket.gethostname() or platform.node() or ""
-    except Exception:
-        host = ""
-    host = re.sub(r"[^\w.\- ]+", "", host).strip() or "this-pc"
-    return f"UEFN Ducky on {host[:48]}"
-
-
 def _apply_session_cookies(blob: dict[str, Any], cookies: dict[str, str]) -> None:
     session = _pick_cookie(cookies, _SESSION_COOKIE_RE)
     if session:
@@ -397,36 +384,6 @@ def _session_cookie_header(blob: dict[str, Any], *, include_challenge: bool = Fa
         str(blob.get("csrf_value") or ""),
         extra=extra or None,
     )
-
-
-def mint_device_key(blob: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Mint a ``dky_v1_`` key with ``uefn-ducky.app``. Soft-fails if scope missing."""
-    blob = dict(blob or _load_blob())
-    base = str(blob.get("base_url") or "").rstrip("/")
-    if not base or not blob.get("session_value"):
-        return blob
-    body = {"name": _device_key_name(), "permissions": [DEVICE_SCOPE], "expiresInDays": 90}
-    status, cookies, payload, raw = _request(
-        "POST",
-        f"{base}/api/v1/auth/api-keys",
-        body=body,
-        cookie_header=_session_cookie_header(blob),
-        csrf_token=str(blob.get("csrf_value") or ""),
-    )
-    _apply_session_cookies(blob, cookies)
-    if status in (200, 201) and isinstance(payload, dict) and payload.get("token"):
-        blob["device_key"] = str(payload["token"])
-        blob["device_key_id"] = str(payload.get("id") or "")
-        blob["device_key_error"] = ""
-        return blob
-    # Soft-fail: plugin scope may not be deployed yet.
-    err = ""
-    if isinstance(payload, dict):
-        err = str(payload.get("error") or payload.get("message") or "")
-    if not err:
-        err = raw.strip()[:200] or f"HTTP {status}"
-    blob["device_key_error"] = err
-    return blob
 
 
 def _revoke_device_key(blob: dict[str, Any]) -> None:
@@ -809,14 +766,6 @@ _OTHER_APP_TOOLS = frozenset({"snip_screen"})
 def _cap_bools(raw: dict[str, Any] | None) -> dict[str, bool]:
     src = raw if isinstance(raw, dict) else {}
     return {key: bool(src.get(key, default)) for key, default in _CAP_DEFAULTS.items()}
-
-
-def cloud_settings_ceiling() -> dict[str, bool] | None:
-    blob = _load_blob()
-    raw = blob.get("agent_settings")
-    if not isinstance(raw, dict) or not raw:
-        return None
-    return _cap_bools(raw)
 
 
 def effective_allow_settings_write(local: bool) -> bool:

@@ -109,18 +109,6 @@ def _encoding_for_model(model: str, provider: str):
         return None
 
 
-def clear_tool_schema_token_cache() -> None:
-    """Drop cached per-tool schema token counts (call when MCP tools change)."""
-    _TOOL_SCHEMA_TOKEN_CACHE.clear()
-    _TOOL_SCHEMA_TOTAL_CACHE.clear()
-    try:
-        from backend.agent.toolsets.tool_index import clear_tool_index_cache
-
-        clear_tool_index_cache()
-    except Exception:
-        pass
-
-
 def count_tokens(text: str, model: str = "", provider: str = "") -> int:
     raw = text or ""
     if not raw:
@@ -1367,6 +1355,3 @@ def compute_context_usage(
         out["agent_info"] = report["agent_info"]
     return out
 
-
-def format_token_count(n: int) -> str:
-    return f"{int(n):,}"

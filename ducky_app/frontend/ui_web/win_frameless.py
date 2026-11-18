@@ -327,23 +327,6 @@ def _apply_min_track_impl(window: object, min_width: int, min_height: int) -> bo
     return hwnd is not None
 
 
-def set_window_min_track_size(window: object, min_width: int, min_height: int) -> bool:
-    """Lower/raise the Win32 minimum resize track size (logical px)."""
-    if sys.platform != "win32":
-        return False
-    native = getattr(window, "native", None)
-    state = {"ok": False}
-
-    def apply() -> None:
-        state["ok"] = _apply_min_track_impl(window, min_width, min_height)
-
-    if native is not None:
-        _run_on_form_ui(native, apply)
-    else:
-        apply()
-    return bool(state["ok"])
-
-
 def clear_window_min_track_size(window: object) -> bool:
     if sys.platform != "win32":
         return False
@@ -1368,11 +1351,6 @@ def install_pywebview_chrome_patches() -> None:
         install_pywebview_chrome_patches._installed = True  # type: ignore[attr-defined]
     except Exception:
         pass
-
-
-def install_chrome_refresh_hooks() -> None:
-    """Backward-compatible alias — use install_pywebview_chrome_patches."""
-    install_pywebview_chrome_patches()
 
 
 _JS_BIG_BYTES = 64 * 1024
