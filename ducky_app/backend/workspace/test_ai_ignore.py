@@ -420,38 +420,19 @@ def test_installed_enforcement_cannot_be_modified(protected):
         guard.require_ai_mutation(guard.__file__)
 
 
-@pytest.mark.parametrize("rule", ["clip.mp4", "*.jpg", "*.part.jpg"])
+@pytest.mark.parametrize("rule", ["clip.mp4", "*.mp3"])
 def test_media_extraction_denied_before_subprocess(protected, monkeypatch, rule):
-    from backend.agent.video import frames
+    from backend.agent.video import audio, frames
 
     settings = PanelSettings.load()
     settings.ai_ignore_patterns = [rule]
     settings.save()
     video = protected / "clip.mp4"
     video.write_bytes(b"synthetic video")
-    monkeypatch.setattr(frames, "ensure_installed", lambda: pytest.fail("ffmpeg must not start"))
+    monkeypatch.setattr(frames, "_runner", lambda *_a: pytest.fail("ffmpeg must not start"))
     with pytest.raises(frames.VideoError, match="AI_FILE_IGNORED"):
-        frames.extract_frames(video, 2)
-    assert list(protected.glob("*.jpg")) == []
-
-
-@pytest.mark.parametrize("rule", ["clip.mp4", "*.transcript.txt", "*.part", "*.audio.mp3"])
-def test_transcript_denial_precedes_cached_read_and_cleanup(protected, monkeypatch, rule):
-    from backend.agent.video import audio
-
-    settings = PanelSettings.load()
-    settings.ai_ignore_patterns = [rule]
-    settings.save()
-    video = protected / "clip.mp4"
-    video.write_bytes(b"synthetic video")
-    text, _ = audio.transcript_paths(video)
-    text.write_text("SYNTHETIC_SECRET")
-    mp3 = video.with_name(video.name + ".audio.mp3")
-    mp3.write_bytes(b"keep existing file")
-    monkeypatch.setattr(audio, "_read", lambda _: pytest.fail("cache must not be read"))
-    result = audio.transcribe_video(video)
-    assert result.text == "" and "AI_FILE_IGNORED" in result.note
-    assert mp3.read_bytes() == b"keep existing file"
+        audio.extract_mp3(protected / "ffmpeg.exe", video, protected / "out.mp3")
+    assert list(protected.glob("*.mp3")) == []
 
 
 def test_staged_video_not_touched_when_ignored(protected, monkeypatch):

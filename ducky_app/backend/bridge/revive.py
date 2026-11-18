@@ -9,7 +9,6 @@ project, which runs those init scripts and starts the listener.
 from __future__ import annotations
 
 import re
-import threading
 import time
 from typing import Any
 
@@ -21,9 +20,6 @@ _EPIC_CALL_TIMEOUT_SEC = 20.0
 # A cold or Verse-building editor can take well past 20 s to answer health after the
 # bootstrap (no_health); polled each second, so a quick start still returns at once.
 _BOOT_WAIT_SEC = 60.0
-# UEFN MCP answers ~30 s before UEFN turns Python on itself, and the boot file then
-# waits ~45 slow loading ticks; give a normal start this long before stepping in.
-AUTO_REVIVE_GRACE_SEC = 60.0
 _SESSION_RETRY_SEC = 2.0
 
 _LAUNCH_HINT = (
@@ -176,74 +172,6 @@ def revive_listener(port: int) -> dict[str, Any]:
         "action": "python_enabled",
         "message": "Python enabled in UEFN — the listener starts in a few seconds.",
     }
-
-
-# After a failed auto restart the next tries come this long after the one before. One try per
-# offline spell left the listener down until the person pressed Restart listener, which then
-# worked (Nov 11 2026 feedback, after Ducky updated itself: the first try met a busy editor).
-AUTO_REVIVE_RETRY_AFTER_SEC = (120.0, 300.0)
-
-
-class AutoRevive:
-    """Panel-poll watchdog: revives the listener while it is offline and UEFN MCP is up, at
-    most ``1 + len(AUTO_REVIVE_RETRY_AFTER_SEC)`` times per offline spell.
-
-    A spell ends when the listener comes online or UEFN MCP goes away (UEFN closed or
-    switching island), so the next island gets its own tries.
-    """
-
-    def __init__(self, *, grace_sec: float = AUTO_REVIVE_GRACE_SEC) -> None:
-        self._grace = grace_sec
-        self._lock = threading.Lock()
-        self._offline_since = 0.0
-        self._tries = 0
-        self._next_try = 0.0
-        self._running = False
-
-    def observe(self, status: dict[str, Any], port: int, *, now: float | None = None) -> bool:
-        """Feed a listener status; starts a background revive when due. True when it did."""
-        t = time.time() if now is None else now
-        down = not status.get("online") and bool(status.get("epic_mcp_online"))
-        with self._lock:
-            if not down:
-                self._offline_since = 0.0
-                self._tries = 0
-                self._next_try = 0.0
-                return False
-            if not self._offline_since:
-                self._offline_since = t
-                self._next_try = t + self._grace
-            if self._running or self._tries > len(AUTO_REVIVE_RETRY_AFTER_SEC) or t < self._next_try:
-                return False
-            retry_after = AUTO_REVIVE_RETRY_AFTER_SEC[self._tries:self._tries + 1]
-            self._tries += 1
-            self._next_try = t + retry_after[0] if retry_after else float("inf")
-            self._running = True
-        threading.Thread(target=self._try, args=(port,), name="ducky-listener-revive", daemon=True).start()
-        return True
-
-    def _try(self, port: int) -> None:
-        try:
-            self._run(port)
-        finally:
-            with self._lock:
-                self._running = False
-
-    @staticmethod
-    def _run(port: int) -> None:
-        try:
-            result = revive_listener(port)
-        except Exception as exc:
-            result = {"ok": False, "message": str(exc)}
-        # UEFN closed between the status poll and the try: status, not an error.
-        if result.get("ok") or result.get("action") == "uefn_offline":
-            return
-        try:
-            from frontend.error_log import record_error
-
-            record_error(error_source("listener_revive", result), f"Auto restart: {result.get('message', '')}")
-        except Exception:
-            pass
 
 
 def error_source(prefix: str, result: dict[str, Any]) -> str:

@@ -1,4 +1,4 @@
-"""Listener revive: reload when up, turn Python on in UEFN when down, auto-try once."""
+"""Listener revive: reload when up, turn Python on in UEFN when down."""
 
 from __future__ import annotations
 
@@ -94,14 +94,12 @@ def test_slow_listener_within_60s_counts_as_started(monkeypatch, epic) -> None:
     state["python"] = "true"
     monkeypatch.setattr(revive, "_BOOT_WAIT_SEC", 60.0)
     clock = {"t": 0.0}
-    logged: list[str] = []
-    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
     monkeypatch.setattr("backend.bridge.listener_get_health", lambda port: {"status": "ok"} if clock["t"] >= 35 else None)
     monkeypatch.setattr(revive.time, "monotonic", lambda: clock["t"])
     monkeypatch.setattr(revive.time, "sleep", lambda s: clock.__setitem__("t", clock["t"] + s))
-    revive.AutoRevive._run(4200)  # the auto path: records an error only when the revive fails
+    out = revive.revive_listener(4200)
     assert clock["t"] == 35  # returned on the first healthy poll, not at the 60 s deadline
-    assert logged == [] and state["script"]
+    assert out["action"] == "listener_started" and state["script"]
 
 
 def test_python_on_with_dead_socket_says_restart(epic) -> None:
@@ -118,59 +116,6 @@ def test_uefn_closed(epic) -> None:
     state["online"] = False
     out = revive.revive_listener(4200)
     assert out["action"] == "uefn_offline" and calls == []
-
-
-def test_auto_revive_tries_again_later_in_the_same_offline_spell(monkeypatch) -> None:
-    """Nov 11 2026: after Ducky updated itself the one auto restart failed and the listener
-    stayed offline until the person pressed Restart listener (which worked)."""
-    runs: list[int] = []
-    monkeypatch.setattr(revive.AutoRevive, "_run", staticmethod(lambda port: runs.append(port)))
-
-    class _Thread:
-        def __init__(self, target, args, **_):
-            self._go = lambda: target(*args)
-
-        def start(self):
-            self._go()
-
-    monkeypatch.setattr(revive.threading, "Thread", _Thread)
-    auto = revive.AutoRevive(grace_sec=60)
-    down = {"online": False, "epic_mcp_online": True}
-    assert not auto.observe(down, 4200, now=100)
-    assert not auto.observe(down, 4200, now=150)
-    assert auto.observe(down, 4200, now=161)  # first try, after the grace
-    assert not auto.observe(down, 4200, now=200)  # not yet
-    assert auto.observe(down, 4200, now=281)  # 120 s later
-    assert not auto.observe(down, 4200, now=500)
-    assert auto.observe(down, 4200, now=581)  # 300 s after that
-    assert not auto.observe(down, 4200, now=5000)  # three tries, then it is the person's call
-    assert runs == [4200, 4200, 4200]
-    # UEFN closed / next island: a fresh spell gets its own tries.
-    auto.observe({"online": False, "epic_mcp_online": False}, 4200, now=6000)
-    auto.observe(down, 4200, now=6100)
-    assert auto.observe(down, 4200, now=6161)
-    assert runs == [4200] * 4
-
-
-def test_auto_revive_never_runs_two_tries_at_once(monkeypatch) -> None:
-    started: list[object] = []
-
-    class _Thread:
-        def __init__(self, target, args, **_):
-            started.append((target, args))
-
-        def start(self):
-            pass  # the try is still running
-
-    monkeypatch.setattr(revive.threading, "Thread", _Thread)
-    auto = revive.AutoRevive(grace_sec=0)
-    down = {"online": False, "epic_mcp_online": True}
-    assert auto.observe(down, 4200, now=10)
-    assert not auto.observe(down, 4200, now=10 + revive.AUTO_REVIVE_RETRY_AFTER_SEC[0] + 1)
-    monkeypatch.setattr(revive.AutoRevive, "_run", staticmethod(lambda port: None))
-    target, args = started[0]
-    target(*args)  # the first try ends
-    assert auto.observe(down, 4200, now=10 + revive.AUTO_REVIVE_RETRY_AFTER_SEC[0] + 2)
 
 
 def test_dead_epic_session_is_dropped_and_tried_once_more(monkeypatch) -> None:
@@ -196,26 +141,6 @@ def test_dead_epic_session_is_dropped_and_tried_once_more(monkeypatch) -> None:
     monkeypatch.setattr(revive, "_SESSION_RETRY_SEC", 0)
     assert revive._call_epic_tool("EnablePythonForMainProject") == "ok"
     assert tries == ["EnablePythonForMainProject", "EnablePythonForMainProject"] and len(forgot) == 1
-
-
-def test_auto_revive_error_code_names_the_step(monkeypatch) -> None:
-    from frontend.usage_events import where_of
-
-    logged: list[str] = []
-    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
-    for action in ("uefn_offline", "stale_socket", "python_already_on"):
-        monkeypatch.setattr(revive, "revive_listener", lambda port, a=action: {"ok": False, "action": a, "step": "no_health" if a == "python_already_on" else "", "message": "x"})
-        revive.AutoRevive._run(4200)
-    monkeypatch.setattr(revive, "revive_listener", lambda port: 1 / 0)
-    revive.AutoRevive._run(4200)
-    # UEFN closing mid-try is status, not an error.
-    assert logged == ["listener_revive.stale_socket", "listener_revive.python_already_on.no_health", "listener_revive.failed"]
-    assert where_of(logged[0]) == "bridge"
-
-
-def test_auto_revive_idle_while_listener_online() -> None:
-    auto = revive.AutoRevive(grace_sec=0)
-    assert not auto.observe({"online": True, "epic_mcp_online": True}, 4200, now=1)
 
 
 @pytest.mark.parametrize("deaths, action", [(1, "listener_started"), (2, "python_already_on")])

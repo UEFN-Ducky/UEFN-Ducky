@@ -9,12 +9,9 @@ from frontend.ui_web import panel_api
 def test_status_reads_and_refreshes_never_ship_or_revive(monkeypatch):
     # Oct 10 2026: every status poll that saw the listener come online re-shipped every skill
     # pack to every IDE. Nov 3 2026: a ship runs only at app start and on Settings -> Apply.
-    from backend.bridge import revive
-
-    shipped, revived = [], []
+    shipped = []
     monkeypatch.setattr(ship_newest, "ship_newest_everywhere", lambda **kw: shipped.append(kw) or [])
     monkeypatch.setattr(ship_newest, "ship_newest_everywhere_async", lambda **kw: shipped.append(kw))
-    monkeypatch.setattr(revive.AutoRevive, "observe", lambda *a, **k: revived.append(1))
     api = panel_api.PanelApi.__new__(panel_api.PanelApi)
     api._listener_status_lock = threading.Lock()
     flips = iter([{"online": False}, {"online": True, "wedged": False}] * 5)
@@ -35,7 +32,7 @@ def test_status_reads_and_refreshes_never_ship_or_revive(monkeypatch):
         while api._listener_status_cache()._inflight:
             threading.Event().wait(0.01)
     assert done.wait(5)
-    assert shipped == [] and revived == []
+    assert shipped == []
 
 
 def test_status_read_shows_live_plugin_rows_without_fetching_uefn(monkeypatch):

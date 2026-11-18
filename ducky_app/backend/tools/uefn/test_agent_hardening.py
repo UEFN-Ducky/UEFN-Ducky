@@ -328,9 +328,9 @@ def test_hard_rules_show_me_lives_in_ducky_ui_show():
 
 def test_built_in_agent_prompt_has_the_hard_rules_once():
     # The server instructions shrank to a pointer, so the in-panel agent gets the rules here.
-    from backend.agent.prompt import get_system_prompt
+    from backend.agent.prompt import assemble_system_prompt, get_system_prompt_parts
 
-    text = get_system_prompt(listener_online=False, listener_port=4200, skill_override="")
+    text = assemble_system_prompt(get_system_prompt_parts(listener_online=False, listener_port=4200))
     assert text.count(AGENT_HARD_RULES) == 1
     for rule in ("Separate systems", "Check off the plan"):
         assert text.count(rule) == 1, rule

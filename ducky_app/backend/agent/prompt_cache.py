@@ -230,14 +230,6 @@ def markers_only_payload(cache: PromptCachePayload) -> PromptCachePayload:
     )
 
 
-def _strip_cache_control(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: _strip_cache_control(v) for k, v in obj.items() if k != "cache_control"}
-    if isinstance(obj, list):
-        return [_strip_cache_control(v) for v in obj]
-    return obj
-
-
 def is_live_context_content(content: Any) -> bool:
     if isinstance(content, str):
         return content.startswith(LIVE_CONTEXT_PREFIX)
@@ -246,42 +238,6 @@ def is_live_context_content(content: Any) -> bool:
         text = first.get("text") if isinstance(first, dict) else ""
         return str(text).startswith(LIVE_CONTEXT_PREFIX)
     return False
-
-
-def cache_prefix_fingerprint(
-    frozen_system: str,
-    tools: list[dict[str, Any]],
-    messages: list[Any],
-) -> str:
-    """Hash of the cacheable prefix (tools JSON + frozen system + history, no live tail / markers)."""
-    cleaned: list[Any] = []
-    for m in messages:
-        if isinstance(m, dict):
-            if is_live_context_content(m.get("content")):
-                continue
-            cleaned.append(_strip_cache_control(m))
-        else:
-            content = getattr(m, "content", "")
-            if is_live_context_content(content):
-                continue
-            cleaned.append(
-                _strip_cache_control(
-                    {
-                        "role": getattr(m, "role", ""),
-                        "content": content,
-                    }
-                )
-            )
-    raw = json.dumps(
-        {
-            "system": frozen_system or "",
-            "tools": _strip_cache_control(tools),
-            "messages": cleaned,
-        },
-        sort_keys=True,
-        default=str,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def build_cache_payload(

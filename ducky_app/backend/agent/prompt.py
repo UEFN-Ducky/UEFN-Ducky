@@ -487,44 +487,6 @@ def assemble_system_prompt(parts: dict[str, str], *, omit: frozenset[str] | None
     return "".join(chunks)
 
 
-def get_system_prompt(
-    *,
-    listener_online: bool = False,
-    listener_port: int,
-    project_root: str = "",
-    skill_override: str | None = None,
-    listener_wedged: bool = False,
-    ducky_name: str = "",
-    ducky_personality: str = "",
-    uefn_project_name: str = "",
-    project_match: bool = True,
-    context_omit: frozenset[str] | None = None,
-) -> str:
-    global _skill_cache
-    skill = skill_override if skill_override is not None else _skill_cache
-    if skill is None:
-        try:
-            from backend.skills.skill_index import load_skill_text
-
-            skill = load_skill_text()
-        except FileNotFoundError:
-            skill = "(uefn_skill.md not found — run UEFN-Ducky panel once)"
-        _skill_cache = skill
-
-    parts = get_system_prompt_parts(
-        listener_online=listener_online,
-        listener_port=listener_port,
-        project_root=project_root,
-        skill_text=skill or "",
-        listener_wedged=listener_wedged,
-        ducky_name=ducky_name,
-        ducky_personality=ducky_personality,
-        uefn_project_name=uefn_project_name,
-        project_match=project_match,
-    )
-    return assemble_system_prompt(parts, omit=context_omit)
-
-
 def compact_messages(
     messages: list[dict[str, Any]],
     keep_last: int = 20,
