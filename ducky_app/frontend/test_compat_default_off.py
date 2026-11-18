@@ -325,11 +325,9 @@ def test_off_or_bad_value_still_starts_the_launcher(
 
 
 def test_decide_is_python_only_when_the_launcher_cannot_run() -> None:
-    for setting in ("off", "auto", "on"):
-        for held in (True, False):
-            assert native_switch.decide(setting, True, True, held) == "native"
-            assert native_switch.decide(setting, False, True, held) == "python"
-            assert native_switch.decide(setting, True, False, held) == "python"
+    assert native_switch.decide(True, True) == "native"
+    assert native_switch.decide(False, True) == "python"
+    assert native_switch.decide(True, False) == "python"
 
 
 def test_launcher_py_runs_the_hook_before_the_python_window() -> None:

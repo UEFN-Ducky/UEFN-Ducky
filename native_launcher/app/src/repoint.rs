@@ -31,8 +31,8 @@ pub const HOP_ENV: &str = "UEFN_DUCKY_LAUNCHER_HOP";
 pub const LAUNCHER_ENV: &str = "UEFN_DUCKY_LAUNCHER_EXE";
 /// `PanelSettings.native_launcher`'s default in `frontend/settings.py`.
 pub const DEFAULT_NATIVE_LAUNCHER: &str = "auto";
-/// Python's copy of the setting (`settings.LAUNCHER_SETTING_FILE`): the default store keeps
-/// settings in ducky.db, which this launcher doesn't read.
+/// Python's old copy of the setting. Python no longer writes it and `wants_native` ignores
+/// the value: a file left by an older version is harmless.
 pub const SETTING_FILE: &str = "launcher/native_launcher.json";
 /// `app_versions.VERSIONS_DIR_NAME` / `CURRENT_FILE`.
 pub const VERSIONS_DIR: &str = "versions";
@@ -141,7 +141,7 @@ pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path, own_version: &st
     }
 }
 
-/// `native_launcher` as off | on | auto (`settings.normalize_native_launcher`): from
+/// `native_launcher` as off | on | auto (Python no longer reads it): from
 /// [`SETTING_FILE`], else `panel_settings.json` (the files store); missing is the default.
 pub fn native_setting(app_data: &Path) -> String {
     let read = |name: &str| {

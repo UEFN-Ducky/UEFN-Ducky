@@ -1,7 +1,7 @@
 """Native launcher switch: start Ducky-Launcher.exe, or fall back to the Python window.
 
-Every window launch starts ``Ducky-Launcher.exe`` (the ``native_launcher`` setting is ignored:
-there is no turning it off). It starts ``UEFN-Ducky.exe --backend`` itself; this waits for
+Every window launch starts ``Ducky-Launcher.exe`` (there is no turning it off; the old
+``native_launcher`` setting is no longer read). It starts ``UEFN-Ducky.exe --backend`` itself; this waits for
 ``launcher/ready-<launcher pid>.json``, and any exit code, a timeout or a spawn error lets the
 Python window start in this same process with the same argv.
 
@@ -37,7 +37,7 @@ BACKEND_EXE_ENV = "UEFN_DUCKY_BACKEND_EXE"
 # Set by Ducky-Launcher.exe when it falls back and starts UEFN-Ducky.exe itself: this launch
 # always runs the Python window, so on/auto never start the launcher again (no loop).
 NO_NATIVE_ENV = "UEFN_DUCKY_NO_NATIVE"
-# Set with it by the launcher (repoint.rs NO_NATIVE_WHY_ENV): no_pointer | hop_failed | start_failed | setting.
+# Set with it by the launcher (repoint.rs NO_NATIVE_WHY_ENV): no_pointer | hop_failed | start_failed.
 NO_NATIVE_WHY_ENV = "UEFN_DUCKY_NO_NATIVE_WHY"
 
 EXIT_WEBVIEW2 = 20
@@ -221,20 +221,17 @@ def no_native() -> bool:
     return _no_native or os.environ.get(NO_NATIVE_ENV, "").strip() == "1"
 
 
-def decide(setting: str, exe_present: bool, webview2_ok: bool, crash_loop_active: bool) -> str:
+def decide(exe_present: bool, webview2_ok: bool) -> str:
     """'native' or 'python' for this launch."""
-    # Always the launcher (its window is up in ~0.1 s, the Python window in 1-2 s): the
-    # setting no longer turns it off. Python only when the launcher can't run at all.
-    # Same rule in repoint.rs wants_native.
-    del setting, crash_loop_active
+    # Always the launcher (its window is up in ~0.1 s, the Python window in 1-2 s). Python
+    # only when the launcher can't run at all. Same rule in repoint.rs wants_native.
     if no_native() or not exe_present or not webview2_ok:
         return "python"
     return "native"
 
 
-def python_reason(setting: str, exe_present: bool, webview2_ok: bool, crash_loop_active: bool) -> str:
+def python_reason(exe_present: bool, webview2_ok: bool) -> str:
     """Why a launch ran in Python ("" when it would be native)."""
-    del setting, crash_loop_active
     if no_native():
         return "launcher_fallback"
     if not exe_present:
@@ -328,20 +325,9 @@ def fallback_reason(code: int, *, timed_out: bool = False) -> str:
     return EXIT_REASONS.get(int(code), "exit_other")
 
 
-def _setting() -> str:
-    try:
-        from frontend.settings import PanelSettings
-
-        return PanelSettings.load().native_launcher
-    except Exception:
-        return "off"
-
-
-def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: str | None = None) -> bool:
+def maybe_start_native(argv: list[str], *, start_hidden: bool = False) -> bool:
     """The launch hook (frontend/launcher.py). True: the launcher painted the window, exit now.
     False: run the Python window in this process, with the same argv.
-
-    Always tries the launcher; the setting is ignored (``setting`` is kept for callers).
     """
     started = time.perf_counter()
     fallback = take_no_native()  # first: children never inherit it
@@ -353,7 +339,7 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
         # slug; launcher.start's fallback is a fixed list). Nov 16 2026: 7 of 14 launches were
         # "launcher_fallback" and nothing said why. Popped: children never inherit it.
         why = os.environ.pop(NO_NATIVE_WHY_ENV, "").strip().lower()
-        if why in ("no_pointer", "hop_failed", "start_failed", "setting"):
+        if why in ("no_pointer", "hop_failed", "start_failed"):
             try:  # off the launch path, as record_start_soon: the stats queue opens the database
                 from frontend import usage_stats
 
@@ -366,9 +352,8 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False, setting: 
     exe = launcher_exe()
     present = exe.is_file()
     wv2 = webview2_ok() if present else False
-    held = crash_loop_active()
-    if decide("on", present, wv2, held) == "python":
-        record_start_soon("python", None, None, python_reason("on", present, wv2, held))
+    if decide(present, wv2) == "python":
+        record_start_soon("python", None, None, python_reason(present, wv2))
         return False
     timeout_s = NATIVE_WAIT_S
     code = run_native(argv, timeout_s, exe=exe)

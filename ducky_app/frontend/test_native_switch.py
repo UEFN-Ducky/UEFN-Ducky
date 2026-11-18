@@ -1,17 +1,18 @@
-"""The native launcher switch: the setting, the decision, the fallbacks, the rollout numbers."""
+"""The native launcher switch: the decision, the fallbacks, the rollout numbers."""
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
 import pytest
 
 from frontend.app_paths import resolve_app_data_dir
-from frontend.settings import PanelSettings, normalize_native_launcher
+from frontend.settings import PanelSettings
 
 
-# --- d2: the native_launcher setting -------------------------------------------------
+# --- the old native_launcher setting: still loads, never read --------------------------
 
 
 @pytest.fixture
@@ -26,64 +27,13 @@ def test_default_is_auto() -> None:
     assert PanelSettings().native_launcher == "auto"
 
 
-def test_old_file_without_the_key_means_auto(files_backend: Path) -> None:
-    files_backend.write_text(json.dumps({"web_access": "on", "terminals_enabled": False}), encoding="utf-8")
-    assert PanelSettings.load().native_launcher == "auto"
-
-
-def test_saved_off_stays_off(files_backend: Path) -> None:
-    files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": "off"}), encoding="utf-8")
-    s = PanelSettings.load()
-    assert s.native_launcher == "off"
-    s.save()
-    assert PanelSettings.load().native_launcher == "off"
-
-
-def test_decide_always_starts_the_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The launcher's window is up in ~0.1 s, the Python window in 1-2 s: no setting turns it off."""
-    monkeypatch.setattr(ns, "_no_native", False)
-    monkeypatch.delenv(ns.NO_NATIVE_ENV, raising=False)
-    for setting in ("auto", PanelSettings().native_launcher, "on", "off", "garbage"):
-        assert ns.decide(setting, True, True, False) == "native", setting
-
-
-@pytest.mark.parametrize("raw", ["garbage", "", None, 1, True, ["on"], {"on": 1}, "ON ", "Auto"])
-def test_bad_value_counts_as_off_or_is_normalized(files_backend: Path, raw: object) -> None:
+@pytest.mark.parametrize("raw", ["python", "off", "on", "garbage", 1, None])
+def test_an_old_settings_row_with_native_launcher_still_loads(files_backend: Path, raw: object) -> None:
     files_backend.write_text(json.dumps({"web_access": "on", "native_launcher": raw}), encoding="utf-8")
-    got = PanelSettings.load().native_launcher
-    # null reads like a missing key (the loader drops nulls): the default, auto.
-    expected = "auto" if raw is None else {"ON ": "on", "Auto": "auto"}.get(raw if isinstance(raw, str) else "", "off")
-    assert got == expected
-
-
-def test_normalize_native_launcher() -> None:
-    assert [normalize_native_launcher(v) for v in ("off", "on", "auto", "nope", None, 3)] == [
-        "off", "on", "auto", "off", "off", "off",
-    ]
-
-
-def test_save_keeps_every_other_key_and_its_order(files_backend: Path) -> None:
-    files_backend.write_text(json.dumps({"web_access": "on", "terminals_enabled": False}), encoding="utf-8")
     s = PanelSettings.load()
-    before = PanelSettings.load().to_json_dict()
-    s.native_launcher = "auto"
-    s.save()
-    after = json.loads(files_backend.read_text(encoding="utf-8"))
-    assert after["native_launcher"] == "auto"
-    assert after["web_access"] == "on" and after["terminals_enabled"] is False
-    keys = [k for k in after if k != "native_launcher"]
-    assert keys == [k for k in before if k != "native_launcher"]
-    assert {k: v for k, v in after.items() if k != "native_launcher"} == {
-        k: v for k, v in before.items() if k != "native_launcher"
-    }
-    assert PanelSettings.load().native_launcher == "auto"
-
-
-def test_save_turns_garbage_into_off(files_backend: Path) -> None:
-    s = PanelSettings(web_access="on")
-    s.native_launcher = "warp-speed"
-    s.save()
-    assert json.loads(files_backend.read_text(encoding="utf-8"))["native_launcher"] == "off"
+    assert s.web_access == "on"
+    s.save()  # and saves again
+    assert PanelSettings.load().web_access == "on"
 
 
 def test_database_round_trip() -> None:
@@ -93,13 +43,24 @@ def test_database_round_trip() -> None:
     assert PanelSettings.load().native_launcher == "on"
 
 
-def test_schema_describes_the_setting() -> None:
-    from frontend.settings_schema import settings_schema
+def test_no_mirror_file_is_written(files_backend: Path) -> None:
+    s = PanelSettings(web_access="on", native_launcher="off")
+    s.save()
+    assert not (resolve_app_data_dir() / "launcher" / "native_launcher.json").exists()
 
-    entry = settings_schema()["fields"]["native_launcher"]
-    assert entry["default"] == "auto"
-    assert entry["enum"] == ["off", "on", "auto"]
-    assert entry["settable"] is False
+
+def test_decide_always_starts_the_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The launcher's window is up in ~0.1 s, the Python window in 1-2 s."""
+    monkeypatch.setattr(ns, "_no_native", False)
+    monkeypatch.delenv(ns.NO_NATIVE_ENV, raising=False)
+    assert ns.decide(True, True) == "native"
+
+
+def test_decide_takes_no_setting() -> None:
+    for fn in (ns.decide, ns.python_reason):
+        assert list(inspect.signature(fn).parameters) == ["exe_present", "webview2_ok"]
+    assert "setting" not in inspect.signature(ns.maybe_start_native).parameters
+    assert not hasattr(ns, "_setting")
 
 
 # --- d3: decide / run_native / the launch hook ----------------------------------------
@@ -108,32 +69,23 @@ from frontend import native_switch as ns  # noqa: E402
 
 
 @pytest.mark.parametrize(
-    "setting, exe, wv2, loop, expected",
+    "exe, wv2, expected",
     [
-        ("off", True, True, False, "native"),
-        ("off", True, True, True, "native"),
-        ("garbage", True, True, False, "native"),
-        ("on", True, True, False, "native"),
-        ("on", True, True, True, "native"),
-        ("on", False, True, False, "python"),
-        ("on", True, False, False, "python"),
-        ("auto", True, True, False, "native"),
-        ("auto", True, True, True, "native"),
-        ("auto", False, True, False, "python"),
-        ("auto", True, False, False, "python"),
+        (True, True, "native"),
+        (False, True, "python"),
+        (True, False, "python"),
+        (False, False, "python"),
     ],
 )
-def test_decision_table(setting: str, exe: bool, wv2: bool, loop: bool, expected: str) -> None:
-    assert ns.decide(setting, exe, wv2, loop) == expected
+def test_decision_table(exe: bool, wv2: bool, expected: str) -> None:
+    assert ns.decide(exe, wv2) == expected
 
 
 def test_python_reason() -> None:
-    assert ns.python_reason("off", False, False, True) == "no_exe"
-    assert ns.python_reason("on", False, True, False) == "no_exe"
-    assert ns.python_reason("on", True, False, False) == "webview2"
-    assert ns.python_reason("auto", True, False, False) == "webview2"
-    assert ns.python_reason("on", True, True, True) == ""
-
+    assert ns.python_reason(False, False) == "no_exe"
+    assert ns.python_reason(False, True) == "no_exe"
+    assert ns.python_reason(True, False) == "webview2"
+    assert ns.python_reason(True, True) == ""
 
 class FakeProc:
     def __init__(self, pid: int, *, exit_after: float | None = None, code: int = 0,
@@ -229,7 +181,7 @@ def test_crash_loop_three_failures_in_ten_minutes_hold_auto_for_a_day() -> None:
     assert ns.crash_loop_active(t + 120 + 24 * 3600 - 1)
     assert not ns.crash_loop_active(t + 120 + 24 * 3600 + 1)
     # The hold is the launcher supervisor's own; this side still starts the launcher.
-    assert ns.decide("auto", True, True, ns.crash_loop_active(t + 121)) == "native"
+    assert ns.decide(True, True) == "native"
 
 
 def test_old_failures_drop_out_of_the_window() -> None:
@@ -265,20 +217,20 @@ def no_spawn(monkeypatch: pytest.MonkeyPatch) -> list:
     return spawned
 
 
-def test_off_still_starts_the_launcher(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_saved_off_still_starts_the_launcher(launcher_present: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rows = _sync_records(monkeypatch)
     started: list = []
     monkeypatch.setattr(ns, "run_native", lambda argv, timeout_s, exe=None: started.append(argv) or None)
-    for setting in ("off", "junk", "auto", None):
-        assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting=setting) is True
-    assert len(started) == 4 and all(r[0] == "native" for r in rows)
+    monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls, **_: PanelSettings(native_launcher="off")))
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is True
+    assert len(started) == 1 and all(r[0] == "native" for r in rows)
 
 
 def test_hidden_start_backend_and_child_never_spawn(no_spawn: list, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on", start_hidden=True) is False
-    assert ns.maybe_start_native(["UEFN-Ducky.exe", "--backend"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"], start_hidden=True) is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe", "--backend"]) is False
     monkeypatch.setenv(ns.NATIVE_CHILD_ENV, "1")
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert no_spawn == []
 
 
@@ -303,7 +255,7 @@ def test_hook_native_ready(launcher_present: Path, monkeypatch: pytest.MonkeyPat
     rows = _sync_records(monkeypatch)
     proc = FakeProc(7001, ready_after=0.0)
     monkeypatch.setattr(ns, "_spawn", _spawner(proc, []))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is True
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is True
     assert rows == [("native", 95, 640, "")]
 
 
@@ -313,7 +265,7 @@ def test_hook_each_exit_code_falls_back(launcher_present: Path, monkeypatch: pyt
                                         code: int, reason: str) -> None:
     rows = _sync_records(monkeypatch)
     monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7100 + code, exit_after=0.0, code=code), []))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert rows == [("python", None, None, reason)]
     marker = ns.crash_loop_path()
     failures = json.loads(marker.read_text(encoding="utf-8"))["failures"] if marker.is_file() else []
@@ -328,7 +280,7 @@ def test_crash_loop_fallback_names_the_launchers_slug(launcher_present: Path, mo
     real_record = ns.record_start
     rows = _sync_records(monkeypatch)
     monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7400, exit_after=0.0, code=22), []))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert rows == [("python", None, None, "crash_loop.port_blocked")]
     row = real_record("python", None, None, "crash_loop.port_blocked")
     assert row["fallback"] == "crash_loop.port_blocked"
@@ -348,7 +300,7 @@ def test_hook_timeout_falls_back(launcher_present: Path, monkeypatch: pytest.Mon
     real = ns.run_native
     monkeypatch.setattr(ns, "run_native", lambda argv, timeout_s=15, **k: real(argv, 0.05, **k))
     monkeypatch.setattr(ns.time, "perf_counter", _fake_clock([0.0, 23.0, 23.0]))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert proc.killed
     assert rows == [("python", None, None, "timeout")]
 
@@ -368,7 +320,7 @@ def test_hook_waits_for_the_launchers_own_no_hello(launcher_present: Path, monke
     monkeypatch.setattr(ns, "run_native", run)
     monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(7300, exit_after=0.0, code=23), []))
     monkeypatch.setattr(ns.time, "perf_counter", _fake_clock([0.0, 16.0, 16.0]))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert calls == [ns.NATIVE_WAIT_S]
     assert rows == [("python", None, None, "no_hello")]
 
@@ -394,7 +346,7 @@ def test_hook_spawn_error_falls_back(launcher_present: Path, monkeypatch: pytest
         raise OSError("blocked by antivirus")
 
     monkeypatch.setattr(ns, "_spawn", boom)
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert rows == [("python", None, None, "start_error")]
 
 
@@ -402,12 +354,12 @@ def test_hook_missing_exe_or_webview2(tmp_path: Path, monkeypatch: pytest.Monkey
     rows = _sync_records(monkeypatch)
     monkeypatch.setenv(ns.LAUNCHER_EXE_ENV, str(tmp_path / "nope.exe"))
     monkeypatch.delenv(ns.NATIVE_CHILD_ENV, raising=False)
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     exe = tmp_path / "Ducky-Launcher.exe"
     exe.write_bytes(b"MZ")
     monkeypatch.setenv(ns.LAUNCHER_EXE_ENV, str(exe))
     monkeypatch.setattr(ns, "webview2_ok", lambda: False)
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert rows == [("python", None, None, "no_exe"), ("python", None, None, "webview2")]
     assert no_spawn == []
 
@@ -472,9 +424,9 @@ def test_hook_records_exactly_one_start(launcher_present: Path, monkeypatch: pyt
                                         tracked: list) -> None:
     monkeypatch.setattr(ns, "record_start_soon", ns.record_start)
     monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(8001, ready_after=0.0), []))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is True
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is True
     monkeypatch.setattr(ns, "_spawn", _spawner(FakeProc(8002, exit_after=0.0, code=21), []))
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="on") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert [n for n, _ in tracked].count("launcher.start") == 2
     assert ns.start_summary()["starts"] == 2
 
@@ -516,24 +468,21 @@ def no_native(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(ns.NO_NATIVE_ENV, "1")
 
 
-@pytest.mark.parametrize("setting", ["on"])
-def test_no_native_decides_python(no_native: None, setting: str) -> None:
-    assert ns.decide(setting, True, True, False) == "python"
-    assert ns.python_reason(setting, True, True, False) == "launcher_fallback"
+def test_no_native_decides_python(no_native: None) -> None:
+    assert ns.decide(True, True) == "python"
+    assert ns.python_reason(True, True) == "launcher_fallback"
 
 
-@pytest.mark.parametrize("setting", ["on"])
 def test_no_native_hook_runs_python_and_drops_the_env(no_native: None, launcher_present: Path,
-                                                    no_spawn: list, monkeypatch: pytest.MonkeyPatch,
-                                                    setting: str) -> None:
+                                                    no_spawn: list, monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
     rows = _sync_records(monkeypatch)
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting=setting) is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert ns.NO_NATIVE_ENV not in os.environ  # agent hosts, bridges: nothing to inherit
     assert no_spawn == [] and rows == [("python", None, None, "launcher_fallback")]
     # Still python after the env is gone, and not a crash-loop failure.
-    assert ns.decide(setting, True, True, False) == "python"
+    assert ns.decide(True, True) == "python"
     assert not ns.crash_loop_path().exists()
 
 
@@ -558,10 +507,10 @@ def test_the_launchers_reason_for_the_python_window_is_sent_as_an_error_code(
     assert ev.validate("error.code", {"code": codes[0], "where": "ui"})["code"] == codes[0]  # a slug the Store takes
 
 
-def test_no_native_dropped_even_when_off(no_native: None, no_spawn: list) -> None:
+def test_no_native_is_dropped(no_native: None, no_spawn: list) -> None:
     import os
 
-    assert ns.maybe_start_native(["UEFN-Ducky.exe"], setting="off") is False
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
     assert ns.NO_NATIVE_ENV not in os.environ
 
 
@@ -582,7 +531,6 @@ def test_child_env_has_no_no_native(monkeypatch: pytest.MonkeyPatch, tmp_path: P
 def test_without_no_native_nothing_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ns, "_no_native", False)
     monkeypatch.delenv(ns.NO_NATIVE_ENV, raising=False)
-    assert ns.decide("on", True, True, False) == "native"
-    assert ns.decide("auto", True, True, False) == "native"
+    assert ns.decide(True, True) == "native"
     monkeypatch.setenv(ns.NO_NATIVE_ENV, "0")
-    assert ns.decide("on", True, True, False) == "native"
+    assert ns.decide(True, True) == "native"

@@ -174,35 +174,6 @@ _StoreUnavailable = (OSError, RuntimeError)
 
 MEMORY_INDEX_DEFAULT_CHARS = 8_000
 
-NATIVE_LAUNCHER_MODES = ("off", "on", "auto")
-
-
-def normalize_native_launcher(value: Any) -> str:
-    """The ``native_launcher`` setting as off | on | auto; anything else is off."""
-    mode = str(value or "").strip().lower() if isinstance(value, str) else ""
-    return mode if mode in NATIVE_LAUNCHER_MODES else "off"
-
-# Ducky-Launcher.exe's copy of ``native_launcher`` (repoint.rs SETTING_FILE): a launcher
-# started from a shortcut decides before Python runs and can't read ducky.db.
-LAUNCHER_SETTING_FILE = ("launcher", "native_launcher.json")
-
-
-def mirror_native_launcher(mode: str) -> None:
-    """Write ``mode`` to the launcher's file when it differs; a missing file reads as auto."""
-    path = default_app_data_dir().joinpath(*LAUNCHER_SETTING_FILE)
-    text = json.dumps({"native_launcher": mode})
-    try:
-        if path.is_file() and path.read_text(encoding="utf-8") == text:
-            return
-        if mode == "auto" and not path.exists():
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        tmp.write_text(text, encoding="utf-8")
-        os.replace(tmp, path)
-    except OSError:
-        pass  # the launcher then reads panel_settings.json or its default
-
 _OLD_MEMORY_INDEX_DEFAULT_CHARS = 2_500
 
 
@@ -564,10 +535,8 @@ class PanelSettings:
     """Agent-opened files land in a tab group beside the chat."""
 
     native_launcher: str = "auto"
-    """Fast native window (Ducky-Launcher.exe): off | on | auto, default auto (a missing key
-    is auto; a saved off stays off). Off and auto run today's Python window (auto until the
-    launcher hosts Browser tabs and focus windows); on falls back to it on any launcher error
-    (frontend/native_switch.py). Any other value counts as off."""
+    """Not read: every launch starts Ducky-Launcher.exe and falls back to the Python window
+    on a launcher error (frontend/native_switch.py). Kept so old rows still load."""
 
     def validate(self) -> None:
         from backend.workspace.ai_ignore import normalize_rules
@@ -600,7 +569,6 @@ class PanelSettings:
             self.mic_permission = "ask"
         if self.web_access not in ("off", "ask", "on"):
             self.web_access = "ask"
-        self.native_launcher = normalize_native_launcher(self.native_launcher)
         try:
             self.tts_volume = max(0.0, min(1.0, float(self.tts_volume)))
         except (TypeError, ValueError):
@@ -773,13 +741,11 @@ class PanelSettings:
             or self.follow_code_off_migrated
             or self.follow_code_speed != "normal"
             or not self.follow_code_split_beside_chat
-            or self.native_launcher != "auto"
         )
 
     def save(self) -> None:
         to_store = replace(self, port=PANEL_LISTENER_PORT)
         to_store.validate()
-        mirror_native_launcher(to_store.native_launcher)
         if _settings_use_db():
             try:
                 from backend.store.importers import phase1
@@ -856,7 +822,6 @@ class PanelSettings:
             disabled_builtin_toolsets=disabled,
             hidden_bundled_agent_profile_ids=hidden,
             follow_code_enabled=False if off else raw.follow_code_enabled,
-            native_launcher=normalize_native_launcher(raw.native_launcher),
             # The old default (2,500) held about 6 entries: a saved 2,500 counts as unset.
             memory_index_max_chars=(
                 MEMORY_INDEX_DEFAULT_CHARS

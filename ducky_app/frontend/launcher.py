@@ -547,8 +547,8 @@ def main() -> None:
         _check_install()
         _drop_stale_launcher_mark()
         _hand_off_to_newest(bridge=False)
-        # native_launcher on/auto: Ducky-Launcher.exe draws the window and this process exits.
-        # Off (the default) spawns nothing; any launcher failure runs the Python window below.
+        # Every window launch: Ducky-Launcher.exe draws the window and this process exits.
+        # No launcher, no WebView2 or any launcher failure runs the Python window below.
         try:
             from frontend.native_switch import maybe_start_native
 
