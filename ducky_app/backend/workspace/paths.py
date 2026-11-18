@@ -23,15 +23,6 @@ WRITE_OUTSIDE_PROJECT_FORBIDDEN = (
 HASH_HEX_CHARS = 16
 
 
-def real_path(path: str) -> str:
-    """``os.path.realpath`` without the ``\\\\?\\`` prefix Windows adds when the file appears
-    mid-call (another thread creating it): that form never matches a plain root."""
-    full = os.path.realpath(os.path.abspath(path))
-    if full.startswith("\\\\?\\") and full[5:6] == ":":
-        return full[4:]
-    return full
-
-
 def island_root(path: str) -> str:
     """Island folder. Writer / MCP often hand ``…/<Project>/Content``; the panel hands ``…/<Project>``."""
     full = real_path(path or "")

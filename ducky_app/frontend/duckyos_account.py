@@ -2448,7 +2448,6 @@ def _fetch_store_zip_url(url: str, size: int, *, timeout: float = 120.0) -> byte
     downloads every few hundred KB), and capped at the announced size so a wrong
     link can't fill the disk.
     """
-    import io
     from urllib.parse import urlparse
 
     from frontend.update_network import download_resumable
@@ -2554,7 +2553,6 @@ def _store_download_and_install_unlocked(
     is_update: bool = False,
     replace_old: bool = False,
 ) -> dict[str, Any]:
-    import io
     import zipfile
 
     slug = (slug or "").strip()

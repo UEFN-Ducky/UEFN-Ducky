@@ -15,7 +15,7 @@ from typing import Any, Literal, Optional
 from frontend.agent_profiles import get_agent_profile, list_agent_profiles_available
 from frontend.archive_folder import is_archive_folder_id
 from frontend.error_log import read_errors
-from frontend.settings import PANEL_LISTENER_PORT, UEFN_LISTENER_PORT, PanelSettings
+from frontend.settings import UEFN_LISTENER_PORT, PanelSettings
 from frontend.ui_web.project_switch import get_panel_project_info, list_panel_projects
 from frontend.ui_web.chats.conversations import (  # delete_conversation: test_subagent_recycle patches it here
     conversation_project_slug, create_conversation, delete_conversation, list_conversations,  # noqa: F401

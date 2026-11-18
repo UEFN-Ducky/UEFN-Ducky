@@ -14,3 +14,22 @@ ignore = ["E402"]
 # Tests import pytest fixtures from other test modules and take them as parameters of
 # the same name; pyflakes reads each parameter as a redefinition of the import.
 "**/test_*.py" = ["F811"]
+# Baseline: findings that existed when lint became a release gate. Fix one, delete its
+# line; never add a line (ducky_app/test_lint_gate.py runs ruff on every test run).
+"ducky_app/backend/agent/prompt_cache.py" = ["F401"]
+"ducky_app/backend/agent/toolsets/intents.py" = ["F401"]
+"ducky_app/backend/bridge/test_editor_presence.py" = ["F401"]
+"ducky_app/backend/tools/panel/ducky_panel.py" = ["F401"]
+"ducky_app/backend/tools/panel/test_swarm_seat_check.py" = ["E731"]
+"ducky_app/backend/uefn_plugins/plugin_host/loader.py" = ["F401"]
+"ducky_app/backend/uefn_plugins/test_auto_storage.py" = ["E741"]
+"ducky_app/backend/uefn_plugins/test_store_sync.py" = ["F401"]
+"ducky_app/frontend/heap_trim.py" = ["F401"]
+"ducky_app/frontend/native_host/test_lifecycle.py" = ["E741"]
+"ducky_app/frontend/test_compat_default_off.py" = ["F401"]
+"ducky_app/frontend/ui_web/panel_api.py" = ["F401"]
+"ducky_app/frontend/ui_web/test_delta_saves.py" = ["F401"]
+"ducky_app/frontend/ui_web/ui_dispatch.py" = ["F841"]
+"ducky_app/frontend/ui_web/webview_app.py" = ["F401"]
+"release/test_release_installer.py" = ["E741"]
+"release/verify_installer_panel.py" = ["E741"]

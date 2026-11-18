@@ -230,7 +230,7 @@ def worldgen_capabilities() -> dict:
     # Real Landscape *create with panels* is NOT exposed to Python in UEFN.
     # spawn_actor(Landscape) → LandscapePlaceholder (0 LandscapeComponents).
     # Panels live on LandscapeStreamingProxy; only Landscape Mode → Create builds them.
-    landscape_create = "unavailable"
+    create_status = "unavailable"
     # Import API EXISTS and the data round-trips through export, but a verified full-white
     # import left the terrain flat: it does NOT reshape visible/collision geometry in UEFN.
     landscape_sculpt_existing = "noop_no_visible_change"
@@ -240,7 +240,7 @@ def worldgen_capabilities() -> dict:
         "methods": methods,
         "terrain_backend": terrain_backend,
         "foliage_backend": foliage_backend,
-        "landscape_create": landscape_create,
+        "landscape_create": create_status,
         "landscape_sculpt_existing": landscape_sculpt_existing,
         "limits": {
             "max_resolution": _MAX_RESOLUTION,
