@@ -224,9 +224,10 @@ class ProtectedFastMCP(FastMCP):
             record_tool_error(name, exc)
             raise
         from backend.agent import verify_evidence
+        from backend.agent.tool_writes import off_loop
 
         try:
-            verify_evidence.record_result(name, arguments, result)
+            await off_loop(verify_evidence.record_result, name, arguments, result)
         except OSError:
             import logging
 

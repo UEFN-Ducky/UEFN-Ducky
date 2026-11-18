@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from backend.agent.tool_lanes import call_registered_tool
+from backend.agent.tool_writes import off_loop, record_sidecar as _record_plugin_sidecar, spill_and_record
 
 if TYPE_CHECKING:
     from mcp.types import Tool
@@ -1075,16 +1076,6 @@ def _guard_key_name(name: str, args: dict[str, Any]) -> str:
         return name
 
 
-def _record_plugin_sidecar(name: str, args: dict[str, Any], text: str, *, ok: bool) -> None:
-    """Journal a plugin / Epic result. Never fails the tool."""
-    try:
-        from backend.workspace.tool_record import record_tool_result
-
-        record_tool_result(name, args, text, ok=ok)
-    except Exception:
-        pass
-
-
 async def _mode_denial(name: str, arguments: Any) -> ToolCallResult | None:
     from backend.agent.run_context import current_mode
     from backend.agent.toolsets.plan_safe import mode_tool_block_reason
@@ -1132,7 +1123,7 @@ async def execute_tool(
         try:
             from backend.agent import verify_evidence
 
-            verify_evidence.record_result(name, arguments or {}, result.data)
+            await off_loop(verify_evidence.record_result, name, arguments or {}, result.data)
         except Exception:
             pass
         if is_epic_capture_call(name, arguments or {}):
@@ -1369,12 +1360,9 @@ async def _dispatch_tool(
             )
             ms = int((time.time() - t0) * 1000)
             if _looks_like_tool_failure(name, text):
-                _record_plugin_sidecar(name, args, text, ok=False)
+                await off_loop(_record_plugin_sidecar, name, args, text, ok=False)
                 return ToolCallResult(ok=False, tool=name, error=_failure_text(text), duration_ms=ms)
-            from backend.agent.tool_spills import inline_or_spill
-
-            data = inline_or_spill(name, text)
-            _record_plugin_sidecar(name, args, data, ok=True)
+            data = await spill_and_record(name, args, text)
             return _with_plan_tick_nudge(
                 name, ToolCallResult(ok=True, tool=name, data=data, duration_ms=ms)
             )
@@ -1430,15 +1418,12 @@ async def _dispatch_tool(
                     hint=_INVENTED_TOOL_HINT,
                     duration_ms=ms,
                 )
-            _record_plugin_sidecar(name, args, text, ok=False)
+            await off_loop(_record_plugin_sidecar, name, args, text, ok=False)
             if _uefn_unreachable(name, text):
                 return _uefn_closed_result(name, ms)
             hint = _hint_for_error(name, text)
             return ToolCallResult(ok=False, tool=name, error=_failure_text(text), hint=hint, duration_ms=ms)
-        from backend.agent.tool_spills import inline_or_spill
-
-        data = inline_or_spill(name, text)
-        _record_plugin_sidecar(name, args, data, ok=True)
+        data = await spill_and_record(name, args, text)
         _note_uefn_call_ok(name)
         return _with_plan_tick_nudge(
             name, ToolCallResult(ok=True, tool=name, data=data, duration_ms=ms)
