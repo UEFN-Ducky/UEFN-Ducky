@@ -396,6 +396,39 @@ def _start_later(start, delay_s: float) -> None:
     timer.start()
 
 
+# (name for the log, module, functions called in order). island_watch is not here
+# (2026-11-03): the first successful UEFN tool call starts it, and it stops once UEFN closes.
+BACKGROUND_STARTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    # UEFN's Verse-error popups on project open get answered (Skip Rebuild → Continue), so an
+    # agent or workflow waiting for UEFN never sits behind them. Off the main thread:
+    # importing backend.tools.core registers every MCP tool (~0.6 s before the window could open).
+    ("popup guard", "backend.tools.core.uefn_popups", ("start_popup_guard",)),
+    # A restart forgets the in-memory undo registry, so last session's trash is dead weight.
+    ("undo trash purge", "frontend.ui_web.project_files", ("purge_undo_trash",)),
+    ("recent project deploy", "frontend.ui_web.project_deploy", ("deploy_all_recent_projects",)),
+    ("plugin auto-update", "frontend.duckyos_account", ("auto_apply_store_updates", "start_store_update_retries")),
+    ("workflow scheduler", "backend.automations.scheduler", ("start_scheduler",)),
+    # Shared spaces sync in the background: after writes, on a timer, at start.
+    ("shared-space sync", "backend.uefn_plugins.sync_scheduler", ("start",)),
+    ("team keeper", "frontend.ui_web.team_keeper", ("start_team_keeper",)),
+    # Stuck states that once waited for a person to notice put right by themselves.
+    ("auto-heal", "frontend.auto_heal", ("start",)),
+)
+
+
+def run_background_starters() -> None:
+    """Each starter in turn; a failing one is logged by name and the rest still start."""
+    import importlib
+
+    for name, module, funcs in BACKGROUND_STARTERS:
+        try:
+            mod = importlib.import_module(module)
+            for func in funcs:
+                getattr(mod, func)()
+        except Exception:
+            logging.getLogger(__name__).warning("%s did not start", name, exc_info=True)
+
+
 def make_background_work():
     """Start the cheap settings/env setup now; return the run-once starter of the deferred
     startup work. The window starts it after it shows; ``--backend`` after its hello.
@@ -422,64 +455,7 @@ def make_background_work():
         threading.Thread(target=_startup_env, daemon=True, name="panel-startup-env").start()
 
         def _startup_bg() -> None:
-            try:
-                # UEFN's Verse-error popups on project open get answered (Skip Rebuild → Continue),
-                # so an agent or workflow waiting for UEFN never sits behind them. Off the main
-                # thread: importing backend.tools.core registers every MCP tool (~0.6 s before
-                # the window could open).
-                from backend.tools.core.uefn_popups import start_popup_guard
-
-                start_popup_guard()
-            except Exception:
-                pass
-            try:
-                from frontend.ui_web.project_files import purge_undo_trash
-
-                # A restart forgets the in-memory undo registry, so last session's trash is dead weight.
-                purge_undo_trash()
-            except Exception:
-                pass
-            try:
-                from frontend.ui_web.project_deploy import deploy_all_recent_projects
-
-                deploy_all_recent_projects()
-            except Exception:
-                pass
-            try:
-                from frontend.duckyos_account import auto_apply_store_updates, start_store_update_retries
-
-                auto_apply_store_updates()
-                start_store_update_retries()
-            except Exception:
-                pass
-            try:
-                from backend.automations.scheduler import start_scheduler
-
-                start_scheduler()
-            except Exception:
-                pass
-            try:
-                # Shared spaces sync in the background: after writes, on a timer, at start.
-                from backend.uefn_plugins.sync_scheduler import start as start_space_sync
-
-                start_space_sync()
-            except Exception:
-                pass
-            try:
-                from frontend.ui_web.team_keeper import start_team_keeper
-
-                start_team_keeper()
-            except Exception:
-                pass
-            try:
-                # Stuck states that once waited for a person to notice put right by themselves
-                from frontend.auto_heal import start as start_auto_heal
-
-                start_auto_heal()
-            except Exception:
-                pass
-            # island_watch is not started here (2026-11-03): the first successful UEFN tool
-            # call starts it, and it stops itself once UEFN is closed.
+            run_background_starters()
 
         def _presence_bg() -> None:
             try:

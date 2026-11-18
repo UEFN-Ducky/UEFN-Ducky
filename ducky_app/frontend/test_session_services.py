@@ -32,6 +32,34 @@ def test_both_start_paths_call_start_session_services() -> None:
         assert name not in text, name
 
 
+def test_a_starter_that_fails_is_named_in_the_log(monkeypatch, caplog) -> None:
+    import sys
+    import types
+
+    from frontend.ui_web import webview_app
+
+    starters = webview_app.BACKGROUND_STARTERS
+    assert len(starters) == 8
+    for bad_name, bad_module, _ in starters:
+        ran: list[str] = []
+        for name, module, funcs in starters:
+            fake = types.ModuleType(module)
+            for func in funcs:
+                def call(name=name, func=func) -> None:
+                    if name == bad_name:
+                        raise RuntimeError("no")
+                    ran.append(f"{name}:{func}")
+                setattr(fake, func, call)
+            monkeypatch.setitem(sys.modules, module, fake)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger=webview_app.__name__):
+            webview_app.run_background_starters()
+        assert {r.split(":")[0] for r in ran} == {n for n, _, _ in starters if n != bad_name}
+        (record,) = caplog.records
+        assert record.getMessage() == f"{bad_name} did not start" and record.exc_info
+    assert any(n == "workflow scheduler" for n, _, _ in starters)
+
+
 def test_each_service_failure_is_logged_and_the_rest_still_start(monkeypatch, caplog) -> None:
     names = [name for name, _ in session_services.SERVICES]
     for bad in names:
