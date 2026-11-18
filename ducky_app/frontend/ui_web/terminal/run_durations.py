@@ -7,7 +7,6 @@ real durations each, in one small JSON next to Ducky's other per-user state.
 from __future__ import annotations
 
 import json
-import os
 import re
 import statistics
 import threading
@@ -20,8 +19,9 @@ _lock = threading.Lock()
 
 
 def _path() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "UEFN-Ducky" / "run_durations.json"
+    from frontend.app_paths import resolve_app_data_dir
+
+    return resolve_app_data_dir() / "run_durations.json"
 
 
 def _key(tool: str, command: str) -> str:
@@ -45,11 +45,11 @@ def record(tool: str, command: str, seconds: float) -> None:
         for old in list(data)[:-_MAX_KEYS]:
             data.pop(old, None)
         try:
+            from frontend.atomic_json import write_json_plain
+
             path = _path()
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data), encoding="utf-8")
-            os.replace(tmp, path)
+            write_json_plain(path, data)
         except OSError:
             pass  # a progress estimate is never worth failing a run
 

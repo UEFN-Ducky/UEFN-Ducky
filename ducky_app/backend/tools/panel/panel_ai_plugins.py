@@ -418,8 +418,9 @@ def _file_hash(target: Path) -> str:
 def _note_path(key: str) -> Path:
     import hashlib
 
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")
-    return Path(base) / "UEFN-Ducky" / "locks" / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".who.json")
+    from frontend.app_paths import resolve_app_data_dir
+
+    return resolve_app_data_dir() / "locks" / (hashlib.sha256(key.encode("utf-8")).hexdigest() + ".who.json")
 
 
 def _last_writer(key: str) -> dict[str, Any]:

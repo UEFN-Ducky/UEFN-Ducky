@@ -17,16 +17,14 @@ MAX_FILES_PER_ENTRY = 50
 
 
 def stats_path() -> Path:
-    """Same directory as the panel's ``errors.jsonl``; env fallback when frontend is absent."""
+    """The app data folder (``frontend.app_paths``); env fallback when frontend is absent."""
     try:
-        from frontend.error_log import errors_path
+        from frontend.app_paths import resolve_app_data_dir
 
-        return errors_path().with_name(STATS_FILENAME)
-    except Exception:  # noqa: BLE001 — standalone scripts have no frontend package
+        return resolve_app_data_dir() / STATS_FILENAME
+    except Exception:  # noqa: BLE001 — standalone scripts have no frontend package: same rule copied
         base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-        if base:
-            return Path(base) / "UEFN-Ducky" / STATS_FILENAME
-        return Path.home() / ".uefn-ducky" / STATS_FILENAME
+        return Path(base or Path.home()) / "UEFN-Ducky" / STATS_FILENAME
 
 
 def _use_db() -> bool:

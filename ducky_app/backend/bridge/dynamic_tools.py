@@ -11,7 +11,6 @@ to the manifest cached from the last successful fetch.
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -296,8 +295,9 @@ _PREFLIGHT_COMMANDS = frozenset(
 
 
 def _manifest_cache_path() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "UEFN-Ducky" / "mcp_command_manifest.json"
+    from frontend.app_paths import resolve_app_data_dir
+
+    return resolve_app_data_dir() / "mcp_command_manifest.json"
 
 
 def _registered_tool_names() -> set[str]:

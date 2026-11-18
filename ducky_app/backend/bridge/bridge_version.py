@@ -77,8 +77,9 @@ def registry_dir() -> Path:
     override = os.environ.get(DIR_ENV, "").strip()
     if override:
         return Path(override)
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "UEFN-Ducky" / "bridges"
+    from frontend.app_paths import resolve_app_data_dir
+
+    return resolve_app_data_dir() / "bridges"
 
 
 def _create_time(pid: int) -> float:

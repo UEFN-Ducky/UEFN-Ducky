@@ -725,8 +725,9 @@ def _process_file_lock(path: str):
     Sidecars stay on disk: unlinking them could split waiters across two locks.
     Closing the handle (including process death) releases the OS lock.
     """
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/.local/share")
-    lock_dir = os.path.join(base, "UEFN-Ducky", "locks")
+    from frontend.app_paths import resolve_app_data_dir
+
+    lock_dir = str(resolve_app_data_dir() / "locks")  # the folder backend.util.file_lock uses
     os.makedirs(lock_dir, exist_ok=True)
     name = hashlib.sha256(path.encode("utf-8")).hexdigest() + ".lock"
     with open(os.path.join(lock_dir, name), "a+b") as handle:

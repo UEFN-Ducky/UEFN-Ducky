@@ -17,7 +17,6 @@ checks every 60 s that the filter is still ours and sets it again when it isn't.
 from __future__ import annotations
 
 import ctypes
-import os
 import sys
 import threading
 import time
@@ -44,8 +43,9 @@ _busy = threading.Lock()
 
 
 def _dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-    return Path(base) / "UEFN-Ducky" / "crash"
+    from frontend.app_paths import resolve_app_data_dir
+
+    return resolve_app_data_dir() / "crash"
 
 
 def _kernel32() -> ctypes.WinDLL:

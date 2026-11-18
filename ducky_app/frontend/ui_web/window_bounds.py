@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
 import time
 from pathlib import Path
@@ -13,8 +12,10 @@ _lock = threading.Lock()
 
 
 def _path() -> Path:
+    from frontend.app_paths import resolve_app_data_dir
+
     # Resolved per call (was a module constant that ignored a later LOCALAPPDATA change).
-    return Path(os.environ.get("LOCALAPPDATA", "")) / "UEFN-Ducky" / "window_bounds.json"
+    return resolve_app_data_dir() / "window_bounds.json"
 
 
 def _use_db() -> bool:

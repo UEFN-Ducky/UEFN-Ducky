@@ -84,12 +84,11 @@ def _kv():
 
 def _perf_dir() -> Path:
     try:
-        from frontend.settings import default_app_data_dir
+        from frontend.app_paths import resolve_app_data_dir
 
-        return default_app_data_dir() / "perf"
-    except Exception:
-        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
-        return Path(base) / "UEFN-Ducky" / "perf"
+        return resolve_app_data_dir() / "perf"
+    except Exception:  # tracing never fails its caller
+        return Path.home() / "UEFN-Ducky" / "perf"
 
 
 def _percentile(sorted_vals: list[float], p: float) -> float:
