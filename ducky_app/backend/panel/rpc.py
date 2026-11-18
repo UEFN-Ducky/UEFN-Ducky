@@ -26,10 +26,15 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from frontend.settings import PANEL_LISTENER_PORT
+from frontend.ui_web.panel_bind import panel_port
 
-# Same loopback control port the event/run bridges already use (panel UI HTTP).
-_RPC_URL = f"http://127.0.0.1:{PANEL_LISTENER_PORT - 1}/__panel_rpc"
+# A fixed URL (tests point it at a stub server); empty: the panel's port at the time of the call.
+_RPC_URL = ""
+
+
+def _rpc_url() -> str:
+    """Same loopback control port the event/run bridges use, read now: the port pair can move."""
+    return _RPC_URL or f"http://127.0.0.1:{panel_port()}/__panel_rpc"
 
 # Must exceed panel_httpd._RPC_HANDLER_WAIT_S (20s) so {pending} returns first.
 _ROUND_TIMEOUT_S = 45.0
@@ -96,8 +101,9 @@ def panel_rpc(method: str, params: dict[str, Any] | None = None, *, timeout: flo
 def _panel_rpc(method: str, params: dict[str, Any] | None, timeout: float, holder: dict[str, Any]) -> dict[str, Any]:
     body = json.dumps({"method": str(method), "params": dict(params or {})}).encode("utf-8")
     deadline = time.monotonic() + max(1.0, float(timeout))
+    url = _rpc_url()
     try:
-        resp = _http("POST", _RPC_URL, body, timeout=min(_ROUND_TIMEOUT_S, float(timeout) + 2.0))
+        resp = _http("POST", url, body, timeout=min(_ROUND_TIMEOUT_S, float(timeout) + 2.0))
     except _Unreachable:
         return {"error": "panel not open"}
 
@@ -107,7 +113,7 @@ def _panel_rpc(method: str, params: dict[str, Any] | None, timeout: float, holde
         remaining = deadline - time.monotonic()
         if not request_id or remaining <= 0:
             return {"error": "timeout", "timed_out": True}
-        poll_url = f"{_RPC_URL}?id={urllib.request.quote(request_id)}"
+        poll_url = f"{url}?id={urllib.request.quote(request_id)}"
         try:
             resp = _http("GET", poll_url, None, timeout=min(_ROUND_TIMEOUT_S, remaining + 2.0))
         except _Unreachable as exc:

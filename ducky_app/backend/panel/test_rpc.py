@@ -22,6 +22,23 @@ def test_poll_socket_timeout_retries_then_succeeds(monkeypatch):
     assert calls.count("GET") >= 2
 
 
+def test_rpc_follows_a_moved_port(monkeypatch):
+    from frontend import settings
+
+    urls: list[str] = []
+
+    def fake_http(method: str, url: str, body, timeout: float):
+        urls.append(url)
+        return {"result": {"ok": True}}
+
+    monkeypatch.setattr(rpc_mod, "_http", fake_http)
+    monkeypatch.setattr(settings, "PANEL_LISTENER_PORT", 4211)
+    rpc_mod.panel_rpc("ask_user", {})
+    monkeypatch.setattr(settings, "PANEL_LISTENER_PORT", 4213)  # the pair moved 4210 -> 4212
+    rpc_mod.panel_rpc("ask_user", {})
+    assert urls == ["http://127.0.0.1:4210/__panel_rpc", "http://127.0.0.1:4212/__panel_rpc"]
+
+
 def test_connection_refused_is_panel_not_open(monkeypatch):
     def fake_http(method: str, url: str, body, timeout: float):
         raise rpc_mod._Unreachable("refused", timed_out=False)
