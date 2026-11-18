@@ -162,7 +162,7 @@ def _make_backup(target: Path) -> None:
     prune_backups(target)
 
 
-def _write_temp(target: Path, payload: str) -> Path:
+def _write_temp(target: Path, payload: str, *, fsync: bool = True) -> Path:
     # mkstemp keeps the name short — `{target}.tmp.{32-hex}` blows Windows MAX_PATH
     # under pytest-of-*/.../conversations/<uuid>/conversation.json.
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -170,8 +170,9 @@ def _write_temp(target: Path, payload: str) -> Path:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(payload)
-            f.flush()
-            os.fsync(f.fileno())
+            if fsync:
+                f.flush()
+                os.fsync(f.fileno())
     except Exception:
         try:
             os.unlink(tmp_name)
@@ -218,6 +219,23 @@ def write_json_atomic(target: Path, data: dict[str, Any], indent: int = 2) -> No
                 except OSError:
                     pass
         prune_backups(target)
+
+
+def write_text_atomic(path: Path | str, text: str, *, fsync: bool = False) -> None:
+    """Write *text* atomically (unique temp in the same folder, replace with retries), no backup."""
+    target = Path(path)
+    with _lock_for(target):
+        tmp = _write_temp(target, text, fsync=fsync)
+        try:
+            _replace_with_retries(tmp, target)
+        except BaseException:
+            _safe_unlink(tmp)
+            raise
+
+
+def write_json_plain(path: Path | str, data: Any, **dumps_kwargs: Any) -> None:
+    """``json.dumps(data, **dumps_kwargs)`` written with :func:`write_text_atomic`."""
+    write_text_atomic(path, json.dumps(data, **dumps_kwargs))
 
 
 def read_json_object(path: Path) -> dict[str, Any]:
