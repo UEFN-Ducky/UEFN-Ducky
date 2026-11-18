@@ -125,6 +125,8 @@ EVENTS: dict[str, dict[str, Any]] = {
     # which host, where it failed, and for an update whether it was the pack or Setup.
     "update.download_fail": {"host": STORAGE_HOSTS, "stage": ("connect", "read", "http"), "what": ("pack", "setup")},
     "sync.download_fail": {"host": STORAGE_HOSTS, "stage": ("connect", "read")},
+    # A check that worked after one failed this session (once a day): a blip, not a stuck PC.
+    "update.check_recovered": {"v": ("version",)},
     "update.check": {
         "status": ("none", "no_release", "up_to_date", "update_available", "paused", "error"),
         "channel": ("installed", "portable", "dev"),
@@ -170,6 +172,8 @@ EVENTS: dict[str, dict[str, Any]] = {
                    "stage": BOOT_STAGES, "uptime": ("bucket", DIED_AFTER_S, "uptime_s"),
                    # agent_crash only: whether the reply had started streaming.
                    "first_token": ("y", "n"),
+                   # net_fail update_check only: the session's first check or a later one.
+                   "attempt": ("first", "later"),
                    # app_unclean_exit: the dead run's app and WebView2 memory at its last heartbeat.
                    "memory": ("bucket", MEMORY_MB, "memory_mb"), "webview": ("bucket", MEMORY_MB, "webview_mb"),
                    # ...and every agent process Ducky started (boot.json heartbeat agents_mb), a bucket only.

@@ -947,6 +947,27 @@ def error(source: str, message: str = "", at: str = "", kind: str = "") -> None:
 
 
 _net_fail_sent: set[tuple[str, str]] = set()
+# This session's update checks (update_swap.check_and_stage): how many ended, and whether one
+# failed since the last that worked.
+_update_checks_done = 0
+_update_check_failed = False
+
+
+def update_check_done(ok: bool) -> None:
+    """One update check ended. A check that works after a failed one this session sends
+    update.check_recovered, once per UTC day per PC (one failure after sleep, not a stuck PC)."""
+    global _update_checks_done, _update_check_failed
+    _update_checks_done += 1
+    if not ok:
+        _update_check_failed = True
+        return
+    if not _update_check_failed:
+        return
+    _update_check_failed = False
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    if _meta_get("usage.update_check_recovered") != today:
+        _meta_set("usage.update_check_recovered", today)
+        track("update.check_recovered", v=_app_version())
 
 
 def net_fail(code: str, stage: str, proxy: str, status: int = 0) -> None:
@@ -967,6 +988,8 @@ def net_fail(code: str, stage: str, proxy: str, status: int = 0) -> None:
     kind = ("timeout" if stage == "timeout" else "offline" if stage in ("dns", "connect", "proxy")
             else "rate_limit" if status == 429 else "server_error" if 500 <= status <= 599 else "other")
     answered = {"reason": f"http_{int(status)}"} if stage == "http" and 100 <= int(status or 0) <= 599 else {}
+    if code == "update_check":  # the session's first check, or a recheck after one that ended
+        answered["attempt"] = "later" if _update_checks_done else "first"
     track("error.code", code=ev.code_of(code), where="store", kind=kind, version=_app_version(),
           net_stage=stage, proxy=proxy, **answered)
 

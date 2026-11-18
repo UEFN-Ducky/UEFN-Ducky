@@ -37,6 +37,10 @@ CHECK_EVERY_S = 30 * 60.0
 # A download the network cut off is tried again this soon; what it already has stays.
 RETRY_FAILED_S = 5 * 60.0
 IDLE_TICK_S = 30.0
+# A tick this much late means the PC slept: its network comes up after it does, so the
+# check waits RESUME_SETTLE_S (Nov 17 2026: "9 PCs dns" read like PCs stuck on old builds).
+WOKE_LATE_S = 120.0
+RESUME_SETTLE_S = 45.0
 # Nobody touched Ducky for this long (or every window is hidden): it may switch.
 AWAY_AFTER_S = 5 * 60.0
 # A window that stopped reporting can't vouch that nothing is unsaved.
@@ -279,6 +283,12 @@ def check_and_stage() -> dict[str, Any] | None:
 
     _set(phase="checking", error="")
     payload, error = fetch_remote_payload()
+    try:
+        from frontend import usage_stats
+
+        usage_stats.update_check_done(payload is not None)
+    except Exception:  # noqa: BLE001 — a count never stops the update
+        pass
     if payload is None or feed_is_paused(payload):
         _set(phase="idle", error=error or "")
         return None
@@ -406,7 +416,9 @@ def _loop() -> None:
             phase, version = _state.get("phase"), str(_state.get("version") or "")
         if phase == "ready" and version and not idle_reasons():
             switch(version)
-        _wake.wait(IDLE_TICK_S)
+        before = time.time()
+        if not _wake.wait(IDLE_TICK_S) and time.time() - before > IDLE_TICK_S + WOKE_LATE_S:
+            _wake.wait(RESUME_SETTLE_S)
 
 
 def check_soon() -> None:

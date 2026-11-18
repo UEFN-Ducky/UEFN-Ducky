@@ -262,3 +262,41 @@ def test_a_missing_installed_dll_says_how_to_repair(monkeypatch):
     assert shutdown._format_fatal_message(error).startswith("FileNotFoundError"), "a source run keeps the raw error"
     monkeypatch.setattr(bundle_root, "is_packaged_runtime", lambda: True)
     assert "uefnducky.org" not in shutdown._format_fatal_message(FileNotFoundError("settings.json"))
+
+
+@pytest.fixture
+def counted(monkeypatch):
+    """usage_stats with its meta and queue in memory: what an update check sends."""
+    from frontend import usage_events as ev
+    from frontend import usage_stats as us
+
+    meta: dict[str, str] = {}
+    rows: list[tuple[str, dict]] = []
+    monkeypatch.setattr(us, "_meta_get", lambda key: meta.get(key))
+    monkeypatch.setattr(us, "_meta_set", lambda key, value: meta.__setitem__(key, value))
+    monkeypatch.setattr(us, "track", lambda name, **props: rows.append((name, ev.validate(name, props))))
+    monkeypatch.setattr(us, "_app_version", lambda: "1.2.500")
+    monkeypatch.setattr(us, "_update_checks_done", 0)
+    monkeypatch.setattr(us, "_update_check_failed", False)
+    monkeypatch.setattr(us, "_net_fail_sent", set())
+    return us, rows
+
+
+def test_update_check_fail_then_ok_sends_one_recovered(counted):
+    us, sent = counted
+    us.net_fail("update_check", "dns", "none")
+    us.update_check_done(False)
+    us.update_check_done(True)
+    us.update_check_done(False)
+    us.update_check_done(True)  # a second recovery the same day: not counted again
+    assert [p.get("attempt") for n, p in sent if n == "error.code"] == ["first"]
+    assert [r for r in sent if r[0] == "update.check_recovered"] == [("update.check_recovered", {"v": "1.2.500"})]
+
+
+def test_update_check_two_oks_send_no_recovered(counted):
+    us, sent = counted
+    us.update_check_done(True)
+    us.update_check_done(True)
+    us.net_fail("update_check", "timeout", "none")
+    assert [n for n, _ in sent] == ["error.code"]
+    assert sent[0][1]["attempt"] == "later"
