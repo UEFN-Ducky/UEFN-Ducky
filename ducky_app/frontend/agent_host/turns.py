@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 PushFn = Callable[[dict[str, Any]], None]
 READY_S = 30.0
-_POLL_S = 0.2
+_POLL_S = 1.0  # turn_ended and a closed host set done at once; Stop and a dead process within this
 
 
 def enabled() -> bool:

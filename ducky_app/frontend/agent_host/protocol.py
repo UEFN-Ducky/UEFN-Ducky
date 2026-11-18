@@ -36,7 +36,7 @@ SILENT_DEAD_S = 30.0  # a host whose process still runs is hung only after this 
 MAX_MESSAGE = 64 * 1024 * 1024
 MAX_BATCH_BYTES = 1024 * 1024
 MAX_BATCH_FRAMES = 128
-_TICK_S = 0.1
+_TICK_S = 1.0  # longest tick; close wakes it at once (_tick_s: shorter beats or silence limits)
 _EOF = object()  # the reader's EOF, queued behind the frames read before it
 
 OnFrame = Callable[[dict[str, Any]], None]
@@ -195,12 +195,22 @@ class Channel:
 
     def _tick_loop(self) -> None:
         last_beat = 0.0
-        while not self._closed.wait(_TICK_S):
+        while not self._closed.wait(tick := self._tick_s()):
             now = time.monotonic()
-            if self._heartbeat_s and now - last_beat >= self._heartbeat_s:
+            # half a tick early: tick jitter never stretches a 2 s beat to 3 s
+            if self._heartbeat_s and now - last_beat >= self._heartbeat_s - tick / 2:
                 last_beat = now
                 self.send("heartbeat", ts=time.time())
             self._check_silence(now)
+
+    def _tick_s(self) -> float:
+        """1 s for the real 2 s beat and 6 s limit; finer only for shorter ones (read each tick)."""
+        tick = _TICK_S
+        if self._heartbeat_s:
+            tick = min(tick, self._heartbeat_s / 2)
+        if self._dead_after_s:
+            tick = min(tick, self._dead_after_s / 4)
+        return tick
 
     def _check_silence(self, now: float) -> None:
         """Close on a missing heartbeat, never for time this side itself was stalled."""

@@ -25,6 +25,7 @@ STOP_GRACE_S = 15.0
 
 _STDERR_TAIL_CHARS = 8000
 _STDOUT_TAIL_CHARS = 4000
+_WAIT_S = 1.0  # exit is seen at once; Stop and the time limit within this
 
 
 def _shared_daemon_pid() -> int:
@@ -433,7 +434,11 @@ def run_streaming_process(
                 result.timed_out = True
                 _terminate_process_tree(proc)
                 break
-            time.sleep(0.1)
+            wait_s = _WAIT_S if deadline is None else max(0.0, min(_WAIT_S, deadline - time.time()))
+            try:
+                proc.wait(timeout=wait_s)
+            except subprocess.TimeoutExpired:
+                pass
         proc.wait(timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         pass

@@ -120,6 +120,34 @@ def test_stop_reaches_the_host_and_ends_the_turn(piped, monkeypatch):
     assert result["out"] == "" and got[-1]["reason"] == "cancelled"
 
 
+def test_a_waiting_turn_wakes_once_a_second_and_ends_at_once(piped, monkeypatch):
+    started, release = threading.Event(), threading.Event()
+
+    def stub(conv, text, *, model, push, run_id, cancel, mode):
+        started.set()
+        release.wait(10)
+        push({"type": "agent_stopped", "reason": "done"})
+
+    _stub_runner(monkeypatch, stub)
+    host = turns._supervisor().assign("c8")
+    checks: list[float] = []
+    alive = host.alive
+    monkeypatch.setattr(host, "alive", lambda: checks.append(time.monotonic()) or alive(), raising=False)
+    result = {}
+    t = threading.Thread(target=lambda: result.setdefault("out", turns.run_in_host(
+        "c8", "r8", "x", model="m", mode="agent", push=lambda e: None, cancel=threading.Event())))
+    t.start()
+    assert started.wait(5)
+    n0 = len(checks)
+    time.sleep(2.1)
+    assert len(checks) - n0 <= 4  # 2.1 s at the old 0.2 s poll: 10
+    t0 = time.perf_counter()
+    release.set()
+    t.join(2)
+    assert not t.is_alive() and result["out"] == ""
+    assert time.perf_counter() - t0 < 0.15
+
+
 def test_a_runner_error_comes_back_as_the_turns_error(piped, monkeypatch):
     def stub(conv, text, **kw):
         raise ValueError("CLI missing")

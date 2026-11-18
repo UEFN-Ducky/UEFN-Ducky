@@ -25,12 +25,14 @@ time.sleep(60)
 """
 
 
-def _pair(slot: str, *, host_frame, app_frame, app_closed=None, dead_after_s=protocol.DEAD_AFTER_S):
+def _pair(slot: str, *, host_frame, app_frame, app_closed=None, dead_after_s=protocol.DEAD_AFTER_S,
+          heartbeat_s=protocol.HEARTBEAT_S):
     key = os.urandom(16)
     listener = protocol.listen(slot, key)
     host: list[protocol.Channel] = []
     t = threading.Thread(
-        target=lambda: host.append(protocol.connect_app(protocol.pipe_name(slot), key, host_frame)), daemon=True
+        target=lambda: host.append(protocol.connect_app(protocol.pipe_name(slot), key, host_frame,
+                                                        heartbeat_s=heartbeat_s)), daemon=True
     )
     t.start()
     app = protocol.accept_host(listener, app_frame, app_closed, dead_after_s=dead_after_s)
@@ -119,8 +121,7 @@ def test_a_slow_handler_never_looks_like_a_missing_heartbeat():
         got.append(frame["seq"])
 
     app, host = _pair(f"t-{uuid.uuid4().hex[:8]}", host_frame=lambda f: None, app_frame=slow,
-                      app_closed=reasons.append, dead_after_s=0.6)
-    host._heartbeat_s = 0.1
+                      app_closed=reasons.append, dead_after_s=0.6, heartbeat_s=0.1)
     for i in range(5):
         host.send("event", conv_id="c1", seq=i)
     deadline = time.monotonic() + 5
@@ -188,6 +189,21 @@ def test_a_silent_host_whose_process_is_gone_closes_at_dead_after():
         t += 0.1
         ch._check_silence(t)
     assert ch.closed and ch.close_reason == "heartbeat"
+
+
+def test_the_tick_loop_wakes_once_a_second_and_at_once_on_close():
+    ch = _bare(heartbeat_s=protocol.HEARTBEAT_S, dead_after_s=protocol.DEAD_AFTER_S)
+    wakes: list[float] = []
+    ch._check_silence = wakes.append  # one call per wakeup
+    ch.send = lambda op, **fields: True
+    loop = threading.Thread(target=ch._tick_loop, daemon=True)
+    loop.start()
+    time.sleep(2.1)
+    assert len(wakes) <= 4  # 2.1 s at the old 0.1 s tick: 21
+    t0 = time.perf_counter()
+    ch._closed.set()
+    loop.join(1.0)
+    assert not loop.is_alive() and time.perf_counter() - t0 < 0.15
 
 
 def test_closing_mid_read_ends_the_reader_quietly(monkeypatch):
