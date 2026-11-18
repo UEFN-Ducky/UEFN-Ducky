@@ -3,8 +3,7 @@
 //! - root mode: hop to the current version's own launcher (`versions/current.json`), or,
 //!   when that pointer is missing or broken, once to the root stub with NO_NATIVE (the
 //!   Python window, which never starts a launcher again);
-//! - the `native_launcher` setting: `off` and `auto` run the Python window instead (auto
-//!   until this launcher hosts Browser tabs, focus windows, capture, snip and menus);
+//! - always this launcher's window (the old `native_launcher` setting is not read);
 //! - a start that fails with 20–24 opens the Python window, so the user still gets one.
 //!
 //! A launch started by `native_switch` (NATIVE_CHILD) never hops, and a hopped launch
@@ -20,7 +19,7 @@ pub const STUB_EXE: &str = "UEFN-Ducky.exe";
 /// Tells `UEFN-Ducky.exe` to use the Python window and never start a launcher.
 pub const NO_NATIVE_ENV: &str = "UEFN_DUCKY_NO_NATIVE";
 /// Why this launcher started the Python window instead (`native_switch.NO_NATIVE_WHY_ENV`):
-/// no_pointer | hop_failed | start_failed | setting. Nov 16 2026: 7 of 14 launches were
+/// no_pointer | hop_failed | start_failed. Nov 16 2026: 7 of 14 launches were
 /// "launcher_fallback" and nothing said which of these it was.
 pub const NO_NATIVE_WHY_ENV: &str = "UEFN_DUCKY_NO_NATIVE_WHY";
 /// Set by `native_switch.run_native`: Python decided and handles any fallback itself.
@@ -31,9 +30,6 @@ pub const HOP_ENV: &str = "UEFN_DUCKY_LAUNCHER_HOP";
 pub const LAUNCHER_ENV: &str = "UEFN_DUCKY_LAUNCHER_EXE";
 /// `PanelSettings.native_launcher`'s default in `frontend/settings.py`.
 pub const DEFAULT_NATIVE_LAUNCHER: &str = "auto";
-/// Python's old copy of the setting. Python no longer writes it and `wants_native` ignores
-/// the value: a file left by an older version is harmless.
-pub const SETTING_FILE: &str = "launcher/native_launcher.json";
 /// `app_versions.VERSIONS_DIR_NAME` / `CURRENT_FILE`.
 pub const VERSIONS_DIR: &str = "versions";
 pub const CURRENT_FILE: &str = "current.json";
@@ -141,35 +137,11 @@ pub fn root_decision(exe: &Path, hopped: bool, app_data: &Path, own_version: &st
     }
 }
 
-/// `native_launcher` as off | on | auto (Python no longer reads it): from
-/// [`SETTING_FILE`], else `panel_settings.json` (the files store); missing is the default.
-pub fn native_setting(app_data: &Path) -> String {
-    let read = |name: &str| {
-        std::fs::read_to_string(app_data.join(name))
-            .ok()
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-            .and_then(|v| v.get("native_launcher").cloned())
-    };
-    let raw = read(SETTING_FILE).or_else(|| read("panel_settings.json"));
-    let mode = match raw {
-        None => DEFAULT_NATIVE_LAUNCHER.to_string(),
-        Some(Value::String(s)) => s.trim().to_ascii_lowercase(),
-        Some(_) => String::new(),
-    };
-    if matches!(mode.as_str(), "off" | "on" | "auto") {
-        mode
-    } else {
-        "off".to_string()
-    }
-}
-
-/// `native_switch.decide` without the EXE and WebView2 checks (the launcher is running,
-/// and a missing WebView2 exits 20, which falls back below).
-/// Always: the launcher's window is up in ~0.1 s, the Python window in 1-2 s, and the
-/// setting no longer turns it off (same rule as `native_switch.decide`). A start that
-/// fails with 20–24 still opens the Python window.
-pub fn wants_native(_setting: &str, _crash_loop_active: bool) -> bool {
-    true
+/// The old `native_launcher` setting: never read, always the default.
+// ponytail: kept only because lib.rs still passes it to `before_start`, which never calls
+// it; drop both once lib.rs stops passing the two closures.
+pub fn native_setting(_app_data: &Path) -> String {
+    DEFAULT_NATIVE_LAUNCHER.to_string()
 }
 
 /// A started-directly launch that ended with one of these opens the Python window.
@@ -236,6 +208,8 @@ pub fn sibling_stub(exe: &Path) -> PathBuf {
 
 /// Before anything else: the process to start instead of running Ducky here, if any.
 /// `native_child` = started by `native_switch.run_native`, which already decided.
+/// Always this launcher's window (up in ~0.1 s, the Python window in 1-2 s): `_setting` and
+/// `_crash_loop_active` are never called, so no settings or crash-loop file is read here.
 pub fn before_start(
     exe: &Path,
     args: &[OsString],
@@ -243,18 +217,13 @@ pub fn before_start(
     native_child: bool,
     app_data: &Path,
     own_version: &str,
-    setting: impl FnOnce() -> String,
-    crash_loop_active: impl FnOnce() -> bool,
+    _setting: impl FnOnce() -> String,
+    _crash_loop_active: impl FnOnce() -> bool,
 ) -> Option<Spawn> {
     // First: Python started us and decided. Hopping from here is what looped (root stub →
     // native_switch → root launcher → stub ...).
     if native_child {
         return None;
-    }
-    let mode = setting();
-    // Only `auto` reads the crash-loop hold, as in `native_switch.decide`.
-    if !wants_native(&mode, mode == "auto" && crash_loop_active()) {
-        return Some(Spawn::python(sibling_stub(exe), args, "setting"));
     }
     match root_decision(exe, hopped, app_data, own_version) {
         Root::RunHere => None,
@@ -463,32 +432,18 @@ mod tests {
     }
 
     #[test]
-    fn setting_matches_normalize_native_launcher() {
-        let d = scratch("settings");
-        assert_eq!(native_setting(&d), DEFAULT_NATIVE_LAUNCHER);
-        for (json, want) in [
-            (r#"{"native_launcher":"auto"}"#, "auto"),
-            (r#"{"native_launcher":" ON "}"#, "on"),
-            (r#"{"native_launcher":"off"}"#, "off"),
-            (r#"{"native_launcher":"maybe"}"#, "off"),
-            (r#"{"native_launcher":1}"#, "off"),
-            (r#"{"theme":"dark"}"#, DEFAULT_NATIVE_LAUNCHER),
-            ("broken", DEFAULT_NATIVE_LAUNCHER),
-        ] {
-            std::fs::write(d.join("panel_settings.json"), json).unwrap();
-            assert_eq!(native_setting(&d), want, "{json}");
-        }
-        // Python's mirror (the db store has no panel_settings.json) wins over the file.
-        std::fs::write(d.join("panel_settings.json"), r#"{"native_launcher":"on"}"#).unwrap();
-        std::fs::create_dir_all(d.join("launcher")).unwrap();
-        std::fs::write(d.join(SETTING_FILE), r#"{"native_launcher":"off"}"#).unwrap();
-        assert_eq!(native_setting(&d), "off");
-        std::fs::write(d.join(SETTING_FILE), r#"{"native_launcher":"auto"}"#).unwrap();
-        assert_eq!(native_setting(&d), "auto");
-        std::fs::remove_file(d.join("panel_settings.json")).unwrap();
-        std::fs::remove_file(d.join(SETTING_FILE)).unwrap();
-        assert_eq!(native_setting(&d), "auto", "no file at all: Python's default");
-        let _ = std::fs::remove_dir_all(&d);
+    fn a_leftover_setting_file_saying_python_still_starts_natively() {
+        let l = Layout::new("leftover");
+        l.pointer(&serde_json::json!({"version": OWN, "dir": "versions/app-1.2.472"}).to_string());
+        let file = l.app_data.join("launcher/native_launcher.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{"native_launcher":"python"}"#).unwrap();
+        std::fs::write(l.app_data.join("panel_settings.json"), r#"{"native_launcher":"off"}"#).unwrap();
+        let never = || -> String { panic!("setting read on a direct launch") };
+        let no_hold = || -> bool { panic!("crash-loop file read on a direct launch") };
+        assert!(before_start(&l.exe, &args(), false, false, &l.app_data, OWN, never, no_hold).is_none());
+        assert_eq!(native_setting(&l.app_data), DEFAULT_NATIVE_LAUNCHER);
+        l.drop_all();
     }
 
     #[test]
@@ -502,14 +457,6 @@ mod tests {
             assert!(v(mode, true).is_none(), "{mode} during a hold");
         }
         l.drop_all();
-    }
-
-    #[test]
-    fn always_native() {
-        for mode in ["off", "on", "auto", ""] {
-            assert!(wants_native(mode, false), "{mode}");
-            assert!(wants_native(mode, true), "{mode} during a hold");
-        }
     }
 
     #[test]

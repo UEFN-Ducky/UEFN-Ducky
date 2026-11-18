@@ -224,7 +224,7 @@ def no_native() -> bool:
 def decide(exe_present: bool, webview2_ok: bool) -> str:
     """'native' or 'python' for this launch."""
     # Always the launcher (its window is up in ~0.1 s, the Python window in 1-2 s). Python
-    # only when the launcher can't run at all. Same rule in repoint.rs wants_native.
+    # only when the launcher can't run at all. Same rule in repoint.rs before_start.
     if no_native() or not exe_present or not webview2_ok:
         return "python"
     return "native"
