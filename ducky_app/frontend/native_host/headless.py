@@ -68,7 +68,7 @@ def take_after_update(argv: list[str]) -> int | None:
 
 def encode(message: dict[str, Any]) -> bytes:
     """One protocol line. Raises ValueError over ``MAX_LINE_BYTES``."""
-    data = (json.dumps(message, ensure_ascii=False, separators=(",", ":"), default=str) + "\n").encode("utf-8")
+    data = (_dumps(message) + "\n").encode("utf-8")
     if len(data) > MAX_LINE_BYTES:
         raise ValueError(f"message over {MAX_LINE_BYTES} bytes")
     return data
@@ -76,7 +76,16 @@ def encode(message: dict[str, Any]) -> bytes:
 
 def park_large_result(value: Any) -> str:
     """Keep one oversized result (as the ``/__panel_api`` reply body) for a single fetch."""
-    body = json.dumps({"ok": True, "result": value}, ensure_ascii=False, default=str).encode("utf-8")
+    return _park_body(_dumps(value).encode("utf-8"))
+
+
+def _dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def _park_body(value_json: bytes) -> str:
+    """Park ``{"ok":true,"result":<value_json>}``, the encoded value as it is; its token."""
+    body = b'{"ok":true,"result":' + value_json + b"}"
     token = secrets.token_urlsafe(18)
     now = time.monotonic()
     with _large_lock:
@@ -108,6 +117,23 @@ def send_large_result(handler: Any, token: str, local: bool) -> None:
     handler.wfile.write(body)
 
 
+def _is_ok_result(message: dict[str, Any]) -> bool:
+    return message.get("ok") is True and list(message) == ["t", "id", "ok", "value"] and message["t"] == "result"
+
+
+def _ok_result_line(message: dict[str, Any]) -> bytes:
+    """A ``result`` line with its value JSON-encoded once: over ``MAX_LINE_BYTES`` the same
+    encoded value is parked and the line says where (dispatch_call's key order, so the line is
+    the bytes ``encode`` would give)."""
+    head = '{"t":"result","id":' + _dumps(message["id"]) + ',"ok":true,"value":'
+    data = (head + _dumps(message["value"]) + "}\n").encode("utf-8")
+    if len(data) <= MAX_LINE_BYTES:
+        return data
+    token = _park_body(data[len(head.encode("utf-8")) : -2])
+    error = f"{LARGE_RESULT_PREFIX}{token} (message over {MAX_LINE_BYTES} bytes)"
+    return encode({"t": "result", "id": message["id"], "ok": False, "error": error})
+
+
 class LineWriter:
     """Thread-safe writer of protocol lines to the launcher (stdout)."""
 
@@ -117,7 +143,7 @@ class LineWriter:
 
     def send(self, message: dict[str, Any]) -> bool:
         try:
-            data = encode(message)
+            data = _ok_result_line(message) if _is_ok_result(message) else encode(message)
         except (TypeError, ValueError) as exc:
             if message.get("t") != "result":
                 _log.warning("backend message not sent: %s", exc)

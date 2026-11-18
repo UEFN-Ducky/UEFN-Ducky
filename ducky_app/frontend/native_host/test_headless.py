@@ -284,6 +284,52 @@ def test_writer_lines_and_size_limit() -> None:
     assert headless.take_large_result("nope") is None
 
 
+def _big_value() -> dict:
+    return {"geometry": [{"x": i, "name": "rué ✓"} for i in range(80_000)]}  # ~2 MB
+
+
+def _sent(message: dict) -> bytes:
+    out = io.BytesIO()
+    assert headless.LineWriter(out).send(message)
+    return out.getvalue()
+
+
+def test_a_big_reply_is_encoded_once(monkeypatch) -> None:
+    value = _big_value()
+    real = json.dumps
+    big_encodes: list[int] = []
+
+    def counting(obj, *a, **k):
+        text = real(obj, *a, **k)
+        if len(text) > headless.MAX_LINE_BYTES:
+            big_encodes.append(len(text))
+        return text
+
+    monkeypatch.setattr(headless.json, "dumps", counting)
+    line = json.loads(_sent({"t": "result", "id": "g", "ok": True, "value": value}))
+    assert len(big_encodes) == 1 and big_encodes[0] > 2_000_000
+    assert line["ok"] is False and line["error"].startswith(headless.LARGE_RESULT_PREFIX)
+    assert line["error"].endswith(f"(message over {headless.MAX_LINE_BYTES} bytes)")
+
+
+def test_the_parked_bytes_equal_the_old_ones() -> None:
+    """Same JSON as the old body (json.dumps({"ok": True, "result": value})), compact."""
+    value = _big_value()
+    line = json.loads(_sent({"t": "result", "id": "g", "ok": True, "value": value}))
+    token = line["error"][len(headless.LARGE_RESULT_PREFIX):].split(" ", 1)[0]
+    body = headless.take_large_result(token)
+    old = {"ok": True, "result": value}
+    assert body == json.dumps(old, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    assert json.loads(body) == json.loads(json.dumps(old, ensure_ascii=False, default=str))
+
+
+def test_a_small_reply_is_unchanged() -> None:
+    message = {"t": "result", "id": 7, "ok": True, "value": {"text": "é" * 5_000, "n": [1, 2.5, None, True]}}
+    want = (json.dumps(message, ensure_ascii=False, separators=(",", ":"), default=str) + "\n").encode("utf-8")
+    assert 10_000 <= len(want) < headless.MAX_LINE_BYTES
+    assert _sent(message) == want
+
+
 def test_send_large_result_only_to_this_pc_once() -> None:
     class _Handler:
         def __init__(self) -> None:
