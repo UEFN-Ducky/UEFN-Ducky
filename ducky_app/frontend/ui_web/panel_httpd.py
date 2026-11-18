@@ -16,14 +16,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from frontend.settings import PANEL_LISTENER_PORT, default_app_data_dir
+from frontend.settings import default_app_data_dir
 from frontend.ui_web.event_backlog import EventBacklog
 from frontend.ui_web.file_kinds import mime_for_path
 from frontend.ui_web.file_range import _copy_file_range, _parse_range_header, _plan_file_range
+from frontend.ui_web.panel_bind import bind_panel_server, panel_port
 from frontend.ui_web.remote_link import routing
 from frontend.ui_web.remote_link.input_lane import input_lane
 
-PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
+PANEL_UI_HTTP_PORT = panel_port()  # the bind target callers override; start_panel_ui_server moves it
 # Cloudflare (and any reverse proxy) needs HTTP/1.1 + Content-Length.
 # Default BaseHTTPRequestHandler is HTTP/1.0 and 502s under keep-alive.
 _HTTP_PROTOCOL = "HTTP/1.1"
@@ -1508,8 +1509,6 @@ def start_panel_ui_server(dist_root: Path, bind_port: int | None = None) -> str:
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
-
-        from frontend.ui_web.panel_bind import bind_panel_server
 
         _server = bind_panel_server(lambda p: _PanelServer(("127.0.0.1", p), Handler), bind_port, PANEL_UI_HTTP_PORT)
         if bind_port is None and PANEL_UI_HTTP_PORT:

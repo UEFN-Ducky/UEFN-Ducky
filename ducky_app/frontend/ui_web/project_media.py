@@ -6,7 +6,6 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from frontend.settings import PANEL_LISTENER_PORT
 from frontend.ui_web.file_kinds import (
     classify_project_file,
     is_audio_file_name,
@@ -15,8 +14,8 @@ from frontend.ui_web.file_kinds import (
     is_video_file_name,
     mime_for_path,
 )
+from frontend.ui_web.panel_bind import panel_port
 
-_PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 _PROJECT_MEDIA_RE = re.compile(r"^project-media/(.+)$")
 # Directory-relative model serving so FBX/glTF can load sibling textures/bins.
 # model-files/<urlquote(encoded_dir)>/<urlquote(filename)>
@@ -36,7 +35,7 @@ def project_thumb_re() -> re.Pattern[str]:
 
 def build_project_thumb_url(slug: str) -> str:
     """Loopback URL for a known project's key art (the Projects window card)."""
-    return f"http://127.0.0.1:{_PANEL_UI_HTTP_PORT}/project-thumb/{quote(slug, safe='')}"
+    return f"http://127.0.0.1:{panel_port()}/project-thumb/{quote(slug, safe='')}"
 
 
 def model_files_re() -> re.Pattern[str]:
@@ -45,7 +44,7 @@ def model_files_re() -> re.Pattern[str]:
 
 def build_project_media_url(encoded_path: str) -> str:
     token = quote(encoded_path, safe="")
-    return f"http://127.0.0.1:{_PANEL_UI_HTTP_PORT}/project-media/{token}"
+    return f"http://127.0.0.1:{panel_port()}/project-media/{token}"
 
 
 def _split_encoded_path(encoded_path: str) -> tuple[str, str]:
@@ -70,7 +69,7 @@ def build_model_media_urls(encoded_path: str) -> dict[str, str]:
     encoded_dir, filename = _split_encoded_path(encoded_path)
     dir_token = quote(encoded_dir, safe="")
     name_token = quote(filename, safe="")
-    base = f"http://127.0.0.1:{_PANEL_UI_HTTP_PORT}/model-files/{dir_token}/"
+    base = f"http://127.0.0.1:{panel_port()}/model-files/{dir_token}/"
     return {
         "media_url": f"{base}{name_token}",
         "media_base_url": base,

@@ -13,9 +13,8 @@ import uuid
 from pathlib import Path
 
 from frontend.app_paths import resolve_app_data_dir
-from frontend.settings import PANEL_LISTENER_PORT
+from frontend.ui_web.panel_bind import panel_port
 
-_PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 _TOOL_CAPTURE_RE = re.compile(r"^tool-captures/([A-Za-z0-9._-]+\.(?:png|jpe?g|webp))$", re.IGNORECASE)
 _MAX_KEEP = 40
 
@@ -33,7 +32,7 @@ def tool_captures_re() -> re.Pattern[str]:
 
 def build_tool_capture_url(filename: str) -> str:
     name = Path(filename).name
-    return f"http://127.0.0.1:{_PANEL_UI_HTTP_PORT}/tool-captures/{name}"
+    return f"http://127.0.0.1:{panel_port()}/tool-captures/{name}"
 
 
 def resolve_tool_capture_path(filename: str) -> Path:

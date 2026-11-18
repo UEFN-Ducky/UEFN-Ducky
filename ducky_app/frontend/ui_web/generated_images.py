@@ -14,9 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from frontend.app_paths import resolve_app_data_dir
-from frontend.settings import PANEL_LISTENER_PORT
+from frontend.ui_web.panel_bind import panel_port
 
-_PANEL_UI_HTTP_PORT = PANEL_LISTENER_PORT - 1
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.(?:png|jpe?g|webp|mp4|webm|mov|mp3|wav|ogg|m4a|html)$", re.IGNORECASE)
 _INDEX = "index.json"
 # Image tools that predate plugin-declared generators; the rest come from what the
@@ -59,7 +58,7 @@ def generated_images_dir(*, for_write: bool = False) -> Path:
 
 
 def build_generated_image_url(filename: str) -> str:
-    return f"http://127.0.0.1:{_PANEL_UI_HTTP_PORT}/generated-images/{Path(filename).name}"
+    return f"http://127.0.0.1:{panel_port()}/generated-images/{Path(filename).name}"
 
 
 def resolve_generated_image_path(filename: str) -> Path:
