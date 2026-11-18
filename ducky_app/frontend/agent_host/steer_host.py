@@ -137,6 +137,12 @@ def address() -> tuple[str, str] | None:
         return _address
 
 
+def served_pipe() -> str:
+    """The pipe this process listens on; "" when it serves none (never starts one)."""
+    addr = _address
+    return addr[0] if addr else ""
+
+
 def mcp_env() -> dict[str, str]:
     """The env the ``uefn`` server needs to ask this host; {} outside a host."""
     from backend.panel.rpc import HOST_KEY_ENV, HOST_PIPE_ENV

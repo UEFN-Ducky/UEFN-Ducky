@@ -93,3 +93,85 @@ def test_question_gate_sees_the_bound_stop_in_a_worker_thread(monkeypatch):
     assert len(calls) == 2
     monkeypatch.setattr(rpc_mod, "panel_rpc", lambda *a, **k: {"blocked": False})
     assert rpc_mod.wait_for_question_answers("chat") is True  # unbound again: no stop
+
+
+_HOST_CALLS = [
+    ("question_gate", {"conv_id": "rpc-direct"}),
+    ("steer_take", {"conv_id": "rpc-direct"}),
+    ("steer_ack", {"conv_id": "rpc-direct", "lease_id": ""}),
+]
+
+
+class _PipeConn:
+    """A stand-in for the host's pipe: the request goes through steer_host as bytes."""
+
+    def __init__(self) -> None:
+        self._reply = b""
+
+    def send_bytes(self, raw: bytes) -> None:
+        import json
+
+        from frontend.agent_host import steer_host
+
+        request = json.loads(raw)
+        self._reply = json.dumps(steer_host.answer(request["method"], request["params"])).encode("utf-8")
+
+    def poll(self, timeout) -> bool:
+        return True
+
+    def recv_bytes(self) -> bytes:
+        return self._reply
+
+    def close(self) -> None:
+        pass
+
+
+def _fake_client(opened: list[str]):
+    def client(pipe, authkey=None):
+        opened.append(pipe)
+        return _PipeConn()
+    return client
+
+
+def test_the_host_answers_its_own_request_without_a_pipe(monkeypatch):
+    import multiprocessing.connection as mpc
+
+    from frontend.agent_host import steer_host
+
+    def no_pipe(*args, **kwargs):
+        raise AssertionError("the host opened a pipe to itself")
+
+    monkeypatch.setattr(mpc, "Client", no_pipe)
+    monkeypatch.setattr(steer_host, "_address", (r"\\.\pipe\ducky-test-self", "00"))
+    monkeypatch.setattr(steer_host, "GATE_WAIT_S", 0.01)
+    for method, params in _HOST_CALLS:
+        reply = rpc_mod.host_rpc(r"\\.\pipe\ducky-test-self", b"\0", method, params, 5.0)
+        assert "error" not in reply, (method, reply)
+
+
+def test_another_process_still_uses_the_pipe(monkeypatch):
+    import multiprocessing.connection as mpc
+
+    from frontend.agent_host import steer_host
+
+    opened: list[str] = []
+    monkeypatch.setattr(mpc, "Client", _fake_client(opened))
+    monkeypatch.setattr(steer_host, "_address", None)  # this process serves no pipe
+    rpc_mod.host_rpc(r"\\.\pipe\ducky-test-other", b"\0", "steer_ack", {"conv_id": "c", "lease_id": ""}, 5.0)
+    assert opened == [r"\\.\pipe\ducky-test-other"]
+
+
+def test_direct_and_pipe_replies_are_equal(monkeypatch):
+    import multiprocessing.connection as mpc
+
+    from frontend.agent_host import steer_host
+
+    opened: list[str] = []
+    monkeypatch.setattr(mpc, "Client", _fake_client(opened))
+    monkeypatch.setattr(steer_host, "_address", (r"\\.\pipe\ducky-test-self", "00"))
+    monkeypatch.setattr(steer_host, "GATE_WAIT_S", 0.01)
+    for method, params in _HOST_CALLS:
+        direct = rpc_mod.host_rpc(r"\\.\pipe\ducky-test-self", b"\0", method, params, 5.0)
+        piped = rpc_mod.host_rpc(r"\\.\pipe\ducky-test-other", b"\0", method, params, 5.0)
+        assert direct == piped, method
+    assert len(opened) == len(_HOST_CALLS)

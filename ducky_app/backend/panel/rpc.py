@@ -20,6 +20,7 @@ import contextvars
 import json
 import os
 import socket
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -143,7 +144,14 @@ def _host_target() -> tuple[str, bytes]:
 
 
 def host_rpc(pipe: str, authkey: bytes, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
-    """One request to the agent host over its pipe; raises OSError/EOFError/TimeoutError."""
+    """One request to the agent host over its pipe; raises OSError/EOFError/TimeoutError.
+
+    Inside the host that serves ``pipe`` (an embedded tool server) the answer comes from
+    ``steer_host.answer`` directly: no pipe, no handshake, no serving thread."""
+    # ponytail: not imported here means this process serves no host pipe
+    host = sys.modules.get("frontend.agent_host.steer_host")
+    if host is not None and pipe and pipe == host.served_pipe():
+        return host.answer(method, params)
     from multiprocessing.connection import Client
 
     conn = Client(pipe, authkey=authkey or None)
