@@ -26,6 +26,19 @@ _MAX_FRAME = 16 * 1024 * 1024
 # to a dedicated bridge (a whole backend, 300-700 MB, per agent).
 _HELLO_TIMEOUT_S = 10.0
 _HELLO_BACKOFF_S = 1.0
+# An agent host checks that its own tool server answers before it starts an agent
+# (coding_agents.readiness, up to 20 s), so a host agent that cannot join at once gains nothing
+# by waiting on. Nov 11-17 2026: 1101 of 1225 turn starts joined in under 5 s and none of the
+# other 124 ever did, each after 31-71 s here plus its own backend's load. A host agent gets
+# one hello window, then this long for a tool server to show up.
+_SLOT_WAIT_S = 5.0
+_RECENT_KEPT = 40  # fallbacks kept with their time and reason (self_health reads them)
+# Why the last try to join a tool server failed: the reason a dedicated bridge is counted under.
+_miss: list[str] = []
+
+
+def _note_miss(why: str) -> None:
+    _miss[:] = [why]
 
 
 def _moved_panel_port() -> int:
@@ -205,6 +218,7 @@ def _hello_attempt(state: dict, read_timeout: float = _HELLO_TIMEOUT_S) -> tuple
     try:
         sock = socket.create_connection((str(state.get("host") or "127.0.0.1"), int(state["port"])), timeout=2.0)
     except OSError:
+        _note_miss(f"nothing listens on its port (pid {state.get('pid') or '?'})")
         return None, False
     try:
         sock.settimeout(read_timeout)
@@ -212,12 +226,15 @@ def _hello_attempt(state: dict, read_timeout: float = _HELLO_TIMEOUT_S) -> tuple
         reply = _read_frame(sock)
     except (socket.timeout, TimeoutError):
         sock.close()
+        _note_miss(f"it took the connection but did not answer in {read_timeout:.0f} s (pid {state.get('pid') or '?'})")
         return None, True
     except (OSError, ValueError, EOFError):
         sock.close()
+        _note_miss("it closed the connection before answering")
         return None, False
     if reply.get("op") != "hello_ok":
         sock.close()
+        _note_miss(f"it refused this agent ({reply.get('reason') or reply.get('op') or 'no reason'})")
         return None, False
     sock.settimeout(None)
     return sock, False
@@ -239,16 +256,21 @@ def _hello_with_retry(state: dict) -> socket.socket | None:
 def _record_fallback(reason: str) -> int:
     """Count each agent that runs its own dedicated bridge instead of the shared daemon."""
     path = _app_data() / _FALLBACKS
+    recent: list[dict] = []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         count = int(data.get("count") or 0) if isinstance(data, dict) else 0
+        if isinstance(data, dict) and isinstance(data.get("recent"), list):
+            recent = [row for row in data["recent"] if isinstance(row, dict)]
     except (OSError, ValueError, TypeError):
         count = 0
     count += 1
+    now = time.time()
+    recent = [*recent[-(_RECENT_KEPT - 1):], {"at": now, "slot": _slot(), "reason": reason}]
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"count": count, "last_at": time.time(), "slot": _slot(),
-                                    "reason": reason, "pid": os.getpid()}), encoding="utf-8")
+        path.write_text(json.dumps({"count": count, "last_at": now, "slot": _slot(), "reason": reason,
+                                    "pid": os.getpid(), "recent": recent}), encoding="utf-8")
     except OSError:
         pass
     try:
@@ -319,11 +341,14 @@ def _spawn_daemon(bridge_args: list[str]) -> None:
             continue  # the job refuses breakaway: start inside it
 
 
-def connect(bridge_args: list[str], timeout_s: float = 30.0) -> socket.socket | None:
+def connect(bridge_args: list[str], timeout_s: float = 30.0, *, patient: bool = True) -> socket.socket | None:
     """Existing daemon first; spawn one only if nobody answers.
 
     A daemon from a different app version is stopped (it still holds the
     single-instance lock) so this exe can serve tools such as web_search.
+
+    ``patient=False`` (a host agent's first join, see ``_SLOT_WAIT_S``): one hello window and
+    no try that runs past ``timeout_s``.
     """
     state = _read_state()
     if state and _stale(state):
@@ -332,14 +357,23 @@ def connect(bridge_args: list[str], timeout_s: float = 30.0) -> socket.socket | 
         while time.time() < deadline and state and _stale(state):
             time.sleep(0.1)
             state = _read_state()
-    if state and not _stale(state) and (sock := _hello_with_retry(state)):
+    if state is None:
+        _note_miss(f"no tool server is registered ({_state_name()} is missing or unreadable)")
+    elif _stale(state):
+        _note_miss(f"the tool server is version {_state_version(state) or '?'}, this agent {_our_version()}")
+    elif sock := (_hello_with_retry(state) if patient else _hello_attempt(state, _HELLO_TIMEOUT_S)[0]):
         return sock
     _spawn_daemon(bridge_args)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         state = _read_state()
-        if state and not _stale(state) and (sock := _try_hello(state)):
-            return sock
+        if state and not _stale(state):
+            if patient:
+                sock = _try_hello(state)
+            else:
+                sock = _hello_attempt(state, max(0.5, min(_HELLO_TIMEOUT_S, deadline - time.time())))[0]
+            if sock:
+                return sock
         time.sleep(0.1)
     return None
 
@@ -375,9 +409,9 @@ def run(bridge_args: list[str]) -> bool:
     agents never reconnect an MCP server themselves, so exiting here left them without
     Ducky tools for the rest of the run ("Transport closed"; Codex after a Ducky update).
     """
-    first = connect(bridge_args)
+    first = connect(bridge_args, _SLOT_WAIT_S, patient=False) if _slot() else connect(bridge_args)
     if first is None:
-        _record_fallback("no shared daemon answered")
+        _record_fallback(_miss[0] if _miss else "no shared daemon answered")
         return False
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer

@@ -21,7 +21,9 @@ import logging
 import os
 import sys
 import threading
+import time
 from multiprocessing.connection import Client
+from pathlib import Path
 from typing import Any
 
 from frontend.agent_host import protocol
@@ -96,6 +98,51 @@ def shed() -> dict[str, Any]:
         return out
 
 
+STALL_S = 15.0
+_STALL_LOG_MAX = 1_000_000
+
+
+def watch_stalls(path: Path, stall_s: float = STALL_S, beat_s: float = 1.0) -> threading.Event:
+    """Write every thread's Python stack to ``path`` when this host's Python stops running for
+    ``stall_s`` (one thread keeping the interpreter inside native code). Set the returned event
+    to stop watching.
+
+    While it is stopped no agent can join the host's tool server and every tool call of every
+    chat waits. Nov 11-17 2026: about five times a day a turn started 50-100 s late that way
+    (tools that answer in 0.1 s took over 100 s at those moments) and nothing recorded what
+    the host was doing. faulthandler's watchdog is a C thread, so it fires even then; the beat
+    re-arms it and, once Python runs again, dates the dump and says how long the stop was.
+    """
+    import faulthandler
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.stat().st_size > _STALL_LOG_MAX:
+            path.unlink()
+    except OSError:
+        pass
+    out = open(path, "a", encoding="utf-8")  # noqa: SIM115 - held while the host runs
+    stop = threading.Event()
+
+    def _beat() -> None:
+        last = time.monotonic()
+        while not stop.is_set():
+            faulthandler.dump_traceback_later(stall_s, file=out)  # replaces the one armed before
+            stop.wait(beat_s)
+            now = time.monotonic()
+            stopped = now - last - beat_s
+            if stopped >= stall_s:
+                out.write(f"=== {time.strftime('%Y-%m-%d %H:%M:%S')}: this host's Python did not run for "
+                          f"{stopped:.0f} s; the stacks above were taken {stall_s:.0f} s into that stop\n")
+                out.flush()
+            last = now
+        faulthandler.cancel_dump_traceback_later()
+        out.close()
+
+    threading.Thread(target=_beat, name="host-stall-watch", daemon=True).start()
+    return stop
+
+
 def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
     """Connect to the app and run until ``shutdown``, the pipe closing, or ``done`` being set."""
     global _batcher
@@ -144,5 +191,12 @@ def main(argv: list[str]) -> int:
 
     set_role("agent_host")  # before turns load plugins: app-only work stays in the window
     key = bytes.fromhex(os.environ.pop(KEY_ENV, ""))  # never handed on to the CLIs this host starts
+    try:
+        from frontend.settings import default_app_data_dir
+
+        # Beside this host's own log (supervisor: logs/agent_hosts/host-<slot>.log).
+        watch_stalls(default_app_data_dir() / "logs" / "agent_hosts" / f"host-{args.slot}-stalls.log")
+    except Exception:  # noqa: BLE001 - a diagnostic never keeps the host from starting
+        _log.warning("the stall watch did not start", exc_info=True)
     serve(args.pipe, key)
     return 0

@@ -268,6 +268,7 @@ def snapshot(detail: bool = False) -> dict[str, Any]:
         "agents_in_window": agents_in_window(),
         "ui_last_hour": _ui_last_hour(),
         "auto_heal": _auto_healed(),
+        "tool_fallbacks": tool_fallbacks(),
     }
     if detail:
         out["perf"] = _perf()
@@ -584,9 +585,48 @@ def _auto_healed() -> list[dict[str, Any]]:
         return []
 
 
+def tool_fallbacks(now: float | None = None) -> dict[str, Any]:
+    """Agent starts that loaded a tool server of their own because they could not join Ducky's
+    (frontend.shared_mcp_adapter counts them and keeps the latest with their reason). Nov 17
+    2026: 91 had piled up over a week, 40-90 s each, and nothing showed them."""
+    now = time.time() if now is None else now
+    try:
+        data = json.loads((_app_dir() / "shared_mcp_fallbacks.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        return {"count": 0, "last_hour": 0, "reason": ""}
+    rows = [r for r in data.get("recent") or [] if isinstance(r, dict)]
+    if not rows:  # written before the latest ones were kept
+        rows = [{"at": data.get("last_at"), "reason": data.get("reason")}]
+
+    def _at(row: dict[str, Any]) -> float:
+        try:
+            return float(row.get("at") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    hour = [r for r in rows if now - _at(r) < 3600]
+    try:
+        count = int(data.get("count") or 0)
+    except (TypeError, ValueError):
+        count = len(rows)
+    return {"count": count, "last_hour": len(hour), "reason": str((hour or rows)[-1].get("reason") or "")}
+
+
 def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
     """Plain-words causes, most important first, each with the fix (a self-care action or a step)."""
     out: list[dict[str, str]] = []
+    falls = snap.get("tool_fallbacks") or {}
+    fell = int(falls.get("last_hour") or 0)
+    if fell:
+        out.append({"severity": "high" if fell >= 3 else "medium",
+                    "what": f"{_plural(fell, 'agent start', 'agent starts')} in the last hour could not join Ducky's "
+                            "tool server and loaded one of their own.",
+                    "why": "Each of those turns starts 15-60 s late and holds a whole tool server in memory. "
+                           f"The last one's reason: {falls.get('reason') or 'not recorded'}.",
+                    "fix": "Restart Ducky if it keeps happening. shared_mcp_fallbacks.json in Ducky's data folder "
+                           "lists the latest ones with their reasons."})
     healed = [h for h in snap.get("auto_heal") or [] if time.time() - float(h.get("at") or 0) < 3600]
     if healed:
         out.append({"severity": "low", "what": f"Ducky fixed {_plural(len(healed), 'stuck thing', 'stuck things')} "

@@ -122,3 +122,29 @@ def test_a_frame_handled_as_the_host_connects_reaches_turns(monkeypatch) -> None
         done.set()
         host.join(5)
         conn.close()
+
+
+def _keep_the_interpreter(seconds: float) -> None:
+    """One C call, so no other Python thread runs until it returns."""
+    began = time.perf_counter()
+    sum(range(2_000_000))
+    per_item = (time.perf_counter() - began) / 2_000_000
+    sum(range(int(seconds / per_item)))
+
+
+def test_a_host_whose_python_stops_writes_what_it_was_doing(tmp_path) -> None:
+    """Nov 11-17 2026: turns started 50-100 s late while the host's Python stood still, and
+    nothing recorded which call kept it."""
+    log = tmp_path / "logs" / "host-0-stalls.log"
+    stop = host_main.watch_stalls(log, stall_s=0.25, beat_s=0.05)
+    try:
+        time.sleep(0.6)  # a host that runs: nothing is written
+        assert log.read_text(encoding="utf-8") == ""
+        _keep_the_interpreter(1.0)
+        deadline = time.monotonic() + 3.0
+        while "did not run for" not in log.read_text(encoding="utf-8") and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        stop.set()
+    text = log.read_text(encoding="utf-8")
+    assert "Timeout" in text and "_keep_the_interpreter" in text and "did not run for" in text

@@ -47,6 +47,29 @@ def _base() -> dict:
             "helpers": [], "other_ducky_processes": [], "uefn": [], "sandboxes": {}, "terminals": {}, "storage": {}}
 
 
+def test_agents_that_loaded_their_own_tool_server_are_named(tmp_path, monkeypatch):
+    """Nov 17 2026: 91 of them had piled up over a week (40-90 s each) and no check showed one."""
+    import time
+
+    monkeypatch.setattr(self_health, "_app_dir", lambda: tmp_path)
+    assert self_health.tool_fallbacks() == {"count": 0, "last_hour": 0, "reason": ""}
+    now = time.time()
+    rows = [{"at": now - 7200, "slot": "0", "reason": "old"}, {"at": now - 60, "slot": "0", "reason": "one"},
+            {"at": now - 5, "slot": "0", "reason": "it took the connection but did not answer in 10 s (pid 7)"}]
+    (tmp_path / "shared_mcp_fallbacks.json").write_text(json.dumps({"count": 91, "recent": rows}), encoding="utf-8")
+    falls = self_health.tool_fallbacks()
+    assert falls["count"] == 91 and falls["last_hour"] == 2 and "did not answer" in falls["reason"]
+    snap = _base()
+    snap["tool_fallbacks"] = falls
+    found = [f for f in self_health.findings(snap) if "tool server" in f["what"]]
+    assert found and found[0]["severity"] == "medium" and "did not answer" in found[0]["why"]
+    # A file from before the latest ones were kept still counts its last one.
+    (tmp_path / "shared_mcp_fallbacks.json").write_text(json.dumps({"count": 3, "last_at": now - 30, "reason": "r"}),
+                                                        encoding="utf-8")
+    assert self_health.tool_fallbacks()["last_hour"] == 1
+    assert not [f for f in self_health.findings(_base()) if "tool server" in f["what"]]
+
+
 def test_a_frozen_window_and_a_call_flood_are_named():
     snap = _base()
     snap["ui_last_hour"] = {"ui_stalls": 1200, "ui_stall_p95_ms": 1063.2,

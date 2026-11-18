@@ -184,8 +184,47 @@ def test_progress_from_the_daemon_reaches_the_cli(monkeypatch, app_data) -> None
 
 def test_each_dedicated_fallback_is_counted(monkeypatch, app_data) -> None:
     monkeypatch.setenv(shared_mcp.SLOT_ENV, "2")
-    monkeypatch.setattr(ad, "connect", lambda args: None)
+    monkeypatch.setattr(ad, "connect", lambda *args, **kwargs: None)
     assert ad.run(["--port", "4200"]) is False
     assert ad.run(["--port", "4200"]) is False
     record = json.loads((app_data / "shared_mcp_fallbacks.json").read_text(encoding="utf-8"))
     assert record["count"] == 2 and record["slot"] == "2" and record["reason"]
+    assert [row["slot"] for row in record["recent"]] == ["2", "2"]
+
+
+def test_a_fallback_names_its_reason_and_only_the_latest_are_kept(monkeypatch, app_data) -> None:
+    """91 fallbacks had piled up by Nov 17 2026 under one reason, "no shared daemon answered"."""
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "3")  # no shared_mcp-h3.json: that host serves nothing
+    monkeypatch.setattr(ad, "_SLOT_WAIT_S", 0.05)
+    monkeypatch.setattr(ad, "_RECENT_KEPT", 3)
+    for _ in range(5):
+        assert ad.run(["--port", "4200"]) is False
+    record = json.loads((app_data / "shared_mcp_fallbacks.json").read_text(encoding="utf-8"))
+    assert record["count"] == 5 and len(record["recent"]) == 3
+    assert "shared_mcp-h3.json" in record["reason"] and record["recent"][-1]["reason"] == record["reason"]
+
+
+def test_a_host_agent_does_not_wait_on_a_host_that_stays_silent(monkeypatch, app_data) -> None:
+    """Its host checked the tool server before starting the agent, so waiting on gains nothing:
+    Nov 11-17 2026, every join that worked took under 5 s and every other one cost 31-71 s here."""
+    import socket
+    import time
+
+    silent = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # takes connections, never answers
+    silent.bind(("127.0.0.1", 0))
+    silent.listen(8)
+    state = {"host": "127.0.0.1", "port": silent.getsockname()[1], "token": "t", "pid": 4242,
+             "key": {"version": "1", "port": "4200", "project": ""}}
+    (app_data / "shared_mcp-h0.json").write_text(json.dumps(state), encoding="utf-8")
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "0")
+    monkeypatch.setattr(ad, "_HELLO_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(ad, "_SLOT_WAIT_S", 0.3)
+    monkeypatch.setattr(ad, "_hello_with_retry", lambda s: pytest.fail("a second, longer hello"))
+    began = time.monotonic()
+    try:
+        assert ad.run(["--port", "4200"]) is False
+    finally:
+        silent.close()
+    assert time.monotonic() - began < 2.0  # one hello window + the short wait, not 31-71 s
+    record = json.loads((app_data / "shared_mcp_fallbacks.json").read_text(encoding="utf-8"))
+    assert "did not answer" in record["reason"] and "4242" in record["reason"]
