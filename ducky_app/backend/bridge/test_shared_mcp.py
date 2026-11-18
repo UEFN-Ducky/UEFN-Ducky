@@ -1365,3 +1365,42 @@ def test_a_new_revision_rebuilds_the_list(monkeypatch) -> None:
         shared_mcp.bump_catalog_revision()
         _listed_bytes(mcp)
     assert len(shared_mcp._listed_cache) <= shared_mcp._LISTED_MAX
+
+
+def test_two_writers_of_the_state_file_never_collide(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(shared_mcp, "state_path", lambda: tmp_path / "shared_mcp-h0.json")
+    errors: list[BaseException] = []
+    bad_reads: list[str] = []
+    done = threading.Event()
+
+    def write(n: int) -> None:
+        try:
+            for i in range(50):
+                shared_mcp._write_state(f"t{n}-{i}", {"k": "v"}, host="127.0.0.1", port=40000 + n)
+        except BaseException as exc:  # noqa: BLE001 — the test reports it
+            errors.append(exc)
+
+    def read() -> None:
+        while not done.is_set():
+            path = tmp_path / "shared_mcp-h0.json"
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue  # not there yet, or mid-replace on Windows
+            try:
+                json.loads(text)
+            except ValueError:
+                bad_reads.append(text)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    writers = [threading.Thread(target=write, args=(n,)) for n in range(8)]
+    for w in writers:
+        w.start()
+    for w in writers:
+        w.join(60)
+    done.set()
+    reader.join(5)
+    assert errors == [] and bad_reads == []
+    assert shared_mcp.read_state()["host"] == "127.0.0.1"
+    assert not list(tmp_path.glob("*.tmp"))  # no temp left behind

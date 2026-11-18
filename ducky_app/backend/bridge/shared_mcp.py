@@ -267,9 +267,10 @@ def _write_state(token: str, key: dict[str, str], *, host: str, port: int) -> No
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"host": host, "port": port, "token": token, "key": key, "pid": os.getpid()}
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload), encoding="utf-8")
-    tmp.replace(path)
+    from frontend.atomic_json import write_json_plain
+
+    # A unique temp per write: one fixed temp name raced between two writers (WinError 5).
+    write_json_plain(path, payload)
 
 
 def _clear_state() -> None:
