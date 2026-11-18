@@ -1234,10 +1234,12 @@ def _import_plugin_from_bytes(
     # Write the new version into a folder of its own first, in the plugins folder's .staging
     # (one level down, so nothing lists it; the same drive, so it renames in). A write that
     # fails leaves the installed copy, and the plugins this one replaces, as they were.
-    # ponytail: a crash mid-install leaves its folder in .staging; sweep it at launch if one shows up.
     try:
         staging_root = appdata_uefn_plugins_dir() / ".staging"
         staging_root.mkdir(parents=True, exist_ok=True)
+        from backend.uefn_plugins.staging_sweep import sweep
+
+        sweep(staging_root)  # what a crashed install left behind
         staging = Path(tempfile.mkdtemp(prefix=f"plugin-{pid}-", dir=staging_root))
     except OSError as exc:
         return {"ok": False, "error": f"Install failed: {exc}"}

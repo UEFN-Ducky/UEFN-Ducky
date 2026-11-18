@@ -244,6 +244,9 @@ def ensure_packs(
     root = _plugin_root(plugin_id)
     errors: list[str] = []
     with _lock(plugin_id):
+        from backend.uefn_plugins.staging_sweep import sweep
+
+        sweep(root, prefix=(".staging-", ".old-"))  # what a crashed unpack left behind
         for pack in packs_for_this_pc(manifest):
             pid, sha, size = pack["id"], pack["sha256"], pack["bytes"]
             folder = root / pid
