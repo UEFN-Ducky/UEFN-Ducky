@@ -75,6 +75,10 @@ def _ensure_gitleaks() -> Path:
     return cached
 
 
+# Seconds per PyPI request. pip-audit's default 15 failed the release twice on one slow reply.
+PIP_AUDIT_TIMEOUT = "60"
+
+
 def _ensure_pip_audit() -> None:
     try:
         import pip_audit  # noqa: F401
@@ -118,7 +122,7 @@ def _pip_audit(root: Path) -> tuple[str, bool]:
         req = Path(fh.name)
     try:
         code, out = _run(
-            [sys.executable, "-m", "pip_audit", "-r", str(req)], cwd=root
+            [sys.executable, "-m", "pip_audit", "--timeout", PIP_AUDIT_TIMEOUT, "-r", str(req)], cwd=root
         )
     finally:
         req.unlink(missing_ok=True)
@@ -134,7 +138,7 @@ def _venv_audit(root: Path) -> tuple[str, bool]:
     if not site.is_dir():
         return "skip (no .venv)", True
     code, out = _run(
-        [sys.executable, "-m", "pip_audit", "--path", str(site), "--skip-editable"], cwd=root
+        [sys.executable, "-m", "pip_audit", "--timeout", PIP_AUDIT_TIMEOUT, "--path", str(site), "--skip-editable"], cwd=root
     )
     if code == 0:
         return "ok", True
