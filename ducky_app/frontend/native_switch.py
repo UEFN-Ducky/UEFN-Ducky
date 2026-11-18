@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -37,7 +38,7 @@ BACKEND_EXE_ENV = "UEFN_DUCKY_BACKEND_EXE"
 # Set by Ducky-Launcher.exe when it falls back and starts UEFN-Ducky.exe itself: this launch
 # always runs the Python window, so on/auto never start the launcher again (no loop).
 NO_NATIVE_ENV = "UEFN_DUCKY_NO_NATIVE"
-# Set with it by the launcher (repoint.rs NO_NATIVE_WHY_ENV): no_pointer | hop_failed | start_failed.
+# Set with it by the launcher (repoint.rs NO_NATIVE_WHY_ENV): no_pointer | hop_failed | start_failed[.reason].
 NO_NATIVE_WHY_ENV = "UEFN_DUCKY_NO_NATIVE_WHY"
 
 EXIT_WEBVIEW2 = 20
@@ -339,7 +340,9 @@ def maybe_start_native(argv: list[str], *, start_hidden: bool = False) -> bool:
         # slug; launcher.start's fallback is a fixed list). Nov 16 2026: 7 of 14 launches were
         # "launcher_fallback" and nothing said why. Popped: children never inherit it.
         why = os.environ.pop(NO_NATIVE_WHY_ENV, "").strip().lower()
-        if why in ("no_pointer", "hop_failed", "start_failed"):
+        # start_failed carries the launcher's exit reason (ui.rs: start_failed.no_hello,
+        # start_failed.crash_loop.port_blocked...), words only.
+        if why in ("no_pointer", "hop_failed", "start_failed") or re.fullmatch(r"start_failed(\.[a-z0-9_]{1,24}){1,2}", why):
             try:  # off the launch path, as record_start_soon: the stats queue opens the database
                 from frontend import usage_stats
 

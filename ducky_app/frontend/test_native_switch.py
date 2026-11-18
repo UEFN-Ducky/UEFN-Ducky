@@ -507,6 +507,30 @@ def test_the_launchers_reason_for_the_python_window_is_sent_as_an_error_code(
     assert ev.validate("error.code", {"code": codes[0], "where": "ui"})["code"] == codes[0]  # a slug the Store takes
 
 
+@pytest.mark.parametrize("why, code", [
+    ("start_failed.no_hello", "launcher_python.start_failed.no_hello"),
+    ("start_failed.crash_loop.port_blocked", "launcher_python.start_failed.crash_loop.port_blocked"),
+    ("start_failed.C:/Users/x", None),  # never a path: words only
+])
+def test_launcher_start_failed_carries_its_reason_word(
+        no_native: None, launcher_present: Path, no_spawn: list, monkeypatch: pytest.MonkeyPatch, why, code) -> None:
+    import threading
+
+    from frontend import usage_events as ev, usage_stats
+
+    sent: list[tuple[str, dict]] = []
+    _sync_records(monkeypatch)
+    monkeypatch.setattr(usage_stats, "track", lambda name, **props: sent.append((name, props)))
+    monkeypatch.setenv(ns.NO_NATIVE_WHY_ENV, why)
+    assert ns.maybe_start_native(["UEFN-Ducky.exe"]) is False
+    for thread in [t for t in threading.enumerate() if t.name == "launcher-why"]:
+        thread.join(5)
+    codes = [props["code"] for name, props in sent if name == "error.code"]
+    assert codes == ([code] if code else [])
+    if code:
+        assert ev.validate("error.code", {"code": code, "where": "ui"})["code"] == code
+
+
 def test_no_native_is_dropped(no_native: None, no_spawn: list) -> None:
     import os
 
