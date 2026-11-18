@@ -6,7 +6,6 @@ import { MobileTabSwitcher, useHeaderTabsSlot } from "./MobileTabSwitcher";
 import { useNarrowLayout } from "../hooks/useNarrowLayout";
 import { FileEditorPane } from "./FileEditorPane";
 import { ChatPane } from "./ChatPane";
-import { PlanPane } from "./PlanPane";
 import { ProviderUsageReport } from "./usage/ProviderUsageReport";
 import { PluginWebviewPane } from "../plugin-ui";
 import { backgroundMountVersion, subscribeBackgroundMounts, wantsBackgroundMount } from "../plugin-ui/openPluginUiTab";
@@ -32,6 +31,8 @@ const ChangesView = lazy(() => import("./changes/ChangesView").then((m) => ({ de
 // them before the first chat could show.
 const TerminalPane = lazy(() => import("../terminal/TerminalPane").then((m) => ({ default: m.TerminalPane })));
 const SettingsView = lazy(() => import("../views/SettingsView").then((m) => ({ default: m.SettingsView })));
+// The plan editor (lexical) loads when a plan tab first shows, not at start-up.
+const PlanPane = lazy(() => import("./PlanPane").then((m) => ({ default: m.PlanPane })));
 const AutomationsView = lazy(() =>
   import("../automations/AutomationsView").then((m) => ({ default: m.AutomationsView })),
 );
@@ -318,12 +319,14 @@ export const EditorGroupPane = memo(function EditorGroupPane({
         allChats.find((c) => c.id === activeTab.chatId) ??
         ({ id: activeTab.chatId, name: activeTab.name } as ChatTab);
       return (
-        <PlanPane
-          chatId={chat.id}
-          chatName={activeTab.name || chat.name}
-          projectRoot={activeTab.projectRoot}
-          onOpenChat={onOpenChat}
-        />
+        <Suspense fallback={<div className="plan-pane" />}>
+          <PlanPane
+            chatId={chat.id}
+            chatName={activeTab.name || chat.name}
+            projectRoot={activeTab.projectRoot}
+            onOpenChat={onOpenChat}
+          />
+        </Suspense>
       );
     }
     if (activeTab.kind === "usage" && activeTab.path) {
