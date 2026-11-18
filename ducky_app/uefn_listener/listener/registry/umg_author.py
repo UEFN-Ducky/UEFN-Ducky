@@ -778,11 +778,13 @@ def _compile_checked(wbp) -> dict:
         compiled, error = True, ""
     except ValueError as exc:
         compiled, error = False, _err_head(str(exc))
+    out = {"compiled": compiled, **({"compile_error": error} if error else {})}
     try:
-        unreal.EditorAssetLibrary.save_loaded_asset(wbp, only_if_is_dirty=False)
-    except Exception:  # noqa: BLE001
-        pass
-    return {"compiled": compiled, **({"compile_error": error} if error else {})}
+        if unreal.EditorAssetLibrary.save_loaded_asset(wbp, only_if_is_dirty=False) is False:
+            out.update(saved=False, save_error="UEFN did not save the widget asset (read-only or checked out?)")
+    except Exception as exc:  # noqa: BLE001 — reported in the result, never raised
+        out.update(saved=False, save_error=_err_head(str(exc)) or type(exc).__name__)
+    return out
 
 
 def _field_names(widget_path: str) -> List[str]:

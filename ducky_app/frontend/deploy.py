@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import sys
@@ -11,6 +12,8 @@ import time
 from pathlib import Path
 
 from frontend.bundle_root import is_packaged_runtime, packaged_data_root
+
+_log = logging.getLogger(__name__)
 
 
 def bundled_listener_dir() -> Path | None:
@@ -339,7 +342,7 @@ def overlay_plugin_listeners_to_appdata(*, reload: bool = True) -> bool:
 
             send_command("reload_listener", timeout=6.0)
         except Exception:
-            pass
+            _log.warning("listener reload failed", exc_info=True)
     return changed
 
 

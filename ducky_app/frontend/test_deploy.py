@@ -423,3 +423,17 @@ def test_plugin_listener_overlays_are_not_rewritten_when_unchanged(tmp_path, mon
     assert (overlay / "cmds.py").read_text(encoding="utf-8") == "X = 2\n"
     assert not (overlay / "gone.py").exists()
 
+
+
+def test_a_failed_reload_is_logged(monkeypatch, tmp_path, caplog) -> None:
+    (tmp_path / "listener").mkdir()
+    monkeypatch.setattr(deploy, "appdata_listener_dir", lambda: tmp_path)
+    monkeypatch.setattr(deploy, "_overlay_plugin_listeners", lambda dest: True)
+
+    def down(*_a, **_k):
+        raise ConnectionError("listener offline")
+
+    monkeypatch.setattr("backend.bridge.send_command", down)
+    with caplog.at_level("WARNING", logger=deploy.__name__):
+        assert deploy.overlay_plugin_listeners_to_appdata() is True
+    assert "listener reload failed" in caplog.text
