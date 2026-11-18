@@ -108,9 +108,9 @@ _JS_API: dict[str, str] = {
         window_input window_spotlight_replay window_text_focus
     """,
     "PanelApiStoreMixin": """
-        bridge_job_poll bridge_job_start create_mcp_plugin create_mcp_server create_skill
+        bridge_job_poll bridge_job_start create_mcp_plugin create_mcp_server
         create_skill_node create_skill_pack create_subskill delete_mcp_plugin delete_mcp_server
-        delete_skill delete_skill_pack delete_subskill draft_skill_pack draft_subskill
+        delete_skill_pack delete_subskill draft_skill_pack draft_subskill
         ducky_link_call ducky_link_list ducky_link_open ducky_link_rtc_connect ducky_sync_copy
         ducky_sync_forget ducky_sync_list ducky_sync_now duckyos_agent_caps
         duckyos_agent_caps_set duckyos_cancel_login duckyos_get_status duckyos_list_pcs
@@ -123,8 +123,8 @@ _JS_API: dict[str, str] = {
         get_uefn_plugin_secret_labels get_uefn_plugin_secret_status import_skill_pack
         import_skill_pack_bytes install_uefn_plugin_bytes list_mcp_plugins list_mcp_servers
         list_uefn_plugins live_overview live_team_invite live_team_join live_team_leave
-        open_mcp_plugins_folder open_skill_pack_folder open_skill_packs_folder
-        open_skills_folder open_uefn_plugins_folder plugin_cache_clear plugin_cache_get
+        open_mcp_plugins_folder open_skill_pack_folder
+        open_uefn_plugins_folder plugin_cache_clear plugin_cache_get
         plugin_cache_set plugin_call plugin_data plugin_data_copy_to_space
         plugin_data_open_web plugin_live_hold plugin_live_holds plugin_live_join
         plugin_live_leave plugin_live_member_states plugin_live_send plugin_live_set_my_state
@@ -138,8 +138,8 @@ _JS_API: dict[str, str] = {
         plugin_scope_sync plugin_scope_unlock plugin_team_overview plugin_translate_batch_poll
         plugin_translate_batch_start plugin_tts_poll plugin_tts_start plugin_tts_voices_poll
         plugin_tts_voices_start prompt_save_skill_pack_export reload_uefn_plugin
-        remote_set_enabled remote_sign_out_all remote_status reset_skill reset_skill_pack
-        save_first_run_progress save_mcp_server_connection save_pack_manifest save_skill save_skill_file
+        remote_set_enabled remote_sign_out_all remote_status reset_skill_pack
+        save_first_run_progress save_mcp_server_connection save_pack_manifest
         save_skill_layout save_skill_node save_subskill set_chat_mcp_plugins set_mcp_config
         set_mcp_plugin_enabled set_mcp_server_enabled set_skill_pack_enabled
         set_uefn_plugin_allowed_models set_uefn_plugin_enabled set_uefn_plugin_secret

@@ -668,15 +668,6 @@ class PanelApiStoreMixin:
             "error": error,
         }
 
-    def save_skill(self, text: str) -> dict[str, Any]:
-        return self.save_subskill("uefn", "core", text)
-
-    def save_skill_file(self, filename: str, text: str) -> dict[str, Any]:
-        parts = filename.replace("\\", "/").split("/")
-        if len(parts) >= 2:
-            return self.save_subskill(parts[0], _pa.Path(parts[-1]).stem, text)
-        return self.save_subskill("uefn", "core", text)
-
     def save_subskill(self, pack_id: str, subskill_id: str, text: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
@@ -692,9 +683,6 @@ class PanelApiStoreMixin:
             "filename": f"{pack_id}/{path.name}",
             "logs": logs,
         }
-
-    def create_skill(self, filename: str, text: str = "") -> dict[str, Any]:
-        return self.create_skill_pack(filename, filename.replace("_", " ").title(), text)
 
     def create_skill_pack(self, pack_id: str, label: str, description: str = "") -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
@@ -1585,9 +1573,6 @@ class PanelApiStoreMixin:
 
         return draft_subskill(pack_id, label, description, model, provider)
 
-    def delete_skill(self, filename: str) -> dict[str, Any]:
-        return self.delete_skill_pack(_pa.Path(filename).stem)
-
     def delete_skill_pack(self, pack_id: str) -> dict[str, Any]:
         from frontend.skill_deploy import sync_skill_all_ides
         from backend.agent.prompt import clear_skill_cache
@@ -1822,27 +1807,12 @@ class PanelApiStoreMixin:
         logs = sync_skill_all_ides(_pa.PanelSettings.load().antigravity_config_path)
         return {"ok": bool(dest), "path": str(dest) if dest else "", "logs": logs}
 
-    def open_skills_folder(self) -> None:
-        self.open_skill_packs_folder()
-
-    def open_skill_packs_folder(self) -> None:
-        from backend.skills.discovery import appdata_skill_packs_dir
-        from backend.skills.seeding import seed_skill_packs
-
-        seed_skill_packs()
-        d = appdata_skill_packs_dir()
-        d.mkdir(parents=True, exist_ok=True)
-        _pa.os.startfile(str(d))  # type: ignore[attr-defined]
-
     def open_skill_pack_folder(self, pack_id: str) -> None:
         from backend.skills.discovery import appdata_skill_packs_dir
 
         d = appdata_skill_packs_dir() / pack_id
         d.mkdir(parents=True, exist_ok=True)
         _pa.os.startfile(str(d))  # type: ignore[attr-defined]
-
-    def reset_skill(self) -> dict[str, Any]:
-        return self.reset_skill_pack("uefn")
 
     def get_mcp_tools_catalog(self) -> dict[str, Any]:
         from frontend.ui_web.mcp_catalog import build_mcp_catalog
