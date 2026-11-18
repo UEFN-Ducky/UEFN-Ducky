@@ -486,6 +486,15 @@ unsafe extern "system" fn main_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         // counted as app_unclean_exit (Nov 2026: a quarter of each day's installs). Same
         // steps as `UiHost::stop_backend`: ask the backend to quit and wait for it.
         WM_ENDSESSION if wp.0 != 0 => {
+            // Say so in boot.json first: Windows may end the process before the backend
+            // quits, and the next start then reads a sign-out, not a crash.
+            with(|u| {
+                u.record.finish(report::Exit::Ok, "");
+                u.record.exit_reason = Some("endsession");
+                if let Some(path) = report::boot_json_path() {
+                    let _ = report::write(&path, &u.record);
+                }
+            });
             let (tx, thread) = with(|u| (u.to_sup.take(), u.sup_thread.take())).unwrap_or((None, None));
             if let Some(tx) = tx {
                 let _ = tx.send(super::ToSup::Quit);

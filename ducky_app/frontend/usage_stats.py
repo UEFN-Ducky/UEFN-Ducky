@@ -674,6 +674,15 @@ def _last_seen() -> dict[str, Any]:
     return out
 
 
+def _previous_end() -> str:
+    try:
+        from frontend import boot_report
+
+        return boot_report.previous_end
+    except Exception:
+        return ""
+
+
 def app_opened(boot_total_ms: float | None = None) -> None:
     """The panel is up: app.open, an update if the version changed, then the thread."""
     global _opened_at, _boot_total_ms
@@ -686,7 +695,9 @@ def app_opened(boot_total_ms: float | None = None) -> None:
     try:
         _opened_at = time.monotonic()
         _boot_total_ms = boot_total_ms
-        unclean = _meta_get(META_RUNNING) == "1"
+        # The crash form's rules: a run a PC restart, a sign-out or the launcher's own exit
+        # ended is no crash (boot_report.begin read why the last launch ended).
+        unclean = _meta_get(META_RUNNING) == "1" and not _previous_end()
         seen = _last_seen() if unclean else {}
         _meta_set(META_RUNNING, "1")
         _note_alive()

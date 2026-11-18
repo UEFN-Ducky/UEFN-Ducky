@@ -193,6 +193,29 @@ def test_restart_check_compares_against_windows_boot_time() -> None:
     assert not boot_report._pc_restarted_since(time.time())
 
 
+def test_a_fast_startup_boot_counts_as_a_restart(monkeypatch) -> None:
+    import time
+
+    # The tick count still says Windows booted long ago; the System log says it started 5 s ago.
+    monkeypatch.setattr(boot_report, "_last_boot_event", lambda: time.time() - 5)
+    assert boot_report._pc_restarted_since(time.time() - 60)
+    monkeypatch.setattr(boot_report, "_last_boot_event", lambda: 0.0)
+    assert not boot_report._pc_restarted_since(time.time())
+
+
+def test_ended_on_purpose_names_restart_sign_out_and_launcher_exit() -> None:
+    run = {"state": "ok", "pid": 7, "started": 1.0}
+    launcher = {"exit_code": 0, "backend_pid": 7, "started": 2.0}
+    assert boot_report.ended_on_purpose(run, restarted=True, dumps=[]) == "restart"
+    assert boot_report.ended_on_purpose(dict(run, launcher=launcher), restarted=False, dumps=[]) == "launcher"
+    signout = dict(run, launcher=dict(launcher, exit_reason="endsession"))
+    assert boot_report.ended_on_purpose(signout, restarted=False, dumps=[]) == "signout"
+    assert boot_report.ended_on_purpose(run, restarted=False, dumps=[]) == ""  # killed
+    # A crash dump keeps a restart (or a launcher exit) a crash.
+    assert boot_report.ended_on_purpose(run, restarted=True, dumps=[{"name": "a.dmp"}]) == ""
+    assert boot_report.build_report(signout, "", restarted=False) is None
+
+
 def test_dont_send_sends_nothing_and_keeps_the_report_for_support(crash) -> None:
     crash["answer"] = False
     _crashed_launch("create_window")

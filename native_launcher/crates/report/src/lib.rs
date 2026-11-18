@@ -95,6 +95,8 @@ pub struct LauncherRecord {
     pub stages: Vec<(String, f64)>,
     pub backend_pid: Option<u32>,
     pub exit: Option<i32>,
+    /// Written instead of the exit code's own word (`endsession`: Windows ended the session).
+    pub exit_reason: Option<&'static str>,
     pub error: String,
 }
 
@@ -108,6 +110,7 @@ impl LauncherRecord {
             stages: vec![("launch".to_string(), 0.0)],
             backend_pid: None,
             exit: None,
+            exit_reason: None,
             error: String::new(),
         }
     }
@@ -144,7 +147,7 @@ impl LauncherRecord {
         }
         if let Some(code) = self.exit {
             obj.insert("exit_code".into(), json!(code));
-            let reason = Exit::from_code(code).map(Exit::reason).unwrap_or("unknown");
+            let reason = self.exit_reason.or_else(|| Exit::from_code(code).map(Exit::reason)).unwrap_or("unknown");
             obj.insert("exit_reason".into(), json!(reason));
         }
         if !self.error.is_empty() {
@@ -254,6 +257,15 @@ mod tests {
             assert_eq!(v["exit_reason"], exit.reason());
             assert!(v.get("error").is_none());
         }
+    }
+
+    #[test]
+    fn end_session_is_exit_0_endsession() {
+        let mut rec = LauncherRecord::new("1.2.506");
+        rec.finish(Exit::Ok, "");
+        rec.exit_reason = Some("endsession");
+        let v = rec.to_json();
+        assert_eq!((v["exit_code"].clone(), v["exit_reason"].clone()), (json!(0), json!("endsession")));
     }
 
     #[test]

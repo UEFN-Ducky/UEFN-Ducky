@@ -848,6 +848,32 @@ def test_a_start_after_a_run_that_never_closed_is_one_unclean_exit(monkeypatch) 
     assert row["stage"] == "other" and row["uptime"] == "more"
 
 
+def test_unclean_exit_skips_a_restart_a_sign_out_and_the_launchers_exit(monkeypatch) -> None:
+    from frontend import boot_report, error_log
+
+    meta: dict[str, str] = {}
+    monkeypatch.setattr(us, "_meta_get", meta.get)
+    monkeypatch.setattr(us, "_meta_set", meta.__setitem__)
+    monkeypatch.setattr(us, "start", lambda: None)
+    monkeypatch.setattr(error_log, "install_crash_hooks", lambda: None)
+    monkeypatch.setattr(us, "_memory_now", lambda: {})
+    us.send_override = lambda body: True
+
+    def unclean() -> list[dict[str, Any]]:
+        rows, _ = us._take(100)
+        us._mem_queue.clear()
+        return [r for r in rows if r["name"] == "error.code" and r["props"]["code"] == "app_unclean_exit"]
+
+    us.app_opened()
+    for end in ("restart", "signout", "launcher"):
+        monkeypatch.setattr(boot_report, "previous_end", end)
+        us.app_opened()  # the run before never closed, but it ended on purpose
+        assert unclean() == [], end
+    monkeypatch.setattr(boot_report, "previous_end", "")
+    us.app_opened()  # killed
+    assert len(unclean()) == 1
+
+
 def test_an_unclean_exit_carries_the_agents_memory_bucket_when_the_heartbeat_had_it(monkeypatch) -> None:
     from frontend import boot_report, error_log
 

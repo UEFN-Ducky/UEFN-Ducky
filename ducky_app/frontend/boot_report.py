@@ -62,6 +62,9 @@ _state_lock = threading.Lock()  # stage(), mark() and the heartbeat thread share
 _native_file: Any = None
 # begin(ask=False): the kept report the pop-up asks about once ask_pending() runs.
 _pending: dict[str, Any] = {}
+# begin(): ended_on_purpose() of the previous launch ('' when it may have crashed). usage_stats
+# reads it so app_unclean_exit follows the crash form's rules.
+previous_end = ""
 HEARTBEAT_S = 30.0
 # The crash pop-up closes itself (report kept, not sent) after this long with no answer. A
 # start that asks before its window waited for the answer for good: after an update with
@@ -303,7 +306,25 @@ def _pc_restarted_since(when: float) -> bool:
         booted = time.time() - kernel32.GetTickCount64() / 1000.0
     except Exception:
         return False
-    return booted > when
+    # Fast Startup resumes the kernel, so its tick count keeps running: the System log says it.
+    return booted > when or _last_boot_event() > when
+
+
+def _last_boot_event() -> float:
+    """When the System log last said Windows started (EventLog 6005, Kernel-Boot 27, which a Fast
+    Startup boot writes too), as epoch seconds; 0 when it can't be read."""
+    import subprocess
+    from datetime import datetime, timezone
+
+    query = ("*[System[(Provider[@Name='EventLog'] and EventID=6005) or "
+             "(Provider[@Name='Microsoft-Windows-Kernel-Boot'] and EventID=27)]]")
+    try:
+        out = subprocess.run(["wevtutil", "qe", "System", f"/q:{query}", "/rd:true", "/c:1", "/f:xml"],
+                             capture_output=True, text=True, timeout=5, creationflags=0x08000000).stdout
+        hit = re.search(r"SystemTime=['\"](\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", out or "")
+        return datetime.strptime(hit.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() if hit else 0.0
+    except Exception:
+        return 0.0
 
 
 def _webview_dumps_dir() -> Path:
@@ -445,6 +466,24 @@ def _launcher_exited_clean(previous: dict[str, Any]) -> bool:
     return backend is None or backend == previous.get("pid")
 
 
+def ended_on_purpose(previous: dict[str, Any], *, restarted: bool | None = None,
+                     dumps: list[dict[str, Any]] | None = None) -> str:
+    """Why a launch left at ``ok`` ended without being a crash: 'restart' (Windows started after
+    it), 'signout' (the launcher saw the session end), 'launcher' (the launcher's window closed
+    on purpose), or '' when it may have crashed. A crash dump since it started keeps it a crash.
+    *restarted* and *dumps* are read here when the caller hasn't already."""
+    if not previous:
+        return ""
+    started = float(previous.get("started") or 0.0)
+    if (crash_dumps(started) if dumps is None and started else dumps):
+        return ""
+    if _pc_restarted_since(started) if restarted is None else restarted:
+        return "restart"
+    if _launcher_exited_clean(previous):
+        return "signout" if previous["launcher"].get("exit_reason") == "endsession" else "launcher"
+    return ""
+
+
 def build_report(
     previous: dict[str, Any],
     native: str,
@@ -464,10 +503,8 @@ def build_report(
     native = (native or "").strip()
     if not previous or (state in _CLEAN_ENDS and not native):
         return None
-    if state == "ok" and not native and restarted:
-        return None
-    if state == "ok" and not native and not dumps and _launcher_exited_clean(previous):
-        return None  # tray Exit under Ducky-Launcher.exe: the launcher said exit 0
+    if state == "ok" and not native and ended_on_purpose(previous, restarted=restarted, dumps=dumps):
+        return None  # a PC restart, a sign-out, or the tray Exit under Ducky-Launcher.exe
     if state == "stuck" and previous.get("reported") and not native:
         return None  # the pop-up already asked while that launch was open
     started = float(previous.get("started") or 0.0)
@@ -785,7 +822,7 @@ def begin(version: str, *, ask: bool = True) -> None:
     keeps it for Settings → Support. ``ask=False`` (the launcher's backend) only keeps it;
     ``ask_pending`` shows the pop-up after hello. Asked before hello, the launcher saw a
     backend silent for 20 s, ended it and the report with it, and opened the Python window."""
-    global _native_file
+    global _native_file, previous_end
     try:
         _dir().mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -816,6 +853,7 @@ def begin(version: str, *, ask: bool = True) -> None:
             ends.append(_native_path().stat().st_mtime)
         except OSError:
             pass
+    previous_end = ended_on_purpose(previous, restarted=restarted, dumps=dumps) if previous else ""
     body = build_report(previous, native, restarted=restarted, dumps=dumps, ended=max(ends) if ends else None) if previous else None
     prune_dumps()
     if body:
