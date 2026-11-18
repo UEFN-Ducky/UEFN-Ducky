@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import threading
 import time
 from multiprocessing.connection import Client
@@ -169,8 +168,11 @@ class Supervisor:
         self._restarted: dict[str, float] = {}
         self._on_host_closed = on_host_closed
         self._argv_for = argv_for
-        base = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir())
-        self._log_dir = log_dir or base / "UEFN-Ducky" / "logs" / "agent_hosts"
+        if log_dir is None:
+            from frontend.app_paths import resolve_app_data_dir
+
+            log_dir = resolve_app_data_dir() / "logs" / "agent_hosts"
+        self._log_dir = log_dir
         self.per_host = per_host
         self.max_hosts = max_hosts
         self.idle_exit_s = idle_exit_s

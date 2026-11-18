@@ -105,6 +105,17 @@ def test_set_visible_tells_each_host_only_its_chats(tmp_path):
     sup._stopped.set()
 
 
+def test_host_logs_go_to_the_shared_app_data_folder(monkeypatch):
+    from frontend.app_paths import resolve_app_data_dir
+
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    sup = supervisor.Supervisor(reap_s=3600)
+    try:
+        assert sup._log_dir == resolve_app_data_dir() / "logs" / "agent_hosts"
+    finally:
+        sup._stopped.set()
+
+
 def test_sixteen_chats_one_visible_stay_under_26_events_a_second():
     tag = f"t-{uuid.uuid4().hex[:8]}"
     key = os.urandom(16)
