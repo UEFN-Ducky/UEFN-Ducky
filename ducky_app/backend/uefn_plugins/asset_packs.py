@@ -280,14 +280,6 @@ def ensure_packs(
     return {"ok": not errors, "packs": status(plugin_id, manifest), "error": "; ".join(errors)}
 
 
-def remove_packs(plugin_id: str) -> None:
-    """Delete every pack of a plugin (its uninstall cleanup)."""
-    shutil.rmtree(_plugin_root(plugin_id), ignore_errors=True)
-    with _PROGRESS_LOCK:
-        for key in [k for k in _PROGRESS if k[0] == plugin_id]:
-            del _PROGRESS[key]
-
-
 def store_url_for(slug: str, version: str) -> Callable[[dict[str, Any]], str]:
     """A ``url_for`` that asks the Store (``asset-packs``) for a fresh link each time.
     The Store's sha256 must match the manifest's, which is what the bytes are checked against."""
