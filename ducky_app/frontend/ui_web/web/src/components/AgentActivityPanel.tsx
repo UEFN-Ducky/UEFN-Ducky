@@ -81,8 +81,15 @@ export const AgentActivityPanel = memo(function AgentActivityPanel({
   const signature = `${lines.length}:${last?.status ?? ""}:${last?.text.length ?? 0}:${statusText}`;
   const [changedAt, setChangedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => { setChangedAt(Date.now()); }, [signature]);
   const live = !showIdleTimer && !isWaitingOnLinked;
+  // `live` too: between turns this panel stays up as "Done" with the same (empty) lines, so a
+  // new turn kept counting from the end of the one before. Nov 18 2026: "Thinking about the
+  // next step… 5m 50s quiet" three seconds after the person sent a message.
+  useEffect(() => {
+    const at = Date.now();
+    setChangedAt(at);
+    setNow(at);
+  }, [signature, live]);
   useEffect(() => {
     if (!live) return;
     const timer = window.setInterval(() => setNow(Date.now()), 5000);

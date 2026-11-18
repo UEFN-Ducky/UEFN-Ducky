@@ -1248,3 +1248,71 @@ def test_a_failed_call_says_whether_it_exited_was_refused_or_broke(monkeypatch) 
     call("spawn_actor", "Traceback (most recent call last)")
     assert [(r["tool"], r["why"]) for r in rows] == [
         ("ducky_terminal_run", "exit_code"), ("ducky_plan_update_node", "refused"), ("spawn_actor", "error")]
+
+
+def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_agents(monkeypatch) -> None:
+    """Nov 18 2026: one chat's road_network_pipeline (45-78 s, called through ducky_call_tool)
+    ran on the server's one loop. Two file edits of another chat waited 54 s for it, and that
+    chat's next turn started only when the call returned."""
+    import asyncio
+    import contextvars
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    import backend.agent.tools as tools
+    from backend.uefn_plugins.plugin_host import tool_registry
+
+    who: contextvars.ContextVar[str] = contextvars.ContextVar("who", default="")
+    seen: list[tuple[str, str, str]] = []
+
+    class Mcp:
+        _tool_manager = SimpleNamespace(_tools={
+            name: SimpleNamespace(is_async=False) for name in ("city_a", "city_b", "other_c", "core_d")})
+
+        async def call_tool(self, name: str, args: dict):
+            seen.append((name, who.get(), threading.current_thread().name))
+            time.sleep(0.5)  # FastMCP calls a sync tool's function right here, start to finish
+            return name
+
+    owners = {"city_a": "city", "city_b": "city", "other_c": "other"}
+    monkeypatch.setattr(tool_registry, "plugin_for_tool", lambda name: owners.get(name, "ducky"))
+    monkeypatch.setattr(shared_mcp, "_shared_serving", True)
+    mcp = Mcp()
+
+    async def four_calls() -> tuple[list[str], float, float]:
+        loop = asyncio.get_running_loop()
+        who.set("chat-1")
+        gaps: list[float] = []
+        over = asyncio.Event()
+
+        async def another_agent() -> None:  # anything else that needs this loop
+            last = loop.time()
+            while not over.is_set():
+                await asyncio.sleep(0.02)
+                gaps.append(loop.time() - last)
+                last = loop.time()
+
+        beat = asyncio.ensure_future(another_agent())
+        began = loop.time()
+        results = await asyncio.gather(*(tools._call_registered_tool(mcp, name, {}) for name in owners.keys() | {"core_d"}))
+        took = loop.time() - began
+        over.set()
+        await beat
+        return sorted(results), took, max(gaps)
+
+    results, took, worst_gap = asyncio.run(four_calls())
+    assert results == ["city_a", "city_b", "core_d", "other_c"]
+    assert worst_gap < 0.35, worst_gap  # the loop kept running; it stood still 0.5 s per call before
+    # One plugin's calls still run one after another (1.0 s for the two); the rest run beside them.
+    assert 0.9 <= took < 1.8, took
+    thread_of = {name: thread for name, _who, thread in seen}
+    assert thread_of["city_a"] == thread_of["city_b"] != thread_of["other_c"]
+    assert len(set(thread_of.values())) == 3
+    assert {agent for _name, agent, _thread in seen} == {"chat-1"}  # each call still runs as its agent
+
+    # A process that serves one agent keeps calling the tool where it always did.
+    monkeypatch.setattr(shared_mcp, "_shared_serving", False)
+    seen.clear()
+    assert asyncio.run(tools._call_registered_tool(mcp, "city_a", {})) == "city_a"
+    assert seen[0][2] == threading.current_thread().name

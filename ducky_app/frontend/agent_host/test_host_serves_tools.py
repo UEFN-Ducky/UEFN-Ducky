@@ -112,3 +112,67 @@ def test_the_hosts_tool_server_never_idles_out_and_stops_with_the_host(host, mon
     tool_server.stop()
     assert not shared_mcp.serving()
     assert not (host / "shared_mcp-h4.json").exists()
+
+
+def test_a_long_tool_called_through_ducky_call_tool_does_not_hold_up_another_agent(host, monkeypatch, request) -> None:
+    """Nov 18 2026: one chat's road_network_pipeline calls (45-78 s each, made through
+    ducky_call_tool) ran on the host's one loop. Another chat's two file edits took 54 s, until
+    the call returned, and its next turn started only then."""
+    import threading
+    import time
+
+    import backend.agent.tools as tools
+    from backend.uefn_plugins.plugin_host.testing import patch_host
+
+    request.getfixturevalue("unrestricted_tools")
+    patch_host(monkeypatch, "is_plugin_host_only_tool", lambda _n: False)
+
+    class SlowMcp(HostMcp):
+        def __init__(self) -> None:
+            super().__init__()
+            registered = self._tool_manager._tools
+            registered["ducky_call_tool"] = SimpleNamespace(
+                name="ducky_call_tool", description="", inputSchema={"type": "object"}, is_async=True)
+            registered["workspace_read_file"] = SimpleNamespace(
+                name="workspace_read_file", description="", inputSchema={"type": "object"}, is_async=False)
+
+        async def call_tool(self, name, arguments):
+            if name == "ducky_call_tool":  # as the real one: the tool layer runs the inner tool
+                result = await tools.execute_tool(str(arguments.get("name")), {})
+                return [{"type": "text", "text": json.dumps({"ok": result.ok, "error": result.error})}]
+            if name == "workspace_read_file":
+                time.sleep(1.5)  # a sync tool's function: FastMCP calls it right where it is awaited
+                return [SimpleNamespace(text='{"ok": true}')]
+            return await super().call_tool(name, arguments)
+
+    mcp = SlowMcp()
+    monkeypatch.setattr(tool_server, "_server", lambda: mcp)
+    monkeypatch.setattr(tools, "_ensure_mcp", lambda: mcp)
+    assert shared_mcp.start_daemon_from_app()["ok"] is True
+    builder, other = _agent("city-builder"), _agent("another-chat")
+    long_answer: list[dict] = []
+
+    def _long_call() -> None:
+        shared_mcp.write_frame(builder, {"op": "mcp", "id": 1, "method": "tools/call", "params": {
+            "name": "ducky_call_tool", "arguments": {"name": "workspace_read_file", "arguments": {}}}})
+        while True:
+            frame = shared_mcp.read_frame(builder)
+            if frame.get("id") == 1:
+                long_answer.append(frame)
+                return
+
+    caller = threading.Thread(target=_long_call, daemon=True)
+    try:
+        caller.start()
+        time.sleep(0.3)  # the long call is running now
+        began = time.monotonic()
+        quick = json.loads(_call(other, "whoami", 2)["result"]["content"][0]["text"])
+        waited = time.monotonic() - began
+        assert quick["conv_id"] == "another-chat"
+        assert waited < 0.8, waited  # it waited the long call out (1.2 s more) before
+        assert not long_answer  # which is still running
+        caller.join(timeout=10)
+        assert json.loads(long_answer[0]["result"]["content"][0]["text"]) == {"ok": True, "error": ""}
+    finally:
+        for sock in (builder, other):
+            shared_mcp.close_handle(sock)
