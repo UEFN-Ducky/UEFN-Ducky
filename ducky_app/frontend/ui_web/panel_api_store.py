@@ -166,16 +166,6 @@ class PanelApiStoreMixin:
         except Exception:
             return get_status()
 
-    def duckyos_agent_caps(self, include_catalog: bool = True) -> dict[str, Any]:
-        from frontend.duckyos_account import agent_caps_status
-
-        return agent_caps_status(include_catalog=bool(include_catalog))
-
-    def duckyos_agent_caps_set(self, denied: Any = None, settings: Any = None) -> dict[str, Any]:
-        from frontend.duckyos_account import set_agent_caps
-
-        return set_agent_caps(denied, settings)
-
     def duckyos_login(self, base_url: str = "", email: str = "", password: str = "") -> dict[str, Any]:
         """Start browser-based login (email/password args ignored — kept for API compat)."""
         from frontend.duckyos_account import DuckyOSAccountError, start_browser_login
@@ -192,16 +182,6 @@ class PanelApiStoreMixin:
         from frontend.duckyos_account import cancel_browser_login
 
         return cancel_browser_login()
-
-    def duckyos_logout(self) -> dict[str, Any]:
-        from frontend.duckyos_account import DuckyOSAccountError, logout
-
-        try:
-            return logout()
-        except DuckyOSAccountError as exc:
-            return {"ok": False, "error": exc.message, "code": exc.code, "logged_in": False}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc), "code": "error", "logged_in": False}
 
     def duckyos_list_pcs(self) -> dict[str, Any]:
         from frontend.duckyos_account import DuckyOSAccountError, list_account_pcs
@@ -313,16 +293,6 @@ class PanelApiStoreMixin:
             return {"ok": False, "error": exc.message, "code": exc.code, "logged_in": False}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "code": "error", "logged_in": False}
-
-    def duckyos_open_admin(self) -> None:
-        import webbrowser
-
-        from frontend.duckyos_account import get_status
-
-        status = get_status()
-        base = str(status.get("base_url") or "").rstrip("/")
-        if base:
-            webbrowser.open(f"{base}/admin")
 
     def duckyos_open_site(self, path: str = "/") -> dict[str, Any]:
         """Open a path of the signed-in account's website in the browser."""
@@ -1498,14 +1468,6 @@ class PanelApiStoreMixin:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "prefs": {}}
 
-    def plugin_prefs_set_all(self, prefs: dict | None = None) -> dict[str, Any]:
-        from frontend.ui_web.plugin_host_api import prefs_all_set
-
-        try:
-            return prefs_all_set(dict(prefs or {}))
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
     def plugin_prefs_set(self, plugin_id: str, prefs: dict | None = None) -> dict[str, Any]:
         from frontend.ui_web.plugin_host_api import prefs_plugin_set
 
@@ -2083,49 +2045,6 @@ class PanelApiStoreMixin:
             "plugins": builtin_group_rows() + list_mcp_plugins() + uefn_rows,
             "plugins_loading": not ready,
         }
-
-    def set_chat_mcp_plugins(self, conv_id: str, plugin_ids: list[str] | None) -> dict[str, Any]:
-        """Set this chat's MCP plugin override; null resets to global defaults.
-
-        The list may mix builtin group ids, UEFN app-plugin ids, and MCP plugin
-        ids — split into conv.builtin_toolsets / uefn_plugins / mcp_plugins.
-        """
-        from backend.agent.builtin_toolsets import is_builtin_group
-        from backend.mcp_plugins.store import load_plugin_manifest as load_mcp_manifest
-        from backend.mcp_plugins.store import normalize_plugin_id
-        from backend.uefn_plugins.plugin_host.tool_registry import is_uefn_agent_tool_plugin
-
-        conv = _pa.load_conversation(conv_id)
-        if not conv:
-            return {"ok": False, "error": "Conversation not found"}
-        if plugin_ids is None:
-            conv.mcp_plugins = None
-            conv.builtin_toolsets = None
-            conv.uefn_plugins = None
-            _pa.save_conversation(conv, touch_updated=False)
-            return {"ok": True, "override": None}
-        builtin_sel: list[str] = []
-        plugin_sel: list[str] = []
-        uefn_sel: list[str] = []
-        for item in plugin_ids:
-            pid = normalize_plugin_id(str(item))
-            if is_builtin_group(pid):
-                if pid not in builtin_sel:
-                    builtin_sel.append(pid)
-                continue
-            if is_uefn_agent_tool_plugin(pid):
-                if pid not in uefn_sel:
-                    uefn_sel.append(pid)
-                continue
-            if load_mcp_manifest(pid) is None:
-                return {"ok": False, "error": f"MCP plugin not found: {pid}"}
-            if pid not in plugin_sel:
-                plugin_sel.append(pid)
-        conv.builtin_toolsets = builtin_sel
-        conv.mcp_plugins = plugin_sel
-        conv.uefn_plugins = uefn_sel
-        _pa.save_conversation(conv, touch_updated=False)
-        return {"ok": True, "override": builtin_sel + plugin_sel + uefn_sel}
 
     def open_mcp_plugins_folder(self) -> None:
         """Reveal AppData folder that holds mcp.json (legacy name)."""

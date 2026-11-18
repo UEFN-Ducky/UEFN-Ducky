@@ -315,11 +315,6 @@ class PanelApiWindowMixin:
 
         rtc.bridge().event(str(peer or ""), str(kind or ""), payload)
 
-    def direct_rtc_report(self, payload: object = None) -> None:
-        from frontend.remote_direct import note_report
-
-        note_report(payload)
-
     def window_input(self, hwnd: object, event: object) -> None:
         from frontend.window_view import handle_stream_message
 
@@ -1124,11 +1119,6 @@ class PanelApiWindowMixin:
         from frontend.ui_web.terminal import get_terminal_manager
 
         return {"sessions": get_terminal_manager().list_sessions()}
-
-    def terminal_write(self, session_id: str, data: str) -> dict[str, Any]:
-        from frontend.ui_web.terminal import get_terminal_manager
-
-        return get_terminal_manager().write(session_id.strip(), data)
 
     def terminal_resize(self, session_id: str, cols: int, rows: int) -> dict[str, Any]:
         from frontend.ui_web.terminal import get_terminal_manager

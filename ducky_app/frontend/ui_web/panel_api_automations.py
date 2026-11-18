@@ -96,14 +96,6 @@ class PanelApiAutomationsMixin:
         except Exception as exc:
             return _refused(exc)
 
-    def workflow_open_web(self, space_id: str) -> dict[str, Any]:
-        from backend.automations import shared
-
-        try:
-            return shared.open_web(str(space_id or ""))
-        except Exception as exc:
-            return _refused(exc)
-
     def import_local_workflows(self) -> dict[str, Any]:
         from backend.automations import shared
 
@@ -549,14 +541,3 @@ class PanelApiAutomationsMixin:
         from frontend.ui_web.generated_images import list_generated_images
 
         return {"ok": True, "images": list_generated_images()}
-
-    def get_generated_image_attachment(self, name: str) -> dict[str, Any]:
-        from frontend.ui_web.generated_images import attachment_from_path, resolve_generated_image_path
-
-        try:
-            att = attachment_from_path(resolve_generated_image_path(name))
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not att:
-            return {"ok": False, "error": "not an image"}
-        return {"ok": True, "attachment": att}

@@ -375,11 +375,6 @@ class PanelApiProjectMixin:
 
         return changesets_api.revert_run(run_id, force=force, program=program)
 
-    def export_changeset(self, run_id: str) -> dict[str, Any]:
-        from frontend.ui_web import changesets_api
-
-        return changesets_api.export_run(run_id)
-
     def archive_changesets(
         self, conv_id: str = "", group_id: str = "", run_id: str = "", archived: bool = True
     ) -> dict[str, int]:
@@ -716,14 +711,6 @@ class PanelApiProjectMixin:
             _pa.record_error("deploy", str(e))
             return [f"Deploy failed: {e}"]
 
-    def deploy_all_projects(self) -> list[str]:
-        from frontend.ui_web.project_deploy import deploy_all_recent_projects
-
-        lines = deploy_all_recent_projects(log=_pa._log)
-        if not lines:
-            return ["No projects yet. Open a project from the header, then return here."]
-        return lines
-
     def apply_ide(self, kind: str) -> str:
         # Host writes MCP+skills for every IDE (like pre-gateway peel). Gateway
         # plugins still register hookups for Settings UI grouping.
@@ -762,23 +749,3 @@ class PanelApiProjectMixin:
         from frontend.ide_apply import verify_all_ide_bridges
 
         return verify_all_ide_bridges()
-
-    def apply_all_ides(self) -> list[str]:
-        """Apply MCP+skills for every host IDE (Cursor / Claude / Antigravity / Codex)."""
-        from frontend.ide_apply import ALL_IDES
-
-        out: list[str] = []
-        for ide in ALL_IDES:
-            kind = ide.value
-            try:
-                msg = self.apply_ide(kind)
-                out.append(f"{kind}: {msg}")
-            except Exception as e:
-                out.append(f"{kind}: error: {e}")
-        try:
-            for ln in _pa.sync_skill_on_mcp_update(_pa.PanelSettings.load().antigravity_config_path):
-                _pa._log(ln)
-                out.append(ln)
-        except Exception as e:
-            out.append(f"skill sync: error: {e}")
-        return out

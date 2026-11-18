@@ -85,7 +85,7 @@ _JS_API: dict[str, str] = {
         browser_pane_state browser_runtime_info browser_site_security cache_font cancel_update
         capture_list_shield check_auto_update_now claim_tab close_all_focus_windows
         close_focus_window close_this_window close_uefn crash_report_delete crash_report_send
-        crash_reports direct_rtc_answer direct_rtc_connect direct_rtc_report
+        crash_reports direct_rtc_answer direct_rtc_connect
         dock_focus_window_beside_main exit_all focus_tab get_app_patch_notes
         get_app_update_status get_auto_update_status get_editor_workspace get_header_visibility
         get_install_info get_sidebar_only_saved_bounds get_tab_owner get_update_progress
@@ -104,7 +104,7 @@ _JS_API: dict[str, str] = {
         store_table_preview terminal_approve_command terminal_busy terminal_busy_many
         terminal_hold terminal_kill terminal_let_go terminal_list terminal_pending_commands
         terminal_read_output terminal_reject_command terminal_request_command terminal_resize
-        terminal_spawn terminal_write toggle_maximize uses_native_window_chrome window_box
+        terminal_spawn toggle_maximize uses_native_window_chrome window_box
         window_input window_spotlight_replay window_text_focus
     """,
     "PanelApiStoreMixin": """
@@ -112,9 +112,9 @@ _JS_API: dict[str, str] = {
         create_skill_node create_skill_pack create_subskill delete_mcp_plugin delete_mcp_server
         delete_skill_pack delete_subskill draft_skill_pack draft_subskill
         ducky_link_call ducky_link_list ducky_link_open ducky_link_rtc_connect ducky_sync_copy
-        ducky_sync_forget ducky_sync_list ducky_sync_now duckyos_agent_caps
-        duckyos_agent_caps_set duckyos_cancel_login duckyos_get_status duckyos_list_pcs
-        duckyos_login duckyos_logout duckyos_open_admin duckyos_open_site duckyos_revoke_pc
+        ducky_sync_forget ducky_sync_list ducky_sync_now
+        duckyos_cancel_login duckyos_get_status duckyos_list_pcs
+        duckyos_login duckyos_open_site duckyos_revoke_pc
         duckyos_store_catalog duckyos_store_download duckyos_store_versions
         ensure_starter_llm_gateways export_skill_pack get_chat_mcp_plugins get_mcp_config
         get_mcp_diagnostics get_mcp_server_connection get_mcp_server_tools
@@ -130,7 +130,7 @@ _JS_API: dict[str, str] = {
         plugin_live_leave plugin_live_member_states plugin_live_send plugin_live_set_my_state
         plugin_live_share plugin_live_shared plugin_live_status plugin_llm_cancel
         plugin_llm_complete plugin_llm_poll plugin_llm_start plugin_panel_error
-        plugin_prefs_get_all plugin_prefs_set plugin_prefs_set_all plugin_scope_activity
+        plugin_prefs_get_all plugin_prefs_set plugin_scope_activity
         plugin_scope_ask plugin_scope_break plugin_scope_choices plugin_scope_drop
         plugin_scope_history plugin_scope_lock plugin_scope_mode plugin_scope_pull
         plugin_scope_push plugin_scope_resolve plugin_scope_restore plugin_scope_retry
@@ -140,7 +140,7 @@ _JS_API: dict[str, str] = {
         plugin_tts_voices_start prompt_save_skill_pack_export reload_uefn_plugin
         remote_set_enabled remote_sign_out_all remote_status reset_skill_pack
         save_first_run_progress save_mcp_server_connection save_pack_manifest
-        save_skill_layout save_skill_node save_subskill set_chat_mcp_plugins set_mcp_config
+        save_skill_layout save_skill_node save_subskill set_mcp_config
         set_mcp_plugin_enabled set_mcp_server_enabled set_skill_pack_enabled
         set_uefn_plugin_allowed_models set_uefn_plugin_enabled set_uefn_plugin_secret
         space_reset_settle starter_llm_onboard_pending starter_setup_status test_mcp_plugin
@@ -174,12 +174,12 @@ _JS_API: dict[str, str] = {
         wait_for_agent_idle
     """,
     "PanelApiProjectMixin": """
-        apply_all_ides apply_ide archive_changesets classify_project_file clear_changesets
+        apply_ide archive_changesets classify_project_file clear_changesets
         compile_verse_project connect_verse_workflow consume_pending_deep_links
         consume_pending_open_files copy_project_entry create_project_file create_project_folder
         create_project_verse_file delete_changeset_entries delete_project_entry
-        delete_recent_project deploy deploy_all_projects disconnect_verse_workflow
-        export_changeset fingerprint_project_dirs get_changeset get_changeset_entry_contents
+        delete_recent_project deploy disconnect_verse_workflow
+        fingerprint_project_dirs get_changeset get_changeset_entry_contents
         get_ide_statuses get_project_info get_urc_status get_verse_lsp_status
         get_verse_workflow_status import_external_entries inspect_project_folder
         is_verse_editor_enabled list_changesets list_file_history list_known_projects
@@ -226,7 +226,7 @@ _JS_API: dict[str, str] = {
         check_workflow_node_code clear_workflow_runs consume_dropped_file_paths copy_workflow
         copy_workflow_folder delete_workflow delete_workflow_template dismiss_workflow_run
         edit_workflow_node_code emit_workflow_trigger export_workflow_folder
-        get_generated_image_attachment get_workflow get_workflow_node_code
+        get_workflow get_workflow_node_code
         get_workflow_tools_catalog get_workflow_version import_local_workflows
         import_workflow_bundle keep_workflow_preview list_generated_images list_media_makers
         list_workflow_nodes
@@ -234,7 +234,7 @@ _JS_API: dict[str, str] = {
         pick_workflow_files pick_workflow_folder queue_file_pick run_workflow run_workflow_node
         save_workflow save_workflow_template set_workflow_editor_prefs set_workflow_folder
         set_workflow_run_here stop_workflow test_workflow_node use_workflow_template
-        workflow_code_api workflow_editor_prefs workflow_open_web workflow_owners
+        workflow_code_api workflow_editor_prefs workflow_owners
         workflow_run_snapshot workflow_sync
     """,
     "PanelApiVideoMixin": """
