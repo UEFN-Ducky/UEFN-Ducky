@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -346,7 +347,6 @@ export interface ChatComposerProps {
   agentRunning: boolean;
   noModelsAvailable: boolean;
   modelsUnavailable: boolean;
-  streamBuffer: string;
   hasContent: boolean;
   canQueue: boolean;
   canSend: boolean;
@@ -357,8 +357,9 @@ export interface ChatComposerProps {
 const TOP_RESIZE_MARGIN = 16;
 const MIN_MESSAGE_AREA_HEIGHT = 100;
 
-/** The chat's input: notices, attachments, the draft with its @ / ~ picker, and the toolbar. */
-export function ChatComposer({
+/** The chat's input: notices, attachments, the draft with its @ / ~ picker, and the toolbar.
+ *  Memoized: stream frames never reach it (voice reads the live text from stores/streamText). */
+export const ChatComposer = memo(function ChatComposer({
   chat,
   allChats,
   visible,
@@ -419,7 +420,6 @@ export function ChatComposer({
   agentRunning,
   noModelsAvailable,
   modelsUnavailable,
-  streamBuffer,
   hasContent,
   canQueue,
   canSend,
@@ -1081,7 +1081,6 @@ export function ChatComposer({
                   setCaret(text.length);
                   requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
                 }}
-                streamText={streamBuffer}
                 agentRunning={agentRunning}
                 duckyVoice={chat.ttsVoice}
                 duckySpeed={chat.ttsSpeed}
@@ -1132,4 +1131,4 @@ export function ChatComposer({
         </div>
         </div>
   );
-}
+});

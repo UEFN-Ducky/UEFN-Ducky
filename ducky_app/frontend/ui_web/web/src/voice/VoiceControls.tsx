@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type MutableRefObject } from "react";
 import { useUiTarget } from "../ui-targets/registry";
+import { useStreamText } from "../stores/streamText";
 
 import { Icons } from "../icons/Icons";
 import { getApi } from "../hooks/usePanelApi";
@@ -60,7 +61,6 @@ export type VoiceControlsProps = {
   onSend: (text?: string) => void;
   /** Dictation finished — the composer can focus and put the caret at the end. */
   onDictationEnd?: (text: string) => void;
-  streamText?: string;
   agentRunning?: boolean;
   /** Per-ducky voice override (tts_voice). */
   duckyVoice?: string;
@@ -138,7 +138,6 @@ export function VoiceControls({
   setInputText,
   onSend,
   onDictationEnd,
-  streamText,
   agentRunning,
   duckyVoice,
   duckySpeed,
@@ -146,6 +145,8 @@ export function VoiceControls({
   onLiveChange,
   abortDictationRef,
 }: VoiceControlsProps) {
+  // The live reply text comes from its store, so stream frames skip the composer.
+  const streamText = useStreamText(chatId);
   const micTargetRef = useUiTarget("chat.composer.mic", {
     kind: "button",
     label: "Microphone",

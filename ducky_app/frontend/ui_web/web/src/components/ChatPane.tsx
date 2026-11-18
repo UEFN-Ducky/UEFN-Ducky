@@ -74,6 +74,7 @@ import { isEnglishLang } from "../views/settings/translationLanguages";
 import type { LiveVoiceUiHandlers } from "../voice/VoiceControls";
 import { noteUserTurn } from "../voice/spokenReplyGate";
 import { useLedgerOpen } from "./ChatChangesDrawer";
+import { setStreamText } from "../stores/streamText";
 import { GroupMemberStrip } from "./GroupMemberStrip";
 import type { GroupMemberDto } from "../types/panel";
 import {
@@ -772,6 +773,19 @@ export function ChatPane({
   // Swarm card buttons (Build / Change / detail) in this pane send here.
   useSwarmCardSend(paneHost, (text) => handleSend(text, { keepDraft: true }));
 
+  // Stable callbacks for the memoized composer: each reads this render's handler.
+  const latestRef = useRef({ handleSend, handleComposerHistoryKey });
+  latestRef.current = { handleSend, handleComposerHistoryKey };
+  const composerOnSend = useCallback((text?: string) => latestRef.current.handleSend(text), []);
+  const composerHistoryKeyCb = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => latestRef.current.handleComposerHistoryKey(event), []);
+  const toggleChanges = useCallback(() => setChangesOpen((v) => !v), [setChangesOpen]);
+  const closeChanges = useCallback(() => setChangesOpen(false), [setChangesOpen]);
+  const closeContextPanel = useCallback(() => setContextPanelOpen(false), []);
+  // Voice speak-along reads the live text here, so stream frames skip the composer.
+  useEffect(() => setStreamText(chat.id, streamBuffer), [chat.id, streamBuffer]);
+  useEffect(() => () => setStreamText(chat.id, ""), [chat.id]);
+
   // Another model, or a new turn running, answers "isn't connected".
   useEffect(() => setNotConnected(null), [selectedModel]);
   useEffect(() => {
@@ -1174,11 +1188,11 @@ export function ChatPane({
           setInputText={setInputText}
           caret={caret}
           setCaret={setCaret}
-          onHistoryKey={handleComposerHistoryKey}
+          onHistoryKey={composerHistoryKeyCb}
           isDragOver={isDragOver}
           changesOpen={changesOpen}
-          onToggleChanges={() => setChangesOpen((v) => !v)}
-          onCloseChanges={() => setChangesOpen(false)}
+          onToggleChanges={toggleChanges}
+          onCloseChanges={closeChanges}
           liveVoice={liveVoice}
           liveVoiceHandlers={liveVoiceHandlers}
           onLiveVoiceChange={handleLiveVoiceChange}
@@ -1216,7 +1230,7 @@ export function ChatPane({
           sessionFiles={sessionFiles}
           contextPanelOpen={contextPanelOpen}
           onToggleContextPanel={handleToggleContextPanel}
-          onCloseContextPanel={() => setContextPanelOpen(false)}
+          onCloseContextPanel={closeContextPanel}
           onContextChanged={handleContextChanged}
           onOpenFile={handleOpenFile}
           onOpenChat={onOpenChat}
@@ -1224,11 +1238,10 @@ export function ChatPane({
           agentRunning={agentRunning}
           noModelsAvailable={noModelsAvailable}
           modelsUnavailable={modelsUnavailable}
-          streamBuffer={streamBuffer}
           hasContent={hasContent}
           canQueue={canQueue}
           canSend={canSend}
-          onSend={(text) => handleSend(text)}
+          onSend={composerOnSend}
           onStop={handleStop}
         />
           </div>
