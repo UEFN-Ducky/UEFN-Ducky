@@ -3896,6 +3896,7 @@
 
 /* Stop stays visible while running; pencil fades in on hover like before. */
 .message-bubble-user-actions .inline-stop-btn {
+  order: 1; /* far right; hover icons appear to its left */
   opacity: 1;
   width: 24px;
   height: 24px;
