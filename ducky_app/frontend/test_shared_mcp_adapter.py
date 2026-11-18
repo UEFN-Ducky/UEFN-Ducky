@@ -52,6 +52,37 @@ def test_a_host_agent_joins_its_own_hosts_daemon(monkeypatch, app_data) -> None:
         thread.join(timeout=6)
 
 
+def test_a_host_agent_joins_its_host_after_an_update_was_downloaded(monkeypatch, app_data) -> None:
+    """Nov 17 2026: 1.2.505 arrived while 1.2.504 ran. Every agent's adapter handed off to the
+    new version, took its own host's tool server for a stale one, waited 33 s and then ran a
+    dedicated bridge: 40-58 s before every turn until Ducky was restarted."""
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "0")
+    monkeypatch.setattr(ad, "_stop_bridge_pid", lambda pid: pytest.fail("tried to stop the host"))
+    monkeypatch.setattr(ad, "_spawn_daemon", lambda args: pytest.fail("the host's tool server was up"))
+    thread = serve(FakeMcp(), monkeypatch, app_data)  # the host that is running: the older version
+    try:
+        state = json.loads((app_data / "shared_mcp-h0.json").read_text(encoding="utf-8"))
+        newer = ".".join(str(n + 1) for n in ad._version_tuple(ad._state_version(state)))
+        monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", newer)  # the adapter, after the hand-off
+        sock = ad.connect(["--port", "4200"], timeout_s=2.0)
+        assert sock is not None
+        assert sock.getpeername()[1] == shared_mcp.wait_ready(1.0)["port"]
+        ad._write_frame(sock, {"op": "bye"})
+        sock.close()
+    finally:
+        shared_mcp.request_stop()
+        thread.join(timeout=6)
+
+
+def test_only_a_daemon_this_exe_can_replace_counts_as_stale(monkeypatch) -> None:
+    older = {"key": {"version": "1.9.9"}}
+    monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "2.0.0")
+    monkeypatch.delenv(shared_mcp.SLOT_ENV, raising=False)
+    assert ad._stale(older)  # the app's daemon: this exe stops it and a newer one starts
+    monkeypatch.setenv(shared_mcp.SLOT_ENV, "0")
+    assert not ad._stale(older)  # a host's own: nothing an agent does replaces it
+
+
 def test_a_host_agent_never_asks_the_app_for_a_daemon(monkeypatch) -> None:
     """The app has no slot: it would start an unslotted daemon nobody in the host uses. Nor does
     the agent start one: its host serves the slot itself (a whole backend per agent before)."""

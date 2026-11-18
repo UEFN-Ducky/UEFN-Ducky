@@ -158,7 +158,17 @@ def _stale(state: dict) -> bool:
 
     A newer one is used as is: an agent still running the old exe killing it would
     cut every newer agent off, and they would kill its replacement in turn.
+
+    An agent host's own tool server (a slot) is never stale. The host serves it inside its
+    own process: an agent can neither stop it nor start another one, and the host that
+    started this agent is that version, so those are this agent's tools. Nov 17 2026: an
+    update downloaded while Ducky was open handed every agent's adapter off to the new
+    version, which refused the running (older) host, waited 33 s for a newer one that could
+    not come and then loaded a whole backend of its own: 40-58 s before every turn, until
+    Ducky was restarted.
     """
+    if _slot():
+        return False
     ours = _our_version()
     theirs = _state_version(state)
     if not ours or theirs == ours:
