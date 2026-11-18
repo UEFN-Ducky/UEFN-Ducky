@@ -74,8 +74,6 @@ _FIELD_TYPE_RE = re.compile(
 _VERSE_SOURCE_CACHE: Dict[str, Tuple[str, str, str]] = {}
 # Per (class, field) inferred @editable type.
 _FIELD_TYPE_CACHE: Dict[Tuple[str, str], Optional[str]] = {}
-# Actors that passed full wiring readiness this session (key = actor path name).
-_WIRING_READY_ACTORS: set[str] = set()
 # Per Script class: field name -> mangled __verse_0x... property on the device.
 _SCRIPT_PROPS_CACHE: Dict[str, Dict[str, str]] = {}
 # Cached Content/Verse search roots (expensive to rebuild).
@@ -561,19 +559,6 @@ def _find_verse_snippet_for_field(field: str) -> Tuple[str, str]:
     result = ("", "")
     _FIELD_SNIPPET_CACHE[field] = result
     return result
-
-
-def _fields_on_device_script(actor: unreal.Actor, hashes: Optional[Dict[str, str]] = None) -> List[str]:
-    """@editable fields present on this device's Script (computed name if readable)."""
-    script = _verse_script(actor)
-    props = _script_verse_properties(script)
-    if props:
-        return sorted(props.keys())
-    found: List[str] = []
-    for field, prop in (hashes or {}).items():
-        if _prop_readable(script, prop):
-            found.append(field)
-    return sorted(found)
 
 
 def _verse_source_for_actor(
@@ -1117,7 +1102,6 @@ def list_verse_property_hashes(refresh: bool = False) -> dict:
     """Compute ``__verse_0x…`` names from @editable field names. ``refresh`` only clears caches."""
     global _VERSE_SEARCH_DIRS_CACHE, _STRUCT_RESCAN_AT
     if refresh:
-        _WIRING_READY_ACTORS.clear()
         _VERSE_SOURCE_CACHE.clear()
         _FIELD_TYPE_CACHE.clear()
         _SCRIPT_PROPS_CACHE.clear()
@@ -1143,40 +1127,6 @@ def _field_not_found_error(
     if suggestions:
         msg += f" Similar fields on this device: {suggestions}."
     return msg
-
-
-def _require_can_wire(actor_path: str, field: str = "") -> None:
-    """Raise with STOP message if Verse is not compiled enough to wire."""
-    actor = lookup.require_actor(actor_path)
-    actor_key = actor.get_path_name()
-    script = _verse_script(actor)
-    script_props = _script_verse_properties(script)
-
-    if actor_key in _WIRING_READY_ACTORS:
-        if field and field not in script_props and _resolve_field_prop(script, field) is None:
-            _cls, verse_text, _fp = _verse_source_for_actor(actor)
-            verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
-            raise ValueError(_field_not_found_error(actor, script, field, verse_fields))
-        return
-
-    _cls, verse_text, _fp = _verse_source_for_actor(actor)
-    verse_fields = _parse_editables_from_verse(verse_text) if verse_text else []
-    if not verse_fields:
-        verse_fields = sorted(script_props.keys())
-    resolved = dict(script_props)
-    for f in verse_fields:
-        prop = _resolve_field_prop_cheap(script, f, resolved)
-        if prop:
-            resolved[f] = prop
-    readiness = _wiring_readiness(verse_fields, resolved)
-    if not readiness.get("can_wire"):
-        raise ValueError(
-            f"STOP — wiring blocked ({readiness.get('status')}): "
-            f"{readiness.get('message')} {readiness.get('next_step')}"
-        )
-    if field and field not in resolved and _resolve_field_prop(script, field, resolved) is None:
-        raise ValueError(_field_not_found_error(actor, script, field, verse_fields))
-    _WIRING_READY_ACTORS.add(actor_key)
 
 
 def _wiring_readiness(verse_fields: List[str], hashes: Dict[str, str]) -> dict:
@@ -1465,29 +1415,6 @@ def _resolve_verse_struct_class(struct_key: str) -> Any:
 def _new_struct_instance(struct_key: str, outer: Any = None) -> Any:
     cls = _resolve_verse_struct_class(struct_key)
     return unreal.new_object(cls, outer) if outer else unreal.new_object(cls)
-
-
-def set_level_thresholds(actor_path: str, threshold_xp_values: List[int]) -> dict:
-    """Set a ``Levels`` array with ``ThresholdXP`` entries on a level-system Verse device."""
-    actor = lookup.require_actor(actor_path)
-    script = _verse_script(actor)
-    levels_prop = _mangled_name("Levels")
-    xp_prop = _mangled_name("ThresholdXP")
-    entries = []
-    with unreal.ScopedEditorTransaction("MCP Set Level Thresholds"):
-        for xp in threshold_xp_values:
-            entry = _new_struct_instance("player_level_threshold")
-            entry.set_editor_property(xp_prop, int(xp))
-            entries.append(entry)
-        script.set_editor_property(levels_prop, entries)
-        script.modify()
-        actor.modify()
-    return {
-        "actor_path": actor.get_path_name(),
-        "count": len(entries),
-        "thresholds": list(threshold_xp_values),
-        "ok": len(script.get_editor_property(levels_prop)) == len(entries),
-    }
 
 
 def resize_verse_array_field(actor_path: str, array_field: str, count: int) -> dict:

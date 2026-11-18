@@ -847,28 +847,6 @@ def foliage_list_sources(
     }
 
 
-def _ensure_foliage_type(mesh_or_type_path: str, asset_folder: str = "") -> Any:
-    """Load an existing FoliageType, or return None if only a StaticMesh is available.
-
-    Creating brand-new FoliageType assets via factory has crashed some UEFN builds;
-    callers should fall back to HISM containers for raw meshes.
-    """
-    path = (mesh_or_type_path or "").strip()
-    if not path:
-        raise ValueError("mesh_or_type_path is required")
-    asset = unreal.EditorAssetLibrary.load_asset(path)
-    if asset is None and "." not in path:
-        asset = unreal.EditorAssetLibrary.load_asset(f"{path}.{path.rsplit('/', 1)[-1]}")
-    if asset is None:
-        raise ValueError(f"Asset not found: {path}")
-
-    ft_cls = getattr(unreal, "FoliageType_InstancedStaticMesh", None)
-    if ft_cls is not None and isinstance(asset, ft_cls):
-        return asset
-    # Do not create new FoliageType assets here — return None so scatter uses HISM.
-    return None
-
-
 def _load_static_mesh(mesh_or_type_path: str) -> Any:
     path = (mesh_or_type_path or "").strip()
     asset = unreal.EditorAssetLibrary.load_asset(path)

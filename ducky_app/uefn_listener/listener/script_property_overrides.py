@@ -1,126 +1,19 @@
-"""Build and apply Verse ``ScriptPropertyOverrides`` blobs for UEFN Ducky.
+"""Wire Verse device fields that need editor objects, not plain values.
 
-Creative device refs (``player_spawner_device`` -> spawn pad) and optional
-``Assets_texture`` icon paths are serialized in the actor-level
-``ScriptPropertyOverrides`` byte array (protected from normal Python reads on
-many builds; ``set_editor_property`` on the actor also fails on current UEFN).
+Spawn pads go into ``player_spawner_device`` wrappers (``SavedActor``), texture
+icons into ``Assets_texture`` wrappers (``AssetForEditor``), and the touched
+Script properties are marked as transient overrides so the wiring survives save.
 
-**Do NOT patch ``__ExternalActors__/*.uasset`` files on disk.** Replacing
-``None`` placeholder bytes in the middle of a serialized UObject invalidates
-internal size/count fields and causes ``Serial size mismatch`` crashes on load
-(LinkerLoad.cpp). There is no safe raw-byte edit path without a full uasset
-writer that updates all export tables.
-
-Record layout (reverse-engineered from ``ValkyrieUploadTemp`` external actors):
-
-    u32 len, utf-8 string + NUL   (repeated)
+**Do NOT patch ``__ExternalActors__/*.uasset`` files on disk.** Replacing bytes in
+the middle of a serialized UObject invalidates its size/count fields and causes
+``Serial size mismatch`` crashes on load (LinkerLoad.cpp).
 """
 
 from __future__ import annotations
 
-import struct
 from typing import Any, List, Optional, Sequence
 
 import unreal
-
-
-def _pack_str(value: str) -> bytes:
-    raw = value.encode("utf-8") + b"\x00"
-    return struct.pack("<I", len(raw)) + raw
-
-
-def build_creative_device_link_record(
-    wrapper_path: str,
-    package_path: str,
-    package_name: str,
-    target_actor_path: str,
-    verse_module: str,
-    verse_class: str,
-) -> bytes:
-    """One ``player_spawner_device`` wrapper -> ``FortCreativeDeviceProp`` link."""
-    parts = (
-        wrapper_path,
-        package_path,
-        package_name,
-        target_actor_path,
-        verse_module,
-        verse_class,
-        "",
-    )
-    return b"".join(_pack_str(p) for p in parts)
-
-
-def build_texture_path_record(
-    struct_path: str,
-    assets_texture_path: str,
-    package_path: str,
-    package_name: str,
-    texture_asset_path: str,
-    verse_assets_module: str,
-    assets_texture_class: str,
-) -> bytes:
-    """Link ``Assets_texture`` subobject to a ``/Project/Textures/...`` asset."""
-    parts = (
-        struct_path,
-        assets_texture_path,
-        package_path,
-        package_name,
-        texture_asset_path,
-        verse_assets_module,
-        assets_texture_class,
-        "",
-    )
-    return b"".join(_pack_str(p) for p in parts)
-
-
-def _project_paths() -> tuple[str, str]:
-    """Return ``(<world package path>, <world name>)`` for the open editor level.
-
-    Was hardcoded to the ``/MCPTest/MCPTest`` dev-project mount; derive it instead so
-    this works in any UEFN project.
-    """
-    try:
-        world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
-        pkg_name = world.get_package().get_name()
-        if pkg_name:
-            return pkg_name, pkg_name.rsplit("/", 1)[-1]
-    except Exception:
-        pass
-    # No editor world: the island's content mount from its descriptor. Never the engine
-    # project file — inside UEFN that is FortniteGame.uproject, not the island.
-    from listener.project_paths import content_root
-
-    mount = content_root().strip("/")
-    if mount:
-        return f"/{mount}/{mount}", mount
-    raise RuntimeError("No island map is open — open the island in UEFN before wiring Verse refs.")
-
-
-def _short_actor_path(actor: unreal.Actor) -> str:
-    path = actor.get_path_name()
-    if ".MCPTest:PersistentLevel." in path:
-        return "PersistentLevel." + path.split(".MCPTest:PersistentLevel.", 1)[-1]
-    if ":PersistentLevel." in path:
-        return "PersistentLevel." + path.split(":PersistentLevel.", 1)[-1]
-    return path
-
-
-def _try_set_blob(actor: unreal.Actor, blob: bytes) -> tuple[bool, str]:
-    """Attempt to write ``ScriptPropertyOverrides`` using several payload types."""
-    errors: List[str] = []
-    payloads: Sequence[Any] = (
-        blob,
-        bytearray(blob),
-        list(blob),
-    )
-    for payload in payloads:
-        try:
-            actor.set_editor_property("ScriptPropertyOverrides", payload)
-            actor.modify()
-            return True, type(payload).__name__
-        except Exception as exc:
-            errors.append(f"{type(payload).__name__}: {exc}")
-    return False, "; ".join(errors[:3])
 
 
 def apply_spawner_links(manager: unreal.Actor, spawn_pads: Sequence[unreal.Actor]) -> dict:

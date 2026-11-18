@@ -275,7 +275,7 @@ def _load_struct_resolver():
 
     ns: dict = {
         "Any": Any, "Dict": Dict, "List": List, "Optional": Optional, "unreal": _Unreal, "time": _Clock,
-        "_WIRING_READY_ACTORS": set(), "_VERSE_SOURCE_CACHE": {}, "_FIELD_TYPE_CACHE": {},
+        "_VERSE_SOURCE_CACHE": {}, "_FIELD_TYPE_CACHE": {},
         "_SCRIPT_PROPS_CACHE": {}, "_FIELD_SNIPPET_CACHE": {}, "_VERSE_SEARCH_DIRS_CACHE": None,
     }
     # The struct cache and anything else the module keeps for it, as declared there.

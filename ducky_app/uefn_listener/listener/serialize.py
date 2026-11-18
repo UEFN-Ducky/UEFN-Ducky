@@ -146,19 +146,3 @@ def serialize_actor(actor: unreal.Actor, fields: Optional[List[str]] = None) -> 
         if getter is not None:
             out[field] = getter(actor)
     return out
-
-
-def serialize_asset_entry(asset_path: str, fields: Optional[List[str]] = None) -> Any:
-    if not fields or fields == ["path"]:
-        return str(asset_path)
-    data = unreal.EditorAssetLibrary.find_asset_data(str(asset_path))
-    if data is None:
-        return {"path": str(asset_path)}
-    full = serialize(data)
-    if not fields:
-        return full
-    out: dict = {"path": str(asset_path)}
-    for field in fields:
-        if field in full:
-            out[field] = full[field]
-    return out

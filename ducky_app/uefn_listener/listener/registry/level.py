@@ -8,27 +8,7 @@ import unreal
 
 from listener import lookup
 from listener.dispatch import register
-from listener.serialize import ALL_ACTOR_FIELDS, rotator_pyr, serialize_actor
-
-
-def _spawn_one(asset_path: str = "", actor_class: str = "", location=None, rotation=None) -> unreal.Actor:
-    loc = unreal.Vector(*location) if location else unreal.Vector(0, 0, 0)
-    rot = rotator_pyr(*rotation) if rotation else rotator_pyr(0, 0, 0)
-    if asset_path:
-        asset = unreal.EditorAssetLibrary.load_asset(asset_path)
-        if asset is None:
-            raise ValueError(f"Asset not found: {asset_path}")
-        actor = unreal.EditorLevelLibrary.spawn_actor_from_object(asset, loc, rot)
-    elif actor_class:
-        cls = getattr(unreal, actor_class, None)
-        if cls is None:
-            raise ValueError(f"Class not found: {actor_class}")
-        actor = unreal.EditorLevelLibrary.spawn_actor_from_class(cls, loc, rot)
-    else:
-        raise ValueError("Provide either asset_path or actor_class")
-    if actor is None:
-        raise RuntimeError("Failed to spawn actor")
-    return actor
+from listener.serialize import ALL_ACTOR_FIELDS, serialize_actor
 
 
 def spawn_actor_batch(items: List[dict]) -> dict:
