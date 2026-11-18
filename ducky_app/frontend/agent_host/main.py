@@ -30,7 +30,8 @@ from frontend.agent_host import protocol
 from frontend.agent_host.batching import Batcher
 from frontend.agent_host.supervisor import APP_OPS, KEY_ENV
 
-_TICK_S = 0.05
+_TICK_S = 0.05  # while text waits for its slot
+_IDLE_S = 1.0  # nothing waiting: a feed wakes the loop; this only catches a missed wake and busy chats' status
 _batcher: Batcher | None = None
 _log = logging.getLogger(__name__)
 _shed_lock = threading.Lock()
@@ -143,6 +144,16 @@ def watch_stalls(path: Path, stall_s: float = STALL_S, beat_s: float = 1.0) -> t
     return stop
 
 
+def pump(batcher: Batcher, done: threading.Event) -> None:
+    """Send the batcher's due text until ``done``: every 50 ms while text waits, else on a feed."""
+    while not done.is_set():
+        batcher.wake.wait(_TICK_S if batcher.has_pending() else _IDLE_S)
+        batcher.wake.clear()  # a feed after this sets it again; one before is already pending
+        if done.is_set():
+            break
+        batcher.flush_due()
+
+
 def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
     """Connect to the app and run until ``shutdown``, the pipe closing, or ``done`` being set."""
     global _batcher
@@ -155,6 +166,7 @@ def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
         op = frame["op"]
         if op == "shutdown":
             done.set()
+            batcher.wake.set()
         elif op == "visible_chats":
             ids = frame.get("conv_ids")
             batcher.set_visible(None if ids is None else [str(i) for i in ids])
@@ -167,12 +179,12 @@ def serve(pipe: str, key: bytes, done: threading.Event | None = None) -> None:
     # In box and _batcher before it reads: the app sends start_turn the moment we connect, and a
     # frame handled before then was dropped (its chats never started).
     box.append(protocol.Channel(conn, send_ops=protocol.HOST_OPS, recv_ops=APP_OPS, on_frame=on_frame,
-                                on_closed=lambda _reason: done.set(), heartbeat_s=protocol.HEARTBEAT_S))
+                                on_closed=lambda _reason: (done.set(), batcher.wake.set()),
+                                heartbeat_s=protocol.HEARTBEAT_S))
     _batcher = batcher
     box[0].start()
     try:
-        while not done.wait(_TICK_S):
-            batcher.flush_due()
+        pump(batcher, done)
         batcher.flush()
     finally:
         _batcher = None

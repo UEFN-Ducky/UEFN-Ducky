@@ -1,7 +1,8 @@
 """Turn events from the host to the app: text joined to at most 10 batches per second per chat.
 
 ``--include-partial-messages`` makes every token an event. The host's main loop feeds each one
-to ``Batcher.feed`` and calls ``flush_due`` about every 50 ms; ``emit(conv_id, events)`` gets a
+to ``Batcher.feed``, which sets ``Batcher.wake``; the loop calls ``flush_due`` about every 50 ms
+while ``has_pending()``, else once ``wake`` is set (or a second has passed); ``emit(conv_id, events)`` gets a
 batch, e.g. one ``text_delta`` carrying 100 tokens, and sends it as one ``event`` frame.
 
 Text, thinking and status lines wait for the next slot; anything else (tool start/done, errors,
@@ -87,6 +88,12 @@ class Batcher:
         self._chats: dict[str, _Chat] = {}
         self._visible: set[str] | None = None  # None: every chat is on screen
         self._lock = threading.Lock()
+        self.wake = threading.Event()  # set on every feed: the host loop stops waiting
+
+    def has_pending(self) -> bool:
+        """Text waits for its slot: the loop keeps its 50 ms cadence until it is sent."""
+        with self._lock:
+            return any(chat.pending for chat in self._chats.values())
 
     def set_visible(self, chat_ids: list[str] | set[str] | None) -> None:
         """Chats on screen get live text; None means all. Text already waiting is sent first."""
@@ -120,6 +127,7 @@ class Batcher:
                     self._flush(conv_id, chat, now)
             if kind in END_TYPES and not chat.pending:
                 self._chats.pop(conv_id, None)
+        self.wake.set()
 
     def flush_due(self) -> None:
         """Send text whose slot has come, and the once-a-second status of hidden busy chats."""
