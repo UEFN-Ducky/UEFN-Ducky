@@ -231,10 +231,6 @@ def catalog(project_id: str) -> dict[str, dict[str, Any]]:
     }
 
 
-def has_runs(project_id: str) -> bool:
-    return db.connect().execute("SELECT 1 FROM runs WHERE project_id=? LIMIT 1", (project_id,)).fetchone() is not None
-
-
 def latest_entry_for_path(project_id: str, paths: list[str], *, since: float) -> dict[str, Any] | None:
     """Newest applied entry touching any of *paths* since *since* (the old parse-every-run)."""
     if not paths:

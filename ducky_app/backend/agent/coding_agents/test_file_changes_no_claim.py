@@ -1,4 +1,4 @@
-"""A shell call never claims a change it can't be tied to; wrong nested stamps are repaired."""
+"""A shell call never claims a change it can't be tied to."""
 from pathlib import Path
 import subprocess
 
@@ -88,29 +88,3 @@ def test_shell_call_still_claims_what_it_wrote(env) -> None:
     turn.process(done)
     assert [e["after"] for e in done["tool"]["fileEdits"]] == ["mine\n"]
     assert ledger.index_stamp("file.txt", project_root=str(inner))["conv_id"] == "me"
-
-
-def test_repair_moves_a_taken_stamp_back_to_the_real_writer(env) -> None:
-    outer, inner, ledger = env
-    guards = ProjectWriter.for_root(str(outer), journal=ledger)
-    token = identity.bind(RunContext(run_id="guards-run", conv_id="guards", ducky_name="Guards"))
-    try:
-        guards.write_text("Repo/a.txt", "guard a\n", tool="workspace_write_file")
-        guards.write_text("Repo/b.txt", "guard b\n", tool="workspace_write_file")
-    finally:
-        identity.reset(token)
-    # The Chats seat's shell call took a.txt (same content); b.txt it changed afterwards.
-    chats = TurnFileChanges(str(inner), RunContext(run_id="chats-run", conv_id="chats", ducky_name="Chats"), ledger)
-    (inner / "b.txt").write_text("chats rewrote b\n", encoding="utf-8")
-    for name in ("a.txt", "b.txt"):
-        path = inner / name
-        snap = file_changes._read(path)
-        chats._record(inner.resolve(), path.resolve(), file_changes.Snapshot(), snap, "mcp__uefn__ducky_terminal_run")
-    assert ledger.index_stamp("a.txt", project_root=str(inner))["conv_id"] == "chats"
-
-    fixed = ledger.repair_nested_stamps(project_root=str(inner), outer_root=str(outer))
-    assert fixed == [{"path": "a.txt", "from_conv_id": "chats", "to_conv_id": "guards", "to_ducky": "Guards"}]
-    a = ledger.index_stamp("a.txt", project_root=str(inner))
-    assert a["conv_id"] == "guards" and a["run_id"] == "guards-run"
-    assert ledger.index_stamp("b.txt", project_root=str(inner))["conv_id"] == "chats"
-    assert ledger.repair_nested_stamps(project_root=str(inner), outer_root=str(outer)) == []

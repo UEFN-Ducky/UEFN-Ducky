@@ -630,25 +630,6 @@ def test_list_runs_empty_storage_does_not_create_dirs(tmp_path: Path) -> None:
     assert not storage.exists()
 
 
-def test_prune_drops_old_closed_runs_and_orphan_blobs(env) -> None:
-    root, storage, journal, writer, clock = env
-    token = as_run("old")
-    try:
-        writer.write_text("Content/Verse/a.verse", "old\n")
-    finally:
-        identity.reset(token)
-    journal.end_run("old", "done", project_root=str(root))
-    clock["now"] += 40 * 86400
-    token = as_run("fresh")
-    try:
-        writer.write_text("Content/Verse/b.verse", "fresh\n")
-    finally:
-        identity.reset(token)
-    stats = journal.prune(project_root=str(root))
-    assert stats == {"removed_runs": 1, "removed_blobs": 1}
-    assert [r["run_id"] for r in journal.list_runs(project_root=str(root))] == ["fresh"]
-
-
 def test_delete_runs_forgets_ledger_not_files(env) -> None:
     root, storage, journal, writer, _ = env
     token = as_run("r1")

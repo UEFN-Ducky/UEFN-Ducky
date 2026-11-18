@@ -967,14 +967,9 @@ class FileChangeJournal:
         return later
 
     def _iter_run_docs(self, storage: Path) -> list[dict[str, Any]]:
-        if _use_db():
-            return _repo().runs_docs(_pid(storage))
-        docs: list[dict[str, Any]] = []
-        for path in (storage / "runs").glob("*.json"):
-            run = self._read_json(path)
-            if isinstance(run, dict) and run.get("run_id"):
-                docs.append(run)
-        return docs
+        from backend.workspace.journal_prune import iter_run_docs
+
+        return iter_run_docs(self, storage)
 
     @staticmethod
     def _status_from_applied(entries: list[dict[str, Any]]) -> str:
@@ -1552,33 +1547,9 @@ class FileChangeJournal:
         return True
 
     def prune(self, *, project_root: str, max_age_days: int = 30, keep_runs: int = 300) -> dict[str, int]:
-        storage = self._storage(project_root)
-        cutoff = self._clock() - max(1, int(max_age_days)) * 86400.0
-        removed_runs = 0
-        with self._lock(storage):
-            runs: list[tuple[float, dict[str, Any]]] = [
-                (float(run.get("started") or 0.0), run) for run in self._iter_run_docs(storage)
-            ]
-            runs.sort(key=lambda t: t[0], reverse=True)
-            keep: list[dict[str, Any]] = []
-            dropped: set[str] = set()
-            for i, (started, run) in enumerate(runs):
-                open_run = run.get("status") in _OPEN_STATUSES
-                if run.get("archived"):
-                    keep.append(run)
-                    continue
-                if not open_run and (i >= keep_runs or started < cutoff):
-                    self._delete_run_doc(storage, run)
-                    rid = str(run.get("run_id") or "")
-                    if rid:
-                        dropped.add(rid)
-                    removed_runs += 1
-                    continue
-                keep.append(run)
-            if dropped:
-                self._drop_catalog_ids(storage, dropped)
-            removed_blobs = self._sweep_orphan_blobs(storage, keep)
-        return {"removed_runs": removed_runs, "removed_blobs": removed_blobs}
+        from backend.workspace.journal_prune import prune
+
+        return prune(self, project_root=project_root, max_age_days=max_age_days, keep_runs=keep_runs)
 
     @staticmethod
     def _sweep_orphan_blobs(storage: Path, keep: list[dict[str, Any]]) -> int:
@@ -1966,56 +1937,6 @@ class FileChangeJournal:
                 if isinstance(stamp, dict):
                     return dict(stamp)
         return None
-
-    def repair_nested_stamps(
-        self, *, project_root: str, outer_root: str, paths: Iterable[str] | None = None
-    ) -> list[dict[str, Any]]:
-        """Give back last-writer stamps a shell call took in a nested project.
-
-        Before writer._owning_root picked the innermost project, a write in a repo nested
-        inside the open project (``GitHub/UEFN-Ducky-Release``) was journaled in the outer
-        ledger, and another chat's shell call then stamped the repo's ledger with itself.
-        A repo stamp is moved to the outer ledger's writer when that row has the same
-        content hash, another chat, and is no newer. Returns one row per moved stamp.
-        """
-        inner_abs = os.path.realpath(project_root)
-        outer_abs = os.path.realpath(outer_root)
-        prefix = os.path.relpath(inner_abs, outer_abs).replace("\\", "/")
-        if prefix.startswith("..") or prefix in ("", "."):
-            raise ValueError("project_root must be inside outer_root")
-        wanted = None if paths is None else {normalize_rel(p) for p in paths}
-        inner_storage = self._storage(project_root)
-        outer_storage = self._storage(outer_root)
-        repaired: list[dict[str, Any]] = []
-        with self._lock(inner_storage), self._lock(outer_storage):
-            inner = self._load_index(inner_storage)
-            outer = self._load_index(outer_storage)
-            for path, stamp in list(inner.items()):
-                if wanted is not None and path not in wanted:
-                    continue
-                if not isinstance(stamp, dict) or stamp.get("deleted"):
-                    continue
-                real = outer.get(f"{prefix}/{path}")
-                if not isinstance(real, dict) or real.get("deleted"):
-                    continue
-                real_conv = str(real.get("conv_id") or "")
-                if (not real_conv or real_conv == str(stamp.get("conv_id") or "")
-                        or str(real.get("hash") or "") != str(stamp.get("hash") or "")
-                        or float(real.get("ts") or 0) > float(stamp.get("ts") or 0)):
-                    continue
-                inner[path] = {
-                    **stamp,
-                    "run_id": str(real.get("run_id") or ""),
-                    "conv_id": real_conv,
-                    "ducky_name": str(real.get("ducky_name") or ""),
-                    "source": str(real.get("source") or identity.SOURCE_AGENT),
-                    "ts": float(real.get("ts") or stamp.get("ts") or 0),
-                }
-                repaired.append({"path": path, "from_conv_id": str(stamp.get("conv_id") or ""),
-                                 "to_conv_id": real_conv, "to_ducky": inner[path]["ducky_name"]})
-            if repaired:
-                self._save_index(inner_storage, inner)
-        return repaired
 
     def recent_after_hash(
         self, path: str, digest: str, *, project_root: str, window_s: float = 60.0
