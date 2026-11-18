@@ -206,11 +206,37 @@ def _snapshot_put(conn, kind: str, text: str, h: str = "") -> str:
     return h
 
 
+# Snapshot text by hash, process-wide: the hash names the text, so an entry never goes
+# stale, and every row of conv_list (the sidebar, re-read on each chat change) read it.
+# Bounded by entries and by the bytes Python holds for the text. Memory only.
+_SNAP_MAX = 64
+_SNAP_MAX_BYTES = 8 * 1024 * 1024
+_snap_lock = threading.Lock()
+_snap_text: OrderedDict[str, str] = OrderedDict()
+_snap_bytes = 0
+
+
 def _snapshot_text(conn, h: str) -> str:
+    global _snap_bytes
     if not h:
         return ""
+    with _snap_lock:
+        text = _snap_text.get(h)
+        if text is not None:
+            _snap_text.move_to_end(h)
+            return text
     row = conn.execute("SELECT text FROM snapshots WHERE hash=?", (h,)).fetchone()
-    return str(row[0]) if row else ""
+    if row is None:
+        return ""  # not kept: it may be written later
+    text = str(row[0])
+    size = sys.getsizeof(text)
+    with _snap_lock:
+        if size <= _SNAP_MAX_BYTES and h not in _snap_text:
+            _snap_text[h] = text
+            _snap_bytes += size
+            while len(_snap_text) > _SNAP_MAX or _snap_bytes > _SNAP_MAX_BYTES:
+                _snap_bytes -= sys.getsizeof(_snap_text.popitem(last=False)[1])
+    return text
 
 
 # --------------------------------------------------------------------------- message parts
