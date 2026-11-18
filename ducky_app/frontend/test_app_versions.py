@@ -231,6 +231,7 @@ def test_panel_hands_off_to_the_newest_and_leaves(monkeypatch) -> None:
     started: list[tuple] = []
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.delenv(av.NO_HOP_ENV, raising=False)
+    monkeypatch.delenv(av.START_HIDDEN_ENV, raising=False)  # a headless/launcher test may have left it set
     monkeypatch.setattr(sys, "executable", str(Path("C:/Programs/UEFN Ducky/UEFN-Ducky.exe")))
     monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe", "uefn-ducky://store/x"])
     monkeypatch.setattr(av, "start_detached", lambda exe, args, **k: started.append((exe, args)) or True)

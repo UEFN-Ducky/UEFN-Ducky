@@ -568,6 +568,7 @@ def test_update_check_is_sent_once_per_session() -> None:
 def test_perf_sample_counts_running_turns(monkeypatch) -> None:
     monkeypatch.setattr(us, "_meta_get", lambda key: "0")
     monkeypatch.setattr(us, "_meta_set", lambda key, value: None)
+    monkeypatch.setattr(us, "_run_meta", {})  # runs other files began and never ended
     us.run_begin("busy", "conv-busy", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
     us._maybe_perf_sample()
     rows, _ = us._take(100)
