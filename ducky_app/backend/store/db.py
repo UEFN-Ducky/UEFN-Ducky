@@ -928,6 +928,42 @@ def integrity_check(conn: sqlite3.Connection) -> str:
     return str(row[0]) if row else "no result"
 
 
+def quick_check(conn: sqlite3.Connection) -> str:
+    """``PRAGMA quick_check``: page and record structure only, no index cross-check."""
+    row = conn.execute("PRAGMA quick_check").fetchone()
+    return str(row[0]) if row else "no result"
+
+
+# The full check reads every page and index of the file (minutes of disk on a 3 GB
+# store), so a start runs the quick check and the full one only this often.
+FULL_CHECK_EVERY_S = 7 * 24 * 3600
+FULL_CHECK_KEY = "last_full_integrity"
+
+
+def _full_check_due(conn: sqlite3.Connection) -> bool:
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key=?", (FULL_CHECK_KEY,)).fetchone()
+        return row is None or time.time() - float(row[0]) >= FULL_CHECK_EVERY_S
+    except (sqlite3.Error, ValueError, TypeError):
+        return True
+
+
+def startup_check(conn: sqlite3.Connection) -> str:
+    """The check a start runs: ``quick_check``, plus the full ``integrity_check`` when the
+    quick one fails or the last full one is a week old. "ok" or the failing result."""
+    result = quick_check(conn)
+    if result == "ok" and not _full_check_due(conn):
+        return result
+    result = integrity_check(conn)
+    if result == "ok":
+        with write_txn(conn):
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value, updated) VALUES (?, ?, ?)",
+                (FULL_CHECK_KEY, str(time.time()), time.time()),
+            )
+    return result
+
+
 SNAPSHOT_FINGERPRINT_KEY = "snapshot_fingerprint"
 # Caches, logs and bookkeeping change on their own all day; a change there alone
 # is no reason for another copy of the database.
@@ -1164,7 +1200,7 @@ def _open_sealed_snapshot(files: list[Path]) -> tuple[Path, Path] | None:
 
 
 def open_checked(root: Path | None = None) -> sqlite3.Connection:
-    """Boot-time open: integrity check, restore from snapshot if it fails.
+    """Boot-time open: :func:`startup_check`, restore from snapshot if it fails.
 
     A lock held by another process ("database is locked") is not damage: it is retried
     and then raised, never answered by restoring an older snapshot over live data.
@@ -1174,7 +1210,7 @@ def open_checked(root: Path | None = None) -> sqlite3.Connection:
     for attempt in range(4):
         try:
             conn = connect(root)
-            result = integrity_check(conn)
+            result = startup_check(conn)
             break
         except sqlite3.DatabaseError as exc:
             if not _is_busy(exc):
@@ -1224,6 +1260,8 @@ __all__ = [
     "head_version",
     "user_version",
     "integrity_check",
+    "quick_check",
+    "startup_check",
     "data_fingerprint",
     "snapshot",
     "unchanged_since_snapshot",
