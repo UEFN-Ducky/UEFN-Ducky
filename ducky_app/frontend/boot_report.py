@@ -853,7 +853,11 @@ def begin(version: str, *, ask: bool = True) -> None:
             ends.append(_native_path().stat().st_mtime)
         except OSError:
             pass
-    previous_end = ended_on_purpose(previous, restarted=restarted, dumps=dumps) if previous else ""
+    # A run that marked itself closed (the Setup update, a version switch, a hand-off) ended on
+    # purpose too, even when it died before usage_stats.app_closing (Nov 18 2026: 11 of 40
+    # app_unclean_exit rows came within a minute of a start, after update swaps).
+    clean = str(previous.get("state") or "") in _CLEAN_ENDS and not native.strip()
+    previous_end = ("closed" if clean else ended_on_purpose(previous, restarted=restarted, dumps=dumps)) if previous else ""
     body = build_report(previous, native, restarted=restarted, dumps=dumps, ended=max(ends) if ends else None) if previous else None
     prune_dumps()
     if body:

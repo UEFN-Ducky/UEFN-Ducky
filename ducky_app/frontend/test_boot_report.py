@@ -216,6 +216,20 @@ def test_ended_on_purpose_names_restart_sign_out_and_launcher_exit() -> None:
     assert boot_report.build_report(signout, "", restarted=False) is None
 
 
+def test_update_swap_marks_run_clean(crash) -> None:
+    # updater._mark_closed (Setup) and hard_exit mark the run closed but never reach
+    # usage_stats.app_closing: the next start must still read it as ended on purpose.
+    boot_report.begin("1.2.505")
+    boot_report.mark("ok")
+    boot_report.mark("closed")
+    boot_report.begin("1.2.506")
+    assert boot_report.previous_end == "closed" and crash["asked"] == []
+    boot_report.mark("ok")  # this one is killed
+    boot_report.begin("1.2.506")
+    assert boot_report.previous_end == ""
+    boot_report.mark("closed")
+
+
 def test_dont_send_sends_nothing_and_keeps_the_report_for_support(crash) -> None:
     crash["answer"] = False
     _crashed_launch("create_window")
