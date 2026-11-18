@@ -23,7 +23,7 @@ import { useFocusWindow } from "../hooks/useFocusWindow";
 import { useLinkedAgents } from "../hooks/useLinkedAgents";
 import { useChatMessages } from "../hooks/useChatMessages";
 import { useChatTurnTimerState } from "../hooks/useChatTurnTimer";
-import { useAgentEventSubscription } from "../hooks/useAgentEventBus";
+import { subscribeAgentEvents, useAgentEventSubscription } from "../hooks/useAgentEventBus";
 import { setRoster, useRoster } from "./team/rosterStore";
 import { useHasApiKey } from "../hooks/useHasApiKey";
 import { getCachedChatComposer, setCachedChatComposer, subscribeComposerDraft, takeComposerDraft } from "../hooks/chatComposerCache";
@@ -93,6 +93,22 @@ import {
 } from "./ChatPlanCard";
 
 export { useChatPlan } from "./ChatPlanCard";
+
+/** `fn` at most once per `ms`, trailing: the first call starts the window, the call at its
+ *  end runs the latest `fn`, so the last value always lands. */
+export function useOncePerSecond(fn: () => unknown, ms = 1000): () => void {
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return useCallback(() => {
+    if (timer.current !== undefined) return;
+    timer.current = window.setTimeout(() => {
+      timer.current = undefined;
+      void fnRef.current();
+    }, ms);
+  }, [ms]);
+}
 
 const NO_LINKED: LinkedAgent[] = [];
 
@@ -472,17 +488,29 @@ function ChatPaneView({
   const inputTextRef = useRef(inputText);
   inputTextRef.current = inputText;
 
+  // The default model setting, read when the pane mounts and when settings change: not on
+  // every usage refresh (each bridge call crosses to Python on the window's thread).
+  const defaultModelRef = useRef<Promise<string> | null>(null);
+  const loadDefaultModel = useCallback(() => {
+    defaultModelRef.current = (async () => {
+      const settings = await getApi()?.get_settings().catch(() => null);
+      const qualified = (settings?.default_model || "").trim();
+      const fromDefault = qualified ? parseFavoriteSelection(qualified)?.modelId || "" : "";
+      return fromDefault || settings?.agent_model || "";
+    })();
+    return defaultModelRef.current;
+  }, []);
+  useEffect(() => {
+    void loadDefaultModel();
+    return subscribeAgentEvents((event) => {
+      if (event.type === "settings_changed") void loadDefaultModel();
+    });
+  }, [loadDefaultModel]);
+
   const refreshContextUsage = useCallback(async () => {
     const api = getApi();
     if (!api) return;
-    const settings = await api.get_settings().catch(() => null);
-    const fromDefault = (() => {
-      const qualified = (settings?.default_model || "").trim();
-      if (!qualified) return "";
-      const parsed = parseFavoriteSelection(qualified);
-      return parsed?.modelId || "";
-    })();
-    const model = selectedModel || fromDefault || settings?.agent_model || "";
+    const model = selectedModel || await (defaultModelRef.current ?? loadDefaultModel());
     if (!model) return;
     try {
       const usage = await api.get_context_usage(chat.id, model, agentMode, inputTextRef.current);
@@ -491,7 +519,7 @@ function ChatPaneView({
     } catch (err) {
       console.error("get_context_usage failed", err);
     }
-  }, [chat.id, selectedModel, agentMode]);
+  }, [chat.id, selectedModel, agentMode, loadDefaultModel]);
 
   const refreshSessionFiles = useCallback(async () => {
     const api = getApi();
@@ -499,6 +527,9 @@ function ChatPaneView({
     const files = await api.get_session_files(chat.id);
     setSessionFiles(files);
   }, [chat.id]);
+  // A busy turn sends usage and tool_done many times a second: meter once a second at most.
+  const usageSoon = useOncePerSecond(refreshContextUsage);
+  const sessionFilesSoon = useOncePerSecond(refreshSessionFiles);
 
   const handleOpenFile = useCallback(
     (path: string, name: string, options?: { line?: number }) => {
@@ -590,21 +621,21 @@ function ChatPaneView({
             call_count: event.call_count ?? event.calls?.length ?? prev.call_count,
             calls: event.calls ?? prev.calls,
           }));
-          void refreshContextUsage();
+          usageSoon();
           return;
         }
         if (event.type === "tool_done") {
-          void refreshSessionFiles();
-          if (contextPanelOpen) void refreshContextUsage();
+          sessionFilesSoon();
+          if (contextPanelOpen) usageSoon();
           const toolName = event.tool?.name || "";
           if (toolName === "ducky_create_plan" || toolName === "ducky_update_plan") {
             applyPlanToolDone(event, chat.id, { setChatPlan, setChatPlanProgress });
           }
         }
       },
-      [chat.id, chat.isGroup, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen],
+      [chat.id, chat.isGroup, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen, usageSoon, sessionFilesSoon],
     ),
-    [chat.id, chat.isGroup, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen],
+    [chat.id, chat.isGroup, handleContextChanged, refreshContextUsage, refreshSessionFiles, contextPanelOpen, usageSoon, sessionFilesSoon],
   );
 
   useEffect(() => {
