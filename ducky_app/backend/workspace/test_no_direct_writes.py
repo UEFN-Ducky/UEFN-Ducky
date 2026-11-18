@@ -31,7 +31,6 @@ SANCTIONED = {"backend/workspace/writer.py"}
 # path::function -> reason. Keep reasons honest; a reviewer reads them.
 ALLOWLIST: dict[str, str] = {
     # AppData / temp, not the project (permanent)
-    "backend/tools/panel/panel_ai_plugins.py::_write_json": "plugin draft under AppData",
     "backend/tools/panel/panel_ai_plugins.py::scaffold_ai_plugin": "plugin draft under AppData",
     "backend/tools/panel/panel_ai_plugins.py::write_ai_plugin_file": "plugin draft under AppData",
     "backend/tools/panel/panel_ai_plugins.py::delete_ai_plugin_draft": "plugin draft under AppData",
@@ -71,7 +70,6 @@ ALLOWLIST: dict[str, str] = {
     # ProjectWriter instance it is handed (a Name receiver the scanner cannot see through).
     "backend/workspace/journal.py::_replay_run": "writer.write_text on the ProjectWriter it is handed (Name receiver)",
     "backend/workspace/journal.py::_delete_run_doc": "run document removal under AppData (files backend)",
-    "backend/workspace/human_watch.py::_save_saved": "human-watch fingerprint under AppData/changesets",
     "backend/workspace/journal.py::_sweep_orphan_blobs": "journal blob GC under AppData",
     "backend/workspace/journal.py::_revert_path": "restores via the ProjectWriter instance",
     # KNOWN DEBT — tester harness resolves its own root and writes directly. Tracked as
