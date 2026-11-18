@@ -141,6 +141,19 @@ def runs_docs(project_id: str) -> list[dict[str, Any]]:
     return [_assemble(conn, r) for r in rows]
 
 
+def runs_brief(project_id: str) -> list[dict[str, Any]]:
+    """``{run_id, started, status, archived}`` per run, newest first: what retention needs, from columns."""
+    _close_stale_once()
+    rows = db.connect().execute(
+        "SELECT run_id, started, status, archived FROM runs WHERE project_id=? ORDER BY started DESC", (project_id,)
+    ).fetchall()
+    return [
+        {"run_id": str(r["run_id"]), "started": float(r["started"] or 0.0), "status": str(r["status"]),
+         "archived": bool(r["archived"])}
+        for r in rows
+    ]
+
+
 def run_put(project_id: str, run: dict[str, Any]) -> None:
     """Upsert the run row; sync entries by content hash; replace the seen map."""
     _close_stale_once()

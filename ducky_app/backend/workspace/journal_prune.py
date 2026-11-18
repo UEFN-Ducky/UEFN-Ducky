@@ -25,13 +25,21 @@ def iter_run_docs(journal: FileChangeJournal, storage: Path) -> list[dict[str, A
     return docs
 
 
+def _retention_rows(journal: FileChangeJournal, storage: Path) -> list[dict[str, Any]]:
+    """Runs with at least run_id, started, status and archived. The database answers from
+    columns (no run document is parsed); the files backend needs the documents for its blob refs."""
+    if _j._use_db():
+        return _j._repo().runs_brief(_j._pid(storage))
+    return iter_run_docs(journal, storage)
+
+
 def prune(journal: FileChangeJournal, *, project_root: str, max_age_days: int = 30, keep_runs: int = 300) -> dict[str, int]:
     storage = journal._storage(project_root)
     cutoff = journal._clock() - max(1, int(max_age_days)) * 86400.0
     removed_runs = 0
     with journal._lock(storage):
         runs: list[tuple[float, dict[str, Any]]] = [
-            (float(run.get("started") or 0.0), run) for run in iter_run_docs(journal, storage)
+            (float(run.get("started") or 0.0), run) for run in _retention_rows(journal, storage)
         ]
         runs.sort(key=lambda t: t[0], reverse=True)
         keep: list[dict[str, Any]] = []
