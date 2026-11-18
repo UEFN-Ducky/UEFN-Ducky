@@ -5,7 +5,7 @@ import importlib.metadata
 import re
 from pathlib import Path
 
-CHECKED = ("mcp", "anyio", "httpx")
+CHECKED = ("mcp", "anyio", "httpx", "pywebview")
 
 
 def validate(requirements: Path) -> dict[str, str]:

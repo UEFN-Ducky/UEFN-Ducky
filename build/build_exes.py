@@ -474,7 +474,8 @@ def main() -> int:
 
     # Deps first: write_ico below needs Pillow, so this must run before it.
     # --upgrade: a ">=" floor already met by an old, vulnerable copy would otherwise ship.
-    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller", "-r", str(req)]
+    # PyInstaller is exact so every build freezes with the tested version.
+    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller==6.22.3", "-r", str(req)]
     print(">", " ".join(pip))
     subprocess.run(pip, check=True, cwd=str(root))
     from runtime_versions import validate as validate_runtime_versions

@@ -1,7 +1,7 @@
 # MCP bridge (host/mcp_server.py).
 # Install from repo root: py -m pip install -r requirements.txt
 # server.py uses the v1 FastMCP API, renamed in MCP 2.x.
-# Tested together: AnyIO 4.14.2 fixes cancellation spinning on completed tasks.
+# Tested together: AnyIO 4.16.0 fixes cancellation spinning on completed tasks.
 # Pin the shipped MCP runtime so an old satisfying dependency cannot survive a rebuild.
 mcp[cli]==1.30.0
 anyio==4.16.0
@@ -11,7 +11,8 @@ tzdata>=2024.1
 truststore>=0.10
 # Control panel: hide to notification area (tray) on close (Windows).
 pystray>=0.19.5
-pywebview>=5.0
+# Exact: Browser panes use pywebview internals (build/runtime_versions.py checks it).
+pywebview==6.2.1
 # Team plugin data is AES-256-GCM encrypted with each team's key (already shipped via pywebview/PyJWT).
 cryptography==50.0.2
 Pillow>=13.0.0
@@ -29,7 +30,7 @@ google-genai>=1.0
 pywinpty>=2.0.13; platform_system == "Windows"
 # Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
 # PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
-toon_format @ git+https://github.com/toon-format/toon-python.git
+toon_format @ git+https://github.com/toon-format/toon-python.git@536a508d486847cb01ec1869cf21d1f7556b0db0
 # Custom code workflow nodes run their JavaScript in V8 (ships mini_racer.dll + icudtl.dat).
 mini-racer==0.14.1
 # Compiled plugins: disassemble a build to prove every PC's CPU runs it (cpu_check.py).

@@ -2,7 +2,7 @@
 pytest>=7.0
 # The release runs the suite on every core (-n auto): about 3 minutes instead of 11 to 19.
 pytest-xdist>=3.6
-# A stuck test fails after 5 minutes (with its stack) instead of hanging the release.
+# A stuck test fails after 10 minutes (pytest.ini timeout = 600) (with its stack) instead of hanging the release.
 pytest-timeout>=2.3
 ruff>=0.6
 # Schema contracts under ducky_app/backend/workspace/schemas (MIT).
