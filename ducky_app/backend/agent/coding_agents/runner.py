@@ -7,6 +7,7 @@ passes and stores a session_id — how resume works is the plugin's job.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
@@ -32,6 +33,7 @@ from frontend.chat_store import Conversation
 from frontend.settings import PanelSettings, apply_workspace_env
 
 PushFn = Callable[[dict[str, Any]], None]
+_log = logging.getLogger(__name__)
 
 _HISTORY_PREFIX_MAX_CHARS = 6000
 
@@ -769,11 +771,18 @@ def _emit_assistant(
     }
 
 
-def _add_agent_host_env(mcp_path: Any) -> None:
-    """In an agent host: the ``uefn`` server asks this host for steer and question checks (D20)."""
+def _agent_host_env() -> dict[str, str]:
+    """In an agent host: the env with which the ``uefn`` server asks this host for steer and
+    question checks (D20); {} outside one."""
     from frontend.agent_host import steer_host
 
-    env = steer_host.mcp_env()
+    return steer_host.mcp_env()
+
+
+def _add_agent_host_env(mcp_path: Any) -> None:
+    """Add :func:`_agent_host_env` to a written config. Turns pass it to
+    ``write_uefn_mcp_config`` instead, which writes the file once."""
+    env = _agent_host_env()
     if not env:
         return
     data = json.loads(Path(mcp_path).read_text(encoding="utf-8"))
@@ -1060,8 +1069,8 @@ def _run_coding_agent_message(
     # Native Edit/Write hits disk outside the writer pipeline. The watcher
     # must pin those files to this duck, not "You".
     set_live_writer(rid, run_ctx.as_writer())
-    mcp_path = write_uefn_mcp_config(conv_id=conv.id, settings=settings, identity=run_ctx)
-    _add_agent_host_env(mcp_path)
+    mcp_path = write_uefn_mcp_config(conv_id=conv.id, settings=settings, identity=run_ctx,
+                                     uefn_env=_agent_host_env())
     prompt_path = write_prompt_file(prompt_text, conv_id=conv.id)
     env = launch_env(
         prompt=prompt_text,
@@ -1170,7 +1179,7 @@ def _run_coding_agent_message(
     try:
         record_external_edits(result.blocks, run_ctx)
     except Exception:  # noqa: BLE001 - attribution must never fail the turn
-        pass
+        _log.warning("could not record the agent's edits for run %s", rid, exc_info=True)
 
     reply = (result.reply_text or "").strip()
     if not reply and not result.blocks and result.output_tail:

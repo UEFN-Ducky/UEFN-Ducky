@@ -112,11 +112,13 @@ def write_uefn_mcp_config(
     settings: PanelSettings | None = None,
     extra_servers: dict[str, Any] | None = None,
     identity: RunContext | None = None,
+    uefn_env: dict[str, str] | None = None,
 ) -> Path:
     """Write a temp mcpServers JSON for Claude/Codex/Cursor launches.
 
     ``identity`` rides along as DUCKY_* env on the ``uefn`` server so the bridge
     process attributes and lane-checks the agent's writes made through Ducky tools.
+    ``uefn_env`` (an agent host's pipe) is added to that server's env last.
     """
     s = settings or PanelSettings.load()
     servers = build_uefn_mcp_servers(s)
@@ -126,13 +128,18 @@ def write_uefn_mcp_config(
             stamp_mcp_identity(uefn, identity, conv_id)
     if extra_servers:
         servers.update(extra_servers)
+    uefn = servers.get("uefn")
+    host_env = bool(uefn_env) and isinstance(uefn, dict)
+    if host_env:
+        uefn["env"] = {**(uefn.get("env") or {}), **uefn_env}
     payload = {"mcpServers": servers}
     prefix = f"uefn-mcp-{(conv_id or 'session')[:12]}."
     fd, name = tempfile.mkstemp(prefix=prefix, suffix=".json", dir=str(coding_agents_tmp_dir()))
     path = Path(name)
     try:
         with open(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2)
+            # The host config was written compact (it used to be re-written after a read back).
+            json.dump(payload, handle, indent=None if host_env else 2)
     except Exception:
         try:
             path.unlink(missing_ok=True)
