@@ -3,10 +3,16 @@
 ``Bridge.exe bridge --port N --adapter``: forward newline-delimited MCP JSON-RPC
 from the IDE to the shared daemon (length-prefixed frames on 127.0.0.1). If no
 daemon can be reached, return False so the caller runs the dedicated bridge.
+
+A host agent's turn never waits for the tool server: when its host does not answer at
+once, the start-up requests are answered from the host's own last answers (kept in
+``agent_tool_catalog-h<slot>.json``, the same bytes, so the agent's tool list and its
+cached prompt stay what they were) while the join goes on beside the turn.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -16,6 +22,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 _STATE = "shared_mcp.json"
 # backend.bridge.shared_mcp.SLOT_ENV: set on every agent host, its agents and their adapters.
@@ -32,6 +39,13 @@ _HELLO_BACKOFF_S = 1.0
 # other 124 ever did, each after 31-71 s here plus its own backend's load. A host agent gets
 # one hello window, then this long for a tool server to show up.
 _SLOT_WAIT_S = 5.0
+# A host's tool server answers a hello in about 15 ms (198 of 198, Nov 17 2026). An agent
+# whose host has not answered in this long starts from the saved answers instead of waiting.
+_QUICK_HELLO_S = 1.5
+_START_HOLD_S = 90.0  # a tool call made during such a start waits this long for a tool server
+# Requests this adapter makes itself: never an id an agent uses (those are numbers).
+_VERIFY_ID = "ducky-adapter-catalog"
+_CHILD_INIT_ID = "ducky-adapter-initialize"
 _RECENT_KEPT = 40  # fallbacks kept with their time and reason (self_health reads them)
 # Why the last try to join a tool server failed: the reason a dedicated bridge is counted under.
 _miss: list[str] = []
@@ -402,51 +416,273 @@ def _cannot_run(request: dict, text: str) -> dict:
     return {"jsonrpc": "2.0", "id": request.get("id"), "error": {"code": -32000, "message": text}}
 
 
+def _rows_revision(rows: list) -> str:
+    """backend.bridge.shared_mcp._catalog_revision, for a tool list that came without one."""
+    try:
+        return hashlib.sha256(json.dumps(sorted(rows, key=lambda row: row["name"]), sort_keys=True,
+                                         separators=(",", ":")).encode()).hexdigest()
+    except (TypeError, KeyError, ValueError):
+        return ""
+
+
+def _catalog_path() -> Path:
+    return _app_data() / f"agent_tool_catalog-h{_slot()}.json"
+
+
+def _read_catalog() -> dict:
+    try:
+        data = json.loads(_catalog_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _load_catalog() -> dict | None:
+    """What this host's tool server last answered to ``initialize`` and ``tools/list``: an agent
+    whose host is not answering starts from these. None until both have been kept."""
+    data = _read_catalog()
+    tools = data.get("tools")
+    if not isinstance(data.get("initialize"), dict) or not isinstance(tools, dict):
+        return None
+    if not isinstance(tools.get("tools"), list) or not tools["tools"]:
+        return None
+    return data
+
+
+def _keep_catalog(method: object, result: object, mem: dict) -> None:
+    """Keep the host's answer for the next start, written only when it differs from the kept
+    one (``mem``: this process's copy of the file, read once).
+
+    The answer is stored as it came. An agent started from it gets the same tool list, in the
+    same order, as one the host answered: the lean rows and their load marks are what keep an
+    agent's prompt small and cached, so nothing here rebuilds or reorders them.
+    """
+    if not isinstance(result, dict) or method not in ("initialize", "tools/list"):
+        return
+    if not mem.get("read"):
+        mem.update(_read_catalog())
+        mem["read"] = True
+    if method == "tools/list":
+        rows = result.get("tools")
+        if not isinstance(rows, list) or not rows:
+            return
+        meta = result.get("_meta") if isinstance(result.get("_meta"), dict) else {}
+        revision = str(meta.get("revision") or "") or _rows_revision(rows)
+        if revision and revision == mem.get("revision") and isinstance(mem.get("tools"), dict):
+            return
+        mem["tools"], mem["revision"] = result, revision
+    else:
+        def _fixed(answer: dict) -> dict:
+            return {k: v for k, v in answer.items() if k != "protocolVersion"}  # echoes each client's own
+
+        if isinstance(mem.get("initialize"), dict) and _fixed(mem["initialize"]) == _fixed(result):
+            return
+        mem["initialize"] = result
+    path = _catalog_path()
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps({"saved_at": time.time(), "revision": mem.get("revision") or "",
+                                   "initialize": mem.get("initialize"), "tools": mem.get("tools")},
+                                  separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _saved_answer(saved: dict, request: dict) -> dict | None:
+    """The result for a start-up request, from the host's kept answers (None: not one of them)."""
+    method = request.get("method")
+    if method == "initialize":
+        answer = dict(saved["initialize"])
+        params = request.get("params") if isinstance(request.get("params"), dict) else {}
+        if params.get("protocolVersion"):
+            answer["protocolVersion"] = str(params["protocolVersion"])  # as the tool server echoes it
+        return answer
+    if method == "tools/list":
+        return saved["tools"]
+    if method == "prompts/list":
+        return {"prompts": []}
+    if method == "resources/list":
+        return {"resources": []}
+    if method == "ping":
+        return {}
+    return None
+
+
+def _quick_join() -> socket.socket | None:
+    """A host agent's own tool server, when it answers at once (it nearly always does)."""
+    state = _read_state()
+    if state is None:
+        _note_miss(f"no tool server is registered ({_state_name()} is missing or unreadable)")
+        return None
+    return _hello_attempt(state, _QUICK_HELLO_S)[0]
+
+
+def _child_command(bridge_args: list[str]) -> tuple[list[str], str | None]:
+    """A tool server of this agent's own: this program's ``bridge`` without ``--adapter``."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "bridge", *bridge_args], None
+    return [sys.executable, "-m", "frontend", "bridge", *bridge_args], str(Path(__file__).resolve().parent.parent)
+
+
+def _write_line(proc: subprocess.Popen, msg: dict) -> bool:
+    try:
+        proc.stdin.write(json.dumps(msg, separators=(",", ":")).encode("utf-8") + b"\n")  # type: ignore[union-attr]
+        proc.stdin.flush()  # type: ignore[union-attr]
+        return True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _end_child(proc: subprocess.Popen) -> None:
+    try:
+        proc.stdin.close()  # type: ignore[union-attr]
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        proc.wait(2.0)
+    except (subprocess.TimeoutExpired, OSError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
+def _start_child(bridge_args: list[str], client_init: dict | None) -> subprocess.Popen | None:
+    """Start that tool server and send it ``initialize`` (it answers into ``_CHILD_INIT_ID``)."""
+    cmd, cwd = _child_command(bridge_args)
+    try:
+        proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    except OSError:
+        return None
+    try:
+        from frontend.app_versions import _kill_with_me
+
+        _kill_with_me(proc)  # it never outlives this adapter
+    except Exception:  # noqa: BLE001 - without the job it still ends when its stdin closes
+        pass
+    params = (client_init or {}).get("params")
+    params = params if isinstance(params, dict) else {}
+    hello = {"jsonrpc": "2.0", "id": _CHILD_INIT_ID, "method": "initialize", "params": {
+        "protocolVersion": str(params.get("protocolVersion") or "2025-06-18"),
+        # No client features: the agent had its initialize answered long ago, so nothing the
+        # tool server then asked the client for (roots, sampling) would be understood.
+        "capabilities": {},
+        "clientInfo": params["clientInfo"] if isinstance(params.get("clientInfo"), dict)
+        else {"name": "uefn-ducky-adapter", "version": _our_version() or "0"},
+    }}
+    if not _write_line(proc, hello):
+        _end_child(proc)
+        return None
+    return proc
+
+
 def run(bridge_args: list[str]) -> bool:
-    """Relay stdio <-> daemon until the IDE closes stdin. False = no daemon (use dedicated).
+    """Relay stdio <-> the tool server until the IDE closes stdin. False = no daemon (use dedicated).
 
     If the daemon goes away mid-session this joins a fresh one, however long that takes:
     agents never reconnect an MCP server themselves, so exiting here left them without
     Ducky tools for the rest of the run ("Transport closed"; Codex after a Ducky update).
+
+    A host agent whose host does not answer at once starts from the host's kept answers
+    (``_load_catalog``) and goes on joining beside its turn (``_join_late``): after
+    ``_SLOT_WAIT_S`` with no host, a tool server of its own runs as a child and is relayed
+    to. Nov 11-17 2026: 124 of 1225 turn starts sat 35-100 s in this join before the model
+    saw the message. With nothing kept yet (a host's first agent) it waits as before.
     """
-    first = connect(bridge_args, _SLOT_WAIT_S, patient=False) if _slot() else connect(bridge_args)
-    if first is None:
+    saved: dict | None = None
+    if _slot():
+        first = _quick_join()
+        if first is None:
+            saved = _load_catalog()
+            if saved is None:
+                first = connect(bridge_args, _SLOT_WAIT_S, patient=False)
+    else:
+        first = connect(bridge_args)
+    if first is None and saved is None:
         _record_fallback(_miss[0] if _miss else "no shared daemon answered")
         return False
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
     out_lock = threading.Lock()
-    link_lock = threading.Lock()  # guards the socket swap and every write
-    link: dict[str, socket.socket | None] = {"sock": first}  # None while no daemon answers
+    link_lock = threading.Lock()  # guards the link swap and every write
+    # What serves the tools now: the daemon's socket, or this agent's own tool server (a child
+    # process). Both None while neither answers.
+    link: dict[str, Any] = {"sock": first, "child": None}
     pending: dict[str, dict] = {}  # request id (as JSON) -> request, until answered
     closing = threading.Event()  # the IDE closed stdin: a dropped socket is ours, not a dead daemon
-    up = threading.Event()  # a daemon is joined
-    up.set()
+    up = threading.Event()  # a tool server is joined
+    starting = threading.Event()  # started from the kept answers: the first join is still on
+    kept: dict[str, Any] = {}  # _keep_catalog's copy of the kept answers
+    # A start from the kept answers: the agent's initialize, the revision of the tool list it
+    # was given, and the child process once one is started.
+    early: dict[str, Any] = {"init": None, "revision": "", "child": None}
+    if first is not None:
+        up.set()
+    else:
+        starting.set()
 
     def _emit(msg: dict) -> None:
         with out_lock:
             stdout.write(json.dumps(msg, separators=(",", ":")).encode("utf-8") + b"\n")
             stdout.flush()
 
-    def _send(frame: dict, request: dict | None = None) -> None:
-        if request is not None and request.get("method") not in _RESENDABLE and not up.is_set():
-            up.wait(_HOLD_CALL_S)  # a quick restart: the call goes to the fresh tool server
+    def _send(msg: dict) -> None:
+        """One request from the agent, to whatever serves its tools now."""
+        method = msg.get("method")
+        if method not in _RESENDABLE and not up.is_set():
+            # A quick restart, or a start still joining: the call goes to the tool server once
+            # one is there.
+            up.wait(_START_HOLD_S if starting.is_set() else _HOLD_CALL_S)
         with link_lock:
-            sock = link["sock"]
-            if sock is None:
-                # No tool server yet; the pump is bringing one back. What can be sent again
-                # waits for it, a tool call hears why it did not run.
-                if request is not None and request.get("method") in _RESENDABLE:
-                    pending[json.dumps(request.get("id"))] = request
-                elif request is not None:
-                    _emit(_cannot_run(request, _DOWN))
+            sock, child = link["sock"], link["child"]
+            if child is not None:
+                if method == "initialize" and saved is not None:
+                    # This adapter initialized the child itself: the agent gets the kept answer.
+                    _emit({"jsonrpc": "2.0", "id": msg.get("id"), "result": _saved_answer(saved, msg)})
+                    return
+                if method is not None:
+                    pending[json.dumps(msg.get("id"))] = msg
+                _write_line(child, msg)
                 return
-            if request is not None:
-                pending[json.dumps(request.get("id"))] = request
+            if sock is None:
+                answer = _saved_answer(saved, msg) if saved is not None and starting.is_set() else None
+                if answer is not None:
+                    if method == "initialize":
+                        early["init"] = msg
+                    elif method == "tools/list":
+                        early["revision"] = (str(saved.get("revision") or "")  # type: ignore[union-attr]
+                                             or _rows_revision(answer.get("tools") or []))
+                    _emit({"jsonrpc": "2.0", "id": msg.get("id"), "result": answer})
+                elif method in _RESENDABLE:
+                    # No tool server yet; one is being joined. What can be sent again waits for it.
+                    pending[json.dumps(msg.get("id"))] = msg
+                else:
+                    _emit(_cannot_run(msg, _DOWN))  # a tool call hears why it did not run
+                return
+            pending[json.dumps(msg.get("id"))] = msg
             try:
-                _write_frame(sock, frame)
+                _write_frame(sock, _request_frame(msg))
             except OSError:
                 pass  # the pump reconnects and settles what is pending
+
+    def _aside(msg: dict) -> None:
+        """A cancel, or another notification from the agent (only its own tool server takes those)."""
+        with link_lock:
+            sock, child = link["sock"], link["child"]
+            if child is not None:
+                if msg.get("method") != "notifications/initialized":  # this adapter sent the child its own
+                    _write_line(child, msg)
+            elif sock is not None and msg.get("method") == "notifications/cancelled":
+                try:
+                    _write_frame(sock, {"op": "cancel", "id": (msg.get("params") or {}).get("requestId")})
+                except OSError:
+                    pass
 
     def _reconnect(dead: socket.socket) -> bool:
         """Join a fresh daemon. False only when the IDE closed stdin: with none to reach this
@@ -496,6 +732,18 @@ def run(bridge_args: list[str]) -> bool:
         up.set()
         return True
 
+    def _checked(result: object) -> None:
+        """The host's own tool list, asked for after a start from the kept one."""
+        if not isinstance(result, dict):
+            return
+        _keep_catalog("tools/list", result, kept)
+        meta = result.get("_meta") if isinstance(result.get("_meta"), dict) else {}
+        live = str(meta.get("revision") or "") or _rows_revision(result.get("tools") or [])
+        if live and early["revision"] and live != early["revision"]:
+            # Only when it really differs: a change notice makes the agent list its tools
+            # again, and a new tool list moves its cached prompt.
+            _emit({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+
     def _pump_daemon() -> None:
         while True:
             with link_lock:
@@ -515,13 +763,99 @@ def run(bridge_args: list[str]) -> bool:
                 # keeps the CLI from aborting it after 1800 s with no response or progress.
                 _emit({"jsonrpc": "2.0", "method": frame["method"], "params": frame.get("params") or {}})
                 continue
-            pending.pop(json.dumps(frame.get("id")), None)
+            if frame.get("id") == _VERIFY_ID:
+                _checked(frame.get("result"))
+                continue
+            request = pending.pop(json.dumps(frame.get("id")), None)
             if frame.get("error"):
                 _emit({"jsonrpc": "2.0", "id": frame.get("id"), "error": frame["error"]})
             else:
                 _emit({"jsonrpc": "2.0", "id": frame.get("id"), "result": frame.get("result") or {}})
+                if request is not None and _slot():
+                    _keep_catalog(request.get("method"), frame.get("result"), kept)
 
-    threading.Thread(target=_pump_daemon, daemon=True, name="shared-mcp-pump").start()
+    def _watch_for_host() -> None:
+        """No tool server left to relay to: join the host's when it is back."""
+        dead = socket.socket()
+        with link_lock:
+            link["sock"] = dead
+        if _reconnect(dead):
+            _pump_daemon()
+
+    def _pump_child(child: subprocess.Popen) -> None:
+        for raw in child.stdout:  # type: ignore[union-attr]
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("id") == _CHILD_INIT_ID and "method" not in msg:
+                # Its answer to this adapter's initialize: the agent already has the kept one.
+                with link_lock:
+                    if closing.is_set():
+                        break
+                    _write_line(child, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+                    link["child"] = child
+                    for request in list(pending.values()):  # what waited for a tool server
+                        _write_line(child, request)
+                starting.clear()
+                up.set()
+                continue
+            if "id" in msg and "method" not in msg:
+                pending.pop(json.dumps(msg.get("id")), None)
+            _emit(msg)
+        with link_lock:
+            link["child"] = None
+            up.clear()
+            lost = list(pending.values())
+            pending.clear()
+        starting.clear()
+        if closing.is_set():
+            _end_child(child)  # the agent left while it was still starting
+            return
+        for request in lost:
+            _emit(_cannot_run(request, _DOWN))
+        _watch_for_host()
+
+    def _join_late() -> None:
+        """After a start from the kept answers: the host's tool server when it answers within
+        its window, else a tool server of this agent's own."""
+        sock = connect(bridge_args, _SLOT_WAIT_S, patient=False)
+        if sock is not None:
+            with link_lock:
+                if closing.is_set():
+                    sock.close()
+                    return
+                link["sock"] = sock
+                try:
+                    for request in list(pending.values()):
+                        _write_frame(sock, _request_frame(request))
+                    if early["revision"]:
+                        # The agent has the kept tool list: ask for the host's own. That also
+                        # starts the host's change notices on this connection.
+                        _write_frame(sock, {"op": "mcp", "id": _VERIFY_ID, "method": "tools/list", "params": {}})
+                except OSError:
+                    pass
+            starting.clear()
+            up.set()
+            _pump_daemon()
+            return
+        if closing.is_set():
+            return
+        _record_fallback(_miss[0] if _miss else "no shared daemon answered")
+        child = _start_child(bridge_args, early["init"])
+        if child is None:
+            starting.clear()
+            _watch_for_host()
+            return
+        early["child"] = child
+        _pump_child(child)
+
+    if first is not None:
+        threading.Thread(target=_pump_daemon, daemon=True, name="shared-mcp-pump").start()
+    else:
+        threading.Thread(target=_join_late, daemon=True, name="shared-mcp-join").start()
     try:
         for line in stdin:
             line = line.strip()
@@ -533,12 +867,10 @@ def run(bridge_args: list[str]) -> bool:
                 continue
             if not isinstance(msg, dict):
                 continue
-            if msg.get("method") == "notifications/cancelled":
-                _send({"op": "cancel", "id": (msg.get("params") or {}).get("requestId")})
-                continue
             if msg.get("id") is None:
-                continue  # notification: no response expected
-            _send(_request_frame(msg), msg)
+                _aside(msg)  # a notification: no response expected
+                continue
+            _send(msg)
     except (OSError, ValueError):
         pass
     finally:
@@ -552,4 +884,6 @@ def run(bridge_args: list[str]) -> bool:
                 except OSError:
                     pass
                 sock.close()
+        if early["child"] is not None:
+            _end_child(early["child"])
     return True

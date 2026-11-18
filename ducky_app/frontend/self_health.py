@@ -623,8 +623,8 @@ def findings(snap: dict[str, Any]) -> list[dict[str, str]]:
         out.append({"severity": "high" if fell >= 3 else "medium",
                     "what": f"{_plural(fell, 'agent start', 'agent starts')} in the last hour could not join Ducky's "
                             "tool server and loaded one of their own.",
-                    "why": "Each of those turns starts 15-60 s late and holds a whole tool server in memory. "
-                           f"The last one's reason: {falls.get('reason') or 'not recorded'}.",
+                    "why": "Each of those holds a whole tool server in memory, and its first tool calls wait "
+                           f"while that loads. The last one's reason: {falls.get('reason') or 'not recorded'}.",
                     "fix": "Restart Ducky if it keeps happening. shared_mcp_fallbacks.json in Ducky's data folder "
                            "lists the latest ones with their reasons."})
     healed = [h for h in snap.get("auto_heal") or [] if time.time() - float(h.get("at") or 0) < 3600]
