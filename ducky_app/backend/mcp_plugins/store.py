@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.skills.discovery import appdata_dir
+from frontend.atomic_json import read_json_object, write_text_atomic
 from urllib.parse import urlparse
 
 PLUGIN_MANIFEST = "plugin.json"
@@ -227,18 +228,11 @@ def normalize_server_id(server_id: str) -> str:
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
-    try:
-        if path.is_file():
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else None
-    except (OSError, json.JSONDecodeError):
-        pass
-    return None
+    return read_json_object(path) or None
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    write_text_atomic(path, json.dumps(data, indent=2) + "\n")
 
 
 def _rows():
