@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import type { editor } from "monaco-editor";
 
 import { Icons } from "../../icons/Icons";
@@ -20,13 +20,66 @@ type LiveCodePreviewProps = {
   language: string;
   fill?: boolean;
   className?: string;
+  /** Static highlighted text until clicked; the Monaco editor is made on the first click. */
+  staticUntilClick?: boolean;
+  /** Plain text, never an editor (a block still streaming). */
+  plain?: boolean;
 };
+
+// Same box as the editor (21 px lines, 8 px padding, 378 px cap) so heights never jump.
+const STATIC_STYLE: CSSProperties = {
+  boxSizing: "border-box",
+  padding: "8px 14px",
+  lineHeight: "21px",
+  fontSize: MONACO_EDITOR_FONT_SIZE,
+  maxHeight: 378,
+  overflow: "hidden",
+  whiteSpace: "pre",
+  overflowWrap: "normal",
+};
+
+// ponytail: unbounded text+language cache; add an LRU if long sessions grow it.
+const colorizeCache = new Map<string, string>();
+const colorizing = new Map<string, Promise<string>>();
+
+function useColorized(value: string, language: string, enabled: boolean): string | null {
+  const appearance = useAppearanceOptional();
+  const key = `${language}\n${value}`;
+  const [html, setHtml] = useState<string | null>(() => colorizeCache.get(key) ?? null);
+  const ready = Boolean(appearance?.appearanceReady);
+  useEffect(() => {
+    if (!enabled) return;
+    const hit = colorizeCache.get(key);
+    if (hit !== undefined) {
+      setHtml(hit);
+      return;
+    }
+    setHtml(null);
+    if (!ready || !appearance) return;
+    let cancelled = false;
+    let job = colorizing.get(key);
+    if (!job) {
+      job = (async () => {
+        const monaco = await setupMonaco();
+        // The theme's token classes (mtkN) are global once it is set.
+        applyVerseMonacoTheme(monaco, appearance.cssVars, appearance.foundation);
+        const out = await monaco.editor.colorize(value, language || "plaintext", {});
+        colorizeCache.set(key, out);
+        return out;
+      })().finally(() => colorizing.delete(key));
+      colorizing.set(key, job);
+    }
+    job.then((out) => { if (!cancelled) setHtml(out); }, () => { /* plain text stays */ });
+    return () => { cancelled = true; };
+  }, [enabled, key, ready, appearance, value, language]);
+  return enabled ? html : null;
+}
 
 /**
  * Read-only Monaco using the same language/theme stack as the project editor.
  * Settings Verse preview and chat fences both mount this — no homemade highlighter.
  */
-export function LiveCodePreview({ value, language, fill, className }: LiveCodePreviewProps) {
+export function LiveCodePreview({ value, language, fill, className, staticUntilClick, plain }: LiveCodePreviewProps) {
   const appearance = useAppearanceOptional();
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -39,7 +92,10 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
   const [unlocked, setUnlocked] = useState(false);
   const [hint, setHint] = useState(false);
   const [copied, setCopied] = useState(false);
-  const canMount = Boolean(appearance?.appearanceReady);
+  const [activated, setActivated] = useState(!staticUntilClick);
+  const isStatic = Boolean(plain) || !activated;
+  const canMount = Boolean(appearance?.appearanceReady) && !isStatic;
+  const staticHtml = useColorized(value, language, Boolean(staticUntilClick) && !plain && !activated);
   const lockScroll = !fill;
 
   useMonacoEditorLayout(containerRef, editorRef, ready);
@@ -180,9 +236,24 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
       ref={wrapRef}
       className={`live-code-preview${fill ? " live-code-preview--fill" : ""}${canMount ? " live-code-preview--boot" : ""}${ready ? " live-code-preview--ready" : ""}${unlocked ? " live-code-preview--active" : ""}${className ? ` ${className}` : ""}`}
     >
-      <pre className="live-code-preview-source">{value}</pre>
+      {isStatic ? (
+        staticHtml !== null ? (
+          <pre
+            className="live-code-preview-source live-code-preview-static"
+            style={STATIC_STYLE}
+            // Monaco's colorize escapes the text; only its token spans are markup.
+            dangerouslySetInnerHTML={{ __html: staticHtml }}
+          />
+        ) : (
+          <pre className="live-code-preview-source live-code-preview-static" style={STATIC_STYLE}>
+            <code>{value}</code>
+          </pre>
+        )
+      ) : (
+        <pre className="live-code-preview-source">{value}</pre>
+      )}
       <div ref={containerRef} className="live-code-preview-editor" />
-      {unlocked || fill ? (
+      {unlocked || fill || isStatic ? (
         <button
           type="button"
           className="live-code-preview-copy"
@@ -209,6 +280,7 @@ export function LiveCodePreview({ value, language, fill, className }: LiveCodePr
           onClick={() => {
             setUnlocked(true);
             setHint(false);
+            if (!plain) setActivated(true);
           }}
         >
           {hint ? <span className="live-code-preview-lock-hint">Click to scroll</span> : null}

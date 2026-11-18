@@ -9,9 +9,11 @@ interface RichCodeBlockProps {
   language?: string;
   inline?: boolean;
   onOpenFile?: OpenFileHandler;
+  /** The reply is still streaming: plain text, no highlighter or editor yet. */
+  streaming?: boolean;
 }
 
-export function RichCodeBlock({ text, language, inline, onOpenFile }: RichCodeBlockProps) {
+export function RichCodeBlock({ text, language, inline, onOpenFile, streaming }: RichCodeBlockProps) {
   const graphic = useRichGraphic(inline ? "" : text, inline ? undefined : language);
   if (inline) {
     return <RichCodeChip text={text} onOpenFile={onOpenFile} />;
@@ -22,6 +24,8 @@ export function RichCodeBlock({ text, language, inline, onOpenFile }: RichCodeBl
       className="rich-code rich-code--block"
       value={text}
       language={monacoLanguageForFence(language, text)}
+      staticUntilClick
+      plain={streaming}
     />
   );
 }

@@ -33,7 +33,7 @@ export const RichContentRenderer = memo(function RichContentRenderer({
   if (mode === "streaming" || !parsed) {
     return (
       <div className="rich-content">
-        <MarkdownContent text={text} onOpenFile={onOpenFile} />
+        <MarkdownContent text={text} onOpenFile={onOpenFile} streaming={mode === "streaming"} />
       </div>
     );
   }

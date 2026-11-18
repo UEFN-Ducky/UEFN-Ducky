@@ -18,6 +18,8 @@ import { safeChatMediaSrc } from "../tool-cards/bodies/WebSearchBody";
 interface MarkdownContentProps {
   text: string;
   onOpenFile?: OpenFileHandler;
+  /** The reply is still streaming (code fences stay plain text). */
+  streaming?: boolean;
 }
 
 /** Markdown cut where a heading starts a new section (a blank line, then `#`, outside a
@@ -48,7 +50,7 @@ export function markdownSections(text: string): string[] {
   return sections;
 }
 
-const MarkdownChunk = memo(function MarkdownChunk({ text, onOpenFile }: MarkdownContentProps) {
+const MarkdownChunk = memo(function MarkdownChunk({ text, onOpenFile, streaming }: MarkdownContentProps) {
   const components = useMemo((): Components => {
     return {
       h1: ({ children }) => <RichHeading level={1}>{children}</RichHeading>,
@@ -73,6 +75,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ text, onOpenFile }: Markdown
         return <RichCodeBlock
           text={String(child.props.children ?? "").replace(/\n$/, "")}
           language={child.props.className?.replace("language-", "")}
+          streaming={streaming}
         />;
       },
       table: ({ children }) => <RichTableWrap>{children}</RichTableWrap>,
@@ -89,7 +92,7 @@ const MarkdownChunk = memo(function MarkdownChunk({ text, onOpenFile }: Markdown
         return alt ? <span>{alt}</span> : null;
       },
     };
-  }, [onOpenFile]);
+  }, [onOpenFile, streaming]);
 
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={richUrlTransform} components={components}>
@@ -98,14 +101,14 @@ const MarkdownChunk = memo(function MarkdownChunk({ text, onOpenFile }: Markdown
   );
 });
 
-export function MarkdownContent({ text, onOpenFile }: MarkdownContentProps) {
+export function MarkdownContent({ text, onOpenFile, streaming }: MarkdownContentProps) {
   const segments = useMemo(() => promoteMarkdownToSegments(text), [text]);
   return (
     <div className="rich-markdown">
       {segments.map((seg, i) =>
         seg.kind === "markdown" ? (
           markdownSections(seg.text).map((part, j) => (
-            <MarkdownChunk key={`md-${i}-${j}`} text={part} onOpenFile={onOpenFile} />
+            <MarkdownChunk key={`md-${i}-${j}`} text={part} onOpenFile={onOpenFile} streaming={streaming} />
           ))
         ) : (
           <RichBlockView
