@@ -6,7 +6,6 @@ from typing import Any
 
 from backend.mcp_plugins.registry import (
     plugin_destructive_tools,
-    plugin_intent_pattern,
     plugin_plan_tools,
 )
 from backend.mcp_plugins.store import (
@@ -62,17 +61,3 @@ def nested_mcp_plan_tool_names() -> frozenset[str]:
         names.update(plugin_plan_tools(manifest))
     return frozenset(names)
 
-
-def plugin_tools_matching_message(all_tool_names: set[str], user_message: str) -> frozenset[str]:
-    selected: set[str] = set()
-    text = user_message or ""
-    for manifest in _enabled_manifests():
-        pattern = plugin_intent_pattern(manifest)
-        if pattern is None or not pattern.search(text):
-            continue
-        prefix = str(manifest.get("tool_prefix") or manifest.get("id") or "")
-        needle = f"{prefix}__"
-        for name in all_tool_names:
-            if name.startswith(needle):
-                selected.add(name)
-    return frozenset(selected)

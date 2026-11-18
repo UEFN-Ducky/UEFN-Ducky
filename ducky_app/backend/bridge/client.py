@@ -828,16 +828,6 @@ def _send_command(command: str, params: Optional[dict] = None, timeout: float = 
     return result
 
 
-def check_connection() -> str:
-    try:
-        port = discover_port()
-        return f"Connected to UEFN on port {port}"
-    except ConnectionError:
-        return "NOT CONNECTED - UEFN listener is not running"
-    except Exception as e:
-        return f"Connection error: {e}"
-
-
 # ---------------------------------------------------------------------------
 # Workspace file tools (host disk; VS Code extension sets UEFN_VSCODE_WORKSPACE_FOLDERS)
 # ---------------------------------------------------------------------------

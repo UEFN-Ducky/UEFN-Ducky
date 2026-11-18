@@ -50,10 +50,6 @@ def is_builtin_group(plugin_id: str) -> bool:
     return plugin_id in BUILTIN_GROUP_IDS
 
 
-def is_bridge_tool(tool_name: str) -> bool:
-    return tool_name in BRIDGE_TOOLS
-
-
 def builtin_group_for_tool(tool_name: str) -> str | None:
     """Return builtin group id, or None for bridge / plugin-owned tools."""
     if tool_name in BRIDGE_TOOLS:
@@ -195,9 +191,3 @@ def count_builtin_group_tools(group_id: str) -> int:
     tools = asyncio.run(mcp.list_tools())
     return sum(1 for t in tools if builtin_group_for_tool(t.name) == group_id)
 
-
-def migrate_drop_builtin_uefn(toolset_ids: list[str] | None) -> list[str] | None:
-    """Strip legacy builtin_uefn from a chat/settings toolset list."""
-    if toolset_ids is None:
-        return None
-    return [x for x in toolset_ids if str(x).strip() != BUILTIN_UEFN]

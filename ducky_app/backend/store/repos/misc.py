@@ -162,12 +162,6 @@ def diag_stamp(project_id: str) -> tuple[int, int] | None:
     return int(float(row[1]) * 1_000_000), int(row[0])
 
 
-def diag_clear(project_id: str) -> None:
-    conn = db.connect()
-    with db.write_txn(conn):
-        conn.execute("DELETE FROM verse_diagnostics WHERE project_id=?", (project_id,))
-
-
 # --------------------------------------------------------------------------- verse digests
 
 
@@ -206,14 +200,3 @@ def digest_search(query: str, paths: list[str], *, limit: int = 2000) -> list[tu
     ).fetchall()
     return [(str(r[0]), int(r[1]), str(r[2])) for r in rows]
 
-
-def digest_drop_missing(existing_paths: set[str]) -> int:
-    conn = db.connect()
-    known = [str(r[0]) for r in conn.execute("SELECT path FROM digest_files").fetchall()]
-    gone = [p for p in known if p not in existing_paths]
-    if gone:
-        with db.write_txn(conn):
-            for p in gone:
-                conn.execute("DELETE FROM digest_lines WHERE path=?", (p,))
-                conn.execute("DELETE FROM digest_files WHERE path=?", (p,))
-    return len(gone)

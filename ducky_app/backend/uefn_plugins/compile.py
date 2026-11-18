@@ -42,7 +42,6 @@ from backend.uefn_plugins.plugin_version import plugin_version_rank
 from backend.uefn_plugins.signing import (
     SigningKeyError,
     pinned_public_key,
-    release_key_problem,
     release_public_key,
 )
 from backend.uefn_plugins.store import PLUGIN_MANIFEST, normalize_plugin_id
@@ -733,38 +732,6 @@ def build_plugin(
         # The licence gate is live only when the Store's key was baked in.
         "license_gate": bool(pubkey),
     }
-
-
-def abi_matches(manifest: dict[str, Any]) -> bool:
-    """True unless the manifest pins a python_abi that differs from this interpreter."""
-    abi = str(manifest.get("python_abi") or "").strip()
-    return (not abi) or abi == PY_ABI
-
-
-def assert_release_abi(zip_path: str | Path) -> None:
-    """Refuse to package a compiled plugin into a release (installer guard).
-
-    Raises CompileError when this build doesn't carry the Store's signing key (the
-    release step that fetches it was skipped, so Store installs would go unverified),
-    and on a python_abi mismatch, so a bundled compiled plugin can never ship against
-    the wrong interpreter.
-    """
-    problem = release_key_problem()
-    if problem:
-        raise CompileError(problem)
-    zp = Path(zip_path)
-    try:
-        with zipfile.ZipFile(zp) as zf:
-            names = [n for n in zf.namelist() if Path(n).name == PLUGIN_MANIFEST and len(Path(n).parts) <= 2]
-            if not names:
-                raise CompileError(f"{zp.name}: no {PLUGIN_MANIFEST}")
-            manifest = json.loads(zf.read(sorted(names, key=len)[0]).decode("utf-8"))
-    except (OSError, zipfile.BadZipFile, json.JSONDecodeError) as exc:
-        raise CompileError(f"{zp.name}: cannot read plugin.json ({exc})") from exc
-    if not abi_matches(manifest):
-        raise CompileError(
-            f"{zp.name}: built for {manifest.get('python_abi')}, this app is {PY_ABI} — refusing to bundle."
-        )
 
 
 def main(argv: list[str] | None = None) -> int:

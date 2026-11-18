@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
-from backend.agent.toolsets.workflows import agent_tool_name
 
 _SCENE_TOOLS = frozenset(
     {
@@ -461,56 +459,6 @@ def skill_intent_matched(user_text: str, history: list[dict] | None = None) -> b
         if isinstance(content, str) and SKILL_INTENT_RE.search(content):
             return True
     return False
-
-
-def _parse_tool_result_data(raw: Any) -> dict[str, Any] | None:
-    if isinstance(raw, dict):
-        return raw
-    if not isinstance(raw, str) or not raw.strip():
-        return None
-    text = raw.strip()
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(parsed, dict) and "data" in parsed:
-        inner = parsed.get("data")
-        if isinstance(inner, str):
-            try:
-                inner_parsed = json.loads(inner)
-                if isinstance(inner_parsed, dict):
-                    return inner_parsed
-            except json.JSONDecodeError:
-                pass
-        if isinstance(inner, dict):
-            return inner
-    return parsed if isinstance(parsed, dict) else None
-
-
-def tools_suggested_by_history(history: list[dict[str, Any]] | None) -> set[str]:
-    """Unlock tools hinted by the last successful inspect / wiring tool results."""
-    suggested: set[str] = set()
-    for message in reversed(history or []):
-        if message.get("role") != "assistant":
-            continue
-        for block in reversed(message.get("blocks") or []):
-            if not isinstance(block, dict):
-                continue
-            if block.get("type") != "tool_call" or block.get("status") != "success":
-                continue
-            result = block.get("result") or {}
-            if not result.get("ok"):
-                continue
-            data = _parse_tool_result_data(result.get("data"))
-            if not data:
-                continue
-            for name in data.get("allowed_next_tools") or []:
-                mapped = agent_tool_name(str(name))
-                if mapped:
-                    suggested.add(mapped)
-            if suggested:
-                return suggested
-    return suggested
 
 
 # Extra tools beyond CORE_TOOLS when the message matches (reduces token load on unrelated turns).

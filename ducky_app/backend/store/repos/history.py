@@ -7,7 +7,6 @@ costs one copy.
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from backend.store import db
@@ -83,13 +82,3 @@ def content(project_id: str, path: str, entry_id: str) -> str | None:
     ).fetchone()
     return None if row is None else str(row[0])
 
-
-def rename_path(project_id: str, old: str, new: str) -> int:
-    conn = db.connect()
-    with db.write_txn(conn):
-        cur = conn.execute("UPDATE file_versions SET path=? WHERE project_id=? AND path=?", (new, project_id, old))
-    return cur.rowcount
-
-
-def now_ms_id() -> str:
-    return f"{int(time.time() * 1000)}"

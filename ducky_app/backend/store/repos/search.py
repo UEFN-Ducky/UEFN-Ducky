@@ -371,14 +371,6 @@ def drop_stale_sandbox_records(older_than_s: float) -> int:
     return n
 
 
-def record_sources() -> dict[str, str]:
-    """source_key -> plugin id of every source holding plugin records."""
-    rows = db.connect().execute(
-        "SELECT DISTINCT source_key, plugin_id FROM search_docs WHERE kind='record'"
-    ).fetchall()
-    return {str(r[0]): str(r[1]) for r in rows}
-
-
 def source_keys() -> list[str]:
     rows = db.connect().execute("SELECT DISTINCT source_key FROM search_docs").fetchall()
     return [str(r[0]) for r in rows]

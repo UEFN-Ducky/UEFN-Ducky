@@ -101,14 +101,6 @@ def plan_docs(project_id: str, kind: str) -> list[tuple[str, dict[str, Any]]]:
     return [(str(k), json.loads(d)) for k, d in rows]
 
 
-def plan_head(project_id: str, key: str) -> dict[str, Any] | None:
-    """The mutator gate's two columns without deserialising the tree."""
-    row = db.connect().execute(
-        "SELECT plan_id, status, updated_at FROM plans WHERE project_id=? AND key=?", (project_id, key)
-    ).fetchone()
-    return None if row is None else dict(row)
-
-
 # --------------------------------------------------------------------------- tasks
 
 
@@ -133,9 +125,3 @@ def task_docs(project_id: str) -> list[dict[str, Any]]:
     ).fetchall()
     return [json.loads(r[0]) for r in rows]
 
-
-def task_delete(project_id: str, task_id: str) -> bool:
-    conn = db.connect()
-    with db.write_txn(conn):
-        cur = conn.execute("DELETE FROM tasks WHERE project_id=? AND id=?", (project_id, task_id))
-    return cur.rowcount > 0
