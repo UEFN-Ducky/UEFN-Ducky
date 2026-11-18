@@ -8,9 +8,10 @@ A file with comments (JSONC) is never rewritten: that would drop them.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
+
+from frontend.atomic_json import write_text_atomic
 
 
 def render_opencode_block(uefn_block: dict[str, Any]) -> dict[str, Any]:
@@ -47,10 +48,7 @@ def merge_opencode_config(config_path: Path, uefn_block: dict[str, Any]) -> bool
         return False
     data.setdefault("$schema", "https://opencode.ai/config.json")
     data["mcp"] = {**mcp, "uefn": block}
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = config_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, config_path)
+    write_text_atomic(config_path, json.dumps(data, indent=2) + "\n")
     return True
 
 

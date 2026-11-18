@@ -24,6 +24,7 @@ import os
 import platform
 import re
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -105,9 +106,7 @@ def mark_stopped(pid: int, local_appdata: Path | str | None = None) -> bool:
     folder = Path(local_appdata) / "UEFN-Ducky" / "crash" if local_appdata else _dir()
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        tmp = folder / "stopped.tmp"
-        tmp.write_text(json.dumps({"pid": int(pid), "at": time.time()}), encoding="utf-8")
-        tmp.replace(_stopped_path(folder))
+        _replace_json(_stopped_path(folder), {"pid": int(pid), "at": time.time()})
     except (OSError, ValueError):
         return False
     return True
@@ -123,13 +122,32 @@ def _scrub(text: str) -> str:
         return text.replace(home, "~").replace(home.replace("\\", "/"), "~") if home else text
 
 
+def _replace_json(path: Path, data: Any) -> None:
+    """Own copy of frontend.atomic_json.write_json_plain: this module loads before the app does."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data))
+        for attempt in range(3):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _write_state() -> None:
     try:
         with _state_lock:
-            path = _boot_path()
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(_state), encoding="utf-8")
-            tmp.replace(path)
+            _replace_json(_boot_path(), _state)
     except (OSError, RuntimeError, ValueError):
         pass
 

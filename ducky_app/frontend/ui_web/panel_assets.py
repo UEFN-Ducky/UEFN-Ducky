@@ -104,10 +104,9 @@ def _write_stamp(key: dict[str, object] | None) -> None:
     if key is None or path is None:
         return
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(key), encoding="utf-8")
-        tmp.replace(path)
+        from frontend.atomic_json import write_json_plain
+
+        write_json_plain(path, key)
     except OSError:
         pass
 

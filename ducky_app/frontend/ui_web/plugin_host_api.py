@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.skills.discovery import appdata_dir
+from frontend.atomic_json import write_text_atomic
 
 log = logging.getLogger("uefn.plugin_host_api")
 
@@ -164,12 +165,7 @@ def cache_set(plugin_id: str, key: str, data: dict[str, Any], *, sensitive: bool
         return
     if sensitive:
         raise RuntimeError("sensitive plugin data needs the database backend")
-    path = cache_dir(pid)
-    path.mkdir(parents=True, exist_ok=True)
-    target = path / f"{k}.json"
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    write_text_atomic(cache_dir(pid) / f"{k}.json", json.dumps(payload, ensure_ascii=False, indent=0) + "\n")
 
 
 def cache_clear(plugin_id: str, key: str = "") -> dict[str, Any]:
@@ -338,12 +334,7 @@ def prefs_all_set(all_prefs: dict[str, Any]) -> dict[str, Any]:
                     # Sealed for the account; raises while its data key is missing (never plaintext).
                     repo.set_prefs(pid, _seal(bag[pid], where["account"]), **where)
             return {"ok": True, "prefs": bag}
-        root = prefs_dir()
-        root.mkdir(parents=True, exist_ok=True)
-        target = prefs_all_path()
-        tmp = target.with_suffix(".tmp")
-        tmp.write_text(json.dumps(bag, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
-        tmp.replace(target)
+        write_text_atomic(prefs_all_path(), json.dumps(bag, ensure_ascii=False, indent=0) + "\n")
         return {"ok": True, "prefs": bag}
 
 

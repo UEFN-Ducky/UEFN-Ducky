@@ -148,11 +148,9 @@ def _write_disk(project_root: str, data: dict[str, Any]) -> None:
         return
     path = _disk_path(project_root)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"v": CACHE_VERSION, "files": data.get("files") or {}}
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        from frontend.atomic_json import write_json_plain
+
+        write_json_plain(path, {"v": CACHE_VERSION, "files": data.get("files") or {}}, ensure_ascii=False)
     except Exception:
         pass
 

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from frontend.atomic_json import write_text_atomic
 from frontend.settings import default_app_data_dir
 
 _RETENTION_DAYS = 7
@@ -89,11 +90,7 @@ def _entries_since(since: float) -> list[dict[str, Any]]:
 
 
 def _write_entries(path: Path, entries: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in entries)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(body, encoding="utf-8")
-    tmp.replace(path)
+    write_text_atomic(path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in entries))
 
 
 def log_call(

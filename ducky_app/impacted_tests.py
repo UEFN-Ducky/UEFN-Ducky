@@ -26,6 +26,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -162,9 +164,22 @@ def _save_cache(path: Path, files: dict[str, list], graph: dict[str, set[str]]) 
     data = {"version": CACHE_VERSION, "files": files, "graph": {k: sorted(v) for k, v in graph.items()}}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data), encoding="utf-8")
-        os.replace(tmp, path)
+        # Stdlib only, so not frontend.atomic_json: unique temp, retry while another run holds it.
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(json.dumps(data))
+            for attempt in range(3):
+                try:
+                    os.replace(tmp, path)
+                    break
+                except PermissionError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
     except OSError:
         pass  # a read-only checkout just parses every time
 
