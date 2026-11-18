@@ -94,6 +94,7 @@ function GuidanceSwitches() {
 export function StartWithWindowsSwitch() {
   const [on, setOn] = useState(true);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState("");
   useEffect(() => onApiReady(() => {
     void Promise.resolve(getApi()?.get_settings?.()).then((settings) => {
       setOn((settings as { start_with_windows?: boolean } | undefined)?.start_with_windows !== false);
@@ -105,12 +106,26 @@ export function StartWithWindowsSwitch() {
       <SettingsToggleRow
         id="toggle-start-with-windows"
         label="Start with Windows"
-        description="Ducky opens hidden in the tray when you sign in, so opening it is instant."
+        description={
+          <>
+            Ducky opens hidden in the tray when you sign in, so opening it is instant.
+            {error ? <><br /><span role="alert">{error}</span></> : null}
+          </>
+        }
         checked={on}
         disabled={!loaded}
         onChange={(value) => {
           setOn(value);
-          void getApi()?.save_agent_settings({ start_with_windows: value });
+          setError("");
+          // Windows refused the change: the setting kept its old value, so the switch goes back.
+          // ponytail: typed `string` for the other callers; a refused apply answers {ok: false, error}.
+          void Promise.resolve(getApi()?.save_agent_settings({ start_with_windows: value })).then((reply) => {
+            const res = reply as unknown as { ok?: boolean; error?: string } | string | undefined;
+            if (res && typeof res === "object" && res.ok === false) {
+              setOn(!value);
+              setError(res.error || "Could not change start with Windows");
+            }
+          });
         }}
       />
     </div>

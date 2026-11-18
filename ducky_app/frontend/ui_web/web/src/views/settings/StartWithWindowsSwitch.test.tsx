@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = {
   get_settings: vi.fn(),
-  save_agent_settings: vi.fn(async () => ({ ok: true })),
+  save_agent_settings: vi.fn<(patch: unknown) => Promise<unknown>>(async () => ({ ok: true })),
 };
 
 vi.mock("../../hooks/usePanelApi", () => ({ getApi: () => api }));
@@ -43,5 +43,18 @@ describe("Start with Windows switch", () => {
     });
     expect(api.save_agent_settings).toHaveBeenCalledWith({ start_with_windows: true });
     expect(box().checked).toBe(true);
+  });
+
+  it("a refused change flips the switch back and says why", async () => {
+    api.get_settings.mockResolvedValue({ start_with_windows: false });
+    api.save_agent_settings.mockResolvedValueOnce({ ok: false, error: "Could not change start with Windows" });
+    render(<StartWithWindowsSwitch />);
+    await waitFor(() => expect(box().disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(box());
+    });
+    expect(api.save_agent_settings).toHaveBeenCalledWith({ start_with_windows: true });
+    expect((await screen.findByRole("alert")).textContent).toBe("Could not change start with Windows");
+    expect(box().checked).toBe(false);
   });
 });
