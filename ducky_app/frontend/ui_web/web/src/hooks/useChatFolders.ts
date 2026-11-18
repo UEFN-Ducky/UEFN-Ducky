@@ -118,10 +118,39 @@ function assembleOneProject(
   };
 }
 
-/** Same rows, same order, same fields: a reload with no change paints nothing.
- * ponytail: JSON compare of ~100 plain rows is sub-ms; key on a revision if the tree grows huge. */
-function sameRows(a: unknown, b: unknown): boolean {
-  return a === b || JSON.stringify(a) === JSON.stringify(b);
+const isPlain = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && Object.getPrototypeOf(v) === Object.prototype;
+const idOf = (v: unknown): unknown => (isPlain(v) && typeof v.id === "string" ? v.id : undefined);
+
+/** `next` with every part equal to `prev` swapped for the `prev` object (array items
+ *  matched by `id`), so a reload with no change returns `prev` itself and one renamed
+ *  row leaves the other rows' objects (and the panes memoized on them) as they were. */
+export function shareRows<T>(prev: T, next: T): T {
+  if (Object.is(prev, next)) return prev;
+  if (Array.isArray(prev) && Array.isArray(next)) {
+    const byKey = new Map<unknown, unknown>();
+    prev.forEach((p, i) => byKey.set(idOf(p) ?? i, p));
+    let same = prev.length === next.length;
+    const out = next.map((n, i) => {
+      const p = byKey.get(idOf(n) ?? i);
+      const s = p === undefined ? n : shareRows(p, n);
+      if (s !== prev[i]) same = false;
+      return s;
+    });
+    return (same ? prev : out) as T;
+  }
+  if (isPlain(prev) && isPlain(next)) {
+    const keys = Object.keys(next);
+    let same = keys.length === Object.keys(prev).length;
+    const out: Record<string, unknown> = {};
+    for (const k of keys) {
+      const s = shareRows(prev[k], next[k]);
+      if (s !== prev[k] || !(k in prev)) same = false;
+      out[k] = s;
+    }
+    return (same ? prev : out) as T;
+  }
+  return next;
 }
 
 export function useChatFolders(refreshToken: number) {
@@ -163,10 +192,15 @@ export function useChatFolders(refreshToken: number) {
     collectExpanded(foldersRef.current, expandedById);
     const one = assembleOneProject(folderRows, allConvs, expandedById);
     if (stale()) return;
-    if (!sameRows(archiveChatsRef.current, one.archiveChats)) setArchiveChats(one.archiveChats);
-    if (!sameRows(hubChatsRef.current, one.hubChats)) setHubChats(one.hubChats);
-    if (!sameRows(rootChatsRef.current, one.rootChats)) setRootChats(one.rootChats);
-    if (!sameRows(foldersRef.current, one.folders)) setFolders(one.folders);
+    // Unchanged rows keep their objects; an unchanged list is not set at all.
+    const archive = shareRows(archiveChatsRef.current, one.archiveChats);
+    const hubs = shareRows(hubChatsRef.current, one.hubChats);
+    const root = shareRows(rootChatsRef.current, one.rootChats);
+    const tree = shareRows(foldersRef.current, one.folders);
+    if (archive !== archiveChatsRef.current) setArchiveChats(archive);
+    if (hubs !== hubChatsRef.current) setHubChats(hubs);
+    if (root !== rootChatsRef.current) setRootChats(root);
+    if (tree !== foldersRef.current) setFolders(tree);
     setFoldersLoaded(true);
   }, []);
 

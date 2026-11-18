@@ -1802,7 +1802,7 @@ function ChatViewEditorChrome({
                     onOpenChat={openChatTab}
                     onOpenFile={handleOpenFileAt}
                     onOpenPlan={openPlanTab}
-                    onDismissChatAlert={(id) => dismissCompletionAlert(id)}
+                    onDismissChatAlert={dismissCompletionAlert}
                     onCloseTab={requestCloseTab}
                     onReorderTabs={reorderTabsInGroup}
                     onDropTab={dropTabOnGroup}

@@ -1,5 +1,5 @@
 import { subscribeLatestChatActivity } from "../navigation/latestChatActivity";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { skipAutoFocus } from "../hooks/useNarrowLayout";
 import { isDucktactoeChat } from "../plugin-ui/ducktactoeBoardChat";
@@ -128,7 +128,41 @@ interface ChatPaneProps {
   onEngage?: () => void;
 }
 
-export function ChatPane({
+/** The chats a pane shows: its own row and its linked children. */
+function paneChats(all: ChatTab[], chat: ChatTab): ChatTab[] {
+  return all.filter((c) => c.id === chat.id || c.parentConvId === chat.id);
+}
+
+function sameFields(a: object, b: object): boolean {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length
+    && ka.every((k) => Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+/** A chat-list reload (a rename, a move, an agent start elsewhere) leaves this pane alone:
+ *  `chat` compares by field, `allChats` by the rows this pane shows (group panes list every
+ *  chat to invite, so they compare it whole), `onEngage` by presence (it only closes over
+ *  this chat's id). */
+export function samePaneProps(a: ChatPaneProps, b: ChatPaneProps): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof ChatPaneProps)[]);
+  for (const k of keys) {
+    if (Object.is(a[k], b[k])) continue;
+    if (k === "chat" && sameFields(a.chat, b.chat)) continue;
+    if (k === "onEngage" && !a.onEngage === !b.onEngage) continue;
+    if (k === "folders" && !b.chat.isGroup) continue;
+    if (k === "allChats" && !b.chat.isGroup) {
+      const x = paneChats(a.allChats, a.chat);
+      const y = paneChats(b.allChats, b.chat);
+      if (x.length === y.length && x.every((c, i) => c === y[i])) continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+export const ChatPane = memo(ChatPaneView, samePaneProps);
+
+function ChatPaneView({
   chat,
   visible,
   flexGrow,

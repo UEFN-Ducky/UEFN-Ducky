@@ -269,8 +269,9 @@ export const EditorGroupPane = memo(function EditorGroupPane({
     }
     if (activeTab.kind === "chat" && activeTab.chatId) {
       const found = allChats.find((c) => c.id === activeTab.chatId);
+      // The row itself when nothing is added, so the memoized pane sees the same chat.
       const chat: ChatTab = found
-        ? { ...found, isGroup: found.isGroup || activeTab.isGroup }
+        ? (found.isGroup || !activeTab.isGroup ? found : { ...found, isGroup: true })
         : {
             id: activeTab.chatId,
             name: activeTab.name,
