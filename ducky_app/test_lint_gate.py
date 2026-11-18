@@ -19,6 +19,14 @@ def test_ruff_config_selects_at_least_today_s_rules():
     assert not missing, f"ruff.toml dropped rule families: {sorted(missing)}"
 
 
+def test_the_release_test_phase_runs_ruff():
+    source = (ROOT / "release" / "publish_app.py").read_text(encoding="utf-8")
+    assert 'RUFF_PATHS = ("ducky_app", "release", "build", "scripts")' in source
+    assert '"-m", "ruff", "check", *RUFF_PATHS' in source
+    phase = source.split("def run_regression_tests", 1)[1]
+    assert phase.index("run_ruff()") < phase.index('"-m", "pytest"'), "ruff must run before pytest"
+
+
 @pytest.mark.skipif(importlib.util.find_spec("ruff") is None, reason="ruff not installed")
 def test_ruff_check_is_clean():
     done = subprocess.run(

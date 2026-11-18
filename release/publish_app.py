@@ -909,13 +909,6 @@ def mcp_call(base: str, api_key: str, name: str, arguments: dict) -> dict:
     return result if isinstance(result, dict) else {"ok": True, "result": result}
 
 
-def absolute_url(base: str, url: str) -> str:
-    text = (url or "").strip()
-    if text.lower().startswith("https://") or text.lower().startswith("http://"):
-        return text
-    return base.rstrip("/") + "/" + text.lstrip("/")
-
-
 def _self_check() -> None:
     assert parse_version_tuple("1.0.450") == (1, 0, 450)
     assert parse_version_tuple("1.0.450") < parse_version_tuple("1.0.451")
@@ -1033,6 +1026,17 @@ def pytest_env(root: Path = ROOT) -> dict[str, str]:
     return env
 
 
+RUFF_PATHS = ("ducky_app", "release", "build", "scripts")
+
+
+def run_ruff() -> None:
+    """ruff check with ruff.toml's rules, before any test suite: a lint finding fails the phase."""
+    print("=== ruff check ===")
+    proc = subprocess.run([sys.executable, "-m", "ruff", "check", *RUFF_PATHS], cwd=str(ROOT))
+    if proc.returncode != 0:
+        raise SystemExit(f"ruff check failed (exit {proc.returncode}); fix the findings above")
+
+
 NATIVE_MANIFEST = ROOT / "native_launcher" / "Cargo.toml"
 # The full pytest run names its folders: pytest.ini's testpaths leaves out release/, whose
 # tests pin these release steps.
@@ -1087,6 +1091,7 @@ def run_regression_tests() -> None:
         check=True,
         cwd=str(ROOT),
     )
+    run_ruff()
     web = ROOT / "ducky_app" / "frontend" / "ui_web" / "web"
     npm = shutil.which("npm")
     if not npm:
