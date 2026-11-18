@@ -512,3 +512,30 @@ def test_a_card_also_shows_at_the_top_of_its_started_by_links(monkeypatch, conv)
     for alone in ("lead", "stranger", "orphan", ""):
         assert pp.starter_root(alone) == "", alone
     assert pp.starter_root("loop-a") == "loop-b"  # a loop ends instead of spinning
+
+
+def test_an_unsaved_rule_says_so(monkeypatch, conv, caplog) -> None:
+    from backend.store.repos import kv
+
+    def locked(*_a, **_k):
+        raise OSError("database is locked")
+
+    monkeypatch.setattr(pp, "_rules_in_db", lambda: True)
+    monkeypatch.setattr(kv, "get_doc", lambda table, key: [])
+    monkeypatch.setattr(kv, "set_doc", locked)
+    _answer(monkeypatch, ["always"])
+    with caplog.at_level("WARNING"):
+        out = pp.decide("Bash", {"command": "git status"}, conv_id="c-unsaved")
+    assert out == {"behavior": "allow", "updatedInput": {"command": "git status"}, "saved": False}
+    assert "could not save the approval rules of chat c-unsaved" in caplog.text
+    # The chat-file store reports a failed save the same way.
+    monkeypatch.setattr(pp, "_rules_in_db", lambda: False)
+    monkeypatch.setattr("frontend.chat_store.save_conversation", locked)
+    assert pp._store_rules("c-unsaved", ["Bash:git status"]) is False
+
+
+def test_a_saved_rule_is_unchanged(monkeypatch, conv) -> None:
+    _answer(monkeypatch, ["always"])
+    out = pp.decide("Bash", {"command": "git status"}, conv_id="c-saved")
+    assert out == {"behavior": "allow", "updatedInput": {"command": "git status"}}
+    assert pp._rules("c-saved") == ["Bash:git status"]

@@ -832,7 +832,8 @@ def update_agent_plugin(agent: str) -> dict[str, Any]:
     return {"ok": True, "plugin_id": plugin["id"], "version": str(result.get("version") or "")}
 
 
-def _store_rules(conv_id: str, rules: list[str]) -> None:
+def _store_rules(conv_id: str, rules: list[str]) -> bool:
+    """Save this chat's rules. False when the save failed (logged): the rule is lost."""
     if _rules_in_db():
         try:
             from backend.store.repos import kv
@@ -842,18 +843,21 @@ def _store_rules(conv_id: str, rules: list[str]) -> None:
             else:
                 kv.delete_doc(_RULES_TABLE, _rules_key(conv_id))
         except Exception:
-            pass
-        return
+            logging.getLogger(__name__).warning("could not save the approval rules of chat %s", conv_id, exc_info=True)
+            return False
+        return True
     conv = _load_conv(conv_id)
     if conv is None:
-        return
+        return True
     conv.agent_allow_rules = rules
     try:
         from frontend.chat_store import save_conversation
 
         save_conversation(conv)
     except Exception:
-        pass
+        logging.getLogger(__name__).warning("could not save the approval rules of chat %s", conv_id, exc_info=True)
+        return False
+    return True
 
 
 def set_allow_everything(conv_id: str, on: bool) -> None:
@@ -894,13 +898,14 @@ def restore_approvals(conv_id: str, saved: dict[str, Any]) -> None:
         _store_own_mode(conv_id, MODE_ASK)
 
 
-def _remember(conv_id: str, rule: str) -> None:
+def _remember(conv_id: str, rule: str) -> bool:
+    """Add ``rule`` to the chat's rules. False only when saving it failed."""
     if not conv_id or not rule:
-        return
+        return True
     rules = _rules(conv_id)
     if rule in rules:
-        return
-    _store_rules(conv_id, (rules + [rule])[-200:])
+        return True
+    return _store_rules(conv_id, (rules + [rule])[-200:])
 
 
 def _ask(card: dict[str, Any], tool_name: str) -> tuple[str, str]:
@@ -965,12 +970,11 @@ def decide(tool_name: str, tool_input: dict[str, Any], *, conv_id: str = "", pro
     if not card.get("risky") and rule and rule in _rules(conv_id):
         return {"behavior": "allow", "updatedInput": tool_input}
     answer, note = _ask(card, tool_name or "tool")
-    if answer == _ALLOW_ALL:
-        _remember(conv_id, _ALL_RULE)
-        return {"behavior": "allow", "updatedInput": tool_input}
-    if answer == _ALLOW_ALWAYS:
-        _remember(conv_id, rule)
-        return {"behavior": "allow", "updatedInput": tool_input}
+    if answer in (_ALLOW_ALL, _ALLOW_ALWAYS):
+        out: dict[str, Any] = {"behavior": "allow", "updatedInput": tool_input}
+        if not _remember(conv_id, _ALL_RULE if answer == _ALLOW_ALL else rule):
+            out["saved"] = False  # the rule did not stick: the same card comes back next time
+        return out
     if answer == _ALLOW_ONCE:
         return {"behavior": "allow", "updatedInput": tool_input}
     if answer == _DENY:
