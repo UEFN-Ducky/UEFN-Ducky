@@ -240,24 +240,19 @@ def _register_shell_integrations() -> None:
         _log.warning("shell integrations not registered", exc_info=True)
 
 
-def _start_auto_update(api: Any) -> None:
-    """The background updater and the folder access check, as the Python window starts them
-    (webview_app._after_gui_start). Missing here, launcher starts (every start since 1.2.478)
-    never downloaded an update."""
+def _start_session_services(api: Any) -> None:
+    """The services the Python window starts too (frontend/session_services.py): updates,
+    usage stats, uninstaller link, crash dumps, heartbeat. No hand-kept copy here."""
+    handover: dict[str, Any] = {}
     try:
-        from frontend import update_swap
         from frontend.app_versions import take_handover
 
-        update_swap.start(api=api, tk_root_holder={}, window_holder=api._window_holder)
-        update_swap.continue_chats(take_handover().get("chats"))  # the chats the switch stopped
+        handover = take_handover()
     except Exception:
-        _log.warning("auto-update did not start", exc_info=True)
-    try:
-        from frontend import folder_access
+        _log.warning("update handover not read", exc_info=True)
+    from frontend.session_services import start_session_services
 
-        folder_access.check_soon()  # Windows Controlled folder access blocking Documents
-    except Exception:
-        pass
+    start_session_services(api, api._window_holder, {}, handover)
 
 
 UEFN_LINK_POLL_S = 8.0
@@ -285,19 +280,9 @@ def _watch_uefn_link(api: Any, *, every_s: float = UEFN_LINK_POLL_S, rounds: int
 
 
 def _start_usage_stats(api: Any) -> None:
-    """app.open, the stats thread (heartbeat, timed sends, crash hooks) and UEFN link changes,
-    as the Python window starts them (webview_app._after_gui_start and its listener poll).
-    Missing here, launcher starts (every start since 1.2.478) sent no app.open, heartbeat or
-    uefn.connect and sent their queued rows only at a clean quit: a new PC read as
-    "installed, never opened" (13 of 50 opened, Nov 5-11 2026)."""
+    """UEFN link changes for the usage counts, as the window's listener poll reports them
+    (app.open is a session service)."""
     try:
-        from frontend import usage_stats
-
-        raw_t0 = os.environ.get("UEFN_DUCKY_BOOT_T0")
-        boot_ms = (time.perf_counter() - float(raw_t0)) * 1000.0 if raw_t0 else None
-        threading.Thread(
-            target=usage_stats.app_opened, args=(boot_ms,), name="usage-stats-open", daemon=True
-        ).start()
         threading.Thread(target=_watch_uefn_link, args=(api,), name="usage-uefn-link", daemon=True).start()
     except Exception:
         _log.warning("usage stats did not start", exc_info=True)
@@ -475,14 +460,6 @@ def run_backend(
     except Exception:
         pass
     try:
-        from frontend.app_versions import mark_ready
-
-        mark_ready(app_version())
-    except Exception:
-        pass
-    _start_auto_update(api)
-    _start_usage_stats(api)
-    try:
         from frontend import boot_report
 
         # The launcher shows the window now: this launch has started. Without it a native
@@ -492,19 +469,8 @@ def run_backend(
         boot_report.ask_pending()  # the last launch's crash pop-up, kept until now (launcher.py)
     except Exception:
         pass
-    try:
-        from frontend import boot_report
-        from frontend.ui_web.agent_turns.state import list_running_agents
-
-        # As the Python window (webview_app): the PC-memory and graphics-memory warnings never
-        # showed under the launcher's window, because nothing listened here.
-        from frontend import busy_pc, low_memory
-
-        boot_report.on_heartbeat(low_memory.on_heartbeat)
-        boot_report.on_heartbeat(busy_pc.on_heartbeat)
-        boot_report.start_heartbeat(lambda: len(list_running_agents()))
-    except Exception:
-        _log.warning("crash heartbeat did not start", exc_info=True)
+    _start_usage_stats(api)
+    _start_session_services(api)
     timer = threading.Timer(BACKGROUND_AFTER_HELLO_S, start_background)
     timer.daemon = True
     timer.start()

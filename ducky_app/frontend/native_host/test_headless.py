@@ -377,24 +377,20 @@ def test_internal_port_accepts_the_launchers_origin_only(internal_ui_server) -> 
     assert _post(internal, "null") == 403
 
 
-def test_backend_starts_the_auto_updater(monkeypatch) -> None:
-    """Launcher starts run the background updater too (it only ran in the Python window)."""
+def test_backend_starts_the_session_services_with_the_handover(monkeypatch) -> None:
+    """Launcher starts run the same services as the Python window (updater included)."""
     from types import SimpleNamespace
 
-    from frontend import app_versions, update_swap
+    from frontend import app_versions, session_services
 
     started: list = []
-    carried: list = []
-    monkeypatch.setattr(update_swap, "start", lambda **k: started.append(k))
-    monkeypatch.setattr(update_swap, "continue_chats", carried.append)
     monkeypatch.setattr(app_versions, "take_handover", lambda: {"chats": [{"conv_id": "c1"}]})
+    monkeypatch.setattr(session_services, "start_session_services", lambda *a: started.append(a))
     holder = {"window": object(), "hidden": False}
     api = SimpleNamespace(_window_holder=holder)
-    headless._start_auto_update(api)
-    assert started == [{"api": api, "tk_root_holder": {}, "window_holder": holder}]
-    assert carried == [[{"conv_id": "c1"}]]
-    src = inspect.getsource(headless.run_backend if hasattr(headless, "run_backend") else headless)
-    assert "_start_auto_update(api)" in src
+    headless._start_session_services(api)
+    assert started == [(api, holder, {}, {"chats": [{"conv_id": "c1"}]})]
+    assert "_start_session_services(api)" in inspect.getsource(headless.run_backend)
 
 
 def test_backend_starts_usage_stats_after_hello(backend_run) -> None:

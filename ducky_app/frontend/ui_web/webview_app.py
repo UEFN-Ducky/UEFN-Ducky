@@ -131,15 +131,8 @@ def _start_boot_meters() -> None:
 
 
 def _install_crash_dumps() -> None:
-    """The window is up, so pythonnet and WinForms are loaded and .NET has set its own
-    exception filter: now set the one that writes a dump, and keep it set."""
-    try:
-        from frontend import native_crash
-
-        if native_crash.install():
-            native_crash.start_watch()
-    except Exception:
-        logging.getLogger(__name__).warning("crash dump filter not installed", exc_info=True)
+    """The window is up, so pythonnet is loaded: keep .NET's unhandled exceptions. The native
+    dump filter is a session service (frontend/session_services.py)."""
     if _managed_handler:
         return
     try:
@@ -782,10 +775,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         from frontend import boot_report
 
         boot_report.on_heartbeat(lambda beat: trim_if_bloated(window, beat))
-        from frontend.low_memory import on_heartbeat as warn_if_pc_full
-
-        boot_report.on_heartbeat(warn_if_pc_full)
-        boot_report.on_heartbeat(busy_pc.on_heartbeat)
     except Exception:
         pass
     window_holder["window"] = window
@@ -939,37 +928,9 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             notifications.bind_desktop(tray.toast if tray is not None else None, open_alert)
         except Exception:
             logging.getLogger(__name__).warning("desktop notifications did not bind", exc_info=True)
-        try:
-            from frontend import __version__ as _running_version
-            from frontend import app_versions, update_swap
+        from frontend.session_services import start_session_services
 
-            app_versions.mark_ready(str(_running_version))
-            update_swap.start(api=api, tk_root_holder=tk_root_holder, window_holder=window_holder)
-            update_swap.continue_chats(handover.get("chats"))  # the chats the switch stopped
-        except Exception:
-            logging.getLogger(__name__).warning("auto-update did not start", exc_info=True)
-        try:
-            from frontend import folder_access
-
-            folder_access.check_soon()  # Windows Controlled folder access blocking Documents
-        except Exception:
-            pass
-        try:
-            from frontend import usage_stats
-
-            raw_t0 = os.environ.get("UEFN_DUCKY_BOOT_T0")
-            boot_ms = (time.perf_counter() - float(raw_t0)) * 1000.0 if raw_t0 else None
-            threading.Thread(
-                target=usage_stats.app_opened, args=(boot_ms,), name="usage-stats-open", daemon=True
-            ).start()
-        except Exception:
-            pass
-        try:
-            from frontend import uninstaller_link
-
-            threading.Thread(target=uninstaller_link.ensure_quietly, name="uninstaller-link", daemon=True).start()
-        except Exception:
-            pass
+        start_session_services(api, window_holder, tk_root_holder, handover)
 
     icon_path = resolve_app_icon_path()
     _start_later(background_work["start"], _BACKGROUND_FALLBACK_S)
