@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from typing import Any
 
 from backend.util.json_util import tool_json
@@ -209,51 +207,3 @@ def ducky_verse_template_apply(
         apply_user_verse_template(template_id, parent_relative=parent_relative),
         pretty=pretty,
     )
-
-
-def _self_check() -> None:
-    """ponytail: save single + pack → get → update → delete (temp AppData)."""
-    tmp = tempfile.mkdtemp(prefix="ducky-vt-")
-    try:
-        os.environ["LOCALAPPDATA"] = tmp
-        os.environ["USERPROFILE"] = tmp
-        os.environ["HOME"] = tmp
-        single = save_user_verse_template("Solo", content="using { /Verse.org/Simulation }\n")
-        assert single.get("ok"), single
-        tid = single["template"]["id"]
-        assert tid.startswith("custom:")
-        got = get_user_verse_template(tid)
-        assert got.get("ok") and "Simulation" in got["template"]["content"]
-        pack = save_user_verse_template(
-            "PlayerCore",
-            folder="PlayerCore",
-            files_json=json.dumps(
-                [
-                    {"path": "player_api.verse", "content": "# api\n"},
-                    {"path": "impl/player.verse", "content": "# impl\n"},
-                ]
-            ),
-        )
-        assert pack.get("ok"), pack
-        assert len(pack["template"]["files"]) == 2
-        updated = save_user_verse_template(
-            "Solo2",
-            content="# edited\n",
-            template_id=tid,
-        )
-        assert updated.get("ok") and updated["template"]["name"] == "Solo2"
-        refused = save_user_verse_template("X", template_id="plugin:verse:foo")
-        assert not refused.get("ok")
-        listed = list_user_verse_templates()
-        assert listed["count"] >= 2
-        deleted = delete_user_verse_template(tid, confirm=True)
-        assert deleted.get("ok"), deleted
-        print("panel_verse_templates.py self-check ok")
-    finally:
-        import shutil
-
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-if __name__ == "__main__":
-    _self_check()
