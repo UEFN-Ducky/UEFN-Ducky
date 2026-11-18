@@ -74,7 +74,7 @@ _JS_API: dict[str, str] = {
         report_ui_perf restart_listener set_visible_chats set_visible_terminals ui_rpc_ack
         ui_rpc_active ui_rpc_claim ui_rpc_pending_questions ui_rpc_respond
     """,
-    "PanelApiAgentsMixin": "agent_broker_call agent_inbox agent_send agent_send_notice",
+    "PanelApiAgentsMixin": "agent_broker_call agent_send",
     "PanelApiWindowMixin": """
         adopt_tab_into_this_focus_window appdata_children appdata_clear appdata_clear_caches
         appdata_delete appdata_delete_project appdata_open appdata_overview appdata_projects
@@ -115,7 +115,7 @@ _JS_API: dict[str, str] = {
         ducky_sync_forget ducky_sync_list ducky_sync_now duckyos_agent_caps
         duckyos_agent_caps_set duckyos_cancel_login duckyos_get_status duckyos_list_pcs
         duckyos_login duckyos_logout duckyos_open_admin duckyos_open_site duckyos_revoke_pc
-        duckyos_store_catalog duckyos_store_download duckyos_store_versions duckyos_submit_code
+        duckyos_store_catalog duckyos_store_download duckyos_store_versions
         ensure_starter_llm_gateways export_skill_pack get_chat_mcp_plugins get_mcp_config
         get_mcp_diagnostics get_mcp_server_connection get_mcp_server_tools
         get_mcp_tools_catalog get_skill_info get_skill_pack_files get_skill_pack_graph

@@ -193,16 +193,6 @@ class PanelApiStoreMixin:
 
         return cancel_browser_login()
 
-    def duckyos_submit_code(self, code: str = "") -> dict[str, Any]:
-        """Deprecated — email codes are completed in the browser now."""
-        _ = code
-        return {
-            "ok": False,
-            "error": "Use Log in — verification happens in the browser.",
-            "code": "use_browser",
-            "logged_in": False,
-        }
-
     def duckyos_logout(self) -> dict[str, Any]:
         from frontend.duckyos_account import DuckyOSAccountError, logout
 

@@ -28,10 +28,3 @@ class PanelApiAgentsMixin:
     def agent_send(self, sender: str, to: str, message: str, expect_reply: bool = False, response_id: str = "") -> dict:
         return self.agent_broker_call("send", kwargs={"sender_conv_id": sender, "receiver_conv_id": to,
             "body": message, "expect_reply": expect_reply, "response_id": response_id})
-
-    def agent_inbox(self, conv_id: str) -> dict:
-        return self.agent_broker_call("read_inbox", args=[conv_id])
-
-    def agent_send_notice(self, sender: str, to: str, body: str) -> dict:
-        return self.agent_broker_call("send_notice", kwargs={"sender_conv_id": sender,
-            "receiver_conv_id": to, "body": body})
