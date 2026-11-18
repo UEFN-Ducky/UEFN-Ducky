@@ -25,6 +25,27 @@ def _folders() -> dict[str, Path]:
     }
 
 
+def test_ai_plugin_json_write_keeps_the_old_file_on_a_crash(tmp_path, monkeypatch):
+    import json
+
+    from backend.tools.panel.panel_ai_plugins import _write_json
+    from frontend import atomic_json
+
+    path = tmp_path / "d" / "plugin.json"
+    _write_json(path, {"id": "old"})
+    assert path.read_text(encoding="utf-8") == json.dumps({"id": "old"}, indent=2) + "\n"
+
+    def boom(src, dst):
+        raise OSError("killed mid-write")
+
+    monkeypatch.setattr(atomic_json.os, "replace", boom)
+    monkeypatch.setattr(atomic_json.time, "sleep", lambda _s: None)
+    with pytest.raises(OSError):
+        _write_json(path, {"id": "new"})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"id": "old"}
+    assert [p.name for p in path.parent.iterdir()] == ["plugin.json"]
+
+
 @pytest.mark.parametrize("text", ["1.2.505", "1.2.505-beta", "", "x"])
 def test_both_parsers_agree(text):
     from frontend.app_versions import parse_version
