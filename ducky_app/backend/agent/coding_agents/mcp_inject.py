@@ -279,8 +279,9 @@ def bootstrap_system_prompt(
     skills_dir: str = "",
     skill_names: list[str] | None = None,
     native_skills: bool = False,
-    task: str = "",
 ) -> str:
+    """The same text for every message of a chat (prompt cache): what fits the message goes
+    in the user prompt (:func:`memory_hint`)."""
     root = (project_root or "").strip() or "(no project selected)"
     folder_note = _folder_project_note(project_root)
     # A folder project never needs the editor; an island gets the one fixed line.
@@ -428,19 +429,32 @@ def bootstrap_system_prompt(
         "`project_memory_list/get(project=…)`, and save a fact about another project there with "
         "`project_memory_save(..., project=…)`. Read "
         "another ducky's context with `ducky_read_chat(conv_id, project=…)`.\n"
-        f"{_memory_index_section(project_root, conv_id, task)}"
+        f"{_memory_index_section(project_root, conv_id)}"
     )
 
 
-def _memory_index_section(project_root: str, conv_id: str, task: str) -> str:
-    """The project's memory index for a coding agent, which never lists memory on its own.
-    Empty when memory is empty or anything fails: the bootstrap never breaks on it."""
+def memory_hint(project_root: str, conv_id: str, task: str) -> str:
+    """One user-prompt line naming the memory entries that fit this message; "" for none."""
+    try:
+        from backend.memory.project import suggest_entries
+        from backend.memory.scope import memory_root
+
+        root = memory_root((conv_id or "").strip(), (project_root or "").strip()) or project_root
+        names = suggest_entries((task or "")[:2000], root)
+    except Exception:
+        return ""
+    return f"Memory entries that fit this message: {', '.join(names)}" if names else ""
+
+
+def _memory_index_section(project_root: str, conv_id: str) -> str:
+    """The project's memory index for a coding agent, which never lists memory on its own,
+    in stored order (never by the message). Empty when memory is empty or anything fails:
+    the bootstrap never breaks on it."""
     try:
         from backend.agent.prompt import memory_index_budget, shared_memory_index
 
         mem_root, index = shared_memory_index(
-            (conv_id or "").strip(), (project_root or "").strip(),
-            max_chars=memory_index_budget(), task=(task or "")[:2000],
+            (conv_id or "").strip(), (project_root or "").strip(), max_chars=memory_index_budget(),
         )
     except Exception:
         return ""

@@ -25,6 +25,7 @@ from backend.agent.coding_agents.base import (
 from backend.agent.coding_agents.mcp_inject import (
     bootstrap_system_prompt,
     launch_env,
+    memory_hint,
     write_prompt_file,
     write_uefn_mcp_config,
 )
@@ -1031,7 +1032,6 @@ def _run_coding_agent_message(
         skills_dir=skills_dir,
         skill_names=skill_names,
         native_skills=bool(reg.get("native_skills")),
-        task=memory_task,
     )
     from frontend import __version__
 
@@ -1053,6 +1053,9 @@ def _run_coding_agent_message(
             prompt_text = f"[{hint}]\n\n{prompt_text}"
     except Exception:  # noqa: BLE001 — a hint is optional
         pass
+    memory_line = memory_hint(project_root, conv.id, memory_task)
+    if memory_line:
+        prompt_text = f"[{memory_line}]\n\n{prompt_text}"
     prompt_text = permission_note(conv.id) + prompt_text
     from frontend.ui_web.workspace_bootstrap import build_journal, build_run_context, record_external_edits
 

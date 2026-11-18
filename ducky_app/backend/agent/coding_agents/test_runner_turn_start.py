@@ -39,6 +39,7 @@ def turn(tmp_path, monkeypatch, config_dir):
 
     def launch(**kwargs):
         seen["mcp"] = Path(kwargs["mcp_config_path"]).read_bytes()
+        seen["prompt"] = kwargs["prompt"]
         return CodingAgentLaunchResult(ok=True, effective_mode="agent", reply_text="done",
                                        blocks=[{"type": "tool_call", "id": "c", "name": "Edit"}])
 
@@ -63,7 +64,8 @@ def turn(tmp_path, monkeypatch, config_dir):
     monkeypatch.setattr(runner.PanelSettings, "load", lambda: SimpleNamespace(uefn_project_root=str(tmp_path)))
     monkeypatch.setattr(runner, "apply_workspace_env", lambda *a: None)
     monkeypatch.setattr(runner, "coding_agent_cfg", lambda *a: {})
-    monkeypatch.setattr(runner, "bootstrap_system_prompt", lambda **kw: "")
+    monkeypatch.setattr(runner, "bootstrap_system_prompt", lambda **kw: (seen.__setitem__("system", kw), "")[1])
+    monkeypatch.setattr(runner, "memory_hint", lambda *a: "")
     monkeypatch.setattr(runner, "launch_env", lambda **kw: {})
     monkeypatch.setattr(runner, "_normalize_launch_model", lambda *a: "model")
     monkeypatch.setattr(runner, "record_coding_agent_usage", lambda *a, **kw: None)
@@ -80,10 +82,10 @@ def turn(tmp_path, monkeypatch, config_dir):
     monkeypatch.setattr(live_agent_runs, "set_live_writer", lambda *a: None)
     monkeypatch.setattr(readiness, "launch_with_ready_tools", lambda adapter, **kw: adapter.launch(**kw))
 
-    def run():
+    def run(text="edit"):
         conv = SimpleNamespace(id="chat", coding_agent="codex", messages=[], ducky_name="",
                                ducky_personality="", coding_agent_stats={}, model="model")
-        return runner._run_coding_agent_message(conv, "edit", model="model", push=lambda e: None, run_id="turn")
+        return runner._run_coding_agent_message(conv, text, model="model", push=lambda e: None, run_id="turn")
 
     return run, seen
 
@@ -106,6 +108,24 @@ def test_a_failed_edit_record_is_logged(turn, monkeypatch, caplog) -> None:
     assert stable(failed) == stable(clean)  # the turn's answer does not change
     warnings = [r for r in caplog.records if "could not record the agent's edits" in r.getMessage()]
     assert len(warnings) == 1 and "turn" in warnings[0].getMessage() and warnings[0].exc_info
+
+
+def test_matched_entries_are_named_in_the_user_prompt(turn, monkeypatch) -> None:
+    run, seen = turn
+    asked: list = []
+
+    def hint(root, conv_id, task):
+        asked.append((conv_id, task))
+        return "Memory entries that fit this message: zz-release" if "release" in task else ""
+
+    monkeypatch.setattr(runner, "memory_hint", hint)
+    run("release the app")
+    assert "[Memory entries that fit this message: zz-release]" in seen["prompt"]
+    assert "release the app" in seen["prompt"]
+    assert "task" not in seen["system"]  # the system prompt never gets the message
+    run("fix the roads")
+    assert "Memory entries" not in seen["prompt"]
+    assert asked == [("chat", "release the app"), ("chat", "fix the roads")]
 
 
 @pytest.mark.parametrize("host", [False, True], ids=["app", "host"])

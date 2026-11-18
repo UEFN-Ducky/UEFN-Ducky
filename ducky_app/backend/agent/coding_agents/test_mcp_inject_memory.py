@@ -19,10 +19,10 @@ def mem_root(tmp_path, monkeypatch):
     return str(root)
 
 
-def _bootstrap(root: str, task: str = "") -> str:
+def _bootstrap(root: str) -> str:
     from backend.agent.coding_agents.mcp_inject import bootstrap_system_prompt
 
-    return bootstrap_system_prompt(project_root=root, conv_id="chat-a", task=task)
+    return bootstrap_system_prompt(project_root=root, conv_id="chat-a")
 
 
 def _index(text: str) -> list[str]:
@@ -48,15 +48,35 @@ def test_empty_memory_adds_no_index(mem_root):
     assert _HEAD not in _bootstrap(mem_root)
 
 
-def test_matching_task_pulls_entry_up(mem_root):
+def _notes(root: str) -> None:
     from backend.memory.project import save_entry
 
     for i in range(3):
-        save_entry(f"aa-note-{i}", "x", description=f"General note {i}", project_root=mem_root)
+        save_entry(f"aa-note-{i}", "x", description=f"General note {i}", project_root=root)
     save_entry("zz-render-trim", "y", description="Render trim crashes when UEFN is in the background",
-               project_root=mem_root)
-    plain = [ln for ln in _index(_bootstrap(mem_root)) if "render-trim" in ln or "aa-note" in ln]
-    ranked = [ln for ln in _index(_bootstrap(mem_root, task="fix the render trim crash")) if
-              "render-trim" in ln or "aa-note" in ln]
-    assert "render-trim" in ranked[0]
-    assert "render-trim" not in plain[0]
+               project_root=root)
+    save_entry("zz-release", "z", description="Release steps for the desktop app", project_root=root)
+
+
+def test_matching_task_pulls_entry_up(mem_root):
+    """The match is named in the user prompt; the system prompt's index keeps its order."""
+    from backend.agent.coding_agents.mcp_inject import memory_hint
+
+    _notes(mem_root)
+    assert "render-trim" not in _index(_bootstrap(mem_root))[0]
+    assert memory_hint(mem_root, "chat-a", "fix the render trim crash") == (
+        "Memory entries that fit this message: zz-render-trim")
+
+
+def test_the_system_prompt_index_is_the_same_for_two_tasks(mem_root, monkeypatch):
+    from backend.agent.coding_agents import mcp_inject
+
+    _notes(mem_root)
+    seen: list[str] = []
+    real = mcp_inject._memory_index_section
+    monkeypatch.setattr(mcp_inject, "_memory_index_section", lambda *a: (seen.append(real(*a)), seen[-1])[1])
+    first, second = _bootstrap(mem_root), _bootstrap(mem_root)
+    assert first == second and seen[0] == seen[1] and "zz-render-trim" in seen[0]
+    assert mcp_inject.memory_hint(mem_root, "chat-a", "fix the roads") == ""
+    assert mcp_inject.memory_hint(mem_root, "chat-a", "release") == (
+        "Memory entries that fit this message: zz-release")
