@@ -47,19 +47,53 @@ def start_auto_title(
     return ""
 
 
+_NAMED_MAX = 512
+# Chats seen with a real title. A named chat is never unnamed by a tool call, so the check
+# that ran on every call (a full chat load, twice per ducky_call_tool) answers from here.
+_named: dict[str, None] = {}
+
+
+def _remember_named(conv_id: str) -> None:
+    _named[conv_id] = None
+    while len(_named) > _NAMED_MAX:
+        _named.pop(next(iter(_named)), None)
+
+
+def forget_name(conv_id: str) -> None:
+    """The chat's title went back to a placeholder: look it up again."""
+    _named.pop(conv_id, None)
+
+
+def _chat_exists_titled(conv_id: str) -> tuple[bool, str]:
+    """(exists, title) without reading the chat's messages."""
+    from frontend.ui_web.chats.conversations import is_placeholder_title, load_conversation_meta
+
+    conv = load_conversation_meta(conv_id)
+    if conv is None:
+        return False, ""
+    title = str(conv.title or "")
+    if is_placeholder_title(title):
+        forget_name(conv_id)
+    else:
+        _remember_named(conv_id)
+    return True, title
+
+
 def self_naming_instruction(title: str, conv_id: str = "") -> str:
     """Ask the working model to choose its name, preserving names chosen by humans."""
     from backend.agent.run_context import current_mode
 
     if current_mode() == "ask":
         return ""
+    if conv_id in _named:
+        return ""
     from frontend.settings import PanelSettings
-    from frontend.ui_web.chats.conversations import is_placeholder_title, load_conversation
+    from frontend.ui_web.chats.conversations import is_placeholder_title
 
     if conv_id:
-        conv = load_conversation(conv_id)
-        if conv is not None:
-            title = conv.title
+        exists, found = _chat_exists_titled(conv_id)
+        if exists:
+            title = found
     if not PanelSettings.load().chat_auto_title or not is_placeholder_title(title):
         return ""
     return (
@@ -78,10 +112,8 @@ def require_self_name(name: str, conv_id: str) -> None:
 
     if current_mode() == "ask":
         return
-    if not conv_id or name == "ducky_rename_self":
+    if not conv_id or name == "ducky_rename_self" or conv_id in _named:
         return
-    if self_naming_instruction("", conv_id):
-        from frontend.ui_web.chats.conversations import load_conversation
-
-        if load_conversation(conv_id) is not None:
-            raise ValueError("Call ducky_rename_self first with a 2–4 word task name, then retry this tool.")
+    exists, title = _chat_exists_titled(conv_id)
+    if exists and self_naming_instruction(title):
+        raise ValueError("Call ducky_rename_self first with a 2–4 word task name, then retry this tool.")

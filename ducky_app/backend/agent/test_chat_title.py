@@ -107,3 +107,57 @@ def test_manual_names_and_disabled_auto_naming_are_preserved(isolated_appdata, t
     settings.save()
     assert self_naming_instruction("New ducky2") == ""
     require_self_name("workspace_read_file", "unknown-chat")
+
+
+def _meta_only(monkeypatch, titles: dict[str, str]) -> list[str]:
+    """Chats served by load_conversation_meta; a full load fails the test."""
+    from types import SimpleNamespace
+
+    from backend.agent import chat_title
+    from frontend.settings import PanelSettings
+
+    monkeypatch.setattr(chat_title, "_named", {})
+    monkeypatch.setattr(PanelSettings, "load", lambda: SimpleNamespace(chat_auto_title=True))
+    looked: list[str] = []
+
+    def meta(conv_id):
+        looked.append(conv_id)
+        return SimpleNamespace(title=titles[conv_id]) if conv_id in titles else None
+
+    def full(*_a, **_k):
+        raise AssertionError("the title check loaded the whole chat")
+
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation_meta", meta)
+    monkeypatch.setattr("frontend.ui_web.chats.conversations.load_conversation", full)
+    return looked
+
+
+def test_the_title_check_reads_no_messages(monkeypatch):
+    from backend.agent.chat_title import require_self_name
+
+    _meta_only(monkeypatch, {"unnamed": "New ducky3", "named": "Boss Fight"})
+    with pytest.raises(ValueError, match="ducky_rename_self first"):
+        require_self_name("workspace_read_file", "unnamed")
+    require_self_name("workspace_read_file", "named")
+    require_self_name("workspace_read_file", "missing")
+
+
+def test_a_named_chat_is_not_looked_up_again(monkeypatch):
+    from backend.agent import chat_title
+
+    titles = {"c1": "Boss Fight"}
+    looked = _meta_only(monkeypatch, titles)
+    for _ in range(100):
+        chat_title.require_self_name("workspace_read_file", "c1")
+        assert chat_title.self_naming_instruction("", "c1") == ""
+    assert looked == ["c1"]
+    # Set back to a placeholder: forgotten, so the check asks again.
+    titles["c1"] = "New ducky1"
+    chat_title.forget_name("c1")
+    with pytest.raises(ValueError):
+        chat_title.require_self_name("workspace_read_file", "c1")
+    # Bounded: the oldest named chat is dropped past 512.
+    titles.update({f"n{i}": "Named" for i in range(600)})
+    for i in range(600):
+        chat_title.require_self_name("workspace_read_file", f"n{i}")
+    assert len(chat_title._named) == 512 and "n0" not in chat_title._named
