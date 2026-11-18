@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import http.client
-import re
 import ssl
 import time
 import urllib.error
@@ -15,6 +14,7 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 from frontend import __version__
+from frontend.app_versions import parse_version
 from frontend.bundle_root import is_packaged_runtime
 
 # Local update rehearsal: point the feed at build/upgrade_proof/serve_update_feed.py
@@ -38,7 +38,6 @@ def update_base_url() -> str:
 
     return resolve_base_url().rstrip("/")
 
-_VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)")
 
 
 def version_check_url() -> str:
@@ -56,11 +55,7 @@ def download_page_url() -> str:
 DOWNLOAD_URL = "https://uefnducky.org/download"
 
 
-def parse_version_tuple(version: str) -> tuple[int, int, int] | None:
-    m = _VERSION_RE.match(str(version or "").strip())
-    if not m:
-        return None
-    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+parse_version_tuple = parse_version  # one parser: app_versions (strict "X.Y.Z", None otherwise)
 
 
 def is_remote_newer(local: str, remote: str) -> bool:

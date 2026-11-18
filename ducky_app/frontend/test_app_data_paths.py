@@ -25,6 +25,15 @@ def _folders() -> dict[str, Path]:
     }
 
 
+@pytest.mark.parametrize("text", ["1.2.505", "1.2.505-beta", "", "x"])
+def test_both_parsers_agree(text):
+    from frontend.app_versions import parse_version
+    from frontend.version_check import parse_version_tuple
+
+    assert parse_version_tuple(text) == parse_version(text)
+    assert parse_version_tuple("1.2.505") == (1, 2, 505)
+
+
 @pytest.mark.parametrize("local_set", [True, False])
 def test_the_named_modules_agree_on_the_app_data_folder(monkeypatch, tmp_path, local_set):
     from backend.bridge import bridge_version

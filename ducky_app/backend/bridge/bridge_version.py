@@ -56,6 +56,8 @@ def own_version() -> str:
 
 
 def version_tuple(version: str) -> tuple[int, ...]:
+    # Not app_versions.parse_version: that one is strict X.Y.Z and gives None; is_older must
+    # still order any dotted version a bridge reports (4 parts, a -beta suffix) by its numbers.
     return tuple(int(n) for n in re.findall(r"\d+", str(version or "")))
 
 

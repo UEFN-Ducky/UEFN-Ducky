@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import socket
-import struct
 import subprocess
 import sys
 import threading
-import time
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+from frontend.ui_web.terminal.ws_util import parse_ws_frame, send_ws_text, ws_accept_key
 from frontend.ui_web.verse_editor.lsp.detect import detect_verse_lsp
 from frontend.ui_web.verse_editor.lsp.project_root import normalize_verse_lsp_project_root
 from frontend.ui_web.verse_editor.lsp.verse_workspace import workspace_folder_fingerprint
 
-_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _STDERR_RING_MAX = 80
 # The editor's verse-lsp is stopped this long after its client went away with nobody
 # reattaching. It used to live until the next build or app exit, connected to no one:
@@ -45,21 +41,6 @@ def _spawn_lsp_hidden(lsp_path: Path, cwd: str) -> subprocess.Popen[bytes]:
     return subprocess.Popen([str(lsp_path)], **kwargs)  # type: ignore[arg-type]
 
 
-def _ws_accept_key(key: str) -> str:
-    digest = hashlib.sha1((key + _WS_GUID).encode()).digest()
-    return base64.b64encode(digest).decode()
-
-
-def _read_exact(sock: socket.socket, n: int) -> bytes:
-    buf = bytearray()
-    while len(buf) < n:
-        chunk = sock.recv(n - len(buf))
-        if not chunk:
-            raise ConnectionError("socket closed")
-        buf.extend(chunk)
-    return bytes(buf)
-
-
 def _read_exact_stream(stream, n: int) -> bytes:
     """Read exactly n bytes from a pipe/file stream (bufsize=0 may return partial reads)."""
     buf = bytearray()
@@ -69,37 +50,6 @@ def _read_exact_stream(stream, n: int) -> bytes:
             break
         buf.extend(chunk)
     return bytes(buf)
-
-
-def _parse_ws_frame(sock: socket.socket) -> bytes:
-    header = _read_exact(sock, 2)
-    masked = (header[1] & 0x80) != 0
-    length = header[1] & 0x7F
-    if length == 126:
-        length = struct.unpack("!H", _read_exact(sock, 2))[0]
-    elif length == 127:
-        length = struct.unpack("!Q", _read_exact(sock, 8))[0]
-    mask = _read_exact(sock, 4) if masked else b""
-    payload = _read_exact(sock, length)
-    if masked:
-        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
-    return payload
-
-
-def _send_ws_text(sock: socket.socket, text: str) -> None:
-    data = text.encode("utf-8")
-    frame = bytearray([0x81])
-    ln = len(data)
-    if ln < 126:
-        frame.append(ln)
-    elif ln < 65536:
-        frame.append(126)
-        frame.extend(struct.pack("!H", ln))
-    else:
-        frame.append(127)
-        frame.extend(struct.pack("!Q", ln))
-    frame.extend(data)
-    sock.sendall(frame)
 
 
 def _lsp_read_message(stream) -> str | None:
@@ -152,11 +102,7 @@ class LspBridge:
         self._last_exit_code: int | None = None
         self._stop = threading.Event()
         self._stderr_ring: deque[str] = deque(maxlen=_STDERR_RING_MAX)
-        self._watched_verse_mtimes: dict[str, float] = {}
         self._pending_fs_events: deque[dict[str, object]] = deque(maxlen=200)
-        self._fs_event_debounce_s = 2.0
-        self._fs_poll_interval_s = 3.0
-        self._last_fs_notify_by_uri: dict[str, float] = {}
         self._stdin_lock = threading.Lock()
         self._ws_send_lock = threading.Lock()
         self._bridge_listening = threading.Event()
@@ -251,7 +197,6 @@ class LspBridge:
         self._last_exit_code = None
         self._stderr_ring.clear()
         self._pending_fs_events.clear()
-        self._watched_verse_mtimes.clear()
 
         try:
             self._proc = _spawn_lsp_hidden(lsp_path, root)
@@ -399,7 +344,7 @@ class LspBridge:
                 continue
             try:
                 with self._ws_send_lock:
-                    _send_ws_text(client, msg)
+                    send_ws_text(client, msg)
             except OSError:
                 continue
 
@@ -418,38 +363,6 @@ class LspBridge:
                 self._append_stderr(line.decode("utf-8", errors="replace"))
         except OSError:
             pass
-
-    def _content_verse_root(self) -> Path | None:
-        root = Path(self._project_root)
-        content = root / "Content"
-        if content.is_dir():
-            return content
-        if root.name.lower() == "content" and root.is_dir():
-            return root
-        return None
-
-    def _watch_verse_files(self) -> None:
-        while not self._stop.is_set():
-            content = self._content_verse_root()
-            if content is not None:
-                try:
-                    now = time.monotonic()
-                    for path in content.rglob("*.verse"):
-                        if not path.is_file():
-                            continue
-                        key = str(path.resolve())
-                        mtime = path.stat().st_mtime
-                        prev = self._watched_verse_mtimes.get(key)
-                        if prev is not None and mtime != prev:
-                            uri = path.as_uri()
-                            last_notify = self._last_fs_notify_by_uri.get(uri, 0.0)
-                            if now - last_notify >= self._fs_event_debounce_s:
-                                self._pending_fs_events.append({"uri": uri, "type": 2})
-                                self._last_fs_notify_by_uri[uri] = now
-                        self._watched_verse_mtimes[key] = mtime
-                except OSError:
-                    pass
-            time.sleep(self._fs_poll_interval_s)
 
     def _flush_pending_fs_events(self, stdin) -> None:
         events: list[dict[str, object]] = []
@@ -509,7 +422,7 @@ class LspBridge:
                     k, v = line.split(":", 1)
                     headers[k.strip().lower()] = v.strip()
             key = headers.get("sec-websocket-key", "")
-            accept = _ws_accept_key(key)
+            accept = ws_accept_key(key)
             resp = (
                 "HTTP/1.1 101 Switching Protocols\r\n"
                 "Upgrade: websocket\r\n"
@@ -528,7 +441,7 @@ class LspBridge:
 
             while not self._stop.is_set():
                 try:
-                    payload = _parse_ws_frame(client)
+                    payload = parse_ws_frame(client)
                 except (ConnectionError, OSError):
                     break
                 if not payload:
