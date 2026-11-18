@@ -1260,7 +1260,7 @@ def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_age
     import time
     from types import SimpleNamespace
 
-    import backend.agent.tools as tools
+    from backend.agent import tool_lanes
     from backend.uefn_plugins.plugin_host import tool_registry
 
     who: contextvars.ContextVar[str] = contextvars.ContextVar("who", default="")
@@ -1295,7 +1295,7 @@ def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_age
 
         beat = asyncio.ensure_future(another_agent())
         began = loop.time()
-        results = await asyncio.gather(*(tools._call_registered_tool(mcp, name, {}) for name in owners.keys() | {"core_d"}))
+        results = await asyncio.gather(*(tool_lanes.call_registered_tool(mcp, name, {}) for name in owners.keys() | {"core_d"}))
         took = loop.time() - began
         over.set()
         await beat
@@ -1314,5 +1314,5 @@ def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_age
     # A process that serves one agent keeps calling the tool where it always did.
     monkeypatch.setattr(shared_mcp, "_shared_serving", False)
     seen.clear()
-    assert asyncio.run(tools._call_registered_tool(mcp, "city_a", {})) == "city_a"
+    assert asyncio.run(tool_lanes.call_registered_tool(mcp, "city_a", {})) == "city_a"
     assert seen[0][2] == threading.current_thread().name
