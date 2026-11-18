@@ -19,20 +19,18 @@ _SKIP_DIRS = {"__pycache__", "node_modules", ".venv", "venv", "build", "dist"}
 
 # path relative to ducky_app -> its line count when it was listed
 SPLITTING: dict[str, int] = {
-    'backend/agent/coding_agents/plans.py': 2160,
+    'backend/agent/coding_agents/plans.py': 2054,
     'backend/automations/runner.py': 2817,
-    'backend/tools/panel/ducky_panel.py': 2826,
-    'backend/workspace/journal.py': 2045,
-    'frontend/duckyos_account.py': 2878,
-    'frontend/ui_web/browser_overlay.py': 1645,
+    'backend/tools/panel/ducky_panel.py': 2815,
+    'backend/workspace/journal.py': 1960,
+    'frontend/duckyos_account.py': 2753,
+    'frontend/ui_web/browser_overlay.py': 1624,
     'frontend/ui_web/group_orchestrator.py': 1895,
-    'frontend/ui_web/panel_api_settings.py': 2129,
-    'frontend/ui_web/panel_api_store.py': 2187,
-    'frontend/ui_web/panel_httpd.py': 1519,
-    'frontend/ui_web/project_files.py': 1659,
-    'frontend/ui_web/win_frameless.py': 1506,
-    'uefn_listener/listener/registry/worldgen.py': 1685,
-    'uefn_listener/listener/verse_editable_editor.py': 1940,
+    'frontend/ui_web/panel_api_settings.py': 2029,
+    'frontend/ui_web/panel_api_store.py': 2066,
+    'frontend/ui_web/panel_httpd.py': 1518,
+    'frontend/ui_web/project_files.py': 1595,
+    'uefn_listener/listener/verse_editable_editor.py': 1866,
 }
 
 
