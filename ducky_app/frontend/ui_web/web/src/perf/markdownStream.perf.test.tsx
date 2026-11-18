@@ -78,3 +78,31 @@ it("a streamed token parses only the section being written, not the whole reply"
   // The budget: about the section being written, never the 20 finished ones.
   expect(stats.parsedCharsPerToken).toBeLessThan(section(0).length * 2);
 });
+
+it("an 8 KB reply with no headings parses at most 12 times a second; the final render is unchanged", () => {
+  vi.useFakeTimers();
+  try {
+    let text = "";
+    let n = 0;
+    while (text.length < 8000) text += `- item ${n++} with **bold** and \`code\` text\n`;
+    const view = render(<RichContentRenderer text={text} mode="streaming" />);
+    probes.parses = 0;
+    // One simulated second at 60 tokens a second.
+    for (let i = 0; i < 60; i++) {
+      text += ` w${i}`;
+      act(() => view.rerender(<RichContentRenderer text={text} mode="streaming" />));
+      act(() => { vi.advanceTimersByTime(1000 / 60); });
+    }
+    const streamParses = probes.parses;
+    console.log("[markdown throttle]", JSON.stringify({ chars: text.length, parsesPerSecond: streamParses }));
+    expect(streamParses).toBeLessThanOrEqual(12);
+    expect(streamParses).toBeGreaterThan(0);
+    // The stream ends: the final text shows at once, as an unthrottled render does.
+    act(() => view.rerender(<RichContentRenderer text={text} mode="full" />));
+    const unthrottled = render(<RichContentRenderer text={text} mode="full" />);
+    expect(view.container.innerHTML).toBe(unthrottled.container.innerHTML);
+    expect(view.container.textContent).toContain(" w59");
+  } finally {
+    vi.useRealTimers();
+  }
+});

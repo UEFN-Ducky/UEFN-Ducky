@@ -1,4 +1,4 @@
-import { Children, isValidElement, memo, useMemo } from "react";
+import { Children, isValidElement, memo, useEffect, useMemo, useReducer, useRef } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -101,7 +101,38 @@ const MarkdownChunk = memo(function MarkdownChunk({ text, onOpenFile, streaming 
   );
 });
 
-export function MarkdownContent({ text, onOpenFile, streaming }: MarkdownContentProps) {
+/** Past this many characters the open section re-parses at most every THROTTLE_MS. */
+export const THROTTLE_CHARS = 2000;
+export const THROTTLE_MS = 100;
+
+/** `text`, but while `throttle` holds it changes at most once per `ms` (the latest text
+ *  always lands, trailing). Off: the text as it is, at once. */
+function useThrottledText(text: string, throttle: boolean, ms = THROTTLE_MS): string {
+  const [, wake] = useReducer((n: number) => n + 1, 0);
+  const shown = useRef(text);
+  const lastAt = useRef(0);
+  const timer = useRef<number | undefined>(undefined);
+  if (!throttle) shown.current = text;
+  else if (shown.current !== text && Date.now() - lastAt.current >= ms) {
+    shown.current = text;
+    lastAt.current = Date.now();
+  }
+  useEffect(() => {
+    if (!throttle || shown.current === text || timer.current !== undefined) return;
+    timer.current = window.setTimeout(() => {
+      timer.current = undefined;
+      wake();
+    }, Math.max(0, ms - (Date.now() - lastAt.current)));
+  });
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return shown.current;
+}
+
+export function MarkdownContent({ text: liveText, onOpenFile, streaming }: MarkdownContentProps) {
+  // ponytail: the open section is "since the last line starting with #"; a native scan,
+  // cheaper than splitting sections only to measure the last one.
+  const openLen = streaming ? liveText.length - liveText.lastIndexOf("\n#") : 0;
+  const text = useThrottledText(liveText, openLen > THROTTLE_CHARS);
   const segments = useMemo(() => promoteMarkdownToSegments(text), [text]);
   return (
     <div className="rich-markdown">
