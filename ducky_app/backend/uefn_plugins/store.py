@@ -1125,8 +1125,9 @@ def _import_plugin_from_bytes(
         ok, reason = signing.verify_download(signed_record, hashlib.sha256(data).hexdigest())
         if not ok:
             return {"ok": False, "error": reason}
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — a check that broke is not a check that passed
+        logging.getLogger(__name__).warning("plugin %s: download check failed", pid, exc_info=True)
+        return {"ok": False, "error": "Could not verify this download. Try again."}
 
     dest = plugin_dir(pid)
     existing = _read_json(dest / PLUGIN_MANIFEST) if dest.is_dir() else None
