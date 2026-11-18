@@ -159,8 +159,8 @@ def _apply_pending_restore(path: Path) -> None:
     # the WAL holds the latest commits and SQLite replays it when the backup is opened).
     # If any step fails, everything moved is put back: SQLite deletes a WAL left beside a
     # missing or empty ducky.db, so a half-done swap would lose those commits. The
-    # wal-checkpoint thread's connection would hold the file mid-rename: it waits.
-    with _ckpt_open:
+    # wal-checkpoint thread's connection would hold the file mid-rename: it is closed.
+    with _ckpt_held():
         _swap_in_restore(path, pending, backup)
 
 
@@ -270,10 +270,10 @@ def _vacuum_if_requested(path: Path) -> None:
         except OSError:
             pass
 
-    # This process's own WAL checkpoint thread opens the file for a moment: hold it off for
-    # the whole rebuild, or its handle reads as another process and the rebuild waits a
+    # This process's own WAL checkpoint thread keeps the file open: close it and hold it off
+    # for the whole rebuild, or its handle reads as another process and the rebuild waits a
     # start (as a staged restore does). A brief open by a scanner gets a few short retries.
-    with _ckpt_open:
+    with _ckpt_held():
         _vacuum_now(path, marker, waits, failures, _note)
 
 
@@ -685,6 +685,8 @@ def assert_capabilities(conn: sqlite3.Connection) -> None:
 
 
 def close_thread_connections() -> None:
+    with _ckpt_held():  # callers then move or delete the file: the checkpointer's handle goes too
+        pass
     cache = getattr(_thread_local, "conns", None)
     conns = list(cache.values()) if cache else []
     if cache:
@@ -710,7 +712,7 @@ def reset_for_tests() -> None:
     with _ckpt_cv:
         _ckpt_due.clear()
         _ckpt_epoch += 1
-    with _ckpt_open:
+    with _ckpt_held():
         pass
     close_thread_connections()
     _reclaim_finished(None, keep=0)
@@ -769,9 +771,13 @@ def write_txn(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 
 _ckpt_cv = threading.Condition()
-# Held while the checkpoint thread has a file open (re-entrant: the loop holds it across
-# its epoch check and checkpoint_passive's own hold).
+# Held while the checkpoint thread uses its connection, and by whoever moves the file
+# (via _ckpt_held, which closes that connection first). Re-entrant: the loop holds it
+# across its epoch check and checkpoint_passive's own hold.
 _ckpt_open = threading.RLock()
+# db path -> the checkpointer's connection, kept between checkpoints (opening one to a
+# multi-GB WAL database once a second during a turn was not free). Only under _ckpt_open.
+_ckpt_conns: dict[str, sqlite3.Connection] = {}
 _ckpt_due: set[str] = set()
 _ckpt_epoch = 0  # reset_for_tests bumps it: checkpoints queued before then are dropped
 _ckpt_thread: threading.Thread | None = None
@@ -813,21 +819,36 @@ def _checkpoint_loop() -> None:
         time.sleep(CHECKPOINT_EVERY_S)
 
 
-def checkpoint_passive(path: str) -> None:
-    """``wal_checkpoint(PASSIVE)`` on its own short-lived connection: it takes no write
-    lock, so writers keep going, and nothing stays open on a file a restore or a test
-    may move (a staged restore waits for it). ``mode=rw`` never creates a database that
-    was deleted meanwhile."""
+@contextmanager
+def _ckpt_held() -> Iterator[None]:
+    """Hold the checkpointer off with its connections closed: a file is about to move."""
     with _ckpt_open:
-        try:
-            conn = sqlite3.connect(Path(path).as_uri() + "?mode=rw", uri=True, timeout=1.0, isolation_level=None)
-        except sqlite3.Error:
-            return
+        while _ckpt_conns:
+            _close_quietly(_ckpt_conns.popitem()[1])
+        yield
+
+
+def checkpoint_passive(path: str) -> None:
+    """``wal_checkpoint(PASSIVE)`` on the checkpointer's own connection: it takes no
+    write lock, so writers keep going. The connection is kept and reopened only after
+    an error; a restore, a rebuild or a test closes it first (:func:`_ckpt_held`).
+    ``mode=rw`` never creates a database that was deleted meanwhile."""
+    with _ckpt_open:
+        conn = _ckpt_conns.get(path)
+        if conn is None:
+            try:
+                conn = sqlite3.connect(
+                    Path(path).as_uri() + "?mode=rw", uri=True, timeout=1.0, isolation_level=None,
+                    check_same_thread=False,  # closed by _ckpt_held on another thread, always under _ckpt_open
+                )
+            except sqlite3.Error:
+                return
+            _ckpt_conns[path] = conn
         try:
             conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
         except sqlite3.Error as exc:
             _log.debug("wal_checkpoint(PASSIVE) %s failed: %s", path, exc)
-        finally:
+            _ckpt_conns.pop(path, None)
             _close_quietly(conn)
 
 
@@ -1165,7 +1186,7 @@ def restore_snapshot(root: Path | None = None) -> Path:
     try:
         # No other process may be mid-first-open while the file is swapped, and this
         # process's wal-checkpoint thread would hold it mid-rename: both wait.
-        with _first_open_lock(root), _ckpt_open:
+        with _first_open_lock(root), _ckpt_held():
             moved: list[tuple[Path, Path]] = []
             for name in (DB_NAME, *SIDECAR_NAMES):
                 p = root / name

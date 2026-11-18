@@ -91,3 +91,49 @@ def test_a_failed_backup_is_logged_and_reported(tmp_path, monkeypatch, caplog) -
     note = json.loads(conn.execute("SELECT value FROM meta WHERE key=?", (db.BACKUP_FAILED_KEY,)).fetchone()[0])
     assert note["from"] == head and note["to"] == head + 1 and "No space" in note["error"]
     assert conn.execute("SELECT name FROM sqlite_master WHERE name='probe_after_upgrade'").fetchone()
+
+
+def _count_connects(monkeypatch) -> list[str]:
+    opened: list[str] = []
+    real = db.sqlite3.connect
+
+    def counted(*args, **kwargs):
+        opened.append(str(args[0]))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(db.sqlite3, "connect", counted)
+    return opened
+
+
+def test_the_checkpointer_opens_one_connection(monkeypatch) -> None:
+    db.connect()
+    path = str(db.db_path())
+    opened = _count_connects(monkeypatch)
+    for _ in range(5):
+        db.checkpoint_passive(path)
+    assert len(opened) == 1
+    db.close_thread_connections()  # a file move closes it
+    assert not db._ckpt_conns
+
+
+def test_it_reopens_after_an_error(monkeypatch) -> None:
+    db.connect()
+    path = str(db.db_path())
+    opened = _count_connects(monkeypatch)
+    db.checkpoint_passive(path)
+
+    class Broken:
+        def execute(self, *a):
+            raise db.sqlite3.OperationalError("disk I/O error")
+
+        def close(self):
+            pass
+
+    with db._ckpt_open:
+        db._ckpt_conns[path].close()
+        db._ckpt_conns[path] = Broken()
+    db.checkpoint_passive(path)  # fails, drops the broken one
+    assert path not in db._ckpt_conns
+    db.checkpoint_passive(path)
+    db.checkpoint_passive(path)
+    assert len(opened) == 2
