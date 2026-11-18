@@ -61,6 +61,30 @@ def test_prune_parses_no_run_document(journal: FileChangeJournal, monkeypatch) -
     assert kept == {r["run_id"] for r in before} - expected_dropped
 
 
+def test_no_sweep_when_nothing_was_pruned(journal: FileChangeJournal, monkeypatch) -> None:
+    _put_runs(5)  # all young, under the run limit
+    sweeps: list[int] = []
+    real_sweep = ledger_repo.sweep_blobs
+    monkeypatch.setattr(ledger_repo, "sweep_blobs", lambda: sweeps.append(1) or real_sweep())
+    assert journal.prune(project_root="Island") == {"removed_runs": 0, "removed_blobs": 0}
+    assert sweeps == []
+    journal.prune(project_root="Island", keep_runs=1)  # drops the closed, unarchived older runs
+    assert sweeps == [1]
+
+
+def test_the_sweep_plan_uses_three_indexes(journal: FileChangeJournal) -> None:
+    from backend.store import db
+
+    sql = db.connect().execute(
+        "EXPLAIN QUERY PLAN DELETE FROM blobs WHERE hash NOT IN (SELECT before_blob FROM run_entries WHERE before_blob<>'') "
+        "AND hash NOT IN (SELECT after_blob FROM run_entries WHERE after_blob<>'') "
+        "AND hash NOT IN (SELECT content_hash FROM file_versions)"
+    ).fetchall()
+    plan = " ".join(str(row[-1]) for row in sql)
+    for index in ("ix_entries_before_blob", "ix_entries_after_blob", "ix_file_versions_hash"):
+        assert index in plan, plan
+
+
 def test_runs_brief_reads_columns_newest_first(journal: FileChangeJournal) -> None:
     _put_runs(3)
     assert ledger_repo.runs_brief(PID) == [

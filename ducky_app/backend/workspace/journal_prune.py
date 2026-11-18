@@ -57,7 +57,10 @@ def prune(journal: FileChangeJournal, *, project_root: str, max_age_days: int = 
                 removed_runs += 1
                 continue
             keep.append(run)
-        if dropped:
+        removed_blobs = 0
+        if removed_runs:
+            # Nothing dropped, nothing newly orphaned: the sweep (a write transaction) waits
+            # for a turn that drops a run. A manual sweep is in Settings > Database.
             journal._drop_catalog_ids(storage, dropped)
-        removed_blobs = journal._sweep_orphan_blobs(storage, keep)
+            removed_blobs = journal._sweep_orphan_blobs(storage, keep)
     return {"removed_runs": removed_runs, "removed_blobs": removed_blobs}
