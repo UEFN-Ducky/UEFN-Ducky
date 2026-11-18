@@ -46,6 +46,10 @@ BITRATE_KBPS: Buckets = ((500, "500kbps"), (2000, "2mbps"), (5000, "5mbps"), (No
 # Frame height to a resolution label: anything over 720 lines reads as 1080p.
 RES_HEIGHT: Buckets = ((480, "480p"), (720, "720p"), (None, "1080p"))
 DROPPED: Buckets = ((0, "0"), (5, "1-5"), (None, "more"))
+# pc.gpu_full: the card's dedicated memory, and UEFN's / Ducky's share of it (GB).
+GPU_TOTAL_GB: Buckets = ((4, "4gb"), (6, "6gb"), (8, "8gb"), (10, "10gb"), (12, "12gb"), (16, "16gb"), (None, "more"))
+GPU_UEFN_GB: Buckets = ((1.99, "<2gb"), (3.99, "<4gb"), (5.99, "<6gb"), (7.99, "<8gb"), (None, "more"))
+GPU_DUCKY_GB: Buckets = ((0.249, "<0.25gb"), (0.499, "<0.5gb"), (0.999, "<1gb"), (None, "more"))
 # Ducky-Launcher.exe (frontend/native_switch.py): page painted against the 1.1 s goal and
 # its 1.3 s outer limit; the bare window shown against the 0.1 s goal.
 PAINTED_MS: Buckets = ((500, "500ms"), (1100, "1100ms"), (1300, "1300ms"), (2000, "2000ms"), (None, "more"))
@@ -200,6 +204,12 @@ EVENTS: dict[str, dict[str, Any]] = {
                    "length": ("bucket", DURATION_S, "length_s"),
                    "fail_stage": ("signaling", "ice_gather", "ice_check", "dtls", "datachannel", "none"),
                    **REMOTE_COMMON},
+    # One per graphics-memory spell (low_memory.check_gpu), also when its warnings are off:
+    # the card's size, which kind of program filled it (usage_stats.gpu_full), never a name.
+    "pc.gpu_full": {"total": ("bucket", GPU_TOTAL_GB, "total_gb"),
+                    "top": ("uefn", "ducky", "browser", "game", "overlay", "other"),
+                    "uefn": ("bucket", GPU_UEFN_GB, "uefn_gb"), "ducky": ("bucket", GPU_DUCKY_GB, "ducky_gb"),
+                    "muted": ("y", "n")},
     "perf.sample": {
         "startup": ("bucket", STARTUP_S, "startup_s"),
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),

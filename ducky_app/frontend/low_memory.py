@@ -313,10 +313,17 @@ def check_gpu() -> None:
                 _gpu_calm_since = 0.0
             return
         _gpu_calm_since = 0.0
-        if _gpu_warned or (_gpu_last_alert and now - _gpu_last_alert < GPU_EVERY_S):
+        if _gpu_warned:
             return
         _gpu_warned = True
-        if not warnings_on():
+        on = warnings_on()
+        try:
+            from frontend import usage_stats
+
+            usage_stats.gpu_full(info, muted=not on)
+        except Exception:
+            pass
+        if not on or (_gpu_last_alert and now - _gpu_last_alert < GPU_EVERY_S):
             return
         _gpu_last_alert = now
         title, body = gpu_memory.describe(info)

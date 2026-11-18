@@ -50,9 +50,43 @@ def _default_read_bytes() -> int:
     return private_bytes()
 
 
+def _default_read_vram() -> int:
+    """UEFN's dedicated GPU bytes (the PDH "GPU Process Memory" counter of this pid), 0 when
+    Windows can't tell. A copy of frontend.gpu_memory's read: the listener can't import frontend."""
+    if os.name != "nt":
+        return 0
+    import ctypes
+
+    class _Value(ctypes.Structure):
+        _fields_ = [("CStatus", ctypes.c_uint32), ("largeValue", ctypes.c_longlong)]
+
+    class _Item(ctypes.Structure):
+        _fields_ = [("szName", ctypes.c_wchar_p), ("FmtValue", _Value)]
+
+    pdh = ctypes.WinDLL("pdh")
+    query, counter = ctypes.c_void_p(), ctypes.c_void_p()
+    if pdh.PdhOpenQueryW(None, None, ctypes.byref(query)) != 0:
+        return 0
+    try:
+        path = rf"\GPU Process Memory(pid_{os.getpid()}_*)\Dedicated Usage"
+        if pdh.PdhAddEnglishCounterW(query, path, None, ctypes.byref(counter)) or pdh.PdhCollectQueryData(query):
+            return 0
+        size, count = ctypes.c_uint32(0), ctypes.c_uint32(0)
+        pdh.PdhGetFormattedCounterArrayW(counter, 0x400, ctypes.byref(size), ctypes.byref(count), None)
+        buf = (ctypes.c_byte * max(size.value, 1))()
+        if not size.value or pdh.PdhGetFormattedCounterArrayW(counter, 0x400, ctypes.byref(size),
+                                                               ctypes.byref(count), buf):
+            return 0
+        items = ctypes.cast(buf, ctypes.POINTER(_Item))
+        return sum(int(items[i].FmtValue.largeValue) for i in range(count.value) if items[i].FmtValue.CStatus in (0, 1))
+    finally:
+        pdh.PdhCloseQuery(query)
+
+
 # Seams (tests replace these).
 clock = time.monotonic
 read_bytes = _default_read_bytes
+read_vram = _default_read_vram
 
 
 def _log(msg: str, level: str = "info") -> None:
@@ -167,7 +201,13 @@ def _finish(b: dict, now_bytes: int, timed_out: bool) -> None:
     if timed_out:
         notes.append("30 s cap")
     tail = f" ({', '.join(notes)})" if notes else ""
-    _log(f"Render trim: {grew:+.0f} MB → {left:+.0f} MB in {secs:.1f} s{tail}")
+    try:
+        vram = int(read_vram() or 0)
+    except Exception:
+        vram = 0
+    # Log only: the pinned render targets sit in VRAM, which the RAM rule above can't see.
+    gpu = f", VRAM {vram / (1024 * _MB):.1f} GB" if vram > 0 else ""
+    _log(f"Render trim: {grew:+.0f} MB → {left:+.0f} MB in {secs:.1f} s{gpu}{tail}")
 
 
 # ---------------------------------------------------------------- overrides

@@ -33,6 +33,8 @@ def gpu(monkeypatch):
     monkeypatch.setattr(low_memory, "_gpu_calm_since", 0.0)
     monkeypatch.setattr(low_memory, "_gpu_last_alert", 0.0)
     monkeypatch.setattr(low_memory, "warnings_on", lambda: True)
+    state["counted"] = []
+    monkeypatch.setattr("frontend.usage_stats.gpu_full", lambda info, muted: state["counted"].append(muted))
     clock = [1000.0]
     monkeypatch.setattr(low_memory.time, "monotonic", lambda: clock[0])
     state["clock"] = clock
@@ -93,6 +95,7 @@ def test_one_calm_alert_per_spell_naming_uefn(gpu):
     _check(gpu, 4.0, after_s=low_memory.GPU_CALM_S)
     _check(gpu, 7.6)
     assert len(gpu["alerts"]) == 2
+    assert gpu["counted"] == [False, False, False]  # pc.gpu_full once per spell, the quiet one too
 
 
 def test_a_reader_failure_gives_nothing(gpu):

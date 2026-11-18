@@ -375,6 +375,22 @@ def test_chat_turn_counts_its_tools_and_first_message_once() -> None:
     assert not any("Cube" in str(r) for r in rows)
 
 
+def test_gpu_full_sends_words_and_buckets_only() -> None:
+    assert ev.validate("pc.gpu_full", {"total_gb": 8.0, "top": "uefn", "uefn_gb": 8.1, "ducky_gb": 0.1,
+                                       "muted": "n"}) == {
+        "total": "8gb", "top": "uefn", "uefn": "more", "ducky": "<0.25gb", "muted": "n"}
+    assert ev.validate("pc.gpu_full", {"top": "C:/Users/x/game.exe", "muted": "maybe", "total": "8 GB"}) == {}
+    us.gpu_full({"total_gb": 8.0, "ducky_gb": 0.1, "top": [{"name": "UnrealEditorFortnite", "gb": 6.3}]}, muted=False)
+    us.gpu_full({"total_gb": 12.0, "ducky_gb": 0.6, "top": [{"name": "C:/Users/x/MySecretTool", "gb": 9.0}]}, muted=True)
+    us.gpu_full({"total_gb": 6.0, "ducky_gb": 0.3, "top": [{"name": "msedgewebview2", "gb": 0.3}]}, muted=False)
+    rows, _ = us._take(100)
+    assert [r["props"] for r in rows if r["name"] == "pc.gpu_full"] == [
+        {"total": "8gb", "top": "uefn", "uefn": "<8gb", "ducky": "<0.25gb", "muted": "n"},
+        {"total": "12gb", "top": "other", "uefn": "<2gb", "ducky": "<1gb", "muted": "y"},
+        {"total": "6gb", "top": "ducky", "uefn": "<2gb", "ducky": "<0.5gb", "muted": "n"},
+    ]
+
+
 def test_source_control_and_remote_view_report_words_only() -> None:
     us.revision("push", {"ok": True, "checked_in": 3}, 42)
     us.revision("pull", {"ok": True, "up_to_date": True}, 0.5)

@@ -38,6 +38,7 @@ class _World:
         self.bytes = 30_000 * MB
         self.state = "foreground"
         self.logs: list[str] = []
+        self.vram = 0
 
 
 def _load(fake_sub, world: _World, name="render_trim_under_test"):
@@ -52,6 +53,7 @@ def _load(fake_sub, world: _World, name="render_trim_under_test"):
     spec.loader.exec_module(mod)
     mod.clock = lambda: world.t
     mod.read_bytes = lambda: world.bytes
+    mod.read_vram = lambda: world.vram
     mod.window_state = lambda: world.state
     mod._log = lambda msg, level="info": world.logs.append(msg)
     return mod
@@ -106,6 +108,20 @@ def test_burst_keeps_going_past_60_ticks_until_memory_drops(sub, world):
     assert not mod.active()
     assert sub.invalidations == 151
     assert world.logs[-1].startswith("Render trim: +712 MB → +18 MB in ")
+    assert "VRAM" not in world.logs[-1]  # unknown VRAM stays out of the line
+
+
+def test_the_end_line_names_uefns_vram(sub, world):
+    mod = _load(sub, world)
+    world.vram = int(6.3 * 1024 * MB)
+    baseline = world.bytes
+    world.bytes = baseline + 500 * MB
+    mod.request_trim(2, baseline=baseline)
+    world.bytes = baseline
+    for _ in range(3):
+        mod.tick()
+    assert not mod.active()
+    assert ", VRAM 6.3 GB" in world.logs[-1]
 
 
 def test_burst_stops_at_the_30_second_cap(sub, world):

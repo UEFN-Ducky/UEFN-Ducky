@@ -987,6 +987,28 @@ def popup(kind: str) -> None:
     track("uefn.popup_watchdog", kind=kind)
 
 
+# Which kind of program fills the card (pc.gpu_full top), from its process name; the name never leaves.
+_GPU_TOPS = (("uefn", r"^unrealeditor"), ("browser", r"^(chrome|msedge|firefox|opera|brave|vivaldi|arc)\b"),
+             ("overlay", r"discord|overlay|nvcontainer|nvidia share|obs\d*$|medal|wallpaper"),
+             ("game", r"shipping$|^fortniteclient|game"))
+
+
+def gpu_full(info: dict[str, Any], *, muted: bool) -> None:
+    """pc.gpu_full: one per graphics-memory spell (gpu_memory.read()'s answer), words and buckets only."""
+    try:
+        rows = info.get("top") or []
+        lead = rows[0] if rows else {}
+        ducky = float(info.get("ducky_gb") or 0)
+        name = str(lead.get("name") or "").lower()
+        top = "ducky" if ducky and ducky >= float(lead.get("gb") or 0) else next(
+            (t for t, p in _GPU_TOPS if re.search(p, name)), "other")
+        uefn = sum(float(r.get("gb") or 0) for r in rows if str(r.get("name") or "").lower().startswith("unrealeditor"))
+        track("pc.gpu_full", total_gb=info.get("total_gb"), top=top, uefn_gb=uefn, ducky_gb=ducky,
+              muted="y" if muted else "n")
+    except Exception:
+        pass
+
+
 # What stopped a push or pull before it tried: the tool answer's own keys, else words in its error.
 _REVISION_KEYS = (("conflict_markers", "conflict_markers"), ("locked_by_other", "locked"),
                   ("both_changed", "both_changed"), ("conflict_dialog", "conflict_dialog"), ("needs_save", "needs_save"))
