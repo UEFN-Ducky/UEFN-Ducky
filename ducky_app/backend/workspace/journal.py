@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, Protocol, runtime_checkable
 
 from backend.workspace import events, identity
+from frontend.atomic_json import read_json_object, write_json_plain, write_text_atomic
 from backend.workspace.editor_ops import usable_ident
 from backend.workspace.paths import content_hash, normalize_rel, same_project_roots
 from backend.workspace.verse_cleanup import kick_verse_compile, prune_empty_parents, revert_uefn_for_deleted_verse
@@ -1676,16 +1677,11 @@ class FileChangeJournal:
 
     @staticmethod
     def _read_json(path: Path) -> Any:
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
+        return read_json_object(path) or None  # every journal file is an object
 
     @staticmethod
     def _write_json(path: Path, data: Any) -> None:
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(path)
+        write_json_plain(path, data, ensure_ascii=False, indent=1)
 
     @staticmethod
     def _store_blob(storage: Path, content: str) -> str:
@@ -1694,9 +1690,7 @@ class FileChangeJournal:
             return _repo().blob_put(content, digest=digest)
         target = storage / "blobs" / f"{digest}.txt"
         if not target.exists():
-            tmp = target.with_suffix(".tmp")
-            tmp.write_text(content, encoding="utf-8", newline="")
-            tmp.replace(target)
+            write_text_atomic(target, content)  # newline="\n": CRLF bodies stay byte-exact
         return digest
 
     @staticmethod

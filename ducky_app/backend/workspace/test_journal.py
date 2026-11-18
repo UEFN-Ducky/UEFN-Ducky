@@ -825,3 +825,28 @@ def test_an_outside_agent_file_beside_content_is_listed_for_by_hand_never_a_fals
     run = journal.get_run("codex-run", project_root=str(island))
     assert validate("changeset_run", run) == []
     assert run["entries"][0]["abs_path"] == str(probe) and not run["entries"][0]["reverted"]
+
+
+def test_two_writers_of_the_journal_state_never_collide(tmp_path: Path) -> None:
+    import json
+    import threading
+
+    target = tmp_path / "ledger" / "index.json"
+    errors: list[BaseException] = []
+
+    def writer(n: int) -> None:
+        for i in range(50):
+            try:
+                FileChangeJournal._write_json(target, {f"p{n}": {"i": i, "pad": "x" * 200}})  # noqa: SLF001
+            except BaseException as exc:  # noqa: BLE001 — collected for the assert
+                errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert isinstance(json.loads(target.read_text(encoding="utf-8")), dict)
+    assert FileChangeJournal._read_json(target) is not None  # noqa: SLF001
+    assert [p.name for p in target.parent.iterdir()] == ["index.json"]  # no temp file left
