@@ -72,6 +72,22 @@ def tree(procs: dict[int, Proc], root: int) -> list[int]:
     return out
 
 
+def ancestor(procs: dict[int, Proc], pid: int, name: str) -> Proc | None:
+    """The nearest process above ``pid`` called ``name`` (a reused parent pid never counts).
+
+    A backend started by a version hand-off has the stub ``UEFN-Ducky.exe`` as its parent and
+    ``Ducky-Launcher.exe`` above that, so the launcher is not always ``os.getppid()``."""
+    proc = procs.get(pid)
+    for _ in range(8):
+        parent = procs.get(proc.ppid) if proc is not None and proc.ppid != proc.pid else None
+        if parent is None or (parent.started and proc.started and parent.started > proc.started):
+            return None
+        if parent.name.lower() == name.lower():
+            return parent
+        proc = parent
+    return None
+
+
 def orphan(procs: dict[int, Proc], pid: int) -> bool:
     """True when ``pid``'s parent is gone (or its pid now belongs to a newer process)."""
     proc = procs.get(pid)

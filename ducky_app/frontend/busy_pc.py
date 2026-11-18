@@ -90,7 +90,11 @@ def raise_window_priority() -> int:
 
     k32 = _kernel32()
     raised = 0
-    for pid in window_pids(proc_table.table(), os.getpid(), os.getppid() if backend_mode() else 0):
+    from frontend.frozen_process import LAUNCHER_EXE
+
+    procs = proc_table.table()
+    launcher = proc_table.ancestor(procs, os.getpid(), LAUNCHER_EXE) if backend_mode() else None
+    for pid in window_pids(procs, os.getpid(), launcher.pid if launcher else 0):
         handle = k32.OpenProcess(0x0200 | 0x1000, False, int(pid))  # SET_INFORMATION | QUERY_LIMITED_INFORMATION
         if not handle:
             continue

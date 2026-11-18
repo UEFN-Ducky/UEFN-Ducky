@@ -891,11 +891,9 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
             beat.update(app_gb=round(me.private / gb, 2), app_mb=round(me.private / 1024**2, 1),
                         threads=me.threads, handles=me.handles)
             # With the Rust launcher, WebView2 is our sibling, not our child.
-            # Check the parent's identity/start time before widening the census.
-            parent = procs.get(me.ppid)
-            launcher = parent if (os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1"
-                                  and parent is not None and parent.name.lower() == "ducky-launcher.exe"
-                                  and parent.started <= me.started) else None
+            # The launcher may be our grandparent (version hand-off: the stub sits between).
+            launcher = (proc_table.ancestor(procs, me.pid, "Ducky-Launcher.exe")
+                        if os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1" else None)
             mine = proc_table.tree(procs, launcher.pid if launcher else me.pid)
             webview = sum(procs[p].private for p in mine if procs[p].name.lower() == WEBVIEW_EXE)
             beat.update(webview_gb=round(webview / gb, 2), webview_mb=round(webview / 1024**2, 1))

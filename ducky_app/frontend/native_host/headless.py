@@ -443,13 +443,18 @@ def run_backend(
         from frontend.ui_web import focus_windows
 
         focus_windows.configure(api=api, base_url=url.split("?")[0], main_window=window)
-        # Browser panes: a WinForms form of this process inside the launcher's window (the
-        # launcher is our parent). Nothing loads until the first pane opens.
+        # Browser panes: a WinForms form of this process inside the launcher's window. The
+        # launcher is our parent, or our grandparent after a version hand-off (then the parent
+        # is the stub, which owns no window and every pane said "no host window").
+        # Nothing loads until the first pane opens.
         if sys.platform == "win32":
+            from backend.util import proc_table
+            from frontend.frozen_process import LAUNCHER_EXE
             from frontend.native_host.pane_host import PaneHost
             from frontend.ui_web import browser_overlay
 
-            browser_overlay.configure(main_window=PaneHost(os.getppid()))
+            launcher = proc_table.ancestor(proc_table.table(), os.getpid(), LAUNCHER_EXE)
+            browser_overlay.configure(main_window=PaneHost(launcher.pid if launcher else os.getppid()))
         port, extra = server_port(bundled_http), {}
         if ui_port is not None:
             # The launcher owns the public port (url, panel.pid, hand-off, IDE bridges keep it)
