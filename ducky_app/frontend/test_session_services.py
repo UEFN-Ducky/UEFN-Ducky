@@ -60,6 +60,24 @@ def test_a_starter_that_fails_is_named_in_the_log(monkeypatch, caplog) -> None:
     assert any(n == "workflow scheduler" for n, _, _ in starters)
 
 
+def test_a_failed_listener_config_write_is_logged(monkeypatch, tmp_path, caplog) -> None:
+    from frontend import atomic_json, project_kind, settings
+
+    def locked(*_a, **_k):
+        raise PermissionError("config.json locked by UEFN")
+
+    monkeypatch.setattr(settings, "default_app_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(settings, "workspace_folders", lambda root: [root])
+    monkeypatch.setattr(project_kind, "is_folder_project", lambda root: False)
+    monkeypatch.setattr(atomic_json, "write_json_atomic", locked)
+    monkeypatch.delenv("UEFN_VSCODE_WORKSPACE_FOLDERS", raising=False)
+    monkeypatch.delenv("UEFN_DUCKY_PROJECT_ROOT", raising=False)
+    with caplog.at_level(logging.WARNING, logger=settings.__name__):
+        assert settings.apply_workspace_env(str(tmp_path / "Island")) is None  # still returns
+    (record,) = caplog.records
+    assert record.getMessage() == "listener config not written" and record.exc_info
+
+
 def test_each_service_failure_is_logged_and_the_rest_still_start(monkeypatch, caplog) -> None:
     names = [name for name, _ in session_services.SERVICES]
     for bad in names:

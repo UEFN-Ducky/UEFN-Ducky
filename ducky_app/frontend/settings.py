@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -16,6 +17,7 @@ from typing import Any
 # processes (a second panel/MCP instance), so save() additionally uses a per-writer temp
 # file + retry so concurrent saves can't corrupt each other or raise WinError 5.
 _SAVE_LOCK = threading.Lock()
+_log = logging.getLogger(__name__)
 
 
 # Who makes pictures, 3D models, videos and music when nothing else is picked: the plugin ids
@@ -989,5 +991,6 @@ def apply_workspace_env(project_root: str) -> None:
         if desired != existing:
             write_json_atomic(cfg_path, desired)
     except Exception:
-        pass
+        # The listener then keeps the previous project root: say so.
+        _log.warning("listener config not written", exc_info=True)
 
