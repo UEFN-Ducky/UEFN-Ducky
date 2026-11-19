@@ -125,7 +125,7 @@ function ReadOnlyFilePane({ relativePath }: FileEditorPaneProps) {
 }
 
 /** Store slug that can preview .uasset / 3D models when installed. */
-const UASSET_PREVIEW_STORE_SLUG = "uasset-preview";
+const UASSET_PREVIEW_STORE_SLUG = "uefn-asset-viewer";
 
 function wantsAssetPreviewPlugin(relativePath: string, kindHint?: string): boolean {
   if (kindHint === "unreal_asset" || kindHint === "model") return true;

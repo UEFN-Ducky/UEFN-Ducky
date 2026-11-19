@@ -12,7 +12,8 @@ STARTER_ACCOUNT_SLUG = "account"
 
 STARTER_LLM_GATEWAY_SLUGS: tuple[str, ...] = ("anthropic", "openai", "google", "cursor")
 
-STARTER_UEFN_PLUGIN_SLUGS: tuple[str, ...] = ("uefn", "playtester", "typesafe")
+# UEFN Asset Viewer: .uasset files open as previews instead of binary.
+STARTER_UEFN_PLUGIN_SLUGS: tuple[str, ...] = ("uefn", "playtester", "typesafe", "uefn-asset-viewer")
 
 STARTER_CREATE_PLUGIN_SLUGS: tuple[str, ...] = ("blender", "forge", "meshy", "tripo", "adobe", "island-media-kit")
 
@@ -38,6 +39,7 @@ STARTER_PLUGIN_LABELS: dict[str, str] = {
     "uefn": "UEFN",
     "playtester": "Play Tester",
     "typesafe": "TypeSafe",
+    "uefn-asset-viewer": "UEFN Asset Viewer",
     "blender": "Blender",
     "forge": "Ducky Forge",
     "meshy": "Meshy",

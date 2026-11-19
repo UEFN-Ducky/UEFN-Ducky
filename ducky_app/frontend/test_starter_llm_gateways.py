@@ -140,6 +140,7 @@ def test_setup_status_lists_the_bundle_with_what_is_installed(isolated_appdata) 
     assert by_slug["uefn"]["group"] == "uefn" and by_slug["uefn"]["installed"] is True
     assert by_slug["uefn"]["label"] == "UEFN" and "leveldesign" not in by_slug
     assert by_slug["playtester"]["group"] == "uefn" and by_slug["typesafe"]["group"] == "uefn"
+    assert by_slug["uefn-asset-viewer"] == {"slug": "uefn-asset-viewer", "label": "UEFN Asset Viewer", "group": "uefn", "installed": False}
     assert {s for s, p in by_slug.items() if p["group"] == "create"} == {"blender", "forge", "meshy", "tripo", "adobe", "island-media-kit"}
     assert by_slug["piper"]["group"] == "extras" and by_slug["piper"]["label"] == "Pipe voices"
     # New users always get the in-app browser and the in-game play tester.
