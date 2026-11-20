@@ -84,6 +84,8 @@ export type PluginSettingsProperty = {
   connected_label?: string;
   /** "model": gateway ids left out of the picker (e.g. the plugin's own router gateway). */
   hide_providers?: string[];
+  /** "model": also list logins (Claude Code, Codex…) with the Faster / Smarter slider; the effort is saved as `<id>_effort`. */
+  logins?: boolean;
   /** "action": panel RPC the button calls once connected. */
   connected_rpc?: string;
 };

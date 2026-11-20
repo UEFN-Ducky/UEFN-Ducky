@@ -55,6 +55,13 @@ function ModelField({
   const { prefs, setPref } = usePluginUiPrefs(pluginId);
   const cur = prefs[prop.id];
   const value = typeof cur === "string" ? cur : typeof prop.default === "string" ? prop.default : "";
+  // `logins`: the chat's whole dropdown (Claude Code, Codex… and the Faster / Smarter slider, kept
+  // in `<id>_effort`), for a plugin that hands the pick to a chat. Otherwise API models only.
+  const effortKey = `${prop.id}_effort`;
+  const effort = typeof prefs[effortKey] === "string" ? (prefs[effortKey] as string) : "off";
+  const loginProps = prop.logins
+    ? { thinkingEffort: effort, onEffortChange: (next: string) => setPref(effortKey, next) }
+    : { apiOnly: true };
   return (
     <div className="voice-settings-row" data-plugin-model-field={prop.id}>
       <label className="voice-settings-label">{prop.label || prop.id}</label>
@@ -66,7 +73,7 @@ function ModelField({
         hint=""
         placeholder={prop.placeholder || "Default model"}
         menuPlacement="bottom"
-        apiOnly
+        {...loginProps}
         hideProviders={prop.hide_providers}
         labeled
       />

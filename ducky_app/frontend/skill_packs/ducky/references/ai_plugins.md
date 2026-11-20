@@ -223,7 +223,7 @@ Store build refuses a plugin without it (rule 8). Optional `data_locks`, `data_l
 | `dock.panels` | A side dock (`defaultSide`, `"ui": "panel:<id>"`) | `plugin_examples_ui` |
 | `editor.kinds` | Opens files by suffix in your panel | `plugin_examples_ui` |
 | `automations.nodes` / `.templates` / `.triggers` / `.image_generators` | Workflow nodes, starters, triggers, Text to Image backends | `plugin_examples_tools`, `plugin_examples_app` |
-| `settings.tabs` + `settings.sections` | Native settings: `boolean`, `string`, `select`, `secret` | `plugin_examples_tools` |
+| `settings.tabs` + `settings.sections` | Native settings: `boolean`, `string`, `select`, `secret`, `action` (a button calling a panel RPC), `model` (the chat's model picker; `logins: true` adds Claude Code / Codex and the Faster / Smarter slider, saved as `<id>_effort`). A gateway's sections show on its own Settings → LLMs page | `plugin_examples_tools` |
 | `walkthrough` | A tour on first enable | `plugin_examples_app` |
 | `verse.templates` | Verse files and multi-file packs for New file | `plugin_examples_uefn` |
 | `appearance.profiles` / `.css` / `.effects` / `.skin` | Themes, app CSS, effects, skins | `plugin_examples_ui` |
@@ -270,7 +270,9 @@ That table is the everyday set. `ducky_plugin_reference` ends with the live list
 
 Secrets: `from backend.agent.secrets import get_key` then `get_key("<secret id>")`.
 Non-secret settings values: `from frontend.ui_web.plugin_host_api import
-prefs_plugin_get` then `prefs_plugin_get(api.plugin_id).get("<property id>")`.
+prefs_plugin_get` then `prefs_plugin_get(api.plugin_id).get("<property id>")`. Changed them from the
+backend (`prefs_plugin_set`)? Push `{"type": "plugin_prefs_changed", "plugin_id": ..., "prefs": <whole slot>}`
+so an open Settings page shows the new values.
 Push a live update to your panels: `from frontend.ui_web.verse_editor.panel_events
 import push_agent_event` then `push_agent_event({"type": "<id>_changed", …})`; the
 panel subscribes with `plugin.subscribe`.

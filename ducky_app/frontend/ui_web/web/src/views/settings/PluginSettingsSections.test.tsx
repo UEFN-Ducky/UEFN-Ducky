@@ -110,6 +110,24 @@ it("renders a model property with the chat's model picker, API models only", () 
   expect(pickerProps.at(-1)).toMatchObject({ model: "", apiOnly: true, hideProviders: ["ducky_auto"] });
 });
 
+it("a model property with logins offers the chat's logins and the Faster / Smarter slider", () => {
+  pickerProps.length = 0;
+  sections = [
+    {
+      id: "coding",
+      tab: "LLMs",
+      plugin_id: "ducky-auto",
+      title: "Coding",
+      properties: [{ id: "route_coding", type: "model", label: "Model", placeholder: "Auto", logins: true }],
+    },
+  ];
+  render(<PluginSettingsSections tabId="LLMs" />);
+  const props = pickerProps.at(-1)!;
+  expect(props.apiOnly).toBeUndefined();
+  expect(props.thinkingEffort).toBe("off");
+  expect(typeof props.onEffortChange).toBe("function");
+});
+
 it("renders a collapsed section as a closed accordion", async () => {
   pluginCall.mockResolvedValue({ ok: true, connected: false, detail: "Not connected" });
   sections = [

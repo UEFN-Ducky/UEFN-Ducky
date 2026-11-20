@@ -2386,6 +2386,8 @@ export interface PanelPushEvent {
     | "discord_changed"
     | "uefn_plugins_changed"
     | "duckyos_account_changed"
+    /** A plugin's backend changed its own settings prefs (`plugin_id`, `prefs`): Settings repaints. */
+    | "plugin_prefs_changed"
     | "gateway_accounts_changed"
     | "plugin_scope_changed"
     /** A write of a plugin (an agent's tool call, its folder) was refused: someone holds the unit. */
@@ -2486,6 +2488,8 @@ export interface PanelPushEvent {
   kept?: boolean;
   /** duckyos_account_changed — the new account key ("" signed out). */
   account?: string;
+  /** plugin_prefs_changed — the plugin's whole prefs slot. */
+  prefs?: Record<string, unknown>;
   source?: string;
   kind?: string;
   /** graph_focus: saved, show or deleted. */

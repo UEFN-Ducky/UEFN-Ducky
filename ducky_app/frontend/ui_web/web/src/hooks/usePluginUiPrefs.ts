@@ -125,6 +125,15 @@ function watchAccountSwitches(): void {
   accountWatch = true;
   installPanelPushBus();
   subscribePanelPush((event) => {
+    if (event.type === "plugin_prefs_changed") {
+      // A plugin's backend changed its own settings (a tool, setup): the open Settings page follows.
+      const pid = typeof event.plugin_id === "string" ? event.plugin_id.trim().toLowerCase() : "";
+      const slot = event.prefs;
+      if (pid && slot && typeof slot === "object" && !Array.isArray(slot)) {
+        applyDiskPrefs({ [pid]: slot as unknown as PluginUiPrefsMap });
+      }
+      return;
+    }
     if (event.type !== "duckyos_account_changed") return;
     if (typeof event.account === "string") switchPrefsAccount(event.account);
     hydratedFromDisk = false;
