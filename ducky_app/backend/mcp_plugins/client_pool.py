@@ -808,9 +808,11 @@ class PluginClientPool:
             with _watchdog() as pressed:
                 raw = await _invoke(session)
         except _EpicDeadline as late:
-            from backend.bridge.call_limits import stall_reason
+            from backend.bridge.call_limits import EPIC_CALL_LIMIT_S, stall_reason
+            from frontend import uefn_events
 
             why = await asyncio.to_thread(stall_reason, namespaced_name, late.limit)
+            uefn_events.deadline(why, late.limit > EPIC_CALL_LIMIT_S, late.steps)
             if late.steps > 1:
                 why["steps_finished"] = f"{late.done} of {late.steps}"
                 why["message"] = f"{why.get('message', '')} {late.done} of {late.steps} steps finished.".strip()
@@ -854,6 +856,10 @@ class PluginClientPool:
             # property that does not exist answers isError=true ("... could not be set"); this
             # method returned that text as a success 98 times in 30 days.
             raise RuntimeError(f"{plugin_id} {original_name} failed: {text.strip()[:4000]}")
+        if epic_call:
+            from frontend import uefn_events
+
+            uefn_events.answer(original_name, text)
         if not getattr(raw, "isError", False):
             try:
                 # What the call made (a Blender render, an export…) goes into Storage under this server.

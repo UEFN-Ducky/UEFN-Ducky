@@ -67,6 +67,14 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "remote.input": {"lag_ms": 90, "dropped_n": 0},
     "remote.load": {"first_frame_ms": 2500, "page_ms": 600},
     "remote.end": {"why": "network", "length_s": 400, "fail_stage": "none", "viewer_version": "1.4.2"},
+    "epic.deadline": {"reason": "popup", "heavy": "y", "steps": "one", "uefn": "43.10"},
+    "uefn.popup": {"kind": "verse_error", "during": "build", "uefn": "43.10"},
+    "verse.build": {"result": "errors", "took_s": 45, "uefn": "43.10"},
+    "uefn.memory": {"grown_gb": 94, "freed_gb": 7.6, "uefn": "43.10"},
+    "epic.status": {"state": "port_taken"},
+    "editor.lease": {"outcome": "gave_up", "waited_s": 90},
+    "epic.describe": {"tool": "describe_toolset", "chars_n": 284817, "uefn": "43.10"},
+    "epic.answer": {"kind": "verse_string", "uefn": "43.10"},
 }
 
 

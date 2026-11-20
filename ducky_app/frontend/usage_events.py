@@ -52,6 +52,12 @@ GPU_UEFN_GB: Buckets = ((1.99, "<2gb"), (3.99, "<4gb"), (5.99, "<6gb"), (7.99, "
 GPU_DUCKY_GB: Buckets = ((0.249, "<0.25gb"), (0.499, "<0.5gb"), (0.999, "<1gb"), (None, "more"))
 # Ducky-Launcher.exe (frontend/native_switch.py): page painted against the 1.1 s goal and
 # its 1.3 s outer limit; the bare window shown against the 0.1 s goal.
+VERSE_BUILD_S: Buckets = ((30, "30s"), (60, "1m"), (180, "3m"), (None, "more"))
+# UEFN memory (GB): growth since its island loaded, or RAM given back.
+UEFN_GB: Buckets = ((1, "1gb"), (4, "4gb"), (16, "16gb"), (64, "64gb"), (None, "more"))
+LEASE_S: Buckets = ((5, "5s"), (30, "30s"), (90, "90s"), (None, "more"))
+# Characters in one answer (Nov 16 2026: describe_toolset ran up to 284,817).
+ANSWER_CHARS: Buckets = ((10000, "10k"), (50000, "50k"), (150000, "150k"), (None, "more"))
 PAINTED_MS: Buckets = ((500, "500ms"), (1100, "1100ms"), (1300, "1300ms"), (2000, "2000ms"), (None, "more"))
 WINDOW_MS: Buckets = ((100, "100ms"), (300, "300ms"), (1000, "1000ms"), (None, "more"))
 # Why a launch ran the Python window, "none" when it did not. Built from native_switch so the
@@ -227,6 +233,31 @@ EVENTS: dict[str, dict[str, Any]] = {
                           "plugin_v": ("version",)},
     "gateway.response": {"provider": ("slug",), "stop": ("safety", "max_tokens", "recitation", "other"),
                          "plugin_v": ("version",)},
+    # UEFN's own behaviour, for the Epic feedback report (frontend/uefn_events.py sends them).
+    # uefn: the UEFN release ("43.10", from Engine/Build/Build.version), so a problem reads per release.
+    # An Epic UEFN call hit its own deadline (client_pool): why it had not answered.
+    "epic.deadline": {"reason": ("popup", "editor_busy", "no_answer"), "heavy": ("y", "n"),
+                      "steps": ("one", "many"), "uefn": ("slug",)},
+    # A UEFN window that held a call or a Verse build, by the kind its title reads as.
+    "uefn.popup": {"kind": ("verse_error", "save", "checkout", "message", "crash", "other"),
+                   "during": ("call", "build"), "uefn": ("slug",)},
+    # One workspace_compile_verse: how it ended and how long it took.
+    "verse.build": {"result": ("ok", "errors", "popup", "still_building", "offline"),
+                    "took": ("bucket", VERSE_BUILD_S, "took_s"), "uefn": ("slug",)},
+    # UEFN's growth since its island loaded, and what freeing its idle RAM gave back.
+    "uefn.memory": {"grown": ("bucket", UEFN_GB, "grown_gb"), "freed": ("bucket", UEFN_GB, "freed_gb"),
+                    "uefn": ("slug",)},
+    # Epic's MCP port, once per UTC day per state.
+    "epic.status": {"state": ("online", "unreachable", "disabled", "port_taken", "other_editor", "other"),
+                    "uefn": ("slug",)},
+    # A chat that waited for another chat's editor lease, and whether it got it.
+    "editor.lease": {"outcome": ("waited", "gave_up"), "waited": ("bucket", LEASE_S, "waited_s")},
+    # Learning Epic's tools: how big a list_toolsets / describe_toolset answer was.
+    "epic.describe": {"tool": ("list_toolsets", "describe_toolset"),
+                      "size": ("bucket", ANSWER_CHARS, "chars_n"), "uefn": ("slug",)},
+    # Epic answers that read as success but are not: an empty property read, a Verse string
+    # Python can't read.
+    "epic.answer": {"kind": ("empty_props", "verse_string"), "uefn": ("slug",)},
     "perf.sample": {
         "startup": ("bucket", STARTUP_S, "startup_s"),
         "idle_cpu": ("bucket", IDLE_CPU_PCT, "idle_cpu_pct"),

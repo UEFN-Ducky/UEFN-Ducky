@@ -122,8 +122,11 @@ def _command_in_window() -> dict[str, Any] | None:
 
 def stall_reason(op: str, limit: float) -> dict[str, Any]:
     """Why an editor call has not answered within ``limit``: popup | editor_busy | no_answer."""
+    from frontend import uefn_events
+
     popup = blocking_popup()
     if popup:
+        uefn_events.popup(str(popup.get("title") or ""), "call")
         return {"ok": False, "reason": "popup", "hwnd": hex(int(popup.get("hwnd") or 0)),
                 "title": str(popup.get("title") or ""),
                 "message": f"{op} is held by a UEFN popup: call uefn_popups, then uefn_popup_press(hwnd, n)."}
@@ -132,6 +135,7 @@ def stall_reason(op: str, limit: float) -> dict[str, Any]:
     # "game thread is busy ... Wait" for 7 minutes behind a "Message" [OK] box.
     held = _command_in_window()
     if held:
+        uefn_events.popup(str(held.get("command") or ""), "call")
         what = f"`{held['command']}`" if held.get("command") else "an editor command"
         return {"ok": False, "reason": "popup", "command": str(held.get("command") or ""),
                 "message": f"{op} waits behind {what}, which has sat inside a UEFN window for "

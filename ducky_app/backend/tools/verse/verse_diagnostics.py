@@ -278,26 +278,33 @@ def workspace_compile_verse(pretty: bool = False) -> str:
     rebuild and wait → confirm the digest is fresh → uncomment → rebuild; never patch
     the digest. Recipe: skill_read_subskill("uefn", "verse_build_lifecycle").
     """
+    from frontend import uefn_events
     from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
 
     client = get_workflow_client()
+    begun = time.monotonic()
     if not client.connected:
         try:
             client.start(timeout_s=1.0)
         except OSError as exc:
+            uefn_events.verse_build("offline", 0)
             raise ValueError(
                 "Verse Workflow Server not connected (UEFN not open or Verse build unavailable). "
                 "Do NOT retry compile. Use workspace_list_verse_errors for Problems diagnostics "
                 f"(works offline). Detail: {exc}"
             ) from exc
     if not client.connected:
+        uefn_events.verse_build("offline", 0)
         raise ValueError(
             "Verse Workflow Server not connected. Do NOT retry. "
             "Use workspace_list_verse_errors for Problems diagnostics (works offline)."
         )
     try:
         state, result = _wait_for_build(client)
+        took = time.monotonic() - begun
         if state == "popup":
+            uefn_events.verse_build("popup", took)
+            uefn_events.popup(str(result.get("title") or ""), "build")
             return tool_json({
                 "ok": False, "blocked_by_popup": True, "hwnd": hex(int(result.get("hwnd") or 0)),
                 "title": str(result.get("title") or ""),
@@ -307,14 +314,18 @@ def workspace_compile_verse(pretty: bool = False) -> str:
         if state == "timeout":
             from backend.bridge.call_limits import VERSE_BUILD_LIMIT_S
 
+            uefn_events.verse_build("still_building", took)
             return tool_json({
                 "ok": False, "still_building": True,
                 "next": f"UEFN is still building after {VERSE_BUILD_LIMIT_S:.0f} s and no popup holds it. "
                         "Call workspace_compile_verse again to keep waiting on the same build; never start another.",
             }, pretty=pretty)
+        if isinstance(result, dict):
+            uefn_events.verse_build("errors" if result.get("numErrors") else "ok", took)
         if isinstance(result, dict) and _project_root():
             _LAST_COMPILE[_project_root()] = (time.time(), int(result.get("numErrors") or 0))
     except TimeoutError as exc:
+        uefn_events.verse_build("still_building", time.monotonic() - begun)
         # The build never answered: UEFN is behind a popup or busy. Say which, don't hang
         # (workspace_compile_verse past 5 min was agent.stuck 3x on Oct 31 2026).
         from backend.tools.core.uefn_popups import blocked_call_hint

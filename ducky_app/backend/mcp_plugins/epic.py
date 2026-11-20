@@ -338,6 +338,10 @@ def probe_epic_mcp(*, ttl_sec: float = _PROBE_CACHE_SEC, project_root: str | Non
     _probe_cache["at"] = now
     _probe_cache["root"] = root
     _probe_cache["result"] = result
+    if expected != EDITOR_UNREAL:
+        from frontend import uefn_events
+
+        uefn_events.epic_status(reason)
     return dict(result)
 
 

@@ -182,12 +182,16 @@ def take_lease(chat_id: str, op: str) -> None:
     """Take the editor lease for ``chat_id``, waiting while another chat holds it."""
     # ponytail: polls the shared lease file, not a strict arrival-order queue; a ticket
     # list in the lease file if two waiting chats ever need first-come-first-served.
+    from frontend import uefn_events
+
     waited = 0.0
     while not try_lease(chat_id, op):
         if waited >= LEASE_WAIT_SEC:
+            uefn_events.lease(waited, gave_up=True)
             raise EditorInUse(op)
         _sleep(LEASE_POLL_SEC)
         waited += LEASE_POLL_SEC
+    uefn_events.lease(waited, gave_up=False)
 
 
 def release_lease(chat_id: str) -> None:
@@ -350,7 +354,7 @@ def free_uefn_memory(why: str = "on request") -> dict[str, Any]:
     uefn = _uefn_memory()
     if uefn is None:
         return {"ok": False, "error": "UEFN isn't running."}
-    pid, _started, private = uefn
+    pid, started, private = uefn
     before = _working_set(pid)
     if not _empty_working_set(pid):
         return {"ok": False, "error": "Windows refused to trim UEFN's memory."}
@@ -367,6 +371,9 @@ def free_uefn_memory(why: str = "on request") -> dict[str, Any]:
         path.write_text(json.dumps(record), encoding="utf-8")
     except OSError:
         pass
+    from frontend import uefn_events
+
+    uefn_events.memory((private - _baseline_for(pid, started, private)) / _GB, record["freed_gb"])
     return {
         "ok": True,
         **record,
@@ -513,12 +520,16 @@ async def acall(
     cancels the wait), then awaits ``fn()`` until UEFN answers. Only the caller's own
     ``timeout`` stops it early (:class:`EditorTimeout`)."""
     if mutating:
+        from frontend import uefn_events
+
         waited = 0.0
         while not try_lease(chat_id, op):
             if waited >= LEASE_WAIT_SEC:
+                uefn_events.lease(waited, gave_up=True)
                 raise EditorInUse(op)
             await asyncio.sleep(LEASE_POLL_SEC)
             waited += LEASE_POLL_SEC
+        uefn_events.lease(waited, gave_up=False)
     _note_heavy(op, heavy)
     result = fn()
     if inspect.isawaitable(result):
