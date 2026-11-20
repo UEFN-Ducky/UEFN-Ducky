@@ -347,7 +347,7 @@ impl Host for UiHost {
         let _ = crate::starts::record(&app_data, false, None, None, &reason);
         let exe = std::env::current_exe().unwrap_or_default();
         // The reason word rides along (native_switch counts launcher_python.start_failed.<reason>).
-        let why = format!("start_failed.{reason}");
+        let why = format!("start_failed.{}", crate::starts::why_word(code, error));
         let started = repoint::Spawn::python(repoint::sibling_stub(&exe), &self.args, &why).start();
         with(|u| {
             u.record.stage(if started.is_ok() { "fallback_python" } else { "fallback_python_failed" });

@@ -38,6 +38,29 @@ pub fn fallback_reason(code: u8, error: &str) -> String {
     }
 }
 
+/// The word the Python window counts as `launcher_python.start_failed.<word>`: the
+/// [`fallback_reason`], and for a `no_hello` the boot stage the backend went silent in
+/// (`no_hello.panel_api_init`, from the supervisor's "no hello, last stage X after N s"), so
+/// a slow import can be told from a backend that never began. Nov 19 2026: every fallback
+/// said only `no_hello`. `native_switch` takes words of `[a-z0-9_]`, 24 chars each.
+pub fn why_word(code: u8, error: &str) -> String {
+    let reason = fallback_reason(code, error);
+    if reason != "no_hello" {
+        return reason;
+    }
+    let stage: String = error
+        .split("last stage ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(24)
+        .collect();
+    if stage.is_empty() { reason } else { format!("{reason}.{stage}") }
+}
+
 /// The row `native_switch.record_start(mode, window_ms, painted_ms, reason)` builds.
 pub fn row(native: bool, window_ms: Option<u64>, painted_ms: Option<u64>, reason: &str, ts: f64) -> Value {
     json!({
@@ -138,6 +161,17 @@ mod tests {
         assert_eq!(fallback_reason(22, e), "crash_loop.port_blocked");
         assert_eq!(fallback_reason(22, ""), "crash_loop.other");
         assert_eq!(fallback_reason(23, e), "no_hello");
+    }
+
+    #[test]
+    fn why_word_names_the_silent_stage() {
+        assert_eq!(why_word(23, "no hello, last stage panel_api_init after 25 s (stderr: x)"), "no_hello.panel_api_init");
+        assert_eq!(why_word(23, "no hello, last stage none after 20 s"), "no_hello.none");
+        assert_eq!(why_word(23, ""), "no_hello");
+        assert_eq!(why_word(23, "no hello, last stage Web-View!! after 9 s"), "no_hello.webview");
+        let e = "backend crashed 3 times in 60 s (backend ended before hello (exit 1): PermissionError: [WinError 10013] x)";
+        assert_eq!(why_word(22, e), "crash_loop.port_blocked");
+        assert_eq!(why_word(20, ""), "webview2");
     }
 
     #[test]

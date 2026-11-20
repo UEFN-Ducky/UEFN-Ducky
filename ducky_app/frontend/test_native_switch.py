@@ -509,6 +509,7 @@ def test_the_launchers_reason_for_the_python_window_is_sent_as_an_error_code(
 
 @pytest.mark.parametrize("why, code", [
     ("start_failed.no_hello", "launcher_python.start_failed.no_hello"),
+    ("start_failed.no_hello.panel_api_init", "launcher_python.start_failed.no_hello.panel_api_init"),  # starts.rs why_word
     ("start_failed.crash_loop.port_blocked", "launcher_python.start_failed.crash_loop.port_blocked"),
     ("start_failed.C:/Users/x", None),  # never a path: words only
 ])
