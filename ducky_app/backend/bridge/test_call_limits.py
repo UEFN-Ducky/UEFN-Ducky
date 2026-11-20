@@ -1,15 +1,22 @@
-"""Call time limits: Epic UEFN calls (unreal__*) have none; they wait while UEFN works."""
+"""Call time limits: Epic UEFN calls (unreal__*) only have a backstop past their own deadline."""
 
 from __future__ import annotations
 
 from backend.bridge import call_limits
 
 
-def test_unreal_calls_have_no_limit_and_the_rest_keep_theirs() -> None:
+def test_unreal_calls_get_a_backstop_and_the_rest_keep_theirs() -> None:
+    """Nov 19 2026: two unreal__ calls sat past 20 min before they reached their own deadline."""
     lim = call_limits.call_limit
-    assert lim("unreal__call_tool", "unreal__call_tool") is None
-    assert lim("unreal__list_toolsets", "unreal__list_toolsets") is None
-    assert lim("ducky_call_tool", "unreal__call_tool") is None
+    backstop = call_limits.EPIC_HEAVY_LIMIT_S + call_limits.EPIC_BACKSTOP_EXTRA_S
+    assert backstop == 450.0
+    assert lim("unreal__call_tool", "unreal__call_tool") == backstop
+    assert lim("unreal__list_toolsets", "unreal__list_toolsets") == backstop
+    assert lim("ducky_call_tool", "unreal__call_tool") == backstop
+    # Past the heavy deadline plus the stuck check's grace, so client_pool always answers first.
+    from backend.bridge import stuck_watch
+
+    assert backstop > call_limits.EPIC_HEAVY_LIMIT_S + stuck_watch.EPIC_GRACE_S
     assert lim("workspace_read_file", "workspace_read_file") == 30.0
     assert lim("skill_search", "skill_search") == 60.0
     assert lim("ducky_call_tool", "roblox_call") == 900.0
@@ -20,6 +27,14 @@ def test_unreal_calls_have_no_limit_and_the_rest_keep_theirs() -> None:
 
 def test_timed_out_message_for_other_tools() -> None:
     assert "did not answer within 30 s" in call_limits.timed_out_message("workspace_read_file", 30)
+
+
+def test_a_backstopped_epic_call_says_what_holds_it(monkeypatch) -> None:
+    monkeypatch.setattr(call_limits, "blocking_popup", lambda: None)
+    monkeypatch.setattr(call_limits, "_command_in_window", lambda: None)
+    monkeypatch.setattr(call_limits, "_editor_answers", lambda: True)
+    msg = call_limits.timed_out_message("unreal__call_tool", 450)
+    assert "unreal__call_tool did not answer in 450 s" in msg and "Check the result" in msg
 
 
 def test_long_listener_tools_answer_at_the_heavy_editor_deadline() -> None:

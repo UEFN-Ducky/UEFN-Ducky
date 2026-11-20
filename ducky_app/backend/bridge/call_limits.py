@@ -28,11 +28,17 @@ QUICK_READ_LIMIT_S = 30.0
 # a 3D generation; a tool that waits by design (WAITS_BY_DESIGN) has no limit.
 # ponytail: one limit for every plugin tool; a per-tool limit if a real tool needs longer.
 PLUGIN_CALL_LIMIT_S = 900.0
-# Epic's UEFN MCP (unreal__*) has no limit here: client_pool gives each UEFN call its own
-# deadline (epic_call_limit) and answers with why, without cancelling the editor's work.
+# Epic's UEFN MCP (unreal__*) only gets a backstop here (EPIC_BACKSTOP_EXTRA_S): client_pool
+# gives each UEFN call its own deadline (epic_call_limit) and answers with why, without
+# cancelling the editor's work.
 # Nov 9 2026: 38 unreal__call_tool calls were agent.stuck past 5 min with no answer.
 EPIC_CALL_LIMIT_S = 120.0
 EPIC_HEAVY_LIMIT_S = 300.0
+# Backstop past the heavy deadline for an Epic call that never reached it: that deadline runs
+# from the call itself, and the waits before it (the editor lease, the pool loop hop, the port
+# probe) had none. Nov 19 2026: two unreal__ calls on 1.2.507 sat past 20 min at where:lease.
+# Covers the 90 s lease wait (editor_gateway.LEASE_WAIT_SEC) and a minute more.
+EPIC_BACKSTOP_EXTRA_S = 150.0
 # Ducky-listener tools that drive one long editor operation. Nov 11 2026: import_asset sat
 # past 5 min 10 times, execute_python 6, take_high_res_screenshot 2, with no word to the
 # agent. They get the heavy Epic deadline: at it the agent hears why (stall_reason) and that
@@ -60,7 +66,7 @@ def call_limit(name: str, inner: str) -> float | None:
     if inner in EDITOR_HEAVY_TOOLS:
         return EPIC_HEAVY_LIMIT_S
     if inner.startswith("unreal__"):
-        return None
+        return EPIC_HEAVY_LIMIT_S + EPIC_BACKSTOP_EXTRA_S
     if name == "ducky_call_tool" and inner != name and inner not in WAITS_BY_DESIGN:
         return PLUGIN_CALL_LIMIT_S
     return None
@@ -169,7 +175,7 @@ def wait_job(job: Job, limit: float, check_every: float,
 def timed_out_message(inner: str, limit: float) -> str:
     """What the agent hears when a call is stopped at its limit. An editor job is not stopped,
     only no longer waited for: the agent hears what holds it (a popup, a busy editor)."""
-    if inner in EDITOR_HEAVY_TOOLS:
+    if inner in EDITOR_HEAVY_TOOLS or inner.startswith("unreal__"):
         return str(stall_reason(inner, limit).get("message") or f"{inner} did not answer in {limit:.0f} s.")
     return (f"{inner} did not answer within {limit:.0f} s and was stopped. If this chat asked "
             "the person a question, tools wait for that answer first. Otherwise call it once "
