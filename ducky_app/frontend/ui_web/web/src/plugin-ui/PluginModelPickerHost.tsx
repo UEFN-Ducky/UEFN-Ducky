@@ -16,7 +16,8 @@
  * With `anchor` (the panel button's box in app coordinates) there is no dialog: the same
  * gateway menu as the chat composer drops down from that button, and the first pick answers.
  * API models only, except with `purpose: "agent"`: then logins (Claude Code, Codex…) are listed
- * too, exactly like the chat's dropdown, and a login pick comes back agent-qualified.
+ * too, exactly like the chat's dropdown, and a login pick comes back agent-qualified. Like the chat's,
+ * a click marks the model and leaves the menu open for the slider; closing it answers.
  *
  * `effort` (a thinking effort id, e.g. "off") shows the chat's Faster / Smarter slider under the
  * menu; the answer then carries `effort`. Moving only the slider answers with the current model.
@@ -123,6 +124,9 @@ export function PluginModelPickerHost() {
   const [provider, setProvider] = useState("");
   // The dropdown sets the agent and answers in the same click, before React re-renders.
   const agentRef = useRef("ducky");
+  // purpose "agent" dropdown: a click marks the model and the menu stays open (like the chat's, so the
+  // slider can still move); closing it answers with this.
+  const chosenRef = useRef<ModelPickResult | null>(null);
 
   useEffect(() => {
     openPicker = (next) => {
@@ -136,6 +140,7 @@ export function PluginModelPickerHost() {
       const prefix = next.current.includes(":") ? next.current.slice(0, next.current.indexOf(":")) : "";
       const startAgent = next.purpose === "agent" && getCachedCodingAgents().some((a) => a.id === prefix) ? prefix : "ducky";
       agentRef.current = startAgent;
+      chosenRef.current = null;
       setAgent(startAgent);
       setPicked(current);
       setProvider(own || startAgent !== "ducky" ? "" : prefix);
@@ -187,10 +192,16 @@ export function PluginModelPickerHost() {
     const pick = (id: string, providerKey = "") => {
       const row = rows.find((r) => r.id === id && (!providerKey || r.providerKey === providerKey)) || rows.find((r) => r.id === id);
       if (request.extra.some((r) => r.id === id)) return finish({ model: id, name: row?.name || id });
-      if (request.purpose === "agent" && agentRef.current !== "ducky")
-        return finish({ model: qualifyModelPick(agentRef.current, id), name: row?.name || id });
       const gw = providerKey.trim().toLowerCase().replace(/-/g, "_");
-      finish({ model: gw ? `${gw}:${id}` : qualifyModelPick("ducky", id), name: row?.name || id });
+      const viaLogin = request.purpose === "agent" && agentRef.current !== "ducky";
+      const result = {
+        model: viaLogin ? qualifyModelPick(agentRef.current, id) : gw ? `${gw}:${id}` : qualifyModelPick("ducky", id),
+        name: row?.name || id,
+      };
+      if (request.purpose !== "agent") return finish(result);
+      chosenRef.current = result;
+      setPicked(id);
+      setProvider(viaLogin ? "" : gw);
     };
     return (
       <div style={{ position: "fixed", left, top, width, height, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
@@ -210,13 +221,13 @@ export function PluginModelPickerHost() {
                 },
               }
             : { apiOnly: true })}
-          closeOnPick
+          closeOnPick={request.purpose !== "agent"}
           preserveSelection
           openSignal={openSignal}
           menuPlacement="bottom"
           {...effortProps}
           onOpenChange={(open) => {
-            if (!open) finish(sliderOnly());
+            if (!open) finish(chosenRef.current ?? sliderOnly());
           }}
         />
       </div>
