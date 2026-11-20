@@ -119,6 +119,7 @@ export function PluginModelPickerHost() {
   const [openSignal, setOpenSignal] = useState(0);
   const [agent, setAgent] = useState("ducky");
   const [effort, setEffort] = useState<string | null>(null);
+  const [provider, setProvider] = useState("");
 
   useEffect(() => {
     openPicker = (next) => {
@@ -132,6 +133,7 @@ export function PluginModelPickerHost() {
       const prefix = next.current.includes(":") ? next.current.slice(0, next.current.indexOf(":")) : "";
       setAgent(next.purpose === "agent" && getCachedCodingAgents().some((a) => a.id === prefix) ? prefix : "ducky");
       setPicked(current);
+      setProvider(own ? "" : prefix);
       setEffort(next.effort);
       setOpenSignal((n) => n + 1);
     };
@@ -176,15 +178,18 @@ export function PluginModelPickerHost() {
 
   if (request.anchor) {
     const { left, top, width, height } = request.anchor;
-    const pick = (id: string) => {
-      const row = rows.find((r) => r.id === id);
+    // The gateway it was picked under wins: Claude Opus sits under Anthropic and under Cursor.
+    const pick = (id: string, providerKey = "") => {
+      const row = rows.find((r) => r.id === id && (!providerKey || r.providerKey === providerKey)) || rows.find((r) => r.id === id);
       if (request.extra.some((r) => r.id === id)) return finish({ model: id, name: row?.name || id });
-      finish({ model: qualifyModelPick("ducky", id), name: row?.name || id });
+      const gw = providerKey.trim().toLowerCase().replace(/-/g, "_");
+      finish({ model: gw ? `${gw}:${id}` : qualifyModelPick("ducky", id), name: row?.name || id });
     };
     return (
       <div style={{ position: "fixed", left, top, width, height, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
         <ModelSelector
           selectedModel={picked}
+          selectedProvider={provider}
           setSelectedModel={pick}
           extraRows={request.extra}
           hideProviders={request.hide}

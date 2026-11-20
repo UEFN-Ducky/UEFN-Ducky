@@ -109,7 +109,10 @@ function agentShortLabel(agentId: string, agents: CodingAgentDto[]): string {
 
 interface ModelSelectorProps {
   selectedModel: string;
-  setSelectedModel: (id: string) => void;
+  /** providerKey: the gateway the model was picked under (the same id can sit under several). */
+  setSelectedModel: (id: string, providerKey?: string) => void;
+  /** The gateway of `selectedModel`, when the caller knows it (else the first gateway listing it). */
+  selectedProvider?: string;
   codingAgent?: string;
   setCodingAgent?: (id: string) => void;
   convId?: string;
@@ -152,6 +155,7 @@ interface ModelSelectorProps {
 export function ModelSelector({
   selectedModel,
   setSelectedModel,
+  selectedProvider = "",
   codingAgent = "ducky",
   setCodingAgent,
   convId,
@@ -219,7 +223,12 @@ export function ModelSelector({
 
   const gateways = useMemo(() => {
     let out = buildPickerGateways(contrib.llm_providers, agents, contrib.llm_coding_agents);
-    if (apiOnly) out = out.map((g) => ({ ...g, nestedAgents: [], primaryAgentId: null }));
+    if (apiOnly) {
+      // API models only: a gateway signed in through a coding agent alone (no key) has none to offer.
+      out = out
+        .map((g) => ({ ...g, nestedAgents: [], primaryAgentId: null }))
+        .filter((g) => visibleModels.some((m) => normId(m.providerKey) === g.providerKey));
+    }
     if (hidden.size) {
       const kept = new Set((extraRows ?? []).map((row) => normId(row.providerKey)));
       out = out.filter((g) => !hidden.has(g.providerKey) || kept.has(g.providerKey));
@@ -231,7 +240,7 @@ export function ModelSelector({
       own.push({ id: key, label: row.provider, providerKey: key, pluginId: "", order: -1, nestedAgents: [], primaryAgentId: null, showsThinkingEffort: false });
     }
     return [...own, ...out];
-  }, [contrib.llm_providers, contrib.llm_coding_agents, agents, apiOnly, extraRows, hidden]);
+  }, [contrib.llm_providers, contrib.llm_coding_agents, agents, apiOnly, extraRows, hidden, visibleModels]);
 
   const syncFromCatalog = useCallback((allModels: CatalogModelRow[]) => {
     setModels(allModels);
@@ -372,9 +381,10 @@ export function ModelSelector({
 
   const selectedProviderKey = useMemo(() => {
     if (codingAgent !== "ducky") return "";
+    if (selectedProvider) return normId(selectedProvider);
     const hit = visibleModels.find((m) => m.id === selectedModel);
     return hit?.providerKey || "";
-  }, [codingAgent, selectedModel, visibleModels]);
+  }, [codingAgent, selectedModel, selectedProvider, visibleModels]);
 
   const normalizedSelectedModel = normalizeCodingAgentModelId(codingAgent, selectedModel);
   const committedModels =
@@ -782,7 +792,7 @@ export function ModelSelector({
       if (agentIsUnavailable(agentId) && agentId !== "ducky") return;
       const api = getApi();
       setCodingAgent?.(agentId);
-      setSelectedModel(row.id);
+      setSelectedModel(row.id, providerKey || row.providerKey || "");
       const nextMenu = catalogThinkingMenu(row);
       persistEffort(effortInMenu(nextMenu, thinkingEffort));
       if (agentId !== "ducky") {
