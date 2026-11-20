@@ -5,8 +5,11 @@ from __future__ import annotations
 from backend.bridge import call_limits
 
 
-def test_unreal_calls_get_a_backstop_and_the_rest_keep_theirs() -> None:
+def test_unreal_calls_get_a_backstop_and_the_rest_keep_theirs(monkeypatch) -> None:
     """Nov 19 2026: two unreal__ calls sat past 20 min before they reached their own deadline."""
+    from backend.mcp_plugins import epic
+
+    monkeypatch.setitem(epic._probe_cache, "result", None)  # no probe yet: UEFN
     lim = call_limits.call_limit
     backstop = call_limits.EPIC_HEAVY_LIMIT_S + call_limits.EPIC_BACKSTOP_EXTRA_S
     assert backstop == 450.0
@@ -23,6 +26,15 @@ def test_unreal_calls_get_a_backstop_and_the_rest_keep_theirs() -> None:
     assert lim("ducky_call_tool", "ducky_ask_user") is None
     assert lim("ducky_ask_user", "ducky_ask_user") is None
     assert lim("spawn_layout", "spawn_layout") is None
+
+
+def test_unreal_editor_calls_keep_no_limit(monkeypatch) -> None:
+    from backend.mcp_plugins import epic
+
+    monkeypatch.setitem(epic._probe_cache, "result", {"epic_mcp_editor": epic.EDITOR_UNREAL})
+    assert call_limits.call_limit("unreal__call_tool", "unreal__call_tool") is None
+    monkeypatch.setitem(epic._probe_cache, "result", {"epic_mcp_editor": epic.EDITOR_UEFN})
+    assert call_limits.call_limit("unreal__call_tool", "unreal__call_tool") == 450.0
 
 
 def test_timed_out_message_for_other_tools() -> None:

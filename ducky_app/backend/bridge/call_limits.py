@@ -66,10 +66,22 @@ def call_limit(name: str, inner: str) -> float | None:
     if inner in EDITOR_HEAVY_TOOLS:
         return EPIC_HEAVY_LIMIT_S
     if inner.startswith("unreal__"):
-        return EPIC_HEAVY_LIMIT_S + EPIC_BACKSTOP_EXTRA_S
+        # Unreal Editor calls have no deadline of their own (a build or package runs long).
+        return None if _epic_is_unreal_editor() else EPIC_HEAVY_LIMIT_S + EPIC_BACKSTOP_EXTRA_S
     if name == "ducky_call_tool" and inner != name and inner not in WAITS_BY_DESIGN:
         return PLUGIN_CALL_LIMIT_S
     return None
+
+
+def _epic_is_unreal_editor() -> bool:
+    """True when the last Epic port probe found Unreal Editor (never probes: it is free)."""
+    try:
+        from backend.mcp_plugins import epic
+
+        last = epic._probe_cache.get("result") or {}
+        return last.get("epic_mcp_editor") == epic.EDITOR_UNREAL
+    except Exception:  # noqa: BLE001 — unknown is UEFN, the common case
+        return False
 
 
 def epic_call_limit(heavy: bool) -> float:
