@@ -1982,17 +1982,7 @@ class PanelApiSettingsMixin:
     def sandbox_open_folder(self, conv_id: str) -> dict[str, Any]:
         from backend.sandbox import paths
 
-        try:
-            folder = paths.sandbox_dir(conv_id)
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
-        if not folder.is_dir():
-            return {"ok": False, "error": "This chat has no sandbox yet."}
-        import os
-
-        if hasattr(os, "startfile"):
-            os.startfile(str(folder))  # noqa: S606 - Explorer on the sandbox folder, a path Ducky made
-        return {"ok": True, "path": str(folder)}
+        return paths.open_folder(conv_id)
 
     def copy_support_dump(self) -> str:
         from frontend.support_dump import format_support_dump

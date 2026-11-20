@@ -53,6 +53,19 @@ def exists(conv_id: str) -> bool:
         return False
 
 
+def open_folder(conv_id: str) -> dict[str, Any]:
+    """Explorer on a chat's sandbox folder (the chat panel's Open folder button)."""
+    try:
+        folder = sandbox_dir(conv_id)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    if not folder.is_dir():
+        return {"ok": False, "error": "This chat has no sandbox yet."}
+    if hasattr(os, "startfile"):
+        os.startfile(str(folder))  # noqa: S606 - Explorer on the sandbox folder, a path Ducky made
+    return {"ok": True, "path": str(folder)}
+
+
 def touch(path: Path) -> None:
     try:
         (path / _TOUCH).write_text(str(int(time.time())), encoding="utf-8")
