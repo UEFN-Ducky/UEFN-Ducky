@@ -15,8 +15,18 @@ vi.mock("./usePanelPushBus", () => ({
   installPanelPushBus: () => {},
   subscribePanelPush: (fn: typeof mock.push) => { mock.push = fn; return () => {}; },
 }));
-import { usePluginContributions } from "./usePluginContributions";
+import { usePluginContributions, withoutEmbeddedTabs } from "./usePluginContributions";
 afterEach(cleanup);
+
+it("drops a plugin's settings tab when its gateway shows the same panel on Settings → LLMs", () => {
+  const tabs = [
+    { id: "DuckyAuto", ui: "panel:routes", plugin_id: "ducky-auto" },
+    { id: "Discord", ui: "panel:main", plugin_id: "discord" },
+  ];
+  const providers = [{ id: "ducky_auto", plugin_id: "ducky-auto", settings_panel: "routes" }];
+  expect(withoutEmbeddedTabs(tabs, providers).map((t) => t.id)).toEqual(["Discord"]);
+  expect(withoutEmbeddedTabs(tabs, undefined)).toHaveLength(2); // no LLMs page panel: keep the tab
+});
 
 // Runs first: the registry is module state, and this is its cold start.
 it("stays not-ready until the API is injected (focus windows boot before it)", async () => {

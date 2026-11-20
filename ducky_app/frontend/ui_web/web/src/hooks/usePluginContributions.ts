@@ -192,6 +192,20 @@ export type PluginLlmProvider = {
   settings_panel?: string;
 };
 
+/** A gateway's panel already shows on its Settings → LLMs page: its plugin's settings tab for the
+ *  same panel is left out, so the settings live in one place (older apps still get the tab). */
+export function withoutEmbeddedTabs(tabs: PluginSettingsTab[], providers: unknown): PluginSettingsTab[] {
+  const embedded = new Set(
+    (Array.isArray(providers) ? providers : [])
+      .filter((p) => p && typeof p.settings_panel === "string" && p.settings_panel)
+      .map((p) => `${String(p.plugin_id || "").toLowerCase()}/panel:${String(p.settings_panel).toLowerCase()}`),
+  );
+  if (!embedded.size) return tabs;
+  return tabs.filter(
+    (t) => !embedded.has(`${String(t.plugin_id || "").toLowerCase()}/${String(t.ui || "").toLowerCase()}`),
+  );
+}
+
 export type PluginContributions = {
   settings_tabs: PluginSettingsTab[];
   settings_sections: PluginSettingsSection[];
@@ -324,7 +338,10 @@ async function refresh() {
       return;
     }
     _pollMs = 400;
-    const settingsTabs = Array.isArray(next.settings_tabs) ? next.settings_tabs : [];
+    const settingsTabs = withoutEmbeddedTabs(
+      Array.isArray(next.settings_tabs) ? next.settings_tabs : [],
+      (next as { llm_providers?: unknown }).llm_providers,
+    );
     // Skip no-op refreshes — uefn_plugins_changed used to rebuild the Plugins
     // sidebar on every identical payload (felt like a constant reload).
     const nextWalkthroughs = Array.isArray((next as { walkthroughs?: unknown }).walkthroughs)
