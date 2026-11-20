@@ -854,7 +854,6 @@ export function AgentTab() {
                 {selected.settings_panel ? (
                   // The gateway's own editor (Ducky Auto's model-per-task rules), right on its page.
                   <div
-                    className="llms-provider-panel"
                     ref={targetRef("settings.llms.provider.panel", {
                       kind: "settings_field",
                       label: `${selected.label} settings`,

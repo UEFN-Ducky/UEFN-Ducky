@@ -481,13 +481,6 @@
   display: block;
 }
 
-/* A gateway's panel on its scrolling Settings → LLMs page has no full-height parent: the
-   absolute-fill iframe below would be 0 px tall, so give it a height of its own. */
-.llms-provider-panel .plugin-settings-embed {
-  height: 80vh;
-  min-height: 560px;
-}
-
 /* Settings tab embed — absolute-fill so the iframe can't collapse to default size. */
 .plugin-settings-embed {
   position: relative;
