@@ -14,13 +14,14 @@
  * hides Ducky AI's chat model, and keeps its own Jev row there only with a Ducky AI plan.
  *
  * With `anchor` (the panel button's box in app coordinates) there is no dialog: the same
- * gateway menu as the chat composer drops down from that button, API models only, and the
- * first pick answers.
+ * gateway menu as the chat composer drops down from that button, and the first pick answers.
+ * API models only, except with `purpose: "agent"`: then logins (Claude Code, Codex…) are listed
+ * too, exactly like the chat's dropdown, and a login pick comes back agent-qualified.
  *
  * `effort` (a thinking effort id, e.g. "off") shows the chat's Faster / Smarter slider under the
  * menu; the answer then carries `effort`. Moving only the slider answers with the current model.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getCachedModels, type CatalogModelRow } from "../hooks/modelsCatalogCache";
 import { getCachedCodingAgents } from "../hooks/codingAgentsCache";
@@ -120,6 +121,8 @@ export function PluginModelPickerHost() {
   const [agent, setAgent] = useState("ducky");
   const [effort, setEffort] = useState<string | null>(null);
   const [provider, setProvider] = useState("");
+  // The dropdown sets the agent and answers in the same click, before React re-renders.
+  const agentRef = useRef("ducky");
 
   useEffect(() => {
     openPicker = (next) => {
@@ -131,9 +134,11 @@ export function PluginModelPickerHost() {
       const current =
         !own && next.current.includes(":") ? next.current.slice(next.current.indexOf(":") + 1) : next.current;
       const prefix = next.current.includes(":") ? next.current.slice(0, next.current.indexOf(":")) : "";
-      setAgent(next.purpose === "agent" && getCachedCodingAgents().some((a) => a.id === prefix) ? prefix : "ducky");
+      const startAgent = next.purpose === "agent" && getCachedCodingAgents().some((a) => a.id === prefix) ? prefix : "ducky";
+      agentRef.current = startAgent;
+      setAgent(startAgent);
       setPicked(current);
-      setProvider(own ? "" : prefix);
+      setProvider(own || startAgent !== "ducky" ? "" : prefix);
       setEffort(next.effort);
       setOpenSignal((n) => n + 1);
     };
@@ -182,6 +187,8 @@ export function PluginModelPickerHost() {
     const pick = (id: string, providerKey = "") => {
       const row = rows.find((r) => r.id === id && (!providerKey || r.providerKey === providerKey)) || rows.find((r) => r.id === id);
       if (request.extra.some((r) => r.id === id)) return finish({ model: id, name: row?.name || id });
+      if (request.purpose === "agent" && agentRef.current !== "ducky")
+        return finish({ model: qualifyModelPick(agentRef.current, id), name: row?.name || id });
       const gw = providerKey.trim().toLowerCase().replace(/-/g, "_");
       finish({ model: gw ? `${gw}:${id}` : qualifyModelPick("ducky", id), name: row?.name || id });
     };
@@ -194,7 +201,15 @@ export function PluginModelPickerHost() {
           extraRows={request.extra}
           hideProviders={request.hide}
           requireVision={request.purpose === "video"}
-          apiOnly
+          {...(request.purpose === "agent"
+            ? {
+                codingAgent: agent,
+                setCodingAgent: (id: string) => {
+                  agentRef.current = id;
+                  setAgent(id);
+                },
+              }
+            : { apiOnly: true })}
           closeOnPick
           preserveSelection
           openSignal={openSignal}
