@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useNow } from "../utils/sharedClock";
 import { Icons } from "../icons/Icons";
 import { TerminalOutput, type TerminalSnapshot } from "./TerminalOutput";
 
@@ -21,12 +21,7 @@ function clock(seconds: number): string {
 
 /** Details panel: what this step is doing right now, how long it took, why it failed, its log. */
 export function LiveNodeStatus({ run }: { run: LiveNodeRun }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (run.state !== "running") return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [run.state]);
+  const now = useNow(1000, run.state === "running");
   const seconds = run.started ? Math.max(0, Math.round(((run.ended ?? now) - run.started) / 1000)) : 0;
   const status = run.state === "running" ? `Running · ${clock(seconds)}`
     : run.state === "ok" ? `Finished in ${clock(seconds)}`

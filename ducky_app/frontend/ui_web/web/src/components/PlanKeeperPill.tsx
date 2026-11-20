@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import type { ChatPlan } from "../types/panel";
 import { getApi } from "../hooks/usePanelApi";
 import { isPlanFinished, isPlanPaused } from "../utils/planLock";
@@ -42,10 +43,10 @@ export function PlanKeeperPill({ plan }: { plan: ChatPlan }) {
       }
     };
     void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
+    const stop = setVisibleInterval(() => void load(), POLL_MS);
     return () => {
       live = false;
-      window.clearInterval(timer);
+      stop();
     };
   }, [lead, paused, finished]);
 

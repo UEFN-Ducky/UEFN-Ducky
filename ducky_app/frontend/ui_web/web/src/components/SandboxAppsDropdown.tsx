@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { createPortal } from "react-dom";
 import { confirmFromHost } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
@@ -57,8 +58,7 @@ export function SandboxAppsDropdown() {
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), open ? POLL_OPEN_MS : POLL_CLOSED_MS);
-    return () => window.clearInterval(timer);
+    return setVisibleInterval(() => void refresh(), open ? POLL_OPEN_MS : POLL_CLOSED_MS);
   }, [open, refresh]);
 
   useLayoutEffect(() => {

@@ -1,6 +1,7 @@
 import { subscribeAgentBackgroundActivity, openAgentBackgroundJob, stopAgentBackgroundJob } from "../hooks/agentBackgroundActivity";
 import { formatElapsedMs } from "../hooks/chatTurnTimer";
 import { useEffect, useRef, useState } from "react";
+import { subscribeClock } from "../utils/sharedClock";
 import { Icons } from "../icons/Icons";
 import {
   clearFinishedBackgroundJobs,
@@ -121,8 +122,7 @@ export function BackgroundActivityDropdown() {
   useEffect(() => {
     if (!ticking) return;
     setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    return subscribeClock(1000, setNow);
   }, [ticking]);
 
   useEffect(() => {

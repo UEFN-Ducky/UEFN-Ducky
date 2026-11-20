@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { subscribeClock } from "../utils/sharedClock";
 import { BillingBadge } from "./BillingBadge";
 import { billingKind } from "../utils/billing";
 
@@ -268,10 +269,7 @@ export function GroupMemberStrip({
   const [observationNow, setObservationNow] = useState(Date.now());
   const refreshObservations = useCallback(() => refreshRoster(groupId), [groupId]);
   useEffect(() => setObservationNow(Date.now()), [ownRoster]);
-  useEffect(() => {
-    const tick = window.setInterval(() => setObservationNow(Date.now()), 15000);
-    return () => window.clearInterval(tick);
-  }, []);
+  useEffect(() => subscribeClock(15000, setObservationNow), []);
 
   // Whether lanes block or only warn is an app setting, read once.
   const [laneMode, setLaneMode] = useState(() => laneModeOf(null));

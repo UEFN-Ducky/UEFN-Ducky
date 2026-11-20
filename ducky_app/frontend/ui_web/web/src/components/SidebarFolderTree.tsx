@@ -1,4 +1,5 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useNow } from "../utils/sharedClock";
 import { DuckyAvatar, DUCKY_AVATAR_SIZES } from "./ducky/DuckyAvatars";
 import { Icons } from "../icons/Icons";
 import type { FolderItem } from "../types/panel";
@@ -324,11 +325,8 @@ const ChatRow = memo(function ChatRow({
   );
   const mutedMeta = progress ? `${progress.done}/${progress.total} · ${progress.current || "Done"}` : "Muted";
   // "- 5m" after the name: how long since this agent last did anything; ticks each minute.
-  const [, setMinuteTick] = useState(0);
-  useEffect(() => {
-    const timer = window.setInterval(() => setMinuteTick((n) => n + 1), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
+  // One timer for the whole tree: each row kept its own (utils/sharedClock).
+  useNow(60_000);
   const ago = formatAgoShort(chat.updated);
 
   return (

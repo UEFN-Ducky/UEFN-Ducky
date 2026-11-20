@@ -1,4 +1,5 @@
 import { memo, useRef, useState, useEffect } from "react";
+import { subscribeClock } from "../utils/sharedClock";
 import { createPortal } from "react-dom";
 import { Icons } from "../icons/Icons";
 import { DuckyAvatar } from "./ducky/DuckyAvatars";
@@ -92,8 +93,7 @@ export const AgentActivityPanel = memo(function AgentActivityPanel({
   }, [signature, live]);
   useEffect(() => {
     if (!live) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 5000);
-    return () => window.clearInterval(timer);
+    return subscribeClock(5000, setNow);
   }, [live]);
   const quietMs = live && !lines.some((line) => line.status === "pending") ? Math.max(0, now - changedAt) : 0;
   const quiet = quietMs >= QUIET_AFTER_MS;

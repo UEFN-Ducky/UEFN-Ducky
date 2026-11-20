@@ -1,4 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
+import { useNow } from "../utils/sharedClock";
 import {
   chatTurnElapsedMs,
   formatElapsedMs,
@@ -54,14 +55,8 @@ export function useChatTurnTimer(chatId: string): ChatTurnTimerView {
   useSyncExternalStore(subscribe, getVersion, getVersion);
   const timer = getChatTurnTimer(chatId);
   const running = Boolean(timer && timer.endedAt == null);
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!running) return;
-    setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => window.clearInterval(id);
-  }, [running, timer?.startedAt]);
+  // Every running chat's clock moves on the same tick (utils/sharedClock).
+  const now = useNow(TICK_MS, running);
 
   const ms = chatTurnElapsedMs(timer, running ? now : undefined);
   return {

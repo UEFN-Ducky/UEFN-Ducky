@@ -307,11 +307,24 @@ def _dormant(plan: dict[str, Any], now: float) -> bool:
 def kept_plans(project_root: str | None = None) -> list[dict[str, Any]]:
     """Team plans the keeper looks after right now, in every project the person works in."""
     from backend.agent.coding_agents.plans import list_plans
+    from backend.store.switch import use_db
 
     out: list[dict[str, Any]] = []
     now = time.time()
+    # In the database plans are one list, whatever the project: asking per project read and
+    # parsed every plan again for each recent project, once a minute (Nov 11 2026: most of a
+    # tick). Read it once and give each project its own copy of the rows. The files store
+    # still keeps a list per project.
+    one_list = use_db("plans")
+    shared: list[dict[str, Any]] | None = None
     for root in _project_roots(project_root):
-        live = [plan for plan in list_plans(root)
+        if not one_list:
+            rows = list_plans(root)
+        elif shared is None:
+            rows = shared = list_plans(root)
+        else:
+            rows = [{**plan, "project_root": root} for plan in shared]
+        live = [plan for plan in rows
                 if str(plan.get("status") or "open") not in ("paused", "finished", "completed", "archived")
                 and _open_steps(plan) and not _dormant(plan, now)]
         if not live:

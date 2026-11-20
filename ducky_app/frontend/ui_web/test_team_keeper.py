@@ -651,6 +651,7 @@ def test_a_team_in_another_project_is_kept_even_with_no_project_open(monkeypatch
     import backend.agent.coding_agents.plans as plans
     from frontend.settings import PanelSettings
 
+    monkeypatch.setenv("DUCKY_STORE_BACKEND_PLANS", "files")  # the files store: a list per project
     monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls: type("S", (), {"uefn_project_root": ""})()))
     monkeypatch.setattr("frontend.ui_web.recent_projects.load_recent_projects", lambda: ["C:/Repo", "c:/repo/", "C:/Other"])
     assert keeper._project_roots(None) == ["C:/Repo", "C:/Other"]
@@ -661,6 +662,42 @@ def test_a_team_in_another_project_is_kept_even_with_no_project_open(monkeypatch
     kept = keeper.kept_plans()
     assert [(p["chat_id"], p["project_root"]) for p in kept] == [("lead", "C:/Repo")]
     assert leaders_read == ["C:/Repo"]  # a project with no live plan isn't read
+
+
+def test_the_one_list_of_plans_is_read_once_however_many_projects_are_recent(monkeypatch) -> None:
+    # Nov 11 2026: in the database plans are one list whatever the project, and the keeper read
+    # and parsed all of it again for every recent project, once a minute.
+    import backend.agent.coding_agents.plans as plans
+
+    monkeypatch.delenv("DUCKY_STORE_BACKEND", raising=False)
+    monkeypatch.delenv("DUCKY_STORE_BACKEND_PLANS", raising=False)
+    monkeypatch.setattr(keeper, "_project_roots", lambda root: ["C:/Open", "C:/Repo", "C:/Other"])
+    read: list[str] = []
+
+    def list_plans(project_root=None):
+        read.append(project_root)
+        return [{**PLAN, "chat_id": "lead", "project_root": project_root, "nodes": [{"id": "a"}]},
+                {**PLAN, "chat_id": "done", "status": "finished", "project_root": project_root}]
+
+    monkeypatch.setattr(plans, "list_plans", list_plans)
+    # The team's chats are in the second project: its plan is kept there, not where it was read.
+    monkeypatch.setattr(keeper, "_team_leaders", lambda root: {"lead"} if root == "C:/Repo" else set())
+    kept = keeper.kept_plans()
+    assert read == ["C:/Open"]
+    assert [(p["chat_id"], p["project_root"]) for p in kept] == [("lead", "C:/Repo")]
+    assert kept[0]["nodes"] == [{"id": "a"}]
+
+
+def test_no_live_plan_reads_no_projects_chats(monkeypatch) -> None:
+    import backend.agent.coding_agents.plans as plans
+
+    monkeypatch.delenv("DUCKY_STORE_BACKEND", raising=False)
+    monkeypatch.delenv("DUCKY_STORE_BACKEND_PLANS", raising=False)
+    monkeypatch.setattr(keeper, "_project_roots", lambda root: ["C:/Open", "C:/Repo"])
+    monkeypatch.setattr(plans, "list_plans", lambda project_root=None: [{**PLAN, "chat_id": "done", "status": "finished"}])
+    asked: list[str] = []
+    monkeypatch.setattr(keeper, "_team_leaders", lambda root: asked.append(root) or set())
+    assert keeper.kept_plans() == [] and asked == []
 
 
 def test_steps_added_after_the_first_wake_resend_the_whole_task(monkeypatch) -> None:

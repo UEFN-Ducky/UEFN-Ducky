@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNow } from "../utils/sharedClock";
 
 import { requestFocusGraph } from "../hooks/graphActivity";
 import { useDockReveal } from "../hooks/useDockReveal";
@@ -59,13 +60,7 @@ export function workflowRunSummary(
 
 /** Re-render once a second while the run is live, for the elapsed times. */
 function useTick(live: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [live]);
-  return now;
+  return useNow(1000, live);
 }
 
 function StateMark({ state }: { state: ChatWorkflowStep["state"] }) {

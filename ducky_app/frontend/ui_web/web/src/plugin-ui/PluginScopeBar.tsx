@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
+import { subscribeClock } from "../utils/sharedClock";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
 import { installPanelPushBus, subscribePanelPush } from "../hooks/usePanelPushBus";
@@ -261,8 +263,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   const ticking = Boolean(active && status?.visible && status.scope?.kind === "shared");
   useEffect(() => {
     if (!ticking) return;
-    const tick = window.setInterval(() => setNow(Date.now()), AGO_TICK_MS);
-    return () => window.clearInterval(tick);
+    return subscribeClock(AGO_TICK_MS, setNow);
   }, [ticking]);
 
   // Core's scheduler syncs shared copies in the background; the bar only asks for a
@@ -288,8 +289,7 @@ export function PluginScopeBar({ pluginId, onScopeChanged, active = true, onLive
   // While a switch gets a team's files the host notes how far it got: read it each second.
   useEffect(() => {
     if (!switching) return;
-    const poll = window.setInterval(() => void refresh(), BINDING_POLL_MS);
-    return () => window.clearInterval(poll);
+    return setVisibleInterval(() => void refresh(), BINDING_POLL_MS);
   }, [switching, refresh]);
 
   // "retry in 40 s" counts down while the panel is on screen.

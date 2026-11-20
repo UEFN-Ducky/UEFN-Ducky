@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { setVisibleInterval } from "../../utils/visibleInterval";
 import { useConfirmModal } from "../../contexts/ConfirmModalContext";
 import { getApi } from "../../hooks/usePanelApi";
 import { Icons } from "../../icons/Icons";
@@ -124,8 +125,7 @@ export function OtherDuckiesChats() {
 
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), REFRESH_MS);
-    return () => window.clearInterval(t);
+    return setVisibleInterval(() => void load(), REFRESH_MS);
   }, [load]);
 
   const shown = withLive(peers, devices, errors);

@@ -4,6 +4,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { toolActivityId, useToolActivityTarget } from "../navigation/toolActivity";
 import { toolExitCode } from "../utils/toolExitCode";
 import { memo, useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useNow } from "../utils/sharedClock";
 import { getAskUserSessionForConv, subscribeAskUser } from "../ask-user";
 import { Icons } from "../icons/Icons";
 import { chatCollapseKey, useChatCollapseScope, useChatCollapseState } from "../hooks/useChatCollapseState";
@@ -168,14 +169,10 @@ export const ToolExecutionCard = memo(function ToolExecutionCard({
   const [fullResult, setFullResult] = useState<string | null>(null);
   if (fullResult !== null) meta.result = fullResult;
   const truncated = fullResult === null && Boolean(result?.tool?.resultTruncated) && typeof result?.id === "number";
-  const [now, setNow] = useState(Date.now);
   const isCancelled = meta.status === "cancelled";
   const isRunning = meta.status === "pending" || meta.status === "running";
-  useEffect(() => {
-    if (!isRunning) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [isRunning]);
+  // One timer for every running card in the window, not one each (utils/sharedClock).
+  const now = useNow(1000, isRunning);
   const isSuccess = meta.status === "success" || result?.role === "success";
   const isChatTool = isChatToolName(meta.name);
   const category = useMemo(() => resolveToolCategory(meta.name), [meta.name]);

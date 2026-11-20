@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { useConfirmModal } from "../contexts/ConfirmModalContext";
 import { getApi } from "../hooks/usePanelApi";
 import { Icons } from "../icons/Icons";
@@ -31,8 +32,7 @@ export function SandboxSection({ convId }: { convId: string }) {
 
   useEffect(() => {
     if (!open) return;
-    const timer = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(timer);
+    return setVisibleInterval(() => void refresh(), POLL_MS);
   }, [open, refresh]);
 
   if (!status?.ok || !status.exists) return null;

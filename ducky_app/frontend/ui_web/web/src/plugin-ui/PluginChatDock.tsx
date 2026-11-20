@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useNow } from "../utils/sharedClock";
 import { ChatPane } from "../components/ChatPane";
 import { ChoiceDropdown } from "../components/ChoiceDropdown";
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -18,12 +19,9 @@ const clock = (ms: number) => {
 /** Seconds since the agent started, while it runs (the collapsed line's timer). */
 function useRunClock(running: boolean): string {
   const [start, setStart] = useState(0);
-  const [, tick] = useState(0);
+  useNow(1000, running);
   useEffect(() => {
-    if (!running) return setStart(0);
-    setStart(Date.now());
-    const id = window.setInterval(() => tick((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
+    setStart(running ? Date.now() : 0);
   }, [running]);
   return running && start ? clock(Date.now() - start) : "";
 }

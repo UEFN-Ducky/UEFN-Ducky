@@ -78,21 +78,53 @@ def _alive(data: dict) -> bool:
         return False
 
 
-def runs(workflow_id: str = "") -> list[dict]:
-    directory = _directory()
-    if not directory.exists():
+# Run files already parsed, by path: (modified, size, data). Several processes write runs, so
+# a file is read again only when its time or size changed. Nov 11 2026: every call read and
+# parsed every run of the last day (their outputs too), and the window, the team keeper and
+# the updater all call it on a timer.
+_PARSED: dict[str, tuple[int, int, dict]] = {}
+
+
+def _files() -> list[tuple[Path, dict]]:
+    """Each run file with its parsed data; unreadable ones are left out. Call under _LOCK."""
+    try:
+        entries = [e for e in os.scandir(_directory()) if e.name.endswith(".json")]
+    except OSError:
+        _PARSED.clear()
         return []
+    found: list[tuple[Path, dict]] = []
+    for entry in entries:
+        try:
+            stat = entry.stat()
+            kept = _PARSED.get(entry.path)
+            if kept is None or kept[0] != stat.st_mtime_ns or kept[1] != stat.st_size:
+                data = json.loads(Path(entry.path).read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("not a run")
+                kept = _PARSED[entry.path] = (stat.st_mtime_ns, stat.st_size, data)
+            found.append((Path(entry.path), kept[2]))
+        except (OSError, ValueError):
+            _PARSED.pop(entry.path, None)
+    here = {str(path) for path, _ in found}
+    for gone in [key for key in _PARSED if key not in here]:
+        del _PARSED[gone]
+    return found
+
+
+def runs(workflow_id: str = "") -> list[dict]:
     result = []
     with _LOCK:
-        for path in directory.glob("*.json"):
+        for path, kept in _files():
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if data.get("ended", data["started"]) < time.time() - 86400:
+                if kept.get("ended", kept["started"]) < time.time() - 86400:
                     path.unlink(missing_ok=True)
                     path.with_suffix(".stop").unlink(missing_ok=True)
+                    _PARSED.pop(str(path), None)
                     continue
-                if workflow_id and data.get("id") != workflow_id:
+                if workflow_id and kept.get("id") != workflow_id:
                     continue
+                # The caller's own copy: what it changes never reaches the kept file data.
+                data = {**kept, "events": list(kept["events"])}
                 if data["state"] == "started" and not _alive(data):
                     data["state"] = "stopped"
                     data["ended"] = time.time()

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { setVisibleInterval } from "../utils/visibleInterval";
 import { getApi, isRemote } from "../hooks/usePanelApi";
 import type { PluginPeopleSection } from "../types/panel";
 
@@ -60,8 +61,7 @@ export function useAccountDuckies(): { duckies: AccountDucky[]; error: string; r
 
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), REFRESH_MS);
-    return () => window.clearInterval(t);
+    return setVisibleInterval(() => void load(), REFRESH_MS);
   }, [load]);
 
   return { duckies, error, reload: useCallback(() => void load(), [load]) };
