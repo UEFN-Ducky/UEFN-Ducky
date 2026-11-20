@@ -15,6 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
+from backend.sandbox import paths as sandbox_paths
 from frontend.project_kind import FOLDER, FOLDER_CONTENT_ROOT, project_kind, project_root_path
 from frontend.settings import PanelSettings
 from frontend.ui_web.file_kinds import (
@@ -388,7 +389,7 @@ def _is_under_any_workspace_folder(target: Path) -> bool:
                 return True
         except OSError:
             continue
-    return False
+    return _is_path_under(resolved, sandbox_paths.root())  # a chat's sandbox: its file links open (read-only)
 
 
 def _is_under_listed_content(target: Path) -> bool:
@@ -430,10 +431,7 @@ def _resolve_file_path(relative_path: str) -> Path:
     if _is_ext_encoded_path(rel):
         return _decode_ext_path(rel)
     if _is_abs_encoded_path(rel):
-        target = _decode_abs_path(rel)
-        if not _is_under_any_workspace_folder(target):
-            raise ValueError(f"Path escapes workspace folders: {relative_path!r}")
-        return target
+        return _decode_abs_path(rel)  # it raises for a path outside every folder
     if _is_ws_encoded_path(rel):
         index = _parse_ws_index(rel)
         return Path(_workspace_folders()[index]["path"]).resolve()
