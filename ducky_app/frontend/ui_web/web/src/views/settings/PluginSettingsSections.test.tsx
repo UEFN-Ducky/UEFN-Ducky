@@ -10,7 +10,9 @@ vi.mock("../../hooks/usePluginContributions", async (importActual) => {
   const actual = await importActual<typeof import("../../hooks/usePluginContributions")>();
   return { ...actual, usePluginContributions: () => ({ settings_sections: sections }) };
 });
+const refreshPrefs = vi.fn();
 vi.mock("../../hooks/usePluginUiPrefs", () => ({
+  refreshPluginUiPrefsFromDisk: () => refreshPrefs(),
   usePluginUiPrefs: () => ({ prefs: {}, setPref: vi.fn(), setPrefs: vi.fn(), getBool: () => false }),
 }));
 vi.mock("./PluginWalkthroughReplayButton", () => ({ PluginWalkthroughReplayButton: () => null }));
@@ -126,6 +128,31 @@ it("a model property with logins offers the chat's logins and the Faster / Smart
   expect(props.apiOnly).toBeUndefined();
   expect(props.thinkingEffort).toBe("off");
   expect(typeof props.onEffortChange).toBe("function");
+});
+
+it("keeps the declared order, puts neighbouring buttons on one row and re-reads saved prefs", () => {
+  refreshPrefs.mockClear();
+  sections = [
+    {
+      id: "try",
+      tab: "LLMs",
+      plugin_id: "ducky-auto",
+      title: "Try a message",
+      properties: [
+        { id: "try_message", type: "string", label: "Message" },
+        { id: "route", type: "action", label: "Try it", rpc: "route" },
+        { id: "check", type: "action", label: "Check", rpc: "check" },
+      ],
+    },
+  ];
+  const { container } = render(<PluginSettingsSections pluginId="ducky-auto" compact />);
+  const message = screen.getByLabelText("Message");
+  const tryIt = screen.getByRole("button", { name: "Try it" });
+  expect(message.compareDocumentPosition(tryIt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  const rows = container.querySelectorAll(".plugin-action-row");
+  expect(rows).toHaveLength(1);
+  expect(rows[0].querySelectorAll("button")).toHaveLength(2);
+  expect(refreshPrefs).toHaveBeenCalled();
 });
 
 it("renders a collapsed section as a closed accordion", async () => {

@@ -2101,6 +2101,26 @@
   width: 100%;
 }
 
+/* Plugin settings: neighbouring action buttons on one row, each with its status under it. */
+.plugin-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+}
+
+.plugin-action-row .voice-settings-row {
+  width: auto;
+  max-width: 100%;
+}
+
+/* A gateway's own settings on its LLMs page: space between its sections. */
+.llms-provider-plugin-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
 .plugin-secret-field .settings-input {
   flex: 1;
   min-width: 160px;

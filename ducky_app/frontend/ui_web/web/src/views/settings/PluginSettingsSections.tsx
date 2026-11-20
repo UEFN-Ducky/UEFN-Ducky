@@ -10,7 +10,7 @@ import {
   type PluginSettingsProperty,
   type PluginSettingsSection,
 } from "../../hooks/usePluginContributions";
-import { usePluginUiPrefs } from "../../hooks/usePluginUiPrefs";
+import { refreshPluginUiPrefsFromDisk, usePluginUiPrefs } from "../../hooks/usePluginUiPrefs";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { PluginWalkthroughReplayButton } from "./PluginWalkthroughReplayButton";
 import { SettingsToggleRow } from "./SettingsToggleRow";
@@ -408,44 +408,52 @@ function SectionFields({
 }) {
   const pluginId = (section.plugin_id || "").trim().toLowerCase();
   const { getBool, setPref } = usePluginUiPrefs(pluginId || "_");
-  const actionProps = section.properties.filter(isActionProp);
-  const boolProps = section.properties.filter(isBoolProp);
-  const secretProps = section.properties.filter(isSecretProp);
-  const prefFieldProps = section.properties.filter(isPrefFieldProp);
-  const modelProps = section.properties.filter(isModelProp);
+  // Declared order; neighbouring buttons share one row and neighbouring toggles one card.
+  const runs: PluginSettingsProperty[][] = [];
+  for (const prop of section.properties) {
+    const last = runs[runs.length - 1];
+    const groups = isActionProp(prop) || isBoolProp(prop);
+    if (groups && last && (isActionProp(last[0]) ? isActionProp(prop) : isBoolProp(last[0]) && isBoolProp(prop))) {
+      last.push(prop);
+    } else {
+      runs.push([prop]);
+    }
+  }
 
   return (
     <>
-      {actionProps.map((prop) => (
-        <ActionField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />
-      ))}
-      {boolProps.length ? (
-        <div className="general-tab-toggle-card">
-          {boolProps.map((prop) => {
-            const defaultOn = prop.default !== false;
-            const checked = getBool(prop.id, defaultOn);
-            return (
-              <SettingsToggleRow
-                key={prop.id}
-                id={`plugin-${pluginId}-${section.id}-${prop.id}`}
-                label={prop.label || prop.id}
-                description={compact ? undefined : prop.description || ""}
-                checked={checked}
-                onChange={(next) => setPref(prop.id, next)}
-              />
-            );
-          })}
-        </div>
-      ) : null}
-      {secretProps.map((prop) => (
-        <SecretField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />
-      ))}
-      {prefFieldProps.map((prop) => (
-        <PrefField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />
-      ))}
-      {modelProps.map((prop) => (
-        <ModelField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />
-      ))}
+      {runs.map((run) => {
+        const prop = run[0];
+        if (isActionProp(prop)) {
+          return (
+            <div className="plugin-action-row" key={prop.id}>
+              {run.map((p) => (
+                <ActionField key={p.id} pluginId={pluginId} prop={p} compact={compact} />
+              ))}
+            </div>
+          );
+        }
+        if (isBoolProp(prop)) {
+          return (
+            <div className="general-tab-toggle-card" key={prop.id}>
+              {run.map((p) => (
+                <SettingsToggleRow
+                  key={p.id}
+                  id={`plugin-${pluginId}-${section.id}-${p.id}`}
+                  label={p.label || p.id}
+                  description={compact ? undefined : p.description || ""}
+                  checked={getBool(p.id, p.default !== false)}
+                  onChange={(next) => setPref(p.id, next)}
+                />
+              ))}
+            </div>
+          );
+        }
+        if (isSecretProp(prop)) return <SecretField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />;
+        if (isPrefFieldProp(prop)) return <PrefField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />;
+        if (isModelProp(prop)) return <ModelField key={prop.id} pluginId={pluginId} prop={prop} compact={compact} />;
+        return null;
+      })}
     </>
   );
 }
@@ -527,6 +535,10 @@ export function PluginSettingsSections({
   accordion?: boolean;
 }) {
   const contrib = usePluginContributions();
+  // A plugin's backend may have rewritten its settings since the app loaded them: show what's saved.
+  useEffect(() => {
+    refreshPluginUiPrefsFromDisk();
+  }, [pluginId, tabId]);
   const byTab = tabId ? pluginSettingsSectionsForTab(contrib, tabId) : [];
   const pid = (pluginId || "").trim().toLowerCase();
   const sections = pid

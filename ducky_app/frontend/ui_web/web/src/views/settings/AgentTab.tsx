@@ -843,6 +843,7 @@ export function AgentTab() {
                 <ProviderCodingAgents pluginId={selected.plugin_id} />
 
                 <div
+                  className="llms-provider-plugin-sections"
                   ref={targetRef("settings.llms.provider.plugin", {
                     kind: "settings_field",
                     label: "Provider settings",

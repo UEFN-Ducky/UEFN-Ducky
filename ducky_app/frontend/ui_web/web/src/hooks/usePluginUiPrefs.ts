@@ -176,6 +176,17 @@ export function hydratePluginUiPrefsFromDisk(): void {
     });
 }
 
+/** Re-read every plugin's saved prefs (a Settings page opening after a backend rewrote them). */
+export function refreshPluginUiPrefsFromDisk(): void {
+  const api = getApi();
+  if (!api?.plugin_prefs_get_all) return;
+  void Promise.resolve(api.plugin_prefs_get_all())
+    .then((res) => {
+      if (res?.ok && res.prefs && typeof res.prefs === "object") applyDiskPrefs(res.prefs as AllPrefs);
+    })
+    .catch(() => undefined);
+}
+
 /** Call once near app root so Languages / Discord prefs survive restart. */
 export function useHydratePluginUiPrefs(): void {
   useEffect(() => {
