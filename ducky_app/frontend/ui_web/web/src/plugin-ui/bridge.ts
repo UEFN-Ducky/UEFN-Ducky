@@ -880,6 +880,7 @@ export const BRIDGE_HANDLERS: Record<string, BridgeHandler> = {
       extra: params.extra,
       hide: params.hide,
       anchor: panelBoxOnPage(ctx.iframe, params.anchor),
+      effort: params.effort,
     });
     return picked ?? { model: "", name: "" };
   },

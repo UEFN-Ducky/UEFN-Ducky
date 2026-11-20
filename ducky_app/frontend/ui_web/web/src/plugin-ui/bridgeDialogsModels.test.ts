@@ -76,6 +76,13 @@ it("passes a panel's extra picker rows through to the host", async () => {
   expect(res).toMatchObject({ ok: true, result: { model: "typesafe:jev-1.14.0" } });
 });
 
+it("passes the thinking effort to the picker and returns the one picked", async () => {
+  host.pick.mockResolvedValue({ model: "openai:m1", name: "Model One", effort: "high" });
+  const res = await call("ui.pickModel", { current: "openai:m1", effort: "off" });
+  expect(host.pick).toHaveBeenCalledWith(expect.objectContaining({ effort: "off" }));
+  expect(res).toMatchObject({ ok: true, result: { model: "openai:m1", effort: "high" } });
+});
+
 it("moves a panel's anchor box onto the app page so the picker drops down from the button", async () => {
   host.pick.mockResolvedValue(null);
   const iframe = { getBoundingClientRect: () => ({ left: 300, top: 40 }) } as unknown as HTMLIFrameElement;

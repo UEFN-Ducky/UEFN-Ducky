@@ -16,6 +16,9 @@
  * With `anchor` (the panel button's box in app coordinates) there is no dialog: the same
  * gateway menu as the chat composer drops down from that button, API models only, and the
  * first pick answers.
+ *
+ * `effort` (a thinking effort id, e.g. "off") shows the chat's Faster / Smarter slider under the
+ * menu; the answer then carries `effort`. Moving only the slider answers with the current model.
  */
 import { useEffect, useState } from "react";
 
@@ -29,6 +32,7 @@ export type ModelPickPurpose = "video" | "agent" | "chat";
 export interface ModelPickResult {
   model: string;
   name: string;
+  effort?: string;
 }
 interface PickRequest {
   purpose: ModelPickPurpose;
@@ -37,6 +41,8 @@ interface PickRequest {
   extra: CatalogModelRow[];
   hide: string[];
   anchor: PickAnchor | null;
+  /** null = no slider. */
+  effort: string | null;
   resolve: (result: ModelPickResult | null) => void;
 }
 export interface PickAnchor {
@@ -89,6 +95,7 @@ export function pickModelFromHost(options: {
   extra?: unknown;
   hide?: unknown;
   anchor?: unknown;
+  effort?: unknown;
 }): Promise<ModelPickResult | null> {
   if (!openPicker) return Promise.reject(new Error("model picker is not mounted"));
   const show = openPicker;
@@ -100,6 +107,7 @@ export function pickModelFromHost(options: {
       extra: extraRows(options.extra),
       hide: Array.isArray(options.hide) ? options.hide.slice(0, 20).map((id) => String(id || "").trim().toLowerCase()).filter(Boolean) : [],
       anchor: anchorBox(options.anchor),
+      effort: typeof options.effort === "string" ? options.effort.trim().slice(0, 40) || "off" : null,
       resolve,
     }),
   );
@@ -110,6 +118,7 @@ export function PluginModelPickerHost() {
   const [picked, setPicked] = useState("");
   const [openSignal, setOpenSignal] = useState(0);
   const [agent, setAgent] = useState("ducky");
+  const [effort, setEffort] = useState<string | null>(null);
 
   useEffect(() => {
     openPicker = (next) => {
@@ -123,6 +132,7 @@ export function PluginModelPickerHost() {
       const prefix = next.current.includes(":") ? next.current.slice(0, next.current.indexOf(":")) : "";
       setAgent(next.purpose === "agent" && getCachedCodingAgents().some((a) => a.id === prefix) ? prefix : "ducky");
       setPicked(current);
+      setEffort(next.effort);
       setOpenSignal((n) => n + 1);
     };
     return () => {
@@ -145,9 +155,16 @@ export function PluginModelPickerHost() {
     ),
   ];
   const finish = (result: ModelPickResult | null) => {
-    request.resolve(result);
+    request.resolve(result && effort !== null ? { ...result, effort } : result);
     setRequest(null);
   };
+  const effortProps =
+    effort !== null ? { thinkingEffort: effort, onEffortChange: (next: string) => setEffort(next) } : {};
+  // Only the slider moved: answer with the model already picked, so the new effort is kept.
+  const sliderOnly = () =>
+    effort !== null && effort !== request.effort && request.current
+      ? { model: request.current, name: picked || request.current }
+      : null;
   const confirm = () => {
     const id = picked.trim();
     if (!id) return finish(null);
@@ -177,8 +194,9 @@ export function PluginModelPickerHost() {
           preserveSelection
           openSignal={openSignal}
           menuPlacement="bottom"
+          {...effortProps}
           onOpenChange={(open) => {
-            if (!open) finish(null);
+            if (!open) finish(sliderOnly());
           }}
         />
       </div>
@@ -234,6 +252,7 @@ export function PluginModelPickerHost() {
           preserveSelection
           openSignal={openSignal}
           labeled
+          {...effortProps}
         />
       )}
     </Modal>
