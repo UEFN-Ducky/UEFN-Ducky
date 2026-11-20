@@ -200,16 +200,17 @@ def set_panel_project_root(path: str, *, push_ui: bool = True) -> dict[str, str]
 
 def _run_project_deploy(root: str, on_log: Callable[[str], None] | None = None) -> None:
     from frontend.deploy import deploy_listener
-    from frontend.error_log import record_error
     from frontend.settings import UEFN_LISTENER_PORT
+    from frontend.ui_web.project_deploy import deploy_worked, report_deploy_failure
 
     try:
         lines = deploy_listener(Path(root), UEFN_LISTENER_PORT)
+        deploy_worked(root)
         if on_log:
             for ln in lines:
                 on_log(ln)
     except Exception as e:  # noqa: BLE001 — deploy is best-effort; surface via error log
-        record_error("deploy", str(e))
+        report_deploy_failure(root, e, f"Deploy failed for {root}: {e}")
         # Failed deploy: drop the flag so the next switch retries instead of skipping.
         with _deploy_lock:
             _deployed_roots.discard(root)

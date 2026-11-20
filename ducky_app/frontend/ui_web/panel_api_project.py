@@ -697,10 +697,15 @@ class PanelApiProjectMixin:
         except ValueError as e:
             return [f"Invalid project: {e}"]
         except Exception as e:
-            _pa.record_error("deploy", str(e))
+            from frontend.ui_web.project_deploy import report_deploy_failure
+
+            report_deploy_failure(path, e, f"Deploy failed for {path}: {e}", alert=False)  # the panel shows it
             return [f"Deploy failed: {e}"]
+        from frontend.ui_web.project_deploy import deploy_worked, report_deploy_failure
+
         try:
             lines = _pa.deploy_listener(root, _pa.UEFN_LISTENER_PORT)
+            deploy_worked(str(root))
             from frontend.ui_web.recent_projects import add_recent_project
 
             add_recent_project(str(root), kind="uefn")
@@ -708,7 +713,7 @@ class PanelApiProjectMixin:
                 _pa._log(ln)
             return lines
         except Exception as e:
-            _pa.record_error("deploy", str(e))
+            report_deploy_failure(str(root), e, f"Deploy failed for {root}: {e}", alert=False)
             return [f"Deploy failed: {e}"]
 
     def apply_ide(self, kind: str) -> str:

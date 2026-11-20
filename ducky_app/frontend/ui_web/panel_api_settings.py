@@ -709,12 +709,15 @@ class PanelApiSettingsMixin:
             root = _pa.Path(s.uefn_project_root)
 
             def _deploy() -> None:
+                from frontend.ui_web.project_deploy import deploy_worked, report_deploy_failure
+
                 try:
                     lines = _pa.deploy_listener(root, _pa.UEFN_LISTENER_PORT)
+                    deploy_worked(str(root))
                     for ln in lines:
                         _pa._log(ln)
                 except Exception as e:
-                    _pa.record_error("deploy", str(e))
+                    report_deploy_failure(str(root), e, f"Deploy failed for {root}: {e}")
 
             _pa.threading.Thread(target=_deploy, daemon=True, name="deploy-listener").start()
         # Discord Ducky panel shows connected-state live — tell it settings changed.

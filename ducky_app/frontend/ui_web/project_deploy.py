@@ -24,12 +24,25 @@ from frontend.ui_web.project_switch import mark_deployed
 _reported: dict[str, str] = {}
 
 
-def _report_once(path: str, msg: str) -> None:
-    """Error-log row plus one alert for a failure this island has not shown before."""
-    if _reported.get(path) == msg:
+def _failure_key(exc: BaseException) -> str:
+    """The same failure again: same exception type and OS error code, whichever file it names
+    (a WinError text that names a different file each try defeated a whole-message match)."""
+    code = getattr(exc, "winerror", None) or getattr(exc, "errno", None)
+    return f"{type(exc).__name__}:{code}" if code else f"{type(exc).__name__}:{exc}"
+
+
+def report_deploy_failure(path: str, exc: BaseException, msg: str = "", *, alert: bool = True) -> None:
+    """Error-log row (plus one alert) for a deploy failure this island has not shown before.
+
+    Every deploy path reports here: boot, project switch, Settings save, the Deploy button.
+    Nov 19 2026: a 1.2.507 PC still sent 14 rows a day from the paths that logged every try."""
+    key, island = _failure_key(exc), _safe_normalize(path) or path
+    if _reported.get(island) == key:
         return
-    _reported[path] = msg
-    record_error("deploy", msg)
+    _reported[island] = key
+    record_error("deploy", msg or f"Deploy failed for {path}: {exc}")
+    if not alert:
+        return
     try:
         from frontend import notifications
 
@@ -38,6 +51,11 @@ def _report_once(path: str, msg: str) -> None:
         )
     except Exception:
         pass
+
+
+def deploy_worked(path: str) -> None:
+    """A deploy of ``path`` went through: its next failure is reported again."""
+    _reported.pop(_safe_normalize(path) or path, None)
 
 
 def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> list[str]:
@@ -63,7 +81,7 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
             root = resolve_uefn_project_root(Path(path))
             project_lines = deploy_listener(root, UEFN_LISTENER_PORT, shared=(i == 0))
             mark_deployed(path)
-            _reported.pop(path, None)
+            deploy_worked(path)
             for ln in project_lines:
                 lines.append(ln)
                 if log:
@@ -75,7 +93,7 @@ def deploy_all_recent_projects(*, log: Callable[[str], None] | None = None) -> l
 
                 msg = f"{msg} {refusal_hint(getattr(e, 'filename', None) or path)}".rstrip()
             lines.append(msg)
-            _report_once(path, msg)
+            report_deploy_failure(path, e, msg)
             if log:
                 log(msg)
 
