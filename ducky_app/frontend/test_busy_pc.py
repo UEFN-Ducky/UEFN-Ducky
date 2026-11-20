@@ -22,6 +22,9 @@ def pc(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(busy_pc, "pc_now", {})
     monkeypatch.setattr(busy_pc, "raise_window_priority", lambda: 0)
     monkeypatch.setattr(busy_pc, "_room", {"beats": 0, "told": True})  # no real notice from a test run
+    monkeypatch.setattr(busy_pc, "light", False)
+    monkeypatch.setattr(busy_pc, "_tell_windows", lambda events: None)  # no real window to tell
+    monkeypatch.setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", busy_pc.BROWSER_ARGS)  # drawn with the card
     monkeypatch.setattr(low_memory, "last_gpu_share", None)
     return tmp_path
 
@@ -42,6 +45,54 @@ def test_the_health_report_says_what_the_pc_was_short_of() -> None:
                                           "and 12.2 GB of memory was free.")
     assert busy_pc.freeze_cause([{"pc_cpu": 91.0}]) == "During them the CPU 91% busy."
     assert busy_pc.freeze_cause([{"duration_ms": 300}]) == ""
+
+
+def test_the_health_report_says_what_the_window_sent_with_its_freezes() -> None:
+    rows = [{"blocked_ms": 0, "panel": "road-network:main", "light": True},
+            {"blocked_ms": 12, "panel": "road-network:main"},
+            {"blocked_ms": 361, "panel": "kanban:board", "pc_soft": 1.0, "pc_gpu": 0.93},
+            {"blocked_ms": True}, {"duration_ms": 300}]  # a wrong type and an older window's row: not counted
+    assert busy_pc.freeze_cause(rows) == (
+        "During them the graphics card was 93% full. "
+        "The page itself was busy in 1 of 3; in the others it waited for the screen. "
+        "With the road-network:main panel on screen: 2. "
+        "Drawn without the graphics card: 1. In light drawing: 1.")
+    assert busy_pc.freeze_cause([{"blocked_ms": 0}]) == (
+        "The page itself was busy in 0 of 1; in the others it waited for the screen.")
+
+
+def test_a_full_card_draws_light_until_it_has_room_again(pc, monkeypatch) -> None:
+    told: list[dict] = []
+    monkeypatch.setattr(busy_pc, "_tell_windows", told.extend)
+    on, off = {"type": "pc_draw", "light": True}, {"type": "pc_draw", "light": False}
+    assert not busy_pc.light_draw(0.85) and told == []  # never full: nothing to say
+    assert busy_pc.light_draw(0.91) and told == [on]
+    assert busy_pc.light_draw(0.85) and told == [on, on]  # under full but no room yet: said again
+    assert not busy_pc.light_draw(0.79) and told == [on, on, off]  # room: said once
+    assert not busy_pc.light_draw(0.85) and len(told) == 3  # and 85% alone does not bring it back
+    assert busy_pc.light_draw(0.95) and not busy_pc.light_draw(None) and told[-2:] == [on, off]  # card unknown: normal
+    monkeypatch.setattr(low_memory, "last_gpu_share", 0.96)
+    busy_pc.on_heartbeat({})  # the 30 s sample decides it
+    assert busy_pc.light and told[-1] == on
+
+
+def test_a_window_drawn_without_the_card_always_draws_light(pc, monkeypatch) -> None:
+    told: list[dict] = []
+    monkeypatch.setattr(busy_pc, "_tell_windows", told.extend)
+    monkeypatch.setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", f"{busy_pc.BROWSER_ARGS} --disable-gpu")
+    assert busy_pc.light_draw(0.20) and busy_pc.light_draw(None)
+    assert told == [{"type": "pc_draw", "light": True}] * 2
+    busy_pc.pc_now["gpu"] = 0.20
+    assert busy_pc.freeze_meta("ui_stall", 900.0) == {"pc_gpu": 0.20, "pc_soft": 1.0}
+    assert busy_pc.freeze_meta("ui_stall", 60.0) == {}
+
+
+def test_a_window_that_cannot_be_told_changes_nothing_else(pc, monkeypatch) -> None:
+    def gone(events):
+        raise OSError("no window")
+
+    monkeypatch.setattr(busy_pc, "_tell_windows", gone)
+    assert busy_pc.light_draw(0.95)  # still decided, never raised
 
 
 def test_a_start_just_after_a_full_card_draws_without_it(pc, monkeypatch) -> None:

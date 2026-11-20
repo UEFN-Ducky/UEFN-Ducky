@@ -41,6 +41,8 @@ const PANEL_PUSH_TYPES = new Set<string>([
   "plugin_hook",
   "appearance_profile_requested",
   "open_target",
+  // The graphics card is full or has room again (frontend/busy_pc.py, utils/lightDraw).
+  "pc_draw",
 ]);
 
 type AgentEventListener = (event: AgentEvent) => void;

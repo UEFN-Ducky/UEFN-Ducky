@@ -136,6 +136,19 @@ body.native-caption-input-ready .app-header .drag-region {
 :root.app-hidden *::after {
   animation-play-state: paused !important;
 }
+/* The graphics card is full, or the window is drawn without it (utils/lightDraw `app-light`).
+   Nothing is blurred behind panels: a radius of 0 keeps each panel's own layer, so what is
+   placed inside it stays where it is. Animations move in steps, about ten a second, so a
+   spinner still turns but the screen is not redrawn on every frame. */
+:root.app-light {
+  --blur-md: blur(0px);
+  --wf-panel-blur: 0px;
+}
+:root.app-light *,
+:root.app-light *::before,
+:root.app-light *::after {
+  animation-timing-function: steps(8, end) !important;
+}
 .tool-card-collapse {
   display: grid;
   grid-template-rows: 0fr;

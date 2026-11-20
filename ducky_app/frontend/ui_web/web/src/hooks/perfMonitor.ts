@@ -4,6 +4,7 @@
  */
 
 import { getApi } from "./usePanelApi";
+import { APP_LIGHT_CLASS } from "../utils/lightDraw";
 import { setVisibleInterval } from "../utils/visibleInterval";
 
 export type UiPerfEntry = {
@@ -23,6 +24,17 @@ export type UiPerfEntry = {
   script_ms?: number;
   layout_ms?: number;
   render_ms?: number;
+  /** How long the page truly could not respond (the browser's own count for the frame).
+   *  A long frame with 0 here was not busy: it waited for the screen to draw. */
+  blocked_ms?: number;
+  /** The window was hidden, or shown but not the one in use, when the frame ended. */
+  hidden?: boolean;
+  unfocused?: boolean;
+  /** Plugin panels on screen ("plugin:panel", comma-joined): their pages run inside this
+   *  window and none of their work shows in `source`. */
+  panel?: string;
+  /** The window was drawing light (utils/lightDraw). */
+  light?: boolean;
 };
 
 type LoafScript = {
@@ -48,6 +60,28 @@ export function stallSource(entry: PerformanceEntry): string | undefined {
 
 const FLUSH_INTERVAL_MS = 5000;
 const LONGTASK_MS = 50;
+
+// Plugin panel tabs on screen: tab id -> "plugin:panel".
+const shownPanels = new Map<string, string>();
+
+/** A plugin panel tab (`plugin:<plugin>:<panel>`) went on or off screen. */
+export function notePanelShown(tabId: string, shown: boolean): void {
+  const [kind, plugin, panel] = String(tabId || "").split(":");
+  if (kind !== "plugin" || !plugin || !panel) return;
+  if (shown) shownPanels.set(tabId, `${plugin}:${panel.split("~")[0]}`);
+  else shownPanels.delete(tabId);
+}
+
+/** What a freeze is recorded with besides its timing: where the window was and what it showed. */
+function frameContext(): Pick<UiPerfEntry, "hidden" | "unfocused" | "panel" | "light"> {
+  const out: Pick<UiPerfEntry, "hidden" | "unfocused" | "panel" | "light"> = {};
+  if (typeof document === "undefined") return out;
+  if (document.hidden) out.hidden = true;
+  else if (!document.hasFocus()) out.unfocused = true;
+  if (shownPanels.size) out.panel = [...new Set(shownPanels.values())].sort().join(",").slice(0, 120);
+  if (document.documentElement.classList.contains(APP_LIGHT_CLASS)) out.light = true;
+  return out;
+}
 
 let installed = false;
 let buffer: UiPerfEntry[] = [];
@@ -127,8 +161,15 @@ export function installPerfMonitor() {
             const source = stallSource(entry);
             // 1481 stalls an hour (Nov 16 2026) and most rows had no source: without the
             // split, script time, forced layout and paint all read the same.
-            const frame = entry as PerformanceEntry & { renderStart?: number; scripts?: LoafScript[] };
+            const frame = entry as PerformanceEntry & {
+              renderStart?: number;
+              scripts?: LoafScript[];
+              blockingDuration?: number;
+            };
             const scripts = Array.isArray(frame.scripts) ? frame.scripts : [];
+            // Nov 20 2026: 92% of a week's freezes had no script, layout or paint time. This
+            // says whether the page was busy in them or only waited for the screen.
+            const blocked = frame.blockingDuration;
             const scriptMs = Math.round(scripts.reduce((ms, s) => ms + (s.duration ?? 0), 0));
             const layoutMs = Math.round(scripts.reduce((ms, s) => ms + (s.forcedStyleAndLayoutDuration ?? 0), 0));
             const renderMs = frame.renderStart ? Math.round(entry.startTime + entry.duration - frame.renderStart) : 0;
@@ -141,6 +182,8 @@ export function installPerfMonitor() {
               ...(scriptMs > 0 ? { script_ms: scriptMs } : {}),
               ...(layoutMs > 0 ? { layout_ms: layoutMs } : {}),
               ...(renderMs > 0 ? { render_ms: renderMs } : {}),
+              ...(typeof blocked === "number" ? { blocked_ms: Math.round(blocked) } : {}),
+              ...frameContext(),
             });
           }
         }

@@ -10,6 +10,16 @@ full, UEFN on 2.5 cores, 81% of RAM in use) and nothing recorded which of the th
 - How full the graphics card is goes into ``launcher/gpu.json``. A start within
   NOTE_MAX_AGE_S of a full card draws the window without the card: Ducky-Launcher's
   ``gpu_was_full`` (native_launcher/app/src/lib.rs) and ``browser_arguments`` here.
+
+Nov 20 2026: in a week, 17,968 of 19,561 freezes had none of Ducky's script, layout or paint
+time in them, and nothing said whether the page was busy or only waiting for the screen.
+
+- While the card is full (FULL_SHARE, until it is back under ROOM_SHARE) or the window is
+  drawn without it, the window draws light: nothing blurred behind panels, animations in
+  steps (``light_draw``, the ``pc_draw`` event, web ``utils/lightDraw``).
+- The window sends each freeze with how long the page truly could not respond
+  (``blocked_ms``), the plugin panel on screen and whether it drew light; ``freeze_cause``
+  counts them.
 """
 
 from __future__ import annotations
@@ -34,6 +44,40 @@ pc_now: dict[str, float] = {}
 # Drawing without the card: samples in a row with room on it, and whether the person was told.
 ROOM_SHARE, ROOM_BEATS = 0.80, 2
 _room = {"beats": 0, "told": False}
+# Light drawing is on (see light_draw). The window hears it with every sample while it is on.
+DRAW_EVENT = "pc_draw"
+light = False
+# A long frame the page was blocked in for less than this was a wait for the screen.
+BLOCKED_MS = 50.0
+
+
+def _tell_windows(events: list[dict[str, Any]]) -> None:
+    from frontend.ui_web.panel_httpd import publish_panel_events
+
+    publish_panel_events(events)
+
+
+def light_draw(share: float | None) -> bool:
+    """Light drawing for this sample of the card (None: unknown): on from a full card until it
+    is back under ROOM_SHARE, and always while the window is drawn without the card. The
+    windows are told on every sample while it is on (one opened later hears it within 30 s)
+    and once when it ends. Never raises."""
+    global light
+    was = light
+    try:
+        from frontend.gpu_memory import FULL_SHARE
+
+        if drawing_without_gpu():
+            light = True
+        elif share is None:
+            light = False
+        else:
+            light = share >= FULL_SHARE or (was and share >= ROOM_SHARE)
+        if light or was:
+            _tell_windows([{"type": DRAW_EVENT, "light": light}])
+    except Exception:
+        pass
+    return light
 
 
 def gpu_back(share: float, alert: Any = None) -> bool:
@@ -154,6 +198,7 @@ def on_heartbeat(beat: dict[str, Any]) -> None:
         from frontend import low_memory
 
         share = low_memory.last_gpu_share
+        light_draw(float(share) if share is not None else None)
         if share is not None:
             pc_now["gpu"] = float(share)
             gpu_back(float(share))
@@ -166,15 +211,21 @@ def on_heartbeat(beat: dict[str, Any]) -> None:
 
 
 def freeze_meta(kind: str, duration_ms: float) -> dict[str, float]:
-    """What a window freeze is recorded with: ``pc_gpu``, ``pc_free_gb``, ``pc_cpu``."""
+    """What a window freeze is recorded with: ``pc_gpu``, ``pc_free_gb``, ``pc_cpu``, and
+    ``pc_soft`` when the window is drawn without the graphics card."""
     if kind != "ui_stall" or duration_ms < FREEZE_MS:
         return {}
-    return {f"pc_{k}": v for k, v in pc_now.items()}
+    meta = {f"pc_{k}": v for k, v in pc_now.items()}
+    if drawing_without_gpu():
+        meta["pc_soft"] = 1.0
+    return meta
 
 
 def freeze_cause(rows: list[dict[str, Any]]) -> str:
     """'During them the graphics card was 96% full, the CPU 36% busy and 12.2 GB of memory was
-    free.' from the freezes' recorded samples (their medians); '' when none has one."""
+    free.' from the freezes' recorded samples (their medians), then what the window itself
+    sent with them: in how many the page was busy, the plugin panel most were under, how many
+    were drawn without the card and how many drew light. '' when no row has any of it."""
     def mid(key: str) -> float | None:
         vals = sorted(float(r[key]) for r in rows if isinstance(r.get(key), (int, float)))
         return vals[len(vals) // 2] if vals else None
@@ -184,4 +235,22 @@ def freeze_cause(rows: list[dict[str, Any]]) -> str:
              f"the CPU {cpu:.0f}% busy" if cpu is not None else "",
              f"{free:.1f} GB of memory was free" if free is not None else ""]
     parts = [p for p in parts if p]
-    return "During them " + ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1] + "." if parts else ""
+    said = ["During them " + ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1] + "."] if parts else []
+    timed = [float(r["blocked_ms"]) for r in rows
+             if isinstance(r.get("blocked_ms"), (int, float)) and not isinstance(r.get("blocked_ms"), bool)]
+    if timed:
+        busy = sum(1 for ms in timed if ms >= BLOCKED_MS)
+        said.append(f"The page itself was busy in {busy} of {len(timed)}; in the others it waited for the screen.")
+    panels: dict[str, int] = {}
+    for r in rows:
+        if r.get("panel"):
+            panels[str(r["panel"])] = panels.get(str(r["panel"]), 0) + 1
+    if panels:
+        name = max(panels, key=lambda k: panels[k])
+        said.append(f"With the {name} panel on screen: {panels[name]}.")
+    soft, lit = sum(1 for r in rows if r.get("pc_soft")), sum(1 for r in rows if r.get("light"))
+    if soft:
+        said.append(f"Drawn without the graphics card: {soft}.")
+    if lit:
+        said.append(f"In light drawing: {lit}.")
+    return " ".join(said)

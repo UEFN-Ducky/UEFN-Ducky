@@ -2389,6 +2389,8 @@ export interface PanelPushEvent {
     /** A plugin's backend changed its own settings prefs (`plugin_id`, `prefs`): Settings repaints. */
     | "plugin_prefs_changed"
     | "gateway_accounts_changed"
+    /** The graphics card is full (or has room again): `light` drawing on or off (utils/lightDraw). */
+    | "pc_draw"
     | "plugin_scope_changed"
     /** A write of a plugin (an agent's tool call, its folder) was refused: someone holds the unit. */
     | "plugin_write_refused"
@@ -2486,6 +2488,8 @@ export interface PanelPushEvent {
   elsewhere?: string;
   since?: number;
   kept?: boolean;
+  /** pc_draw: draw light (no blur behind panels, animations in steps) while true. */
+  light?: boolean;
   /** duckyos_account_changed — the new account key ("" signed out). */
   account?: string;
   /** plugin_prefs_changed — the plugin's whole prefs slot. */

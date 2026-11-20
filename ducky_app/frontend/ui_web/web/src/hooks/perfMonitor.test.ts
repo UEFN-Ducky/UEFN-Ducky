@@ -35,11 +35,14 @@ beforeEach(() => {
     return rafCalls;
   });
   vi.stubGlobal("PerformanceObserver", FakeObserver);
+  // jsdom has no focus: these rows are a window in use unless a test says otherwise.
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
 });
 
 afterEach(() => {
   vi.clearAllTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   api.report_ui_perf.mockReset();
 });
@@ -107,6 +110,36 @@ it("keeps IPC diagnostic batches within 200 entries even with many stalls", asyn
   const batch = api.report_ui_perf.mock.calls[0][0];
   expect(batch).toHaveLength(200);
   expect(batch.filter((entry: { kind: string }) => entry.kind === "ui_stall")).toHaveLength(198);
+});
+
+it("records whether the page was busy in a long frame, and what the window showed", async () => {
+  const { installPerfMonitor, notePanelShown } = await import("./perfMonitor");
+  installPerfMonitor();
+  vi.mocked(document.hasFocus).mockReturnValue(false);
+  notePanelShown("plugin:road-network:main", true);
+  notePanelShown("plugin:road-network:main~2", true);
+  notePanelShown("plugin:kanban:board", true);
+  notePanelShown("chat:not-a-panel", true);
+  document.documentElement.classList.add("app-light");
+  const frames = [
+    { name: "long-animation-frame", duration: 320, blockingDuration: 0 }, // waited for the screen
+    { name: "long-animation-frame", duration: 410, blockingDuration: 361.4 }, // the page was busy
+    { name: "longtask", duration: 90 }, // an older browser: no count
+  ];
+  FakeObserver.instances[0].callback({ getEntries: () => frames });
+  notePanelShown("plugin:kanban:board", false);
+  document.documentElement.classList.remove("app-light");
+  vi.mocked(document.hasFocus).mockReturnValue(true);
+  FakeObserver.instances[0].callback({ getEntries: () => [frames[0]] });
+  await vi.advanceTimersByTimeAsync(5000);
+  const batch = api.report_ui_perf.mock.calls[0][0];
+  expect(batch[0]).toMatchObject({ blocked_ms: 0, unfocused: true, light: true, panel: "kanban:board,road-network:main" });
+  expect(batch[1]).toMatchObject({ blocked_ms: 361 });
+  expect(batch[2]).not.toHaveProperty("blocked_ms");
+  expect(batch[3]).toEqual({
+    kind: "ui_stall", name: "long-animation-frame", duration_ms: 320, peak_pending: 0, blocked_ms: 0,
+    panel: "road-network:main",
+  });
 });
 
 function runFrames(count: number) {

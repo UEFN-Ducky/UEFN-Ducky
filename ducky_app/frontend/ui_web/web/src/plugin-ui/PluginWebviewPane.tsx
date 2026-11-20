@@ -26,6 +26,7 @@ import { isDucktactoeBoardTab } from "./ducktactoeBoardChat";
 import { PluginSurfaceBoundary } from "./PluginSurfaceBoundary";
 import { PluginScopeBar } from "./PluginScopeBar";
 import { getApi, isRemote } from "../hooks/usePanelApi";
+import { notePanelShown } from "../hooks/perfMonitor";
 import { usePluginPage } from "./usePluginPage";
 import { WINDOW_ID } from "../tabs/tabRegistryClient";
 import { PluginChatDock, useDock } from "./PluginChatDock";
@@ -183,9 +184,13 @@ export function PluginWebviewPane({ tabId, chatOverlay, visible = true, headerMe
   // Ducky knows which plugin panels are on screen, so an agent testing one is told
   // when its panel code is paused (a hidden tab) instead of reading stale results.
   useEffect(() => {
+    notePanelShown(tabId, visible);
     void getApi()?.report_plugin_panel?.(WINDOW_ID, tabId, visible, true);
   }, [tabId, visible]);
-  useEffect(() => () => void getApi()?.report_plugin_panel?.(WINDOW_ID, tabId, false, false), [tabId]);
+  useEffect(() => () => {
+    notePanelShown(tabId, false);
+    void getApi()?.report_plugin_panel?.(WINDOW_ID, tabId, false, false);
+  }, [tabId]);
 
   useEffect(() => {
     if (!parsed) return;

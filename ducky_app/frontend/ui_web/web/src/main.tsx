@@ -23,6 +23,7 @@ import {
 } from "./remote/directTransport";
 import { RemoteDuckyBar } from "./components/RemoteDuckyBar";
 import { installAppIdle } from "./utils/appIdle";
+import { installLightDraw } from "./utils/lightDraw";
 import { installStartupRefresh } from "./hooks/startupRefresh";
 
 const remoteDucky = isRemoteDuckyWindow();
@@ -41,6 +42,9 @@ if (isDirectMode()) {
 
 // Endless glows hold still while the window sits in the background.
 installAppIdle();
+// No blur and stepped animations while this PC's graphics card is full. A phone or another
+// PC looking in draws on its own card, so it never follows.
+if (!isDirectMode()) installLightDraw();
 // Native launcher: start-up values that came from its cache and changed refresh in place.
 installStartupRefresh();
 
