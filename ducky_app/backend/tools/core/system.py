@@ -68,7 +68,7 @@ def uefn_window_list(title_regex: str = "", pretty: bool = False) -> str:
 def uefn_window_capture(hwnd: int = 0, title_regex: str = "", pretty: bool = False) -> Any:
     """Screenshot one UEFN window into this chat's AppData attachments folder.
 
-    Pass ``hwnd`` from uefn_window_list, or a ``title_regex``. To see why UEFN stopped
+    Pass ``hwnd`` from uefn_window_list, a ``title_regex``, or nothing for the main editor window. To see why UEFN stopped
     answering, start with uefn_popups (it numbers a popup's buttons for uefn_popup_press).
     """
     from backend.tools.core.uefn_windows import capture_uefn_window

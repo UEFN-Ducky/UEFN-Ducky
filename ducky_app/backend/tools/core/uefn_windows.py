@@ -61,7 +61,8 @@ def capture_uefn_window(*, hwnd: int = 0, title_regex: str = "") -> dict[str, An
         int(rect.get("bottom") or 0),
     )
     if box[2] <= box[0] or box[3] <= box[1]:
-        return {"ok": False, "error": "window has no on-screen rect", "hwnd": win.get("hwnd")}
+        return {"ok": False, "fail": "not_found", "hwnd": win.get("hwnd"),
+                "error": "window has no on-screen rect (minimized?): it can't be captured until it is shown"}
     try:
         from PIL import ImageGrab
     except Exception as exc:
@@ -76,7 +77,14 @@ def capture_uefn_window(*, hwnd: int = 0, title_regex: str = "") -> dict[str, An
 
     saved = save_capture_for_agents(buf.getvalue(), prefix="uefn_window")
     if not saved.get("ok"):
-        return {"ok": False, "error": str(saved.get("error") or "Screenshot was not saved: no active chat.")}
+        # No chat bound to this call (an outside agent): the AppData captures folder, not a
+        # refusal. Nov 17-19 2026: 69 of 108 calls failed, most of them this or no arguments.
+        from frontend.ui_web.tool_captures import save_tool_capture_png
+
+        try:
+            saved = save_tool_capture_png(buf.getvalue(), prefix="uefn_window")
+        except OSError as exc:
+            return {"ok": False, "fail": "error", "error": f"Screenshot was not saved: {exc}"}
     return {
         "ok": True,
         "hwnd": win.get("hwnd"),
@@ -243,16 +251,23 @@ def _resolve(hwnd: int, title_regex: str) -> dict[str, Any]:
         for win in listed.get("windows") or []:
             if int(win.get("hwnd") or 0) == int(hwnd):
                 return {"ok": True, **win}
-        return {"ok": False, "error": f"UEFN window {hwnd} not found"}
+        return {"ok": False, "fail": "not_found",
+                "error": f"UEFN window {hwnd} not found: call uefn_window_list again, or pass no hwnd for the editor"}
     if (title_regex or "").strip():
         listed = list_uefn_windows(title_regex)
         if listed.get("ok") is False:
             return listed
         wins = listed.get("windows") or []
         if not wins:
-            return {"ok": False, "error": "no UEFN window matched", "title_regex": title_regex}
+            return {"ok": False, "fail": "not_found", "error": "no UEFN window matched", "title_regex": title_regex}
         return {"ok": True, **wins[0]}
-    return {"ok": False, "error": "hwnd or title_regex required"}
+    # Neither given: the main editor window (not owned, on screen), the one agents mean.
+    wins = list_uefn_windows().get("windows") or []
+    main = [w for w in wins if not w.get("owned")] or wins
+    shown = [w for w in main if (w.get("rect") or {}).get("width")]
+    if not (shown or main):
+        return {"ok": False, "fail": "not_found", "error": "no UEFN window is open"}
+    return {"ok": True, **(shown or main)[0]}
 
 
 def _click_path() -> Path:
