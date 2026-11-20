@@ -36,6 +36,9 @@ def test_a_guessed_ducky_name_is_the_tool_it_stands_for() -> None:
     assert resolve_invented_tool_name("ducky_list_files", known) == "workspace_find"
     assert resolve_invented_tool_name("ducky_skill_read", known) == "skill_read_subskill"
     assert resolve_invented_tool_name("ducky_read_subskill", known) == "skill_read_subskill"
+    saves = known | {"project_memory_save", "project_memory_append"}
+    assert resolve_invented_tool_name("ducky_memory_save", saves) == "project_memory_save"
+    assert resolve_invented_tool_name("ducky_memory_append", saves) == "project_memory_append"
     # Only when the real tool is there, and never over a tool that has the guessed name.
     assert resolve_invented_tool_name("ducky_memory_get", {"workspace_find"}) is None
     assert resolve_invented_tool_name("ducky_read", known | {"ducky_read"}) is None

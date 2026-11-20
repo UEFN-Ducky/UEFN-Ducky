@@ -1115,6 +1115,9 @@ GUESSED_TOOL_NAMES: dict[str, str] = {
     "ducky_memory_search": "project_memory_list",
     "ducky_memory_get_all": "project_memory_list",
     "ducky_memory_list": "project_memory_list",
+    # Nov 18 2026: the last guessed name still failing, on 1.2.506.
+    "ducky_memory_save": "project_memory_save",
+    "ducky_memory_append": "project_memory_append",
     "ducky_read_file": "workspace_read_file",
     "ducky_read": "workspace_read_file",
     "ducky_list_files": "workspace_find",
