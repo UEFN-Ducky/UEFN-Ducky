@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import Any
 
@@ -253,12 +254,38 @@ def test_a_batch_the_store_keeps_refusing_is_dropped_not_resent_forever() -> Non
     assert us.flush() is True and us.queued() == 0
 
 
-def test_a_store_that_is_busy_or_rate_limited_never_drops_the_batch(monkeypatch) -> None:
-    # The Store answers 200 {"error": ...}; a failed store write says "try again:".
+def _store_answers(monkeypatch, answer) -> None:
+    """The Store's answers come from the test (``api_request`` is replaced), so the stop that
+    keeps a test run from sending (``_test_copy``) is lifted for it."""
     from frontend import duckyos_account
 
+    monkeypatch.setattr(duckyos_account, "api_request", answer)
+    monkeypatch.setattr(us, "_test_copy", lambda: False)
+
+
+def test_a_test_run_never_reaches_the_store(monkeypatch) -> None:
+    # Nov 21 2026: test runs and sandbox copies each counted as a new PC in the Store.
+    from frontend import duckyos_account
+
+    calls: list[Any] = []
+    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: calls.append(a) or (200, {"payload": {}}, ""))
+    assert us._test_copy() is True  # this very process runs pytest
+    us.track("feature.open", tab="chat")
+    assert us.flush() is False and us.queued() == 1 and calls == []  # kept here, never sent
+    for name in ("PYTEST_CURRENT_TEST", "PYTEST_VERSION"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delitem(sys.modules, "pytest")
+    assert us._test_copy() is False  # a real install: no mark of a test run or a sandbox
+    monkeypatch.setenv("DUCKY_SANDBOX", "1")
+    assert us._test_copy() is True
+    monkeypatch.delenv("DUCKY_SANDBOX")
+    assert us.flush() is True and us.queued() == 0 and len(calls) == 1  # and a real install sends
+
+
+def test_a_store_that_is_busy_or_rate_limited_never_drops_the_batch(monkeypatch) -> None:
+    # The Store answers 200 {"error": ...}; a failed store write says "try again:".
     errors = iter(["try again: store busy (db timeout)"] * 5 + ["too soon: one batch per install every 30 s", ""])
-    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: (200, {"payload": {"error": next(errors)}}, ""))
+    _store_answers(monkeypatch, lambda *a, **k: (200, {"payload": {"error": next(errors)}}, ""))
     us.track("feature.open", tab="chat")
     for _ in range(6):
         assert us.flush() is False and us.queued() == 1   # kept every time, never dropped
@@ -266,10 +293,8 @@ def test_a_store_that_is_busy_or_rate_limited_never_drops_the_batch(monkeypatch)
 
 
 def test_a_store_that_answers_404_429_or_5xx_never_drops_the_batch(monkeypatch) -> None:
-    from frontend import duckyos_account
-
     answers = iter([(404, None, ""), (429, {"error": "slow down"}, ""), (503, None, ""), (200, {"payload": {}}, "")])
-    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: next(answers))
+    _store_answers(monkeypatch, lambda *a, **k: next(answers))
     us.track("feature.open", tab="chat")
     for _ in range(3):
         assert us.flush() is False and us.queued() == 1
@@ -282,9 +307,7 @@ def _refusal_reports() -> list[dict[str, Any]]:
 
 
 def test_a_refused_batch_reports_the_stores_one_word_reason(monkeypatch) -> None:
-    from frontend import duckyos_account
-
-    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: (400, {"error": "bad_event"}, ""))
+    _store_answers(monkeypatch, lambda *a, **k: (400, {"error": "bad_event"}, ""))
     us.track("feature.open", tab="chat")
     for _ in range(us.REFUSED_DROP_AFTER):
         assert us.flush() is False
@@ -309,15 +332,13 @@ def test_reason_token_is_one_short_word_never_the_detail() -> None:
 
 
 def test_a_batch_refused_as_too_large_is_split_and_both_halves_sent(monkeypatch) -> None:
-    from frontend import duckyos_account
-
     sent: list[int] = []
 
     def store(method: str, path: str, body: dict[str, Any], **_: Any) -> tuple[int, Any, str]:
         sent.append(len(body["events"]))
         return (413, None, "") if len(sent) == 1 else (200, {"payload": {}}, "")
 
-    monkeypatch.setattr(duckyos_account, "api_request", store)
+    _store_answers(monkeypatch, store)
     for tab in ("chat", "editor", "plan", "usage"):
         us.track("feature.open", tab=tab)
     assert us.flush() is False
@@ -338,9 +359,7 @@ def test_a_too_large_half_that_is_refused_again_is_dropped_and_reported() -> Non
 
 
 def test_a_refused_413_reports_too_big(monkeypatch) -> None:
-    from frontend import duckyos_account
-
-    monkeypatch.setattr(duckyos_account, "api_request", lambda *a, **k: (413, None, ""))
+    _store_answers(monkeypatch, lambda *a, **k: (413, None, ""))
     us.track("feature.open", tab="chat")  # one row: nothing to split, so it counts toward dropping
     for _ in range(us.REFUSED_DROP_AFTER):
         assert us.flush() is False
@@ -577,6 +596,7 @@ def test_perf_sample_counts_running_turns(monkeypatch) -> None:
     monkeypatch.setattr(us, "_meta_get", lambda key: "0")
     monkeypatch.setattr(us, "_meta_set", lambda key, value: None)
     monkeypatch.setattr(us, "_run_meta", {})  # runs other files began and never ended
+    monkeypatch.setattr(us, "_opened_at", 0.0)  # an app open in a test under 5 min ago: no sample yet
     us.run_begin("busy", "conv-busy", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
     us._maybe_perf_sample()
     rows, _ = us._take(100)

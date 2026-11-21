@@ -9,12 +9,16 @@ in, the account's token goes with it and the server attaches the account.
 The ``usage_stats`` setting (on by default) is the one switch: off means nothing
 is queued, nothing is sent and the queue is emptied. Every public function here
 swallows its own errors: stats never break the app.
+
+A test run, a process a test started and a sandbox copy queue their rows like any Ducky and
+never send them (``_test_copy``): the Store only hears from real installs.
 """
 
 from __future__ import annotations
 
 import atexit
 import json
+import os
 import re
 import secrets
 import sys
@@ -455,11 +459,25 @@ def reason_token(error: str, status: int = 0) -> str:
     return word or (f"http_{status}" if status else "unknown")
 
 
+def _test_copy() -> bool:
+    """A sandbox copy (``DUCKY_SANDBOX``), a test run, or a process a test started (pytest's own
+    marks, the three ``backend.store.db`` trusts to keep tests off the real database).
+
+    Each one has a fresh database, so it made a new install id and the Store counted a new PC
+    with its own opens and, on its second start, an unclean exit (Nov 21 2026: 36 of a day's
+    71 opens and about 22 of 32 app_unclean_exit rows; 23 such ids on one PC in a week)."""
+    return bool(os.environ.get("DUCKY_SANDBOX")) or (
+        "PYTEST_CURRENT_TEST" in os.environ or "PYTEST_VERSION" in os.environ or "pytest" in sys.modules
+    )
+
+
 def _send(body: dict[str, Any]) -> str:
     """ok | refused:<reason> (the Store answered no to this batch) | failed (no answer: try again)."""
     if send_override is not None:
         got = send_override(body)
         return got if isinstance(got, str) else "ok" if got else "failed"
+    if _test_copy():
+        return "failed"  # the rows stay in this copy's own queue; nothing reaches the Store
     try:
         from frontend.duckyos_account import api_request
 
