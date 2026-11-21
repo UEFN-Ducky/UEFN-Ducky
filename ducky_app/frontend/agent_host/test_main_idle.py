@@ -41,7 +41,9 @@ def test_an_idle_host_wakes_at_most_twice_a_second():
     assert batcher.wakeups <= 4  # 2.1 s idle: was 42
 
 
-def test_a_queued_event_is_sent_within_60_ms():
+def test_a_queued_event_is_sent_at_the_next_tick():
+    # The tick is 50 ms and Windows wakes a waiting thread up to 15.6 ms late: measured here
+    # 55 to 65 ms, so a 60 ms limit failed about every second run (Nov 21 2026, 33 of 60).
     sent: list[float] = []
     batcher = Batcher(lambda conv_id, events: sent.append(time.monotonic()), per_second=1000.0)
     done, thread = _run(batcher)
@@ -52,4 +54,4 @@ def test_a_queued_event_is_sent_within_60_ms():
     while not sent and time.monotonic() < deadline:
         time.sleep(0.005)
     _stop(batcher, done, thread)
-    assert sent and sent[0] - fed <= 0.06
+    assert sent and sent[0] - fed <= 0.1  # far under the idle wait: the feed woke the loop
