@@ -65,6 +65,10 @@ _pending: dict[str, Any] = {}
 # begin(): ended_on_purpose() of the previous launch ('' when it may have crashed). usage_stats
 # reads it so app_unclean_exit follows the crash form's rules.
 previous_end = ""
+# begin(): how the launch before this one ended, as one word (usage_events.APP_ENDS): closed |
+# handoff | stopped, restart | signout | launcher, or running | starting | native | fatal | stuck
+# for one that never said it was closing; "alive" when it was still running; '' with none.
+previous_how = ""
 HEARTBEAT_S = 30.0
 # The crash pop-up closes itself (report kept, not sent) after this long with no answer. A
 # start that asks before its window waited for the answer for good: after an update with
@@ -823,7 +827,7 @@ def begin(version: str, *, ask: bool = True) -> None:
     keeps it for Settings → Support. ``ask=False`` (the launcher's backend) only keeps it;
     ``ask_pending`` shows the pop-up after hello. Asked before hello, the launcher saw a
     backend silent for 20 s, ended it and the report with it, and opened the Python window."""
-    global _native_file, previous_end
+    global _native_file, previous_end, previous_how
     try:
         _dir().mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -838,6 +842,7 @@ def begin(version: str, *, ask: bool = True) -> None:
         # This launch will hand off: the running process owns both crash files.
         # Leave this process unarmed so its later stage/mark calls are no-ops too.
         _state.clear()
+        previous_how = "alive"
         return
     stopped = _read_json(_stopped_path())
     if previous and int(stopped.get("pid") or 0) == int(previous.get("pid") or -1):
@@ -859,6 +864,9 @@ def begin(version: str, *, ask: bool = True) -> None:
     # app_unclean_exit rows came within a minute of a start, after update swaps).
     clean = str(previous.get("state") or "") in _CLEAN_ENDS and not native.strip()
     previous_end = ("closed" if clean else ended_on_purpose(previous, restarted=restarted, dumps=dumps)) if previous else ""
+    state = str(previous.get("state") or "")
+    previous_how = "" if not previous else state if clean else previous_end or (
+        "native" if native.strip() or dumps else {"fatal": "fatal", "stuck": "stuck", "ok": "running"}.get(state, "starting"))
     body = build_report(previous, native, restarted=restarted, dumps=dumps, ended=max(ends) if ends else None) if previous else None
     prune_dumps()
     if body:

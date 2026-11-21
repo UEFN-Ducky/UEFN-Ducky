@@ -27,6 +27,9 @@ def _fresh_module():
     us._install_fresh = False
     us._update_check_sent = False
     us._stop.set()
+    from frontend import boot_report
+
+    boot_report.previous_how = ""  # a begin() in an earlier test file: no app.ended rows here
     yield
     us.send_override = None
     us.registry_override = None
@@ -58,6 +61,8 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "plugin.remove": {"plugin_id": "uefn-physics"},
     "feature.open": {"tab": "workflows"},
     "error.code": {"code": "agent_timeout", "where": "agent"},
+    "turn.wait": {"provider": "claude", "first_s": 4.2, "quiet_s": 58, "why": "compacting"},
+    "app.ended": {"how": "running", "uptime_s": 5000},
     "agent.stuck": {"provider": "codex", "after_s": 90},
     "ui.crash": {"code": "render"},
     "perf.sample": {"startup_s": 3.2, "idle_cpu_pct": 0.4, "memory_mb": 700},
@@ -1182,3 +1187,67 @@ def test_rows_are_flushed_at_exit(db_queue, monkeypatch) -> None:
     # A send reads the rows still queued too.
     us._enqueue({"name": "app.close", "props": {}, "ts": time.time()})
     assert [r["name"] for r in us._take(100)[0]][-1] == "app.close"
+
+
+def test_a_turn_reports_what_it_waited_on() -> None:
+    us.run_begin("run-w", "conv-w", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
+    us.turn_waits("run-w", {"first_s": 4.2, "quiet_s": 58.0, "why": "compacting"})
+    us.turn_waits("run-w", None)  # a turn end with nothing to say keeps what it has
+    us.run_end("run-w", "done")
+    us.run_begin("run-x", "conv-x", coding_agent="ducky", provider="anthropic", model="claude-opus-5-5")
+    us.run_end("run-x", "done")  # Ducky's own agent has no such record: no row
+    rows, _ = us._take(100)
+    waits = [r["props"] for r in rows if r["name"] == "turn.wait"]
+    assert len(waits) == 1
+    assert {k: waits[0][k] for k in ("provider", "first", "quiet", "why")} == {
+        "provider": "claude", "first": "10s", "quiet": "2m", "why": "compacting"}
+    assert ev.validate("turn.wait", {"why": "C:/Users/x"}) == {}  # only the listed words pass
+
+
+def test_a_refused_or_failed_call_says_what_the_no_was_about() -> None:
+    answers = {
+        "Error executing tool workspace_search: Path is outside allowed workspace folders: 'x'.": "folder",
+        'no step "3" in this plan': "missing",
+        "Error executing tool execute_python: UEFN listener is not running. Start it in UEFN": "offline",
+        "Error executing tool workspace_edit_file: old_text is not in the file.": "args",
+        'Refused: "| tail" hides the output until the command ends': "rule",
+        '{"ok": false, "error": "This file belongs to Mallard"}': "lane",
+        "something nobody listed": "other",
+    }
+    for text, word in answers.items():
+        assert ev.no_kind(text) == word, text
+    us.tool_done("delete_asset", ok=False, duration_ms=10, fail="refused", said="BP_Secret was not found")
+    us.tool_done("ducky_terminal_run", ok=False, duration_ms=10, fail="exit_nonzero", said="Command failed (exit code 1).")
+    us.tool_done("spawn_actor", ok=True, duration_ms=10, said="not found")  # a call that worked says nothing
+    rows, _ = us._take(100)
+    calls = {r["props"]["tool"]: r["props"] for r in rows if r["name"] == "tool.call"}
+    assert calls["delete_asset"]["no"] == "missing"
+    assert "no" not in calls["ducky_terminal_run"] and "no" not in calls["spawn_actor"]
+    assert "secret" not in str(calls["delete_asset"]).lower()  # the answer itself never leaves
+
+
+def test_every_start_says_how_the_launch_before_it_ended(monkeypatch) -> None:
+    from frontend import boot_report, error_log
+
+    meta: dict[str, str] = {us.META_LAST_VERSION: "1.2.400", us.META_INSTALL: "a" * 32,
+                            us.META_LAST_SEEN: '{"stage": "page_started", "uptime_s": 5000}'}
+    monkeypatch.setattr(us, "_meta_get", meta.get)
+    monkeypatch.setattr(us, "_meta_set", meta.__setitem__)
+    monkeypatch.setattr(us, "start", lambda: None)
+    monkeypatch.setattr(error_log, "install_crash_hooks", lambda: None)
+    monkeypatch.setattr(boot_report, "previous_end", "closed")
+    us.send_override = lambda body: True
+
+    def ended() -> list[dict[str, Any]]:
+        rows, _ = us._take(100)
+        us._mem_queue.clear()
+        return [r["props"] for r in rows if r["name"] == "app.ended"]
+
+    monkeypatch.setattr(boot_report, "previous_how", "")
+    us.app_opened()
+    assert ended() == []  # no launch before this one
+    # The launch before: 1.2.400, last heard from 5,000 s in, closed on purpose.
+    meta.update({us.META_LAST_VERSION: "1.2.400", us.META_LAST_SEEN: '{"stage": "page_started", "uptime_s": 5000}'})
+    monkeypatch.setattr(boot_report, "previous_how", "closed")
+    us.app_opened()
+    assert ended() == [{"how": "closed", "uptime": "2h", "v": "1.2.400"}]  # a clean end counts too

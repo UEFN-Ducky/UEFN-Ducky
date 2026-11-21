@@ -9,6 +9,9 @@ A status the agent sends with ``"waiting": True`` names a wait itself (its conve
 compacted, about a minute): it is shown again every ``every_s`` with how long it has run, until
 the next event.
 
+The turn's last event (``agent_stopped``) leaves with ``waits``: seconds to the first output,
+the longest silence and what that one waited on, for the anonymous turn.wait count.
+
 Before the CLI starts, ``set_step`` names the setup step running (login check, prompt build...).
 A step quiet for ``step_after_s`` is shown; one quiet for ``stuck_after_s`` calls ``on_stuck``
 once, unless it was set with ``can_stop=False`` (a login that waits on the person).
@@ -60,9 +63,11 @@ class StallNotice:
         self.every_s = every_s
         self._clock = clock
         self._is_alive = is_alive or (lambda: _cli_alive(conv_id))
-        self._last = clock()
+        self._began = self._last = clock()
+        self._first: float | None = None  # seconds to the first text, thinking or tool call
+        self._quiet, self._quiet_why = 0.0, ""  # the longest silence and what it waited on
         self._pending: list[str] = []
-        self._waiting = ""
+        self._waiting = self._waiting_on = ""  # a named wait's line, and its one word
         self._push: PushFn | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -77,13 +82,17 @@ class StallNotice:
     def set_step(self, step: str, *, can_stop: bool = True) -> None:
         """Name the setup step now running; "" once the CLI is launching."""
         with self._lock:
-            self.step, self._can_stop, self._last = step, can_stop, self._clock()
+            now = self._clock()
+            self._gap(now)
+            self.step, self._can_stop, self._last = step, can_stop, now
 
     def wrap(self, push: PushFn) -> PushFn:
         self._push = push
 
         def wrapped(event: dict[str, Any]) -> None:
             self.observe(event)
+            if event.get("type") == "agent_stopped":
+                event = {**event, "waits": self.waits()}
             push(event)
 
         return wrapped
@@ -91,14 +100,37 @@ class StallNotice:
     def observe(self, event: dict[str, Any]) -> None:
         kind = str(event.get("type") or "")
         with self._lock:
-            self._last = self._clock()
-            self._waiting = str(event.get("text") or "") if kind == "status" and event.get("waiting") else ""
+            now = self._clock()
+            self._gap(now)
+            if self._first is None and kind in ("text_delta", "thinking", "tool"):
+                self._first = now - self._began
+            self._last = now
+            named = event.get("waiting") if kind == "status" else None
+            self._waiting = str(event.get("text") or "") if named else ""
+            self._waiting_on = (named if isinstance(named, str) else "other") if named else ""
             tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
             if kind == "tool" and tool.get("status") == "pending":
                 self._pending.append(str(tool.get("name") or "tool").removeprefix("mcp__uefn__"))
             elif kind == "tool_done" and self._pending:
                 # Chips pair positionally: the oldest open one closes first.
                 self._pending.pop(0)
+
+    def _gap(self, now: float) -> None:
+        """Under the lock, before ``_last`` moves: keep the longest silence and what it waited on."""
+        quiet = now - self._last
+        if quiet > self._quiet:
+            start = bool(self.step) or self._first is None
+            self._quiet = quiet
+            self._quiet_why = self._waiting_on or ("start" if start else "tool" if self._pending else "model")
+
+    def waits(self) -> dict[str, Any]:
+        """``first_s`` (absent when nothing came), ``quiet_s`` and ``why``: start | model | tool,
+        or the word a waiting status named (compacting)."""
+        with self._lock:
+            out: dict[str, Any] = {"quiet_s": round(self._quiet, 1), "why": self._quiet_why or "model"}
+            if self._first is not None:
+                out["first_s"] = round(self._first, 1)
+        return out
 
     def text(self) -> str:
         """The status to show now, or "" while the stream is not quiet."""

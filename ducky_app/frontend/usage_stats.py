@@ -701,6 +701,15 @@ def _previous_end() -> str:
         return ""
 
 
+def _previous_how() -> str:
+    try:
+        from frontend import boot_report
+
+        return boot_report.previous_how
+    except Exception:
+        return ""
+
+
 def app_opened(boot_total_ms: float | None = None) -> None:
     """The panel is up: app.open, an update if the version changed, then the thread."""
     global _opened_at, _boot_total_ms
@@ -716,7 +725,7 @@ def app_opened(boot_total_ms: float | None = None) -> None:
         # The crash form's rules: a run a PC restart, a sign-out or the launcher's own exit
         # ended is no crash (boot_report.begin read why the last launch ended).
         unclean = _meta_get(META_RUNNING) == "1" and not _previous_end()
-        seen = _last_seen() if unclean else {}
+        seen = _last_seen()  # the launch before this one; _note_alive writes this launch's next
         _meta_set(META_RUNNING, "1")
         _note_alive()
         if not enabled():
@@ -730,6 +739,9 @@ def app_opened(boot_total_ms: float | None = None) -> None:
         last = _meta_get(META_LAST_VERSION) or ""
         if unclean:
             track("error.code", code="app_unclean_exit", where="ui", kind="crash", version=last, **seen)
+        how = _previous_how()
+        if how:
+            track("app.ended", how=how, uptime_s=seen.get("uptime_s"), v=last)
         if last and last != __version__:
             track("update.installed", **{"from": last, "to": __version__})
         if last != __version__:
@@ -869,6 +881,21 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
             v=_app_version(),
             **why,
         )
+        waits = meta.get("waits")
+        if waits:
+            track("turn.wait", provider=meta["provider"], first_s=waits.get("first_s"),
+                  quiet_s=waits.get("quiet_s"), why=waits.get("why"), v=_app_version())
+    except Exception:
+        pass
+
+
+def turn_waits(run_id: str, waits: Any) -> None:
+    """What the turn's last event said it waited (StallNotice.waits), kept for run_end."""
+    try:
+        with _lock:
+            meta = _run_meta.get(run_id or "")
+            if meta is not None and isinstance(waits, dict):
+                meta["waits"] = waits
     except Exception:
         pass
 
@@ -902,8 +929,10 @@ def fail_of(text: str) -> str:
 
 def tool_done(
     name: str, *, ok: bool, duration_ms: float, conv_id: str = "", args: dict[str, Any] | None = None, fail: str = "",
+    said: str = "",
 ) -> None:
-    """fail: why a failed call failed (ev.TOOL_FAILS); a failed call without one is "error"."""
+    """fail: why a failed call failed (ev.TOOL_FAILS); a failed call without one is "error".
+    said: a refused or failed call's answer, read here for its one NO_KINDS word."""
     try:
         if not enabled():
             return
@@ -926,6 +955,8 @@ def tool_done(
             props["fail"] = fail
             # why: the three things a failed call can be, so exits and refusals never read as crashes.
             props["why"] = {"exit_nonzero": "exit_code", "refused": "refused"}.get(fail, "error")
+            if said and fail in ("refused", "error"):
+                props["no"] = ev.no_kind(said)
         if after_fail:
             props["after_fail"] = "yes"
         if name in ev.COMMAND_TOOLS and isinstance(args, dict):

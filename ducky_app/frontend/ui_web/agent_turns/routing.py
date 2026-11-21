@@ -584,6 +584,12 @@ def run_message(
                     if "reason" not in ended:
                         ended["reason"] = str(event.get("reason") or "")
                         ended["detail"] = str(event.get("detail") or "")
+                        try:  # a count never stops the turn's last event
+                            from frontend import usage_stats as usage
+
+                            usage.turn_waits(run_id, event.get("waits"))
+                        except Exception:
+                            pass
                 push(event)
 
             try:

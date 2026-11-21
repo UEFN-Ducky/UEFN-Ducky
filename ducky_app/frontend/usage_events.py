@@ -25,6 +25,8 @@ TOOL_S: Buckets = ((1, "1s"), (10, "10s"), (60, "1m"), (None, "more"))
 DIED_AFTER_S: Buckets = ((60, "1m"), (300, "5m"), (1800, "30m"), (7200, "2h"), (28800, "8h"), (None, "more"))
 UPTIME_S: Buckets = ((300, "5m"), (1800, "30m"), (7200, "2h"), (28800, "8h"), (None, "more"))
 STUCK_S: Buckets = ((60, "60s"), (300, "5m"), (1200, "20m"), (None, "more"))
+# turn.wait: seconds to a coding-agent turn's first output, and its longest silence.
+WAIT_S: Buckets = ((3, "3s"), (10, "10s"), (30, "30s"), (120, "2m"), (None, "more"))
 TOOL_CALLS: Buckets = ((0, "0"), (5, "1-5"), (20, "6-20"), (None, "more"))
 NODES: Buckets = ((5, "1-5"), (20, "6-20"), (None, "more"))
 STARTUP_S: Buckets = ((2, "2s"), (5, "5s"), (15, "15s"), (None, "more"))
@@ -94,6 +96,15 @@ BOOT_STAGES = ("launch", "handoff", "handoff_exit", "reclaim_claim", "webview_im
                "ready_for_webview_start", "window_shown", "page_started", "other")
 # Why a tool call failed: run_agent_command's "fail" word, refused = answered {"ok": false} / "ERROR".
 TOOL_FAILS = ("exit_nonzero", "busy", "not_approved", "timeout", "not_found", "refused", "error")
+# What a refused or failed call's answer was about (tool.call no; no_kind reads it on the PC,
+# the answer never leaves). "refused" alone covered a path outside the project, a plan step
+# that is not there and UEFN being closed alike (Nov 2026: 380 unreal__call_tool refusals).
+NO_KINDS = ("folder", "missing", "args", "offline", "busy", "big", "lane", "rule", "timeout", "other")
+# What a turn waited on during its longest silence (turn.wait why; StallNotice.waits).
+WAIT_WHY = ("start", "model", "tool", "compacting", "compacting_idle", "other")
+# How the launch before this one ended (app.ended how; boot_report.previous_how).
+APP_ENDS = ("closed", "handoff", "stopped", "restart", "signout", "launcher", "running", "starting",
+            "native", "fatal", "stuck", "alive")
 # What a terminal command was, from its first words (cmd_kind); the command never leaves.
 CMD_KINDS = ("test", "build", "git", "install", "script", "other")
 # Tools whose tool.call carries cmd.
@@ -119,6 +130,9 @@ EVENTS: dict[str, dict[str, Any]] = {
     },
     "app.heartbeat": {"uefn_up": YES_NO},
     "app.close": {"uptime": ("bucket", UPTIME_S, "uptime_s")},
+    # Every start says how the launch before it ended, the clean ones too: app_unclean_exit
+    # is one bucket, and nothing gave the share of launches it stands for.
+    "app.ended": {"how": APP_ENDS, "uptime": ("bucket", DIED_AFTER_S, "uptime_s"), "v": ("version",)},
     # One per window launch with native_launcher on/auto: who drew it, how fast, why it fell back.
     "launcher.start": {
         "mode": ("native", "python"),
@@ -166,7 +180,13 @@ EVENTS: dict[str, dict[str, Any]] = {
     "tool.call": {"tool": ("slug",), "ok": YES_NO, "duration": ("bucket", TOOL_S, "duration_s"),
                   "fail": TOOL_FAILS, "cmd": CMD_KINDS, "after_fail": ("yes",),
                   # Failed calls only: exit_code (ran, exited non-zero), refused (a rule said no), error.
-                  "why": ("exit_code", "refused", "error")},
+                  "why": ("exit_code", "refused", "error"),
+                  # Refused and failed calls only: what the tool's "no" was about.
+                  "no": NO_KINDS},
+    # One per coding-agent turn: chat.turn has the turn's length, nothing said how long the
+    # person looked at a chat doing nothing (Nov 21 2026: a minute of compacting, unseen).
+    "turn.wait": {"provider": PROVIDERS, "first": ("bucket", WAIT_S, "first_s"),
+                  "quiet": ("bucket", WAIT_S, "quiet_s"), "why": WAIT_WHY, "v": ("version",)},
     "skill.used": {"skill": ("slug",)},
     "workflow.run": {"outcome": ("ok", "error", "stopped"), "nodes": ("bucket", NODES, "nodes_n")},
     "plugin.install": {"plugin_id": ("slug",)},
@@ -446,6 +466,34 @@ def kind_of(message: str) -> str:
     for kind, rule in _KIND_RULES:
         if rule.search(text):
             return kind
+    return "other"
+
+
+# What a tool's "no" was about (tool.call no): first match wins.
+_NO_RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (word, re.compile(pattern))
+    for word, pattern in (
+        ("big", r"exceeds maximum allowed tokens|too (large|big|long)"),
+        ("folder", r"outside (the )?(allowed|open)|read-only here"),
+        ("lane", r"belongs to|another ducky|locked by|is locked"),
+        ("offline", r"listener is not running|not (running|connected|reachable)|unreachable|unavailable"
+                    r"|connection (failed|refused)|is (closed|not open)"),
+        ("args", r"missing required|required parameter|field required|validation error|invalid|parameter error"
+                 r"|old_(text|string)|appears \d+ times|must be"),
+        ("busy", r"editor busy|is busy|still (running|building)|wait for the current|popup|dialog"),
+        ("timeout", r"timed out|timeout"),
+        ("missing", r"not found|no such|unknown tool|does not exist|no step"),
+        ("rule", r"\brefused\b|\bnever\b|not allowed|not an allowed|was not in the last|stop: this exact call"),
+    )
+)
+
+
+def no_kind(answer: str) -> str:
+    """One of NO_KINDS for a tool's refusal or error text; only this word is reported."""
+    text = (answer or "")[:500].lower()
+    for word, rule in _NO_RULES:
+        if rule.search(text):
+            return word
     return "other"
 
 

@@ -156,6 +156,7 @@ def _push_tool_done(push: PushFn, conv_id: str, rec: Any) -> None:
             usage_stats.tool_done(
                 effective_tool_name(str(rec.name or "tool"), args), ok=ok,
                 duration_ms=float(ms), conv_id=conv_id, args=args, fail=fail,
+                said="" if ok else _tool_result_text(raw_result),
             )
     except Exception:
         pass

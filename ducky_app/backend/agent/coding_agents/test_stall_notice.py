@@ -136,3 +136,35 @@ def test_thread_pushes_and_stops():
     time.sleep(0.1)
     assert count >= 1 and seen[0]["type"] == "status"
     assert len(seen) == count
+
+
+def test_the_turns_last_event_says_what_it_waited_on():
+    # Nov 21 2026: a chat sat a minute compacting and no count anywhere said so.
+    notice, push, clock, seen = make()
+    clock.now += 4
+    push({"type": "status", "text": "Claude Code initialized"})
+    clock.now += 2
+    push({"type": "thinking", "text": "x"})  # the first output, 6 s in
+    push({"type": "status", "text": "Compacting the conversation", "waiting": "compacting"})
+    clock.now += 58
+    push({"type": "tool", "tool": {"name": "Read", "status": "pending"}})
+    clock.now += 20
+    push({"type": "tool_done", "tool": {"name": "Read", "status": "success"}})
+    push({"type": "agent_stopped", "reason": "done"})
+    assert seen[-1] == {"type": "agent_stopped", "reason": "done",
+                        "waits": {"first_s": 6.0, "quiet_s": 58.0, "why": "compacting"}}
+
+
+def test_a_long_tool_a_slow_model_and_a_slow_start_are_told_apart():
+    notice, push, clock, _ = make()
+    notice.set_step("checking the Codex login")
+    clock.now += 40
+    notice.set_step("")
+    assert notice.waits() == {"quiet_s": 40.0, "why": "start"}  # nothing came yet: no first_s
+    push({"type": "text_delta", "text": "hi"})
+    clock.now += 50
+    push({"type": "tool", "tool": {"name": "Read", "status": "pending"}})
+    assert notice.waits()["why"] == "model"
+    clock.now += 90
+    push({"type": "tool_done", "tool": {"name": "Read", "status": "success"}})
+    assert notice.waits() == {"first_s": 40.0, "quiet_s": 90.0, "why": "tool"}

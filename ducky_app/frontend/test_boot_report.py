@@ -864,3 +864,25 @@ def test_a_crash_pop_up_has_no_reload(monkeypatch) -> None:
     assert "Reload" not in tk.buttons and "Send report" in tk.buttons
     tk = _popup(monkeypatch, "UEFN Ducky got stuck on its loading screen", None)  # no window to reload
     assert "Reload" not in tk.buttons
+
+
+def test_begin_says_how_the_launch_before_this_one_ended(crash, monkeypatch) -> None:
+    boot_report.begin("1.2.510")
+    assert boot_report.previous_how == ""  # this PC's first launch
+    boot_report.begin("1.2.510")
+    assert boot_report.previous_how == "starting"  # the one above never finished starting
+    boot_report.mark("ok")
+    boot_report.begin("1.2.510")
+    assert boot_report.previous_how == "running"  # ended with no mark while running
+    boot_report.mark("ok")
+    crash["restarted"] = True
+    boot_report.begin("1.2.510")
+    assert boot_report.previous_how == "restart"
+    crash["restarted"] = False
+    boot_report.mark("ok")
+    boot_report.mark("closed")
+    boot_report.begin("1.2.510")
+    assert boot_report.previous_how == "closed"
+    monkeypatch.setattr(boot_report, "_still_running", lambda pid: True)
+    boot_report.begin("1.2.510")
+    assert boot_report.previous_how == "alive"  # the Ducky before is still running

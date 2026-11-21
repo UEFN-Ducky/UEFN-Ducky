@@ -736,9 +736,11 @@ def _usage_tool_done(
         # ducky_call_tool counts as the tool it ran (as for Ducky's own agent), so a failure
         # names the tool that failed.
         args = arguments if isinstance(arguments, dict) else {}
-        if not ok and not fail and result is not None:
+        text = ""
+        if not ok and result is not None:
             texts = [str(b.get("text") or "") for b in result.get("content") or [] if isinstance(b, dict) and b.get("type") == "text"]
             text = texts[0] if texts else ""
+        if not ok and not fail and result is not None:
             low = text[:500].lower()
             # A non-zero exit and a plan/lane rule's refusal are not crashes (anj7w3p9d2f6y, ant6p2k9w3x7d).
             fail = (usage_stats.fail_of(text)
@@ -747,7 +749,7 @@ def _usage_tool_done(
         usage_stats.tool_done(
             effective_tool_name(name, args), ok=ok, duration_ms=(time.monotonic() - t0) * 1000.0,
             conv_id=str(getattr(ident, "conv_id", "") or ""), args=arguments if isinstance(arguments, dict) else None,
-            fail=fail,
+            fail=fail, said=text,
         )
     except Exception:
         pass
