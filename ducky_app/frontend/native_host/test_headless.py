@@ -458,3 +458,92 @@ def test_uefn_link_changes_reach_usage_stats(monkeypatch) -> None:
     api._last_listener_status = {"online": True}
     headless._watch_uefn_link(api, every_s=0, rounds=1)
     assert modes == ["offline", "online"]
+
+
+# ---- the launcher's pipe must not sit on standard input
+#
+# Nov 21 2026: a backend whose launcher pipe stayed silent never served a request. Its main
+# thread was in a read on standard input; numpy's first import on another thread waited for
+# that read (its OpenBLAS start-up code touches standard input and needs the C runtime's lock
+# on descriptor 0), holding Windows' loader lock, so every Thread.start() in the process hung
+# too. The launcher writes only for a page call or a window change, so the installed app
+# stalls for as long as the page is quiet.
+
+_QUIET_PIPE_S = 3.0
+
+_QUIET_PIPE_CHILD = textwrap.dedent(
+    """
+    import json, subprocess, sys, threading, time
+
+    from frontend.native_host import headless
+
+    out = {}
+    done = threading.Event()
+
+    def work():
+        time.sleep(0.5)  # the main thread is inside its read on the pipe by now
+        t = time.perf_counter()
+        import numpy  # noqa: F401
+        out["numpy_s"] = time.perf_counter() - t
+        t = time.perf_counter()
+        thread = threading.Thread(target=lambda: None)
+        thread.start()
+        thread.join()
+        out["thread_s"] = time.perf_counter() - t
+        ran = subprocess.run([sys.executable, "-c", "print(7)"], capture_output=True, timeout=60)
+        out["child_said"] = ran.stdout.decode().strip()
+        done.set()
+
+    threading.Thread(target=work, daemon=True).start()
+    stream = headless._private_stdin()
+    out["moved"] = stream is not None
+    t0 = time.perf_counter()
+    line = (stream or sys.stdin.buffer).readline()
+    out["read_s"] = time.perf_counter() - t0
+    out["line"] = line.decode().strip()
+    done.wait(60)
+    out["standard_input_now"] = sys.stdin.buffer.read().decode()
+    with open(sys.argv[1], "w", encoding="utf-8") as fh:
+        json.dump(out, fh)
+    """
+)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the C runtime's descriptor lock and loader lock are Windows'")
+def test_a_silent_launcher_pipe_holds_no_library_load_and_no_thread_start(tmp_path) -> None:
+    import time
+
+    pytest.importorskip("numpy")
+    # The installed backend is a windowed program: use the windowed interpreter when there is one.
+    windowed = Path(sys.executable).with_name("pythonw.exe")
+    result = tmp_path / "result.json"
+    env = dict(os.environ, PYTHONPATH=str(DUCKY_APP), DUCKY_SANDBOX="1")
+    child = subprocess.Popen(
+        [str(windowed if windowed.is_file() else sys.executable), "-c", _QUIET_PIPE_CHILD, str(result)],
+        cwd=str(DUCKY_APP), env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        time.sleep(_QUIET_PIPE_S)  # the launcher says nothing: no page call, no window change
+        child.stdin.write(b'{"t":"bye"}\n')
+        child.stdin.flush()
+        _, err = child.communicate(timeout=120)
+    finally:
+        if child.poll() is None:
+            child.kill()
+    assert result.is_file(), err.decode("utf-8", "replace")
+    out = json.loads(result.read_text(encoding="utf-8"))
+    assert out["moved"] is True
+    # The read really was pending the whole quiet time, and the message still arrived through it.
+    assert out["read_s"] >= _QUIET_PIPE_S - 1.0 and out["line"] == '{"t":"bye"}'
+    # Read through descriptor 0, numpy's import took as long as the pipe was quiet (5.0 of 5 s).
+    assert out["numpy_s"] < _QUIET_PIPE_S - 1.5, out
+    assert out["thread_s"] < 1.0, out
+    # Standard input is NUL now, and a valid handle: child processes still start.
+    assert out["standard_input_now"] == "" and out["child_said"] == "7"
+
+
+def test_the_backend_reads_the_launcher_through_the_private_pipe() -> None:
+    source = inspect.getsource(headless.run_backend)
+    assert "_private_stdin() or _std_binary(\"stdin\")" in source
+    if sys.platform != "win32":
+        assert headless._private_stdin() is None

@@ -251,6 +251,52 @@ def _std_binary(which: str) -> IO[bytes] | None:
         return None
 
 
+def _private_stdin() -> IO[bytes] | None:
+    """The launcher's pipe on a descriptor of its own, with standard input pointed at NUL.
+
+    The main thread sits in a read on that pipe for as long as the launcher is quiet (it
+    writes only for a page call or a window change). Read through descriptor 0, that read
+    holds the C runtime's lock on descriptor 0, and a library whose start-up code touches
+    standard input (numpy's OpenBLAS does) waits for that lock while it holds Windows'
+    loader lock: no library loads and no thread starts in the whole process until the
+    launcher writes again. Seen Nov 21 2026: a backend whose pipe stayed silent never served
+    a request; numpy's import took exactly as long as the pipe was quiet. frontend/launcher.py
+    loads numpy early for the IDE bridge for the same reason; taking the pipe off
+    descriptor 0 holds for any library and costs nothing while running.
+
+    None when there is nothing to move (not Windows, no descriptor 0, or the move failed):
+    the caller then reads standard input as before."""
+    if sys.platform != "win32":
+        return None
+    try:
+        pipe_fd = os.dup(0)  # its own descriptor and lock; child processes do not inherit it
+    except OSError:
+        return None  # no descriptor 0: nothing reads through it
+    try:
+        nul_fd = os.open(os.devnull, os.O_RDONLY)
+        try:
+            os.dup2(nul_fd, 0)  # closes descriptor 0's handle on the pipe
+        finally:
+            os.close(nul_fd)
+    except OSError:
+        _log.warning("the launcher's pipe stayed on standard input", exc_info=True)
+        os.close(pipe_fd)
+        return None  # descriptor 0 still is the pipe
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        # A windowed program's standard handle does not follow descriptor 0, and its old
+        # value is a closed handle now: subprocess would fail to start anything on it.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetStdHandle.argtypes = [wintypes.DWORD, wintypes.HANDLE]
+        kernel32.SetStdHandle(wintypes.DWORD(-10 & 0xFFFFFFFF), wintypes.HANDLE(msvcrt.get_osfhandle(0)))
+    except Exception:
+        _log.warning("the standard input handle was not pointed at NUL", exc_info=True)
+    return os.fdopen(pipe_fd, "rb")  # from here on the pipe lives only on this descriptor
+
+
 def _register_shell_integrations() -> None:
     # Shortcuts, Open with and uefn-ducky:// keep pointing at UEFN-Ducky.exe (this EXE).
     if os.environ.get("DUCKY_SANDBOX"):
@@ -375,7 +421,7 @@ def run_backend(
         pass
 
     out = stdout if stdout is not None else _std_binary("stdout")
-    inp = stdin if stdin is not None else _std_binary("stdin")
+    inp = stdin if stdin is not None else (_private_stdin() or _std_binary("stdin"))
     if out is None or inp is None:
         _log.error("--backend needs the launcher's stdin and stdout pipes")
         return EXIT_START_FAILED
