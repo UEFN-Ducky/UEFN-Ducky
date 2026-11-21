@@ -176,6 +176,11 @@ def revive_listener(port: int, *, reload_if_online: bool = True) -> dict[str, An
             }
         _call_epic_tool("EnablePythonForMainProject")  # 43.00 name (was EnablePythonInUEFN)
     except Exception as exc:
+        # UEFN at its project browser has no "main project": both calls above say Python is
+        # not ready ("No active UEFN project") while Python runs and the listener can start.
+        # Seen live Nov 21 2026: two automatic restarts failed there, a third never came.
+        if not _start_listener_in_editor(port):
+            return {"ok": True, "action": "listener_started", "message": "Listener started in the open UEFN."}
         return {"ok": False, "action": "failed", "message": f"Could not enable Python in UEFN: {exc}. " + _LAUNCH_HINT}
     return {
         "ok": True,

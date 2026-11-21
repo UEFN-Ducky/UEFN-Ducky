@@ -22,6 +22,8 @@ def epic(monkeypatch):
             state["script"] = block.get("content", "")
             state["started"] = state.get("boots", False)
             return "started"
+        if tool_name == "EnablePythonForMainProject" and state.get("no_project"):
+            raise RuntimeError("unreal-mcp call_tool failed: No active UEFN project.")
         return '{"result":"{\\"returnValue\\":%s}"}' % state["python"]
 
     monkeypatch.setattr(revive, "_call_epic_tool", call)
@@ -49,6 +51,27 @@ def test_python_off_gets_enabled(epic) -> None:
     out = revive.revive_listener(4200)
     assert out["action"] == "python_enabled" and out["ok"]
     assert calls == ["IsPythonReadyForMainProject", "EnablePythonForMainProject"]
+
+
+def test_uefn_at_its_project_browser_still_gets_its_listener_started(epic) -> None:
+    """Seen live Nov 21 2026: UEFN open with no island. Epic says Python is not ready and
+    refuses to turn it on ("No active UEFN project") while Python runs: two automatic
+    restarts failed there. The listener starts from the boot script all the same."""
+    calls, state = epic
+    state["no_project"] = True
+    state["boots"] = True
+    out = revive.revive_listener(4200)
+    assert out["ok"] and out["action"] == "listener_started"
+    assert calls == ["IsPythonReadyForMainProject", "EnablePythonForMainProject", "execute_python"]
+
+
+def test_no_island_and_python_really_off_says_why(epic) -> None:
+    calls, state = epic
+    state["no_project"] = True
+    state["script_refused"] = True
+    out = revive.revive_listener(4200)
+    assert not out["ok"] and out["action"] == "failed"
+    assert "No active UEFN project" in out["message"] and calls[-1] == "execute_python"
 
 
 def test_python_on_does_not_enable_again(epic) -> None:
