@@ -13,6 +13,7 @@ import {
   type MountChoiceDropdownOpts,
   type MountedChoiceDropdown,
 } from "./mountChoiceDropdown";
+import { mountModelPicker, type MountModelPickerOpts } from "./mountModelPicker";
 import { pluginLlmCompleteAsync } from "./pluginLlmAsync";
 import { pluginTranslateBatchAsync } from "./pluginTranslateAsync";
 import { handlePluginFault } from "./pluginCrashGuard";
@@ -156,6 +157,16 @@ function makeHostApi(pluginId: string) {
       opts: MountChoiceDropdownOpts,
     ): MountedChoiceDropdown {
       return mountHostChoiceDropdown(container, opts);
+    },
+    /** The chat's own model picker (logins + Faster / Smarter with `logins: true`). */
+    mountModelPicker(container: HTMLElement, opts: MountModelPickerOpts) {
+      return mountModelPicker(container, opts);
+    },
+    /** This plugin's backend panel RPC (api.register_panel_rpc), same as a panel's bridge call. */
+    async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+      const api = getApi();
+      if (!api?.plugin_call) throw new Error("Update the app to use this");
+      return api.plugin_call(pid, method, params);
     },
   });
 }

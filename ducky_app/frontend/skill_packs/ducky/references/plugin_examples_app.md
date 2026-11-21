@@ -339,4 +339,11 @@ Only when the user asks for exactly that:
   an IDE whose MCP config and skills Ducky writes (Settings → LLMs → the gateway).
 - `contributes.shell.boot` `[{ "entry": "ui/boot.js" }]`: a script that runs in Ducky's
   own window, not a sandboxed panel (the Translation plugin translates the app this
-  way). Prefer a panel; never use it for a plugin's own UI.
+  way). Prefer a panel; never use it for a plugin's own UI — except a gateway's own
+  LLMs page: listen for `ducky:llm-slot` (`detail.surface === "settings"`, `detail.providerId`
+  your provider id, `detail.mount` the element in the page; `open: false` = gone) and draw
+  the page there, styled however the gateway wants with the app's CSS variables. Use
+  `window.__duckyPluginHost.forPlugin("<id>")`: `.call(method, params)` runs your
+  `register_panel_rpc`, `.mountModelPicker(el, {model, onChange, logins, effort,
+  onEffortChange, placeholder, hideProviders})` mounts the chat's own model picker,
+  `.mountChoiceDropdown(el, …)` the app's dropdown. No iframe, no loading frame.
