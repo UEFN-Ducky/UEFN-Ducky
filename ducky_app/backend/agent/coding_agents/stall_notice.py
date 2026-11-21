@@ -5,6 +5,10 @@ When the CLI's stream goes quiet the window only knows "no event for a while" an
 model step that streams nothing (hidden thinking). After ``after_s`` of silence this pushes
 a status every ``every_s`` naming which one it is, so the label tells the truth.
 
+A status the agent sends with ``"waiting": True`` names a wait itself (its conversation being
+compacted, about a minute): it is shown again every ``every_s`` with how long it has run, until
+the next event.
+
 Before the CLI starts, ``set_step`` names the setup step running (login check, prompt build...).
 A step quiet for ``step_after_s`` is shown; one quiet for ``stuck_after_s`` calls ``on_stuck``
 once, unless it was set with ``can_stop=False`` (a login that waits on the person).
@@ -58,6 +62,7 @@ class StallNotice:
         self._is_alive = is_alive or (lambda: _cli_alive(conv_id))
         self._last = clock()
         self._pending: list[str] = []
+        self._waiting = ""
         self._push: PushFn | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -87,6 +92,7 @@ class StallNotice:
         kind = str(event.get("type") or "")
         with self._lock:
             self._last = self._clock()
+            self._waiting = str(event.get("text") or "") if kind == "status" and event.get("waiting") else ""
             tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
             if kind == "tool" and tool.get("status") == "pending":
                 self._pending.append(str(tool.get("name") or "tool").removeprefix("mcp__uefn__"))
@@ -99,9 +105,11 @@ class StallNotice:
         with self._lock:
             quiet = self._clock() - self._last
             pending = self._pending[0] if self._pending else ""
-            step = self.step
+            step, waiting = self.step, self._waiting
         if step:
             return f"Still starting · {step} · {_elapsed(quiet)}" if quiet >= self.step_after_s else ""
+        if waiting:
+            return f"{waiting} · {_elapsed(quiet)}"
         if quiet < self.after_s:
             return ""
         since = _elapsed(quiet)
@@ -131,6 +139,8 @@ class StallNotice:
         push = self._push
         if text and push is not None:
             event: dict[str, Any] = {"type": "status", "text": text, "conv_id": self.conv_id}
+            if self._waiting:
+                event["waiting"] = True  # a chat that is not on screen shows this line as it is
             if self.run_id:
                 event["run_id"] = self.run_id
             try:

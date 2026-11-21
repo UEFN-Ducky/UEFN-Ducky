@@ -7,7 +7,8 @@ batch, e.g. one ``text_delta`` carrying 100 tokens, and sends it as one ``event`
 
 Text, thinking and status lines wait for the next slot; anything else (tool start/done, errors,
 turn end) goes at once, after the text before it. Chats not on screen (``set_visible``) get no
-text, only one status line per second: the running tool and how long it has run.
+text, only one status line per second: the running tool and how long it has run, or the wait
+the turn itself named (a status with ``"waiting": True``: "Compacting the conversation · 40s").
 
 Only a turn's own events (text, thinking, status, tool calls) make a chat busy; an error or
 turn end stops its status line, and so do 2 minutes with no event (a turn that died without
@@ -67,6 +68,7 @@ class _Chat:
     run_started: float = 0.0
     tool: str = ""
     tool_started: float = 0.0
+    waiting: str = ""  # the last status that named a wait, until the turn's next event
     last_status: float = float("-inf")
     last_event: float = 0.0
     active: bool = False
@@ -176,6 +178,7 @@ class Batcher:
         if not chat.active:
             chat.active, chat.run_started = True, now
         chat.last_event = now
+        chat.waiting = str(event.get("text") or "") if kind == "status" and event.get("waiting") else ""
         if kind == "tool":
             tool = event.get("tool") if isinstance(event.get("tool"), dict) else {}
             chat.tool, chat.tool_started = str(tool.get("name") or "tool"), now
@@ -201,7 +204,8 @@ class Batcher:
                     "type": "status",
                     "conv_id": conv_id,
                     "run_id": chat.run_id,
-                    "text": f"{label} · {elapsed}s",
+                    "text": chat.waiting or f"{label} · {elapsed}s",
+                    "waiting": bool(chat.waiting),  # the app's own sender keeps the line too
                     "tool": chat.tool,
                     "elapsed_s": elapsed,
                     "heartbeat": True,

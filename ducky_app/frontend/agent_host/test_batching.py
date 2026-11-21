@@ -107,6 +107,21 @@ def test_status_time_counts_from_the_first_turn_event_not_from_zero():
     assert status["heartbeat"] is True
 
 
+def test_a_hidden_chat_shows_the_wait_its_turn_named():
+    # Nov 21 2026: a chat compacting for 58 s showed only "Working · 43s".
+    b, clock, sent = _batcher()
+    b.set_visible([])
+    b.feed({"type": "status", "text": "Compacting the conversation · 40s", "waiting": True, "conv_id": "c1", "run_id": "r1"})
+    clock.t = 1.0
+    b.flush_due()
+    line = _statuses(sent)[-1]
+    assert (line["text"], line["waiting"], line["heartbeat"]) == ("Compacting the conversation · 40s", True, True)
+    b.feed({"type": "status", "text": "Conversation compacted. Continuing", "conv_id": "c1", "run_id": "r1"})
+    clock.t = 3.0
+    b.flush_due()
+    assert _statuses(sent)[-1]["text"] == "Working · 3s"
+
+
 def test_an_error_stops_the_status_line():
     b, clock, sent = _batcher()
     b.set_visible([])

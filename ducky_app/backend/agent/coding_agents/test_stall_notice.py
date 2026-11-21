@@ -59,6 +59,20 @@ def test_tool_done_closes_oldest_chip_first():
     assert notice.text() == "Waiting for the model · 1m 30s with no output (Claude Code is running)"
 
 
+def test_a_named_wait_stays_up_with_its_time_until_the_next_event():
+    notice, push, clock, seen = make()
+    push({"type": "status", "text": "Compacting the conversation", "waiting": True})
+    clock.now += 20
+    assert notice.tick() == "Compacting the conversation · 20s"
+    assert seen[-1] == {"type": "status", "text": "Compacting the conversation · 20s", "waiting": True,
+                        "conv_id": "conv-1", "run_id": "run-1"}
+    clock.now += 50
+    assert notice.text() == "Compacting the conversation · 1m 10s"  # never "Waiting for the model"
+    push({"type": "status", "text": "Conversation compacted. Continuing"})
+    clock.now += 20
+    assert notice.text() == ""
+
+
 def test_dead_cli_is_reported():
     notice, push, clock, _ = make(alive=False)
     push({"type": "status", "text": "Claude Code initialized"})
