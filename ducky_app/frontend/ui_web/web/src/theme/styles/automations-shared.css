@@ -142,7 +142,6 @@
 .aw-toolbar-fields { flex: 1 1 180px; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .aw-name { field-sizing: content; width: auto; max-width: 100%; min-width: 4ch; box-sizing: border-box; background: transparent; border: 0; border-radius: 6px; padding: 2px 6px; color: var(--text); font: inherit; font-size: 16px; font-weight: 700; letter-spacing: 0.01em; text-overflow: ellipsis; }
 .aw-name:focus { outline: 1px solid var(--accent); }
-.aw-name.aw-description { color: var(--text-muted); font-size: 11px; font-weight: 400; }
 .aw-toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin-left: auto; }
 .aw-toolbar button:disabled { opacity: 0.35; cursor: default; }
 .aw-toolbar button:focus-visible, .aw-list button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

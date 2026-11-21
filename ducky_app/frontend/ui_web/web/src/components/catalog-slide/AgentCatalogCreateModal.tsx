@@ -3,8 +3,6 @@ import { Modal, ModalActions } from "../Modal";
 import { ModelSelector } from "../ModelSelector";
 import { getCachedDefaultModel } from "../../hooks/modelsCatalogCache";
 
-export type AgentCatalogCreateDomain = "memory" | "plans" | "skills" | "mcps";
-
 type Props = {
   open: boolean;
   title: string;

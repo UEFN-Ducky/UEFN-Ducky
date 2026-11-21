@@ -10,8 +10,6 @@ import {
 } from "react";
 
 import type { ProblemsDuckyHandlers } from "./problemsDuckyHandlersRef";
-import { setProblemsDuckyHandlers } from "./problemsDuckyHandlersRef";
-
 export type { ProblemsDuckyHandlers } from "./problemsDuckyHandlersRef";
 
 interface ProblemsDuckyBridgeValue {
@@ -28,7 +26,6 @@ export function ProblemsDuckyBridgeProvider({ children }: { children: ReactNode 
   const registerHandlers = useCallback((next: ProblemsDuckyHandlers | null) => {
     handlersRef.current = next;
     setHandlers(next);
-    setProblemsDuckyHandlers(next);
   }, []);
 
   const value = useMemo(

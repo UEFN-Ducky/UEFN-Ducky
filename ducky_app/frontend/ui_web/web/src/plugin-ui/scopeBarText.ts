@@ -2,7 +2,6 @@
 import type {
   PluginFolderShareUnit,
   PluginLiveGroup,
-  PluginLivePeer,
   PluginScopeFolderUnit,
   PluginScopeLock,
   PluginScopePerson,
@@ -645,7 +644,4 @@ export function outgoingStateText(state: string, reason?: string, attempts?: num
   if (state === "refetch") return "Getting the team's version again";
   return "Queued";
 }
-
-/** A live teammate's name on the bar and in the drawer. */
-export const livePeerName = (peer: PluginLivePeer) => peer.name || peer.label || "A teammate";
 

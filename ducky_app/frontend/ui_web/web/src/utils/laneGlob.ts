@@ -96,10 +96,6 @@ export function match(pattern: string, relPath: string): boolean {
   return compileGlob(pattern).test(normalizeRel(relPath));
 }
 
-export function anyMatch(patterns: string[], relPath: string): boolean {
-  return patterns.some((p) => match(p, relPath));
-}
-
 export function literalPrefix(pattern: string): string {
   const kept: string[] = [];
   for (const seg of normalizeGlob(pattern).split("/")) {

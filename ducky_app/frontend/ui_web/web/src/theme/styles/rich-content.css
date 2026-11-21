@@ -20,14 +20,6 @@
   min-width: 0;
 }
 
-.rich-content--streaming {
-  /* A single pre-wrapped text node keeps long live responses cheap to update. */
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: var(--chat-line-height, 1.8);
-}
-
 .rich-summary {
   margin-bottom: 12px;
   font-size: 13px;
@@ -486,10 +478,6 @@
 
 .live-code-preview--fill .live-code-preview-editor {
   flex: 1 1 auto;
-}
-
-.rich-pre-wrap {
-  margin: 0 0 14px;
 }
 
 /* Links */
@@ -1132,10 +1120,6 @@
   border: 0;
 }
 
-.rich-inventory-folder {
-  color: var(--blue);
-}
-
 .rich-inventory-list {
   display: flex;
   flex-direction: column;
@@ -1220,12 +1204,6 @@
 
 .rich-inventory-slash {
   color: var(--chat-border-color, var(--border));
-}
-
-.rich-inventory-title {
-  min-width: 0;
-  max-width: 100%;
-  color: var(--rich-item-accent);
 }
 
 .rich-inventory-desc strong {

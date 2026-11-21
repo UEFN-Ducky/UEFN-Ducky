@@ -272,24 +272,3 @@ export const VERSE_COLOR_TOKENS: VerseTokenDef[] = [
 
 export const VERSE_TOKEN_IDS = VERSE_COLOR_TOKENS.map((t) => t.id);
 
-const SYNTAX_TOKEN_PREFIX = "verse-syntax-";
-
-/** Syntax colors derived from base theme vars — ignores verse-syntax appearance overrides. */
-export function resolveVerseSyntaxColors(
-  vars: Record<string, string>,
-  foundation: Record<FoundationKey, string>,
-): Record<string, string> {
-  const baseVars = { ...vars };
-  for (const key of Object.keys(baseVars)) {
-    if (key.startsWith(SYNTAX_TOKEN_PREFIX)) {
-      delete baseVars[key];
-    }
-  }
-  const out: Record<string, string> = {};
-  for (const token of VERSE_COLOR_TOKENS) {
-    if (token.cat === "syntax") {
-      out[token.id] = token.rule(baseVars, foundation);
-    }
-  }
-  return out;
-}

@@ -10,21 +10,7 @@ import { followCodeSpeedMultiplier, getFollowCodeSettings } from "./followCodeSe
 
 import { minimalEdit } from "./minimalEdit";
 
-
-
 export type OpenFileOptions = { activate?: boolean };
-
-
-
-export type EditorHandle = {
-
-  path: string;
-
-  editor: editor.IStandaloneCodeEditor;
-
-};
-
-
 
 export type QueueCallbacks = {
 
@@ -47,15 +33,11 @@ export type QueueCallbacks = {
 
 };
 
-
-
 function sleep(ms: number): Promise<void> {
 
   return new Promise((r) => setTimeout(r, ms));
 
 }
-
-
 
 export class EditorActionQueue {
 
@@ -71,23 +53,17 @@ export class EditorActionQueue {
 
   private callbacks: QueueCallbacks;
 
-
-
   constructor(callbacks: QueueCallbacks) {
 
     this.callbacks = callbacks;
 
   }
 
-
-
   isAgentActive(path: string): boolean {
 
     return this.agentActivePaths.has(registryKey(path));
 
   }
-
-
 
   registerEditor(path: string, ed: editor.IStandaloneCodeEditor): void {
 
@@ -98,15 +74,11 @@ export class EditorActionQueue {
 
   }
 
-
-
   getEditor(path: string): editor.IStandaloneCodeEditor | undefined {
 
     return this.editors.get(registryKey(path));
 
   }
-
-
 
   /**
    * Poll until Monaco has registered an editor for `path` (or we give up).
@@ -140,8 +112,6 @@ export class EditorActionQueue {
 
   }
 
-
-
   revealIfOpen(path: string, line: number, column: number): boolean {
 
     const ed = this.getEditor(path);
@@ -158,15 +128,11 @@ export class EditorActionQueue {
 
   }
 
-
-
   unregisterEditor(path: string): void {
 
     this.editors.delete(registryKey(path));
 
   }
-
-
 
   enqueue(batch: EditorAction[]): void {
 
@@ -177,8 +143,6 @@ export class EditorActionQueue {
     void this.pump();
 
   }
-
-
 
   private async pump(): Promise<void> {
 
@@ -221,8 +185,6 @@ export class EditorActionQueue {
     }
 
   }
-
-
 
   private async runPathActions(path: string, actions: EditorAction[]): Promise<void> {
 
@@ -275,8 +237,6 @@ export class EditorActionQueue {
 
   }
 
-
-
   private async runAction(
 
     path: string,
@@ -300,8 +260,6 @@ export class EditorActionQueue {
     const delay = (action.durationMs ?? 350) * multiplier;
 
     const wait = () => (delay > 0 ? sleep(delay) : Promise.resolve());
-
-
 
     switch (action.type) {
 
@@ -449,5 +407,4 @@ export class EditorActionQueue {
   }
 
 }
-
 

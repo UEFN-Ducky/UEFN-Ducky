@@ -250,26 +250,3 @@ export function usePluginUiPrefs(pluginId: string): {
   return { prefs, setPref, setPrefs, getBool };
 }
 
-/** Typed Discord placement prefs (backed by usePluginUiPrefs). */
-export function useDiscordUiPrefs(): {
-  prefs: {
-    showInHeader: boolean;
-  };
-  setPrefs: (patch: Partial<{
-    showInHeader: boolean;
-  }>) => void;
-} {
-  const { getBool, setPref } = usePluginUiPrefs("discord");
-  const prefs = {
-    showInHeader: getBool("showInHeader", false),
-  };
-  const setPrefs = useCallback(
-    (patch: Partial<typeof prefs>) => {
-      for (const [k, v] of Object.entries(patch)) {
-        if (typeof v === "boolean") setPref(k, v);
-      }
-    },
-    [setPref],
-  );
-  return { prefs, setPrefs };
-}

@@ -2,12 +2,8 @@ import type { editor } from "monaco-editor";
 
 import type { LspDiagnostic } from "./verseLspClient";
 
-
-
 export const VERSE_LSP_MARKER_OWNER = "verse-lsp";
 const MARKER_OWNER = VERSE_LSP_MARKER_OWNER;
-
-
 
 function lspSeverityToMonaco(
 
@@ -39,8 +35,6 @@ function lspSeverityToMonaco(
 
 }
 
-
-
 function normalizeMarkerRange(
 
   monaco: typeof import("monaco-editor"),
@@ -57,15 +51,11 @@ function normalizeMarkerRange(
 
   let endCol = d.range.end.character + 1;
 
-
-
   if (endLine < startLine || (endLine === startLine && endCol <= startCol)) {
 
     endCol = startCol + 1;
 
   }
-
-
 
   return {
 
@@ -85,8 +75,6 @@ function normalizeMarkerRange(
 
 }
 
-
-
 export function applyLspDiagnostics(
 
   monaco: typeof import("monaco-editor"),
@@ -102,16 +90,6 @@ export function applyLspDiagnostics(
   const markers: editor.IMarkerData[] = diagnostics.map((d) => normalizeMarkerRange(monaco, d));
 
   monaco.editor.setModelMarkers(model, MARKER_OWNER, markers);
-
-}
-
-
-
-export function clearLspDiagnostics(monaco: typeof import("monaco-editor"), model: editor.ITextModel): void {
-
-  if (model.isDisposed()) return;
-
-  monaco.editor.setModelMarkers(model, MARKER_OWNER, []);
 
 }
 

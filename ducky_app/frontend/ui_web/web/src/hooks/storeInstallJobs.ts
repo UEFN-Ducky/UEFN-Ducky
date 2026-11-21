@@ -148,10 +148,6 @@ export function markStoreCatalogDirty(): void {
   catalogDirty = true;
 }
 
-export function isStoreCatalogDirty(): boolean {
-  return catalogDirty;
-}
-
 /** Run Store download/install exclusively (FIFO). Failures do not break the queue. */
 export function runStoreInstallExclusive<T>(fn: () => Promise<T>): Promise<T> {
   exclusivePending++;

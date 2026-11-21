@@ -1,13 +1,5 @@
 import type { FolderItem } from "../types/panel";
 
-export function anyRunningUnderChat(
-  chatId: string,
-  runningChatIds: ReadonlySet<string>,
-  childrenByParent: Map<string, FolderItem["chats"]>,
-): boolean {
-  return firstUnderChat(chatId, runningChatIds, childrenByParent) !== "";
-}
-
 export function anyRunningUnderFolder(
   folder: FolderItem,
   runningChatIds: ReadonlySet<string>,

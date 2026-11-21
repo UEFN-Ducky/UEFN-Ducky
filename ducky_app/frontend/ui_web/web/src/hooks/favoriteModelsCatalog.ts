@@ -1,8 +1,6 @@
 import type { CatalogModelRow } from "./modelsCatalogCache";
 import type { CodingAgentDto } from "../types/panel";
 
-export type FavoriteBackend = string;
-
 export function isCodingAgentFavoriteId(
   id: string,
   codingAgents: CodingAgentDto[] = [],

@@ -94,11 +94,6 @@ export function trackEditorTabDragPointer(e: { screenX: number; screenY: number;
   dragSession.lastClientY = e.clientY;
 }
 
-export function getActiveEditorTabDrag(): { tabId: string; groupId: string } | null {
-  if (!dragSession) return null;
-  return { tabId: dragSession.tabId, groupId: dragSession.groupId };
-}
-
 export function setEditorTabDragData(dataTransfer: DataTransfer, tab: EditorTab, groupId: string): void {
   beginEditorTabDrag(tab.id, groupId);
   dataTransfer.clearData();

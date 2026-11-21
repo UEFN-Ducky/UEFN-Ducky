@@ -91,7 +91,3 @@ export function useRunningAgents(_pollMs = 10000): Set<string> {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** Imperative read for non-React helpers (linked-agent status sync). */
-export function getRunningAgentIds(): Set<string> {
-  return _runningIds;
-}

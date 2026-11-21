@@ -20,8 +20,5 @@ export const PLUGIN_UI_SANDBOX = "allow-scripts allow-pointer-lock";
 /** postMessage channel tag so we ignore unrelated window messages. */
 export const BRIDGE_CHANNEL = "uefn-plugin-ui";
 
-/** How long the host waits for a bridge handler before rejecting (ms). */
-export const BRIDGE_TIMEOUT_MS = 5000;
-
 /** Header-button action prefix: `panel:<panelId>` opens that plugin's UI tab. */
 export const PANEL_ACTION_PREFIX = "panel:";

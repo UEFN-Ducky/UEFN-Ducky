@@ -7,7 +7,6 @@ import { listEnabledGatewayTours } from "./pluginWalkthroughs";
 import {
   markStarterPluginToursCompleted,
   selectLlmsProvider,
-  setSuppressStarterPluginTours,
 } from "./starterLlmGateways";
 import type { WalkthroughDef, WalkthroughStep } from "./types";
 import { WORKFLOWS_TOURS } from "../automations/workflowsTours";
@@ -671,7 +670,6 @@ function llmsSetupIntroSteps(): WalkthroughStep[] {
       "Open LLMs",
       "Press LLMs in the sidebar. Each enabled gateway plugin is a row you will click next.",
       async () => {
-        setSuppressStarterPluginTours(false);
         markStarterPluginToursCompleted();
         requestOpenSettings();
         await wait(200);

@@ -1,5 +1,4 @@
 import { getApi } from "../../hooks/usePanelApi";
-import { downloadBase64File } from "../utils/fileTransfer";
 import type {
   SkillNodePatchDto,
   SkillPackDraftDto,
@@ -90,23 +89,6 @@ export async function loadPackFiles(packId: string): Promise<SkillFile[]> {
       text: f.text,
     }),
   );
-}
-
-export async function setPackDefaultEnabled(
-  packId: string,
-  enabled: boolean,
-  currentPacks: string[],
-  currentSubskills: Record<string, string[]>,
-): Promise<{ packs: string[]; subskills: Record<string, string[]> }> {
-  const api = requireApi();
-  const nextPacks = enabled
-    ? [...currentPacks, packId].filter((p, i, a) => a.indexOf(p) === i)
-    : currentPacks.filter((p) => p !== packId);
-  const res = await api.set_default_skill_selection(nextPacks, currentSubskills);
-  return {
-    packs: res.default_enabled_packs ?? res.enabled_packs ?? nextPacks,
-    subskills: res.default_enabled_subskills ?? res.enabled_subskills ?? currentSubskills,
-  };
 }
 
 export async function saveFileMeta(
@@ -266,13 +248,6 @@ export async function commitSkillPackDraft(draft: SkillPackDraft): Promise<strin
   return packId;
 }
 
-export async function createFile(packId: string, label: string): Promise<string> {
-  const api = requireApi();
-  const fileId = slugify(label);
-  const res = await api.create_subskill(packId, fileId, label, "", "", "");
-  return res.subskill_id ?? fileId;
-}
-
 export async function deleteFile(packId: string, fileId: string): Promise<void> {
   const api = requireApi();
   const res = await api.delete_subskill(packId, fileId);
@@ -291,30 +266,6 @@ export async function deletePack(packId: string): Promise<void> {
   if (!res.ok) throw new Error((res as { error?: string }).error ?? "Delete pack failed");
 }
 
-export async function resetPack(packId: string): Promise<void> {
-  const api = requireApi();
-  await api.reset_skill_pack(packId);
-}
-
-export async function exportPack(packId: string) {
-  const api = requireApi();
-  const res = await api.export_skill_pack(packId);
-  if (!res.ok) return res;
-  if (!res.data_base64 || !res.filename) {
-    return { ...res, ok: false, error: res.error ?? "Export produced no data" };
-  }
-
-  if (typeof api.prompt_save_skill_pack_export === "function") {
-    const saved = await api.prompt_save_skill_pack_export(res.filename, res.data_base64);
-    if (saved.cancelled) return { ok: false, cancelled: true };
-    if (saved.ok && saved.path) return { ...res, path: saved.path };
-    if (!saved.ok) return saved;
-  }
-
-  downloadBase64File(res.filename, res.data_base64);
-  return res;
-}
-
 export async function importPackBytes(
   filename: string,
   dataBase64: string,
@@ -328,6 +279,3 @@ export async function importPackBytes(
   return api.import_skill_pack_bytes(filename, dataBase64, packId ?? "", replace ?? false);
 }
 
-export function openPackFolder(packId: string): void {
-  void getApi()?.open_skill_pack_folder?.(packId);
-}

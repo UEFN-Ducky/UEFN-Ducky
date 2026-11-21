@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getApi } from "../hooks/usePanelApi";
 import { onApiReady } from "../hooks/onApiReady";
 import { syncVerseDiagnosticsSettings } from "../verse-editor/diagnostics/verseDiagnosticsSettings";
@@ -85,16 +77,3 @@ export function VerseDiagnosticsSettingsProvider({ children }: { children: React
   );
 }
 
-export function useVerseDiagnosticsSettings(): VerseDiagnosticsSettingsContextValue {
-  const ctx = useContext(VerseDiagnosticsSettingsContext);
-  if (!ctx) {
-    return {
-      cacheEnabled: true,
-      autoCheck: true,
-      loaded: false,
-      setCacheEnabled: async () => {},
-      setAutoCheck: async () => {},
-    };
-  }
-  return ctx;
-}

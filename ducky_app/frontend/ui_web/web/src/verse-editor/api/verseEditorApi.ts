@@ -49,8 +49,6 @@ export async function readVerseFile(
   }
 }
 
-
-
 /** mtime/size fingerprint only (no content): cheap enough to run on every tab switch. */
 export async function statVerseFile(path: string): Promise<ProjectFileStat> {
   const api = getApi();
@@ -98,8 +96,6 @@ export async function recordExternalFileChange(
   }
 }
 
-
-
 /** A phone or the website gets no answer here: verse-lsp listens on the PC's own
  * 127.0.0.1, which a browser elsewhere cannot reach, so the PC refuses to start it. */
 function offPcStatus(): VerseLspStatusDto {
@@ -141,8 +137,6 @@ export async function getLspStatus(): Promise<VerseLspStatusDto> {
 
 }
 
-
-
 export async function stopLsp(): Promise<void> {
   const api = getApi();
   if (!api) return;
@@ -177,18 +171,6 @@ export async function startLsp(projectRoot?: string): Promise<VerseLspStatusDto>
     throw e;
 
   }
-
-}
-
-
-
-export async function isEditorEnabled(): Promise<boolean> {
-
-  const api = getApi();
-
-  if (!api) return false;
-
-  return api.is_verse_editor_enabled();
 
 }
 

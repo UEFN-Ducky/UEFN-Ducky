@@ -27,13 +27,6 @@ export interface QuickOpenChatItem {
   score: number;
 }
 
-export interface QuickOpenRecentItem {
-  kind: "recent";
-  tab: EditorTab;
-}
-
-export type QuickOpenListItem = QuickOpenFileItem | QuickOpenChatItem | QuickOpenRecentItem;
-
 export function fuzzyScore(query: string, text: string): number {
   const q = query.trim().toLowerCase().replace(/[_-]+/g, " ");
   if (!q) return 0;

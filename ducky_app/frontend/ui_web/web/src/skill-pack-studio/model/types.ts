@@ -49,32 +49,3 @@ export function fileKey(packId: string, fileId: string): string {
   return `${packId}:${fileId}`;
 }
 
-export function packSelection(packId: string): StudioSelection {
-  return { kind: "pack", packId };
-}
-
-export function fileSelection(packId: string, fileId: string): StudioSelection {
-  return { kind: "file", packId, fileId };
-}
-
-export function selectionEquals(a: StudioSelection | null, b: StudioSelection | null): boolean {
-  if (!a || !b) return a === b;
-  if (a.kind !== b.kind) return false;
-  if (a.kind === "pack" && b.kind === "pack") return a.packId === b.packId;
-  if (a.kind === "file" && b.kind === "file") {
-    return a.packId === b.packId && a.fileId === b.fileId;
-  }
-  return false;
-}
-
-export function isPackSelected(selection: StudioSelection | null, packId: string): boolean {
-  return selection?.kind === "pack" && selection.packId === packId;
-}
-
-export function isFileSelected(
-  selection: StudioSelection | null,
-  packId: string,
-  fileId: string,
-): boolean {
-  return selection?.kind === "file" && selection.packId === packId && selection.fileId === fileId;
-}

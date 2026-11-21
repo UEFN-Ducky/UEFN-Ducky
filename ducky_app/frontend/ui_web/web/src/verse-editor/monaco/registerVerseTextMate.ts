@@ -26,11 +26,6 @@ class TokenizerState implements languages.IState {
 let grammarPromise: Promise<IGrammar> | null = null;
 let tokenizeErrorLogged = false;
 
-/** Allow tokenize errors to log again after a project switch refresh. */
-export function resetVerseTextMateTokenizeErrors(): void {
-  tokenizeErrorLogged = false;
-}
-
 async function loadGrammar(): Promise<IGrammar> {
   if (!grammarPromise) {
     grammarPromise = (async () => {
@@ -122,10 +117,6 @@ function applyLanguageConfiguration(monaco: typeof import("monaco-editor")): voi
     ],
     indentationRules,
   });
-}
-
-export function getVerseTmTheme() {
-  return tmTheme;
 }
 
 export async function registerVerseTextMate(monaco: typeof import("monaco-editor")): Promise<void> {

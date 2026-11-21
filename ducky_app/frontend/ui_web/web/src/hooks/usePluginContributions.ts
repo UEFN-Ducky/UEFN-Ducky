@@ -639,10 +639,6 @@ export function dockPanelPluginUi(
   return { pluginId, uiPanelId };
 }
 
-export function pluginContributesEditorKind(contrib: PluginContributions, kind: string): boolean {
-  return contrib.editor_kinds.some((k) => k.kind === kind);
-}
-
 /** Resolve a plugin UI panel that claims this file path (suffixes first, then kind). */
 export function resolvePluginEditorForFile(
   contrib: PluginContributions,
@@ -673,10 +669,6 @@ export function resolvePluginEditorForFile(
   const ui = String(byKind.ui || "").trim();
   if (!pluginId || !ui.startsWith("panel:")) return null;
   return { pluginId, panelId: ui.slice("panel:".length).trim().toLowerCase() };
-}
-
-export function pluginContributesHeaderButton(contrib: PluginContributions, buttonId: string): boolean {
-  return contrib.header_buttons.some((b) => b.id === buttonId);
 }
 
 export function pluginSettingsSectionsForTab(

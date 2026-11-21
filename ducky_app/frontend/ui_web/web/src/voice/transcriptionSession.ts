@@ -136,11 +136,6 @@ function currentChoice(openaiReady: boolean): BackendChoice {
   });
 }
 
-/** Which engine a mic press would use right now (for labels / hints). */
-export async function resolveSttChoice(): Promise<BackendChoice> {
-  return currentChoice(await openaiVoiceReady());
-}
-
 /**
  * Warm the engine the next mic press will use: spawn the Windows speech helper,
  * or mint an OpenAI token. Cheap and idempotent — call on hover / panel open.

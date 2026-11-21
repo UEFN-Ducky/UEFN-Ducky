@@ -44,6 +44,3 @@ export function observeProjectRoot(root: string): void {
   }
 }
 
-export function currentObservedRoot(): string {
-  return lastRoot;
-}

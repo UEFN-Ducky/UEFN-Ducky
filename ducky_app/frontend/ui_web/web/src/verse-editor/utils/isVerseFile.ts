@@ -20,43 +20,6 @@ export {
   isUnrealAssetPath,
 };
 
-export const EDITABLE_TEXT_EXTENSIONS = [
-  ...VERSE_EXTENSIONS,
-  ".py",
-  ".txt",
-  ".json",
-  ".md",
-  ".cfg",
-  ".ini",
-  ".toml",
-  ".yaml",
-  ".yml",
-  ".xml",
-  ".csv",
-  ".log",
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".css",
-  ".scss",
-  ".less",
-  ".html",
-  ".htm",
-  ".rs",
-  ".php",
-  ".c",
-  ".h",
-  ".cpp",
-  ".cxx",
-  ".cc",
-  ".hpp",
-  ".hh",
-  ".go",
-] as const;
-
 const BINARY_PROJECT_SUFFIXES = [
   ".umap",
   ".uasset",
@@ -358,18 +321,3 @@ export function isSystemWorkspaceRootName(name: string): boolean {
   );
 }
 
-/** Friendly sidebar label for a UEFN multi-root workspace folder (paths unchanged). */
-export function workspaceRootDisplayName(entry: { name: string; read_only?: boolean }): string {
-  if (entry.read_only === false) return "Content";
-  const name = entry.name.trim();
-  if (name === "vproject - DO NOT MODIFY" || /^vproject\b/i.test(name)) return "vproject";
-  if (/^built-?in digests$/i.test(name)) return "Built-in Digests";
-  if (/\(Assets\)\s*$/i.test(name)) return "Assets";
-  if (name.startsWith("/")) return name.slice(1);
-  const slash = name.lastIndexOf("/");
-  if (slash >= 0) {
-    const tail = name.slice(slash + 1).trim();
-    if (tail) return tail.replace(/\s*\(Assets\)\s*$/i, "Assets").trim() || tail;
-  }
-  return name;
-}

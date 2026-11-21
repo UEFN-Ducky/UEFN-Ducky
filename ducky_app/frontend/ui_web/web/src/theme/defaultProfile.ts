@@ -4,8 +4,6 @@ import builtinJson from "./appearanceBuiltinProfiles.json";
 /** Built-in profile id — never persisted in appearance_profiles. */
 export const DEFAULT_PROFILE_ID = "__default__";
 
-export const DEFAULT_PROFILE_NAME = "Default";
-
 /** Legacy built-in ids (removed from host — now Store plugins `light` / `hacker`). */
 export const LIGHT_PROFILE_ID = "__light__";
 export const HACKER_PROFILE_ID = "__hacker__";
@@ -62,14 +60,6 @@ export function isLegacyBuiltInProfileId(id: string | null | undefined): boolean
   return LEGACY_BUILT_IN_PROFILE_IDS.has((id || "").trim());
 }
 
-/** Map removed built-ins → Store plugin package ids. */
-export function legacyBuiltInToPluginId(id: string | null | undefined): "light" | "hacker" | null {
-  const trimmed = (id || "").trim();
-  if (trimmed === LIGHT_PROFILE_ID) return "light";
-  if (trimmed === HACKER_PROFILE_ID) return "hacker";
-  return null;
-}
-
 export function normalizeActiveProfileId(id: string | null | undefined): string {
   const trimmed = (id || "").trim();
   if (!trimmed) return DEFAULT_PROFILE_ID;
@@ -97,16 +87,6 @@ export function builtInPersistPayload(id: string): {
     foundation,
     overrides: { ...profile.overrides },
     statusOverrides: { ...profile.statusOverrides },
-  };
-}
-
-export function createDefaultProfile(): BuiltInAppearanceProfile {
-  return getBuiltInProfile(DEFAULT_PROFILE_ID) ?? {
-    id: DEFAULT_PROFILE_ID,
-    name: DEFAULT_PROFILE_NAME,
-    foundation: defaultFoundation(),
-    overrides: {},
-    statusOverrides: {},
   };
 }
 

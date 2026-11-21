@@ -3,8 +3,6 @@
  * tool step. The voice lane sends it as context and the live voice view can show it.
  */
 
-import { useSyncExternalStore } from "react";
-
 import type { ToolCallData } from "../types/panel";
 import { shouldSpeakToolStep } from "./processNarration";
 import { spokenToolStart } from "./toolNarration";
@@ -85,15 +83,6 @@ export function getWorkStatus(chatId: string): string {
 export function subscribeWorkStatus(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
-}
-
-/** React: the chat's current one-line work status. */
-export function useWorkStatus(chatId: string): string {
-  return useSyncExternalStore(
-    subscribeWorkStatus,
-    () => getWorkStatus(chatId),
-    () => getWorkStatus(chatId),
-  );
 }
 
 /** Test helper. */

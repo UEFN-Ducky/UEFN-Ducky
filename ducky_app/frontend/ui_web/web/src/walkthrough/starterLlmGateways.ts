@@ -6,18 +6,6 @@ import { markTourCompleted } from "./WalkthroughService";
 
 export const STARTER_LLM_SLUGS = ["account", "anthropic", "openai", "google", "cursor"] as const;
 
-let suppressStarterPluginTours = false;
-
-export function setSuppressStarterPluginTours(value: boolean): void {
-  suppressStarterPluginTours = value;
-}
-
-export function shouldSuppressPluginWalkthrough(pluginId: string): boolean {
-  if (!suppressStarterPluginTours) return false;
-  const id = pluginId.trim().toLowerCase().replace(/^plugin\./, "");
-  return (STARTER_LLM_SLUGS as readonly string[]).includes(id);
-}
-
 export function markStarterPluginToursCompleted(): void {
   for (const slug of STARTER_LLM_SLUGS) {
     markTourCompleted(pluginTourId(slug));
@@ -26,17 +14,6 @@ export function markStarterPluginToursCompleted(): void {
 
 export function selectLlmsProvider(id: string | null): void {
   window.dispatchEvent(new CustomEvent("ducky:llms-select-provider", { detail: { id } }));
-}
-
-export async function peekStarterLlmOnboard(): Promise<{ pending: boolean }> {
-  const api = getApi();
-  if (!api?.starter_llm_onboard_pending) return { pending: false };
-  try {
-    const out = await api.starter_llm_onboard_pending();
-    return { pending: !!out.pending };
-  } catch {
-    return { pending: false };
-  }
 }
 
 /** What the bundle job reports: installed, already there, and per-plugin errors. */
@@ -76,10 +53,3 @@ export function ensurePopularPlugins(force = false): Promise<StarterInstallResul
   return popularInflight;
 }
 
-export async function ensureStarterLlmGateways(): Promise<void> {
-  try {
-    await ensurePopularPlugins(false);
-  } catch {
-    /* Caller can install from the setup card */
-  }
-}

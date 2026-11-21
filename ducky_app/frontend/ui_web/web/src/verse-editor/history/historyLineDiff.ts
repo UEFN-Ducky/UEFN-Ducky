@@ -46,6 +46,3 @@ export function diffLineHistory(currentText: string, historicalText: string): Hi
   return out;
 }
 
-export function countHistoryDiffChanges(segments: HistoryDiffSegment[]): number {
-  return segments.filter((s) => s.kind !== "same").length;
-}

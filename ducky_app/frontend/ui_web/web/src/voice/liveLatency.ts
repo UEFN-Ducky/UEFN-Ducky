@@ -39,10 +39,6 @@ export function setLiveTurnLane(lane: LiveTurnLane): void {
   if (pending) pending.lane = lane;
 }
 
-export function liveTurnTimerRunning(): boolean {
-  return pending !== null;
-}
-
 /** Nothing will be spoken for this turn. */
 export function cancelLiveTurnTimer(): void {
   pending = null;

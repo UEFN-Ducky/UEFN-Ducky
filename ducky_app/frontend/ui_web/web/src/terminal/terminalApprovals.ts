@@ -119,10 +119,6 @@ export function listTerminalApprovals(): TerminalApproval[] {
   return snapshot;
 }
 
-export function terminalApprovalsForConv(convId: string): TerminalApproval[] {
-  return snapshot.filter((item) => terminalApprovalShowsIn(item, convId));
-}
-
 /** The chat's options: Always/Everything only for a chat. */
 export function terminalApprovalChoices(item: PendingTerminalCommand): TerminalApprovalChoice[] {
   const inChat = Boolean((item.conv_id || "").trim());

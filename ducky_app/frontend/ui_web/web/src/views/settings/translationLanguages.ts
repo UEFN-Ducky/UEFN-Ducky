@@ -1,19 +1,5 @@
 /** Language list helpers for the Translation plugin (user-added only). */
 
-export type PresetLanguage = { code: string; label: string };
-
-/** Common picks shown before the user's custom list. */
-export const PRESET_LANGUAGES: PresetLanguage[] = [
-  { code: "en", label: "English" },
-  { code: "es", label: "Español" },
-  { code: "fr", label: "Français" },
-  { code: "de", label: "Deutsch" },
-  { code: "pt", label: "Português" },
-  { code: "ja", label: "日本語" },
-  { code: "ko", label: "한국어" },
-  { code: "zh", label: "中文" },
-];
-
 export function parseCustomLanguages(raw: unknown): string[] {
   if (typeof raw !== "string" || !raw.trim()) return [];
   return raw

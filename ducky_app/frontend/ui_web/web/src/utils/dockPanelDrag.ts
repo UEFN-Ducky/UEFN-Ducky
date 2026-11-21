@@ -9,9 +9,6 @@ export type DockDropTarget = {
   insert: DockRailInsertZone;
 } | null;
 
-/** @deprecated Use DockDropTarget — kept for gradual migration */
-export type DockDropZone = DockSide | null;
-
 const EDGE_PEEK_PX = 96;
 
 export function dockDropTargetSide(target: DockDropTarget): DockSide | null {
@@ -80,7 +77,3 @@ export function classifyDockDropTarget(clientX: number, clientY: number): DockDr
   return null;
 }
 
-/** @deprecated Use classifyDockDropTarget */
-export function classifyDockDropZone(clientX: number, clientY: number): DockDropZone {
-  return dockDropTargetSide(classifyDockDropTarget(clientX, clientY));
-}

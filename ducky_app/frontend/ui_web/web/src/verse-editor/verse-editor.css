@@ -35,7 +35,6 @@
 .monaco-editor .suggest-widget,
 .monaco-editor .suggest-details-container,
 .monaco-editor .monaco-hover,
-.monaco-editor .monaco-editor-hover,
 .monaco-editor .zone-widget {
   z-index: 150000;
 }

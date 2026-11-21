@@ -86,8 +86,6 @@ import type { DockSide } from "../workspace/workspaceDockStorage";
 import { useLongPressSelect } from "../hooks/useLongPressSelect";
 import { SelectionActionBar } from "./SelectionActionBar";
 
-export const WORKSPACE_TREE_ROOT = WORKSPACE_ROOTS_PATH;
-
 /** Sidebar hover cards open away from the rail (right dock → left of the row). */
 const FileTreeHoverPlacementContext = createContext<EditorTabHoverCardPlacement>("right");
 

@@ -61,15 +61,6 @@ const boundByTabId = new Map<string, ChatTab>();
 const pendingByTabId = new Map<string, Promise<ChatTab | null>>();
 let suppressRemoteOpenDepth = 0;
 
-export function getBoundDucktactoeChat(tabId: string): ChatTab | undefined {
-  return boundByTabId.get(tabId) ?? gameChat ?? undefined;
-}
-
-export function setBoundDucktactoeChat(tabId: string, chat: ChatTab): void {
-  boundByTabId.set(tabId, chat);
-  gameChat = chat;
-}
-
 export function clearBoundDucktactoeChat(tabId: string): void {
   boundByTabId.delete(tabId);
   pendingByTabId.delete(tabId);

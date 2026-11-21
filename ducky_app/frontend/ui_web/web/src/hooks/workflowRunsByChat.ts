@@ -408,11 +408,6 @@ export function useWorkflowRuns(workflowId: string): ChatWorkflowRun[] {
     () => EMPTY);
 }
 
-export function useChatWorkflowRun(chatId: string): ChatWorkflowRun | null {
-  const runs = useChatWorkflowRuns(chatId);
-  return runs[runs.length - 1] ?? null;
-}
-
 /** The chat's workflow run still running, or null (a newer finished run does not hide it). */
 export function useRunningChatWorkflow(chatId: string): ChatWorkflowRun | null {
   const runs = useChatWorkflowRuns(chatId);

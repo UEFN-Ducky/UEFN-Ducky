@@ -22,17 +22,6 @@ export function parseLoginDeepLink(raw: string): boolean {
   return /^uefn-ducky:\/\/login\/?(?:[?#].*)?$/i.test(String(raw || "").trim());
 }
 
-export function consumeAccountLoginRequest(): boolean {
-  try {
-    const raw = sessionStorage.getItem(ACCOUNT_LOGIN_KEY) || "";
-    if (!raw) return false;
-    sessionStorage.removeItem(ACCOUNT_LOGIN_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** sessionStorage handshake consumed by StoreTab once the catalog is loaded. */
 export const STORE_INSTALL_KEY = "uefn-store-install";
 

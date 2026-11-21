@@ -1,6 +1,5 @@
 export type AgentMode = "ask" | "plan" | "agent";
 
-
 export type ChatLayoutMode = "full" | "sidebarHidden";
 
 // Runtime helpers live in ./panelTabs (this file is types only); re-exported for old imports.
@@ -2325,24 +2324,6 @@ export interface DiscordBotDto {
   channel_id?: string;
   has_token?: boolean;
   configured?: boolean;
-}
-
-export interface DiscordStatusDto {
-  ok: boolean;
-  configured?: boolean;
-  guild_set?: boolean;
-  bot_id?: string;
-  bot_name?: string;
-  guild_id?: string;
-  label?: string;
-  prefix?: string;
-  enabled?: boolean;
-  /** Optional posting identity — sends become "**name:** text"; blank = post as the bot. */
-  post_name?: string;
-  /** Comma-separated Discord user IDs allowed to run commands. Blank = locked; "*" = anyone. */
-  allowed_ids?: string;
-  error?: string;
-  plugin_disabled?: boolean;
 }
 
 export type DiscordMemberStatus = "online" | "idle" | "dnd" | "offline";
@@ -5314,13 +5295,6 @@ export interface SubskillDraftResultDto {
   ok: boolean;
   draft?: SubskillDraftFileDto;
   error?: string;
-}
-
-export interface SkillCreateResultDto {
-  ok: boolean;
-  path: string;
-  filename: string;
-  pack_id?: string;
 }
 
 export interface SkillDeleteResultDto {

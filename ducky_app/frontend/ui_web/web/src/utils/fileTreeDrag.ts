@@ -11,10 +11,6 @@ import {
   isWsEncodedPath,
 } from "../verse-editor/utils/isVerseFile";
 
-/** An island's Content pane root. Runtime code uses `contentRootPath()`, which is `.` for
- * a folder project. */
-export const CONTENT_ROOT_PATH = "Content";
-
 let workspaceFolderAbsPathsLower: string[] = [];
 
 /** Call when workspace roots load so abs: parent walks stay inside UEFN folders. */
@@ -218,6 +214,3 @@ export function revealDirPaths(
   return [...dirs];
 }
 
-export function isWorkspaceTreeRoot(path: string): boolean {
-  return isWsEncodedPath(path) || path === WORKSPACE_ROOTS_PATH;
-}

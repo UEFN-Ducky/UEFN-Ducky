@@ -422,10 +422,6 @@ export function releaseMic(chatId: string): void {
   if (micOwner === id) micOwner = null;
 }
 
-export function micOwnerId(): string | null {
-  return micOwner;
-}
-
 export function interruptLiveSpeak(): void {
   parkLiveSpeakQueue();
 }

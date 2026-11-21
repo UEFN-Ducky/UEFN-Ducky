@@ -135,11 +135,6 @@ export function useListenerUptimeSec(live = true): number | undefined {
   return useSyncExternalStore(live ? _subscribeUptime : _noSubscribe, _uptimeSnapshot, _uptimeSnapshot);
 }
 
-/** Refresh outside the poll cadence (e.g. straight after a deploy). */
-export function refreshListenerStatus(): void {
-  _poll();
-}
-
 export function useListenerStatus(pollMs = 8000, refreshToken = 0) {
   const status = useSyncExternalStore(_subscribe, _snapshot, _snapshot);
 

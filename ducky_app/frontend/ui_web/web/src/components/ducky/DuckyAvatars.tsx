@@ -1,4 +1,3 @@
-import { DEFAULT_BUNDLED_DUCKY_STYLE } from "../../generated/bundledDuckies";
 import { ScopedCss, useScopedClass } from "../../utils/scopedCss";
 import { useDuckyCatalogOptional } from "./DuckyCatalogContext";
 
@@ -74,15 +73,6 @@ export function DuckyAvatar({
       />
     </>
   );
-}
-
-export function normalizeDuckyStyle(styleId?: string | null): string {
-  const raw = (styleId || "").trim();
-  return raw || DEFAULT_BUNDLED_DUCKY_STYLE;
-}
-
-export function randomDuckyStyle(): string {
-  return DEFAULT_BUNDLED_DUCKY_STYLE;
 }
 
 export { randomDuckyStyleFromCatalog, useDuckyCatalog } from "./DuckyCatalogContext";

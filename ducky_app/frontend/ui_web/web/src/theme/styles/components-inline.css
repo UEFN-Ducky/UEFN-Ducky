@@ -24,10 +24,6 @@
   margin-left: 4px;
 }
 
-.ui-hidden {
-  display: none;
-}
-
 .ui-status-muted {
   padding: 24px;
   color: var(--muted);
@@ -54,11 +50,6 @@
   flex-shrink: 0;
 }
 
-.ui-status-error-plain {
-  padding: 24px;
-  color: var(--red);
-}
-
 .ui-status-sidebar-muted {
   font-size: 12px;
   color: var(--muted);
@@ -69,12 +60,6 @@
   font-size: 12px;
   color: var(--red);
   padding: 8px;
-}
-
-.ui-dropdown-muted-label {
-  padding: 8px 10px;
-  font-size: 11px;
-  color: var(--muted);
 }
 
 /* ── DropdownPanel (position via CSS vars on ref) ── */
@@ -3511,47 +3496,8 @@ html.window-maximized .window-resize-grip {
   color: var(--red);
 }
 
-/* ── SkillSelector ── */
-.skill-selector-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  cursor: pointer;
-  font-weight: 400;
-  transition: all 0.15s;
-}
-
-.skill-selector-btn.is-open {
-  background: var(--tab-active);
-}
-
-.skill-selector-btn:not(.is-open):hover {
-  background: var(--tab-hover);
-}
-
-.skill-selector-btn.has-skills {
-  color: var(--accent);
-}
-
-.skill-selector-btn:not(.has-skills) {
-  color: var(--muted);
-}
-
 .skill-selector-panel {
   padding: 8px;
-}
-
-.skill-selector-heading {
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--muted);
-  letter-spacing: 0.04em;
-  padding: 4px 10px 8px;
 }
 
 /* ── SkillCheckboxList ── */
@@ -3566,16 +3512,6 @@ html.window-maximized .window-resize-grip {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.skill-checkbox-primary {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: default;
-  opacity: 0.85;
 }
 
 .skill-checkbox-item {
@@ -3871,55 +3807,6 @@ html.window-maximized .window-resize-grip {
 .chat-perm-update-btn:hover:not(:disabled) { background: var(--bg-hover); }
 .chat-perm-update-btn:disabled { opacity: 0.6; cursor: default; }
 
-/* ── ComposerAttachMenu ── */
-.composer-attach-menu {
-  position: relative;
-}
-
-.composer-attach-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: color 0.15s;
-}
-
-.composer-attach-btn.is-open,
-.composer-attach-btn:hover {
-  background: transparent;
-  color: var(--fg);
-}
-
-.composer-attach-btn.has-skills {
-  color: var(--accent);
-}
-
-.composer-attach-hidden-input {
-  display: none;
-}
-
-.composer-attach-flyout.is-positioned {
-  position: fixed;
-  left: var(--composer-attach-left);
-  top: var(--composer-attach-top);
-  width: var(--composer-attach-width);
-  max-height: min(520px, 70vh);
-  overflow-y: auto;
-  z-index: 10050;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
-  padding: 6px;
-  transform-origin: top left;
-}
-
 .composer-attach-flyout-item {
   display: flex;
   align-items: center;
@@ -3967,46 +3854,6 @@ html.window-maximized .window-resize-grip {
   font-weight: 400;
   line-height: 16px;
   text-align: center;
-}
-
-.composer-attach-submenu {
-  padding-top: 6px;
-}
-.composer-attach-submenu .composer-attach-section-body {
-  padding: 0 2px 2px;
-}
-
-.composer-attach-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 4px 2px 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--muted);
-}
-.composer-attach-search:focus-within {
-  border-color: var(--accent);
-}
-.composer-attach-search-icon {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-}
-.composer-attach-search-input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  font-size: 13px;
-  outline: none;
-}
-
-.composer-attach-section {
-  margin-top: 4px;
 }
 
 .composer-attach-section-label {

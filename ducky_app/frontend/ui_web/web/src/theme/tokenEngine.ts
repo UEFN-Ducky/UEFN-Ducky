@@ -21,14 +21,6 @@ export interface StatusColorDef {
   vars: { bg: string; border: string; text: string; dim: string };
 }
 
-export const TOKEN_CATEGORIES = [
-  { id: "brand", name: "Brand & Interactive" },
-  { id: "surface", name: "Surfaces" },
-  { id: "textborder", name: "Typography & Borders" },
-  { id: "semantic", name: "Status & Semantic" },
-  { id: "layout", name: "Layout & Effects" },
-] as const;
-
 const SEMANTIC_COLOR_IDS = ["green", "red", "amber", "blue", "purple", "yellow"] as const;
 
 export const COLOR_TOKENS: TokenDef[] = [

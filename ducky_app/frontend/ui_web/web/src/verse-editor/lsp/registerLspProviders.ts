@@ -8,7 +8,6 @@ import type {
 } from "monaco-editor";
 import type { VerseLspClient } from "./verseLspClient";
 import { readVerseFile } from "../api/verseEditorApi";
-import { basename } from "../utils/isVerseFile";
 import { fileUrisMatch, resolveWorkspaceFilePath, toEditorAbsolutePath } from "./uriUtils";
 import { ensureLspDocumentOpen, getNavigateToFile } from "./verseLspSession";
 import { verseLspLog, verseLspLogError, verseLspWarn } from "./verseLspDebug";
@@ -689,6 +688,3 @@ export function registerVerseLspProviders(
   };
 }
 
-export function revealRequestToOpenArgs(req: RevealRequest): { path: string; name: string } {
-  return { path: req.path, name: basename(req.path) };
-}

@@ -25,13 +25,6 @@ export function billingKind(codingAgent: string | undefined, provider: string | 
   return "api_key";
 }
 
-export const BILLING_LABEL: Record<Exclude<BillingKind, "">, string> = {
-  subscription: "Subscription",
-  api_key: "API key",
-  local: "Local",
-  account: "Ducky account",
-};
-
 export const BILLING_TITLE: Record<Exclude<BillingKind, "">, string> = {
   subscription: "Runs on the coding agent's own login (Codex, Claude Code…): your subscription, not per-token billing.",
   api_key: "Billed per token to your saved API key. Agents may only start chats on it when you allow it in Settings → LLMs.",

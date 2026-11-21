@@ -30,12 +30,6 @@ export function getLspDiagnosticsStats(): LspDiagnosticsStats {
   return { ...stats };
 }
 
-export function resetLspDiagnosticsStats(): void {
-  stats.received = 0;
-  stats.dropped = 0;
-  stats.applied = 0;
-}
-
 if (typeof window !== "undefined") {
   (window as unknown as { __verseLspDiagnostics?: () => LspDiagnosticsStats }).__verseLspDiagnostics =
     getLspDiagnosticsStats;

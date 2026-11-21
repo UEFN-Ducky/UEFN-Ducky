@@ -89,14 +89,6 @@
 .aw-port:focus-visible { outline: 2px solid var(--wf-select); }
 .aw-port--in { left: 0; }
 .aw-port--out { left: 100%; }
-.aw-danger {
-  background: var(--red-dim);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-  border-radius: 6px;
-  padding: 6px;
-  cursor: pointer;
-}
 .aw-spawn-scrim {
   position: fixed;
   inset: 0;
@@ -105,11 +97,6 @@
 .aw-spawn-searchbar { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); cursor: text; }
 .aw-spawn-searchbar svg { flex: 0 0 auto; width: 17px; height: 17px; transition: color 120ms ease; }
 .aw-spawn-searchbar:focus-within svg { color: var(--accent); }
-.aw-spawn-hint {
-  margin: 0 10px 4px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
 .aw-spawn-scroll {
   flex: 1 1 auto;
   min-height: 0;

@@ -365,66 +365,6 @@
   gap: 20px;
 }
 
-/* Discord Settings — full-bleed CatalogSlideShell (Skills / Plans pattern). */
-.discord-settings-tab {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-  height: 100%;
-}
-
-.discord-settings-tab:has(.catalog-slide) {
-  height: 100%;
-}
-
-.discord-tab.catalog-slide {
-  flex: 1;
-  min-height: 0;
-  height: 100%;
-}
-
-.discord-tab .catalog-slide-header-titles .general-tab-section-desc {
-  max-width: 42rem;
-}
-
-.discord-bots-table-actions {
-  width: 1%;
-  white-space: nowrap;
-  text-align: right;
-}
-
-.discord-bots-table-actions .icon-btn {
-  opacity: 0.65;
-}
-
-.discord-bots-table-actions .icon-btn:hover {
-  opacity: 1;
-}
-
-.discord-tab .appearance-details {
-  margin-bottom: 8px;
-}
-
-.discord-commands-catalog {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 4px 2px 24px;
-}
-
-.discord-commands-catalog .catalog-slide-header {
-  margin-bottom: 0;
-}
-
-.discord-commands-catalog .general-tab-section-desc code {
-  font-size: 0.92em;
-}
-
 .general-tab-section-intro {
   display: flex;
   flex-direction: column;
@@ -833,50 +773,6 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-}
-
-.discord-bot-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.discord-bot-field-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--muted);
-}
-
-.discord-bot-field-label.is-ok {
-  color: var(--green, #3ba55d);
-}
-
-.discord-bot-field .settings-input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.discord-bot-field--switch {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
-  column-gap: 12px;
-  row-gap: 4px;
-  align-items: center;
-}
-
-.discord-bot-field--switch .discord-bot-field-label {
-  grid-column: 1;
-  grid-row: 1;
-}
-
-.discord-bot-field--switch .general-tab-switch {
-  grid-column: 2;
-  grid-row: 1;
 }
 
 @keyframes llms-provider-status-pulse {

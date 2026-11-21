@@ -70,10 +70,6 @@ export function subscribeMicPermissionPrompt(fn: (open: boolean) => void): () =>
   return () => promptListeners.delete(fn);
 }
 
-export function isMicPermissionPromptOpen(): boolean {
-  return promptOpen;
-}
-
 /** Resolve the in-app Allow/Block prompt (called from MicPermissionModal). */
 export function resolveMicPermissionPrompt(allowed: boolean): void {
   const resolve = promptResolve;

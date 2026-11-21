@@ -34,10 +34,3 @@ export function insertIndexForTabDrop(
   return dockDropInsertIndex(dropTarget, sectionPanelIds ? sectionCount : onSide.length);
 }
 
-export function countPanelsOnRail(side: DockSide): number {
-  const rail = document.querySelector<HTMLElement>(`.dock-rail--${side}`);
-  if (!rail) return 0;
-  const tabBodies = rail.querySelectorAll<HTMLElement>("[data-dock-panel-id]").length;
-  if (tabBodies > 0) return tabBodies;
-  return rail.querySelectorAll<HTMLElement>(".sidebar-stacked-panel").length;
-}

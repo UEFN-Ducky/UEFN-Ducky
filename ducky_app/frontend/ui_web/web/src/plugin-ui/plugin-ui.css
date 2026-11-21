@@ -565,16 +565,6 @@
   flex-direction: column;
   gap: 2px;
 }
-
-/* Your team: the sidebar's own dropdown, above the sections. */
-.team-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 2px 0 10px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--border, #3a3a3a);
-}
 .team-picker__label {
   padding: 0 4px;
   font-size: 10px;
@@ -582,36 +572,12 @@
   text-transform: uppercase;
   color: var(--muted);
 }
-.team-picker .scope-picker {
-  width: 100%;
-  max-width: none;
-}
-.team-picker__msg {
-  margin: 0;
-  padding: 0 4px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.team-picker__msg--error {
-  color: var(--red);
-}
-
-/* The team's plugins as Ledger groups; a press slides the list out and the plugin in. */
-.team-slide {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
 .team-slide__track {
   display: flex;
   flex: 0 0 200%;
   width: 200%;
   min-height: 0;
   transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.team-slide.is-detail .team-slide__track {
-  transform: translateX(-50%);
 }
 .team-slide__panel {
   flex: 0 0 50%;
@@ -622,31 +588,11 @@
   padding: 0 12px 12px;
   transition: opacity 240ms ease, visibility 0s;
 }
-/* The panel slid away is out of reach (no tabbing into it) once it's gone. */
-.team-slide:not(.is-detail) .team-slide__panel--detail,
-.team-slide.is-detail .team-slide__panel--list {
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 240ms ease, visibility 0s 240ms;
-}
 @media (prefers-reduced-motion: reduce) {
   .team-slide__track,
   .team-slide__panel {
     transition: none;
   }
-}
-.team-slide__intro {
-  margin: 0;
-  padding: 10px 2px;
-  color: var(--muted);
-}
-.team-ledger {
-  overflow: hidden;
-  border: 1px solid var(--border, #3a3a3a);
-  border-radius: 10px;
-}
-.team-ledger__group:first-child .team-ledger__head {
-  border-top: 0;
 }
 .team-ledger__head {
   height: 52px;
@@ -672,24 +618,10 @@
   color: var(--amber);
   border-color: color-mix(in srgb, var(--amber) 45%, transparent);
 }
-.team-ledger__badge--error {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 45%, transparent);
-}
-.team-ledger__body {
-  padding: 4px 0 8px;
-  border-top: 1px solid var(--border, #3a3a3a);
-}
 .team-ledger__empty {
   margin: 0;
   padding: 6px 14px 6px 40px;
   color: var(--muted);
-}
-.team-ledger__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 4px 14px 0;
 }
 .team-plugin-icon {
   display: inline-flex;
@@ -713,12 +645,6 @@
   height: 60%;
   color: var(--amber);
 }
-.team-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 8px;
-}
 .team-detail__head {
   display: flex;
   align-items: center;
@@ -735,67 +661,6 @@
 .team-detail__title .changes-run-name {
   color: var(--fg);
   font-size: 13px;
-}
-.team-detail__picker {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-/* A plugin's own view in the Team modal: every section (Changes, Incoming, Conflicts, Locks,
-   History, People, Settings) as one Ledger card, its intro as the card's header row. */
-.team-detail .plugin-scope-panel {
-  max-height: none;
-  overflow: hidden;
-  border: 1px solid var(--border, #3a3a3a);
-  border-radius: 10px;
-}
-.team-detail .plugin-scope-panel__body {
-  padding: 0;
-}
-.team-detail .plugin-scope-intro {
-  min-height: 46px;
-  padding: 0 14px;
-  background: var(--panel-header);
-  color: var(--muted);
-  font-size: 12px;
-}
-.team-detail .plugin-scope-row {
-  min-height: 36px;
-  padding: 4px 14px 4px 26px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border, #3a3a3a) 60%, transparent);
-  border-left: 2px solid transparent;
-  font-size: 12px;
-}
-.team-detail .plugin-scope-row:last-child {
-  border-bottom: 0;
-}
-.team-detail .plugin-scope-row:hover {
-  background: var(--tab-hover);
-}
-.team-detail .plugin-scope-row--warn,
-.team-detail .plugin-scope-row--error {
-  padding-left: 26px;
-  box-shadow: none;
-  background: var(--red-dim);
-}
-.team-detail .plugin-scope-row--warn {
-  border-left-color: var(--amber);
-}
-.team-detail .plugin-scope-row--error {
-  border-left-color: var(--red);
-}
-.team-detail .plugin-scope-row__name {
-  font-weight: 600;
-}
-.team-detail .plugin-scope-row__sub,
-.team-detail .plugin-scope-seq {
-  color: var(--muted);
-}
-.team-detail .plugin-scope-subhead {
-  padding: 10px 14px 4px;
-}
-.team-detail .plugin-scope-empty {
-  padding: 10px 14px;
 }
 .team-ledger__face {
   display: inline-flex;
@@ -923,10 +788,6 @@
   position: absolute;
   top: -2px;
   right: -4px;
-}
-/* The phone's header is narrow: icon only, green and the dot still say live. */
-.app-header--remote .app-header-team-btn .live-trigger-count {
-  display: none;
 }
 
 /* The status: one phrase that opens the tab explaining it. It shrinks first. */
@@ -1098,57 +959,6 @@
 .plugin-scope-menu__foot {
   padding: 4px 8px;
 }
-
-/* The header's Team and Live menu: Live / All tabs, one accordion per team copy. */
-.live-menu__tabs {
-  display: flex;
-  gap: 4px;
-  padding: 2px 4px 6px;
-}
-.live-menu__tab {
-  flex: 1 1 0;
-  padding: 4px 8px;
-  border: 1px solid var(--border, #3a3a3a);
-  border-radius: var(--radius-sm, 6px);
-  background: none;
-  color: var(--fg-dim, #a0a0a0);
-  font: inherit;
-  cursor: pointer;
-}
-.live-menu__tab.is-active {
-  color: var(--fg, #e6e6e6);
-  background: color-mix(in srgb, var(--accent, #d4a017) 12%, transparent);
-}
-.live-menu__team-head {
-  width: 100%;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.live-menu__team-head:hover {
-  background: color-mix(in srgb, var(--fg, #e6e6e6) 6%, transparent);
-}
-.live-menu__caret {
-  flex: none;
-  transition: transform 0.12s ease;
-}
-.live-menu__caret.is-open {
-  transform: rotate(90deg);
-}
-.live-menu__team-body {
-  padding-left: 12px;
-}
-.team-live-menu__foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-top: 1px solid var(--border, #3a3a3a);
-  margin-top: 4px;
-  padding-top: 6px;
-}
 .team-live-menu__status {
   flex: 1 1 auto;
   min-width: 0;
@@ -1159,46 +969,6 @@
 .plugin-scope-dot--local {
   background: var(--muted, #888);
 }
-
-/* The header menu's copy picker: the copy the whole app is on, and Local or a team to switch to. */
-.team-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 2px 4px 8px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--border, #3a3a3a);
-}
-.team-copy__current,
-.team-copy__option,
-.team-live-menu__settings {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm, 6px);
-  background: none;
-  color: var(--fg, #e6e6e6);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.team-copy__current {
-  border-color: var(--border, #3a3a3a);
-  background: color-mix(in srgb, var(--fg, #e6e6e6) 4%, transparent);
-}
-.team-copy__current:hover:not(:disabled),
-.team-copy__option:hover:not(:disabled),
-.team-live-menu__settings:hover {
-  background: color-mix(in srgb, var(--fg, #e6e6e6) 7%, transparent);
-}
-.team-copy__current:disabled,
-.team-copy__option:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
 .team-copy__list {
   display: flex;
   flex-direction: column;
@@ -1208,12 +978,8 @@
   border-radius: var(--radius-sm, 6px);
   background: var(--bg-elevated, var(--bg));
 }
-.team-copy__option.is-current {
-  background: color-mix(in srgb, var(--accent, #d4a017) 12%, transparent);
-}
 .team-copy__icon,
-.team-copy__check,
-.team-copy__chevron {
+.team-copy__check {
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -1224,7 +990,6 @@
 }
 .team-copy__icon svg,
 .team-copy__check svg,
-.team-copy__chevron svg,
 .live-menu__head svg,
 .live-menu__start svg,
 .team-live-menu__alert svg {
@@ -1233,12 +998,6 @@
 }
 .team-copy__check {
   color: var(--accent, #d4a017);
-}
-.team-copy__chevron {
-  transition: transform 0.12s ease;
-}
-.team-copy__chevron.is-open {
-  transform: rotate(180deg);
 }
 .team-copy__text {
   display: flex;
@@ -1249,13 +1008,6 @@
 .team-copy__name {
   overflow: hidden;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.team-copy__sub {
-  overflow: hidden;
-  color: var(--fg-dim, #a0a0a0);
-  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

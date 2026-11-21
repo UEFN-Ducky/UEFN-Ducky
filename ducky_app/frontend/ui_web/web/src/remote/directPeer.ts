@@ -470,6 +470,3 @@ function openStream(s: Session, open: StreamOpen & { id?: string }): { ok: boole
   return { ok: true, result: { id } };
 }
 
-export function directPeerSessionCount(): number {
-  return sessions.size;
-}

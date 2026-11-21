@@ -161,12 +161,6 @@ export function useWaitingItems(): WaitingItem[] {
   return useSyncExternalStore(subscribeWaitingChats, readItems, readItems);
 }
 
-/** This chat's oldest unanswered card, or null (no store read needed by callers outside React). */
-export function chatWait(convId: string | undefined | null): ChatWait | null {
-  ensureSources();
-  return snapshot.byChat.get(String(convId || "")) ?? null;
-}
-
 /**
  * "Needs you" for a row anywhere (sidebar, tabs, team bar): what the chat waits on and for how
  * many seconds, or null. Re-renders only when that chat's card changes; `since` is as of render.

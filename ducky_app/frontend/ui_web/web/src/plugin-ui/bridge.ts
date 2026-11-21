@@ -238,16 +238,6 @@ export function setBrowserUiCover(cover: boolean): void {
   }
 }
 
-/** Clear stuck cover depth and re-show any mounted browser pane (never hide_all). */
-export function forceClearBrowserUiCover(): void {
-  browserUiCoverDepth = 0;
-  for (const [tabId, entry] of paneInsets) {
-    entry.inset.visible = true;
-    lastSentBounds.delete(tabId);
-    pushBrowserPaneBounds(tabId);
-  }
-}
-
 /**
  * Escape hatch when shell.boot / browser overlays steal all clicks (left dock
  * locked, black content). Remove overlays, clear cover, hide stray panes, then

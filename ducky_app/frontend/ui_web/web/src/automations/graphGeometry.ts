@@ -18,10 +18,6 @@ export function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
-export function nodeHeight(compact = false): number {
-  return compact ? NODE_HEIGHT_COMPACT : NODE_HEIGHT;
-}
-
 export function portPoint(node: AutomationGraphNodeDto, direction: "in" | "out", compact = false) {
   return { x: node.x + (direction === "out" ? NODE_WIDTH : 0), y: node.y + (compact ? NODE_HEIGHT_COMPACT / 2 : PORT_Y) };
 }

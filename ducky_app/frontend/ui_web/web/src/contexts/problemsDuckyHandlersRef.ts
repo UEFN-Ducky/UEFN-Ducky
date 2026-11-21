@@ -12,12 +12,3 @@ export interface ProblemsDuckyHandlers {
   onCreateAndSend: (payload: ProblemsDraftPayload) => void | Promise<void>;
 }
 
-let handlers: ProblemsDuckyHandlers | null = null;
-
-export function setProblemsDuckyHandlers(next: ProblemsDuckyHandlers | null): void {
-  handlers = next;
-}
-
-export function getProblemsDuckyHandlers(): ProblemsDuckyHandlers | null {
-  return handlers;
-}

@@ -63,7 +63,3 @@ export function useHasApiKey(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** Call after settings save so the composer unlocks without waiting for the poll. */
-export function refreshHasApiKey(): void {
-  void _sync();
-}

@@ -18,10 +18,6 @@
   outline-offset: 2px;
 }
 
-.settings-view-header {
-  display: none;
-}
-
 .settings-view-header-tabs-stack {
   display: flex;
   flex-direction: column;
@@ -353,122 +349,6 @@
   padding: 0 4px;
 }
 
-.discord-bots-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 4px;
-}
-
-.discord-bots-empty-link {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent);
-  font: inherit;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.discord-bots-empty-link:hover {
-  filter: brightness(1.1);
-}
-
-.discord-bots-table {
-  width: 100%;
-  border-collapse: collapse;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--surface) 40%, var(--bg));
-  font-size: 12px;
-}
-
-.discord-bots-table th,
-.discord-bots-table td {
-  padding: 10px 12px;
-  text-align: left;
-  vertical-align: middle;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.discord-bots-table thead th {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--surface) 70%, var(--bg));
-}
-
-.discord-bots-table tbody tr {
-  cursor: pointer;
-}
-
-.discord-bots-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.discord-bots-table tbody tr:hover {
-  background: var(--tab-hover);
-}
-
-.discord-bots-table tbody tr.is-selected {
-  background: var(--tab-active);
-}
-
-.discord-bots-table-name {
-  font-weight: 600;
-  color: var(--text-primary);
-  max-width: 12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.discord-bots-table-prefix {
-  font-family: var(--font-mono);
-  color: var(--terminal-ansi-green, var(--green, #3ba55d));
-  white-space: nowrap;
-}
-
-.discord-bots-table-status {
-  color: var(--muted);
-  max-width: 10rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.discord-bots-table-enabled {
-  width: 1%;
-  white-space: nowrap;
-}
-
-.discord-commands-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.discord-commands-group-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-}
-
-.discord-commands-group-count {
-  font-weight: 600;
-  letter-spacing: 0;
-  text-transform: none;
-  opacity: 0.75;
-}
-
 .discord-commands-list {
   list-style: none;
   margin: 0;
@@ -495,34 +375,7 @@
   flex-wrap: wrap;
 }
 
-.discord-commands-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.discord-commands-kind {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--muted);
-}
-
-.discord-commands-kind--chat {
-  color: color-mix(in srgb, var(--accent) 85%, var(--text));
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-}
-
 .discord-commands-kind--agent {
-  color: var(--muted);
-}
-
-.discord-commands-desc {
-  margin: 6px 0 0;
-  font-size: 13px;
-  line-height: 1.4;
   color: var(--muted);
 }
 
@@ -1092,55 +945,6 @@
   min-width: 0;
 }
 
-.discord-setup-guide {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--muted);
-  padding: 4px 0;
-}
-
-.discord-setup-guide summary {
-  cursor: pointer;
-  font-weight: 600;
-  padding: 4px 0;
-}
-
-.discord-setup-steps {
-  margin: 6px 0 4px;
-  padding-left: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.discord-setup-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-/* Discord bot detail — stacked fields matching other Settings inputs. */
-.discord-bot-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 520px;
-}
-
-.discord-setup-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 55%, var(--bg));
-}
-
 .discord-setup-card-head {
   display: flex;
   align-items: baseline;
@@ -1159,37 +963,6 @@
   color: var(--muted);
 }
 
-.discord-setup-checklist {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.discord-setup-checklist > li {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 12.5px;
-  line-height: 1.4;
-  color: var(--text-secondary, var(--muted));
-}
-
-.discord-setup-checklist strong {
-  color: var(--text);
-  font-weight: 650;
-}
-
-.discord-setup-checklist code {
-  font-size: 11px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-  color: var(--text);
-}
-
 .discord-setup-step-n {
   flex-shrink: 0;
   width: 20px;
@@ -1205,40 +978,8 @@
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
-.discord-bot-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.discord-bot-field-hint {
-  grid-column: 1 / -1;
-  grid-row: 2;
-  font-size: 11px;
-  line-height: 1.35;
-  color: var(--muted);
-}
-
-.discord-bot-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.discord-bot-note {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--muted);
-}
-
 .discord-bot-note--warn {
   color: var(--amber, #d4a017);
-}
-
-.discord-bot-note code {
-  font-size: 11px;
 }
 
 .llms-provider-status.is-ok {
@@ -2413,10 +2154,6 @@
   display: block;
 }
 
-.skills-mcp-ides-section {
-  margin-bottom: 20px;
-}
-
 .llms-default-model-card {
   display: flex;
   flex-direction: column;
@@ -3101,49 +2838,6 @@
   font-size: 13px;
 }
 
-.skills-mcp-skills-section {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background-color: var(--card);
-}
-
-.skills-mcp-skills-header {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: flex-start;
-}
-
-.skills-mcp-skills-header-info {
-  flex: 1;
-  min-width: 200px;
-}
-
-.skills-mcp-skills-header-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.skills-mcp-skills-header-path {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 4px;
-  line-height: 1.45;
-}
-
-.skills-mcp-skills-dir {
-  font-family: var(--font-mono);
-}
-
-.skills-mcp-skills-header-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .skills-mcp-new-form {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
@@ -3169,37 +2863,6 @@
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   background-color: color-mix(in srgb, var(--bg) 15%, transparent);
-}
-
-.skills-mcp-defaults-title {
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.skills-mcp-defaults-desc {
-  margin: 0 0 10px 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.45;
-}
-
-.skills-mcp-defaults-msg {
-  margin-top: 8px;
-  font-size: 12px;
-}
-
-.skills-mcp-defaults-msg.is-success {
-  color: var(--green);
-}
-
-.skills-mcp-defaults-msg.is-error {
-  color: var(--red);
-}
-
-.skills-mcp-body {
-  display: flex;
-  min-height: 420px;
 }
 
 .skills-mcp-file-list {
@@ -3245,100 +2908,12 @@
   padding: 8px;
 }
 
-.skills-mcp-editor-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.skills-mcp-editor-toolbar {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.skills-mcp-editor-filename {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.skills-mcp-view-btn.is-active {
-  font-weight: 600;
-}
-
-.skills-mcp-view-btn.is-inactive {
-  font-weight: 400;
-}
-
 .skills-mcp-edit-panel {
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   flex: 1;
-}
-
-.skills-mcp-edit-hint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.skills-mcp-code {
-  font-family: var(--font-mono);
-}
-
-.skills-mcp-textarea {
-  width: 100%;
-  flex: 1;
-  min-height: 300px;
-  padding: 14px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--fg);
-  resize: vertical;
-}
-
-.skills-mcp-edit-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.skills-mcp-save-msg {
-  font-size: 12px;
-}
-
-.skills-mcp-save-msg.is-success {
-  color: var(--green);
-}
-
-.skills-mcp-save-msg.is-error {
-  color: var(--red);
-}
-
-.skills-mcp-preview-pre {
-  margin: 0;
-  padding: 16px;
-  flex: 1;
-  max-height: 520px;
-  overflow: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  color: var(--fg-dim);
 }
 
 .skills-mcp-mcp-toolbar {
@@ -3363,62 +2938,6 @@
   background: var(--input-bg);
   color: var(--fg);
   font-size: 13px;
-}
-
-.skills-mcp-mcp-categories {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.skills-mcp-mcp-category {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  background-color: var(--card);
-}
-
-.skills-mcp-mcp-category-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 16px;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.skills-mcp-mcp-category-toggle:hover {
-  background-color: color-mix(in srgb, var(--fg) 3%, transparent);
-}
-
-.skills-mcp-mcp-category-chevron {
-  color: var(--muted);
-  transform: rotate(-90deg);
-  transition: transform 0.2s ease;
-  flex-shrink: 0;
-  font-size: 14px;
-}
-
-.skills-mcp-mcp-category-chevron.is-open {
-  transform: rotate(0deg);
-}
-
-.skills-mcp-mcp-category-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg);
-  text-transform: none;
-  letter-spacing: normal;
-}
-
-.skills-mcp-mcp-category-count {
-  color: var(--muted);
-  font-weight: 400;
-  margin-left: 8px;
 }
 
 .skills-mcp-mcp-tool-list {
@@ -3465,23 +2984,10 @@
   border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
 }
 
-.skills-mcp-badge--purple {
-  background-color: color-mix(in srgb, var(--accent) 18%, transparent);
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
 .skills-mcp-badge--muted {
   background-color: color-mix(in srgb, var(--muted) 18%, transparent);
   color: var(--muted);
   border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
-}
-
-.skills-mcp-tool-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background-color: color-mix(in srgb, var(--bg) 20%, transparent);
 }
 
 .skills-mcp-tool-card-toggle {
@@ -4007,38 +3513,6 @@
   }
 }
 
-/* MCP plugins section (legacy aliases) */
-.skills-mcp-plugins-section {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.skills-mcp-plugins-header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.skills-mcp-plugins-title {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.skills-mcp-plugins-desc {
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 4px;
-}
-
-.skills-mcp-plugins-header-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 .mcp-create-form,
 .mcp-create-modal {
   display: flex;
@@ -4329,20 +3803,6 @@
   margin-bottom: 4px;
 }
 
-/* --- Source Control (URC) tab --- */
-.urc-card {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--card) 65%, var(--bg));
-}
-
-.urc-meta {
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-
 .urc-file-group {
   margin-top: 8px;
 }
@@ -4360,47 +3820,6 @@
   padding: 0;
   max-height: 220px;
   overflow-y: auto;
-}
-
-.urc-file {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 3px 6px;
-  border-radius: 6px;
-  word-break: break-all;
-}
-
-.urc-file:nth-child(odd) {
-  background: color-mix(in srgb, var(--card) 80%, var(--bg));
-}
-
-.urc-commit-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.urc-commit-label {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.urc-commit-input {
-  width: 100%;
-  resize: vertical;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 13px;
-  box-sizing: border-box;
-}
-
-.urc-commit-input:focus {
-  outline: none;
-  border-color: var(--border-focus);
 }
 
 .plans-tab-notice {
@@ -5129,7 +4548,6 @@
   word-break: break-word;
 }
 
-.memory-tab-summary-preview .markdown-body,
 .memory-tab-summary-preview p {
   margin-top: 0;
 }

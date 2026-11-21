@@ -245,10 +245,6 @@ export function registerUiAction(id: string, run: UiActionFn, meta: { label?: st
   };
 }
 
-export function hasUiAction(id: string): boolean {
-  return actions.has(id);
-}
-
 /** Wait for a view to register an action (it mounts when its tab opens). */
 export async function waitForUiAction(id: string, timeoutMs = 4000): Promise<boolean> {
   const end = Date.now() + timeoutMs;
