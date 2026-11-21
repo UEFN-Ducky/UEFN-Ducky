@@ -349,6 +349,19 @@ def test_suggest_entries_returns_best_match(isolated_appdata, tmp_path):
     assert suggest_entries("nothing relevant here", root) == []
 
 
+def test_one_shared_word_is_not_a_match(isolated_appdata, tmp_path):
+    from backend.memory.project import save_entry, suggest_entries
+
+    root = str(tmp_path / "Proj")
+    save_entry("audio/show-import", "x", description="Importing the show audio into the island", project_root=root)
+    save_entry("team-workflow/git-and-worktrees", "x", description="Git worktree add and remove", project_root=root)
+    # "island" is the only word in common: chance, not a reason to pull the entry.
+    assert suggest_entries("how is that different from our island tools", root) == []
+    assert "audio/show-import" in suggest_entries("the import of the show audio fails", root)
+    # A one-word message can only ever share one word.
+    assert "team-workflow/git-and-worktrees" in suggest_entries("worktree", root)
+
+
 @pytest.mark.parametrize("store", ["db", "files"])
 def test_private_sub_entry_hidden_from_other_authors(isolated_appdata, tmp_path, monkeypatch, store):
     from backend.memory.project import index_markdown, read_entry, save_entry, suggest_entries

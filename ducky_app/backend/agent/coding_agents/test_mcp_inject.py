@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.agent.coding_agents import mcp_inject
 from backend.agent.coding_agents.mcp_inject import bootstrap_system_prompt, stamp_mcp_identity
 from backend.workspace.identity import RunContext
 
@@ -142,6 +143,23 @@ def test_coding_agents_get_one_fixed_uefn_line(monkeypatch, folder, online):
         assert UEFN_LINE not in text and "### UEFN popups" not in text
     else:
         assert text.count(UEFN_LINE) == 1 and "### UEFN popups" in text
+
+
+# What an agent re-reads on every call of every turn, in characters (no persona, no skill packs,
+# no memory). It reached about 9,000 tokens with nobody deciding it should. Smaller always passes;
+# raise a number only when the new text is worth sending on every call.
+PROMPT_CEILING_CHARS = {"island": 33_925, "folder": 27_563}
+
+
+@pytest.mark.parametrize("kind", ["island", "folder"])
+def test_the_agent_prompt_does_not_grow_unnoticed(monkeypatch, kind) -> None:
+    monkeypatch.setattr("frontend.project_kind.is_folder_project", lambda root: kind == "folder")
+    monkeypatch.setattr(mcp_inject, "_memory_index_section", lambda root, conv: "")
+    size = len(bootstrap_system_prompt(project_root="/tmp/p", conv_id="chat-a"))
+    assert size <= PROMPT_CEILING_CHARS[kind], (
+        f"the {kind} prompt is {size} characters, {size - PROMPT_CEILING_CHARS[kind]} over its ceiling: cut "
+        "the new text, or raise PROMPT_CEILING_CHARS on purpose"
+    )
 
 
 def test_bootstrap_names_the_up_front_tools() -> None:

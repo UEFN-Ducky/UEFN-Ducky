@@ -598,10 +598,13 @@ def index_markdown(
 
 
 def suggest_entries(text: str, project_root: str = "", *, limit: int = 3) -> list[str]:
-    """Names of the entries (subs included) whose name + description best match ``text``."""
+    """Names of the entries (subs included) whose name + description best match ``text``. An entry
+    needs two of the message's words (one when the message has only one): a single shared word is
+    chance, and it pulled an unrelated entry into a question about something else (Nov 2026)."""
     words = _words(text)
     if not words or limit <= 0:
         return []
+    need = min(2, len(words))
     scored: list[tuple[int, int, str]] = []
     pos = 0
     for e in list_entries(project_root):
@@ -611,7 +614,7 @@ def suggest_entries(text: str, project_root: str = "", *, limit: int = 3) -> lis
             if item.get("private"):
                 continue
             s = _score(words, item["name"], item.get("description", ""))
-            if s > 0:
+            if s >= need:
                 scored.append((-s, pos, item["name"]))
             pos += 1
     scored.sort()
