@@ -588,6 +588,19 @@ unsafe extern "system" fn splash_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     }
 }
 
+/// Exit: every window and the tray icon leave the screen now. The backend may take seconds to
+/// save and stop; until Nov 2026 they stayed up, dead, for that whole wait.
+pub(super) fn hide_all() {
+    drop(with(|u| u.tray.take()));
+    let all: Vec<HWND> =
+        with(|u| u.main.into_iter().chain(u.extras.by_wid.values().map(|e| e.hwnd)).collect()).unwrap_or_default();
+    for h in all {
+        unsafe {
+            let _ = ShowWindow(h, SW_HIDE);
+        }
+    }
+}
+
 pub(super) fn show_main() {
     let main = with(|u| u.main).flatten();
     let h = match main {

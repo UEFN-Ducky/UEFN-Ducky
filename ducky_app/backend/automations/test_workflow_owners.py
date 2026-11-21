@@ -107,6 +107,31 @@ def test_local_workflows_are_per_account_and_sealed(who: _Who) -> None:
     assert store.clear_runs("missing") is False
 
 
+def test_a_stored_run_keeps_each_value_once(who: _Who, monkeypatch: pytest.MonkeyPatch) -> None:
+    who.be("ana@x.org")
+    wf = store.save_workflow({"name": "Release", "graph": {"nodes": [], "edges": []}})
+    answer = {"tool": "ducky_terminal_run", "output": "a long answer", "data": {"text": "a long answer"}}
+    run = {"run": "r1", "ok": False, "ended": 5, "node_outputs": {"build": {"text": "a long ans..."}}, "steps": [
+        {"id": "build", "ok": True, "label": "Build", "inputs": {"folder": "x"}, "result": answer,
+         "outputs": {"result": answer, "text": "a long answer"},
+         "substeps": [{"id": "inner", "ok": True, "result": 1, "outputs": {"value": 1}}]},
+        {"id": "upload", "ok": False, "label": "Upload", "error": "refused", "result": answer, "outputs": {"text": "x"}},
+    ]}
+    slim = owned._for_log
+    monkeypatch.setattr(owned, "_for_log", lambda one: one)  # a run stored whole, as before Nov 2026
+    store.append_run(wf["id"], {**run, "run": "old"})
+    monkeypatch.setattr(owned, "_for_log", slim)
+    store.append_run(wf["id"], run)
+    old, new = store.get_workflow(wf["id"])["runs"]
+    for kept in (old, new):  # the next run slims the ones stored whole down too
+        assert kept["steps"] == [
+            {"id": "build", "ok": True, "label": "Build", "inputs": {"folder": "x"}, "substeps": [{"id": "inner", "ok": True}]},
+            {"id": "upload", "ok": False, "label": "Upload", "error": "refused", "result": answer},  # why it failed stays
+        ]
+        assert kept["node_outputs"] == run["node_outputs"]  # what each step made, once
+    assert "outputs" in run["steps"][0] and run["steps"][0]["result"] is answer  # the run's own result is untouched
+
+
 def test_signed_out_workflows_can_be_brought_into_the_account(who: _Who) -> None:
     who.be("")
     wf = store.save_workflow({"name": "Made offline", "graph": CRON})

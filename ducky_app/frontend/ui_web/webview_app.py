@@ -564,14 +564,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     from backend.workspace.diff_workers import enable as enable_diff_workers
 
     enable_diff_workers()
-    # The WinForms UI thread runs Python callbacks (pywebview bridge, evaluate_js
-    # completions) and competes for the GIL with agent threads doing CPU-bound
-    # stream/JSON work. The default 5ms switch interval lets busy threads starve
-    # it for seconds (perf traces showed 14-18s evaluate_js waits with tiny
-    # payloads). A shorter interval keeps the UI thread responsive.
-    import sys as _sys
-
-    _sys.setswitchinterval(0.001)
     background_work: dict[str, object] = {"start": make_background_work()}
 
     # WebView2 paints this color for not-yet-rendered regions (e.g. area newly exposed while

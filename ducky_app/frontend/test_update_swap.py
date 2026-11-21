@@ -336,7 +336,6 @@ def test_hard_exit_for_a_switch_leaves_other_ducky_processes_alone(monkeypatch) 
     for name in ("_stop_all_agents", "_stop_cpu_workers", "_stop_all_terminals", "_flush_space_sync", "_stop_mcp_plugins"):
         monkeypatch.setattr(shutdown, name, lambda: None)
     monkeypatch.setattr(shutdown, "release_panel_process", lambda: None)
-    monkeypatch.setattr(shutdown, "_kill_sibling_processes", lambda: calls.append("siblings"))
     monkeypatch.setattr(shutdown, "_spawn_kill_uefn_processes", lambda: calls.append("reaper"))
     monkeypatch.setattr(shutdown, "_terminate_process", lambda: calls.append("exit"))
     shutdown.hard_exit(keep_others=True)
@@ -344,4 +343,4 @@ def test_hard_exit_for_a_switch_leaves_other_ducky_processes_alone(monkeypatch) 
     monkeypatch.setattr(shutdown, "_exit_started", False)
     calls.clear()
     shutdown.hard_exit()
-    assert calls == ["siblings", "reaper", "exit"]
+    assert calls == ["reaper", "exit"]  # the reaper first: a slow step after it never costs it its start

@@ -110,19 +110,26 @@ def kill_process_ps_filter() -> str:
     )
 
 
-def stop_bridges_ps(exclude_pid: int = 0) -> str:
-    """PowerShell that ends Ducky's tool bridges (``UEFN-Ducky-Bridge``, or the app exe run
+def stop_bridges_ps() -> str:
+    """PowerShell that ends this Ducky's tool bridges (``UEFN-Ducky-Bridge``, or the app exe run
     as ``bridge``), never another Ducky window: a second profile, a test bed or another
     install is not this Ducky's to close. Oct 21 2026: a test copy that quit took the
     person's Ducky down with it, with no crash trace."""
-    skip = f" -and $_.ProcessId -ne {int(exclude_pid)}" if exclude_pid else ""
     return (
         f"Get-CimInstance Win32_Process -Filter \"Name like '{EXE_PREFIX}%'\" | Where-Object {{ "
-        f"{bridge_ps_filter()}{skip} }} | "
+        f"{bridge_ps_filter()} }} | "
         "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
 
 
 def bridge_ps_filter() -> str:
-    """``Where-Object`` test on a Win32_Process row: a Ducky tool bridge, not a Ducky window."""
-    return f"($_.Name -like '{EXE_PREFIX}-Bridge*' -or $_.CommandLine -match '\\sbridge(\\s|$)')"
+    """``Where-Object`` test on a Win32_Process row: one of THIS Ducky's tool bridges, not a Ducky
+    window and not another Ducky's bridge. A bridge carries the port of the Ducky it serves
+    (mcp_block.resolve_bridge_args); until Nov 2026 any Ducky that quit ended every Ducky's
+    bridges on the PC, so a test copy closing took the person's own tools with it."""
+    from frontend.settings import UEFN_LISTENER_PORT
+
+    return (
+        f"(($_.Name -like '{EXE_PREFIX}-Bridge*' -or $_.CommandLine -match '\\sbridge(\\s|$)') "
+        f"-and $_.CommandLine -match '--port\\s+{int(UEFN_LISTENER_PORT)}(\\s|$)')"
+    )

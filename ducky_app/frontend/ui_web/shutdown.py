@@ -8,7 +8,6 @@ import re
 import subprocess
 import sys
 import threading
-import time
 import traceback
 from collections.abc import Callable
 from typing import Any
@@ -19,6 +18,9 @@ from frontend.frozen_process import release_panel_process
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _exit_lock = threading.Lock()
 _exit_started = False
+# Exit never takes longer than this, whatever a step below waits for (the launcher gives its
+# backend the same 5 s). The window is off the screen long before.
+EXIT_LIMIT_S = 5.0
 
 # Cross-thread work for the Tk pump. pywebview bridge threads must not call
 # ``tk_root.after`` — that raises "main thread is not in main loop".
@@ -92,13 +94,12 @@ def _terminate_process() -> None:
 def _spawn_kill_uefn_processes() -> None:
     """Fire-and-forget reaper for this Ducky's IDE bridge workers.
 
-    Spawned **detached** so it outlives this panel's own termination. The old code spawned
-    ``taskkill /F /PID <self> /T`` alongside the PowerShell reaper as siblings — the ``/T`` killed
-    self's whole child tree, which includes the reaper, so the bridge workers often survived
-    "Exit all". Now one detached PowerShell waits for the panel to die, then force-kills every
-    remaining bridge, never another Ducky window (app_paths.stop_bridges_ps). (IDE-managed
-    bridges may still be respawned by the IDE itself — that is outside our control;
-    close/disable the IDE's UEFN MCP to stop those for good.)
+    Spawned **detached** so it outlives this panel's own termination, and first in the exit:
+    PowerShell takes 1 to 2 s to start, and a step that ran long used to leave no time for it.
+    It force-kills this Ducky's bridges, never another Ducky's and never a Ducky window
+    (app_paths.stop_bridges_ps). (IDE-managed bridges may still be respawned by the IDE
+    itself — that is outside our control; close/disable the IDE's UEFN MCP to stop those
+    for good.)
     """
     if sys.platform != "win32":
         return
@@ -131,20 +132,6 @@ def _stop_tray(api: Any) -> None:
         pass
 
 
-def _kill_sibling_processes() -> None:
-    """Terminate this Ducky's bridge workers before this process exits."""
-    if sys.platform != "win32":
-        return
-    try:
-        subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", stop_bridges_ps(os.getpid())],
-            capture_output=True, timeout=10, creationflags=_CREATE_NO_WINDOW,
-        )
-        time.sleep(0.12)
-    except Exception:
-        pass
-
-
 def hard_exit(*, api: Any = None, keep_others: bool = False) -> None:
     """Kill this process immediately. Must not return.
 
@@ -169,6 +156,11 @@ def hard_exit(*, api: Any = None, keep_others: bool = False) -> None:
         install_health.record("exit")
     except Exception:
         pass
+    limit = threading.Timer(EXIT_LIMIT_S, _terminate_process)
+    limit.daemon = True
+    limit.start()
+    if not keep_others:
+        _spawn_kill_uefn_processes()
     _stop_all_agents()
     _stop_cpu_workers()
     _stop_all_terminals()
@@ -177,9 +169,6 @@ def hard_exit(*, api: Any = None, keep_others: bool = False) -> None:
     release_panel_process()
     if api is not None:
         _stop_tray(api)
-    if not keep_others:
-        _kill_sibling_processes()
-        _spawn_kill_uefn_processes()
     _terminate_process()
 
 
@@ -318,11 +307,6 @@ def _start_hard_exit(*, api: Any = None) -> None:
     ).start()
 
 
-def arm_force_exit(delay: float = 0.15, *, api: Any = None) -> None:
-    """Backup kill if the primary exit path stalls. Safe to call repeatedly."""
-    threading.Timer(max(0.04, float(delay)), lambda: hard_exit(api=api)).start()
-
-
 def _best_effort_cleanup(*, api: Any, tk_root: Any, window_holder: dict[str, object]) -> None:
     _stop_tray(api)
     w = window_holder.get("window")
@@ -355,10 +339,6 @@ def abort_and_quit(
         usage_stats.app_closing()
     except Exception:
         pass
-    _stop_all_agents()
-    arm_force_exit(0.08, api=api)
-    arm_force_exit(0.2, api=api)
-    arm_force_exit(0.45, api=api)
     threading.Thread(
         target=_best_effort_cleanup,
         kwargs={"api": api, "tk_root": tk_root, "window_holder": window_holder},

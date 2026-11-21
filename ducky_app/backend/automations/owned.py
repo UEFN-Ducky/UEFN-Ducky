@@ -374,9 +374,29 @@ def state(aid: str, workflow_id: str) -> dict[str, Any]:
     return {"last_run": row["last_run"], "run_here": row["run_here"]}
 
 
+def _for_log(run: Any) -> Any:
+    """A run as the log keeps it. A step keeps what the log shows and what a later run reads back
+    (label, state, error, inputs, its code log); the values it made stay once, in the run's
+    ``node_outputs`` (long text cut), and its raw result only when it failed. Kept whole, one tool
+    answer was in a run five times: 20 runs of one workflow were 6 MB, sealed again on every run
+    and sent on every open, and nothing read those copies (Nov 2026)."""
+
+    def steps(rows: Any) -> list[Any]:
+        out = []
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                row = {k: v for k, v in row.items() if k != "outputs" and (k != "result" or row.get("ok") is False)}
+                if "substeps" in row:
+                    row["substeps"] = steps(row["substeps"])
+            out.append(row)
+        return out
+
+    return {**run, "steps": steps(run["steps"])} if isinstance(run, dict) and isinstance(run.get("steps"), list) else run
+
+
 def append_run(aid: str, workflow_id: str, run: dict[str, Any], at: float, *, keep: int = RUN_CAP) -> list[dict[str, Any]]:
     """Add a run, keep the last ``keep``; returns the runs that were dropped."""
-    every = runs(aid, workflow_id) + [run]
+    every = [_for_log(one) for one in runs(aid, workflow_id) + [run]]  # (runs stored whole before slim down here too)
     cut = max(len(every) - max(int(keep), 1), 0)
     runtime.runtime_put(aid, workflow_id, runs=_seal(every[cut:], aid), last_run=at)
     return every[:cut]

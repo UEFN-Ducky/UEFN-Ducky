@@ -67,17 +67,20 @@ def test_reclaim_skips_a_panel_pid_that_already_exited(monkeypatch, tmp_path) ->
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="PowerShell filter")
-def test_quitting_reaps_bridges_never_another_ducky_window() -> None:
+def test_quitting_reaps_this_duckys_bridges_never_another_duckys_or_a_window(monkeypatch) -> None:
     from frontend.app_paths import bridge_ps_filter
 
     rows = (
         "@([pscustomobject]@{Name='UEFN-Ducky.exe'; CommandLine='\"C:\\x\\UEFN-Ducky.exe\"'},"
         "[pscustomobject]@{Name='UEFN-Ducky-Bridge.exe'; CommandLine='\"C:\\x\\UEFN-Ducky-Bridge.exe\" bridge --port 4200'},"
         "[pscustomobject]@{Name='UEFN-Ducky.exe'; CommandLine='\"C:\\x\\UEFN-Ducky.exe\" bridge --port 4200 --adapter'},"
-        "[pscustomobject]@{Name='UEFN-Ducky.exe'; CommandLine='\"C:\\t\\UEFN-Ducky.exe\" --profile testbed'})"
+        "[pscustomobject]@{Name='UEFN-Ducky.exe'; CommandLine='\"C:\\t\\UEFN-Ducky.exe\" --profile testbed'},"
+        # another Ducky's bridge (a test copy on its own port) is not this one's to end
+        "[pscustomobject]@{Name='UEFN-Ducky-Bridge.exe'; CommandLine='\"C:\\t\\UEFN-Ducky-Bridge.exe\" bridge --port 4601 --adapter'})"
     )
+    monkeypatch.setattr("frontend.settings.UEFN_LISTENER_PORT", 4200)
     script = f"{rows} | Where-Object {{ {bridge_ps_filter()} }} | ForEach-Object {{ $_.CommandLine }}"
     out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                          capture_output=True, text=True, timeout=60).stdout.split("\n")
     picked = [line.strip() for line in out if line.strip()]
-    assert len(picked) == 2 and all(" bridge " in line for line in picked)  # two bridges, no window
+    assert len(picked) == 2 and all(" bridge --port 4200" in line for line in picked)  # its two bridges only

@@ -33,7 +33,7 @@ use crate::LOCK_WAIT;
 // ponytail: not `mod windows` — that name would shadow the `windows` crate in this file.
 #[path = "windows.rs"]
 mod wins;
-use wins::{create_main, create_msg_window, native_op, show_main};
+use wins::{create_main, create_msg_window, hide_all, native_op, show_main};
 
 const WM_WAKE: u32 = WM_APP + 1;
 const TITLE: &str = "UEFN Ducky";
@@ -335,6 +335,7 @@ impl Host for UiHost {
         if let Some(tx) = tx {
             let _ = tx.send(ToSup::Quit);
         }
+        hide_all(); // (the wait below is the backend's, not the person's)
         if let Some(t) = thread {
             let _ = t.join();
         }
@@ -356,7 +357,6 @@ impl Host for UiHost {
     }
 
     fn finish(&mut self, code: u8, error: &str) {
-        drop(with(|u| u.tray.take()));
         with(|u| {
             let exit = report::Exit::from_code(code as i32).unwrap_or(report::Exit::StartError);
             u.record.finish(exit, error);
@@ -471,7 +471,7 @@ fn end_with(end: End) {
 
 fn on_event(name: &str, data: Value) {
     match name {
-        "quit" => {}
+        "quit" => hide_all(), // Exit chosen in the app: the backend says so before it starts to stop
         "toast" => {
             let event = json!({"t": "event", "name": name, "data": data});
             with(|u| u.tray.as_ref().map(|t| t.handle_event(&event)));
