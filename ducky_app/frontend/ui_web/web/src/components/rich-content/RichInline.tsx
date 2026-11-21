@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { OpenFileHandler } from "../../types/richContent";
 import { basename } from "../../verse-editor/utils/isVerseFile";
-import { isWorkspaceFilePath, normalizeWorkspacePath } from "./isWorkspacePath";
+import { isWorkspaceFilePath, localFilePath, normalizeWorkspacePath } from "./isWorkspacePath";
 import { RichCodeBlock } from "./RichCodeBlock";
 import { onActivateKey } from "./RichCodeChip";
 import { RichEmphasis } from "./RichEmphasis";
@@ -12,7 +12,7 @@ import { parseChatRefHref } from "../chatReferences";
 import { requestOpenChatReference } from "../../navigation/openChatReference";
 import { ChatRefChip } from "../ChatRefChip";
 import { openCodingAgentLoginUi, parseCodingAgentLoginHref } from "../../walkthrough/openCodingAgentLogin";
-import { isRemote } from "../../hooks/usePanelApi";
+import { getApi, isRemote } from "../../hooks/usePanelApi";
 import { openHttpsOnThisDevice } from "../../remote/openHttps";
 
 export function RichLink({ href = "", children, onOpenFile }: {
@@ -22,6 +22,19 @@ export function RichLink({ href = "", children, onOpenFile }: {
 }) {
   const color = richColorFromHref(href);
   if (color) return <span className={`rich-text-accent rich-tone--${color}`}>{children}</span>;
+  // A full path on this PC (an export, a file in another folder): show it in File Explorer.
+  // Before the reference chips, whose `file:` form is a project file. Not on a phone: the
+  // Explorer window would open on the PC.
+  const local = localFilePath(href);
+  if (local) {
+    if (isRemote()) return <span className="rich-md-link rich-md-link--static" title={local}>{children}</span>;
+    const run = () => void getApi()?.open_path_in_explorer?.(local);
+    return (
+      <span role="button" tabIndex={0} className="rich-md-link" title={`Show in File Explorer: ${local}`} onClick={run} onKeyDown={onActivateKey(run)}>
+        {children}
+      </span>
+    );
+  }
   if (parseChatRefHref(href)) {
     const label = (Array.isArray(children) ? children : [children])
       .map((child) => (typeof child === "string" || typeof child === "number" ? String(child) : ""))

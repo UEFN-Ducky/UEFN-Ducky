@@ -6,6 +6,14 @@ import { RichContentRenderer } from "./RichContentRenderer";
 import { MarkdownContent } from "./MarkdownContent";
 import { CHAT_APPEARANCE_PREVIEW } from "../../views/settings/ChatResponsePreview";
 
+const openPathInExplorer = vi.hoisted(() => vi.fn());
+const remote = vi.hoisted(() => ({ on: true }));
+vi.mock("../../hooks/usePanelApi", async (original) => ({
+  ...(await original<typeof import("../../hooks/usePanelApi")>()),
+  getApi: () => ({ open_path_in_explorer: openPathInExplorer }),
+  isRemote: () => remote.on,
+}));
+
 afterEach(cleanup);
 
 describe("rich reply rendering", () => {
@@ -193,6 +201,26 @@ describe("rich reply rendering", () => {
     })} />);
     expect(container.querySelector("script, a[href^='javascript:']")).toBeNull();
     expect(container.querySelector(".rich-ref")?.textContent).toBe("safe");
+  });
+
+  it("shows a link to a full path on this PC in File Explorer", () => {
+    // Nov 21 2026: a link to an exported video (file:///C:/...%20...) rendered as dead text.
+    openPathInExplorer.mockClear();
+    const text = "[the video](file:///C:/Users/me/Videos/Island%20Media%20Kit/Trailer%2030s.mp4) and [plain](C:/Exports/a.mp4)";
+    // On a phone the Explorer window would open on the PC, so the link is plain text there.
+    const phone = render(<MarkdownContent text={text} />);
+    expect(phone.getByText("the video").getAttribute("role")).toBeNull();
+    phone.unmount();
+    remote.on = false;
+    const { getByText } = render(<MarkdownContent text={text} />);
+    remote.on = true;
+    const link = getByText("the video");
+    expect(link.getAttribute("title")).toContain("Trailer 30s.mp4");
+    expect(link.getAttribute("role")).toBe("button");
+    fireEvent.click(link);
+    expect(openPathInExplorer).toHaveBeenLastCalledWith("C:\\Users\\me\\Videos\\Island Media Kit\\Trailer 30s.mp4");
+    fireEvent.keyDown(getByText("plain"), { key: "Enter" });
+    expect(openPathInExplorer).toHaveBeenLastCalledWith("C:\\Exports\\a.mp4");
   });
 
   it("renders the Appearance chat preview as the ledger dashboard widgets", () => {

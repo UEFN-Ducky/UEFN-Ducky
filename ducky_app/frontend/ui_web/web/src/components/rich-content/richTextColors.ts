@@ -2,6 +2,7 @@ import { Children, isValidElement } from "react";
 import type { ReactNode } from "react";
 import { defaultUrlTransform } from "react-markdown";
 import { parseChatRefHref } from "../chatReferences";
+import { localFilePath } from "./isWorkspacePath";
 
 export const RICH_TEXT_COLORS = ["blue", "purple", "green", "amber", "yellow", "red"] as const;
 export type RichTextColor = typeof RICH_TEXT_COLORS[number];
@@ -19,6 +20,8 @@ export function richUrlTransform(url: string, key: string): string {
   ) {
     return url;
   }
+  // A full path on this PC: RichLink shows it in File Explorer (it never runs the file).
+  if (key === "href" && localFilePath(url)) return url;
   if (key === "href" && /^ducky:\/\/settings\.llms\/[a-z0-9_-]+#login$/i.test(url)) return url;
   return defaultUrlTransform(url);
 }
