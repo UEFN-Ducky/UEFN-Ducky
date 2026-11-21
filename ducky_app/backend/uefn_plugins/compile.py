@@ -17,6 +17,10 @@ Module layout (settled by a Nuitka experiment): the backend package is renamed t
 the plugin root makes ``Path(__file__).resolve().parents[1]`` resolve to the plugin
 folder — exactly as the source package did. Non-Python files found inside the backend
 are re-emitted under ``uefn_plugin_<id>/`` so ``__file__``-relative reads still land.
+
+A module written across several files (:mod:`one_module`) is compiled as the one module
+it is. And a build is only written once it has loaded: the finished zip is unpacked the
+way an install lays it out and its backend imported in a process of its own.
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
+from backend.uefn_plugins import one_module
 from backend.uefn_plugins.plugin_host.loader import compiled_module_name
 from backend.uefn_plugins.plugin_version import plugin_version_rank
 from backend.uefn_plugins.signing import (
@@ -503,34 +508,79 @@ def _should_minify(rel: Path) -> bool:
     return parts[0] == "ui" or len(parts) == 1
 
 
-def _smoke_import(pyd: Path, mod_name: str, register_name: str) -> str:
-    """Load the compiled module in a fresh app-ABI process; return '' on success else error.
+# Run in a process of its own (the same way in the installed app and from source): import the
+# built backend from an unpacked copy of the zip, and say in a file how that went.
+_LOAD_CHECK = """import importlib.util, json, os, sys
+from importlib.machinery import ExtensionFileLoader
 
-    Skipped under a frozen interpreter (no ``-c``); the final build/test covers that.
+
+def say(what):
+    with open(ARGS["report"], "w", encoding="utf-8") as fh:
+        json.dump(what, fh)
+
+
+try:  # (what the plugin prints while loading is not the build's output)
+    null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null, 1)
+    os.dup2(null, 2)
+except OSError:
+    pass
+sys.stdout = sys.stderr = open(os.devnull, "w")
+os.environ["DUCKY_SKIP_LICENSE_GATE"] = "1"  # the load is checked here, not the licence
+say({"started": True})
+try:
+    loader = ExtensionFileLoader(ARGS["name"], ARGS["pyd"])
+    spec = importlib.util.spec_from_file_location(ARGS["name"], ARGS["pyd"], loader=loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[ARGS["name"]] = module
+    spec.loader.exec_module(module)
+    if callable(getattr(module, ARGS["register"], None)):
+        say({"ok": True})
+    else:
+        say({"error": "the backend has no %s()" % ARGS["register"]})
+except BaseException as exc:
+    say({"error": "%s: %s" % (type(exc).__name__, exc)})
+os._exit(0)
+"""
+_LOAD_CHECK_S = 180.0
+
+
+def _check_build_loads(raw_zip: bytes, work: Path, mod_name: str, pyd_name: str, register_name: str) -> tuple[str, str]:
+    """Does the build load? ``(why it does not, why that could not be checked)``, both '' when it does.
+
+    The zip is unpacked under ``work`` the way an install lays it out (the files the backend
+    reads beside itself are there) and the backend imported in a process of its own, which
+    has this process's import path: Ducky's own modules are there as they are in the app.
+    Only what the backend itself did counts as not loading; a check that could not run says so.
     """
-    if getattr(sys, "frozen", False):
-        return ""
-    code = (
-        "import sys,importlib.util\n"
-        "from importlib.machinery import ExtensionFileLoader\n"
-        "name=sys.argv[1]; pyd=sys.argv[2]; reg=sys.argv[3]\n"
-        "ld=ExtensionFileLoader(name,pyd)\n"
-        "sp=importlib.util.spec_from_file_location(name,pyd,loader=ld)\n"
-        "m=importlib.util.module_from_spec(sp); sys.modules[name]=m; sp.loader.exec_module(m)\n"
-        "assert hasattr(m,reg), 'missing register(): '+reg\n"
-        "print('ok')\n"
-    )
-    import os
+    home = work / "installed"
+    report = work / "load-check.json"
+    try:
+        import multiprocessing
 
-    env = dict(os.environ)
-    env["DUCKY_SKIP_LICENSE_GATE"] = "1"  # smoke test checks load only, not licensing
-    res = subprocess.run(
-        [sys.executable, "-I", "-c", code, mod_name, str(pyd), register_name],
-        capture_output=True, text=True, errors="replace", env=env, creationflags=_NO_WINDOW,
-    )
-    if res.returncode == 0 and "ok" in res.stdout:
-        return ""
-    return (res.stderr or res.stdout or "import failed").strip().splitlines()[-1]
+        with zipfile.ZipFile(io.BytesIO(raw_zip)) as zf:
+            zf.extractall(home)
+        args = {"name": mod_name, "pyd": str(home / pyd_name), "register": register_name, "report": str(report)}
+        proc = multiprocessing.get_context("spawn").Process(
+            target=exec, args=(_LOAD_CHECK, {"ARGS": args}), name="ducky-build-load-check", daemon=True,
+        )
+        proc.start()
+        proc.join(_LOAD_CHECK_S)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(10)
+            return "", f"loading it took over {int(_LOAD_CHECK_S)} seconds"
+        code = proc.exitcode
+        said = json.loads(report.read_text(encoding="utf-8")) if report.is_file() else None
+    except Exception as exc:  # noqa: BLE001 - the check itself failed, which says nothing about the build
+        return "", f"{type(exc).__name__}: {exc}"
+    if not isinstance(said, dict):
+        return "", f"the process that loads it did not start (exit code {code})"
+    if said.get("ok"):
+        return "", ""
+    if said.get("error"):
+        return str(said["error"]), ""
+    return f"it closed the process that loaded it (exit code {code})", ""
 
 
 def build_plugin(
@@ -548,8 +598,9 @@ def build_plugin(
     ``visibility`` (public, or the Store's private value) and ``audience`` are baked into
     the license gate so a private build only loads where its audience is reachable. They
     do not change what ships.
-    ``smoke_test=False`` skips importing the built module — a reviewer rebuilding
-    someone else's submission never runs its code. ``release=True`` (Store publish and
+    ``smoke_test=False`` skips loading the built module — a reviewer rebuilding
+    someone else's submission never runs its code. Otherwise a build that does not load
+    is refused (:func:`_check_build_loads`). ``release=True`` (Store publish and
     review builds) bakes in the Store's public key — the one this app carries, else
     fetched from the Store now — and fails if neither is available: a build made
     without the key would never be license-checked. Dev builds bake whatever key this
@@ -621,16 +672,16 @@ def build_plugin(
         staged = work / mod_name
         _progress(progress, 0.55, "Staging backend…")
         data_files, foreign = _stage_backend_package(pkg_src, staged)
+        try:
+            joined = one_module.join(staged)
+        except one_module.OneModuleError as exc:
+            raise CompileError(f"{entry}/{exc}") from exc
         _inject_license(staged, pid, version_str, visibility, audience, pubkey)
         _progress(progress, 0.6, "Compiling backend with Nuitka…")
         pyd, nuitka_warn = _run_nuitka(kpy, work, mod_name)
         warnings.extend(nuitka_warn)
         _progress(progress, 0.75, "Checking it runs on every CPU…")
         _assert_runs_on_every_cpu(pyd)
-
-        smoke = _smoke_import(pyd, mod_name, register_name) if smoke_test else ""
-        if smoke:
-            warnings.append(f"compiled module did not import in a test process: {smoke}")
 
         # Rewrite the manifest for a compiled install.
         out_manifest = dict(manifest)
@@ -707,6 +758,16 @@ def build_plugin(
                 f"The build is {len(raw) / 1048576:.1f} MB and the Store takes up to "
                 f"{STORE_MAX_ZIP_BYTES // 1048576} MB: move big media out of the plugin (users fetch or make it)."
             )
+        if smoke_test:
+            _progress(progress, 0.93, "Checking the build loads…")
+            broken, unchecked = _check_build_loads(raw, work, mod_name, final_pyd_name, register_name)
+            if broken:
+                raise CompileError(
+                    f"The build does not load, so it was not written: {broken}. A compiled plugin has no .py "
+                    "files of its own to read or run; run the plugin from source to find anything else."
+                )
+            if unchecked:
+                warnings.append(f"the build was not checked for loading: {unchecked}")
         out_zip.parent.mkdir(parents=True, exist_ok=True)
         tmp = out_zip.with_suffix(out_zip.suffix + ".tmp")
         tmp.write_bytes(raw)
@@ -729,6 +790,8 @@ def build_plugin(
         "warnings": warnings,
         "minified": minified,
         "uncompiled": uncompiled,
+        # Files compiled as part of another module (one module written across files).
+        "joined": [f"{entry}/{rel}" for rel in joined],
         # The licence gate is live only when the Store's key was baked in.
         "license_gate": bool(pubkey),
     }

@@ -59,6 +59,15 @@ underscores). No `.py` source ships. UI `.js` / `.css` are minified (vendored
 - **Never load `.py` files by path**: no `importlib.util.spec_from_file_location`,
   `runpy.run_path`, `SourceFileLoader`, `exec(open(…).read())`. Import modules:
   `from . import store`.
+- **One long module cut into files** is the one exception. A module may run files
+  beside it in its own namespace when their names are a marked list:
+  `_PARTS = ("_kit.py", "_roads.py")  # ducky-build: one module`, then your own loop
+  that `exec`s each file into `globals()` (that is how it runs from source). The build
+  compiles the listed files into the module and leaves the list empty, so the loop
+  runs nothing there. Every part starts with the module's own `from __future__` lines.
+- **A build that does not load is not written.** The build unpacks the finished zip
+  the way an install lays it out and imports the backend in a process of its own.
+  `Build failed: The build does not load…` carries Python's own error: fix what it names.
 - **Import your own modules relatively.** `import backend.x` or `from backend import x`
   imports the *app's* `backend` package, not yours.
 - **Data files** go in `assets/` or as `.json` / `.txt` next to the module.

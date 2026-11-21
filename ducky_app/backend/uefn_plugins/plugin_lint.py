@@ -11,7 +11,9 @@ each problem with a message that says how to fix it.
   the backend) and a template that uses it, a bundled ``skills/<id>/SKILL.md``,
   and ``:focus-visible`` styles when there is a panel.
 - The backend never reads its own ``.py`` source or loads ``.py`` files by path:
-  installed plugins can be compiled, and those files are gone then.
+  installed plugins can be compiled, and those files are gone then. The one way a
+  module may run files beside it is the marked list the build compiles into the
+  module (:mod:`one_module`).
 - ``plugin.json``: ``data_sharing`` is true or false, ``data_locks`` maps doc key or
   file path prefixes to ``auto`` or ``required``, ``data_local`` lists prefixes of this
   PC's own items, ``data_sync`` maps doc key prefixes of a log to ``batched``, and each
@@ -31,6 +33,8 @@ import difflib
 import re
 from pathlib import Path
 from typing import Any, Iterable, Iterator
+
+from backend.uefn_plugins import one_module
 
 UI_SUFFIXES = frozenset({".html", ".htm", ".css", ".js", ".mjs"})
 _SKIP_PARTS = frozenset({"backend", "skills", "scripts", "deploy", ".git", "__pycache__", ".venv", "node_modules"})
@@ -403,6 +407,36 @@ def _kw_str(call: ast.Call, key: str) -> str:
     return ""
 
 
+def _own_file_facts(tree: ast.AST) -> tuple[dict[int, set[str]], set[int]]:
+    """Per call (by ``id``), from the scope the call is in (a function's own body, or the module's):
+    the names that scope assigns a path ending in ``.py`` to (``p = here / "x.py"``), and whether
+    that scope uses ``__file__`` at all."""
+    defs = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    py_names: dict[int, set[str]] = {}
+    by_own_file: set[int] = set()
+    for scope in [tree] + [n for n in ast.walk(tree) if isinstance(n, defs[:2])]:
+        own, todo = [], list(ast.iter_child_nodes(scope))
+        while todo:
+            node = todo.pop()
+            if isinstance(node, defs):
+                continue
+            own.append(node)
+            todo.extend(ast.iter_child_nodes(node))
+        names: set[str] = set()
+        for node in own:
+            if isinstance(node, ast.Assign) and any(
+                    isinstance(c, ast.Constant) and isinstance(c.value, str) and c.value.lower().endswith(".py")
+                    for c in ast.walk(node.value)):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        uses_own_file = any(isinstance(node, ast.Name) and node.id == "__file__" for node in own)
+        for node in own:
+            if isinstance(node, ast.Call):
+                py_names[id(node)] = names
+                if uses_own_file:
+                    by_own_file.add(id(node))
+    return py_names, by_own_file
+
+
 class _Backend:
     """What a plugin's backend registers, read from its source (never imported)."""
 
@@ -416,7 +450,8 @@ class _Backend:
         self.source_reads: list[str] = []
         self.file_writes: list[tuple[str, int]] = []  # (rel, line) of each call that writes a file of its own
 
-    def scan(self, rel: str, tree: ast.AST) -> None:
+    def scan(self, rel: str, tree: ast.AST, joins: bool = False) -> None:
+        """``joins``: the module is one written across files (its marked list is what it reads and runs)."""
         # `for fn in TOOLS: api.tool(fn, name=fn.__name__)`: each function of the module's TOOLS tuple is a tool
         # by its own name (never one tool called "fn").
         seqs = {t.id: [e.id for e in node.value.elts if isinstance(e, ast.Name)]
@@ -426,6 +461,7 @@ class _Backend:
                   if isinstance(node, ast.For) and isinstance(node.target, ast.Name)
                   and isinstance(node.iter, ast.Name) and node.iter.id in seqs}
         cache_lines = _local_cache_writes(tree)
+        py_names, by_own_file = _own_file_facts(tree)
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self.func_docs[node.name] = (ast.get_docstring(node) or "").strip().split("\n", 1)[0].strip()
@@ -454,11 +490,12 @@ class _Backend:
             elif name == "tool" and node.args and isinstance(node.args[0], ast.Name):
                 self.tools.add(_kw_str(node, "name") or node.args[0].id)
                 self.tool_funcs[_kw_str(node, "name") or node.args[0].id] = node.args[0].id
-            self._source_read(rel, node, name)
+            self._source_read(rel, node, name, joins, py_names.get(id(node), set()), id(node) in by_own_file)
             if _writes_file(node, name) and getattr(node, "lineno", 0) not in cache_lines:
                 self.file_writes.append((rel, getattr(node, "lineno", 0)))
 
-    def _source_read(self, rel: str, call: ast.Call, name: str) -> None:
+    def _source_read(self, rel: str, call: ast.Call, name: str, joins: bool = False,
+                     py_names: Iterable[str] = (), by_own_file: bool = False) -> None:
         line = getattr(call, "lineno", 0)
         if name == "reload":
             self.source_reads.append(
@@ -479,6 +516,18 @@ class _Backend:
                 "keep what you need as data instead."
             )
             return
+        if joins:
+            return  # its marked files are what it reads and runs; the build compiles them into it
+        if name in ("exec", "compile") and isinstance(call.func, ast.Name) and by_own_file and call.args \
+                and isinstance(call.args[0], ast.Call) \
+                and _call_name(call.args[0].func) in ("read", "read_text", "read_bytes"):
+            self.source_reads.append(
+                f"{rel}:{line}: runs Python it reads from a file beside the module. Installed plugins can be "
+                "compiled and the .py files are gone then: import the module instead. For one long module cut "
+                f'into files, mark the list of files with "# {one_module.MARK}" and the build compiles them '
+                "into the module."
+            )
+            return
         if name not in ("open", "read_text", "read_bytes"):
             return
         if isinstance(call.func, ast.Name):
@@ -488,6 +537,8 @@ class _Backend:
         strings = [n.value for n in ast.walk(call) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
         reads_py = any(s.lower().endswith(".py") for s in strings)
         own_file = target is not None and _is_own_file(target)
+        # `path = here / "x.py"` on one line and `open(path)` on the next is the same read.
+        reads_py = reads_py or (isinstance(target, ast.Name) and target.id in py_names and not _writes_file(call, name))
         if reads_py or own_file:
             self.source_reads.append(
                 f"{rel}:{line}: reads a .py file{' (its own source)' if own_file else ''}. Installed plugins "
@@ -549,10 +600,15 @@ def scan_backend(root: Path, *, skip_tests: bool = False) -> _Backend:
         if skip_tests and (py.name.startswith(("test_", "conftest")) or "tests" in py.relative_to(root).parts):
             continue  # fixture tools in tests are not what agents search
         try:
-            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+            text = py.read_text(encoding="utf-8")
+            tree = ast.parse(text, filename=str(py))
         except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
             continue  # py_compile reports it
-        found.scan(py.relative_to(root).as_posix(), tree)
+        try:
+            joins = one_module.declared(text) is not None
+        except one_module.OneModuleError:
+            joins = False  # check_backend says what is wrong with the mark
+        found.scan(py.relative_to(root).as_posix(), tree, joins)
     return found
 
 
@@ -607,6 +663,7 @@ def check_backend(root: Path, manifest: dict[str, Any], plugin_id: str) -> list[
             f"start.chat → pipeline.agent → {node_id} → pipeline.finish."
         )
     issues.extend(found.source_reads)
+    issues.extend(one_module.problems(root / "backend", "backend/"))
     issues.extend(register_background_issues(root))
     return issues
 
