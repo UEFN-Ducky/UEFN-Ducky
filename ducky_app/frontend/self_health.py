@@ -60,7 +60,28 @@ def _role(cmdline: list[str]) -> str:
         return "agent host"
     if " bridge" in f" {args}" or args.startswith("bridge"):
         return "tool server (bridge)"
+    if "--multiprocessing-fork" in args:
+        # A process another Ducky process started for work of its own (a plugin's worker,
+        # large text comparisons). It read as a second "app" before.
+        return "worker"
     return "app"
+
+
+def _own_plugin_workers() -> dict[int, str]:
+    """pid -> plugin, for the process a plugin runs its own work in. Each one writes its pid
+    to ``plugin_local/<plugin>/worker-*.json`` (City Builder's ``backend/worker.py``)."""
+    out: dict[int, str] = {}
+    try:
+        from backend.skills.discovery import appdata_dir
+
+        for path in (appdata_dir() / "plugin_local").glob("*/worker-*.json"):
+            try:
+                out[int(json.loads(path.read_text(encoding="utf-8"))["pid"])] = path.parent.name
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _cmdline(pid: int) -> tuple[list[str], str]:
@@ -326,10 +347,13 @@ def _plugin_last_used() -> dict[str, float]:
 
 def ducky_footprint(procs: dict[int, Any], me_pid: int, known: dict[int, tuple[str, str]] | None = None,
                     host_pids: set[int] | None = None, *, idle: bool = False, now: float | None = None,
-                    last_used: dict[str, float] | None = None) -> dict[str, Any]:
+                    last_used: dict[str, float] | None = None,
+                    own_workers: dict[int, str] | None = None) -> dict[str, Any]:
     """Everything Ducky holds: its process tree plus Ducky's other processes (shared tool
     servers), in parts (MB of private memory). ``known`` = pid -> (role, exe) already read;
-    command lines are asked only for Python children (plugin workers)."""
+    command lines are asked only for Python children (plugin workers). ``own_workers`` =
+    pid -> plugin for the processes plugins run their own work in (Nov 20 2026: City
+    Builder's worker counted as a tool server)."""
     from backend.util import proc_table
 
     known, host_pids = known or {}, host_pids or set()
@@ -343,6 +367,7 @@ def ducky_footprint(procs: dict[int, Any], me_pid: int, known: dict[int, tuple[s
     big: list[dict[str, Any]] = []
     conhosts = 0
     last = _plugin_last_used() if last_used is None else last_used
+    own = _own_plugin_workers() if own_workers is None else own_workers
     for pid in pids:
         proc = procs[pid]
         name, mb = proc.name.lower(), _mb(proc.private)
@@ -351,6 +376,11 @@ def ducky_footprint(procs: dict[int, Any], me_pid: int, known: dict[int, tuple[s
             part = "app"
         elif pid in host_pids or role == "agent host":
             part = "agent_hosts"
+        elif pid in own and _ducky_named(proc) and role in ("", "worker"):
+            # The plugin's own process: it closes itself when it has been idle, so it is
+            # never listed as a leftover to stop (idle_min stays None).
+            part = "plugin_workers"
+            workers.append({"pid": pid, "plugin": own[pid], "mb": mb, "idle_min": None})
         elif _ducky_named(proc):
             part = "tool_servers"
             if role == "shared tool server":

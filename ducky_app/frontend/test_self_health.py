@@ -442,6 +442,41 @@ def test_health_names_agent_host_processes():
     assert self_health._role(["UEFN-Ducky.exe", "agent-host", "--slot", "0", "--pipe", "p"]) == "agent host"
     assert self_health._role(["python.exe", "-m", "frontend", "agent-host", "--slot", "1", "--pipe", "p"]) == "agent host"
     assert self_health._role(["UEFN-Ducky.exe"]) == "app"
+    # a process Ducky started for work of its own is not a second app
+    assert self_health._role(["UEFN-Ducky.exe", "--multiprocessing-fork", "parent_pid=7", "pipe_handle=9"]) == "worker"
+
+
+def test_a_plugins_own_worker_is_counted_as_that_plugins_not_as_a_tool_server(monkeypatch, tmp_path):
+    """Nov 20 2026: City Builder runs its work in a process of its own (UEFN-Ducky.exe started
+    by Ducky). It names itself in plugin_local/<plugin>/worker-*.json."""
+    from backend.util import proc_table
+
+    me, mb = 100, 1 << 20
+
+    def proc(pid, name, ppid, size_mb):
+        return proc_table.Proc(pid, ppid, name, size_mb * mb, size_mb * mb, 1, 1, 0.0, 200.0)
+
+    procs = {p.pid: p for p in (proc(me, "UEFN-Ducky.exe", 1, 236), proc(1, "explorer.exe", 0, 50),
+                                proc(120, "UEFN-Ducky.exe", me, 1161),  # City Builder's worker
+                                proc(121, "UEFN-Ducky.exe", me, 40),  # Ducky's own text-comparison worker
+                                proc(130, "UEFN-Ducky-Bridge.exe", 1, 180))}
+    folder = tmp_path / "plugin_local" / "road-network"
+    folder.mkdir(parents=True)
+    (folder / "worker-34ae30f668fb.json").write_text('{"key": "00", "pid": 120}', encoding="utf-8")
+    (folder / "worker-broken.json").write_text("not json", encoding="utf-8")
+    monkeypatch.setattr("backend.skills.discovery.appdata_dir", lambda: tmp_path)
+    assert self_health._own_plugin_workers() == {120: "road-network"}
+    known = {120: ("worker", ""), 121: ("worker", ""), 130: ("shared tool server", "C:/Ducky/UEFN-Ducky-Bridge.exe")}
+    dt = self_health.ducky_footprint(procs, me, known, set(), now=10_000.0, last_used={})
+    assert dt["parts"]["plugin_workers"] == 1161 and dt["parts"]["tool_servers"] == 220 and dt["parts"]["app"] == 236
+    assert dt["plugin_workers"] == [{"pid": 120, "plugin": "road-network", "mb": 1161, "idle_min": None}]
+    # it closes itself when idle: never reported as a leftover to stop
+    findings = self_health._footprint_findings(dt, {})
+    assert "plugin workers 1.13 GB" in findings[0]["what"] and not [f for f in findings if "unused" in f["what"]]
+    # a key file left behind whose pid now belongs to something else changes nothing
+    stale = self_health.ducky_footprint(procs, me, {130: known[130]}, set(), now=10_000.0, last_used={},
+                                        own_workers={130: "road-network", 1: "road-network"})
+    assert stale["parts"]["plugin_workers"] == 0 and stale["plugin_workers"] == []
 
 
 def test_health_flags_turns_running_in_the_window():
