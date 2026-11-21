@@ -72,9 +72,10 @@ export function RichLink({ href = "", children, onOpenFile }: {
       </span>
     );
   }
-  if (onOpenFile && isWorkspaceFilePath(href)) {
+  if (isWorkspaceFilePath(href)) {
     const path = normalizeWorkspacePath(href);
-    const run = () => onOpenFile(path, basename(path));
+    // No editor handler here (a plan, a card): the app opens the file itself.
+    const run = () => (onOpenFile ? onOpenFile(path, basename(path)) : void getApi()?.open_project_file(path));
     return (
       <span role="button" tabIndex={0} className="rich-md-link" title={path} onClick={run} onKeyDown={onActivateKey(run)}>
         {children}

@@ -1,13 +1,18 @@
 import { useId, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { getApi } from "../../hooks/usePanelApi";
+import { getApi, isRemote } from "../../hooks/usePanelApi";
 import type { OpenFileHandler } from "../../types/richContent";
 import { basename } from "../../verse-editor/utils/isVerseFile";
 import { classifyRichRef, type RichRefOpen } from "./classifyRichRef";
 
 function openChip(open: RichRefOpen, onOpenFile?: OpenFileHandler): void {
+  if (open.type === "local") {
+    void getApi()?.open_path_in_explorer?.(open.path);
+    return;
+  }
   if (open.type === "file") {
-    if (onOpenFile) onOpenFile(open.path, basename(open.path));
+    if (onOpenFile && open.line) onOpenFile(open.path, basename(open.path), { line: open.line });
+    else if (onOpenFile) onOpenFile(open.path, basename(open.path));
     else void getApi()?.open_project_file(open.path);
     return;
   }
@@ -58,7 +63,8 @@ export function RichCodeChip({ text, onOpenFile }: { text: string; onOpenFile?: 
     onMouseEnter: (e: MouseEvent<HTMLElement>) => show(e.currentTarget),
     onMouseLeave: () => setPos(null),
   };
-  const open = ref.open;
+  // Not on a phone: the Explorer window would open on the PC.
+  const open = ref.open?.type === "local" && isRemote() ? undefined : ref.open;
   if (!open) {
     // Only a name, not a link: pressing it does nothing, so a click never copies or
     // selects-and-copies over what the person was doing.

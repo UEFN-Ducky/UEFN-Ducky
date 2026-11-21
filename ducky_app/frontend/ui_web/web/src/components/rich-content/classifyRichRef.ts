@@ -1,4 +1,5 @@
 import { isFolderProject } from "../../verse-editor/utils/isVerseFile";
+import { localFilePath } from "./isWorkspacePath";
 
 export type RichRefKind =
   | "verse"
@@ -15,7 +16,10 @@ export type RichRefKind =
   | "tool"
   | "name";
 
-export type RichRefOpen = { type: "file"; path: string } | { type: "asset"; path: string };
+export type RichRefOpen =
+  | { type: "file"; path: string; line?: number }
+  | { type: "asset"; path: string }
+  | { type: "local"; path: string };
 
 export type RichRef = {
   text: string;
@@ -26,7 +30,9 @@ export type RichRef = {
 };
 
 const UMG_TYPES = /^(CanvasPanel|Image|TextBlock|Button|Overlay|StackBox|Border|SizeBox)$/;
-const FILE_EXT = /\.(verse|versetest|vson|uasset|umap|py|json|md|txt|toml|cfg|blend|fbx)$/i;
+const FILE_EXT = /\.(verse|versetest|vson|uasset|umap|py|json|md|txt|toml|cfg|blend|fbx|ts|tsx|js|jsx|mjs|css|html|yml|yaml)$/i;
+/** `src/app.py:42` or `src/app.py:42:7`: the file, then the line. */
+const PATH_LINE = /^(.+\.\w+):(\d+)(?::\d+)?$/;
 const UEFN_PATH = /^\/[A-Za-z][\w]*(?:\/[\w./-]+)+$/;
 const ACTORISH = /^[A-Z][A-Za-z0-9]*_[A-Za-z0-9]/;
 const FIELDISH = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
@@ -71,6 +77,7 @@ function uefnToContent(path: string): string {
 function withOpen(base: Omit<RichRef, "hint">, open?: RichRefOpen): RichRef {
   if (open?.type === "file") return { ...base, open, hint: "Open in the editor" };
   if (open?.type === "asset") return { ...base, open, hint: "Reveal in UEFN" };
+  if (open?.type === "local") return { ...base, open, hint: "Show in File Explorer" };
   // Nothing to open: the chip is only a name. Clicking it does nothing (it never copies).
   return { ...base, hint: "" };
 }
@@ -81,6 +88,11 @@ export function classifyRichRef(raw: string): RichRef {
   if (!text) {
     return { text: raw, kind: "name", label: "Name", hint: "" };
   }
+  const lined = text.match(PATH_LINE);
+  const target = lined ? lined[1] : text;
+  // A full path on this PC is not a project file: show it in File Explorer.
+  const local = localFilePath(target);
+  if (local) return withOpen({ text, kind: "file", label: "File on this PC" }, { type: "local", path: local });
   if (text.startsWith("@") || text === "Props") {
     return withOpen({ text, kind: "keyword", label: text.startsWith("@") ? "Verse specifier" : "Editable field" });
   }
@@ -105,11 +117,12 @@ export function classifyRichRef(raw: string): RichRef {
       label: kind === "tool" ? "Tool" : kind === "verse" ? "Verse tool" : kind === "device" ? "Editor tool" : "Tool",
     });
   }
-  if (FILE_EXT.test(text) || /^(?:content\/|verse\/)/i.test(text)) {
-    const verse = /\.verse/i.test(text);
+  if (FILE_EXT.test(target) || /^(?:content\/|verse\/)/i.test(target)) {
+    const verse = /\.verse/i.test(target);
+    const open = fileOpen(target);
     return withOpen(
       { text, kind: verse ? "verse" : "file", label: verse ? "Verse file" : "Project file" },
-      fileOpen(text),
+      lined ? { type: "file", path: open.path, line: Number(lined[2]) } : open,
     );
   }
   if (/^COL_/i.test(text)) return withOpen({ text, kind: "folder", label: "Blender collection" });

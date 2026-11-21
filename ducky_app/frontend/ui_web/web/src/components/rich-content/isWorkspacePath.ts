@@ -3,7 +3,7 @@ import { isFolderProject } from "../../verse-editor/utils/isVerseFile";
 const WORKSPACE_PATH_RE =
   /^(?:content\/)?(?:verse|textures|materials|blueprints|audio|meshes|ui|plugins)[/\\]/i;
 
-const FILE_EXT_RE = /\.(verse|versetest|vson|uasset|umap|py|json|md|txt|toml|cfg)$/i;
+const FILE_EXT_RE = /\.(verse|versetest|vson|uasset|umap|py|json|md|txt|toml|cfg|ts|tsx|js|jsx|mjs|css|html|yml|yaml)$/i;
 
 export function isWorkspaceFilePath(href: string): boolean {
   const trimmed = href.trim();
@@ -14,10 +14,10 @@ export function isWorkspaceFilePath(href: string): boolean {
   return false;
 }
 
-/** A file or folder on this PC by full path: `file:///C:/a/b.mp4`, `C:/a/b.mp4` or `C:\a\b.mp4`
+/** A file or folder on this PC by full path: `file:///C:/a/b.mp4`, `file:C:/a/b.mp4`, `C:/a/b.mp4` or `C:\a\b.mp4`
  * (percent-escapes decoded). Returns the Windows path, or null for anything else. */
 export function localFilePath(href: string): string | null {
-  let s = (href || "").trim().replace(/^file:\/\/\/?/i, "");
+  let s = (href || "").trim().replace(/^file:(?:\/\/\/?)?/i, "");
   try {
     s = decodeURIComponent(s);
   } catch {

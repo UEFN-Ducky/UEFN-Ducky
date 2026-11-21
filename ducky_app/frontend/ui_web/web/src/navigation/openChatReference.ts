@@ -112,7 +112,8 @@ export function requestOpenChatReference(href: string, label = ""): void {
   }
   if (parsed.kind === "file") {
     const path = parsed.id;
-    fileOpener?.(path, path.split("/").pop() || path);
+    // No editor tab host mounted yet: the app opens the file itself.
+    if (!requestOpenProjectFile(path)) void getApi()?.open_project_file?.(path);
     return;
   }
   if (parsed.kind === "plugin") {

@@ -28,6 +28,13 @@ describe("classifyRichRef", () => {
     expect(classifyRichRef("EntryTrigger").open).toBeUndefined();
   });
 
+  it("opens full PC paths in Explorer and path:line at that line", () => {
+    expect(classifyRichRef("C:\\Users\\me\\Videos\\clip.mp4").open).toEqual({ type: "local", path: "C:\\Users\\me\\Videos\\clip.mp4" });
+    expect(classifyRichRef("C:/repo/app.py:12").open).toEqual({ type: "local", path: "C:\\repo\\app.py" });
+    expect(classifyRichRef("Content/Verse/hud.verse:42").open).toEqual({ type: "file", path: "Content/Verse/hud.verse", line: 42 });
+    expect(classifyRichRef("Content/ui/menu.html").open).toEqual({ type: "file", path: "Content/ui/menu.html" });
+  });
+
   it("splits the place-and-wire tool chain into different chip kinds", () => {
     expect(classifyRichRef("workspace_write_file").kind).toBe("file");
     expect(classifyRichRef("workspace_list_verse_errors").kind).toBe("verse");
