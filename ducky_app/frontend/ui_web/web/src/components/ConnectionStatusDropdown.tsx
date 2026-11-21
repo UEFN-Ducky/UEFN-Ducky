@@ -56,7 +56,7 @@ export function epicMcpRows(status: ListenerStatus): [RowProps, RowProps] {
       "UEFN MCP",
       editor === "uefn" || (!editor && Boolean(status.epic_mcp_online)),
       "Unreal Editor",
-      `Offline${reason ? ` · ${reason}` : ""}`,
+      uefnMcpOfflineDetail(status, reason),
     ),
     row("Unreal MCP", editor === "unreal", "UEFN", "Offline · open Unreal Editor 5.8+ with Unreal MCP"),
   ];
@@ -76,6 +76,26 @@ function Row({ label, detail, ok, warn, action }: RowProps & { action?: ReactNod
       </div>
     </div>
   );
+}
+
+/** The listener row while it is not linked. Ducky links by itself (it follows the UEFN
+ * process and restarts a listener that did not start), so nothing here tells the person to
+ * start anything: "open UEFN + start listener" left people looking for a button. */
+export function listenerOfflineDetail(status: { uefn_running?: boolean; unchecked?: boolean }): string {
+  if (status.unchecked) return "Checking…";
+  return status.uefn_running
+    ? "Linking… UEFN is open; this takes about a minute after the island loads"
+    : "Offline · open an island in UEFN and it links by itself";
+}
+
+/** The UEFN MCP row while it is off. It read "Offline · unreachable", which told nobody what
+ * to do. UEFN starts its MCP with an island, and only when the setting Ducky writes was
+ * there when UEFN started: a UEFN that was already open needs one restart. */
+export function uefnMcpOfflineDetail(status: { uefn_running?: boolean }, reason: string): string {
+  if (reason && reason !== "unreachable") return `Offline · ${reason}`;
+  return status.uefn_running
+    ? "Off · open an island; if it stays off, close and reopen UEFN once"
+    : "Offline · starts with UEFN";
 }
 
 /** Restart the UEFN listener; when it is down, Ducky turns Python on in UEFN so it starts. */
@@ -217,7 +237,7 @@ export function ConnectionStatusDropdown({
       ? `Connected · port ${status.port ?? 4200}${uptimeSec ? ` · up ${Math.floor(uptimeSec)}s` : ""}`
       : race
         ? "Offline — listener init race; stay on workspace_*"
-        : "Offline — open UEFN + start listener";
+        : listenerOfflineDetail(status);
 
   const [uefnMcpRow, unrealMcpRow] = epicMcpRows(status);
 

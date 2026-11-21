@@ -45,6 +45,13 @@ def _usage_stats(ctx: dict[str, Any]) -> None:
     threading.Thread(target=usage_stats.app_opened, args=(boot_ms,), name="usage-stats-open", daemon=True).start()
 
 
+def _uefn_watch(ctx: dict[str, Any]) -> None:
+    # The header follows UEFN by itself and a listener that did not start is restarted.
+    from frontend.ui_web.lag import uefn_watch
+
+    uefn_watch.start(ctx["api"])
+
+
 def _uninstaller_link(ctx: dict[str, Any]) -> None:
     from frontend import uninstaller_link
 
@@ -73,6 +80,7 @@ SERVICES: tuple[tuple[str, Callable[[dict[str, Any]], None]], ...] = (
     ("auto-update", _update_swap),
     ("folder access check", _folder_access),
     ("usage stats", _usage_stats),
+    ("UEFN watch", _uefn_watch),
     ("uninstaller link", _uninstaller_link),
     ("crash dump filter", _crash_dumps),
     ("crash heartbeat", _heartbeat),

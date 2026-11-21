@@ -1138,6 +1138,8 @@ export interface ListenerStatus {
   epic_mcp_setup_steps?: string[];
   /** Set when Unreal Editor sits on UEFN's port: Ducky moved it to 8001, restart Unreal once. */
   epic_mcp_note?: string;
+  /** A UEFN process runs on this PC (read from the process list, never a connection). */
+  uefn_running?: boolean;
   uefn_python_editor_scripting?: boolean;
   uefn_mcp_toolsets?: boolean;
   python_and_toolsets?: boolean;

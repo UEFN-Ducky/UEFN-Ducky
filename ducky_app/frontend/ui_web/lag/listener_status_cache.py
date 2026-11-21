@@ -1,10 +1,11 @@
-"""The UEFN listener status: the last value we know, never fetched in the background.
+"""The UEFN listener status: the last value we know; a read never fetches.
 
-Ducky never looks for UEFN on its own (decision 2026-11-03). Reading the status
-(``get``) returns the last value at once and never contacts UEFN. Only ``refresh``
-fetches: the person pressed refresh, the listener was restarted, or a UEFN tool call
-just ran. Many refreshes at once start one fetch; a refresh during a fetch queues one
-more. Each fetch's result goes to ``on_result`` (the window's status pill).
+Reading the status (``get``) returns the last value at once and never contacts UEFN
+(decision 2026-11-03: a status read is free). Only ``refresh`` fetches: the person
+pressed refresh, the listener was restarted, a UEFN tool call just ran, or
+``uefn_watch`` saw UEFN open, close or due for its next look (it fetches nothing while
+UEFN is closed). Many refreshes at once start one fetch; a refresh during a fetch queues
+one more. Each fetch's result goes to ``on_result`` (the window's status pill).
 """
 
 from __future__ import annotations

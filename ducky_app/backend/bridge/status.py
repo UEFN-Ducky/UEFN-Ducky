@@ -285,6 +285,15 @@ def fetch_listener_status(
     if get_ok and isinstance(health, dict):
         uptime = float(health.get("uptime_sec", 0) or 0)
 
+    # From the process list (no connection): the header tells "UEFN is closed" from
+    # "UEFN is open and not linked yet".
+    try:
+        from backend.bridge.editor_presence import uefn_running
+
+        uefn_open = bool(online or uefn_running())
+    except Exception:
+        uefn_open = bool(online)
+
     from backend.mcp_plugins.epic import EDITOR_UNREAL, editor_label, expected_editor, probe_epic_mcp
     from frontend.uefn_project_beta import read_uefn_beta_access
 
@@ -313,6 +322,9 @@ def fetch_listener_status(
         status_text = "Unreal project"
     else:
         status_text = "Offline — open UEFN + deploy listener"
+        if uefn_open:
+            # Ducky links by itself (frontend/ui_web/lag/uefn_watch.py): nothing to press.
+            status_text = "Offline — UEFN is open; Ducky links to it by itself about a minute after the island loads"
         if beta.get("listener_init_race"):
             status_text = "Offline — listener init race; stay on workspace_*; reload_listener once"
     if epic_online:
@@ -392,6 +404,7 @@ def fetch_listener_status(
         "tick_age_sec": tick_age,
         "current_command": current_command,
         "in_window_sec": in_window,
+        "uefn_running": uefn_open,
         "epic_mcp_online": epic_online,
         "epic_mcp_reason": epic_reason,
         "epic_mcp_url": str(epic.get("epic_mcp_url") or ""),

@@ -1151,9 +1151,10 @@ class PanelApi(
         return True
 
     def get_listener_status(self, refresh: bool = False) -> dict[str, Any]:
-        """The last known listener status, at once. Ducky never looks for UEFN in the
-        background: only ``refresh`` (the person's refresh, a UEFN tool call that just ran)
-        fetches, and its result reaches the window as a ``listener_status`` push."""
+        """The last known listener status, at once: a read never contacts UEFN. Only
+        ``refresh`` fetches (the person's refresh, a UEFN tool call that just ran, and
+        ``lag/uefn_watch`` while UEFN is open), and its result reaches the window as a
+        ``listener_status`` push."""
         cache = self._listener_status_cache()
         if refresh:
             cache.refresh()

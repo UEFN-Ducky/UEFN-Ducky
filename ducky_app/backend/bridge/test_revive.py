@@ -180,3 +180,98 @@ def test_boot_script_on_dead_session_restarts_it_once(monkeypatch, deaths, actio
     out = revive.revive_listener(4200)
     assert out["action"] == action
     assert tries.count("execute_python") == 2 and len(forgot) == 1
+
+
+# ---- the automatic restart (fed by frontend/ui_web/lag/uefn_watch.py)
+#
+# Nothing called it from Nov 3 to Nov 21 2026, and on Nov 18 it was deleted as unused: a UEFN
+# that opened an island with Python off stayed "Offline" until the person pressed Restart
+# UEFN listener, and 40 of 45 new PCs never read "Connected to UEFN".
+
+
+class _NowThread:
+    def __init__(self, target, args, **_):
+        self._go = lambda: target(*args)
+
+    def start(self):
+        self._go()
+
+
+def test_auto_revive_waits_out_a_normal_start_then_tries_three_times(monkeypatch) -> None:
+    runs: list[int] = []
+    monkeypatch.setattr(revive.AutoRevive, "_run", staticmethod(lambda port: runs.append(port)))
+    monkeypatch.setattr(revive.threading, "Thread", _NowThread)
+    auto = revive.AutoRevive(grace_sec=60)
+    down = {"online": False, "epic_mcp_online": True}
+    assert not auto.observe(down, 4200, now=100)
+    assert not auto.observe(down, 4200, now=150)  # UEFN turns Python on itself within the grace
+    assert auto.observe(down, 4200, now=161)  # first try, after the grace
+    assert not auto.observe(down, 4200, now=200)  # not yet
+    assert auto.observe(down, 4200, now=281)  # 120 s later
+    assert not auto.observe(down, 4200, now=500)
+    assert auto.observe(down, 4200, now=581)  # 300 s after that
+    assert not auto.observe(down, 4200, now=5000)  # three tries, then it is the person's call
+    assert runs == [4200, 4200, 4200]
+    # UEFN closed or the next island: a fresh spell gets its own tries.
+    auto.observe({"online": False, "epic_mcp_online": False}, 4200, now=6000)
+    auto.observe(down, 4200, now=6100)
+    assert auto.observe(down, 4200, now=6161)
+    assert runs == [4200] * 4
+
+
+def test_auto_revive_never_runs_two_tries_at_once(monkeypatch) -> None:
+    started: list[object] = []
+
+    class _Thread:
+        def __init__(self, target, args, **_):
+            started.append((target, args))
+
+        def start(self):
+            pass  # the try is still running
+
+    monkeypatch.setattr(revive.threading, "Thread", _Thread)
+    auto = revive.AutoRevive(grace_sec=0)
+    down = {"online": False, "epic_mcp_online": True}
+    assert auto.observe(down, 4200, now=10)
+    assert not auto.observe(down, 4200, now=10 + revive.AUTO_REVIVE_RETRY_AFTER_SEC[0] + 1)
+    monkeypatch.setattr(revive.AutoRevive, "_run", staticmethod(lambda port: None))
+    target, args = started[0]
+    target(*args)  # the first try ends
+    assert auto.observe(down, 4200, now=10 + revive.AUTO_REVIVE_RETRY_AFTER_SEC[0] + 2)
+
+
+def test_auto_revive_does_nothing_while_linked_or_with_no_island_open() -> None:
+    auto = revive.AutoRevive(grace_sec=0)
+    assert not auto.observe({"online": True, "epic_mcp_online": True}, 4200, now=1)
+    assert not auto.observe({"online": False, "epic_mcp_online": False}, 4200, now=2)  # UEFN closed or loading
+    assert not auto.observe({}, 4200, now=3)  # nothing fetched yet
+
+
+def test_the_automatic_restart_never_reloads_a_listener_that_answers(monkeypatch) -> None:
+    """It came up between the status that said offline and the try: a reload would cut off
+    the command it is running. The person's own Restart button still reloads."""
+    posted: list[str] = []
+    monkeypatch.setattr("backend.bridge.listener_get_health", lambda port: {"status": "ok"})
+    monkeypatch.setattr("backend.bridge.post_command_to_listener", lambda port, cmd, **_: posted.append(cmd))
+    logged: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
+    revive.AutoRevive._run(4200)
+    assert posted == [] and logged == []
+    assert revive.revive_listener(4200, reload_if_online=False)["action"] == "already_online"
+    assert revive.revive_listener(4200)["action"] == "reloaded" and posted == ["reload_listener"]
+
+
+def test_auto_revive_error_code_names_the_step(monkeypatch) -> None:
+    from frontend.usage_events import where_of
+
+    logged: list[str] = []
+    monkeypatch.setattr("frontend.error_log.record_error", lambda src, _msg: logged.append(src))
+    for action in ("uefn_offline", "stale_socket", "python_already_on"):
+        result = {"ok": False, "action": action, "step": "no_health" if action == "python_already_on" else "", "message": "x"}
+        monkeypatch.setattr(revive, "revive_listener", lambda port, r=result, **_: r)
+        revive.AutoRevive._run(4200)
+    monkeypatch.setattr(revive, "revive_listener", lambda port, **_: 1 / 0)
+    revive.AutoRevive._run(4200)
+    # UEFN closing mid-try is status, not an error.
+    assert logged == ["listener_revive.stale_socket", "listener_revive.python_already_on.no_health", "listener_revive.failed"]
+    assert where_of(logged[0]) == "bridge"

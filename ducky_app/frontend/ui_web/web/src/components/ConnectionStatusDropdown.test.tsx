@@ -2,8 +2,22 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ConnectionStatusDropdown, epicMcpRows } from "./ConnectionStatusDropdown";
+import { ConnectionStatusDropdown, epicMcpRows, listenerOfflineDetail } from "./ConnectionStatusDropdown";
 import type { ListenerStatus } from "../types/panel";
+
+describe("the listener row while it is not linked", () => {
+  it("never tells the person to start the listener: Ducky links by itself", () => {
+    // Nov 21 2026: "Offline — open UEFN + start listener" beside a running UEFN, until
+    // Restart UEFN listener was pressed. 40 of 45 new PCs never read Connected.
+    expect(listenerOfflineDetail({ uefn_running: false })).toBe(
+      "Offline · open an island in UEFN and it links by itself",
+    );
+    expect(listenerOfflineDetail({ uefn_running: true })).toBe(
+      "Linking… UEFN is open; this takes about a minute after the island loads",
+    );
+    expect(listenerOfflineDetail({ unchecked: true })).toBe("Checking…");
+  });
+});
 
 const status: ListenerStatus = {
   online: false,
@@ -132,10 +146,14 @@ describe("ConnectionStatusDropdown", () => {
       ["UEFN MCP", "Offline · port held by Unreal Editor", false, true],
       ["Unreal MCP", "Running · not used for this project", false, true],
     ]);
+    // "Offline · unreachable" told nobody what to do (Nov 21 2026).
     expect(rows({ epic_mcp_reason: "unreachable" })).toEqual([
-      ["UEFN MCP", "Offline · unreachable", false, false],
+      ["UEFN MCP", "Offline · starts with UEFN", false, false],
       ["Unreal MCP", "Offline · open Unreal Editor 5.8+ with Unreal MCP", false, false],
     ]);
+    expect(rows({ epic_mcp_reason: "unreachable", uefn_running: true })[0][1]).toBe(
+      "Off · open an island; if it stays off, close and reopen UEFN once",
+    );
     expect(rows({ epic_mcp_reason: "port_taken" }).map((r) => r[1])).toEqual([
       "Port taken by another program",
       "Port taken by another program",
