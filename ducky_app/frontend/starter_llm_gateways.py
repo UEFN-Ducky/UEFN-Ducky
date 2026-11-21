@@ -12,6 +12,9 @@ STARTER_ACCOUNT_SLUG = "account"
 
 STARTER_LLM_GATEWAY_SLUGS: tuple[str, ...] = ("anthropic", "openai", "google", "cursor")
 
+# Ducky Auto: the chat model picker's auto router, which sends each step to the right model.
+STARTER_AI_PLUGIN_SLUGS: tuple[str, ...] = ("ducky-auto",)
+
 # UEFN Asset Viewer: .uasset files open as previews instead of binary.
 STARTER_UEFN_PLUGIN_SLUGS: tuple[str, ...] = ("uefn", "playtester", "typesafe", "uefn-asset-viewer")
 
@@ -25,6 +28,7 @@ STARTER_EXTRA_PLUGIN_SLUGS: tuple[str, ...] = ("browser", "translation", "piper"
 POPULAR_PLUGIN_SLUGS: tuple[str, ...] = (
     (STARTER_ACCOUNT_SLUG,)
     + STARTER_LLM_GATEWAY_SLUGS
+    + STARTER_AI_PLUGIN_SLUGS
     + STARTER_UEFN_PLUGIN_SLUGS
     + STARTER_CREATE_PLUGIN_SLUGS
     + STARTER_EXTRA_PLUGIN_SLUGS
@@ -36,6 +40,7 @@ STARTER_PLUGIN_LABELS: dict[str, str] = {
     "openai": "OpenAI",
     "google": "Google",
     "cursor": "Cursor",
+    "ducky-auto": "Ducky Auto",
     "uefn": "UEFN",
     "playtester": "Play Tester",
     "typesafe": "TypeSafe",
@@ -268,7 +273,7 @@ def start_first_run_tour(chat_id: str) -> None:
 
 
 def _group(slug: str) -> str:
-    if slug == STARTER_ACCOUNT_SLUG or slug in STARTER_LLM_GATEWAY_SLUGS:
+    if slug == STARTER_ACCOUNT_SLUG or slug in STARTER_LLM_GATEWAY_SLUGS or slug in STARTER_AI_PLUGIN_SLUGS:
         return "ai"
     if slug in STARTER_UEFN_PLUGIN_SLUGS:
         return "uefn"

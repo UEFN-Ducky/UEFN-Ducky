@@ -149,6 +149,8 @@ def test_setup_status_lists_the_bundle_with_what_is_installed(isolated_appdata) 
     # The account (Ducky AI) and the gateways install first, so Connect AI can start while the rest land.
     assert [p["slug"] for p in plugins][:5] == ["account", "anthropic", "openai", "google", "cursor"]
     assert {p["group"] for p in plugins[:5]} == {"ai"} and by_slug["account"]["label"] == "Ducky Account"
+    # New users get Ducky Auto right after the gateways it routes between.
+    assert plugins[5] == {"slug": "ducky-auto", "label": "Ducky Auto", "group": "ai", "installed": False}
 
 
 def test_setup_turns_on_a_plugin_that_ships_off(isolated_appdata, monkeypatch) -> None:
