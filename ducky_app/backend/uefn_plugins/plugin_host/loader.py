@@ -303,7 +303,10 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
         entry = sanitize_entry(str(boot.get("entry") or "").strip(), root)
         if not entry:
             continue
-        _CONTRIBUTIONS["shell_boots"].append({"plugin_id": pid, "entry": entry})
+        # version lets the shell swap in an updated plugin's script without a restart.
+        _CONTRIBUTIONS["shell_boots"].append(
+            {"plugin_id": pid, "entry": entry, "version": str(ver_raw or "")}
+        )
 
     for profile in contributes.get("appearance.profiles") or contributes.get("appearance_profiles") or []:
         if not isinstance(profile, dict):

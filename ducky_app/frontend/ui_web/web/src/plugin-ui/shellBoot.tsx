@@ -208,6 +208,9 @@ function runBootCleanup(pluginId: string): void {
   }
 }
 
+// Keyed by version too: an updated plugin unloads its old script and loads the new one.
+const bootKey = (b: PluginShellBoot): string => `${b.plugin_id}::${b.entry}::${b.version ?? ""}`;
+
 function bootUrl(boot: PluginShellBoot): string {
   const entry = boot.entry.replace(/^\/+/, "");
   return assetUrl(`${PLUGIN_UI_ROUTE_PREFIX}/${boot.plugin_id}/${entry}?t=${Date.now()}`);
@@ -263,7 +266,7 @@ export function usePluginShellBoots(): void {
       forPlugin: (pluginId: string) => makeHostApi(pluginId),
     }) as Window[typeof HOST_KEY];
 
-    const wanted = new Set(contrib.shell_boots.map((b) => `${b.plugin_id}::${b.entry}`));
+    const wanted = new Set(contrib.shell_boots.map(bootKey));
 
     for (const [key, el] of [...loaded.current.entries()]) {
       if (!wanted.has(key)) {
@@ -275,7 +278,7 @@ export function usePluginShellBoots(): void {
     }
 
     for (const boot of contrib.shell_boots) {
-      const key = `${boot.plugin_id}::${boot.entry}`;
+      const key = bootKey(boot);
       if (loaded.current.has(key)) continue;
       const script = document.createElement("script");
       script.src = bootUrl(boot);

@@ -105,6 +105,8 @@ export type PluginSettingsSection = {
 export type PluginShellBoot = {
   plugin_id: string;
   entry: string;
+  /** Plugin version; a new one reloads the script. */
+  version?: string;
 };
 
 export type PluginAppearanceProfile = {
