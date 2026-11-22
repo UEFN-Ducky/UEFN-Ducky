@@ -42,6 +42,16 @@ def test_linux_uses_xdg_env(monkeypatch, tmp_path):
     assert app_paths.resolve_app_data_dir() / "ducky.db" == tmp_path / "data" / "UEFN-Ducky" / "ducky.db"
 
 
+def test_db_real_folder_guard_follows_the_os(monkeypatch, tmp_path):
+    from backend.store import db
+
+    monkeypatch.setattr(db.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(db.sys, "platform", "linux")
+    assert db.installed_app_dir() == tmp_path / ".local" / "share" / "UEFN-Ducky"
+    monkeypatch.setattr(db.sys, "platform", "win32")
+    assert db.installed_app_dir() == tmp_path / "AppData" / "Local" / "UEFN-Ducky"
+
+
 def test_linux_defaults_and_ignores_relative_xdg(monkeypatch, tmp_path):
     _env(monkeypatch, "linux", XDG_CACHE_HOME="relative/cache")
     monkeypatch.setattr(app_paths.Path, "home", classmethod(lambda cls: tmp_path))

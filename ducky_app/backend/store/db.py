@@ -120,6 +120,14 @@ def db_path(root: Path | None = None) -> Path:
     return (root or app_root()) / DB_NAME
 
 
+def installed_app_dir() -> Path:
+    """The installed app's own data folder, ignoring env redirects (tests repoint
+    LOCALAPPDATA / XDG_DATA_HOME, so the guards below must not follow them)."""
+    if sys.platform.startswith("linux"):
+        return Path.home() / ".local" / "share" / "UEFN-Ducky"
+    return Path.home() / "AppData" / "Local" / "UEFN-Ducky"
+
+
 def snapshot_dir(root: Path | None = None) -> Path:
     return (root or app_root()) / SNAPSHOT_DIR_NAME
 
@@ -495,7 +503,7 @@ def _refuse_real_appdata_under_pytest(path: Path) -> None:
     if not under_pytest or os.environ.get("DUCKY_TESTS_REAL_APPDATA") == "1":
         return
     try:
-        real = (Path.home() / "AppData" / "Local" / "UEFN-Ducky").resolve()
+        real = installed_app_dir().resolve()
         here = path.parent.resolve() if path.parent.exists() else path.parent
     except OSError:
         return
@@ -1077,7 +1085,7 @@ def _refuse_source_upgrade_of_real_db(conn: sqlite3.Connection, current: int, he
         return
     try:
         here = Path(conn.execute("PRAGMA database_list").fetchone()[2]).parent.resolve()
-        real = (Path.home() / "AppData" / "Local" / "UEFN-Ducky").resolve()
+        real = installed_app_dir().resolve()
     except OSError:
         return
     if here == real:
