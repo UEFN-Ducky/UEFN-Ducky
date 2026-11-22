@@ -7,6 +7,9 @@ Nov 7-10 2026 ("This app can't run on your PC" at sign-in), and only a Python st
 A hidden start costs nothing visible, so the stub's 1-2 s don't matter there.
 Only the installed app manages it: a test copy (``DUCKY_SANDBOX``), a source checkout or
 any other EXE never writes or removes it, so it can never point at a throwaway copy.
+
+Linux: ``~/.config/autostart/uefn-ducky.desktop`` (XDG autostart), Exec = ``$APPIMAGE`` or the
+installed binary with ``--background``; the same rules keep a source run or test copy out.
 """
 from __future__ import annotations
 
@@ -51,6 +54,11 @@ def start_exe(stub: Path) -> Path:
 
 def managed_exe() -> Path | None:
     """The EXE the entry may name, or None when this process must leave the entry alone."""
+    if sys.platform.startswith("linux"):
+        from frontend.open_files import linux_app_exe
+
+        found = linux_app_exe()
+        return Path(found) if found else None
     if sys.platform != "win32" or os.environ.get("DUCKY_SANDBOX"):
         return None
     try:
@@ -75,7 +83,41 @@ def _winreg():
     return winreg
 
 
+def linux_entry_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "autostart" / "uefn-ducky.desktop"
+
+
+def linux_entry_text(exe: Path | str) -> str:
+    from frontend.open_files import desktop_exec_quote
+
+    return ("[Desktop Entry]\nType=Application\nName=UEFN Ducky\n"
+            f"Exec={desktop_exec_quote(str(exe))} {BACKGROUND_FLAG}\n"
+            "Icon=uefn-ducky\nTerminal=false\nX-GNOME-Autostart-enabled=true\n")
+
+
+def _apply_linux(exe: Path, enabled: bool) -> bool:
+    entry = linux_entry_path()
+    try:
+        if not enabled:
+            entry.unlink(missing_ok=True)
+            return True
+        text = linux_entry_text(exe)
+        if not entry.is_file() or entry.read_text(encoding="utf-8") != text:
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            entry.write_text(text, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
 def registered_command() -> str | None:
+    if sys.platform.startswith("linux"):
+        try:
+            lines = linux_entry_path().read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return None
+        return next((ln[5:] for ln in lines if ln.startswith("Exec=")), None)
     if sys.platform != "win32":
         return None
     reg = _winreg()
@@ -92,6 +134,8 @@ def apply(enabled: bool) -> bool:
     exe = managed_exe()
     if exe is None:
         return False
+    if sys.platform.startswith("linux"):
+        return _apply_linux(exe, enabled)
     reg = _winreg()
     try:
         if enabled:

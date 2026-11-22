@@ -178,3 +178,52 @@ def test_apply_saved_setting_follows_the_setting(monkeypatch, reg):
     reg.values[autostart.VALUE_NAME] = "x"
     assert autostart.apply_saved_setting() is True
     assert autostart.VALUE_NAME not in reg.values
+
+
+@pytest.fixture()
+def linux_home(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    for var in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(var, str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("DUCKY_SANDBOX", raising=False)
+    monkeypatch.setattr(autostart.sys, "platform", "linux")
+    app = tmp_path / "Apps" / "UEFN Ducky.AppImage"
+    app.parent.mkdir()
+    app.write_bytes(b"\x7fELF")
+    monkeypatch.setenv("APPIMAGE", str(app))
+    return home, app
+
+
+def test_linux_toggle_writes_and_removes_the_xdg_entry(linux_home):
+    home, app = linux_home
+    entry = home / ".config" / "autostart" / "uefn-ducky.desktop"
+    assert autostart.linux_entry_path() == entry
+    assert autostart.apply(True) is True
+    text = entry.read_text(encoding="utf-8")
+    assert f'Exec="{app}" --background\n' in text.replace("\\\\", "\\")
+    assert autostart.registered_command().endswith(" --background")
+    assert autostart.apply(True) is True and entry.read_text(encoding="utf-8") == text
+    assert autostart.apply(False) is True
+    assert not entry.exists() and autostart.registered_command() is None
+    assert autostart.apply(False) is True  # already off
+
+
+def test_linux_xdg_config_home_and_installed_binary(linux_home, monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.delenv("APPIMAGE")
+    monkeypatch.setattr("frontend.bundle_root.is_packaged_runtime", lambda: True)
+    assert autostart.apply(True) is True
+    text = (tmp_path / "cfg" / "autostart" / "uefn-ducky.desktop").read_text(encoding="utf-8")
+    assert "Exec=" in text and "X-GNOME-Autostart-enabled=true" in text
+
+
+def test_linux_source_run_or_test_copy_leaves_it_alone(linux_home, monkeypatch):
+    monkeypatch.delenv("APPIMAGE")
+    monkeypatch.setattr("frontend.bundle_root.is_packaged_runtime", lambda: False)
+    assert autostart.apply(True) is False
+    monkeypatch.setenv("APPIMAGE", str(linux_home[1]))
+    monkeypatch.setenv("DUCKY_SANDBOX", "/box")
+    assert autostart.apply(True) is False
+    assert not autostart.linux_entry_path().exists()
