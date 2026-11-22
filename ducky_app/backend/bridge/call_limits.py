@@ -99,11 +99,22 @@ def blocking_popup() -> dict[str, Any] | None:
         return None
 
 
-def _editor_answers() -> bool:
-    """True when the listener's game thread answers a ping within a few seconds."""
-    try:
-        from backend.bridge import send_command
+# How long the editor check waits for the listener lock before it calls the editor busy.
+# Nov 20 2026: 5 unreal__ calls ran past 20 min; this ping queued behind another command's
+# lock (execute_python, an import) with no limit, so the deadline never answered.
+_PING_LOCK_WAIT_S = 5.0
 
+
+def _editor_answers() -> bool:
+    """True when the listener's game thread answers a ping within a few seconds; False when
+    another command has held the listener lock for ``_PING_LOCK_WAIT_S``."""
+    try:
+        from backend.bridge import client, send_command
+
+        # ponytail: the lock may be taken again before the ping; stall_reason_bounded caps that.
+        if not client._listener_lock.acquire(timeout=_PING_LOCK_WAIT_S):
+            return False
+        client._listener_lock.release()
         send_command("ping", {}, timeout=5.0)
         return True
     except Exception:  # noqa: BLE001
@@ -144,10 +155,29 @@ def stall_reason(op: str, limit: float) -> dict[str, Any]:
     if not _editor_answers():
         return {"ok": False, "reason": "editor_busy",
                 "message": f"{op} did not answer in {limit:.0f} s and UEFN's game thread is busy: "
-                           "its work goes on. Wait, then check its result before calling again."}
+                           "its work goes on. Call uefn_popups first; if none is up, wait, then "
+                           "check its result before calling again."}
+    return _no_answer(op, limit)
+
+
+def _no_answer(op: str, limit: float) -> dict[str, Any]:
     return {"ok": False, "reason": "no_answer",
-            "message": f"{op} did not answer in {limit:.0f} s although the editor answers: "
-                       "its work may go on. Check the result before calling it again."}
+            "message": f"{op} did not answer in {limit:.0f} s: its work may go on. Call uefn_popups "
+                       "first. Then Check the result: only if it did not happen, retry it ONCE; after "
+                       "a second miss use the Ducky fallback tool."}
+
+
+# How long the deadline answer may spend finding out why (window list, listener health, ping).
+STALL_LOOK_S = 10.0
+
+
+def stall_reason_bounded(op: str, limit: float, budget: float = STALL_LOOK_S) -> dict[str, Any]:
+    """:func:`stall_reason`, or ``no_answer`` once it has looked for ``budget`` s. The look goes
+    on on its own thread; nothing waits for it."""
+    job = Job(lambda: stall_reason(op, limit))
+    if job.done.wait(budget) and job.error is None and isinstance(job.result, dict):
+        return job.result
+    return _no_answer(op, limit)
 
 
 class Job:
@@ -192,7 +222,7 @@ def timed_out_message(inner: str, limit: float) -> str:
     """What the agent hears when a call is stopped at its limit. An editor job is not stopped,
     only no longer waited for: the agent hears what holds it (a popup, a busy editor)."""
     if inner in EDITOR_HEAVY_TOOLS or inner.startswith("unreal__"):
-        return str(stall_reason(inner, limit).get("message") or f"{inner} did not answer in {limit:.0f} s.")
+        return str(stall_reason_bounded(inner, limit).get("message") or f"{inner} did not answer in {limit:.0f} s.")
     return (f"{inner} did not answer within {limit:.0f} s and was stopped. If this chat asked "
             "the person a question, tools wait for that answer first. Otherwise call it once "
             "more; if it stops again, carry on without it and tell the person.")

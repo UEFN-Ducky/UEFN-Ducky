@@ -808,10 +808,10 @@ class PluginClientPool:
             with _watchdog() as pressed:
                 raw = await _invoke(session)
         except _EpicDeadline as late:
-            from backend.bridge.call_limits import EPIC_CALL_LIMIT_S, stall_reason
+            from backend.bridge.call_limits import EPIC_CALL_LIMIT_S, stall_reason_bounded
             from frontend import uefn_events
 
-            why = await asyncio.to_thread(stall_reason, namespaced_name, late.limit)
+            why = await asyncio.to_thread(stall_reason_bounded, namespaced_name, late.limit)
             uefn_events.deadline(why, late.limit > EPIC_CALL_LIMIT_S, late.steps)
             if late.steps > 1:
                 why["steps_finished"] = f"{late.done} of {late.steps}"

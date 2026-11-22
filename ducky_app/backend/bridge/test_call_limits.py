@@ -70,3 +70,50 @@ def test_a_late_editor_job_says_what_holds_it_and_never_to_send_it_again(monkeyp
     monkeypatch.setattr(call_limits, "blocking_popup", lambda: {"hwnd": 0x1A2B, "title": "Save Content", "blocking": True})
     popup = call_limits.timed_out_message("execute_python", 300)
     assert "held by a UEFN popup" in popup and "uefn_popup_press" in popup
+
+
+def test_stall_reason_never_waits_on_a_held_listener_lock(monkeypatch) -> None:
+    """Nov 20 2026: 5 unreal__ calls ran past 20 min. At the deadline the editor check pinged
+    UEFN, and the ping queued behind another command's listener lock with no limit."""
+    import threading
+
+    from backend.bridge import client
+
+    monkeypatch.setattr(call_limits, "blocking_popup", lambda: None)
+    monkeypatch.setattr(call_limits, "_command_in_window", lambda: None)
+    monkeypatch.setattr(call_limits, "_PING_LOCK_WAIT_S", 0.2, raising=False)
+    # The POST itself answers at once: only the lock can hold the ping.
+    monkeypatch.setattr(client, "_post_json_locked", lambda *a, **k: {"success": True, "result": {}})
+    client._invalidate_cache()
+    got: list = []
+    client._listener_lock.acquire()
+    try:
+        worker = threading.Thread(target=lambda: got.append(call_limits.stall_reason("unreal__call_tool", 120)),
+                                  daemon=True)
+        worker.start()
+        worker.join(timeout=2.0)
+        assert not worker.is_alive(), "stall_reason waited on the listener lock"
+    finally:
+        client._listener_lock.release()
+    assert got[0]["reason"] == "editor_busy"
+
+
+def test_a_hung_editor_check_still_answers_within_its_budget(monkeypatch) -> None:
+    import time
+
+    monkeypatch.setattr(call_limits, "stall_reason", lambda op, limit: time.sleep(3) or {"reason": "popup"})
+    began = time.monotonic()
+    why = call_limits.stall_reason_bounded("unreal__call_tool", 120, budget=0.3)
+    assert time.monotonic() - began < 1.0
+    assert why["reason"] == "no_answer" and "uefn_popups" in why["message"] and "Check the result" in why["message"]
+
+
+def test_late_messages_send_the_agent_to_uefn_popups(monkeypatch) -> None:
+    monkeypatch.setattr(call_limits, "blocking_popup", lambda: None)
+    monkeypatch.setattr(call_limits, "_command_in_window", lambda: None)
+    monkeypatch.setattr(call_limits, "_editor_answers", lambda: True)
+    late = call_limits.stall_reason("unreal__call_tool", 120)["message"]
+    assert "uefn_popups" in late and "ONCE" in late and "Check the result" in late
+    monkeypatch.setattr(call_limits, "_editor_answers", lambda: False)
+    busy = call_limits.stall_reason("unreal__call_tool", 120)["message"]
+    assert "uefn_popups" in busy and "once" not in busy.lower()  # its work goes on: never sent again
