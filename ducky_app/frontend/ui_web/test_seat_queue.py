@@ -16,8 +16,9 @@ def q(monkeypatch):
     monkeypatch.setattr(adm, "_read_free", lambda: 64.0)
     monkeypatch.setattr(sq, "_line", deque())
     monkeypatch.setattr(sq, "_starting", set())
-    monkeypatch.setattr(sq, "_user_cap", None)
-    monkeypatch.setattr(sq, "pc_limit", lambda: 4)
+    monkeypatch.setattr(sq, "_user_cap", 4)  # the cap tests run with the slider at 4
+    monkeypatch.setattr(sq, "_ensure_watch", lambda: None)  # no real lag watcher in tests
+    monkeypatch.setattr(sq, "_lag_ms", 0.0)
     monkeypatch.setattr(sq, "_spawn", lambda fn, name: fn())  # start turns inline
     monkeypatch.setattr(sq, "_seen", set())
     monkeypatch.setattr(sq, "_first_starts", deque())
@@ -101,15 +102,40 @@ def test_cap_four_runs_four_and_the_fifth_starts_when_one_ends(q):
     assert sq.status()["running"] == 4 and sq.status()["waiting"] == 5
 
 
-def test_the_slider_lowers_the_cap_but_never_past_the_pc_limit(q):
+def test_the_slider_takes_any_number_and_zero_means_no_cap(q):
     assert sq.set_run_at_once(2) == 2
-    assert sq.set_run_at_once(99) == 4
+    assert sq.set_run_at_once(99) == 99  # past any PC hint
     sq.set_run_at_once(2)
     for i in range(3):
         sq.request(f"s{i}", q["starter"](f"s{i}"))
     assert q["started"] == ["s0", "s1"]
-    sq.set_run_at_once(0)  # back to the PC limit: the waiting seat starts
+    assert sq.set_run_at_once(0) == sq.NO_CAP  # no cap: the waiting seat starts
     assert q["started"] == ["s0", "s1", "s2"]
+
+
+def test_a_lagging_app_holds_new_seats_and_drains_when_it_recovers(q):
+    sq.set_run_at_once(None)
+    sq.request("a", q["starter"]("a"))
+    sq._lag_sample(900.0)  # the app wakes 900 ms late
+    assert sq.request("b", q["starter"]("b")) == "queued"
+    assert sq.status()["held"] and "paused: app lagging" in sq.status()["text"]
+    assert sq.is_busy("a")  # the running seat is never stopped
+    for _ in range(20):
+        sq._lag_sample(0.0)  # the lag falls back
+    assert q["started"] == ["a", "b"] and not sq.status()["held"]
+
+
+def test_a_lagging_app_still_starts_the_first_seat(q):
+    sq._lag_sample(900.0)
+    assert sq.request("a", q["starter"]("a")) == "started"  # nothing runs: never stuck
+
+
+def test_with_no_cap_a_hundred_seats_all_start(q, monkeypatch):
+    monkeypatch.setattr(sq, "pc_limit", lambda: 2)  # a small PC hint caps nothing
+    sq.set_run_at_once(None)
+    for i in range(100):
+        sq.request(f"s{i}", q["starter"](f"s{i}"))
+    assert len(q["started"]) == 100 and sq.status()["waiting"] == 0
 
 
 def test_low_memory_never_holds_a_seat(q, monkeypatch):
@@ -131,7 +157,7 @@ def test_a_running_or_waiting_seat_is_busy_and_stop_drops_it(q):
 
 def test_first_turns_start_three_at_a_time_five_seconds_apart(q, monkeypatch):
     monkeypatch.setattr(sq, "WAVE_SIZE", 3)
-    monkeypatch.setattr(sq, "pc_limit", lambda: 16)
+    monkeypatch.setattr(sq, "_user_cap", 16)
     for i in range(10):
         sq.request(f"s{i}", q["starter"](f"s{i}"))
     assert q["started"] == ["s0", "s1", "s2"]
@@ -212,7 +238,7 @@ def test_an_interrupted_member_restarts_once_then_is_skipped_for_ten_minutes(res
 def test_seven_restarts_at_once_keep_the_cap(restarts):
     q = restarts
     results = [sq.restart(f"m{i}") for i in range(7)]
-    assert results == ["started"] * 4 + ["queued"] * 3  # pc_limit() == 4
+    assert results == ["started"] * 4 + ["queued"] * 3  # the slider cap is 4
     assert len(q["started"]) == 4
     q["end"]("m0")
     assert q["started"][-1] == "m4" and len(q["alive"]) == 4

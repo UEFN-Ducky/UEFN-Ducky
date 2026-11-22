@@ -19,12 +19,13 @@ def world(monkeypatch):
     started: list[str] = []
     monkeypatch.setattr(adm, "_running", set())
     monkeypatch.setattr(adm, "_read_free", lambda: 64.0)
-    for name, value in (("_line", deque()), ("_starting", set()), ("_user_cap", None), ("_seen", set()),
+    for name, value in (("_line", deque()), ("_starting", set()), ("_user_cap", 4), ("_seen", set()),
                         ("_first_starts", deque()), ("_wave_timer", False), ("_starts", {}),
                         ("_retried", set()), ("_idle_since", {})):
         monkeypatch.setattr(sq, name, value)
-    monkeypatch.setattr(sq, "pc_limit", lambda: 4)
     monkeypatch.setattr(sq, "WAVE_SIZE", 100)
+    monkeypatch.setattr(sq, "_ensure_watch", lambda: None)  # no real lag watcher in tests
+    monkeypatch.setattr(sq, "_lag_ms", 0.0)
     monkeypatch.setattr(sq, "_spawn", lambda fn, name: fn())  # seats start inline
     timers: list[float] = []
     monkeypatch.setattr(sq, "_spawn_later", lambda delay, fn: timers.append(delay))
@@ -82,7 +83,7 @@ def test_fifty_agent_sends_start_at_most_the_cap_then_one_per_ended_turn(world):
 
 def test_first_turns_start_in_waves(world, monkeypatch):
     monkeypatch.setattr(sq, "WAVE_SIZE", 3)
-    monkeypatch.setattr(sq, "pc_limit", lambda: 8)
+    monkeypatch.setattr(sq, "_user_cap", 8)
     for i in range(6):
         deliver(world, f"m{i}")
     assert world["started"] == ["m0", "m1", "m2"] and world["timers"] == [sq.WAVE_GAP_S]

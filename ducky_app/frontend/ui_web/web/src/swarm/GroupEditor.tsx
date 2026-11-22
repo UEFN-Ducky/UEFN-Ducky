@@ -10,14 +10,14 @@ export interface SwarmGroup {
   perms?: Permissions;
 }
 
-/** How many seats run at once: never above the seat count or K3's PC limit. */
+/** How many seats run at once: up to every seat; there is no PC cap. */
 export function RunAtOnceSlider(props: {
   value: number;
   seats: number;
-  pcLimit: number;
+  pcLimit?: number;
   onEdit: (edit: SwarmEdit) => void;
 }) {
-  const max = Math.max(1, Math.min(props.seats, props.pcLimit));
+  const max = Math.max(1, props.seats);
   const [n, setN] = useState(Math.min(props.value, max));
   useEffect(() => setN(Math.min(props.value, max)), [props.value, max]);
   return (
@@ -35,7 +35,6 @@ export function RunAtOnceSlider(props: {
       />
       <span>
         {n} of {props.seats}
-        {props.pcLimit < props.seats ? ` (this PC runs ${props.pcLimit})` : ""}
       </span>
     </label>
   );

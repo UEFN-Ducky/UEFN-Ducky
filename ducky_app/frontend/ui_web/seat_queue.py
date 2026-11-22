@@ -1,12 +1,15 @@
-"""One cap on team-member turns running at once, across every team (K3 seat queue).
+"""The line team-member turns start through, across every team (K3 seat queue).
 
-Oct 24 2026: 16 agents made the app lag (GIL-capped app, a 539-thread UI herd, chats taking
-10–45 s). Keeper wakes and plan dispatches ask ``request`` before starting a member's turn:
-under the cap it starts now, over it the seat waits in one FIFO line and starts when a turn
-ends (``on_turn_end``). The running count is admission.py's member slots plus seats this queue
-is starting. Free memory never holds a seat (Nov 5 2026): admission.py only warns.
-``limit()`` defaults from CPU cores and RAM (``pc_limit``); the card's "Run at once" slider
-(``set_run_at_once``) can lower it, never raise it past the PC limit.
+Keeper wakes and plan dispatches ask ``request`` before starting a member's turn. There is no
+cap by default: every seat starts (paced by the waves below). The card's "Run at once" slider
+(``set_run_at_once``) sets an optional cap, any number; over it a seat waits in one FIFO line
+and starts when a turn ends (``on_turn_end``). The running count is admission.py's member
+slots plus seats this queue is starting. Free memory never holds a seat (Nov 5 2026):
+admission.py only warns. ``pc_limit`` is only a hint for estimates, never a cap.
+
+Safety: a watcher thread times its own short sleeps. When the app runs late (``LAG_HOLD_MS``
+smoothed), new seats wait in line while at least one runs; running turns are never stopped,
+so no work is lost. Once the lag falls back the line drains by itself.
 
 First turns start in waves (``WAVE_SIZE`` per ``WAVE_GAP_S``): 3 of 14 seats opened with
 "Ducky's tools didn't connect" when all started at once. A turn that ended that way never
@@ -34,6 +37,8 @@ PushFn = Callable[[dict[str, Any]], None]
 
 WAVE_SIZE = 3
 WAVE_GAP_S = 5.0
+LAG_TICK_S = 0.25
+LAG_HOLD_MS = 500.0  # ponytail: one threshold for every PC; tune if it holds a healthy app
 STALE_S = 5.0
 _ENDED_OK = frozenset({"", "done", "completed", "finished"})
 _START_FAILED_RE = re.compile(
@@ -57,6 +62,8 @@ _starts: dict[str, Callable[[], Any]] = {}  # each seat's last start, for the on
 _retried: set[str] = set()  # seats whose failed start was already retried once
 _idle_since: dict[str, float] = {}  # admission slots whose chat runs no agent, since when
 _now = time.monotonic
+_lag_ms = 0.0  # how late the watcher's sleeps wake, smoothed
+_watching = False
 
 
 def _agent_running(conv_id: str) -> bool:
@@ -112,25 +119,56 @@ def total_memory_gb() -> float:
         return 16.0
 
 
+NO_CAP = 1_000_000
+
+
 def pc_limit() -> int:
-    """Turns this PC can run at once: one per two cores and per 2 GB of RAM, at least 2."""
+    """A hint for estimates only (one per two cores and per 2 GB of RAM, at least 2); never a cap."""
     # ponytail: fixed per-agent cost (half a core, 2 GB); measure real agent use if it misjudges.
     cores = os.cpu_count() or 4
     return max(2, min(cores // 2, int(total_memory_gb() // 2)))
 
 
 def limit() -> int:
-    pc = pc_limit()
-    return min(pc, _user_cap) if _user_cap else pc
+    return _user_cap or NO_CAP
 
 
 def set_run_at_once(n: int | None) -> int:
-    """The "Run at once" slider: lowers the cap (0 / None = the PC limit). Returns the cap."""
+    """The "Run at once" slider: an optional cap, any number (0 / None = no cap). Returns the cap."""
     global _user_cap
     with _lock:
-        _user_cap = max(1, min(int(n), pc_limit())) if n else None
+        _user_cap = max(1, int(n)) if n else None
     drain()
     return limit()
+
+
+def lagging() -> bool:
+    return _lag_ms >= LAG_HOLD_MS
+
+
+def _lag_sample(late_ms: float) -> None:
+    """Fold one late wake into ``_lag_ms`` (rises at once, falls slowly); drain when it clears."""
+    global _lag_ms
+    was = lagging()
+    _lag_ms = late_ms if late_ms > _lag_ms else _lag_ms * 0.8 + late_ms * 0.2
+    if was and not lagging():
+        drain()
+
+
+def _watch_lag() -> None:
+    while True:
+        t0 = time.monotonic()
+        time.sleep(LAG_TICK_S)
+        _lag_sample(max(0.0, (time.monotonic() - t0 - LAG_TICK_S) * 1000))
+
+
+def _ensure_watch() -> None:
+    global _watching
+    with _lock:
+        if _watching:
+            return
+        _watching = True
+    _spawn(_watch_lag, "seat-lag-watch")
 
 
 def _running() -> set[str]:
@@ -151,8 +189,8 @@ def _running() -> set[str]:
 
 
 def _room(running: int) -> bool:
-    """Call under ``_lock``."""
-    return running < limit()
+    """Call under ``_lock``. A lagging app starts no more seats while one already runs."""
+    return running < limit() and not (running and lagging())
 
 
 def is_busy(conv_id: str) -> bool:
@@ -173,6 +211,7 @@ def request(conv_id: str, start: Callable[[], Any]) -> str:
     Returns ``started``, ``queued`` (it starts when a turn ends) or ``busy`` (already running
     or waiting: nothing added).
     """
+    _ensure_watch()
     with _lock:
         if is_busy(conv_id):
             return "busy"
@@ -326,5 +365,7 @@ def status() -> dict[str, Any]:
     """For the team bar, card and Settings: ``{running, waiting, limit, pc_limit, text}``."""
     with _lock:
         running, waiting = len(_running()), len(_line)
+    held = lagging() and waiting > 0
     return {"running": running, "waiting": waiting, "limit": limit(), "pc_limit": pc_limit(),
-            "text": f"{running} running · {waiting} waiting"}
+            "held": held, "lag_ms": round(_lag_ms),
+            "text": f"{running} running · {waiting} waiting" + (" · paused: app lagging" if held else "")}

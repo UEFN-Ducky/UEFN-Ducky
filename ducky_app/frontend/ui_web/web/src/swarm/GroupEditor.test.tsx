@@ -43,14 +43,14 @@ describe("GroupEditor", () => {
     expect(edits).toEqual([{ group: "Engine: UE 5.8 web fork", trust_drafts: true }]);
   });
 
-  it("run-at-once slider is capped by the PC limit and emits on release", () => {
+  it("run-at-once slider goes up to every seat, past the PC hint, and emits on release", () => {
     const edits: SwarmEdit[] = [];
     render(<RunAtOnceSlider value={4} seats={12} pcLimit={6} onEdit={(e) => edits.push(e)} />);
     const slider = screen.getByLabelText("Run at once") as HTMLInputElement;
-    expect(slider.max).toBe("6");
-    expect(screen.getByText("4 of 12 (this PC runs 6)")).toBeTruthy();
-    fireEvent.change(slider, { target: { value: "6" } });
+    expect(slider.max).toBe("12");
+    expect(screen.getByText("4 of 12")).toBeTruthy();
+    fireEvent.change(slider, { target: { value: "12" } });
     fireEvent.pointerUp(slider);
-    expect(edits).toEqual([{ run_at_once: 6 }]);
+    expect(edits).toEqual([{ run_at_once: 12 }]);
   });
 });
