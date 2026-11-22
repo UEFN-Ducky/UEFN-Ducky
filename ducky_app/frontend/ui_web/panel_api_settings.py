@@ -1105,6 +1105,8 @@ class PanelApiSettingsMixin:
             cmd = accounts.account_login(p, account)
             if cmd.get("browser"):  # signing in hidden in the browser: the table polls the status
                 return {"waiting": True, "message": cmd["message"]}
+            if cmd.get("code_modal"):  # the table opens the link-and-code modal (coding_agent_login*)
+                return {"code_modal": True}
             from frontend.ui_web.terminal import get_terminal_manager
 
             cwd = (_pa.PanelSettings.load().uefn_project_root or "").strip() or "."

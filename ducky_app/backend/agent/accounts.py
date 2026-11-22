@@ -68,7 +68,8 @@ def _provider(data: dict, provider: str) -> dict:
 def _default_kind(provider: str) -> str:
     """A row with no kind yet: a login when the provider is a coding agent with logins."""
     try:
-        return "login" if callable(_agent_reg(provider).get("account_login")) else "key"
+        reg = _agent_reg(provider)
+        return "login" if callable(reg.get("account_login")) or callable(reg.get("login")) else "key"
     except Exception:
         return "key"
 
@@ -484,7 +485,15 @@ def account_login(agent_id: str, account_id: str) -> dict:
     """``{argv, env}`` that signs this account in, from the plugin's ``account_login``;
     ``{browser, message}`` when the plugin signs in hidden in the browser."""
     _STATUS.pop((agent_id, account_id), None)  # signing in: ask again next time
-    if callable(_agent_reg(agent_id).get("account_browser_login")):
+    reg = _agent_reg(agent_id)
+    one_sign_in = account_id == DEFAULT or not callable(reg.get("account_login"))
+    if one_sign_in and callable(reg.get("login")) and not callable(reg.get("account_browser_login")):
+        # The CLI's own sign-in (every row of a CLI with one sign-in per PC, like Antigravity),
+        # which the plugin's link-and-code login signs in: Settings opens that modal instead of
+        # a terminal tab with no box for the code.
+        _find(_provider(_load(), agent_id), account_id)
+        return {"code_modal": True}
+    if callable(reg.get("account_browser_login")):
         started = _call_hook(agent_id, "account_browser_login", account_id) or {}
         if started.get("error"):
             raise ValueError(str(started["error"]))

@@ -9,10 +9,15 @@ import type { GatewayAccountDto, GatewayAccountStatusDto } from "../../types/pan
 import type { UsageWindow } from "../../components/GatewayUsageFooter";
 import { targetRef } from "../../ui-targets/registry";
 import { BROWSER_WAIT, INSTALLING, REPAIRING, waitForInstall as waitForCliInstall, waitForSignIn } from "./gatewayLogin";
+import { CodingAgentLoginModal } from "./CodingAgentsSection";
+import { refreshModelsCatalog } from "../../hooks/modelsCatalogCache";
 
 /** Walkthroughs' "paste a key" and "Test & Save" steps land on the API keys table. */
 const ADD_KEY_TARGET = { kind: "button", label: "Add API key", route: "settings.llms" } as const;
 const SAVE_KEY_TARGET = { kind: "button", label: "Test & Save", route: "settings.llms" } as const;
+/** Walkthroughs' "Log in" / "Log out" steps land on a logins table (the only place to sign in). */
+const LOGIN_TARGET = { kind: "button", label: "Log in", route: "settings.llms" } as const;
+const LOGOUT_TARGET = { kind: "button", label: "Log out", route: "settings.llms" } as const;
 
 type Kind = "key" | "login";
 
@@ -104,6 +109,8 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
   const [leaving, setLeaving] = useState("");
   // Row signing in hidden in the browser, and what it says meanwhile.
   const [waiting, setWaiting] = useState<{ id: string; text: string } | null>(null);
+  // The CLI's own sign-in through the plugin's link-and-code login (Claude Code, Antigravity).
+  const [codeLogin, setCodeLogin] = useState(false);
   const mounted = useRef(true);
   useEffect(() => () => void (mounted.current = false), []);
 
@@ -179,11 +186,16 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
   const startLogin = async (id: string, retried = false): Promise<boolean> => {
     setBusy(true);
     setMenu(null);
-    let started: { ok: boolean; error?: string; waiting?: boolean; message?: string } | undefined;
+    let started: { ok: boolean; error?: string; waiting?: boolean; message?: string; code_modal?: boolean } | undefined;
     try {
       started = await api()?.login_gateway_account?.(provider, id);
       if (!started) throw new Error("Update Ducky to manage accounts.");
       if (!started.ok) throw new Error(started.error || "Failed");
+      if (started.code_modal) {
+        setNote("");
+        setCodeLogin(true);
+        return true;
+      }
       setNote(started.waiting ? "" : TERMINAL_HINT);
       await load();
     } catch (e) {
@@ -385,7 +397,9 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
             <button
               type="button"
               className="settings-btn"
-              ref={kind === "key" ? targetRef("settings.llms.provider.key", ADD_KEY_TARGET) : undefined}
+              ref={kind === "key"
+                ? targetRef("settings.llms.provider.key", ADD_KEY_TARGET)
+                : targetRef("settings.llms.provider.agent.login", LOGIN_TARGET)}
               disabled={busy}
               onClick={addFirst}
             >
@@ -453,11 +467,13 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
                     {a.kind === "login" ? (
                       a.status?.loggedIn ? (
                         <button type="button" className="settings-btn" disabled={busy}
+                          ref={targetRef("settings.llms.provider.agent.logout", LOGOUT_TARGET)}
                           onClick={() => void run(() => api()?.logout_gateway_account?.(provider, a.id), `${a.label} logged out.`)}>
                           Log out
                         </button>
                       ) : (
                         <button type="button" className="settings-btn" disabled={busy || waiting?.id === a.id}
+                          ref={targetRef("settings.llms.provider.agent.login", LOGIN_TARGET)}
                           onClick={() => void startLogin(a.id)}>
                           Log in
                         </button>
@@ -503,6 +519,21 @@ export function GatewayAccounts({ provider, kind, title, keyUrl }: {
         </label>
       ) : null}
       <p role="status" className="gateway-accounts-note">{note}</p>
+      {codeLogin ? (
+        <CodingAgentLoginModal
+          agentId={provider}
+          title={`Log in to ${loginName || provider}`}
+          onClose={() => {
+            void api()?.coding_agent_login_cancel?.(provider);
+            setCodeLogin(false);
+          }}
+          onLoggedIn={() => {
+            setCodeLogin(false);
+            void load();
+            void refreshModelsCatalog();
+          }}
+        />
+      ) : null}
     </section>
   );
 }

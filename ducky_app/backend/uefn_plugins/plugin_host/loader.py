@@ -586,16 +586,14 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             order = int(agent.get("order") if agent.get("order") is not None else 100)
         except (TypeError, ValueError):
             order = 100
-        row = {
-            "id": aid,
-            "label": str(agent.get("label") or aid).strip() or aid,
-            "order": order,
-            "plugin_id": pid,
-        }
-        if agent.get("accounts") is False:
-            # One sign-in per PC (Antigravity): no "<agent> logins" table; the agent's row signs in.
-            row["accounts"] = False
-        _CONTRIBUTIONS["llm_coding_agents"].append(row)
+        _CONTRIBUTIONS["llm_coding_agents"].append(
+            {
+                "id": aid,
+                "label": str(agent.get("label") or aid).strip() or aid,
+                "order": order,
+                "plugin_id": pid,
+            }
+        )
 
     for hook in contributes.get("ide.hookups") or contributes.get("ide_hookups") or []:
         if not isinstance(hook, dict):

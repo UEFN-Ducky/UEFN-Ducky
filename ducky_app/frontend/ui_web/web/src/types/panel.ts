@@ -1999,8 +1999,6 @@ export interface UefnPluginContributionsDto {
     label: string;
     order?: number;
     plugin_id: string;
-    /** false: one sign-in per PC, so Settings shows no "<agent> logins" table (the agent row signs in). */
-    accounts?: boolean;
   }>;
   agent_tools?: Record<string, { category?: string; tools?: string[] }>;
   enabled_ids?: string[];
@@ -3879,7 +3877,7 @@ export interface PanelApi {
   /** key "" keeps the saved key; base_url "" clears it, left out keeps it. */
   set_gateway_account_key?(provider: string, account: string, key: string, base_url?: string): Promise<GatewayAccountResult>;
   set_gateway_auto_switch?(provider: string, on: boolean): Promise<GatewayAccountResult>;
-  login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id?: string; waiting?: boolean; message?: string }>>;
+  login_gateway_account?(provider: string, account: string, conv_id?: string): Promise<GatewayAccountResult<{ session_id?: string; waiting?: boolean; message?: string; code_modal?: boolean }>>;
   logout_gateway_account?(provider: string, account: string): Promise<GatewayAccountResult>;
   gateway_account_status?(provider: string, account: string): Promise<GatewayAccountResult<{ status: GatewayAccountStatusDto }>>;
   /** The plugins turned on here that make videos or music, for Settings → LLMs → Default models. */

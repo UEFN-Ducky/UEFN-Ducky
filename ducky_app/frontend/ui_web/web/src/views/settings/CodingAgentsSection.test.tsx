@@ -43,9 +43,12 @@ function setup(agent: Partial<CodingAgentDto>) {
 }
 
 it("shows one tidy row and hides CLI inputs until Advanced opens", async () => {
-  setup({ logged_in: true });
-  expect(await screen.findByText("Logged in")).toBeTruthy();
-  expect(screen.getByText("v2.1.311")).toBeTruthy();
+  setup({ logged_in: false, can_login: true, can_logout: true });
+  expect(await screen.findByText("v2.1.311")).toBeTruthy();
+  // Sign-in lives in the logins table above: the row never repeats it.
+  expect(screen.queryByRole("button", { name: "Log in" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Log out" })).toBeNull();
+  expect(screen.queryByText("Not logged in")).toBeNull();
   expect(screen.queryByPlaceholderText("CLI path (blank = PATH)")).toBeNull();
   expect(screen.queryByPlaceholderText("Default args")).toBeNull();
 

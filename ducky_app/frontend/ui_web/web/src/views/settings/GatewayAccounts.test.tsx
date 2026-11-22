@@ -12,6 +12,9 @@ const api = {
   login_gateway_account: vi.fn(),
   gateway_account_status: vi.fn(),
   open_external_url: vi.fn(),
+  coding_agent_login: vi.fn(),
+  coding_agent_login_status: vi.fn(),
+  coding_agent_login_cancel: vi.fn(),
 };
 const confirm = vi.fn();
 const runBridgeJob = vi.fn();
@@ -342,6 +345,20 @@ it("reduced motion deletes at once with no leaving animation", async () => {
   } finally {
     window.matchMedia = matchMedia;
   }
+});
+
+it("a link-and-code sign-in opens the code box, not a terminal tab", async () => {
+  api.list_gateway_accounts.mockResolvedValue(lone({ loggedIn: false }));
+  api.login_gateway_account.mockResolvedValue({ ok: true, code_modal: true });
+  api.coding_agent_login.mockReset().mockResolvedValue({
+    ok: true, needs_login: true, login_ui: "code_modal", auth_url: "https://accounts.google.com/o/oauth2/auth?x=1" });
+  api.coding_agent_login_status.mockReset().mockResolvedValue({ ok: true, logged_in: false });
+  render(<GatewayAccounts provider="antigravity" kind="login" title="Antigravity logins" />);
+  await screen.findByText("Not logged in");
+  fireEvent.click(within(row("Default")).getByRole("button", { name: "Log in" }));
+  await screen.findByPlaceholderText("Paste the login code");
+  expect(api.coding_agent_login).toHaveBeenCalledWith("antigravity");
+  expect(screen.queryByText(/terminal tab/)).toBeNull();
 });
 
 it("a browser sign-in shows a spinner, not the terminal hint, then Logged in", async () => {

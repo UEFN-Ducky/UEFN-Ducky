@@ -360,42 +360,7 @@ function CodingAgentRows({
 }) {
   const [busyId, setBusyId] = useState("");
   const [detectNote, setDetectNote] = useState<Record<string, string>>({});
-  const [loginId, setLoginId] = useState("");
-  const [logoutId, setLogoutId] = useState("");
-
-  const closeLogin = useCallback(() => {
-    const api = getApi();
-    if (loginId && api?.coding_agent_login_cancel) {
-      void api.coding_agent_login_cancel(loginId);
-    }
-    setLoginId("");
-  }, [loginId]);
-  const finishLogin = useCallback(() => {
-    setLoginId("");
-    void refresh();
-    void refreshModelsCatalog();
-  }, [refresh]);
-
-  const startLogout = async (agentId: string) => {
-    const api = getApi();
-    if (!api?.coding_agent_logout) return;
-    setLogoutId(agentId);
-    setDetectNote((n) => ({ ...n, [agentId]: "Signing out…" }));
-    try {
-      const res = await api.coding_agent_logout(agentId);
-      if (!res.ok) {
-        setDetectNote((n) => ({ ...n, [agentId]: String(res.error || res.message || "Logout failed") }));
-        return;
-      }
-      setDetectNote((n) => ({ ...n, [agentId]: res.message || "Logged out." }));
-      await refresh();
-      void refreshModelsCatalog();
-    } catch (e) {
-      setDetectNote((n) => ({ ...n, [agentId]: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setLogoutId("");
-    }
-  };
+  // Sign-in and sign-out live in the "<agent> logins" table above (GatewayAccounts), not here.
 
   return (
     <div className="llms-provider-card">
@@ -409,18 +374,7 @@ function CodingAgentRows({
         const help = (agent.install_help || "").trim();
         const note = (detectNote[agent.id] || "").trim();
         const version = /\bv\d[\w.-]*/.exec(agent.status || "")?.[0] || "";
-        const pill = !agent.available
-          ? "Not found"
-          : agent.logged_in === true
-            ? "Logged in"
-            : agent.logged_in === false
-              ? "Not logged in"
-              : "";
         const detecting = busyId === agent.id;
-        const loggingIn = loginId === agent.id;
-        const loggingOut = logoutId === agent.id;
-        const loggedIn = agent.logged_in === true;
-        const needsLogin = agent.available && agent.logged_in === false;
         return (
           <div
             key={agent.id}
@@ -428,49 +382,13 @@ function CodingAgentRows({
             style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}
           >
             <div className="llms-provider-row-main" style={{ width: "100%" }}>
-              <div className={`llms-provider-label${agent.available && !needsLogin ? " is-saved" : ""}`}>
-                {agent.available && !needsLogin ? (
-                  <Icons.Check />
-                ) : (
-                  <span className="llms-provider-dot" title={needsLogin ? "Not logged in" : "Not available"} />
-                )}
+              <div className={`llms-provider-label${agent.available ? " is-saved" : ""}`}>
+                {agent.available ? <Icons.Check /> : <span className="llms-provider-dot" title="Not available" />}
                 <span>{agent.label}</span>
-                {pill ? (
-                  <span className={`coding-agent-pill ${pill === "Logged in" ? "is-ok" : "is-fail"}`}>{pill}</span>
-                ) : null}
+                {!agent.available ? <span className="coding-agent-pill is-fail">Not found</span> : null}
                 {version ? <span className="coding-agent-version">{version}</span> : null}
               </div>
               <div style={{ flex: 1 }} />
-              {agent.can_login && (needsLogin || loggingIn) ? (
-                <button
-                  type="button"
-                  className="settings-btn llms-provider-btn"
-                  ref={targetRef("settings.llms.provider.agent.login", {
-                    kind: "button",
-                    label: "Log in",
-                    route: "settings.llms",
-                  })}
-                  disabled={loggingIn || loggingOut || detecting}
-                  onClick={() => setLoginId(agent.id)}
-                >
-                  {loggingIn ? "Logging in…" : "Log in"}
-                </button>
-              ) : null}
-              {agent.can_logout && (loggedIn || loggingOut) ? (
-                <button
-                  type="button"
-                  className="settings-btn llms-provider-btn"
-                  ref={targetRef("settings.llms.provider.agent.logout", {
-                    kind: "button",
-                    label: "Log out",
-                    route: "settings.llms",
-                  })}
-                  disabled={loggingOut || loggingIn || detecting}
-                  onClick={() => void startLogout(agent.id)}
-                >
-                  {loggingOut ? "Signing out…" : "Log out"}
-                </button>
-              ) : null}
               <label className="general-tab-switch" title="Enable in chat picker">
                 <input
                   type="checkbox"
@@ -576,14 +494,6 @@ function CodingAgentRows({
         <div className="general-tab-section-desc">
           No coding agents yet — install Cursor / Anthropic / OpenAI / Google from Settings → Plugins → Gateways.
         </div>
-      ) : null}
-      {loginId ? (
-        <CodingAgentLoginModal
-          agentId={loginId}
-          title={`Log in to ${rows.find((a) => a.id === loginId)?.label || "Claude Code"}`}
-          onClose={closeLogin}
-          onLoggedIn={finishLogin}
-        />
       ) : null}
     </div>
   );

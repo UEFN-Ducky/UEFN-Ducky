@@ -833,7 +833,7 @@ export function AgentTab() {
                   .filter((a) => (a.plugin_id || "").trim().toLowerCase() === selected.plugin_id.trim().toLowerCase())
                   .map((a) => {
                     const id = String(a.id || "").trim().toLowerCase().replace(/-/g, "_");
-                    return id && a.accounts !== false ? (
+                    return id ? (
                       <GatewayAccounts key={id} provider={id} kind="login" title={`${a.label || id} logins`} />
                     ) : null;
                   })}

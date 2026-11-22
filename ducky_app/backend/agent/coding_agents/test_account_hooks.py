@@ -185,6 +185,31 @@ def test_browser_login_hook_opens_no_terminal(reg, monkeypatch):
     assert api.login_gateway_account("gemini_cli", "default") == {"ok": False, "error": "Gemini CLI isn't installed yet."}
 
 
+def test_the_default_login_opens_the_code_box_not_a_terminal(reg, monkeypatch):
+    """Claude Code / Antigravity: the table's Log in on the CLI's own sign-in opens the
+    link-and-code modal; another account keeps its own folder's terminal sign-in."""
+    row = {
+        "login": lambda **k: {},
+        "account_login": lambda d: {"argv": ["claude"], "env": {}},
+        "account_status": lambda d: {"loggedIn": False},
+    }
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda aid: row if aid == "claude_code" else None)
+    import frontend.ui_web.terminal as terminal
+
+    monkeypatch.setattr(terminal, "get_terminal_manager", lambda: 1 / 0)  # never a terminal
+    api = PanelApi.__new__(PanelApi)
+    assert api.login_gateway_account("claude_code", "default") == {"ok": True, "code_modal": True}
+    other = api.add_gateway_account("claude_code", "Account 2", "login")["id"]
+    assert accounts.account_login("claude_code", other)["argv"] == ["claude"]
+    # One sign-in per PC (Antigravity: a code login, no per-account login): every row, and its
+    # Default row is a login, not a key (the table read "Antigravity logins (0)").
+    agy = {"login": lambda **k: {}, "account_status": lambda d: {"loggedIn": False}}
+    patch_host(monkeypatch, "get_coding_agent_registration", lambda aid: agy if aid == "antigravity" else None)
+    assert accounts.list_accounts("antigravity")[0]["kind"] == "login"
+    second = accounts.add_account("antigravity", "Account 2", "login")
+    assert accounts.account_login("antigravity", second) == {"code_modal": True}
+
+
 def test_agent_row_says_when_its_sign_in_is_one_click(monkeypatch):
     """The setup guide's Connect reads this: a browser sign-in needs no window and no code."""
     from backend.agent.coding_agents.base import CodingAgentInfo
