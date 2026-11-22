@@ -257,9 +257,13 @@ class TrayIconController:
     def toast(self, title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
         """A Windows notification from the tray icon. A click runs ``on_click`` (the latest
         toast's; Windows shows one at a time per icon). Quiet hours / Focus are respected.
-        Linux: always False; ``notifications`` sends those over D-Bus itself."""
+        Linux: a freedesktop notification over D-Bus (``notifications.linux_toast``)."""
         if sys.platform != "win32":
-            return False
+            if not sys.platform.startswith("linux"):
+                return False
+            from frontend.notifications import linux_toast
+
+            return linux_toast(title, message, on_click)
         send = getattr(self._icon, "_message", None)
         if send is None or not getattr(self._icon, "visible", False):
             return False

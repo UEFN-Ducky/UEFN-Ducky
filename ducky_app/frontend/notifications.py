@@ -21,8 +21,10 @@ command, the message) shows in the Windows notification only.
 from __future__ import annotations
 
 import hashlib
+import html
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -64,8 +66,11 @@ _site_timer: threading.Timer | None = None
 
 def bind_desktop(toast: ToastFn | None, open_target: OpenFn | None) -> None:
     """The app's tray shows notifications; ``open_target(kind, id)`` brings the window up on
-    that chat or workflow (``kind`` "" just brings it up). Set once by the panel process."""
+    that chat or workflow (``kind`` "" just brings it up). Set once by the panel process.
+    Linux without a tray still notifies: over D-Bus (:func:`linux_toast`)."""
     global _toast_fn, _open_fn
+    if toast is None and sys.platform.startswith("linux"):
+        toast = linux_toast
     _toast_fn = toast
     _open_fn = open_target
 
@@ -258,6 +263,80 @@ def _show(items: list[dict[str, str]]) -> None:
         _log.debug("toast failed", exc_info=True)
 
 
+# --- Linux notifications (org.freedesktop.Notifications) -------------------------
+
+_FDN = "org.freedesktop.Notifications"
+_FDN_PATH = "/org/freedesktop/Notifications"
+_SIGNAL = re.compile(r"\.(ActionInvoked|ActivationToken|NotificationClosed) \(uint32 (\d+)(?:, '((?:[^'\\]|\\.)*)')?")
+_linux_clicks: dict[int, Callable[[], None]] = {}
+_linux_tokens: dict[int, str] = {}
+_linux_watching = threading.Event()
+
+
+def linux_toast(title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
+    """A desktop notification with an Open button (and a body click: "default"). Either runs
+    ``on_click`` with ``XDG_ACTIVATION_TOKEN`` set, so the window may take focus on Wayland."""
+    from frontend.open_files import gdbus_call, gv_str
+
+    _watch_linux_actions()
+    reply = gdbus_call(
+        _FDN, _FDN_PATH, f"{_FDN}.Notify",
+        gv_str("UEFN Ducky"), "uint32 0", gv_str("uefn-ducky"),
+        gv_str((title or "UEFN Ducky")[:120]), gv_str(html.escape(message or "", quote=False)),
+        "['default', 'Open', 'open', 'Open']", "{'desktop-entry': <'uefn-ducky'>}", "int32 -1",
+    )
+    found = re.search(r"uint32 (\d+)", reply or "")
+    if not found:
+        return False
+    if on_click is not None:
+        with _lock:
+            _linux_clicks[int(found.group(1))] = on_click
+    return True
+
+
+def handle_linux_signal(line: str) -> None:
+    """One line of ``gdbus monitor`` on the notification server."""
+    m = _SIGNAL.search(line or "")
+    if not m:
+        return
+    name, nid, arg = m.group(1), int(m.group(2)), m.group(3) or ""
+    with _lock:
+        if name == "ActivationToken":  # sent just before ActionInvoked (spec 1.2)
+            _linux_tokens[nid] = arg
+            return
+        click = _linux_clicks.pop(nid, None)
+        token = _linux_tokens.pop(nid, "")
+    if name != "ActionInvoked" or click is None or arg not in ("open", "default"):
+        return
+    if token:
+        # The window's focus code (and GTK's present) reads it from here.
+        os.environ["XDG_ACTIVATION_TOKEN"] = token
+    try:
+        click()
+    except Exception:
+        _log.debug("notification click failed", exc_info=True)
+
+
+def _watch_linux_actions() -> None:
+    if _linux_watching.is_set():
+        return
+    from frontend.open_files import gdbus_monitor
+
+    stream = gdbus_monitor(_FDN, _FDN_PATH)
+    if stream is None:
+        return
+    _linux_watching.set()
+
+    def run() -> None:
+        try:
+            for line in stream:
+                handle_linux_signal(line)
+        finally:
+            _linux_watching.clear()  # the bus went away: the next notification starts a new one
+
+    threading.Thread(target=run, name="notify-actions", daemon=True).start()
+
+
 # --- The account (uefnducky.org) -------------------------------------------------
 
 
@@ -313,3 +392,5 @@ def reset_for_tests() -> None:
         _toast_pending.clear()
         _site_items.clear()
         _recent.clear()
+        _linux_clicks.clear()
+        _linux_tokens.clear()

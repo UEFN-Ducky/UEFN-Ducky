@@ -87,4 +87,8 @@ def test_linux_menu_matches_windows_and_toast_is_dbus(monkeypatch) -> None:
     icon.menu[1][1](icon, None)
     assert shown == [1] and exited == [1]
     # Linux notifications go over D-Bus (frontend.notifications), never a Win32 balloon.
-    assert tray.toast("t", "m") is False
+    from frontend import notifications
+
+    sent = []
+    monkeypatch.setattr(notifications, "linux_toast", lambda *a: sent.append(a) or True)
+    assert tray.toast("t", "m") is True and sent == [("t", "m", None)]

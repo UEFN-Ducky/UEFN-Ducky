@@ -115,3 +115,47 @@ def test_old_site_gets_one_phone_push_per_batch(monkeypatch) -> None:
     assert [e for e, _ in sent] == ["desktop-notify", "desktop-agent-done"]
     assert sent[0][1]["keyId"] == "key1" and len(sent[0][1]["items"]) == 3
     assert sent[1][1] == {"title": "UEFN Ducky", "body": "2 updates on your PC."}
+
+
+def test_linux_notify_open_action_passes_activation_token(monkeypatch) -> None:
+    """Fake session bus: Notify gets an Open action; ActionInvoked opens with the token set."""
+    from frontend import open_files
+
+    notifications.reset_for_tests()
+    calls: list[tuple] = []
+    monkeypatch.setattr(open_files, "gdbus_call", lambda *a, **_k: calls.append(a) or "(uint32 42,)")
+    monkeypatch.setattr(open_files, "gdbus_monitor", lambda *a, **_k: None)
+    monkeypatch.delenv("XDG_ACTIVATION_TOKEN", raising=False)
+    opened: list[str] = []
+    assert notifications.linux_toast("Agent finished", "a <b> & c", lambda: opened.append("c1")) is True
+    dest, path, method, *args = calls[0]
+    assert (dest, method) == ("org.freedesktop.Notifications", "org.freedesktop.Notifications.Notify")
+    assert args[3] == "'Agent finished'" and args[4] == "'a &lt;b&gt; &amp; c'"
+    assert args[5] == "['default', 'Open', 'open', 'Open']"
+    # Another notification's click is not ours; a close without a click forgets it.
+    notifications.handle_linux_signal("/org/freedesktop/Notifications: org.freedesktop.Notifications.ActionInvoked (uint32 7, 'open')")
+    assert opened == []
+    notifications.handle_linux_signal("/org/freedesktop/Notifications: org.freedesktop.Notifications.ActivationToken (uint32 42, 'tok-1')")
+    notifications.handle_linux_signal("/org/freedesktop/Notifications: org.freedesktop.Notifications.ActionInvoked (uint32 42, 'open')")
+    assert opened == ["c1"]
+    import os
+
+    assert os.environ["XDG_ACTIVATION_TOKEN"] == "tok-1"
+    notifications.handle_linux_signal("/org/freedesktop/Notifications: org.freedesktop.Notifications.ActionInvoked (uint32 42, 'open')")
+    assert opened == ["c1"]  # once
+
+
+def test_linux_notify_fails_soft_and_binds_without_a_tray(monkeypatch) -> None:
+    import sys
+
+    from frontend import open_files
+
+    monkeypatch.setattr(open_files, "gdbus_call", lambda *a, **_k: None)  # no bus / no server
+    monkeypatch.setattr(open_files, "gdbus_monitor", lambda *a, **_k: None)
+    assert notifications.linux_toast("t", "m") is False
+    monkeypatch.setattr(sys, "platform", "linux")
+    notifications.bind_desktop(None, None)
+    assert notifications._toast_fn is notifications.linux_toast
+    monkeypatch.setattr(sys, "platform", "win32")
+    notifications.bind_desktop(None, None)
+    assert notifications._toast_fn is None
