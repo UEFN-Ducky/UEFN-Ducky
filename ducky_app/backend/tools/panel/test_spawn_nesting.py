@@ -66,6 +66,7 @@ def store(monkeypatch):
 
     class Api:
         def group_find_or_create(self, name="", folder_id="", open_tab=False, caller_conv_id=""):
+            s.open_tabs.append(open_tab)
             return groups._group_create_locked(PanelApiChatsMixin(), name, folder_id, SimpleNamespace(), None, False)
 
         def group_seat_profile(self, group_id, profile_id, model="", write_allowed=None, for_agent=False,
@@ -75,6 +76,7 @@ def store(monkeypatch):
             hub.group_members = [*hub.group_members, {"member_conv_id": "y", "name": name}]
             return {"ok": True, "member": {"member_conv_id": "y", "name": name, "ducky_name": name}}
 
+    s.open_tabs = []
     monkeypatch.setattr(ducky_panel, "_panel_api", lambda: Api())
     return s
 
@@ -91,6 +93,14 @@ def test_a_group_made_by_a_member_of_g_is_nested_in_g(monkeypatch, store):
     x = store.convs[res["id"]]
     folder = next(f for f in store.folders if f.id == res["folder_id"])
     assert folder.parent_id == "fG" and x.parent_conv_id == "G"
+
+
+def test_an_agent_made_group_never_opens_a_tab(monkeypatch, store):
+    store.group("G", "fG", leader="lead")
+    store.chat("lead", "fG", "G")
+    _as(monkeypatch, "lead")
+    ducky_panel.ducky_group_create("X")
+    assert store.open_tabs == [False]
 
 
 def test_a_parent_folder_outside_the_callers_group_is_refused(monkeypatch, store):

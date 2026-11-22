@@ -993,7 +993,8 @@ def ducky_group_create(name: str, parent_folder_id: str = "", pretty: bool = Fal
     """
     parent = _spawn_parent_folder(_resolve_sender(""), (parent_folder_id or "").strip())
     api = _panel_api()
-    res = api.group_find_or_create(name=name.strip() or "Group", folder_id=parent, open_tab=True)
+    # Agent-made groups never open a tab: a swarm makes many at once.
+    res = api.group_find_or_create(name=name.strip() or "Group", folder_id=parent, open_tab=False)
     return tool_json(res, pretty=pretty)
 
 

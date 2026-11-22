@@ -557,12 +557,8 @@ def run_message(
     push = _make_run_scoped_push(base_push, session, conv_id, run_id)
     if parent_conv_id:
         _push_linked_agent(push, parent_conv_id, conv_id, child_title, "running")
-        # Group roundtables must not auto-open member tabs (breaks immersion).
-        from frontend.ui_web.group_orchestrator import is_group_conversation
-
-        parent_conv = load_conversation(parent_conv_id)
-        if not (parent_conv and is_group_conversation(parent_conv)):
-            notify_chats_changed(conv_id, child_title, conv.folder_id, push=push)
+        # Sidebar only: an agent's child chat never opens a tab (a swarm opened one per member and lagged the panel).
+        notify_chats_changed(conv_id, child_title, conv.folder_id, push=push, open_tab=False)
 
     if external:
         # BYOA path: Claude Code / Codex / Cursor — no embedded AgentRunner.
