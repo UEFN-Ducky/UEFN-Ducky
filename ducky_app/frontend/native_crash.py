@@ -159,3 +159,65 @@ def start_watch(every_s: float = WATCH_S) -> None:
     thread = threading.Thread(target=loop, daemon=True, name="native-crash-watch")
     _installed["watch"] = thread
     thread.start()
+
+
+# --- Linux ---------------------------------------------------------------------------
+# No minidumps: faulthandler (boot_report.begin) writes the app's own Python stacks to
+# native.log on every platform. A process the app starts (WebKitWebProcess, a helper) that
+# dies on a signal is written here as a small ``.sigcrash`` JSON the next crash report reads
+# like a dump (minidump.read).
+
+CRASH_SIGNALS = ("SIGSEGV", "SIGABRT", "SIGBUS", "SIGFPE", "SIGILL")
+SIGCRASH_SUFFIX = ".sigcrash"
+# ponytail: by process name; read the faulting module from a core dump if this guesses wrong.
+_MODULE_BY_PROCESS = {"webkit": "libwebkit2gtk"}
+
+
+def signal_name(returncode: int | None) -> str:
+    """'SIGSEGV' for a return code of a process a crash signal ended, else ''."""
+    import signal
+
+    if returncode is None or returncode >= 0:
+        return ""
+    try:
+        name = signal.Signals(-returncode).name
+    except ValueError:
+        return ""
+    return name if name in CRASH_SIGNALS else ""
+
+
+def write_signal_report(process: str, returncode: int | None, folder: Path | None = None,
+                        module: str = "") -> Path | None:
+    """A ``.sigcrash`` for a process a crash signal ended; None for any other end."""
+    name = signal_name(returncode)
+    if not name:
+        return None
+    if not module:
+        module = next((m for key, m in _MODULE_BY_PROCESS.items() if key in process.lower()), "")
+    folder = Path(folder or _installed["folder"] or _dir())
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"ducky-{time.strftime('%Y%m%d-%H%M%S')}-{process}{SIGCRASH_SUFFIX}"
+        import json
+
+        path.write_text(json.dumps({"signal": name, "code": -int(returncode or 0), "process": process,
+                                    "module": module, "at": time.time()}), encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
+def watch_child(proc: object, process: str, folder: Path | None = None) -> threading.Thread:
+    """Parent watchdog: wait for *proc* (a ``subprocess.Popen``) on a daemon thread and write a
+    report if a crash signal ends it."""
+
+    def wait() -> None:
+        try:
+            code = proc.wait()  # type: ignore[attr-defined]
+        except Exception:
+            return
+        write_signal_report(process, code, folder)
+
+    thread = threading.Thread(target=wait, daemon=True, name=f"crash-watch-{process}")
+    thread.start()
+    return thread

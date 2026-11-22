@@ -18,6 +18,7 @@ from frontend import boot_report
 @pytest.fixture
 def crash(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # the same crash folder on Linux
     monkeypatch.delenv("DUCKY_SANDBOX", raising=False)  # these tests run the normal app's path
     monkeypatch.setattr(boot_report, "_state", {})
     monkeypatch.setattr(boot_report, "_pending", {})
@@ -193,6 +194,23 @@ def test_restart_check_compares_against_windows_boot_time() -> None:
     assert not boot_report._pc_restarted_since(time.time())
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux boot time")
+def test_a_linux_reboot_counts_as_a_restart(monkeypatch) -> None:
+    import time
+
+    assert boot_report._linux_boot_time() > 0
+    assert boot_report._pc_restarted_since(1.0)
+    assert not boot_report._pc_restarted_since(time.time())
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux /proc")
+def test_a_linux_heartbeat_has_pc_and_app_memory() -> None:
+    beat = boot_report._memory_sample(None)
+    assert beat["total_gb"] > 0 and 0 <= beat["free_gb"] <= beat["total_gb"]
+    assert boot_report._own_private_bytes() > 0
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Fast Startup is Windows")
 def test_a_fast_startup_boot_counts_as_a_restart(monkeypatch) -> None:
     import time
 

@@ -81,6 +81,11 @@ _page: dict[str, Any] = {"started": False, "watching": False, "errors": [], "web
 
 
 def _dir() -> Path:
+    if sys.platform.startswith("linux"):
+        # Same folder as app_paths.local_app_data_base (this module loads before it can).
+        xdg = os.environ.get("XDG_DATA_HOME") or ""
+        base = xdg if os.path.isabs(xdg) else str(Path.home() / ".local" / "share")
+        return Path(base) / "UEFN-Ducky" / "crash"
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
     return Path(base) / "UEFN-Ducky" / "crash"
 
@@ -300,6 +305,8 @@ def trim_native(native: str, limit: int = NATIVE_MAX) -> str:
 
 def _pc_restarted_since(when: float) -> bool:
     """True when Windows started after *when*: a launch the PC's restart ended is no crash."""
+    if sys.platform.startswith("linux") and when > 0:
+        return _linux_boot_time() > when
     if os.name != "nt" or when <= 0:
         return False
     try:
@@ -312,6 +319,38 @@ def _pc_restarted_since(when: float) -> bool:
         return False
     # Fast Startup resumes the kernel, so its tick count keeps running: the System log says it.
     return booted > when or _last_boot_event() > when
+
+
+def _proc_values(path: str) -> dict[str, int]:
+    """``Name: 123 kB`` / ``name 123`` lines of a /proc file as {name: first number}."""
+    out: dict[str, int] = {}
+    try:
+        with open(path, encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                parts = line.replace(":", " ").split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    out[parts[0]] = int(parts[1])
+    except OSError:
+        pass
+    return out
+
+
+def _linux_boot_time() -> float:
+    return float(_proc_values("/proc/stat").get("btime", 0))
+
+
+def _linux_memory() -> dict[str, Any]:
+    """The heartbeat's PC memory fields from /proc/meminfo (kB)."""
+    info = _proc_values("/proc/meminfo")
+    if "MemTotal" not in info:
+        return {}
+    gb = 1024**2  # kB per GB
+    return {
+        "free_gb": round(info.get("MemAvailable", info.get("MemFree", 0)) / gb, 2),
+        "total_gb": round(info["MemTotal"] / gb, 1),
+        "commit_gb": round(info.get("Committed_AS", 0) / gb, 1),
+        "commit_limit_gb": round(info.get("CommitLimit", 0) / gb, 1),
+    }
 
 
 def _last_boot_event() -> float:
@@ -339,6 +378,9 @@ def _webview_dumps_dir() -> Path:
 
 def _dump_folders() -> list[tuple[Path, str, bool]]:
     """(folder, pattern, is the app's own dump)."""
+    if sys.platform.startswith("linux"):
+        # native_crash.write_signal_report: a child process a crash signal ended.
+        return [(_dir(), "ducky-*.sigcrash", False)]
     return [(_webview_dumps_dir(), "*.dmp", False), (_dir(), "ducky-*.dmp", True)]
 
 
@@ -927,6 +969,8 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
     agents and threads. Anything that can't be read is left out."""
     beat: dict[str, Any] = {"at": round(time.time(), 1)}
     gb = 1024**3
+    if sys.platform.startswith("linux"):
+        beat.update(_linux_memory())
     try:
         import ctypes
         from ctypes import wintypes
@@ -1032,6 +1076,8 @@ def size_bucket(mb: Any) -> str:
 
 def _own_private_bytes() -> int:
     """This process's private bytes from one GetProcessMemoryInfo call (no process snapshot)."""
+    if sys.platform.startswith("linux"):
+        return _proc_values("/proc/self/status").get("RssAnon", 0) * 1024  # private, resident
     try:
         import ctypes
         from ctypes import wintypes

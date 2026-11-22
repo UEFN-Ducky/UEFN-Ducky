@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import struct
+import sys
 import threading
 import time
 from pathlib import Path
@@ -111,6 +112,7 @@ def test_only_the_three_newest_dumps_are_kept(tmp_path: Path) -> None:
 
 
 def test_the_crash_report_names_the_webview_dump_written_since_the_last_start(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")  # WebView2's dump folders
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     started = time.time() - 600
     folder = boot_report._webview_dumps_dir()
@@ -132,6 +134,7 @@ def test_the_crash_report_names_the_webview_dump_written_since_the_last_start(mo
 
 
 def test_the_app_dump_folder_is_read_too(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")  # the app's .dmp folder
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     boot_report._dir().mkdir(parents=True)
     (boot_report._dir() / "ducky-20261025-101233.dmp").write_bytes(
@@ -171,6 +174,7 @@ def test_a_heartbeat_with_plenty_of_memory_is_no_cause_and_no_end_time_is_bounde
 
 def test_heartbeats_write_boot_json_and_never_more_than_every_30_s(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # the same folder on Linux
     boot_report._dir().mkdir(parents=True)
     monkeypatch.setattr(boot_report, "_state", {"state": "ok", "started": time.time()})
     monkeypatch.setattr(boot_report, "_heartbeat", {"thread": None})

@@ -162,8 +162,25 @@ def parse(data: bytes) -> dict[str, Any]:
         return {"unreadable": True, "error": str(exc) or "unreadable"}
 
 
+def read_signal(data: bytes) -> dict[str, Any]:
+    """A Linux ``.sigcrash`` (native_crash.write_signal_report) in parse()'s shape."""
+    import json
+
+    try:
+        raw = json.loads(data.decode("utf-8"))
+        return {
+            "code": int(raw["code"]), "code_name": str(raw["signal"]), "address": None,
+            "module": str(raw.get("module") or ""), "offset": None,
+            "main_module": str(raw.get("process") or ""), "process_type": "", "params": [],
+        }
+    except (ValueError, KeyError, TypeError) as exc:
+        return {"unreadable": True, "error": str(exc) or "unreadable"}
+
+
 def read(path: Path) -> dict[str, Any]:
     try:
+        if Path(path).suffix == ".sigcrash":
+            return read_signal(Path(path).read_bytes())
         return parse(Path(path).read_bytes())
     except OSError as exc:
         return {"unreadable": True, "error": exc.strerror or "unreadable"}
@@ -181,6 +198,8 @@ def process_label(info: dict[str, Any]) -> str:
 
 def where(info: dict[str, Any]) -> str:
     if info.get("module"):
+        if info.get("offset") is None:
+            return str(info["module"])  # a Linux signal report: no address
         return f"{info['module']}+0x{int(info.get('offset') or 0):x}"
     return f"0x{int(info['address']):x}" if info.get("address") is not None else "an unknown place"
 
