@@ -357,6 +357,52 @@ def request_app_exit(
     abort_and_quit(api=api, tk_root=tk_root, window_holder=window_holder)
 
 
+EXIT_SIGNALS = ("SIGTERM", "SIGINT", "SIGHUP")
+
+
+def install_exit_signals(on_exit: Callable[[], None]) -> bool:
+    """Linux: SIGTERM, SIGINT, SIGHUP (logout, ``kill``, Ctrl+C) and logind's
+    ``PrepareForShutdown`` run *on_exit*, the same exit as the window's Quit. Call it from the
+    main thread. Windows keeps its own path (the launcher's WM_ENDSESSION). True when set."""
+    if not sys.platform.startswith("linux"):
+        return False
+    import signal
+
+    for name in EXIT_SIGNALS:
+        signal.signal(getattr(signal, name), lambda _sig, _frame: on_exit())
+    threading.Thread(target=watch_logind, args=(on_exit,), name="logind-watch", daemon=True).start()
+    return True
+
+
+def install_app_exit_signals(*, api: Any, tk_root: Any, window_holder: dict[str, object]) -> bool:
+    """:func:`install_exit_signals` wired to :func:`request_app_exit`."""
+    return install_exit_signals(
+        lambda: request_app_exit(api=api, tk_root=tk_root, window_holder=window_holder))
+
+
+def _prepare_for_shutdown(line: str) -> bool:
+    """A ``gdbus monitor`` line that says the PC is about to shut down or restart."""
+    return "PrepareForShutdown" in line and "true" in line.split("PrepareForShutdown", 1)[1]
+
+
+def watch_logind(on_exit: Callable[[], None], cmd: list[str] | None = None) -> None:
+    """Run *on_exit* when logind announces a shutdown. ``gdbus`` ships with GLib (WebKitGTK
+    needs it), so no D-Bus library. Returns when the monitor ends (no system bus)."""
+    # ponytail: no delay inhibitor; SIGTERM from systemd still runs the same exit if we're late.
+    cmd = cmd or ["gdbus", "monitor", "--system", "--dest", "org.freedesktop.login1",
+                  "--object-path", "/org/freedesktop/login1"]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        if _prepare_for_shutdown(line):
+            proc.kill()
+            on_exit()
+            return
+
+
 def start_tk_pump(make_root: Callable[[], Any]) -> Any:
     """Make the hidden Tk root ON the pump thread and run its mainloop there; return the root.
 
