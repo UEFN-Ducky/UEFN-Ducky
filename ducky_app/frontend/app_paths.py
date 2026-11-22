@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 APP_DATA_DIR_NAME = "UEFN-Ducky"
@@ -14,11 +15,38 @@ FOLDERID_LOCAL_APP_DATA = "F1B32785-6FBA-4FCF-9D55-7B8E7F157091"
 _KF_FLAG_DONT_VERIFY = 0x4000
 
 
+def _is_linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def _xdg(var: str, default: str) -> Path:
+    # XDG spec: relative values are invalid and must be ignored.
+    value = os.environ.get(var) or ""
+    return Path(value) if os.path.isabs(value) else Path.home() / default
+
+
 def local_app_data_base() -> Path:
+    """Base folder for app data: ``%LOCALAPPDATA%`` on Windows, ``$XDG_DATA_HOME`` on Linux."""
+    if _is_linux():
+        return _xdg("XDG_DATA_HOME", ".local/share")
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if base:
         return Path(base)
     return Path.home()
+
+
+def cache_base() -> Path:
+    """Base folder for caches (``$XDG_CACHE_HOME`` on Linux; same as data on Windows)."""
+    if _is_linux():
+        return _xdg("XDG_CACHE_HOME", ".cache")
+    return local_app_data_base()
+
+
+def config_base() -> Path:
+    """Base folder for config (``$XDG_CONFIG_HOME`` on Linux; same as data on Windows)."""
+    if _is_linux():
+        return _xdg("XDG_CONFIG_HOME", ".config")
+    return local_app_data_base()
 
 
 def windows_known_folder(folder_id: str) -> str:
