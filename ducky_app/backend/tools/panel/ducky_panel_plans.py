@@ -50,11 +50,41 @@ def _other_root_with_plan(cid: str, root: str) -> str:
     return ""
 
 
+def _outline_rows(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """The plan as {n, id, content, status, owner?} rows, in tree order."""
+    from backend.agent.coding_agents.plans import outline_numbers
+
+    rows = []
+    for lab, n in outline_numbers(plan.get("nodes")):
+        row = {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
+        if n.get("assignee"):
+            row["owner"] = n["assignee"]
+        rows.append(row)
+    return rows
+
+
+def _find_section(pairs: list[tuple[str, dict[str, Any]]], want: str) -> tuple[str, dict[str, Any]] | None:
+    """The (n, node) ``want`` names: its id, its outline number (``2.1``), its title, or the
+    start of one title only. None when nothing, or more than one title, fits."""
+    for test in (lambda lab, n: n.get("id") == want,
+                 lambda lab, n: lab == want.rstrip(".")):
+        hit = next(((lab, n) for lab, n in pairs if test(lab, n)), None)
+        if hit:
+            return hit
+    low = want.casefold()
+    titled = [(lab, n) for lab, n in pairs if str(n.get("content") or "").strip().casefold() == low]
+    if len(titled) == 1:
+        return titled[0]
+    starts = [(lab, n) for lab, n in pairs if str(n.get("content") or "").strip().casefold().startswith(low)]
+    return starts[0] if len(starts) == 1 and not titled else None
+
+
 @mcp.tool()
 def ducky_get_plan(chat_id: str = "", pretty: bool = False, section: str = "", outline: bool = False) -> str:
     """Load the project Plan for this conversation (or chat_id). Returns outline numbering 1, 1.1, 1.1.1, …
 
-    ``section=<node id>`` returns only that sub plan, its steps and their notes.
+    ``section=`` (a step's id, its outline number such as ``2.1``, or its title) returns only
+    that sub plan, its steps and their notes; a miss answers with the outline to pick from.
     ``outline=true`` returns titles, status and owner per step, no notes and no full plan:
     read a big plan that way, then the part you need with ``section=``.
     """
@@ -78,24 +108,22 @@ def ducky_get_plan(chat_id: str = "", pretty: bool = False, section: str = "", o
         )
     head = {key: plan.get(key) for key in ("id", "chat_id", "title", "status", "kind", "assigned_from") if plan.get(key)}
     if (section or "").strip():
-        found = next((n for n in _walk_nodes(plan.get("nodes")) if n.get("id") == section.strip()), None)
-        if found is None:
-            return tool_json({"ok": False, "error": f"no step {section.strip()!r} in this plan"}, pretty=pretty)
-        label = next((lab for lab, n in outline_numbers(plan.get("nodes")) if n is found), "")
+        want = section.strip()
+        pair = _find_section(outline_numbers(plan.get("nodes")), want)
+        if pair is None:
+            return tool_json({"ok": False, "plan": head,
+                              "error": f"no step {want!r} in this plan: pass a step's id or its n from outline",
+                              "outline": _outline_rows(plan)}, pretty=pretty)
+        label, found = pair
         return tool_json(
             attach_next_tick({"ok": True, "plan": head, "n": label, "section": found,
                               "progress": todo_progress({"nodes": [found]})}, plan, caller=cid),
             pretty=pretty,
         )
     if outline:
-        rows = []
-        for lab, n in outline_numbers(plan.get("nodes")):
-            row = {"n": lab, "id": n["id"], "content": n["content"], "status": n["status"]}
-            if n.get("assignee"):
-                row["owner"] = n["assignee"]
-            rows.append(row)
         return tool_json(
-            attach_next_tick({"ok": True, "plan": head, "progress": todo_progress(plan), "outline": rows}, plan, caller=cid),
+            attach_next_tick({"ok": True, "plan": head, "progress": todo_progress(plan), "outline": _outline_rows(plan)},
+                             plan, caller=cid),
             pretty=pretty,
         )
     return tool_json(
