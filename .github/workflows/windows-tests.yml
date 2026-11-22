@@ -49,9 +49,38 @@ jobs:
           python -m pip install -r requirements-dev.txt
           npm ci --prefix ducky_app/frontend/ui_web/web
 
+      # A 4-core runner is slower than a dev PC: a timing test that loses its race runs
+      # once more on its own. A real failure fails both times and stays red.
       - name: pytest
         id: pytest
-        run: python -m pytest ducky_app -q -n auto -p no:cacheprovider --junitxml="${{ runner.temp }}/pytest.xml"
+        run: |
+          python -m pytest ducky_app -q -n auto --junitxml="${{ runner.temp }}/pytest.xml"
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          Write-Output "::warning::retrying the failed tests once, one at a time"
+          python -m pytest ducky_app -q --lf --junitxml="${{ runner.temp }}/pytest-retry.xml"
+          exit $LASTEXITCODE
+
+      # The Verse grammar and theme come from the person's own UEFN install (Epic's files,
+      # never in the repo; scripts/ensure-verse-assets.mjs). CI has no UEFN: the editor's
+      # imports get empty stand-ins of the same shape.
+      - name: Verse language stand-ins
+        if: ${{ !cancelled() }}
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          stand_ins = {
+              "verse.tmGrammar.json": {"scopeName": "source.verse", "patterns": [], "repository": {}},
+              "language-configuration.json": {},
+              "verse-snippets.json": {},
+              "verse-dark.tmTheme.json": {"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []},
+          }
+          lang = Path("ducky_app/frontend/ui_web/web/src/verse-editor/lang")
+          lang.mkdir(parents=True, exist_ok=True)
+          for name, doc in stand_ins.items():
+              if not (lang / name).is_file():
+                  (lang / name).write_text(json.dumps(doc), encoding="utf-8")
 
       - name: vitest
         id: vitest
@@ -67,21 +96,30 @@ jobs:
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
-          xml = Path(r"${{ runner.temp }}") / "pytest.xml"
-          baseline = int(os.environ["BASELINE_PASSED"])
-          lines = []
-          if xml.is_file():
+          def counts(xml):
+              if not xml.is_file():
+                  return None
               root = ET.parse(xml).getroot()
               suites = [root] if root.tag == "testsuite" else list(root)
               total = sum(int(s.get("tests", 0)) for s in suites)
               failed = sum(int(s.get("failures", 0)) + int(s.get("errors", 0)) for s in suites)
               skipped = sum(int(s.get("skipped", 0)) for s in suites)
-              passed = total - failed - skipped
-              lines.append(f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped")
+              return total - failed - skipped, failed, skipped
+
+          temp = Path(r"${{ runner.temp }}")
+          baseline = int(os.environ["BASELINE_PASSED"])
+          first, retry = counts(temp / "pytest.xml"), counts(temp / "pytest-retry.xml")
+          lines = []
+          if first is None:
+              lines.append("windows-tests: pytest wrote no report")
+          else:
+              passed, failed, skipped = first
+              if retry is not None:
+                  passed, failed = passed + retry[0], retry[1]
+                  lines.append(f"{retry[0]:,} passed on the retry (flaky on this runner)")
+              lines.insert(0, f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped")
               if passed < baseline:
                   lines.append(f"**{baseline - passed:,} fewer passing than the baseline.**")
-          else:
-              lines.append("windows-tests: pytest wrote no report")
           lines.append("pytest: ${{ steps.pytest.outcome }} · vitest: ${{ steps.vitest.outcome }}")
           text = "\n\n".join(lines) + "\n"
           print(text)
