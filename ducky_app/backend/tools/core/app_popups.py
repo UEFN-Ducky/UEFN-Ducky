@@ -11,16 +11,27 @@ BM_CLICK, no pointer move); custom-drawn ones (Premiere's DroverLord, Qt, Slate)
 capture like UEFN's (``uefn_popups.find_buttons``) and pressed with a real click that gives the
 person back their window and pointer. ``press_lone_ok`` presses only blocking message boxes
 whose single button is the way on, never one whose title could commit or discard something.
+
+Linux (X11): windows come from the EWMH client list by pid (``/proc`` names, ``.exe`` dropped),
+buttons always from the capture, clicks through XTest (``xdotool``). Wayland lets no app read
+or click another's windows, so there every call says so instead.
 """
 
 from __future__ import annotations
 
 import ctypes
 import io
+import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 from typing import Any
+
+_LINUX = sys.platform.startswith("linux")
+WAYLAND_REASON = ("Wayland does not let one app see or click another app's windows, so app popups "
+                  "can't be listed or pressed here. Log in to an X11 (Xorg) session to use them.")
 
 # name -> exe names (lower case). Any other exe works too: app="foo.exe".
 APPS: dict[str, tuple[str, ...]] = {
@@ -54,6 +65,8 @@ def exe_names(app: str) -> tuple[str, ...]:
         return APPS[key]
     if key.endswith(".exe"):
         return (key,)
+    if _LINUX and key:
+        return (key,)  # a Linux program name: "krita"
     return tuple(name for names in APPS.values() for name in names) if not key else ()
 
 
@@ -61,7 +74,51 @@ def _user32() -> Any:
     return ctypes.windll.user32
 
 
+def unsupported_reason() -> str:
+    """Why app popups can't work in this session ("" when they can)."""
+    if _LINUX:
+        from frontend.native_capture import is_wayland
+
+        return WAYLAND_REASON if is_wayland() else ""
+    return ""
+
+
+def _linux_pids(names: tuple[str, ...]) -> dict[int, str]:
+    """pid -> program name for running processes named like ``names`` (comm or argv[0])."""
+    wanted = {n[:-4] if n.endswith(".exe") else n for n in names}
+    out: dict[int, str] = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/comm", encoding="utf-8", errors="replace") as f:
+                comm = f.read().strip().lower()
+            with open(f"/proc/{entry}/cmdline", "rb") as f:
+                argv0 = os.path.basename(f.read().split(b"\0", 1)[0].decode("utf-8", "replace")).lower()
+        except OSError:
+            continue
+        argv0 = argv0[:-4] if argv0.endswith(".exe") else argv0  # Wine / Proton
+        hit = next((n for n in (argv0, comm) if n in wanted), "")
+        if hit:
+            out[int(entry)] = hit
+    return out
+
+
+def _x11_top_windows(pids: dict[int, str]) -> list[dict[str, Any]]:
+    """_top_windows for X11. X has no disabled windows: a main window counts as disabled
+    while one of its app's windows is modal or transient for another."""
+    from frontend.native_capture import x11_windows
+
+    wins = [w for w in x11_windows() if w["pid"] in pids]
+    modal_pids = {w["pid"] for w in wins if w["modal"] or w["transient_for"]}
+    return [{"hwnd": w["xid"], "pid": w["pid"], "exe": pids[w["pid"]], "title": w["title"], "cls": w["cls"],
+             "owner": w["transient_for"], "enabled": bool(w["transient_for"]) or w["pid"] not in modal_pids,
+             "rect": w["rect"]} for w in wins]
+
+
 def _pids(names: tuple[str, ...]) -> dict[int, str]:
+    if _LINUX and names:
+        return _linux_pids(names)
     if sys.platform != "win32" or not names:
         return {}
     from ctypes import wintypes
@@ -185,13 +242,15 @@ def _static_text(hwnd: int) -> str:
 def list_popups(app: str = "") -> list[dict[str, Any]]:
     """Each app's windows besides its main one. ``blocking``: the main window is disabled
     (a modal is up), which is when the app's scripts stop running."""
-    if sys.platform != "win32":
+    if _LINUX and unsupported_reason():
+        return []
+    if sys.platform != "win32" and not _LINUX:
         return []
     pids = _pids(exe_names(app))
     if not pids:
         return []
     by_pid: dict[int, list[dict[str, Any]]] = {}
-    for w in _top_windows(pids):
+    for w in (_x11_top_windows(pids) if _LINUX else _top_windows(pids)):
         by_pid.setdefault(w["pid"], []).append(w)
     out: list[dict[str, Any]] = []
     for pid, wins in by_pid.items():
@@ -212,6 +271,11 @@ def list_popups(app: str = "") -> list[dict[str, Any]]:
 
 
 def _capture(popup: dict[str, Any]) -> Any:
+    if _LINUX:
+        from frontend.native_capture import grab_image
+
+        r = popup["rect"]
+        return grab_image(int(r["left"]), int(r["top"]), int(r["width"]), int(r["height"]))
     from backend.tools.core.uefn_popups import _grab
 
     return _grab(popup["rect"], popup["hwnd"])
@@ -294,7 +358,7 @@ def describe(popup: dict[str, Any], *, save: bool = True) -> dict[str, Any]:
     buttons, img = _buttons(popup, img)
     out = {**popup, "buttons": [{"n": i, "label": b.get("label", ""), "nx": b["nx"], "ny": b["ny"],
                                  "primary": bool(b.get("primary"))} for i, b in enumerate(buttons, start=1)]}
-    said = _static_text(popup["hwnd"])
+    said = _static_text(popup["hwnd"]) if sys.platform == "win32" else ""
     if said:
         out["text"] = said
     if save and img is not None:
@@ -326,6 +390,9 @@ def _find(hwnd: int) -> dict[str, Any] | None:
 
 def press(hwnd: int, n: int) -> dict[str, Any]:
     """Press button ``n`` (1-based, left to right) of an app popup; report whether it closed."""
+    reason = unsupported_reason()
+    if reason:
+        return {"ok": False, "error": reason}
     popup = _find(hwnd)
     if popup is None:
         return {"ok": False, "error": f"no app popup {hwnd} on screen (ducky_app_popups lists them)"}
@@ -333,7 +400,12 @@ def press(hwnd: int, n: int) -> dict[str, Any]:
     if not 1 <= int(n) <= len(buttons):
         return {"ok": False, "error": f"button {n} not found; this popup shows {len(buttons)}", "title": popup["title"]}
     b = buttons[int(n) - 1]
-    if b.get("hwnd"):
+    if _LINUX:
+        try:
+            _x11_click(int(hwnd), popup, b)
+        except OSError as exc:
+            return {"ok": False, "error": str(exc), "title": popup["title"]}
+    elif b.get("hwnd"):
         _user32().SendMessageW(int(b["hwnd"]), 0x00F5, 0, 0)  # BM_CLICK: no pointer, no focus change
     else:
         from backend.tools.core import uefn_modal
@@ -359,6 +431,34 @@ def press(hwnd: int, n: int) -> dict[str, Any]:
     return {"ok": True, "title": popup["title"], "app": popup["app"], "pressed": int(n),
             "label": b.get("label", ""), "closed": closed,
             "open_popups": [p["title"] for p in list_popups(popup["app"])]}
+
+
+def _xdotool(*args: Any) -> str:
+    exe = shutil.which("xdotool")
+    if not exe:
+        raise OSError("xdotool is not installed; app popups click through it (apt install xdotool)")
+    done = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, timeout=5)
+    return done.stdout
+
+
+def _x11_click(xid: int, popup: dict[str, Any], b: dict[str, Any]) -> None:
+    """A real XTest click on the button, then the person's pointer and window back."""
+    r = popup["rect"]
+    x, y = r["left"] + round(b["nx"] * r["width"]), r["top"] + round(b["ny"] * r["height"])
+    loc = dict(line.split("=", 1) for line in _xdotool("getmouselocation", "--shell").split() if "=" in line)
+    had = _xdotool("getactivewindow").strip()
+    try:
+        _xdotool("windowactivate", xid)  # no --sync: it never returns without a window manager
+        time.sleep(0.15)
+        _xdotool("mousemove", x, y, "click", 1)
+        if not _wait_closed(xid, 1.5) and b.get("primary"):
+            _xdotool("key", "Return")  # the default button answers Enter
+            _wait_closed(xid, 1.5)
+    finally:
+        if "X" in loc and "Y" in loc:
+            _xdotool("mousemove", loc["X"], loc["Y"])
+        if had:
+            _xdotool("windowactivate", had)
 
 
 def _wait_closed(hwnd: int, seconds: float) -> bool:
@@ -405,6 +505,9 @@ def press_lone_ok(app: str, *, skip: frozenset[int] = frozenset()) -> list[dict[
 def stall_report(app: str, *, press_ok: bool = True) -> dict[str, Any]:
     """For a call that stopped answering: press the app's lone-OK message boxes, then list
     what is still up (each with numbered buttons for ``ducky_app_popup_press``)."""
+    reason = unsupported_reason()
+    if reason:
+        return {"ok": False, "error": reason, "pressed": [], "popups": [], "blocking": False}
     pressed = press_lone_ok(app) if press_ok else []
     still = [describe(p) for p in list_popups(app)]
     return {"pressed": pressed, "popups": still, "blocking": any(p.get("blocking") for p in still)}
