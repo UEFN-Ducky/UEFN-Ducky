@@ -2,7 +2,8 @@
 
 PrintWindow asks the window to draw itself, so the capture is right while another window
 sits on top of it; a window that draws nothing that way (some GPU apps) falls back to a
-screen grab of its rectangle.
+screen grab of its rectangle. Linux: the EWMH client list and a screen grab of the window's
+rectangle (mss on X11, the ScreenCast portal on Wayland; X can't draw a covered window).
 """
 
 from __future__ import annotations
@@ -13,10 +14,22 @@ import sys
 from typing import Any
 
 _WIN = sys.platform == "win32"
+_LINUX = sys.platform.startswith("linux")
+
+
+def _x11_windows_of(wanted: set[int]) -> list[dict[str, Any]]:
+    from frontend.native_capture import x11_windows
+
+    return [{"hwnd": w["xid"], "pid": w["pid"], "title": w["title"],
+             "rect": {k: w["rect"][k] for k in ("left", "top", "right", "bottom")}}
+            for w in x11_windows()
+            if w["pid"] in wanted and w["rect"]["width"] >= 40 and w["rect"]["height"] >= 40]
 
 
 def windows_of(pids: list[int]) -> list[dict[str, Any]]:
     """Visible top-level windows owned by ``pids``: hwnd, pid, title, rect."""
+    if _LINUX and pids:
+        return _x11_windows_of({int(p) for p in pids})
     if not _WIN or not pids:
         return []
     from ctypes import wintypes
@@ -127,6 +140,13 @@ def capture(window: dict[str, Any], conv_id: str) -> dict[str, Any]:
         image = None
     if image is not None and not _blank(image):
         image = image.crop(crop)
+    elif not _WIN:
+        try:
+            from frontend.native_capture import grab_image
+
+            image = grab_image(frame["left"], frame["top"], frame["right"] - frame["left"], frame["bottom"] - frame["top"])
+        except Exception as exc:
+            return {"ok": False, "error": f"Could not capture the window: {exc}"}
     else:
         try:
             from PIL import ImageGrab
