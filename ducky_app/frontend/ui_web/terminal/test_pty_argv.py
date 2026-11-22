@@ -1,6 +1,16 @@
 """Command spawn must not require Git Bash."""
 
+import pytest
+
 from frontend.ui_web.terminal.session import pty_argv
+
+
+@pytest.fixture(autouse=True)
+def _windows_shells(monkeypatch):
+    # These are the Windows rules; test_posix_shells.py has Linux's.
+    from frontend.ui_web.terminal import shells
+
+    monkeypatch.setattr(shells, "_posix", lambda: False)
 
 
 def test_command_argv_skips_shell_resolve():
