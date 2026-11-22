@@ -663,7 +663,9 @@ def _memory_now() -> dict[str, float]:
             web = 0
             for child in me.children(recursive=True):
                 try:
-                    if child.name().lower() == "msedgewebview2.exe":
+                    name = child.name().lower()
+                    # Linux: WebKitGTK's web process (psutil cuts names to 15 chars there).
+                    if name == "msedgewebview2.exe" or name.startswith("webkitwebproc"):
                         web += getattr(child.memory_info(), "private", 0) or child.memory_info().rss
                 except Exception:
                     continue
