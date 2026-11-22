@@ -23,7 +23,7 @@ def _repo(tmp_path):
     (tmp_path / "backend").mkdir()
     for name in ("team.py", "images.py"):
         (tmp_path / "backend" / name).write_text("v1\n")
-    git("add", ".")
+    git("add", "backend")  # not ".": the test app data (an open ducky.db-shm) can sit in tmp_path
     git("commit", "-qm", "init")
     (tmp_path / "backend" / "team.py").write_text("mine\n")  # this chat's edit
     (tmp_path / "backend" / "images.py").write_text("theirs\n")  # the other chat's edit

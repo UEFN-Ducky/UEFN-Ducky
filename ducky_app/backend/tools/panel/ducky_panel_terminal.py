@@ -129,7 +129,11 @@ def ducky_terminal_run(
     this command, or when the command is typed into the Local workflow running it).
 
     expect_minutes: how long this run should take; shows the person a progress bar, and a run
-    three times slower (at least 2 min) comes back still running."""
+    three times slower (at least 2 min) comes back still running.
+
+    background=true: the command keeps running after this returns. In a chat, Ducky sends
+    that chat a [Background] message with its last output when it ends, which starts the
+    agent again: do other work or end the turn, never wait on it in a loop."""
     hidden = hides_output(command)
     if hidden:
         return tool_json({"ok": False, "error": hidden, "session_id": session_id.strip()}, pretty=pretty)
@@ -170,6 +174,9 @@ def ducky_terminal_run(
         # nobody saw, and the bare "timed out" didn't show why (Oct 12 2026).
         result["asked_in_chat"] = chat or "(no chat: the call carried no chat identity)"
         result["chat_allows_everything"] = bool(chat) and allows_everything(chat)
+    if background and chat and result.get("ok"):
+        result["when_done"] = ("Ducky messages this chat when it ends and starts you again: "
+                               "go on with other work or end the turn; no waiting loop.")
     return tool_json(early_return_hint(result), pretty=pretty)
 
 

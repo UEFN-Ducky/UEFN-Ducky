@@ -551,3 +551,36 @@ def test_no_reaper_ends_a_bare_sessions_console_host(mgr, monkeypatch):
     monkeypatch.setattr(session_module, "_spawning", 0)
     assert other.reap_console_hosts() == [901]
     assert ended == [901]
+
+
+def test_an_agents_background_command_tells_its_chat_once_when_it_ends(mgr, tmp_path, monkeypatch):
+    # Nov 22 2026: an agent ran a build with background=true and had to poll it, holding its
+    # seat; now it ends its turn and the end of the job wakes it with the output.
+    import time as _time
+
+    from backend.agent import a2a_client
+
+    told: list[dict] = []
+    monkeypatch.setattr(a2a_client, "send_notice", lambda **kw: told.append(kw) or {"ok": True})
+    sid = _open(mgr, tmp_path, "agent-a")["session_id"]
+    shell = mgr.get_session(sid)
+
+    def run_command(command, background=False, **_kw):
+        shell.ran_background = background
+        mgr.running[shell._pty.pid] = [9998]
+        return {"ok": True}
+
+    monkeypatch.setattr(shell, "run_command", run_command)
+    monkeypatch.setattr(shell, "read_output_tail", lambda max_chars=8000: "building\n12 passed\n")
+    req = mgr.request_command(sid, "npm test", conv_id="agent-a", background=True)
+    assert mgr.approve_command(req["request_id"])["ok"]
+    assert mgr.background_jobs("agent-a") == ["npm test"] and mgr.background_jobs("other") == []
+    now = _time.time() + manager_module._BG_START_GRACE_S + 1
+    mgr.close_idle_agent_terminals(now=now, running={"agent-a"})
+    assert told == []  # still running
+    mgr.running.pop(shell._pty.pid)  # it ends
+    mgr.close_idle_agent_terminals(now=now, running={"agent-a"})
+    mgr.close_idle_agent_terminals(now=now + 5, running={"agent-a"})
+    assert len(told) == 1 and told[0]["receiver_conv_id"] == "agent-a"
+    assert "`npm test` finished" in told[0]["body"] and "12 passed" in told[0]["body"]
+    assert mgr.background_jobs("agent-a") == []

@@ -54,6 +54,7 @@ _AGENT_STALE_CLOSE_S = 600.0
 # as busy (hung, or queued behind another chat's test run) or a background command it started
 # still ran. Its agent done and the terminal quiet this long, it closes anyway, tree and all.
 _ORPHAN_BACKGROUND_CLOSE_S = 3600.0
+_BG_START_GRACE_S = 5.0
 _REAP_EVERY_S = 5.0
 # How often agent terminals' and sandbox programs' memory caps follow the shared budget.
 _BUDGET_EVERY_S = 5.0
@@ -128,6 +129,10 @@ class TerminalManager:
         # "held" | "not_agent"}. Logged at debug (terminal.keep) at most once a minute.
         self.kept: dict[str, str] = {}
         self._kept_logged_at = float("-inf")
+        # Agents' background commands: {session id: {"chat", "commands", "at"}}. The agent ends
+        # its turn while they run; when the last one in that terminal ends, its chat is told
+        # (send_notice wakes an idle ducky) so the work goes on without the person.
+        self._bg_jobs: dict[str, dict[str, Any]] = {}
 
     def set_push(self, push: Callable[[dict[str, Any]], None] | None) -> None:
         self._push = push
@@ -386,6 +391,8 @@ class TerminalManager:
             # counted from its last output: Nov 6 2026, closing it on the next tick lost that
             # output to the agent reading it (the loopback test read "session not found").
             background = session.background_alive(snapshot)
+            if not background:
+                self._tell_background_done(session, now)
             if session.id in asked:
                 kept[session.id] = "allow_card"
             elif session.id in held:
@@ -401,12 +408,43 @@ class TerminalManager:
             elif quiet < _AGENT_STALE_CLOSE_S and session.has_running_command(snapshot):
                 kept[session.id] = "busy"
             elif self.kill(session.id).get("ok"):
+                self._tell_background_done(session, now, ended="was closed after an hour with no output")
                 closed.append(session.id)
         self.kept = kept
         if kept and now - self._kept_logged_at >= 60.0:
             self._kept_logged_at = now
             _keep_log.debug("kept agent terminals: %s", kept)
         return closed
+
+    def background_jobs(self, conv_id: str) -> list[str]:
+        """The background commands this chat's agent started that still run."""
+        with self._lock:
+            return [c for job in self._bg_jobs.values() if job["chat"] == conv_id for c in job["commands"]]
+
+    def _tell_background_done(self, session: Any, now: float, *, ended: str = "finished") -> None:
+        """The agent's background commands in this terminal ended: one notice to its chat with
+        the output tail, which wakes the ducky to go on."""
+        with self._lock:
+            job = self._bg_jobs.get(session.id)
+            # ponytail: a 5 s grace, so a job whose process hasn't spawned yet isn't "done"
+            if not job or now - job["at"] < _BG_START_GRACE_S:
+                return
+            del self._bg_jobs[session.id]
+        try:
+            tail = "\n".join(session.read_output_tail(max_chars=4000).strip().splitlines()[-20:])
+        except Exception:
+            tail = ""
+        cmds = "; ".join(f"`{c[:200]}`" for c in job["commands"])
+        body = (f"[Background] {cmds} {ended} in terminal {session.id} after {int(now - job['at'])} s. "
+                "Read the output, then go on with the work it was for.")
+        if tail:
+            body += "\nLast output:\n" + tail
+        try:
+            from backend.agent.a2a_client import send_notice
+
+            send_notice(sender_conv_id=f"terminal:{session.id}", receiver_conv_id=job["chat"], body=body)
+        except Exception:
+            _keep_log.warning("could not tell %s its background command ended", job["chat"], exc_info=True)
 
     def close_chat_terminals(self, chat_ids: list[str] | set[str], *, now: float | None = None,
                              force: bool = False) -> list[str]:
@@ -724,6 +762,11 @@ class TerminalManager:
             return {"ok": True, "request_id": request_id, "saved": saved, "run": {"ok": True, "status": "approved"}}
         if pending.background:
             result = session.run_command(pending.command, background=True)
+            if pending.conv_id and result.get("ok"):
+                with self._lock:
+                    job = self._bg_jobs.setdefault(session.id, {"chat": pending.conv_id, "commands": []})
+                    job["commands"].append(pending.command)
+                    job["at"] = time.time()
         else:
             # Run after signaling approval so agent waiters unblock; avoid blocking UI on completion.
             threading.Thread(

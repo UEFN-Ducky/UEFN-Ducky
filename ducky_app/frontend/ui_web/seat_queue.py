@@ -168,7 +168,8 @@ def _ensure_watch() -> None:
         if _watching:
             return
         _watching = True
-    _spawn(_watch_lag, "seat-lag-watch")
+    # Its own thread, not _spawn: tests run _spawn inline, and this loop never returns.
+    threading.Thread(target=_watch_lag, name="seat-lag-watch", daemon=True).start()
 
 
 def _running() -> set[str]:

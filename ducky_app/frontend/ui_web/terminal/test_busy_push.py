@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 from frontend.ui_web.terminal.manager import TerminalManager
 from frontend.ui_web.terminal.session import TerminalSession
@@ -13,7 +14,8 @@ def _mgr() -> tuple[TerminalManager, TerminalSession, list[dict]]:
     mgr.set_push(events.append)
     session = TerminalSession(shell="bash", cwd="C:/repo")
     session._on_busy = lambda busy: mgr._busy_changed(session.id, busy)
-    mgr._sessions[session.id] = object()  # type: ignore[assignment]
+    # A real-shaped entry: the manager outlives the test, and other managers' reapers read it.
+    mgr._sessions[session.id] = SimpleNamespace(session=session, chat="", run_owned=False)  # type: ignore[assignment]
     return mgr, session, events
 
 
