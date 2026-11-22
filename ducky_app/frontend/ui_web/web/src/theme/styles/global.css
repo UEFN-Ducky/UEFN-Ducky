@@ -139,10 +139,12 @@ body.native-caption-input-ready .app-header .drag-region {
 /* The graphics card is full, or the window is drawn without it (utils/lightDraw `app-light`).
    Nothing is blurred behind panels: a radius of 0 keeps each panel's own layer, so what is
    placed inside it stays where it is. Animations move in steps, about ten a second, so a
-   spinner still turns but the screen is not redrawn on every frame. */
+   spinner still turns but the screen is not redrawn on every frame. A panel with its own
+   blur radius scales it by --blur-k, so no blur is left to redraw under a sliding panel. */
 :root.app-light {
   --blur-md: blur(0px);
   --wf-panel-blur: 0px;
+  --blur-k: 0;
 }
 :root.app-light *,
 :root.app-light *::before,

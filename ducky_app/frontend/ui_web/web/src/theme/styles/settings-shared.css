@@ -1221,7 +1221,7 @@
   padding: 14px var(--settings-pad-x);
   border-bottom: 1px solid color-mix(in srgb, var(--border-light) 70%, transparent);
   background: color-mix(in srgb, var(--bg) 78%, transparent);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(calc(12px * var(--blur-k, 1)));
   flex-shrink: 0;
 }
 
