@@ -20,6 +20,39 @@ def _app(tmp_path: Path, tools: list[str], top: list[str]) -> Path:
     return tmp_path
 
 
+def test_npm_install_is_skipped_only_when_node_modules_matches_the_lock(tmp_path: Path) -> None:
+    import os
+
+    lock = tmp_path / "package-lock.json"
+    lock.write_text("{}")
+    assert not be.node_modules_current(tmp_path)  # nothing installed
+    installed = tmp_path / "node_modules" / ".package-lock.json"
+    installed.parent.mkdir()
+    installed.write_text("{}")
+    os.utime(lock, (1000, 1000))
+    os.utime(installed, (2000, 2000))
+    assert be.node_modules_current(tmp_path)
+    os.utime(lock, (3000, 3000))  # the lock changed after the install
+    assert not be.node_modules_current(tmp_path)
+
+
+def test_pip_is_skipped_for_the_same_requirements_within_a_day(tmp_path: Path) -> None:
+    import os
+
+    req = tmp_path / "requirements.txt"
+    req.write_text("a==1\n")
+    stamp = be.pip_stamp([req], python="py", stamp_dir=tmp_path / "s")
+    assert not be.pip_fresh(stamp)
+    stamp.parent.mkdir()
+    stamp.write_text("ok")
+    os.utime(stamp, (10_000, 10_000))
+    assert be.pip_fresh(stamp, now=10_000 + 3600)
+    assert not be.pip_fresh(stamp, now=10_000 + be.PIP_STAMP_MAX_AGE_S + 1)  # a day old: pip again
+    req.write_text("a==2\n")
+    assert be.pip_stamp([req], python="py", stamp_dir=tmp_path / "s") != stamp  # new pins, new stamp
+    assert be.pip_stamp([req], python="other", stamp_dir=tmp_path / "s") != be.pip_stamp([req], python="py", stamp_dir=tmp_path / "s")
+
+
 def test_ffmpeg_dll_copied_to_the_top_is_a_duplicate(tmp_path: Path) -> None:
     app = _app(tmp_path, ["ffmpeg.exe", "avcodec-63.dll", "avutil-61.dll"], ["avcodec-63.dll", "python313.dll"])
     assert be.duplicate_ffmpeg_dlls(app) == ["avcodec-63.dll"]

@@ -69,7 +69,7 @@ OutputBaseFilename=Setup-engine
 ; a minute; the separate process gives the 64 MB dictionary its memory.
 Compression=lzma2/ultra64
 LZMAUseSeparateProcess=yes
-LZMANumBlockThreads=4
+LZMANumBlockThreads=8
 SolidCompression=yes
 WizardStyle=modern
 ; Show the project's Ducky Source-Available License on the install wizard's

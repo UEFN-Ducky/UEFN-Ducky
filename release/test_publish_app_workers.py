@@ -32,14 +32,14 @@ def test_uefn_in_the_process_list_means_fewer_workers() -> None:
     pa = _load()
     with_uefn = ["System", "explorer.exe", "UnrealEditorFortnite-Win64-Shipping.exe", "python.exe"]
     assert pa.uefn_open(with_uefn)
-    assert pa.pytest_workers(pa.uefn_open(with_uefn), cores=16) == "4"
-    assert pa.pytest_workers(True, cores=4) == "2"  # never below 2
+    assert pa.pytest_workers(pa.uefn_open(with_uefn), cores=16) == "16"
+    assert pa.pytest_workers(True, cores=1) == "2"  # never below 2
 
 
 def test_without_uefn_half_the_cores() -> None:
     pa = _load()
     assert not pa.uefn_open(["System", "explorer.exe", "UEFN-Ducky.exe"])
-    assert pa.pytest_workers(pa.uefn_open([]), cores=16) == "8"
+    assert pa.pytest_workers(pa.uefn_open([]), cores=16) == "16"
     assert pa.pytest_workers(False, cores=2) == "2"  # never below 2
 
 
@@ -83,8 +83,9 @@ def test_the_suite_and_build_use_the_scaled_settings(monkeypatch) -> None:
     monkeypatch.setattr(retry_scope, "clear", lambda root: None)
     pa.run_regression_tests()
     pytest_cmd = next(cmd for cmd, _kw in calls if "pytest" in cmd and "-n" in cmd)
-    assert pytest_cmd[pytest_cmd.index("-n") + 1] == "4"
-    assert any(cmd[:2] == ["npm", "test"] and "--maxWorkers=2" in cmd for cmd, _kw in calls)
+    assert pytest_cmd[pytest_cmd.index("-n") + 1] == "16"
+    assert "--durations=25" in pytest_cmd
+    assert any(cmd[:2] == ["npm", "test"] and "--maxWorkers=16" in cmd for cmd, _kw in calls)
 
 
 def test_pytest_gets_the_ffmpeg_bundle_when_it_exists(tmp_path, monkeypatch) -> None:

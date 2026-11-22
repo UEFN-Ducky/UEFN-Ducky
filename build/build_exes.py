@@ -27,6 +27,7 @@ ships as plaintext and runs on UEFN's embedded 3.11 at load time.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -91,6 +92,32 @@ def _validate_listener_source(listener_root: Path) -> None:
             raise SystemExit(1)
 
 
+def node_modules_current(web_dir: Path) -> bool:
+    """npm's own record of the installed tree (node_modules/.package-lock.json) is at least as
+    new as package-lock.json: an install would change nothing. The release's fresh worktree
+    runs npm ci just before the build."""
+    lock, installed = web_dir / "package-lock.json", web_dir / "node_modules" / ".package-lock.json"
+    return lock.is_file() and installed.is_file() and installed.stat().st_mtime >= lock.stat().st_mtime
+
+
+PIP_STAMP_MAX_AGE_S = 24 * 3600
+
+
+def pip_stamp(files: list[Path], python: str = sys.executable, stamp_dir: Path | None = None) -> Path:
+    """The stamp a pip install of exactly these requirement files with this Python leaves."""
+    h = hashlib.sha256(python.encode())
+    for f in files:
+        h.update(f.read_bytes())
+    base = stamp_dir or Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "UEFN-Ducky" / "pip-stamps"
+    return base / f"{h.hexdigest()[:24]}.ok"
+
+
+def pip_fresh(stamp: Path, now: float | None = None) -> bool:
+    """Same requirements installed in the last day: skip pip. ponytail: a day old, --upgrade
+    runs again, so a fixed ">=" dependency still lands within a day (the security gate audits too)."""
+    return stamp.is_file() and (now or time.time()) - stamp.stat().st_mtime < PIP_STAMP_MAX_AGE_S
+
+
 def _build_react_panel(root: Path) -> None:
     """Build ducky_app/frontend/ui_web/web/dist for PyInstaller embed."""
     web_dir = root / "ducky_app" / "frontend" / "ui_web" / "web"
@@ -105,7 +132,12 @@ def _build_react_panel(root: Path) -> None:
     if dist.is_dir():
         shutil.rmtree(dist)
         print(f"Cleaned React panel dist: {dist}")
-    for cmd in ([npm, "install"], [npm, "run", "build"]):
+    cmds = [[npm, "run", "build"]]
+    if not node_modules_current(web_dir):
+        cmds.insert(0, [npm, "install"])
+    else:
+        print("node_modules matches package-lock.json (npm ci already ran): no npm install")
+    for cmd in cmds:
         print(">", " ".join(cmd), f"(cwd={web_dir})")
         subprocess.run(cmd, check=True, cwd=str(web_dir))
     if not (dist / "index.html").is_file():
@@ -411,9 +443,11 @@ def main() -> int:
     req = root / "requirements.txt"
     spec = here / "unified.spec"
     # TEMP — AppData/UEFN-Ducky/pyinstaller-work gets deleted mid-Analysis (Defender).
+    # Kept between builds: PyInstaller reuses its cached bytecode and DLL scans there
+    # (a clean work dir re-scans every binary). The retry below still starts it clean.
     work = Path(tempfile.gettempdir()) / "uefn-ducky-pyi-work"
     legacy_work = here / "unified-work"
-    for stale in (work, legacy_work):
+    for stale in (legacy_work,):
         if stale.is_dir():
             try:
                 shutil.rmtree(stale)
@@ -476,8 +510,14 @@ def main() -> int:
     # --upgrade: a ">=" floor already met by an old, vulnerable copy would otherwise ship.
     # PyInstaller is exact so every build freezes with the tested version.
     pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller==6.22.3", "-r", str(req)]
-    print(">", " ".join(pip))
-    subprocess.run(pip, check=True, cwd=str(root))
+    stamp = pip_stamp([req, here / "build_exes.py"])
+    if pip_fresh(stamp):
+        print(f"pip: same requirements installed under a day ago ({stamp.name}): skipped")
+    else:
+        print(">", " ".join(pip))
+        subprocess.run(pip, check=True, cwd=str(root))
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
     from runtime_versions import validate as validate_runtime_versions
 
     print(f"Verified MCP runtime: {validate_runtime_versions(req)}")
@@ -568,13 +608,6 @@ def main() -> int:
         except OSError:
             pass
         _run_pyinstaller()
-
-    if work.is_dir():
-        try:
-            shutil.rmtree(work)
-            print(f"Removed PyInstaller work dir: {work}")
-        except OSError as exc:
-            print(f"Note: could not remove {work} ({exc}). Delete it manually if you want it gone.", file=sys.stderr)
 
     # One-dir: PyInstaller writes a folder (EXEs + their payload), not a single file.
     staged = dist_stage / exe_stem

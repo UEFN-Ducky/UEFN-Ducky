@@ -37,6 +37,7 @@ store-publish.yml) runs exactly RELEASE_STEPS below, signing included.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -469,7 +470,8 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
         # Idle priority (inherited by what it starts): UEFN keeps the CPU while it builds.
         print("UEFN is open: the EXE build runs at idle priority")
         flags = _IDLE_PRIORITY_CLASS
-    subprocess.run(cmd, check=True, cwd=str(ROOT), creationflags=flags)
+    with timed("build_exes (panel + PyInstaller)"):
+        subprocess.run(cmd, check=True, cwd=str(ROOT), creationflags=flags)
     version = read_version()
     # UEFN Ducky's own uninstaller (the Setup host under its uninstall name) goes into the
     # one-dir build, so Setup installs it and the update pack carries it. Signed builds
@@ -499,12 +501,13 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     env.pop("DUCKY_SIGN_PYTHON", None)
     if _signing_on():
         env["DUCKY_SIGN_PYTHON"] = sys.executable
-    subprocess.run(
-        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-EngineOnly"],
-        check=True,
-        cwd=str(ROOT),
-        env=env,
-    )
+    with timed("Inno engine"):
+        subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-EngineOnly"],
+            check=True,
+            cwd=str(ROOT),
+            env=env,
+        )
     engine = ROOT / "dist" / "Setup-engine.exe"
     if engine.is_file():
         cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
@@ -984,6 +987,16 @@ def run_security_gate() -> None:
         )
 
 
+@contextlib.contextmanager
+def timed(label: str):
+    """Prints how long the block took, so a slow release names its slow step."""
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        print(f"[time] {label}: {time.monotonic() - start:.0f}s", flush=True)
+
+
 _IDLE_PRIORITY_CLASS = 0x00000040 if os.name == "nt" else 0
 _UEFN_EXE_PREFIX = "unrealeditorfortnite"
 
@@ -1008,12 +1021,15 @@ def uefn_open(names: list[str] | None = None) -> bool:
 
 
 def pytest_workers(uefn: bool, cores: int | None = None) -> str:
-    """pytest's -n: half the cores, or a quarter of them (at least 2) while UEFN is open.
+    """pytest's -n: half the cores, or a third of them (at least 2) while UEFN is open.
     Nov 5 2026: UEFN ran out of memory beside pytest on 16 workers, vitest and the EXE build;
     later that day the PC hard-reset during a release test run on every core. The release
-    never waits for UEFN to close; it only runs smaller."""
+    never waits for UEFN to close; it only runs smaller. A quarter made the suite the
+    release's slowest step (21 min, Nov 22 2026); vitest and the build still run apart from it."""
     count = int(cores or os.cpu_count() or 4)
-    return str(max(2, count // 4 if uefn else count // 2))
+    # ponytail: every core, UEFN open or not (the person's call, Nov 22 2026). Memory is the
+    # ceiling (Nov 5 hard-reset); drop back to count // 2 if the PC runs out again.
+    return str(max(2, count))
 
 
 def pytest_env(root: Path = ROOT) -> dict[str, str]:
@@ -1086,12 +1102,14 @@ def run_regression_tests() -> None:
     # The build installs requirements.txt too, but only after this: a new
     # dependency would fail the suite here first. requirements-dev.txt adds pytest-xdist.
     print("=== dependencies (requirements-dev.txt) ===")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements-dev.txt")],
-        check=True,
-        cwd=str(ROOT),
-    )
-    run_ruff()
+    with timed("pip (requirements-dev)"):
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "requirements-dev.txt")],
+            check=True,
+            cwd=str(ROOT),
+        )
+    with timed("ruff"):
+        run_ruff()
     web = ROOT / "ducky_app" / "frontend" / "ui_web" / "web"
     npm = shutil.which("npm")
     if not npm:
@@ -1101,14 +1119,15 @@ def run_regression_tests() -> None:
     # bundled duckies, critical CSS) are made by predev/prebuild, never by `npm test`: a
     # fresh checkout or worktree failed 34 test files on a missing import before this ran.
     print("=== generated web sources (predev) ===")
-    subprocess.run([npm, "run", "-s", "predev"], check=True, cwd=str(web))
+    with timed("predev"):
+        subprocess.run([npm, "run", "-s", "predev"], check=True, cwd=str(web))
     uefn = uefn_open()
     workers = pytest_workers(uefn)
     print(f"tests use {workers} workers ({os.cpu_count()} cores{', UEFN is open' if uefn else ''})")
     import retry_scope
 
     retry = retry_scope.retry_targets(ROOT)
-    vitest_workers = "2" if uefn else workers
+    vitest_workers = workers
     env = pytest_env()
     if retry is not None:
         # A fix on top of a failed full run: never the whole suite again (see retry_scope).
@@ -1132,17 +1151,20 @@ def run_regression_tests() -> None:
         print("regression tests ok (retry)")
         return
     print("=== vitest (panel) ===")
-    subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
+    with timed("vitest"):
+        subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
     # Half the cores, each test file on one worker (module state stays together): about 3
     # minutes instead of 11 to 19 on one core. A test stuck for 5 minutes fails with its
     # stack instead of holding the release forever (a lock deadlock once hung it 45 minutes).
     print("=== pytest (required before Store publish) ===")
-    full = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
-         "--timeout", "300", "--timeout-method", "thread", *PYTEST_PATHS],
-        cwd=str(ROOT),
-        env=env,
-    )
+    # --durations: the slowest tests are listed every run, so they can be made faster.
+    with timed("pytest"):
+        full = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
+             "--timeout", "300", "--timeout-method", "thread", "--durations=25", *PYTEST_PATHS],
+            cwd=str(ROOT),
+            env=env,
+        )
     if full.returncode != 0:
         # Release runs used to fail one different test that passes alone (timing, Windows
         # file locks, threads left by an earlier test, real windows opened side by side). The
@@ -1159,7 +1181,8 @@ def run_regression_tests() -> None:
             retry_scope.record_failure(ROOT, retry_scope.last_failed(ROOT) or failed)
             raise SystemExit(f"{len(failed)} failed tests failed again on their own (exit {alone.returncode})")
         print("The failed tests passed on their own: they only fail inside the full suite (see above).")
-    run_cargo_tests()
+    with timed("cargo test"):
+        run_cargo_tests()
     retry_scope.clear(ROOT)
     print("regression tests ok")
 
@@ -1255,8 +1278,10 @@ def main() -> None:
         raise SystemExit("--set-version goes with --phase build (the step that writes the version).")
     built: dict = {}
     if phase == "test":
-        run_security_gate()
-        run_regression_tests()
+        with timed("security gate"):
+            run_security_gate()
+        with timed("tests (all)"):
+            run_regression_tests()
         _record_phase("tested")
         print(f"TESTED={_head()}")
         return

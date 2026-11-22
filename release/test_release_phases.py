@@ -127,7 +127,7 @@ def test_the_full_pytest_run_collects_every_test_folder(pa, tmp_path, monkeypatc
         assert folder in full
         assert (ROOT / folder).is_dir()
     # The launcher's Python side (frontend/native_switch.py and its tests) lives under ducky_app.
-    assert full[full.index("-n") + 1] == "4"
+    assert full[full.index("-n") + 1] == "8"  # every core of the test's 8
 
 
 # --- the pinned commands -------------------------------------------------------------
