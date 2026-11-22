@@ -42,7 +42,7 @@ class FieldMeta:
 
 # One entry per PanelSettings field. `settable` marks fields ducky_settings_set
 # may write; structured fields (appearance, profiles, plugin lists) are False —
-# they have dedicated tools. `port` and the legacy list are internal/not settable.
+# they have dedicated tools (appearance: ducky_appearance_get / _set / _profile). `port` and the legacy list are internal/not settable.
 FIELD_META: dict[str, FieldMeta] = {
     "port": FieldMeta("Listener port", "internal", description="Fixed panel port; not user-editable."),
     "antigravity_config_path": FieldMeta(

@@ -271,6 +271,12 @@ them). It can't pick another plugin's theme or the user's own. It still ships an
 `@api.tool()` that lists and applies its themes, a workflow node and a bundled skill.
 See `plugin_examples_ui` § Theme.
 
+An agent changes the person's look itself, without a plugin: `ducky_appearance_get`
+(current look + every theme, effect, skin and sound), `ducky_appearance_set` (any
+color, CSS variable, status color, effect, skin or sound) and `ducky_appearance_profile`
+(activate any theme, save_as, rename, delete). After building a theme plugin, activate
+its theme with `ducky_appearance_profile(action="activate", profile=<name>)`.
+
 ## 7. Make it look designed (unslop pass)
 
 The kit makes a panel look like Ducky; it doesn't make it look designed. Before

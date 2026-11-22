@@ -165,6 +165,16 @@ keeps a Show me button); several things in order go in one call's `steps` (Back 
 Next in one popup). Load `skill_read_subskill("ducky", "guided_ui")` for the
 routes and target ids (Settings tabs, Store plugins, Workflows, chat box).
 
+## Change Ducky's look (Appearance)
+
+Do it yourself; never send the person to Settings → Appearance. `ducky_appearance_get` returns
+the current look plus every theme, effect, skin and sound you can pick. `ducky_appearance_set`
+changes any part (the five base colors, any CSS variable such as radius, fonts and sizes,
+status colors, the effect, the skin, sounds); "" puts a value back. `ducky_appearance_profile`
+lists, activates, saves (`save_as`), renames and deletes themes. A new theme with its own
+effect or skin is a plugin (`appearance.profiles` / `.effects` / `.skin`, see `plugin_look`
+§ 6): build it, then activate it. Refused only while the person has Change Ducky Settings off.
+
 ## Videos and the code behind them
 
 A YouTube link: `web_video(url)` reads its transcript, chapters and description;

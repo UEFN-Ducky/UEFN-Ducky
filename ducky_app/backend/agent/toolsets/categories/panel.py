@@ -115,6 +115,7 @@ EXTENDED_TOOLS = frozenset(
         "ducky_instantiate_plan_template",
         "ducky_settings_schema",
         "ducky_settings_get",
+        "ducky_appearance_get",
         "ducky_skills_list_packs",
         "ducky_mcp_list_plugins",
         "ducky_profile_list",

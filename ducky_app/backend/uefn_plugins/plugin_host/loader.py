@@ -357,7 +357,12 @@ def _load_one(pid: str, root: Path, manifest: dict[str, Any], *, register: bool 
             {"id": eid, "label": label or eid, "plugin_id": pid, "entry": entry}
         )
 
-    for skin in contributes.get("appearance.skin") or contributes.get("appearance_skins") or []:
+    for skin in (
+        contributes.get("appearance.skin")
+        or contributes.get("appearance_skin")
+        or contributes.get("appearance_skins")
+        or []
+    ):
         if not isinstance(skin, dict):
             continue
         sid = str(skin.get("id") or "").strip()
