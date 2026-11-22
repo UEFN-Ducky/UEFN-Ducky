@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=UEFN Ducky
+GenericName=AI assistant for UEFN
+Comment=AI agents, Verse and tools for Unreal Editor for Fortnite
+Exec=uefn-ducky %U
+Icon=uefn-ducky
+Terminal=false
+StartupNotify=true
+StartupWMClass=uefn-ducky
+Categories=Development;
+MimeType=x-scheme-handler/uefn-ducky;
