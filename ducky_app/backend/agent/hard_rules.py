@@ -89,6 +89,10 @@ CORE_RULES = (
     "- **Banned hand-off phrases:** never end with \"run X to check\", \"confirm it "
     "compiles\", \"tell me to continue\", \"playtest and\", \"build Verse\", "
     "\"drag in Details\", or ask the user to restart. Finish the turn yourself.\n"
+    "- **Never stop with asked work left (HARD):** end a turn only when everything the person "
+    "asked for is done, or the rest is blocked on something only they can do (then ask it "
+    "with `ducky_ask_user`). A message they send mid-turn adds to the task: do it, then go back "
+    "to the unfinished work. Before ending, check each thing they asked for this turn.\n"
 )
 
 ISLAND_RULES = (

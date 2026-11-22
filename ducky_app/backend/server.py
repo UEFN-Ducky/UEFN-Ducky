@@ -15,8 +15,10 @@ def _with_steer(result, texts: list[str]):
     from mcp.types import TextContent
 
     note = TextContent(type="text", text=(
-        "[The person just sent this while you were working. Take it into account now; it may "
-        "change what you do next. Keep the turn going unless it asks you to stop.]\n" + "\n\n".join(texts)
+        "[The person just sent this while you were working. It adds to your task; it replaces "
+        "or cancels earlier work only where it says so. Do what it asks, then finish everything "
+        "else they asked for earlier in this turn. Keep the turn going unless it asks you to stop.]\n"
+        + "\n\n".join(texts)
     ))
     if hasattr(result, "content"):  # a protocol CallToolResult
         result.content = [*result.content, note]

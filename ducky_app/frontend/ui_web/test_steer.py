@@ -122,6 +122,17 @@ def test_steer_note_rides_on_every_result_shape():
     assert protocol.content[-1].text.endswith("x")
 
 
+def test_a_mid_turn_message_adds_to_the_task_and_the_rest_still_gets_done():
+    from mcp.types import TextContent
+
+    from backend.agent.hard_rules import CORE_RULES
+
+    note = _with_steer([TextContent(type="text", text="ok")], ["also stop the agents"])[-1].text
+    assert "adds to your task" in note and "then finish everything else" in note
+    assert "may change what you do next" not in note  # read as "drop the earlier work"
+    assert "Never stop with asked work left" in CORE_RULES
+
+
 def test_merge_puts_message_after_its_tool():
     final = [
         {"type": "text", "text": "a"},
