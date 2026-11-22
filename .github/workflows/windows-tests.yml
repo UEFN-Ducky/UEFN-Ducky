@@ -1,0 +1,89 @@
+# The full Windows suite on every push to main: a change that breaks Windows shows up
+# within minutes, not at release time. pytest (ducky_app, the golden files included) and
+# the panel's vitest. The summary compares the pass count with today's baseline.
+name: windows-tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: windows-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Passed on main the day this job was added (1.2.516, a local Windows run). Raise it
+  # when tests are added; a run below it lost tests somewhere.
+  BASELINE_PASSED: "7493"
+  # "1" from the full test pass (2.1): test_platform_parity.py then fails instead of xfails.
+  DUCKY_PARITY_STRICT: "0"
+  PYTHONUTF8: "1"
+
+jobs:
+  windows-tests:
+    name: windows-tests
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ducky_app/frontend/ui_web/web/package-lock.json
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix ducky_app/frontend/ui_web/web
+
+      - name: pytest
+        id: pytest
+        run: python -m pytest ducky_app -q -n auto -p no:cacheprovider --junitxml="${{ runner.temp }}/pytest.xml"
+
+      - name: vitest
+        id: vitest
+        if: ${{ !cancelled() }}
+        working-directory: ducky_app/frontend/ui_web/web
+        run: npm test
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        shell: python
+        run: |
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          xml = Path(r"${{ runner.temp }}") / "pytest.xml"
+          baseline = int(os.environ["BASELINE_PASSED"])
+          lines = []
+          if xml.is_file():
+              root = ET.parse(xml).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root)
+              total = sum(int(s.get("tests", 0)) for s in suites)
+              failed = sum(int(s.get("failures", 0)) + int(s.get("errors", 0)) for s in suites)
+              skipped = sum(int(s.get("skipped", 0)) for s in suites)
+              passed = total - failed - skipped
+              lines.append(f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped")
+              if passed < baseline:
+                  lines.append(f"**{baseline - passed:,} fewer passing than the baseline.**")
+          else:
+              lines.append("windows-tests: pytest wrote no report")
+          lines.append("pytest: ${{ steps.pytest.outcome }} · vitest: ${{ steps.vitest.outcome }}")
+          text = "\n\n".join(lines) + "\n"
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(text)

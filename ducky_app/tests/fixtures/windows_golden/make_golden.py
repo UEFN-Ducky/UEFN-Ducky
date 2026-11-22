@@ -182,20 +182,17 @@ def build(out: Path) -> None:
 
 
 def personal_hits(path: Path) -> list[str]:
-    """Rows of the golden DB that name this PC's user or home folder (must be none)."""
-    import sqlite3
-
+    """Places in the golden DB's bytes that name this PC's user or home folder (must be
+    none). The file is VACUUMed, so no old page hides one."""
+    raw = path.read_bytes().lower()
     words = {w for w in (Path.home().name, os.environ.get("USERNAME", ""), str(Path.home())) if len(w) > 2}
-    conn = sqlite3.connect(path)
-    try:
-        hits = []
-        for (table,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall():
-            for row in conn.execute(f'SELECT * FROM "{table}"').fetchall():
-                text = repr(row).replace("\\\\", "\\")
-                hits += [f"{table}: {text[:200]}" for w in words if w.lower() in text.lower()]
-        return hits
-    finally:
-        conn.close()
+    hits = []
+    for word in words:
+        for form in {word, json.dumps(word)[1:-1]}:
+            at = raw.find(form.lower().encode("utf-8"))
+            if at >= 0:
+                hits.append(f"{word!r} at byte {at}: {raw[max(0, at - 80):at + 80]!r}")
+    return hits
 
 
 def main() -> int:
