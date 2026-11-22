@@ -10,6 +10,7 @@ def test_windows_dictation_and_tts_pass_their_arguments(monkeypatch):
     from backend.voice import windows_speech, windows_tts
 
     seen: list[tuple] = []
+    monkeypatch.setattr("sys.platform", "win32")
     monkeypatch.setattr(windows_speech, "poll_session", lambda s, c, w: seen.append(("poll", s, c, w)) or {})
     monkeypatch.setattr(windows_speech, "start_session", lambda lang: seen.append(("start", lang)) or {})
     monkeypatch.setattr(windows_tts, "start", lambda text, voice: seen.append(("tts", text, voice)) or {})

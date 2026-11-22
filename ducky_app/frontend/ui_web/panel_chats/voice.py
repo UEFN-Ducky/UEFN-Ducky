@@ -3,7 +3,19 @@ Windows speech settings, and a reply's short spoken summary."""
 
 from __future__ import annotations
 
+import sys
 from typing import Any
+
+
+def _tts():
+    """Offline read-aloud backend for this OS (same API on Windows and Linux)."""
+    if sys.platform.startswith("linux"):
+        from backend.voice import linux_tts
+
+        return linux_tts
+    from backend.voice import windows_tts
+
+    return windows_tts
 
 
 def voice_transcribe_audio(self, b64_audio: str, mime: str = "audio/webm") -> dict[str, Any]:
@@ -21,21 +33,15 @@ def voice_create_realtime_token(self) -> dict[str, Any]:
 
 
 def voice_win_tts_start(self, text: str, voice_id: str = "") -> dict[str, Any]:
-    from backend.voice.windows_tts import start
-
-    return start(str(text or ""), str(voice_id or ""))
+    return _tts().start(str(text or ""), str(voice_id or ""))
 
 
 def voice_win_tts_voices_start(self) -> dict[str, Any]:
-    from backend.voice.windows_tts import voices_start
-
-    return voices_start()
+    return _tts().voices_start()
 
 
 def voice_win_tts_poll(self, job_id: str) -> dict[str, Any]:
-    from backend.voice.windows_tts import poll
-
-    return poll(str(job_id or ""))
+    return _tts().poll(str(job_id or ""))
 
 
 def voice_win_stt_prewarm(self) -> dict[str, Any]:
