@@ -44,6 +44,9 @@ def test_invalidate_plugin_runtime_bounds_hanging_unload() -> None:
 
     mod.unload = _hang  # type: ignore[attr-defined]
     sys.modules["uefn_plugin_hangunload"] = mod
+    # The teardown's first imports (automations, spaces, store settings) took 2-4 s on a
+    # loaded release PC: run that path once without an unload so only the bound is timed.
+    lifecycle.invalidate_plugin_runtime("hangunloadwarm", unload_timeout=0.25)
     try:
         t0 = time.perf_counter()
         lifecycle.invalidate_plugin_runtime("hangunload", unload_timeout=0.25)
