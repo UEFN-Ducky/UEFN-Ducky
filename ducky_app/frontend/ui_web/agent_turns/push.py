@@ -153,11 +153,14 @@ def notify_chats_changed(
     folder_id: str = "",
     *,
     push: PushFn | None = None,
-    open_tab: bool = True,
+    open_tab: bool = False,
     removed_conv_ids: list[str] | None = None,
     removed_folder_ids: list[str] | None = None,
 ) -> None:
     """Tell the React panel to reload the sidebar (new chat/folder from MCP tools).
+
+    Never opens a tab unless ``open_tab=True``: only a chat the person made themselves
+    passes it. Agents and swarms stay in the sidebar (a tab each lagged the panel).
 
     Deleted or archived chats and deleted folders are named, so every open window
     drops those rows at once instead of showing them until its next reload.

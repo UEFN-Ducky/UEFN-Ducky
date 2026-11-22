@@ -42,7 +42,7 @@ def create_conversation(
     config: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     conv = self._new_conversation(folder_id, ducky_style, file_path, config)
-    _pa.notify_chats_changed(conv.id, conv.title, folder_id)
+    _pa.notify_chats_changed(conv.id, conv.title, folder_id, open_tab=True)  # the person's own New chat
     return _conversation_row(conv)
 
 
@@ -78,7 +78,7 @@ def finish_first_run_setup(self) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "created": False, "error": str(exc)}
     # Announced only now, so the tab never opens on an empty chat.
-    _pa.notify_chats_changed(conv.id, conv.title, "")
+    _pa.notify_chats_changed(conv.id, conv.title, "", open_tab=True)
     return {"ok": True, "created": True, **_conversation_row(conv)}
 
 

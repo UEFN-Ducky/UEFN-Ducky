@@ -28,6 +28,13 @@ def test_chats_changed_names_the_chat_and_what_was_removed():
     assert seen[-1] == {"type": "context_changed", "conv_id": "c1"}
 
 
+def test_chats_changed_never_opens_a_tab_unless_asked():
+    seen: list[dict] = []
+    push.notify_chats_changed("c1", "T", "f", push=seen.append)
+    push.notify_chats_changed("c2", "T", "f", push=seen.append, open_tab=True)
+    assert seen[0]["open"] is False and "open" not in seen[1]
+
+
 def test_the_active_chat_is_per_thread():
     push._set_active_conv_id("c9")
     assert push.get_active_conv_id() == "c9"
