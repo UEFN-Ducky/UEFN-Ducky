@@ -322,14 +322,14 @@ def _watch_linux_actions() -> None:
         return
     from frontend.open_files import gdbus_monitor
 
-    stream = gdbus_monitor(_FDN, _FDN_PATH)
-    if stream is None:
+    monitor = gdbus_monitor(_FDN, _FDN_PATH)
+    if monitor is None:
         return
     _linux_watching.set()
 
     def run() -> None:
         try:
-            for line in stream:
+            for line in monitor.stdout:
                 handle_linux_signal(line)
         finally:
             _linux_watching.clear()  # the bus went away: the next notification starts a new one

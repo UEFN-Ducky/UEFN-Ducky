@@ -379,8 +379,9 @@ def gdbus_call(dest: str, path: str, method: str, *args: str, timeout_s: float =
 
 
 def gdbus_monitor(dest: str, path: str = ""):
-    """Signals from ``dest`` as gdbus prints them (``/obj: iface.Signal (args)``), one per line.
-    The open text stream, or None. Started before the call whose answer it waits for."""
+    """Signals from ``dest`` as gdbus prints them (``/obj: iface.Signal (args)``), one per line
+    on the process's ``stdout``. The running process, or None. Start it before the call whose
+    answer it waits for; ``terminate()`` it when done."""
     exe = shutil.which("gdbus")
     if not exe:
         return None
@@ -390,7 +391,7 @@ def gdbus_monitor(dest: str, path: str = ""):
                                 env=_clean_env())
     except OSError:
         return None
-    return proc.stdout
+    return proc
 
 
 def gv_str(text: str) -> str:

@@ -113,6 +113,8 @@ def write_blocked(folder: Path) -> bool:
 
 def protection_mode() -> int:
     """Controlled folder access's mode (0 off). Read the way Windows Security shows it."""
+    if os.name != "nt":
+        return 0  # no Defender; creationflags would raise ValueError off Windows
     try:
         out = subprocess.run(
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
@@ -154,6 +156,8 @@ def parse_blocked(xml: str) -> list[tuple[str, str, str]]:
 
 
 def _blocks(window_ms: int) -> list[tuple[str, str, str]]:
+    if os.name != "nt":
+        return []
     query = f"*[System[(EventID={BLOCKED_EVENT}) and TimeCreated[timediff(@SystemTime) <= {window_ms}]]]"
     try:
         out = subprocess.run(["wevtutil", "qe", LOG, f"/q:{query}", "/c:200", "/rd:true", "/f:xml"],
@@ -322,6 +326,49 @@ def _box(text: str, yes_no: bool) -> bool:
 
     flags = (0x4 if yes_no else 0x0) | 0x30 | 0x10000 | 0x40000  # Yes/No or OK, warning, in front
     return int(ctypes.windll.user32.MessageBoxW(None, text, TITLE, flags)) in (1, 6)
+
+
+# --- Linux: pickers through the XDG desktop portal ------------------------------
+
+PORTAL = "org.freedesktop.portal.Desktop"
+PORTAL_PATH = "/org/freedesktop/portal/desktop"
+_RESPONSE = re.compile(r"^(\S+): org\.freedesktop\.portal\.Request\.Response \(uint32 (\d+), (.*)\)$")
+
+
+def portal_pick(title: str = "Add project", *, directory: bool = True) -> str | None:
+    """The desktop's own file or folder picker (GNOME, KDE, Flatpak, Wayland) through
+    ``org.freedesktop.portal.FileChooser.OpenFile``. The chosen path, None when cancelled
+    or there is no portal."""
+    from urllib.parse import unquote, urlparse
+
+    from frontend.open_files import gdbus_call, gdbus_monitor, gv_str
+
+    monitor = gdbus_monitor(PORTAL)  # first: the answer is a signal on the request object
+    if monitor is None:
+        return None
+    try:
+        opts = "{'directory': <%s>, 'modal': <true>}" % ("true" if directory else "false")
+        reply = gdbus_call(PORTAL, PORTAL_PATH, "org.freedesktop.portal.FileChooser.OpenFile",
+                           gv_str(""), gv_str(title), opts, timeout_s=30)
+        handle = re.search(r"objectpath '([^']+)'", reply or "")
+        if not handle:
+            return None
+        # ponytail: waits as long as the picker stays open; no timeout, the person closes it.
+        for line in monitor.stdout:
+            m = _RESPONSE.match(line.strip())
+            if not m or m.group(1) != handle.group(1):
+                continue
+            uri = re.search(r"'uris': <\['([^']+)'", m.group(3))
+            if m.group(2) != "0" or not uri:
+                return None  # 1 cancelled, 2 failed
+            parsed = urlparse(uri.group(1))
+            return unquote(parsed.path) if parsed.scheme == "file" else None
+        return None
+    finally:
+        try:
+            monitor.terminate()
+        except Exception:  # noqa: BLE001 - already gone
+            pass
 
 
 def _restart() -> bool:
