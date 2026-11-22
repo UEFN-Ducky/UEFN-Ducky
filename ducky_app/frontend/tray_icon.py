@@ -1,4 +1,4 @@
-"""System tray + shared app icon (Windows when pystray + Pillow are available)."""
+"""System tray + shared app icon (pystray + Pillow: Win32 on Windows, AppIndicator on Linux)."""
 
 from __future__ import annotations
 
@@ -56,9 +56,37 @@ def _imports_ok() -> bool:
     return True
 
 
+_SNI_WATCHER = "org.kde.StatusNotifierWatcher"
+
+
+def linux_tray_host() -> bool:
+    """A StatusNotifier host (KDE, GNOME's AppIndicator extension, waybar...) owns the watcher."""
+    from frontend.open_files import gdbus_call
+
+    out = gdbus_call("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                     "org.freedesktop.DBus.NameHasOwner", _SNI_WATCHER)
+    return bool(out and "true" in out)
+
+
 def tray_supported() -> bool:
-    """System tray on Windows when pystray + Pillow are installed."""
-    return sys.platform == "win32" and _imports_ok()
+    """System tray on Windows when pystray + Pillow are installed; on Linux also a tray host."""
+    if sys.platform == "win32":
+        return _imports_ok()
+    if not sys.platform.startswith("linux"):
+        return False
+    # AppIndicator draws through the StatusNotifier host; the XEmbed fallback is gone on Wayland.
+    import os
+
+    os.environ.setdefault("PYSTRAY_BACKEND", "appindicator")
+    return linux_tray_host() and _imports_ok()
+
+
+def close_action(tray: object | None) -> Literal["hide", "minimize"]:
+    """What closing the main window does: hide to the tray, or minimise when Linux has no tray
+    to bring it back from. Windows always hides (as before)."""
+    if tray is None and sys.platform.startswith("linux"):
+        return "minimize"
+    return "hide"
 
 
 def _normalize_mode(mode: str | ConnectionIcon) -> ConnectionIcon:
@@ -228,7 +256,10 @@ class TrayIconController:
 
     def toast(self, title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
         """A Windows notification from the tray icon. A click runs ``on_click`` (the latest
-        toast's; Windows shows one at a time per icon). Quiet hours / Focus are respected."""
+        toast's; Windows shows one at a time per icon). Quiet hours / Focus are respected.
+        Linux: always False; ``notifications`` sends those over D-Bus itself."""
+        if sys.platform != "win32":
+            return False
         send = getattr(self._icon, "_message", None)
         if send is None or not getattr(self._icon, "visible", False):
             return False

@@ -8,6 +8,9 @@ loopback HTTP instead of starting another window.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -191,7 +194,7 @@ def try_handoff_to_running(
     Keep retries/timeout short: a stale panel.pid after a force-kill/update otherwise
     burns ~20s of connect timeouts before cold start can proceed.
     """
-    if sys.platform != "win32":
+    if sys.platform != "win32" and not sys.platform.startswith("linux"):
         return False
     from frontend.ui_web.panel_httpd import panel_ui_http_url
 
@@ -268,8 +271,11 @@ def register_windows_url_protocol(exe: Path | str | None = None) -> None:
     """HKCU ``uefn-ducky://`` protocol so the website Store can open/install in the app.
 
     Safe to call on every launch (mirrors :func:`register_windows_open_with`).
+    Linux: :func:`register_linux_url_handler` instead.
     """
     if sys.platform != "win32":
+        if sys.platform.startswith("linux"):
+            register_linux_url_handler(exe)
         return
     from frontend.app_versions import stable_exe
     from frontend.frozen_process import is_uefn_ducky_executable
@@ -297,6 +303,179 @@ def register_windows_url_protocol(exe: Path | str | None = None) -> None:
             winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
     except OSError:
         pass
+
+
+# --- Linux desktop: D-Bus, xdg-open, the menu entry -----------------------------
+
+APP_ID = "uefn-ducky"
+SCHEME_MIME = "x-scheme-handler/uefn-ducky"
+# packaging/linux/uefn-ducky.desktop is this with exec="uefn-ducky" (test_open_files_linux checks).
+DESKTOP_ENTRY = """[Desktop Entry]
+Type=Application
+Name=UEFN Ducky
+GenericName=AI assistant for UEFN
+Comment=AI agents, Verse and tools for Unreal Editor for Fortnite
+Exec={exec} %U
+Icon=uefn-ducky
+Terminal=false
+StartupNotify=true
+StartupWMClass=uefn-ducky
+Categories=Development;
+MimeType=x-scheme-handler/uefn-ducky;
+"""
+PACKAGED_DESKTOP_FILES = ("/usr/share/applications/uefn-ducky.desktop",
+                          "/usr/local/share/applications/uefn-ducky.desktop")
+
+
+def desktop_exec_quote(arg: str) -> str:
+    """One Exec= argument, quoted the way the Desktop Entry spec reads it."""
+    if arg and not any(c in arg for c in ' \t\n"\'\\><~|&;$*?#()`'):
+        return arg
+    escaped = "".join("\\" + c if c in '"`$\\' else c for c in arg)
+    return f'"{escaped}"'
+
+
+def linux_app_exe() -> str | None:
+    """What the menu, autostart and links start: the AppImage, else the installed binary.
+    None from source or in a test copy (never point the desktop at a throwaway path)."""
+    if os.environ.get("DUCKY_SANDBOX"):
+        return None
+    appimage = os.environ.get("APPIMAGE")
+    if appimage and Path(appimage).is_file():
+        return appimage
+    try:
+        from frontend.bundle_root import is_packaged_runtime
+
+        if is_packaged_runtime() and Path(sys.executable).is_file():
+            return sys.executable
+    except Exception:
+        pass
+    return None
+
+
+def _clean_env() -> dict[str, str]:
+    """The AppImage's own library paths would load into xdg-open's programs and break them."""
+    env = dict(os.environ)
+    if env.get("APPIMAGE"):
+        for key in ("LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH", "GDK_PIXBUF_MODULE_FILE"):
+            env.pop(key, None)
+    return env
+
+
+def gdbus_call(dest: str, path: str, method: str, *args: str, timeout_s: float = 5.0) -> str | None:
+    """One session-bus call through glib's ``gdbus`` (on every GTK/KDE desktop). ``args`` are
+    GVariant text. Returns gdbus's printed reply, None when it failed or gdbus is missing."""
+    exe = shutil.which("gdbus")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run(
+            [exe, "call", "--session", "--dest", dest, "--object-path", path, "--method", method, *args],
+            capture_output=True, text=True, timeout=timeout_s, env=_clean_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.strip() if out.returncode == 0 else None
+
+
+def gdbus_monitor(dest: str, path: str = ""):
+    """Signals from ``dest`` as gdbus prints them (``/obj: iface.Signal (args)``), one per line.
+    The open text stream, or None. Started before the call whose answer it waits for."""
+    exe = shutil.which("gdbus")
+    if not exe:
+        return None
+    cmd = [exe, "monitor", "--session", "--dest", dest] + (["--object-path", path] if path else [])
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                env=_clean_env())
+    except OSError:
+        return None
+    return proc.stdout
+
+
+def gv_str(text: str) -> str:
+    """A GVariant string literal."""
+    return "'" + str(text).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def xdg_open(target: str) -> bool:
+    """``xdg-open`` a file, folder or URL, detached (it can block until the program exits)."""
+    exe = shutil.which("xdg-open")
+    if not exe:
+        return False
+    try:
+        subprocess.Popen([exe, target], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True, env=_clean_env())
+        return True
+    except OSError:
+        return False
+
+
+def open_path(path: str | Path) -> bool:
+    """Open a file or folder in its default program."""
+    if sys.platform == "win32":
+        try:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+            return True
+        except OSError:
+            return False
+    return xdg_open(str(path))
+
+
+def open_url(url: str) -> bool:
+    """Open a link in the default browser."""
+    if sys.platform == "win32":
+        import webbrowser
+
+        return bool(webbrowser.open(url))
+    return xdg_open(url)
+
+
+def show_in_folder(path: str | Path) -> bool:
+    """Open the file's folder with the file selected. Linux: the file manager's own
+    ``FileManager1.ShowItems`` (Nautilus, Dolphin, Nemo...), else just open the folder."""
+    target = Path(path)
+    if sys.platform == "win32":
+        try:
+            subprocess.Popen(["explorer.exe", f"/select,{target}"])
+            return True
+        except OSError:
+            return False
+    if target.exists():
+        uri = target.resolve().as_uri()
+        if gdbus_call("org.freedesktop.FileManager1", "/org/freedesktop/FileManager1",
+                      "org.freedesktop.FileManager1.ShowItems", f"[{gv_str(uri)}]", gv_str("")) is not None:
+            return True
+    folder = target if target.is_dir() else target.parent
+    return xdg_open(str(folder))
+
+
+def register_linux_url_handler(exe: Path | str | None = None) -> bool:
+    """No package installed the menu entry (AppImage, tarball): write it to
+    ``~/.local/share/applications`` and make it the ``uefn-ducky://`` handler. Every start
+    rewrites it, so a moved AppImage heals. True when an entry is in place."""
+    if any(Path(p).is_file() for p in PACKAGED_DESKTOP_FILES):
+        return True
+    target = str(exe) if exe else linux_app_exe()
+    if not target:
+        return False
+    data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    entry = data / "applications" / f"{APP_ID}.desktop"
+    text = DESKTOP_ENTRY.format(exec=desktop_exec_quote(target))
+    try:
+        if not entry.is_file() or entry.read_text(encoding="utf-8") != text:
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            entry.write_text(text, encoding="utf-8")
+    except OSError:
+        return False
+    mime = shutil.which("xdg-mime")
+    if mime:
+        try:
+            subprocess.run([mime, "default", entry.name, SCHEME_MIME], capture_output=True,
+                           timeout=10, env=_clean_env())
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return True
 
 
 def panel_process_alive(pid: int) -> bool:
