@@ -125,7 +125,7 @@ def run_quiet(cmd: list[str]) -> tuple[int, str]:
     import subprocess
 
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        done = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return 127, ""
     return done.returncode, done.stdout

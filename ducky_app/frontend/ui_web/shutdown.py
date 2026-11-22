@@ -392,7 +392,7 @@ def watch_logind(on_exit: Callable[[], None], cmd: list[str] | None = None) -> N
     cmd = cmd or ["gdbus", "monitor", "--system", "--dest", "org.freedesktop.login1",
                   "--object-path", "/org/freedesktop/login1"]
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace")
     except OSError:
         return
     assert proc.stdout is not None

@@ -371,7 +371,7 @@ def gdbus_call(dest: str, path: str, method: str, *args: str, timeout_s: float =
     try:
         out = subprocess.run(
             [exe, "call", "--session", "--dest", dest, "--object-path", path, "--method", method, *args],
-            capture_output=True, text=True, timeout=timeout_s, env=_clean_env(),
+            capture_output=True, text=True, errors="replace", timeout=timeout_s, env=_clean_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -388,7 +388,7 @@ def gdbus_monitor(dest: str, path: str = ""):
     cmd = [exe, "monitor", "--session", "--dest", dest] + (["--object-path", path] if path else [])
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                                env=_clean_env())
+                                errors="replace", env=_clean_env())
     except OSError:
         return None
     return proc

@@ -148,7 +148,8 @@ def test_coding_agents_get_one_fixed_uefn_line(monkeypatch, folder, online):
 # What an agent re-reads on every call of every turn, in characters (no persona, no skill packs,
 # no memory). It reached about 9,000 tokens with nobody deciding it should. Smaller always passes;
 # raise a number only when the new text is worth sending on every call.
-PROMPT_CEILING_CHARS = {"island": 33_925, "folder": 27_563}
+# +347 (Nov 22 2026): the "Never stop with asked work left" core rule (hard_rules.CORE_RULES).
+PROMPT_CEILING_CHARS = {"island": 34_272, "folder": 27_910}
 
 
 @pytest.mark.parametrize("kind", ["island", "folder"])

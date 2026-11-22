@@ -437,7 +437,7 @@ def _xdotool(*args: Any) -> str:
     exe = shutil.which("xdotool")
     if not exe:
         raise OSError("xdotool is not installed; app popups click through it (apt install xdotool)")
-    done = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, timeout=5)
+    done = subprocess.run([exe, *map(str, args)], capture_output=True, text=True, errors="replace", timeout=5)
     return done.stdout
 
 

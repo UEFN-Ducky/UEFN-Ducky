@@ -12,8 +12,13 @@ from pathlib import Path
 APP_ROOT = Path(__file__).resolve().parents[2]  # ducky_app/
 STORE_DIR = "backend/store"
 
-# path -> reason. Empty on purpose; add only with a reason a reviewer accepts.
-ALLOWLIST: dict[str, str] = {}
+# path -> reason. Add only with a reason a reviewer accepts.
+ALLOWLIST: dict[str, str] = {
+    "frontend/ui_web/test_shutdown_signals.py": (
+        "a test: its child process holds an uncommitted write on a throwaway WAL database, then "
+        "the test reads it back raw to prove shutdown checkpointed it; ducky.db is never opened"
+    ),
+}
 
 
 def _imports_sqlite(tree: ast.AST) -> bool:

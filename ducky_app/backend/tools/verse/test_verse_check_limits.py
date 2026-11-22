@@ -117,11 +117,14 @@ def test_a_build_that_runs_past_its_limit_says_still_building(monkeypatch) -> No
 def test_a_build_behind_a_popup_names_it_at_the_first_look(monkeypatch) -> None:
     client = _HangingClient()
     _short_build_limits(monkeypatch, client)
+    # A full limit far past the 0.1 s first look: 0.3 s left 0.15 s of room, and a release run
+    # on every core missed it (0.32 s, Nov 22 2026).
+    monkeypatch.setattr("backend.bridge.call_limits.VERSE_BUILD_LIMIT_S", 2.0)
     monkeypatch.setattr("backend.tools.core.uefn_popups.list_popups",
                         lambda: [{"hwnd": 0x1234, "title": "Save changes?", "blocking": True}])
     started = time.monotonic()
     out = json.loads(vd.workspace_compile_verse())
-    assert time.monotonic() - started < 0.25  # the first look (60 s live), not the full limit
+    assert time.monotonic() - started < 1.0  # the first look (60 s live), not the full limit
     assert out == {**out, "ok": False, "blocked_by_popup": True, "hwnd": "0x1234", "title": "Save changes?"}
     client.release.set()
 

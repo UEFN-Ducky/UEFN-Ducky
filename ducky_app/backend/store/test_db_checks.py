@@ -94,11 +94,15 @@ def test_a_failed_backup_is_logged_and_reported(tmp_path, monkeypatch, caplog) -
 
 
 def _count_connects(monkeypatch) -> list[str]:
+    """The checkpointer's own opens: it always opens a ``file:...?mode=rw`` URI. A plain-path
+    db.connect() on some other thread (one an earlier test left running, under a loaded
+    release run) is not the checkpointer and used to fail this with 2 == 1."""
     opened: list[str] = []
     real = db.sqlite3.connect
 
     def counted(*args, **kwargs):
-        opened.append(str(args[0]))
+        if kwargs.get("uri") and str(args[0]).endswith("?mode=rw"):
+            opened.append(str(args[0]))
         return real(*args, **kwargs)
 
     monkeypatch.setattr(db.sqlite3, "connect", counted)
