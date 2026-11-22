@@ -1,8 +1,10 @@
-"""DPAPI-encrypted API key storage (Windows). Non-Windows keeps secrets in memory only."""
+"""Encrypted API key storage: DPAPI on Windows, AES-GCM under a Secret Service master key on
+Linux (see :func:`_linux_seal`). Other OS keep secrets in memory only."""
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import struct
 import sys
@@ -23,14 +25,116 @@ def credentials_path() -> Path:
     return default_app_data_dir() / "credentials.dat"
 
 
+def _is_linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
 def _dpapi_available() -> bool:
-    return sys.platform == "win32"
+    """Secrets can be sealed and persisted here (DPAPI on Windows, the Linux seal on Linux)."""
+    return sys.platform == "win32" or _is_linux()
+
+
+# --- Linux seal: AES-GCM with a 32-byte master key kept in Secret Service --------------
+_LINUX_SEAL_VERSION = 1
+_KEYRING_SERVICE = "UEFN-Ducky"
+_KEYRING_USER = "master-key"
+_master_key: bytes | None = None
+_log = logging.getLogger(__name__)
+
+
+def master_key_path() -> Path:
+    """0600 fallback key file, used only when no keyring answers (headless, no D-Bus)."""
+    return default_app_data_dir() / "master.key"
+
+
+def _keyring_master_key() -> bytes | None:
+    import base64
+
+    try:
+        import keyring
+
+        stored = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER)
+        if stored:
+            key = base64.b64decode(stored)
+            if len(key) == 32:
+                return key
+        key = os.urandom(32)
+        keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER, base64.b64encode(key).decode("ascii"))
+        # Read back: some backends accept a write and keep nothing.
+        if keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER) == base64.b64encode(key).decode("ascii"):
+            return key
+    except Exception as exc:  # no backend, locked collection, D-Bus down: all mean "no keyring"
+        _log.debug("keyring unavailable: %s", exc)
+    return None
+
+
+def _file_master_key(path: Path) -> bytes:
+    try:
+        key = path.read_bytes()
+        if len(key) == 32:
+            return key
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = os.urandom(32)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(key)
+    os.replace(tmp, path)
+    return key
+
+
+def _linux_master_key() -> bytes:
+    """The process's master key. A key file that already exists wins (sticky, so blobs
+    sealed while the keyring was down stay readable); else the keyring; else a new file."""
+    global _master_key
+    if _master_key is not None:
+        return _master_key
+    path = master_key_path()
+    key = _file_master_key(path) if path.is_file() else _keyring_master_key()
+    if key is None:
+        _log.warning("No keyring (Secret Service) available: secrets sealed with key file %s", path)
+        key = _file_master_key(path)
+    _master_key = key
+    return key
+
+
+def _linux_seal(data: bytes, entropy: bytes | None, *, protect: bool) -> bytes:
+    """DPAPI's contract on Linux: ``version | nonce(12) | AES-GCM(ciphertext+tag)``, the
+    entropy bound as associated data, so the wrong entropy fails with ``OSError``."""
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    aad = b"\x00" if entropy is None else b"\x01" + _ENTROPY + entropy
+    aes = AESGCM(_linux_master_key())
+    if protect:
+        nonce = os.urandom(12)
+        return bytes([_LINUX_SEAL_VERSION]) + nonce + aes.encrypt(nonce, data, aad)
+    if len(data) < 29 or data[0] != _LINUX_SEAL_VERSION:
+        raise OSError("Unseal failed: not a sealed blob")
+    try:
+        return aes.decrypt(data[1:13], data[13:], aad)
+    except InvalidTag:
+        raise OSError("Unseal failed") from None
+
+
+def seal(data: bytes, entropy: bytes | None = b"") -> bytes:
+    """Seal for this OS user: DPAPI on Windows, the Linux seal on Linux."""
+    return _dpapi(data, entropy, protect=True)
+
+
+def unseal(blob: bytes, entropy: bytes | None = b"") -> bytes:
+    """Inverse of :func:`seal`; ``OSError`` on a wrong key or entropy."""
+    return _dpapi(blob, entropy, protect=False)
 
 
 def _dpapi(data: bytes, entropy: bytes | None, *, protect: bool) -> bytes:
     """One CryptProtectData / CryptUnprotectData call. Windows hands the result back in a
     LocalAlloc buffer the caller must LocalFree: kept, every sealed chat save and read
     leaked its whole ciphertext or plaintext into the process heap (GBs an hour)."""
+    if _is_linux():
+        return _linux_seal(data, entropy, protect=protect)
     if not _dpapi_available():
         raise OSError("Credential persist requires Windows DPAPI")
     import ctypes
