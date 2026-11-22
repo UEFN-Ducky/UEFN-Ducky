@@ -77,6 +77,24 @@ def ensure(source_dir: Path | None = None) -> str:
     return did
 
 
+def linux_uninstall_command(kind: str | None = None, env: dict[str, str] | None = None) -> str:
+    """Linux has no uninstall entry to point: the command that removes this copy, for Settings
+    to show ("" for a source checkout: delete its folder)."""
+    import shlex
+
+    from frontend.install_info import LINUX_PACKAGE, install_kind
+
+    env = os.environ if env is None else env
+    kind = kind or install_kind(env=env)
+    return {
+        "appimage": f"rm {shlex.quote(env.get('APPIMAGE') or '')}",
+        "deb": f"sudo apt remove {LINUX_PACKAGE}",
+        "rpm": f"sudo dnf remove {LINUX_PACKAGE}",
+        "aur": f"sudo pacman -R {LINUX_PACKAGE}",
+        "flatpak": f"flatpak uninstall {env.get('FLATPAK_ID') or LINUX_PACKAGE}",
+    }.get(kind, "")
+
+
 def ensure_quietly() -> None:
     """Boot hook: never lets a failure reach the app."""
     try:

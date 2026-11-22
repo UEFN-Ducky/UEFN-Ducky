@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,9 @@ def get_install_info() -> dict[str, Any]:
         "uninstall_command": None,
         "quiet_uninstall_command": None,
     }
+    if sys.platform.startswith("linux"):
+        kind = install_kind()
+        info.update(install_kind=kind, install_label=install_label(kind))
     if sys.platform != "win32":
         return info
     entry = _read_uninstall_entry()
@@ -102,3 +106,60 @@ def get_install_info() -> dict[str, Any]:
 
 def is_installed() -> bool:
     return bool(get_install_info()["installed"])
+
+
+# --- Linux -----------------------------------------------------------------------------
+
+# The package name in the .deb, .rpm and AUR PKGBUILD.
+LINUX_PACKAGE = "uefn-ducky"
+KIND_LABELS = {
+    "appimage": "AppImage", "deb": "Debian package", "rpm": "RPM package", "flatpak": "Flatpak",
+    "aur": "AUR package", "source": "Source checkout", "installer": "Installed", "portable": "Portable",
+}
+# Package manager that owns a file -> install kind, asked in this order.
+_OWNER_QUERIES = (("deb", ("dpkg", "-S")), ("rpm", ("rpm", "-qf")), ("aur", ("pacman", "-Qo")))
+
+
+def run_quiet(cmd: list[str]) -> tuple[int, str]:
+    """(return code, stdout); 127 when the program isn't there."""
+    import subprocess
+
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+    return done.returncode, done.stdout
+
+
+def _running_file() -> Path:
+    return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+
+
+def install_kind(*, env: dict[str, str] | None = None, root: str = "/", exe: Path | None = None,
+                 run: Any = None) -> str:
+    """How this copy was installed. Linux: 'flatpak', 'appimage', 'deb', 'rpm', 'aur' or
+    'source'; Windows: 'installer' or 'portable'. *env*, *root*, *exe*, *run* are test seams."""
+    if not sys.platform.startswith("linux"):
+        return "installer" if is_installed() else "portable"
+    env = os.environ if env is None else env
+    if (Path(root) / ".flatpak-info").is_file():
+        return "flatpak"
+    appimage = env.get("APPIMAGE") or ""
+    if appimage and Path(appimage).is_file():
+        return "appimage"
+    exe = exe or _running_file()
+    # Only system folders can belong to a package; a checkout never asks the package managers.
+    if str(exe).startswith(("/usr/", "/opt/")):
+        run = run or run_quiet
+        for kind, query in _OWNER_QUERIES:
+            if run([*query, str(exe)])[0] == 0:
+                return kind
+    return "source"
+
+
+def install_label(kind: str | None = None) -> str:
+    """What Settings shows, e.g. 'AppImage · x86_64'."""
+    import platform
+
+    kind = kind or install_kind()
+    return f"{KIND_LABELS.get(kind, kind)} · {platform.machine() or '?'}"

@@ -8,7 +8,15 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from frontend import install_health as ih
+
+
+@pytest.fixture(autouse=True)
+def _own_data_home(monkeypatch, tmp_path: Path) -> None:
+    """Linux keeps app data under XDG_DATA_HOME, which the test AppData isolation doesn't move."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
 
 def _pe(body: bytes = b"code", size: int = 1024) -> bytes:
@@ -98,6 +106,7 @@ def test_a_truncated_launcher_with_a_bad_good_copy_is_left_alone(tmp_path) -> No
     assert _log_rows()[-1]["event"] == "launcher_broken_no_good_copy"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Inno Setup's unins000.dat is Windows")
 def test_a_change_made_by_setup_is_logged_but_not_sent(tmp_path, monkeypatch) -> None:
     tracked: list[tuple] = []
     monkeypatch.setattr(ih, "_track", lambda *a: tracked.append(a))

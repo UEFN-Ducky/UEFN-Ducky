@@ -279,6 +279,8 @@ def repair_launcher(root: Path) -> bool:
 def check_at_start(root: Path | None = None) -> dict[str, Any]:
     """Every Ducky start: log what changed in the install root since Ducky last looked, put a
     broken root launcher back, keep the good copy current. Returns what it found."""
+    if sys.platform.startswith("linux") and root is None:
+        return check_linux_at_start()
     try:
         root = root or install_root()
         if root is None:
@@ -310,6 +312,58 @@ def check_at_start(root: Path | None = None) -> dict[str, Any]:
         keep_good_copy(root)
         _save_state(root, files, "start")
         return report
+    except Exception:
+        return {}
+
+
+# --- Linux: each install kind checks itself; nothing to repair from here -----------------
+
+
+def linux_health(kind: str | None = None, *, env: dict[str, str] | None = None, root: str = "/",
+                 run: Any = None) -> dict[str, Any]:
+    """``{kind, ok, problem}`` for this Linux install. *env*, *root*, *run* are test seams."""
+    from frontend import install_info
+
+    env = os.environ if env is None else env
+    run = run or install_info.run_quiet
+    kind = kind or install_info.install_kind(env=env, root=root, run=run)
+    package = install_info.LINUX_PACKAGE
+    problem = ""
+    if kind == "appimage":
+        image = Path(env.get("APPIMAGE") or "")
+        try:
+            with open(image, "rb") as fh:
+                whole = fh.read(4) == b"\x7fELF" and os.access(image, os.X_OK)
+        except OSError:
+            whole = False
+        problem = "" if whole else "The AppImage file is missing, damaged or not executable."
+    elif kind in ("deb", "rpm"):
+        # dpkg -V / rpm -V print one line per file that differs from the package.
+        code, out = run(["dpkg" if kind == "deb" else "rpm", "-V", package])
+        problem = "" if code == 0 and not out.strip() else f"Some installed files differ from the package: {out.strip()[:300]}"
+    elif kind == "aur":
+        code, out = run(["pacman", "-Qkk", package])
+        problem = "" if code == 0 else f"pacman reports missing or changed files: {out.strip()[-300:]}"
+    elif kind == "flatpak":
+        problem = "" if (Path(root) / "app").is_dir() else "The Flatpak's /app folder is missing."
+    return {"kind": kind, "ok": not problem, "problem": problem}
+
+
+def check_linux_at_start() -> dict[str, Any]:
+    """Every Linux start of a packaged copy: log and count a damaged install (never raises)."""
+    try:
+        if any(os.environ.get(k) for k in ("DUCKY_SANDBOX", "DUCKY_TESTS_ISOLATED_APPDATA")):
+            return {}
+        from frontend.install_info import install_kind
+
+        kind = install_kind()
+        if kind == "source":  # a dev checkout: nothing installed to check
+            return {}
+        health = linux_health(kind)
+        if not health["ok"]:
+            _log({"event": "linux_install_broken", **health})
+            _track("install_linux_broken", health["kind"], "crash")
+        return health
     except Exception:
         return {}
 
