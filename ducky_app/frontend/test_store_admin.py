@@ -62,15 +62,22 @@ def test_actions_check_snapshot_vacuum_export_and_clear(tmp_path: Path) -> None:
     _appdata()
     from backend.store.repos import events
 
-    events.insert("perf", ts=time.time(), source="t", message="m")
+    # Background loggers (stuck-tool watch, popup guard, perf trace) an earlier test left running
+    # can add events rows meanwhile (30 instead of 1 in a release run on every core, Nov 22 2026),
+    # so the checks follow this test's own row and the export's own count.
+    events.insert("perf", ts=time.time(), source="store-admin-test", message="m")
     assert store_admin.action("check")["ok"] is True
     assert store_admin.overview()["integrity"]["result"] == "ok"
     snap = store_admin.action("snapshot")
     assert snap["ok"] and store_admin.overview()["snapshots"][0]["name"] == snap["snapshot"]
     assert store_admin.action("vacuum")["ok"] is True
     exp = store_admin.action("export_table", "events")
-    assert exp["ok"] and exp["rows"] == 1 and Path(exp["path"]).read_text(encoding="utf-8").count("\n") == 1
-    assert store_admin.action("clear_table", "events") == {"ok": True, "removed": 1, "removed_files": 0}
+    lines = Path(exp["path"]).read_text(encoding="utf-8").splitlines()
+    assert exp["ok"] and exp["rows"] >= 1 and len(lines) == exp["rows"]  # one JSON line per row
+    assert sum(json.loads(line).get("source") == "store-admin-test" for line in lines) == 1
+    cleared = store_admin.action("clear_table", "events")
+    assert cleared["ok"] and cleared["removed"] >= exp["rows"] and cleared["removed_files"] == 0
+    assert "store-admin-test" not in json.dumps(store_admin.table_preview("events")["rows"])
     assert store_admin.action("clear_table", "messages")["ok"] is False  # not clearable
     assert store_admin.action("delete_snapshot", snap["snapshot"])["ok"] is True
     assert store_admin.overview()["snapshots"] == []
