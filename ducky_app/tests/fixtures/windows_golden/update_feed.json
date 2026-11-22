@@ -1,0 +1,19 @@
+{
+  "currentVersion": "1.2.517",
+  "installerUrl": "/api/v1/files/golden-setup/content",
+  "installerSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "releaseNotes": "golden release notes",
+  "versions": [
+    {
+      "version": "1.2.517",
+      "changelog": "golden release notes",
+      "created_at": null
+    }
+  ],
+  "update": {
+    "version": "1.2.517",
+    "packUrl": "/api/v1/files/golden-pack/content",
+    "manifestUrl": "/api/v1/files/golden-manifest/content",
+    "manifestSha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  }
+}
