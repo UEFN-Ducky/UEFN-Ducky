@@ -238,6 +238,41 @@ class _Hello:
         return self._crypt(data, hwnd, decrypt=True)
 
 
+class _SealVault:
+    """Linux stand-in for :class:`_Hello` (no Windows Hello there): the cookie key is sealed
+    with the Secret Service master key (``secrets.seal``).
+    ponytail: no per-unlock prompt; add one (polkit / fprintd) if Linux wants Hello's ask."""
+
+    _ENTROPY = b"browser-vault"
+
+    def exists(self) -> bool:
+        return True
+
+    def create(self, hwnd: int = 0) -> None:
+        pass
+
+    def delete(self) -> None:
+        pass
+
+    def encrypt(self, data: bytes) -> bytes:
+        from backend.agent.secrets import seal
+
+        return seal(data, self._ENTROPY)
+
+    def decrypt(self, data: bytes, hwnd: int = 0) -> bytes:
+        from backend.agent.secrets import unseal
+
+        return unseal(data, self._ENTROPY)
+
+
+def _is_linux() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def _default_hello() -> _Hello | _SealVault:
+    return _SealVault() if _is_linux() else _Hello()
+
+
 def _user_sid() -> str:
     out = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"], capture_output=True, text=True, errors="replace",
                          timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -248,6 +283,8 @@ def _user_sid() -> str:
 
 
 def hello_available() -> bool:
+    if _is_linux():
+        return True
     try:
         _Hello()._provider()
         return True
@@ -262,7 +299,7 @@ def unlock(hwnd: int = 0, hello: _Hello | None = None) -> str:
         return ""  # this Ducky (or one before it) already unlocked it
     profile = profile_dir("saved")
     try:
-        hello = hello or _Hello()
+        hello = hello or _default_hello()
         vault = _vault(profile)
         if vault.is_file():
             from backend.agent.secrets import protect_plain
@@ -294,7 +331,7 @@ def lock(hello: _Hello | None = None) -> str:
     try:
         from backend.agent.secrets import unprotect_plain
 
-        _write_atomic(_vault(profile), (hello or _Hello()).encrypt(unprotect_plain(sealed)))
+        _write_atomic(_vault(profile), (hello or _default_hello()).encrypt(unprotect_plain(sealed)))
     except OSError as exc:
         return f"not locked, the key stays as it was: {exc}"  # never drop a key we couldn't seal
     del state["os_crypt"]["encrypted_key"]
