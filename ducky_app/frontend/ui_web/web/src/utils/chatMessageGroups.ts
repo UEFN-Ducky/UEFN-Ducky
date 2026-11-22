@@ -206,6 +206,16 @@ export function groupChatMessages(messages: ChatMessage[]): ChatRow[] {
         });
       }
     } else if ((msg.role === "error" || msg.role === "success") && msg.tool) {
+      // A result whose call is already on screen without one (saved call, live result)
+      // completes that card instead of drawing the call a second time.
+      const open = msg.tool.id
+        ? grouped.findIndex((r) => r.kind === "tool" && !r.result && r.intent.tool?.id === msg.tool?.id)
+        : -1;
+      if (open >= 0) {
+        const row = grouped[open] as Extract<ChatRow, { kind: "tool" }>;
+        grouped[open] = { ...row, result: msg };
+        continue;
+      }
       // A paged/reloaded result can arrive without its intent. It is still a
       // tool outcome, never a turn-level interruption.
       grouped.push({ kind: "tool", id: uniqueId(String(msg.id)),

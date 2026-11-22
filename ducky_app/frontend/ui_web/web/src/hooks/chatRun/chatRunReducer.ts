@@ -140,6 +140,20 @@ function toolRows(rows: readonly ChatMessage[]): number {
   return n;
 }
 
+/** A tool call or result row's key: the same call saved and live share its tool id. */
+function toolKey(m: ChatMessage): string {
+  const id = m.tool?.id;
+  if (!id || m.role === "assistant" || m.role === "user") return "";
+  return `${m.role === "tool" ? "call" : "done"}:${id}`;
+}
+
+/** The live rows the saved rows already hold (same tool call, same id) drop out: a reload
+ *  mid-turn saved the ask_user card and its answer, and the live copy showed it twice. */
+function withoutSavedTools(saved: readonly ChatMessage[], live: ChatMessage[]): ChatMessage[] {
+  const have = new Set(saved.map(toolKey).filter(Boolean));
+  return have.size ? live.filter((m) => !have.has(toolKey(m))) : live;
+}
+
 /** The saved copy up to the turn's last finished row: the reply still being written
  *  (a trailing checkpoint bubble) stays out, the live stream shows that. */
 function withoutReplyInProgress(incoming: ChatMessage[], lastUser: number): ChatMessage[] {
@@ -190,14 +204,14 @@ export function mergeCommitted(existing: ChatMessage[], incoming: ChatMessage[])
       if (toolRows(incoming.slice(lastUser + 1)) > toolRows(live)) return withoutReplyInProgress(incoming, lastUser);
       return [...incoming.slice(0, lastUser + 1), ...live];
     }
-    return [...incoming, ...tail];
+    return [...incoming, ...withoutSavedTools(incoming, tail)];
   }
   // A run this pane didn't send (a group hub's prompt, or one started while the
   // tab was in the background): the backend holds its prompt. Keep rows up to
   // that prompt, plus any later rows already on screen, then the live tail.
   const onScreen = new Set(existing.slice(0, tailStart).map((m) => String(m.id)));
   const kept = incoming.filter((m, i) => i <= lastUser || onScreen.has(String(m.id)));
-  const merged = [...kept, ...tail];
+  const merged = [...kept, ...withoutSavedTools(kept, tail)];
   if (toolRows(incoming.slice(lastUser + 1)) > toolRows(merged.slice(lastUser + 1))) return withoutReplyInProgress(incoming, lastUser);
   return merged;
 }

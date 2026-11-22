@@ -724,3 +724,27 @@ describe("chatRunReducer — a turn that ended takes its saved copy", () => {
     expect(texts(run(ended, { type: "loaded", rows: saved }))).toEqual(["hi", "the real reply"]);
   });
 });
+
+describe("chatRunReducer — a saved tool call never shows twice", () => {
+  const ask = { id: "toolu_ask", name: "mcp__uefn__ducky_ask_user", arguments: { questions: [] } };
+  const savedTurn: ChatMessage[] = [
+    { id: 0, role: "user", text: "go" },
+    { id: 1, role: "tool", text: "", tool: { ...ask, status: "pending" } },
+    { id: 2, role: "success", text: "answer", tool: { ...ask, status: "success" } },
+  ];
+
+  it("a run this pane didn't send: the live result of a saved call drops out on reload", () => {
+    const shown = run({ ...initialRunState, externalRunning: true }, { type: "loaded", rows: savedTurn });
+    const answered = run(shown, ev({ type: "tool_done", success: true, text: "answer", tool: { ...ask, status: "success" } } as AgentEvent));
+    const reloaded = run(answered, { type: "loaded", rows: savedTurn });
+    expect(reloaded.messages.filter((m) => m.tool?.id === "toolu_ask")).toHaveLength(2); // one call, one result
+  });
+
+  it("after a stop the saved call and its live copy merge into one", () => {
+    const sent = run(initialRunState, { type: "send", text: "go" }, { type: "sendAccepted", runId: "r1" },
+      ev({ type: "tool", text: "", tool: { ...ask, status: "pending" } } as AgentEvent));
+    const stopped = run(sent, { type: "stop" });
+    const reloaded = run(stopped, { type: "loaded", rows: [{ id: 9, role: "user", text: "earlier" }, ...savedTurn.slice(1)] });
+    expect(reloaded.messages.filter((m) => m.role === "tool" && m.tool?.id === "toolu_ask")).toHaveLength(1);
+  });
+});

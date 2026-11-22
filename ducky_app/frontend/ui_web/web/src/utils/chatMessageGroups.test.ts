@@ -411,3 +411,18 @@ describe("live checkpoints and failed commands", () => {
     }
   });
 });
+
+describe("a tool result finds its own call", () => {
+  it("a result that arrives after other rows completes its call's card, never a second card", () => {
+    const ask = { id: "toolu_ask", name: "ducky_ask_user", arguments: {} };
+    const rows = buildCommittedChatRows([
+      { id: 0, role: "user", text: "go" },
+      { id: 1, role: "tool", text: "", tool: { ...ask, status: "pending" } },
+      { id: 2, role: "assistant", text: "", thinking: "waiting" },
+      { id: "opt-1", role: "success", text: "answer", tool: { ...ask, status: "success" } },
+    ], [], false);
+    const cards = rows.filter((r) => r.kind === "tool");
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ result: { text: "answer" } });
+  });
+});
