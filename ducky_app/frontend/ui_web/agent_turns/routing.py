@@ -584,6 +584,7 @@ def run_message(
                     if "reason" not in ended:
                         ended["reason"] = str(event.get("reason") or "")
                         ended["detail"] = str(event.get("detail") or "")
+                        ended["error_class"] = str(event.get("error_class") or "")
                         try:  # a count never stops the turn's last event
                             from frontend import usage_stats as usage
 
@@ -652,7 +653,7 @@ def run_message(
                 error_push({"type": "error", "text": str(e), "conv_id": conv_id, "run_id": run_id})
                 # Interrupted: the session id stays on the chat, so the next message resumes it.
                 _push_agent_stopped(error_push, conv_id, run_id, "interrupted" if interrupted else "error",
-                                    detail=str(e))
+                                    detail=str(e), error_class=type(e).__name__)
             finally:
                 from frontend.ui_web.live_agent_runs import discard_live_run_id
 
@@ -662,7 +663,8 @@ def run_message(
                 # cleared these; every external turn left both behind.
                 # Still booked: no _push_agent_stopped above has alerted for this run.
                 if ended.get("reason") and run_id in _run_started:
-                    _alert_after_run(conv_id, run_id, ended["reason"], str(ended.get("detail") or ""))
+                    _alert_after_run(conv_id, run_id, ended["reason"], str(ended.get("detail") or ""),
+                                     str(ended.get("error_class") or ""))
                 _run_started.pop(run_id, None)
                 _quiet_runs.discard(run_id)
 
@@ -800,7 +802,7 @@ def run_message(
             )
         except Exception as e:
             push({"type": "error", "text": str(e), "conv_id": conv_id})
-            _push_agent_stopped(push, conv_id, run_id, "error", detail=str(e))
+            _push_agent_stopped(push, conv_id, run_id, "error", detail=str(e), error_class=type(e).__name__)
         finally:
             run_identity.reset(identity_token)
 

@@ -524,11 +524,21 @@ _TURN_REASONS: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("sdk_request", r"sdk request failed"),
         # runner.py: a setup step (login check, prompt build) that never finished.
         ("stuck_start", r"stuck on .{0,80}before the agent started"),
+        # agent_turns.state._push_agent_stopped's own words when the turn gave no detail.
+        ("no_detail", r"agent (errored|timed out) before finishing"),
     )
 )
 TURN_REASONS = ("fc_mismatch", "tool_restart", "mcp_connect", "cli_exit", "session_resume", "context_full", "network", "auth", "empty",
                 "no_model", "sdk_setup", "plan", "rate_limit", "model_not_found", "http", "sdk_request",
-                "stuck_start", *(k for k in ERROR_KINDS if k not in ("auth", "rate_limit", "other")), "other")
+                "stuck_start", "no_detail", "exc", *(k for k in ERROR_KINDS if k not in ("auth", "rate_limit", "other")),
+                "other")
+
+
+def error_word(class_name: str) -> str:
+    """An exception's class name as a chat.turn reason, exc_<name>: lower case, [a-z0-9_] and
+    at most 24 characters (the Store's word rule). Never the message, only the class."""
+    name = re.sub(r"[^a-z0-9]+", "_", (class_name or "").lower()).strip("_")
+    return f"exc_{name}"[:24].rstrip("_") if name else ""
 
 
 def turn_reason(detail: str) -> str:

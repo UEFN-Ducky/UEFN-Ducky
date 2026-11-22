@@ -1149,7 +1149,8 @@ def _run_coding_agent_message(
         ckpt.flush(error=str(exc), force=True)
         record_coding_agent_usage(conv, agent_id, model, None, push=push)
         push({"type": "error", "text": str(exc), "conv_id": conv.id, "run_id": rid})
-        push({"type": "agent_stopped", "reason": "error", "detail": str(exc), "conv_id": conv.id, "run_id": rid})
+        push({"type": "agent_stopped", "reason": "error", "detail": str(exc), "error_class": type(exc).__name__,
+              "conv_id": conv.id, "run_id": rid})
         return {"ok": False, "error": str(exc), "run_id": rid}
     except BaseException:
         # Persist partial work without converting cancellation/control flow

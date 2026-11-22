@@ -857,7 +857,8 @@ def _turn_outcome(reason: str, detail: str = "") -> str:
             "needs_login": "login", "interrupted": "interrupted"}.get(reason, "other")
 
 
-def run_end(run_id: str, reason: str, detail: str = "") -> None:
+def run_end(run_id: str, reason: str, detail: str = "", error_class: str = "") -> None:
+    """``error_class``: the exception's class name, the reason when no rule reads the detail."""
     try:
         with _lock:
             meta = _run_meta.pop(run_id, None)
@@ -869,7 +870,13 @@ def run_end(run_id: str, reason: str, detail: str = "") -> None:
         outcome = _turn_outcome(reason, detail)
         # Why a turn failed, as one ERROR_KINDS word (Oct 27 2026: Codex 0 -> 13 errors, 7 within
         # 10 s, and nothing said why). The detail itself never leaves.
-        why = {"kind": ev.kind_of(detail), "reason": ev.turn_reason(detail)} if outcome == "error" else {}
+        why = {}
+        if outcome == "error":
+            reason_word = ev.turn_reason(detail)
+            if reason_word == "other" and error_class:
+                # Nov 22 2026: 87% of failed turns read "other"; the class still says which failure.
+                reason_word = ev.error_word(error_class) or reason_word
+            why = {"kind": ev.kind_of(detail), "reason": reason_word}
         track(
             "chat.turn",
             provider=meta["provider"],

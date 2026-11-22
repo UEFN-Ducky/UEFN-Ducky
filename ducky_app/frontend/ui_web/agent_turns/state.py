@@ -393,7 +393,7 @@ def _alert_finished(conv_id: str, reason: str) -> None:
     threading.Thread(target=_send, daemon=True, name="chat-alert").start()
 
 
-def _alert_after_run(conv_id: str, run_id: str, reason: str, detail: str = "") -> None:
+def _alert_after_run(conv_id: str, run_id: str, reason: str, detail: str = "", error_class: str = "") -> None:
     """A run ended: a failure always alerts, a finish only after long work (a quick reply
     was watched), a sub-agent's or a workflow step's never. Clears the run's bookkeeping."""
     quiet = run_id in _quiet_runs
@@ -402,7 +402,7 @@ def _alert_after_run(conv_id: str, run_id: str, reason: str, detail: str = "") -
     try:
         from frontend import usage_stats
 
-        usage_stats.run_end(run_id, reason, detail)
+        usage_stats.run_end(run_id, reason, detail, error_class=error_class)
     except Exception:
         pass
     try:
@@ -430,7 +430,7 @@ def _started_by_workflow() -> bool:
 
 
 def _push_agent_stopped(
-    push: PushFn, conv_id: str, run_id: str, reason: str, detail: str = ""
+    push: PushFn, conv_id: str, run_id: str, reason: str, detail: str = "", error_class: str = ""
 ) -> None:
     event: dict[str, Any] = {
         "type": "agent_stopped",
@@ -444,9 +444,11 @@ def _push_agent_stopped(
         event["detail"] = "Agent timed out before finishing its reply"
     elif reason == "error":
         event["detail"] = "Agent errored before finishing its reply"
+    if error_class:  # the exception's class name only, for the chat.turn reason
+        event["error_class"] = error_class
     push(event)
     close_changeset_run(run_id, reason)
-    _alert_after_run(conv_id, run_id, reason, str(event.get("detail") or ""))
+    _alert_after_run(conv_id, run_id, reason, str(event.get("detail") or ""), error_class)
     if reason != "done":
         return
     # Private DM with a group member → short note on the group hub for everyone.

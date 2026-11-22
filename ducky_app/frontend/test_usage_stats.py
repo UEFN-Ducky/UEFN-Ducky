@@ -574,6 +574,30 @@ def test_a_gateways_own_start_up_failure_has_its_own_reason_word(detail, want) -
     assert want.split("_")[0] in {r.split("_")[0] for r in ev.TURN_REASONS}
 
 
+def test_a_failed_turn_no_rule_reads_names_its_exception_class() -> None:
+    """ank4r8t2b6x9p: 87% of failed turns read reason:other. The class name is a safe word;
+    the message never leaves."""
+    import re
+
+    from frontend import usage_events as ev
+
+    cases = [("weird text at C:/Users/x", "KeyError", "exc_keyerror"),
+             ("connection reset by peer", "ConnectionResetError", "network"),  # a rule still wins
+             ("Agent errored before finishing its reply", "", "no_detail"),
+             ("weird text", "", "other")]
+    for i, (detail, cls, _) in enumerate(cases):
+        us.run_begin(f"x{i}", f"cx{i}", coding_agent="claude_code", provider="anthropic", model="claude-opus-5-5")
+        us.run_end(f"x{i}", "error", detail, error_class=cls)
+    rows, _ = us._take(100)
+    turns = [r["props"] for r in rows if r["name"] == "chat.turn"]
+    assert [t.get("reason") for t in turns] == [want for _, _, want in cases]
+    assert not any("Users" in str(t) or "weird" in str(t) for t in turns)
+
+    long = ev.error_word("PluginRuntimeUnavailableErrorWithAVeryLongName")
+    assert len(long) <= 24 and re.fullmatch(r"[a-z0-9_]+", long) and long.startswith("exc_")
+    assert ev.error_word("") == "" and ev.error_word("__") == ""
+
+
 def test_a_stuck_report_carries_the_app_version(monkeypatch) -> None:
     monkeypatch.setattr(us, "_app_version", lambda: "1.2.488")
     us.stuck("claude_code", 300, tool="unreal__call_tool")

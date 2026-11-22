@@ -37,7 +37,7 @@ def test_embedded_error_turn_ends_with_its_error_text(monkeypatch):
     monkeypatch.setattr(chat_saves, "upsert_in_flight_assistant", lambda *a, **kw: None)
     monkeypatch.setattr(run, "_log_agent_crash", lambda *a, **kw: None)
     monkeypatch.setattr(state, "close_changeset_run", lambda *a: None)
-    monkeypatch.setattr(usage_stats, "run_end", lambda rid, reason, detail="": ended.append((reason, detail)))
+    monkeypatch.setattr(usage_stats, "run_end", lambda rid, reason, detail="", **_kw: ended.append((reason, detail)))
     session = SimpleNamespace(_cancel=threading.Event(), set_runner=lambda *a, **kw: None,
                               clear_runner=lambda *a, **kw: None)
     pushed: list[dict] = []
