@@ -1999,6 +1999,8 @@ export interface UefnPluginContributionsDto {
     label: string;
     order?: number;
     plugin_id: string;
+    /** false: one sign-in per PC, so Settings shows no "<agent> logins" table (the agent row signs in). */
+    accounts?: boolean;
   }>;
   agent_tools?: Record<string, { category?: string; tools?: string[] }>;
   enabled_ids?: string[];
