@@ -156,6 +156,7 @@ def test_scrolling_up_reaches_the_first_message(tmp_path: Path) -> None:
 
 
 def test_store_catalog_cache_serves_last_good_copy(monkeypatch) -> None:
+    import frontend.ui_web.panel_api  # noqa: F401 - panel_api_store is imported through it
     from frontend.ui_web import panel_api_store as pas
 
     good = {"ok": True, "items": [{"slug": "anthropic"}]}
@@ -165,6 +166,7 @@ def test_store_catalog_cache_serves_last_good_copy(monkeypatch) -> None:
 
 
 def test_store_catalog_cache_never_serves_another_account() -> None:
+    import frontend.ui_web.panel_api  # noqa: F401 - panel_api_store is imported through it
     from frontend.ui_web import panel_api_store as pas
 
     offline = lambda: {"ok": False, "error": "offline", "items": []}  # noqa: E731
@@ -242,8 +244,10 @@ def test_perf_events_are_written_in_one_transaction_per_report(quiet_perf, monke
     pt = quiet_perf
     single: list[int] = []
     batches: list[int] = []
-    monkeypatch.setattr(events, "insert", lambda *a, **k: single.append(1))
-    monkeypatch.setattr(events, "insert_many", lambda kind, rows: batches.append(len(rows)) or len(rows))
+    # Only perf rows: usage_stats' and error_log's writer threads, left running by earlier
+    # tests in this worker, batch their own kinds through the same repo (CI saw [500, 4]).
+    monkeypatch.setattr(events, "insert", lambda kind, **k: kind == "perf" and single.append(1))
+    monkeypatch.setattr(events, "insert_many", lambda kind, rows: (kind == "perf" and batches.append(len(rows))) or len(rows))
     for _ in range(500):
         pt.trace("ui_frame", "raf_gap", 300.0)
     pt.trace("ui_js", "evaluate_js", 4.0, js_bytes=105_656)
