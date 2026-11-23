@@ -131,9 +131,10 @@ def address() -> tuple[str, str] | None:
         if _address is None:
             key = os.urandom(32)
             tag = f"rpc-{os.urandom(4).hex()}"
-            listener = Listener(protocol.pipe_name(tag), authkey=key)
+            name = protocol.pipe_name(tag)
+            listener = protocol.listen_at(name, key)
             threading.Thread(target=_accept_loop, args=(listener,), name="host-steer-accept", daemon=True).start()
-            _address = (protocol.pipe_name(tag), key.hex())
+            _address = (name, key.hex())
         return _address
 
 

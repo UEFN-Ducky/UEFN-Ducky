@@ -1,6 +1,7 @@
 """App <-> agent-host channel: one named pipe per host, JSON frames, a reader thread per side.
 
-The app listens on ``\\\\.\\pipe\\uefn-ducky-host-<app pid>-<slot>``; the host connects.
+The app listens on ``\\\\.\\pipe\\uefn-ducky-host-<app pid>-<slot>`` (Linux: an AF_UNIX socket,
+``$XDG_RUNTIME_DIR/uefn-ducky/uefn-ducky-host-<app pid>-<slot>.sock``); the host connects.
 Every frame is ``{"op": ..., **fields}``, e.g.
 ``{"op": "start_turn", "conv_id": "c1", "text": "hi", "mode": "agent", "model": "claude-haiku-5-5"}``.
 
@@ -17,9 +18,11 @@ and a host whose process still runs (``alive``) is closed only after ``SILENT_DE
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import queue
+import socket
 import threading
 import time
 from multiprocessing.connection import Client, Connection, Listener
@@ -43,8 +46,60 @@ OnFrame = Callable[[dict[str, Any]], None]
 OnClosed = Callable[[str], None]
 
 
+_MAX_SUN_PATH = 107  # AF_UNIX sun_path is 108 bytes, NUL included
+
+
+def _socket_dir() -> str:
+    """Linux: ``$XDG_RUNTIME_DIR/uefn-ducky`` (else the app cache folder), kept 0700 by ``listen_at``."""
+    run = os.environ.get("XDG_RUNTIME_DIR") or ""
+    if os.path.isabs(run) and os.path.isdir(run):
+        return os.path.join(run, "uefn-ducky")
+    from frontend import app_paths
+
+    return os.path.join(str(app_paths.cache_base()), app_paths.APP_DATA_DIR_NAME, "sock")
+
+
 def pipe_name(slot: int | str, app_pid: int | None = None) -> str:
-    return rf"\\.\pipe\uefn-ducky-host-{app_pid or os.getpid()}-{slot}"
+    leaf = f"uefn-ducky-host-{app_pid or os.getpid()}-{slot}"
+    if os.name == "nt":
+        return rf"\\.\pipe\{leaf}"
+    path = os.path.join(_socket_dir(), f"{leaf}.sock")
+    if len(os.fsencode(path)) > _MAX_SUN_PATH:
+        # ponytail: a very long cache dir can still overflow; XDG_RUNTIME_DIR is short in practice
+        path = os.path.join(_socket_dir(), hashlib.sha1(leaf.encode()).hexdigest()[:16] + ".sock")
+    return path
+
+
+def _clear_stale(path: str) -> None:
+    """Remove a socket file nobody listens on (its app died), so bind doesn't hit EADDRINUSE."""
+    if not os.path.exists(path):
+        return
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        probe.connect(path)
+    except (ConnectionRefusedError, FileNotFoundError):
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+    except OSError:
+        pass
+    finally:
+        probe.close()
+
+
+def listen_at(name: str, authkey: bytes) -> Listener:
+    """Listen on ``name`` (a ``pipe_name``). Linux: 0700 folder, stale socket cleared, socket 0600;
+    ``Listener.close`` unlinks the socket file."""
+    if os.name == "nt":
+        return Listener(name, authkey=authkey)
+    folder = os.path.dirname(name)
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    os.chmod(folder, 0o700)
+    _clear_stale(name)
+    listener = Listener(name, family="AF_UNIX", authkey=authkey)
+    os.chmod(name, 0o600)
+    return listener
 
 
 class Channel:
@@ -236,7 +291,7 @@ class Channel:
 
 def listen(slot: int | str, authkey: bytes, app_pid: int | None = None) -> Listener:
     """App side: create this host's pipe. Pass ``authkey`` to the host (env) so no other process can attach."""
-    return Listener(pipe_name(slot, app_pid), authkey=authkey)
+    return listen_at(pipe_name(slot, app_pid), authkey)
 
 
 def accept_host(

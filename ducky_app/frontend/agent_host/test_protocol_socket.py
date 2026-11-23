@@ -1,0 +1,83 @@
+"""The agent host's channel address: a named pipe on Windows, an AF_UNIX socket on Linux."""
+
+from __future__ import annotations
+
+import os
+import socket
+import stat
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from frontend.agent_host import protocol  # noqa: E402
+
+posix = pytest.mark.skipif(os.name == "nt", reason="AF_UNIX socket path is Linux-only")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows pipe name")
+def test_windows_pipe_name_is_unchanged():
+    assert protocol.pipe_name(3, 42) == r"\\.\pipe\uefn-ducky-host-42-3"
+
+
+@posix
+def test_socket_lives_in_runtime_dir_and_stays_short(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    assert protocol.pipe_name(3, 42) == str(tmp_path / "uefn-ducky" / "uefn-ducky-host-42-3.sock")
+    long_slot = "rpc-" + "x" * 200
+    name = protocol.pipe_name(long_slot, 42)
+    assert len(os.fsencode(name)) <= protocol._MAX_SUN_PATH
+    assert name != protocol.pipe_name("rpc-" + "y" * 200, 42)
+
+
+@posix
+def test_socket_is_0600_in_a_0700_folder_and_removed_on_close(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    name = protocol.pipe_name("modes", 42)
+    listener = protocol.listen("modes", b"k" * 32, app_pid=42)
+    try:
+        assert stat.S_IMODE(os.stat(name).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(os.path.dirname(name)).st_mode) == 0o700
+    finally:
+        listener.close()
+    assert not os.path.exists(name)
+
+
+@posix
+def test_stale_socket_from_a_dead_app_is_replaced(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    name = protocol.pipe_name("stale", 42)
+    os.makedirs(os.path.dirname(name), mode=0o700)
+    dead = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    dead.bind(name)
+    dead.close()  # the file stays, nobody listens: what a crashed app leaves
+    assert os.path.exists(name)
+    listener = protocol.listen("stale", b"k" * 32, app_pid=42)
+    try:
+        frames = []
+        app = None
+        host = threading.Thread(target=lambda: frames.append(
+            protocol.connect_app(name, b"k" * 32, lambda f: None, heartbeat_s=0)), daemon=True)
+        host.start()
+        app = protocol.accept_host(listener, lambda f: None, dead_after_s=0)
+        host.join(5)
+        assert frames and not app.closed
+    finally:
+        listener.close()
+        if app:
+            app.close()
+        for ch in frames:
+            ch.close()
+
+
+@posix
+def test_fallback_without_runtime_dir_uses_app_cache(tmp_path, monkeypatch):
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    if sys.platform.startswith("linux"):
+        assert protocol.pipe_name(1, 2).startswith(str(tmp_path / "UEFN-Ducky" / "sock"))
