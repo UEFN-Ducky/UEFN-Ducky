@@ -430,10 +430,63 @@ def uefn_memory_status() -> dict[str, Any] | None:
     return out
 
 
-def call(chat_id: str, op: str, mutating: bool, fn: Callable[[], T], *, heavy: bool | None = None) -> T:
+# The linked PC's Ducky runs the call through its own gateway (its lease, its limits).
+REMOTE_METHOD = "run_uefn_tool"
+
+
+def _remote_pc(arguments: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The linked PC for a call that can travel (its ``arguments`` are known), else None."""
+    if arguments is None:
+        return None
+    from backend.bridge import editor_presence
+
+    return editor_presence.linked_pc()
+
+
+def _ran_on(result: Any, name: str) -> Any:
+    tag = f"(ran on {name})"
+    if isinstance(result, dict):
+        return {**result, "ran_on": name}
+    if isinstance(result, str):
+        return f"{result}\n{tag}" if result else tag
+    return {"result": result, "ran_on": name}
+
+
+def remote_call(pc: dict[str, Any], op: str, arguments: dict[str, Any], *, heavy: bool | None = None) -> Any:
+    """Run ``op`` on the linked PC ``pc`` over the sealed link; the result names that PC.
+
+    Waits as long as an Epic UEFN call may (``call_limits.epic_call_limit``), then
+    :class:`EditorTimeout`. Any other failure is a ``RuntimeError`` with the PC's reason."""
+    from backend.bridge.call_limits import epic_call_limit
+    from frontend import ducky_link
+
+    name = str(pc.get("name") or "your other PC")
+    limit = epic_call_limit(is_heavy_op(op, arguments) if heavy is None else bool(heavy))
+    out = ducky_link.call(str(pc.get("keyId") or ""), REMOTE_METHOD, {"op": op, "arguments": arguments}, timeout=limit)
+    if not out.get("ok"):
+        error = str(out.get("error") or "it couldn't run it")
+        if error == ducky_link.NOT_ANSWERING:
+            raise EditorTimeout(f"{name} didn't answer {op} in {limit:g}s. {error}")
+        raise RuntimeError(f"{op} on {name}: {error}")
+    return _ran_on(out.get("result"), name)
+
+
+def call(
+    chat_id: str,
+    op: str,
+    mutating: bool,
+    fn: Callable[[], T],
+    *,
+    heavy: bool | None = None,
+    arguments: dict[str, Any] | None = None,
+) -> T:
     """Run one editor call ``fn`` for ``chat_id``; a mutating one waits for the lease first.
 
-    ``heavy`` overrides :func:`is_heavy_op` (a caller that knows the call's arguments)."""
+    ``heavy`` overrides :func:`is_heavy_op` (a caller that knows the call's arguments).
+    ``arguments`` lets the call run on a linked PC when this one has no UEFN."""
+    pc = _remote_pc(arguments)
+    if pc is not None:
+        return remote_call(pc, op, arguments or {}, heavy=heavy)
     if mutating:
         take_lease(chat_id, op)
     _note_heavy(op, heavy)
@@ -515,10 +568,14 @@ async def acall(
     *,
     heavy: bool | None = None,
     timeout: float | None = None,
+    arguments: dict[str, Any] | None = None,
 ) -> Any:
     """:func:`call` for a coroutine: waits for the lease without blocking the loop (Stop
     cancels the wait), then awaits ``fn()`` until UEFN answers. Only the caller's own
     ``timeout`` stops it early (:class:`EditorTimeout`)."""
+    pc = _remote_pc(arguments)
+    if pc is not None:
+        return await asyncio.to_thread(remote_call, pc, op, arguments or {}, heavy=heavy)
     if mutating:
         from frontend import uefn_events
 

@@ -134,3 +134,47 @@ def forget() -> None:
     """Read the process list again on the next ask (UEFN was just launched or closed)."""
     with _lock:
         _cache.clear()
+    with _link_lock:
+        _link.clear()
+
+
+# Off Windows with no local UEFN, editor calls can run on another UEFN Ducky of the
+# account (a Windows PC) over the sealed link (frontend.ducky_link). Windows runs UEFN
+# itself, so there it is always None and nothing here runs.
+LINK_CACHE_SEC = 30.0
+_link_lock = threading.Lock()
+_link: dict[str, object] = {}
+
+
+def linked_pc() -> dict | None:
+    """``{"keyId", "name"}`` of the live UEFN Ducky that runs this one's editor calls, else None.
+
+    ponytail: the first live Ducky of the account that isn't this one; a picker setting if
+    an account ever links several Windows PCs.
+    """
+    if sys.platform == "win32" or uefn_running():
+        return None
+    with _link_lock:
+        now = _mono()
+        if _link and now - float(_link["at"]) < LINK_CACHE_SEC:  # type: ignore[arg-type]
+            return _link["pc"]  # type: ignore[return-value]
+        try:
+            from frontend.ducky_link import list_duckies
+
+            rows = list_duckies().get("devices") or []
+        except Exception:
+            rows = []
+        pc = next(
+            ({"keyId": str(d["keyId"]), "name": str(d.get("name") or "your other PC")}
+             for d in rows if isinstance(d, dict) and d.get("live") and not d.get("mine") and d.get("keyId")),
+            None,
+        )
+        _link.update(at=now, pc=pc)
+        return pc
+
+
+def route() -> str:
+    """Where editor calls go: ``local`` (UEFN here), ``remote`` (a linked PC) or ``none``."""
+    if uefn_running():
+        return "local"
+    return "remote" if linked_pc() else "none"
