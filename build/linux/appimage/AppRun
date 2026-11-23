@@ -2,9 +2,9 @@
 # UEFN Ducky AppImage entry point.
 #   UEFN-Ducky-<ver>-<arch>.AppImage [args]          start Ducky (args go to uefn-ducky)
 #   ... --install-integration                         menu entry, icons, uefn-ducky:// links
-#   ... --uninstall [--purge]                         remove menu entry, icons, link handler and
-#                                                     autostart; --purge also deletes chats,
-#                                                     settings and caches (kept otherwise)
+#   ... --uninstall [--purge]                         remove menu entry, icons, link handler,
+#                                                     autostart and caches; --purge also deletes
+#                                                     chats and settings (kept otherwise)
 # The app itself rewrites the menu entry on every start (frontend/open_files.py), so a moved
 # AppImage heals; this script adds the icons it names.
 set -u
@@ -52,6 +52,7 @@ install_integration() {
 uninstall() {
   local purge=$1 rel f
   rm -f "$DATA/applications/$APP_ID.desktop" "$CONFIG/autostart/$APP_ID.desktop"
+  rm -rf "$CACHE/UEFN-Ducky"  # rebuilt on demand; not the person's data
   while read -r rel; do
     rm -f "$DATA/icons/$rel"
     # Only folders this left empty (icons/hicolor/<size>/apps ... icons).
@@ -65,8 +66,8 @@ uninstall() {
   command -v update-desktop-database >/dev/null && [ -d "$DATA/applications" ] \
     && update-desktop-database -q "$DATA/applications" 2>/dev/null
   if [ "$purge" = 1 ]; then
-    rm -rf "$DATA/UEFN-Ducky" "$CONFIG/UEFN-Ducky" "$CACHE/UEFN-Ducky"
-    echo "UEFN Ducky: removed, with its chats, settings and caches."
+    rm -rf "$DATA/UEFN-Ducky" "$CONFIG/UEFN-Ducky"
+    echo "UEFN Ducky: removed, with its chats and settings."
   else
     echo "UEFN Ducky: removed from the menu. Chats and settings stay in $DATA/UEFN-Ducky (--purge deletes them)."
   fi

@@ -82,8 +82,7 @@ def test_install_then_uninstall_keeps_only_user_data(appdir: Path, tmp_path: Pat
     out = _run(appdir, home, "--uninstall")
     assert "Chats and settings stay" in out
     assert _tree(home) == [
-        ".cache", ".cache/UEFN-Ducky", ".cache/UEFN-Ducky/search.bin",
-        ".config", ".config/mimeapps.list",
+        ".cache", ".config", ".config/mimeapps.list",
         ".local", ".local/share", ".local/share/UEFN-Ducky",
         ".local/share/UEFN-Ducky/chats", ".local/share/UEFN-Ducky/chats/keep.json",
     ]
