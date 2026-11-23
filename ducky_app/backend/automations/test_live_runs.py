@@ -104,7 +104,9 @@ def test_a_removed_or_day_old_run_is_dropped(folder) -> None:
     path = live_runs._path("wf", "r2")
     data = json.loads(path.read_text(encoding="utf-8"))
     data["started"] = time.time() - 2 * 86400
-    path.write_text(json.dumps(data), encoding="utf-8")
+    # As every Ducky process writes it (a replace): same size, and on Linux often the same mtime
+    # tick as the first write, so only the new file id says it changed.
+    live_runs._write(path, data)
     path.with_suffix(".stop").touch()
     assert live_runs.runs() == [] and live_runs._PARSED == {}
     assert not path.exists() and not path.with_suffix(".stop").exists()

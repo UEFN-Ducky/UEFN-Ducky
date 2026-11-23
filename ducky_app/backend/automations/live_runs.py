@@ -78,11 +78,13 @@ def _alive(data: dict) -> bool:
         return False
 
 
-# Run files already parsed, by path: (modified, size, data). Several processes write runs, so
-# a file is read again only when its time or size changed. Nov 11 2026: every call read and
+# Run files already parsed, by path: ((modified, size, file id), data). Several processes write
+# runs, so a file is read again only when one of those changed. Nov 11 2026: every call read and
 # parsed every run of the last day (their outputs too), and the window, the team keeper and
-# the updater all call it on a timer.
-_PARSED: dict[str, tuple[int, int, dict]] = {}
+# the updater all call it on a timer. _write replaces the file, so the file id (inode) changes
+# on every write: Linux moves mtime once per kernel tick, and a same-size rewrite inside one
+# tick looked unchanged. Windows' scandir reports the id as 0 (time and size decide, as before).
+_PARSED: dict[str, tuple[tuple[int, int, int], dict]] = {}
 
 
 def _files() -> list[tuple[Path, dict]]:
@@ -96,13 +98,14 @@ def _files() -> list[tuple[Path, dict]]:
     for entry in entries:
         try:
             stat = entry.stat()
+            stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
             kept = _PARSED.get(entry.path)
-            if kept is None or kept[0] != stat.st_mtime_ns or kept[1] != stat.st_size:
+            if kept is None or kept[0] != stamp:
                 data = json.loads(Path(entry.path).read_text(encoding="utf-8"))
                 if not isinstance(data, dict):
                     raise ValueError("not a run")
-                kept = _PARSED[entry.path] = (stat.st_mtime_ns, stat.st_size, data)
-            found.append((Path(entry.path), kept[2]))
+                kept = _PARSED[entry.path] = (stamp, data)
+            found.append((Path(entry.path), kept[1]))
         except (OSError, ValueError):
             _PARSED.pop(entry.path, None)
     here = {str(path) for path, _ in found}

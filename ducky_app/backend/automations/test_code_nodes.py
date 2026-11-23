@@ -517,6 +517,11 @@ def _v8():
         from py_mini_racer import MiniRacer
     except ImportError:
         pytest.skip("mini-racer isn't installed")
+    from backend.automations import jsrt
+
+    # V8 starts once per process: a bare MiniRacer() first started it without jsrt's flags, and
+    # every Custom code run on that xdist worker then refused to run (eval still on).
+    jsrt._load()
     return MiniRacer
 
 

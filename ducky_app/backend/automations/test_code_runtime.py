@@ -21,6 +21,11 @@ from backend.automations import code_api, code_node, jsrt, plugin, runner, store
 from backend.automations.pins import node_pins
 
 
+# "Stopped promptly": well under what not stopping takes (a 30 s wait, a loop with no end) yet
+# far over a stall of the machine itself; under `-n 6` in WSL every worker paused 3.3 s at once.
+_PROMPT = 10.0
+
+
 def _module(body: str, *, decl: str = "{}") -> str:
     return f"// @ts-check\nexport const node = {decl};\n\nexport default async function run(input, ducky) {{\n{body}\n}}\n"
 
@@ -45,16 +50,26 @@ def test_host_call_returns_value_and_log():
 
 
 def test_promise_all_runs_host_calls_together():
+    lock, active, most = threading.Lock(), [0], [0]
+    all_in = threading.Barrier(4)
+
     def slow(name, args):
-        time.sleep(0.3)
+        with lock:
+            active[0] += 1
+            most[0] = max(most[0], active[0])
+        try:
+            all_in.wait(timeout=_PROMPT)  # returns only once all four calls are running together
+        except threading.BrokenBarrierError:
+            pass
+        with lock:
+            active[0] -= 1
         return args["i"]
 
-    started = time.time()
     out = _run(_module('  const r = await Promise.all([1, 2, 3, 4].map((i) => ducky.tool("t", { i })));\n  return { r };'),
                host={"tool": slow})
     assert out["ok"], out
     assert out["value"] == {"r": [1, 2, 3, 4]}
-    assert time.time() - started < 1.0  # four 0.3 s calls side by side, not one after another
+    assert most[0] == 4  # four calls side by side, not one after another (no wall clock: CI stalls)
 
 
 def test_thrown_error_names_its_line():
@@ -93,8 +108,8 @@ def test_runaway_code_stops_within_two_seconds(body):
     started = time.time()
     out = _run(_module(body), host={"tool": lambda *_: {}, "expr": lambda *_: 1}, cancel=cancel)
     assert out["ok"] is False and out["stopped"] is True
-    assert time.time() - started < 2.0
-    deadline = time.time() + 2
+    assert time.time() - started < _PROMPT
+    deadline = time.time() + _PROMPT
     while [t for t in threading.enumerate() if t.name == "custom-code"]:  # the isolate gets closed
         assert time.time() < deadline
         time.sleep(0.02)
@@ -161,7 +176,7 @@ def test_sleep_ends_early_when_stopped():
     threading.Timer(0.2, cancel.set).start()
     started = time.time()
     out = _run(_module("  await ducky.sleep(30);\n  return {};"), cancel=cancel)
-    assert out["stopped"] is True and time.time() - started < 2.0
+    assert out["stopped"] is True and time.time() - started < _PROMPT
 
 
 def test_check_syntax_reports_line_and_column_without_running():
@@ -455,7 +470,7 @@ def test_stop_during_a_host_call_ends_the_run(events, approvals, tools):
     assert runner.stop_workflow(wid) is True
     worker.join(5)
     release.set()
-    assert not worker.is_alive() and time.time() - started < 2.0
+    assert not worker.is_alive() and time.time() - started < _PROMPT
     assert result["ok"] is False and result["error"] == runner.STOPPED
 
 
@@ -683,15 +698,17 @@ def test_waiting_for_uefn_ends_when_stopped_and_frees_the_open_lock(monkeypatch,
     project.write_text("{}")
     monkeypatch.setattr(window_view, "_uefn_running", lambda: True)
     monkeypatch.setattr(project_switch, "switch_panel_project", lambda **kw: pytest.fail("switched a project that never got ready"))
-    monkeypatch.setattr(window_view, "wait_uefn_ready", lambda **kw: time.sleep(5) or {"ok": True})
+    never = threading.Event()  # UEFN that never gets ready (released when the test ends)
+    monkeypatch.setattr(window_view, "wait_uefn_ready", lambda **kw: never.wait(30) or {"ok": True})
     _cancel, token = _stop_soon()
     started = time.time()
     try:
         out = uefn.open_project(str(project), timeout=120)
     finally:
         runner._CANCEL.reset(token)
+        never.set()
     assert out == {"ok": False, "stopped": True, "error": "Stopped"}
-    assert time.time() - started < 2.0
+    assert time.time() - started < _PROMPT
     assert uefn._open_lock.acquire(timeout=0.1)  # a new run can open UEFN right away
     uefn._open_lock.release()
 
@@ -702,12 +719,14 @@ def test_waiting_for_uefn_ends_when_stopped_and_frees_the_open_lock(monkeypatch,
     ("uefn.wait_ready", {"timeout": 60}, "frontend.window_view.wait_uefn_ready"),
 ])
 def test_play_test_waits_end_when_stopped(monkeypatch, ntype, config, patch):
-    monkeypatch.setattr(patch, lambda *a, **k: time.sleep(5) or {"ok": True})
+    never = threading.Event()  # a wait that never ends on its own (released when the test ends)
+    monkeypatch.setattr(patch, lambda *a, **k: never.wait(30) or {"ok": True})
     _cancel, token = _stop_soon()
     started = time.time()
     try:
         step = runner._exec_node({"id": "w", "type": ntype, "config": config}, {})
     finally:
         runner._CANCEL.reset(token)
+        never.set()
     assert step["ok"] is False and "Stopped" in step["error"]
-    assert time.time() - started < 2.0
+    assert time.time() - started < _PROMPT

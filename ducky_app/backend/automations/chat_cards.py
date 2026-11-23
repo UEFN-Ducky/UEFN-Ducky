@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 from pathlib import Path
 
 from frontend.atomic_json import write_json_atomic
 
 _lock = threading.Lock()
-# (folder, the folder's change time) -> the cards read then. The panel asks for the list every
-# second while a workflow runs; reading one file per hidden card each time (355 files on one
-# PC, and the folder only grows) took a quarter of the app's CPU (Nov 11 2026).
-_read: tuple[str, int, list[dict[str, str]]] | None = None
+# (folder, its file names) -> the cards read then. The panel asks for the list every second
+# while a workflow runs; reading one file per hidden card each time (355 files on one PC, and
+# the folder only grows) took a quarter of the app's CPU (Nov 11 2026). A file's name is the
+# hash of its pair, so the names are the whole state; the folder's mtime was not (Linux moves
+# it once per kernel tick, so a card hidden in the same few ms never showed).
+_read: tuple[str, frozenset[str], list[dict[str, str]]] | None = None
 
 
 def _directory() -> Path:
@@ -33,12 +36,12 @@ def dismiss(chat_id: str, run_id: str) -> None:
 
 
 def dismissed() -> list[dict[str, str]]:
-    """Every hidden card. Read again only when the folder changed (a file added by this
-    process or another one moves the folder's change time)."""
+    """Every hidden card. Read again only when the folder's files changed (added by this
+    process or another one): one listing, no file opened."""
     global _read
     directory = _directory()
     try:
-        stamp = directory.stat().st_mtime_ns
+        stamp = frozenset(name for name in os.listdir(directory) if name.endswith(".json"))
     except OSError:
         return []
     where = str(directory)
