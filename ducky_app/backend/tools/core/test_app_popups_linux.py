@@ -31,8 +31,9 @@ def test_wayland_says_why(linux, monkeypatch) -> None:
 
 
 def test_linux_program_names(linux) -> None:
-    assert ap.exe_names("blender") == ("blender.exe",)
-    assert ap.exe_names("krita") == ("krita",)
+    assert ap.app_names("blender") == ("blender.exe",)
+    assert ap.app_names("krita") == ("krita",)
+    assert ap.exe_names("nothing") == ()  # exe_names stays the Windows table on every OS
 
 
 def _rect(l, t, w, h):  # noqa: E741

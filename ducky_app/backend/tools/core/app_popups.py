@@ -65,13 +65,18 @@ def exe_names(app: str) -> tuple[str, ...]:
         return APPS[key]
     if key.endswith(".exe"):
         return (key,)
-    if _LINUX and key:
-        return (key,)  # a Linux program name: "krita"
     return tuple(name for names in APPS.values() for name in names) if not key else ()
 
 
 def _user32() -> Any:
     return ctypes.windll.user32
+
+
+def app_names(app: str) -> tuple[str, ...]:
+    """exe_names, plus on Linux any other program name as itself ("krita")."""
+    names = exe_names(app)
+    key = str(app or "").strip().lower()
+    return names or ((key,) if _LINUX and key else ())
 
 
 def unsupported_reason() -> str:
@@ -246,7 +251,7 @@ def list_popups(app: str = "") -> list[dict[str, Any]]:
         return []
     if sys.platform != "win32" and not _LINUX:
         return []
-    pids = _pids(exe_names(app))
+    pids = _pids(app_names(app))
     if not pids:
         return []
     by_pid: dict[int, list[dict[str, Any]]] = {}

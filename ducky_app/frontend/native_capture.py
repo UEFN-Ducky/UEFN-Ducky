@@ -374,6 +374,12 @@ def linux_grabber() -> Any:
     return shared_portal() if is_wayland() else MssGrabber()
 
 
+if sys.platform != "win32":
+    # Off Windows the best grabber is the Linux one. One name for every caller (and every
+    # test that patches _BestGrabber), so Capturer looks it up the same way on both.
+    _BestGrabber = linux_grabber  # type: ignore[misc,assignment]  # noqa: F811
+
+
 def x11_windows() -> list[dict[str, Any]]:
     """Mapped EWMH client windows (``_NET_CLIENT_LIST``): xid, pid, title, cls, rect, transient_for,
     modal. [] without an X server (XWayland lists only X clients)."""
@@ -443,7 +449,7 @@ class Capturer:
         self.fps = min(START_FPS, self.max_fps)
         self._target_fn = target_fn
         self._on_frame = on_frame
-        self._factory = grabber_factory or (_BestGrabber if sys.platform == "win32" else linux_grabber)
+        self._factory = grabber_factory or _BestGrabber
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="native-capture", daemon=True)
         self._lag = 0.0
