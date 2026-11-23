@@ -1,0 +1,130 @@
+"""A plugin release builds Windows x64, Linux x86_64 and Linux arm64 zips and publishes them
+in ONE uds_release; a failed Linux build uploads nothing."""
+
+from __future__ import annotations
+
+import json
+import textwrap
+from pathlib import Path
+
+import pytest
+
+from backend.uefn_plugins import release_platforms as rp
+
+ABI = {"": "cp313-win_amd64", "linux-x86_64": "cpython-313-x86_64-linux-gnu",
+       "linux-arm64": "cpython-313-aarch64-linux-gnu"}
+
+# A plugin repo's scripts, as the S17 kit's plugins have them (build_zip with target=).
+BUILD_ZIP = textwrap.dedent('''
+    import json, zipfile
+    from pathlib import Path
+    ROOT = Path(__file__).resolve().parents[1]
+    ABI = {abi!r}
+    def build_compiled_zip(*, out=None, release=False, target=""):
+        assert release, "a Store build bakes the license check in"
+        m = json.loads((ROOT / "plugin.json").read_text())
+        tag = f"-{{target}}" if target else ""
+        (ROOT / "deploy").mkdir(exist_ok=True)
+        dest = ROOT / "deploy" / f"{{m['id']}}-{{m['version']}}{{tag}}-compiled.ducky-plugin.zip"
+        with zipfile.ZipFile(dest, "w") as zf:
+            zf.writestr("plugin.json", json.dumps({{**m, "compiled": True, "python_abi": ABI[target]}}))
+        return dest
+''').format(abi=ABI)
+
+RELEASE = textwrap.dedent('''
+    CALLS, UPLOADS = [], []
+    def _load_dotenv():
+        pass
+    def upload_with_ticket(base, key, path):
+        UPLOADS.append(path.name)
+        return f"up-{len(UPLOADS)}"
+    def mcp_call(base, key, name, arguments):
+        CALLS.append((name, arguments))
+        return {"ok": True}
+''')
+
+
+@pytest.fixture
+def plugin(tmp_path, monkeypatch):
+    root = tmp_path / "uefn-plugin-fake"
+    (root / "scripts").mkdir(parents=True)
+    (root / "plugin.json").write_text(json.dumps({"id": "fake", "version": "1.2.3", "label": "Fake"}))
+    (root / "scripts" / "build_zip.py").write_text(BUILD_ZIP)
+    (root / "scripts" / "release.py").write_text(RELEASE)
+    monkeypatch.setenv("DUCKYOS_API_KEY", "k")
+    return root
+
+
+def fake_docker(plugin_root, fail_on=""):
+    """Stands in for `docker run … python:3.13-bookworm`: runs the plugin's build for the target."""
+    calls = []
+
+    def run(cmd, check):
+        calls.append(cmd)
+        if cmd == rp.QEMU_SETUP:
+            return
+        assert cmd[:2] == ["docker", "run"] and rp.IMAGE in cmd and "DUCKY_REPO=/ducky" in cmd
+        target = next(t for t in rp.LINUX_TARGETS if repr(t) in cmd[-1])
+        assert cmd[cmd.index("--platform") + 1] == rp.LINUX_TARGETS[target]
+        if target == fail_on:
+            raise SystemExit(f"docker build {target} failed")
+        rp._script(plugin_root, "build_zip").build_compiled_zip(release=True, target=target)
+
+    return run, calls
+
+
+def test_build_gives_three_platform_zips(plugin):
+    run, calls = fake_docker(plugin)
+    zips = rp.build(plugin, run=run)
+    names = [z.name for z in zips]
+    assert names == ["fake-1.2.3-windows-x64-compiled.ducky-plugin.zip",
+                     "fake-1.2.3-linux-x86_64-compiled.ducky-plugin.zip",
+                     "fake-1.2.3-linux-arm64-compiled.ducky-plugin.zip"]
+    builds = [c for c in calls if c != rp.QEMU_SETUP]
+    assert [c[c.index("--platform") + 1] for c in builds] == ["linux/amd64", "linux/arm64"]
+    assert calls.index(rp.QEMU_SETUP) == 1  # arm64 emulation is set up right before its build
+
+
+def test_publish_sends_three_artifacts_in_one_release(plugin, monkeypatch):
+    run, _ = fake_docker(plugin)
+    zips = rp.build(plugin, run=run)
+    store = rp._script(plugin, "release")
+    monkeypatch.setattr(rp, "_script", lambda p, name: store if name == "release" else None)
+    rp.publish(plugin, zips, category="plugins", changelog="Linux builds")
+    assert len(store.UPLOADS) == 3
+    releases = [a for n, a in store.CALLS if n == "uds_release"]
+    assert len(releases) == 1
+    [args] = releases
+    plats = {(a["os"], a["arch"]) for a in args["artifacts"]}
+    assert plats == {("windows", "x86_64"), ("linux", "x86_64"), ("linux", "aarch64")}
+    win = next(a for a in args["artifacts"] if a["os"] == "windows")
+    assert args["uploadId"] == win["uploadId"] and args["publish"] is True and args["name"] == "Fake"
+    assert all(a["uploadId"] and len(a["sha256"]) == 64 and a["size"] > 0 for a in args["artifacts"])
+    assert {a["file"] for a in args["artifacts"]} == {"fake-windows-x86_64.zip", "fake-linux-x86_64.zip",
+                                                     "fake-linux-aarch64.zip"}
+
+
+def test_a_failed_linux_build_stops_before_any_upload(plugin, monkeypatch):
+    run, _ = fake_docker(plugin, fail_on="linux-arm64")
+    monkeypatch.setattr(rp.subprocess, "run", run)
+    published = []
+    monkeypatch.setattr(rp, "publish", lambda *a, **k: published.append(a))
+    monkeypatch.setattr(rp, "_script", _no_commit(rp._script))
+    with pytest.raises(SystemExit, match="linux-arm64"):
+        rp.main([str(plugin), "--publish"])
+    assert published == []
+
+
+def _no_commit(real):
+    class _Commit:
+        @staticmethod
+        def commit_and_push_before_publish(root, changelog):
+            pass
+
+    return lambda plugin, name: _Commit if name == "commit_before_store" else real(plugin, name)
+
+
+def test_linux_build_cmd_mounts_the_kit_read_only(tmp_path):
+    cmd = rp.linux_build_cmd(tmp_path, "linux-arm64")
+    assert f"{rp.DUCKY_REPO}:/ducky:ro" in cmd and "--platform" in cmd and "linux/arm64" in cmd
+    assert cmd[-1].endswith("target='linux-arm64')")
