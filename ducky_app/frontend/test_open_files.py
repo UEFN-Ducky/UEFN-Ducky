@@ -170,3 +170,31 @@ def test_register_windows_open_with_writes_applications_key(tmp_path: Path, monk
                 winreg.DeleteKey(winreg.HKEY_CURRENT_USER, sub)
             except OSError:
                 pass
+
+
+@pytest.fixture()
+def handoff(monkeypatch):
+    from frontend import open_files
+    from frontend.ui_web import shutdown
+
+    monkeypatch.setattr(shutdown, "_exit_started", False)
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(windows=[]))
+    monkeypatch.delenv("UEFN_DUCKY_NATIVE_CHILD", raising=False)
+    return open_files, shutdown
+
+
+def test_launcher_hosted_backend_takes_the_handoff_without_a_pywebview_window(handoff, monkeypatch):
+    open_files, shutdown = handoff
+    monkeypatch.setenv("UEFN_DUCKY_NATIVE_CHILD", "1")
+    assert open_files.panel_can_take_handoff() is True
+    monkeypatch.setattr(shutdown, "_exit_started", True)  # closing: the fast close stays fast
+    assert open_files.panel_can_take_handoff() is False
+
+
+def test_python_window_still_needs_a_window(handoff, monkeypatch):
+    open_files, shutdown = handoff
+    assert open_files.panel_can_take_handoff() is False
+    monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(windows=[object()]))
+    assert open_files.panel_can_take_handoff() is True
+    monkeypatch.setattr(shutdown, "_exit_started", True)
+    assert open_files.panel_can_take_handoff() is False

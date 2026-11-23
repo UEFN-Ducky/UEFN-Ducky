@@ -153,6 +153,15 @@ def panel_can_take_handoff() -> bool:
     except Exception:
         pass
     try:
+        from frontend.native_host import launcher_windows
+
+        if launcher_windows.active():
+            # --backend: the launcher owns the window, so webview.windows is always [];
+            # checking it answered 503 "closing" to every second launch of a healthy Ducky.
+            return True
+    except Exception:
+        pass
+    try:
         import webview
 
         return bool(getattr(webview, "windows", None))
