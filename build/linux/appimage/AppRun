@@ -31,11 +31,18 @@ install_icons() {
 
 install_integration() {
   local exe="${APPIMAGE:-$HERE/AppRun}"
-  # Desktop Entry Exec quoting: backslash-escape " ` $ \ inside double quotes.
-  local quoted
-  quoted="$(printf '%s' "$exe" | sed -e 's/[\\"`$]/\\\\&/g' -e 's/[|&]/\\&/g')"
+  # Desktop Entry Exec quoting (as open_files.desktop_exec_quote): \ " ` $ get a backslash.
+  local q="${exe//\\/\\\\}" line
+  q="${q//\"/\\\"}"
+  q="${q//\`/\\\`}"
+  q="${q//\$/\\\$}"
   mkdir -p "$DATA/applications"
-  sed "s|^Exec=.*|Exec=\"$quoted\" %U|" "$HERE/$APP_ID.desktop" > "$DATA/applications/$APP_ID.desktop"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      Exec=*) printf 'Exec="%s" %%U\n' "$q" ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done < "$HERE/$APP_ID.desktop" > "$DATA/applications/$APP_ID.desktop"
   install_icons
   command -v xdg-mime >/dev/null && xdg-mime default "$APP_ID.desktop" "$SCHEME" 2>/dev/null
   command -v update-desktop-database >/dev/null && update-desktop-database -q "$DATA/applications" 2>/dev/null
