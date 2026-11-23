@@ -96,13 +96,19 @@ def case_page_zoom_scales_the_rect(window, pushed) -> None:
     gp.ui_sync(window, pane.control.Dispose)
 
 
+_FORM = """<title>Form</title><body style="margin:0;height:3000px">
+<input id="q" style="position:absolute;left:20px;top:20px;width:200px;height:30px">
+<script>window.keys = []; q.addEventListener('keydown', e => keys.push(e.key + ':' + e.isTrusted));</script>"""
+
+
 def _site() -> str:
-    """Two loopback pages, /a and /b, each with its own title."""
+    """Loopback pages: /a and /b, each with its own title, and /form (a tall page with a box)."""
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     class Page(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
-            body = f"<title>Page {self.path.strip('/').upper()}</title><p>{self.path}</p>".encode()
+            body = (_FORM if self.path == "/form" else
+                    f"<title>Page {self.path.strip('/').upper()}</title><p>{self.path}</p>").encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body)))
@@ -144,7 +150,6 @@ def case_browser_tab_opens_a_local_page_and_reads_its_title(window, pushed) -> N
     assert bo.evaluate("lxb", "nope()")["ok"] is False
     snap = bo.snapshot("lxb")
     assert snap["ok"] and snap["data"].startswith("data:image/jpeg;base64,"), snap
-    assert bo.devtools("lxb", "Page.captureScreenshot")["ok"] is False
     assert bo.clear_browsing_data("cookies")["ok"]
 
     assert bo.navigate("lxb", "file:///etc/passwd")["ok"] is False
@@ -153,6 +158,59 @@ def case_browser_tab_opens_a_local_page_and_reads_its_title(window, pushed) -> N
     assert bo.close_pane("lxb") == {"ok": True, "closed": True}
     assert _wait(lambda: gp.ui_sync(window, lambda: len(gp.overlay_of(window).get_children())) == 1)
     assert bo.get_state("lxb")["ok"] is False
+
+
+def case_devtools_methods_click_type_keys_and_screenshot(window, pushed) -> None:
+    """What the Browser plugin's agent tools send (browser_click, browser_type, browser_press,
+    browser_screenshot), with Windows' reply shape."""
+    import base64
+    import struct
+
+    from frontend.ui_web import browser_overlay as bo
+
+    site = _site()
+    bo.configure(main_window=window)
+    dt = lambda method, **p: bo.devtools("lxd", method, p)  # noqa: E731
+    js = lambda expr: bo.evaluate("lxd", expr)["value"]  # noqa: E731
+    assert bo.open_pane("lxd", f"{site}/form")["ok"]
+    assert bo.set_bounds("lxd", 0, 0, 400, 300, *window.viewport, True)["ok"]
+    assert _wait(lambda: bo.get_state("lxd").get("title") == "Form" and not bo.get_state("lxd")["loading"])
+    assert js("document.activeElement.id") != "q"
+
+    # A click on the box focuses it (move, press, release, as browser_click sends them).
+    assert dt("Emulation.setFocusEmulationEnabled", enabled=True) == {"ok": True, "reply": {}}
+    for kind in ("mouseMoved", "mousePressed", "mouseReleased"):
+        extra = {} if kind == "mouseMoved" else {"button": "left", "clickCount": 1}
+        assert dt("Input.dispatchMouseEvent", type=kind, x=60, y=35, **extra)["ok"]
+    assert _wait(lambda: js("document.activeElement.id") == "q"), js("document.activeElement.tagName")
+
+    # Typed text lands in the box; Enter is a trusted keydown the page sees.
+    assert dt("Input.insertText", text="hi") == {"ok": True, "reply": {}}
+    assert dt("Input.dispatchKeyEvent", type="keyDown", key="Enter", code="Enter", windowsVirtualKeyCode=13, text="\r")["ok"]
+    assert dt("Input.dispatchKeyEvent", type="keyUp", key="Enter", code="Enter", windowsVirtualKeyCode=13)["ok"]
+    assert _wait(lambda: js("q.value") == "hi" and "Enter:true" in js("keys")), (js("q.value"), js("keys"))
+
+    # browser_type with clear: select all, then the new text replaces the old.
+    select_all = {"key": "a", "code": "KeyA", "windowsVirtualKeyCode": 65, "modifiers": 2}
+    assert dt("Input.dispatchKeyEvent", type="rawKeyDown", commands=["selectAll"], **select_all)["ok"]
+    assert dt("Input.dispatchKeyEvent", type="keyUp", **select_all)["ok"]
+    assert dt("Input.insertText", text="x")["ok"]
+    assert _wait(lambda: js("q.value") == "x"), js("q.value")
+
+    # The whole tall page, as base64 PNG in reply.data.
+    got = dt("Page.captureScreenshot", format="png")
+    assert got["ok"], got
+    png = base64.b64decode(got["reply"]["data"])
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    w, h = struct.unpack(">II", png[16:24])
+    assert h >= 3000 > window.viewport[1] and w >= 300, (w, h)
+    assert dt("Emulation.setDeviceMetricsOverride", width=390, height=844, deviceScaleFactor=1, mobile=True)["ok"]
+    assert dt("Emulation.clearDeviceMetricsOverride")["ok"]
+
+    nope = dt("Network.getCookies")
+    assert nope["ok"] is False and "Network.getCookies" in nope["error"]
+    assert bo.close_pane("lxd")["ok"]
+    assert bo.devtools("lxd", "Page.captureScreenshot") == {"ok": False, "error": "pane not open"}
 
 
 def case_ui_helpers_run_on_the_gtk_loop(window, pushed) -> None:
