@@ -585,7 +585,10 @@ def ducky_launch_uefn(project: str = "", reason: str = "", pretty: bool = False)
     An agent's launch asks the person first; ``reason`` (one line) goes on that card
     and in the project's ``crash-watch`` memory.
     """
-    from frontend.window_view import launch_uefn_project
+    if sys.platform.startswith("linux"):
+        from backend.tools.uefn.proton import launch_uefn_project
+    else:
+        from frontend.window_view import launch_uefn_project
 
     island = _island_arg(project)
     return tool_json(
@@ -603,7 +606,10 @@ def ducky_close_uefn(reason: str = "", pretty: bool = False) -> str:
     An agent's close asks the person first; ``reason`` (one line) goes on that card
     and in the project's ``crash-watch`` memory.
     """
-    from frontend.window_view import close_uefn
+    if sys.platform.startswith("linux"):
+        from backend.tools.uefn.proton import close_uefn
+    else:
+        from frontend.window_view import close_uefn
 
     return tool_json(_through_gateway("ducky_close_uefn", close_uefn, reason), pretty=pretty)
 
@@ -619,7 +625,10 @@ def ducky_restart_uefn(project: str = "", timeout: float = 180, reason: str = ""
     An agent's restart asks the person first (a no or no answer cancels it); ``reason``
     (one line) goes on that card and in the project's ``crash-watch`` memory.
     """
-    from frontend.window_view import restart_uefn_project
+    if sys.platform.startswith("linux"):
+        from backend.tools.uefn.proton import restart_uefn_project
+    else:
+        from frontend.window_view import restart_uefn_project
 
     island = _island_arg(project)
     return tool_json(
