@@ -303,6 +303,9 @@ def test_listing_neither_keeps_nor_reopens_an_idle_server(transport, monkeypatch
         for _ in range(3):
             assert listed() == first
         assert len(transport.opened) == opened, "listing started an idle server again"
+        # The sweeper reads this each pass: without it a loaded runner can idle-close
+        # the server again between call_tool returning and the check below.
+        monkeypatch.setattr(cp, "_IDLE_EVICT_SEC", 3600.0)
         pool.run_sync(pool.call_tool(first[0], {}))
         assert "one" in pool._connections and transport.calls == ["echo"]
     finally:
