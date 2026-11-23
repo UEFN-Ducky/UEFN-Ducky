@@ -29,6 +29,7 @@ import { ScopedCss, useScopedClass } from "../utils/scopedCss";
 import { useAppearance } from "../theme/AppearanceContext";
 import { AddToUefnTab } from "./settings/AddToUefnTab";
 import { AppDataTab } from "./settings/AppDataTab";
+import { MoveToLinux } from "../settings/MoveToLinux";
 import { PermissionsTab } from "./settings/PermissionsTab";
 import { AgentTab } from "./settings/AgentTab";
 import { LanguagesTab } from "./settings/LanguagesTab";
@@ -678,6 +679,7 @@ export const SettingsView = memo(function SettingsView({ version }: SettingsView
         </div>
         {activeTab === "General" && generalSection === "general" && <AddToUefnTab />}
         {activeTab === "General" && generalSection === "app_data" && <AppDataTab />}
+        {activeTab === "General" && generalSection === "app_data" && <MoveToLinux />}
         {activeTab === "General" && generalSection === "permissions" && <PermissionsTab />}
         {activeTab === "General" && generalSection === "log_errors" && (
           <LogErrorsTab sectionTab={logErrorsSection} />
