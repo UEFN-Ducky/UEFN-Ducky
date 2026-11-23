@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import struct
+import sys
 import threading
 import time
 from collections.abc import Iterable, Iterator
@@ -402,8 +403,13 @@ def backup_files(root: Path | None = None) -> list[Path]:
 
 
 def _made(st: os.stat_result) -> float:
-    """When a file was made (a snapshot's copy starts then; sealing it keeps its mtime)."""
-    return float(getattr(st, "st_birthtime", 0) or (st.st_ctime if os.name == "nt" else st.st_mtime))
+    """When a file was made (a snapshot's copy starts then; sealing it keeps its mtime).
+    Linux stat has no birth time: its ctime (inode change) is never earlier than the file
+    and, unlike mtime, can't be set back (``os.utime``, ``copy2``), so a backup made after
+    the rows were sealed never looks older.
+    ponytail: a rename/chmod moves Linux ctime later; os.statx's birth time (3.15) if that bites."""
+    linux = sys.platform.startswith("linux")
+    return float(getattr(st, "st_birthtime", 0) or (st.st_ctime if os.name == "nt" or linux else st.st_mtime))
 
 
 SETTLE_S = 60.0  # a backup this fresh may still be being written
