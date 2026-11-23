@@ -64,6 +64,25 @@ jobs:
         run: |
           python -m pip install -r requirements-dev.txt
           python -m pytest -q -p no:cacheprovider build/test_build_exes.py build/linux/appimage $(ls release/test_sign_linux.py 2>/dev/null)
+      # CI has no UEFN: the Verse editor's grammar imports get empty stand-ins (as in linux-tests).
+      # The release lane extracts the real ones (scripts/extract_vscode_ext.py) before its build.
+      - name: Verse language stand-ins
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          stand_ins = {
+              "verse.tmGrammar.json": {"scopeName": "source.verse", "patterns": [], "repository": {}},
+              "language-configuration.json": {},
+              "verse-snippets.json": {},
+              "verse-dark.tmTheme.json": {"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []},
+          }
+          lang = Path("ducky_app/frontend/ui_web/web/src/verse-editor/lang")
+          lang.mkdir(parents=True, exist_ok=True)
+          for name, doc in stand_ins.items():
+              if not (lang / name).is_file():
+                  (lang / name).write_text(json.dumps(doc), encoding="utf-8")
       # build_exes.py runs the frozen app's --runtime-smoke itself (panel archive and
       # every asset verified, MCP server answers); xvfb gives it a display.
       - name: Freeze (PyInstaller) + runtime smoke
