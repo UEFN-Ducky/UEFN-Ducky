@@ -206,6 +206,8 @@ def test_reopening_in_a_chat_reuses_its_idle_terminal(monkeypatch, tmp_path):
 
     monkeypatch.setattr(manager_mod, "TerminalSession", FakeSession)
     monkeypatch.setattr(manager_mod, "TerminalBridge", FakeBridge)
+    # The shell asked for is the shell it gets (on Linux with no pwsh, an agent's powershell is bash).
+    monkeypatch.setattr(manager_mod, "agent_shell", manager_mod.shell_label)
     mgr, events, chat = TerminalManager(), [], ["chat-1"]
     monkeypatch.setattr(terminal, "get_terminal_manager", lambda: mgr)
     patch_turns(monkeypatch, "get_panel_push", lambda: events.append)
@@ -257,9 +259,12 @@ def test_real_loopback_background_output_after_sixty_seconds(monkeypatch, tmp_pa
     import time
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-    if sys.platform != "win32":
-        pytest.skip("PowerShell terminal integration requires Windows")
-    pytest.importorskip("winpty")
+    if sys.platform == "win32":
+        pytest.importorskip("winpty")
+        shell, command = "powershell", "Start-Sleep -Seconds 61; Write-Output ('DUCKY_LONG_' + 'FINISHED')"
+    else:
+        pytest.importorskip("ptyprocess")
+        shell, command = "bash", 'sleep 61; echo DUCKY_LONG_""FINISHED'
     mgr = TerminalManager()
     events = []
     mgr.set_push(events.append)
@@ -288,15 +293,13 @@ def test_real_loopback_background_output_after_sixty_seconds(monkeypatch, tmp_pa
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        opened = json.loads(tools.ducky_terminal_open(shell="powershell", cwd=str(tmp_path)))
+        opened = json.loads(tools.ducky_terminal_open(shell=shell, cwd=str(tmp_path)))
         assert opened["ok"], opened
         sid = opened["session_id"]
         assert events[0]["type"] == "terminal_open"
         assert json.loads(tools.ducky_terminal_list())["sessions"][0]["session_id"] == sid
         started = time.monotonic()
-        result = json.loads(tools.ducky_terminal_run(
-            sid, "Start-Sleep -Seconds 61; Write-Output ('DUCKY_LONG_' + 'FINISHED')", background=True,
-        ))
+        result = json.loads(tools.ducky_terminal_run(sid, command, background=True))
         assert result["ok"] and result["status"] == "running", result
         assert time.monotonic() - started < 10
         deadline = started + 90
@@ -316,6 +319,33 @@ def test_real_loopback_background_output_after_sixty_seconds(monkeypatch, tmp_pa
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_linux_output_streams_line_by_line(tmp_path):
+    """Each line reaches the panel as it is printed, not when the command ends."""
+    import sys
+    import time
+
+    if sys.platform == "win32":
+        pytest.skip("Linux pty terminal")
+    pytest.importorskip("ptyprocess")
+    from frontend.ui_web.terminal.session import TerminalSession
+
+    seen: list[tuple[float, str]] = []
+    session = TerminalSession(shell="bash", cwd=str(tmp_path), agent=True,
+                              on_output=lambda text: seen.append((time.monotonic(), text)))
+    session.spawn()
+    try:
+        out = session.run_command("for i in 1 2 3; do echo STREAM_$i; sleep 0.5; done", timeout_s=20)
+        assert out["ok"] and out["exit_code"] == 0, out
+        assert out["output_tail"] == "STREAM_1\nSTREAM_2\nSTREAM_3"
+
+        def first(line):
+            return next(t for t, text in seen if line + "\r\n" in text)
+
+        assert first("STREAM_3") - first("STREAM_1") >= 0.8
+    finally:
+        session.kill()
 
 
 def test_a_chat_less_agent_terminal_reaches_the_window_as_an_agents(forwarded, monkeypatch):
