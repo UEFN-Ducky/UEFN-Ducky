@@ -232,6 +232,8 @@ def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
 def mark_ready(version: str) -> None:
     """The panel of ``version`` came up: its failed-start count goes back to zero, and the
     install's root launcher becomes this version's (:func:`refresh_root_launcher`)."""
+    if sys.platform.startswith("linux"):
+        confirm_appimage_swap(version)
     write_current(version)
     try:
         refresh_root_launcher()
@@ -244,6 +246,49 @@ def mark_ready(version: str) -> None:
     except Exception:
         pass
     clear_starts(version)
+
+
+# --- Linux AppImage self-update (frontend.updater) ------------------------------------
+APPIMAGE_SWAP_FILE = "appimage_swap.json"
+
+
+def appimage_swap_paths() -> tuple[Path, Path, Path]:
+    """(state, ok mark, failure report) of the last AppImage swap."""
+    state = versions_dir() / APPIMAGE_SWAP_FILE
+    return state, state.with_suffix(".ok"), state.with_suffix(".failed")
+
+
+def begin_appimage_swap(version: str, *, from_version: str, app: Path, previous: Path) -> None:
+    state, ok, failed = appimage_swap_paths()
+    for mark in (ok, failed):
+        try:
+            mark.unlink(missing_ok=True)
+        except OSError:
+            pass
+    _write_json(state, {"version": version, "from": from_version, "app": str(app),
+                        "previous": str(previous), "at": time.time()})
+
+
+def confirm_appimage_swap(version: str) -> bool:
+    """The swapped-in AppImage reached ready: its watchdog stops waiting."""
+    state, ok, _failed = appimage_swap_paths()
+    try:
+        if json.loads(state.read_text(encoding="utf-8")).get("version") != version:
+            return False
+        ok.write_text(str(time.time()), encoding="utf-8")
+        return True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def appimage_swap_failure() -> dict[str, Any] | None:
+    """``{from, to, at}`` when the last AppImage update didn't start and was rolled back
+    ("Update failed, back on <to>")."""
+    try:
+        data = json.loads(appimage_swap_paths()[2].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def clear_starts(version: str) -> None:

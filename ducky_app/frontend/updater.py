@@ -833,6 +833,8 @@ def apply_update() -> dict[str, Any]:
     """
     _cancel.clear()
     _set_progress(stage="check", downloaded_bytes=0, total_bytes=0, error=None)
+    if sys.platform.startswith("linux"):
+        return apply_linux_update()
     status = get_app_update_status()
     channel = str(status.get("channel") or "")
     if channel == "dev":
@@ -971,3 +973,376 @@ def launch_uninstall() -> dict[str, Any]:
         return _result(ok=True, error=None, stage="opened")
     _shutdown_after_delay()
     return _result(ok=True, error=None, stage="uninstalling")
+
+
+# --- Linux -----------------------------------------------------------------------------
+# Windows never runs anything below: apply_update() only comes here on Linux.
+
+# install_info.install_kind() -> the store record's ``package`` (DuckyOS uds_app_release).
+_PACKAGE_FOR_KIND = {
+    "installer": "setup", "appimage": "appimage", "deb": "deb", "rpm": "rpm",
+    "flatpak": "flatpak", "aur": "aur",
+}
+_ARCH_NAMES = {"x86_64": "x64", "amd64": "x64", "x64": "x64", "aarch64": "arm64", "arm64": "arm64"}
+# What the update button does per install kind (the web banner reads ``update_action``).
+UPDATE_ACTIONS = {
+    "appimage": "restart", "deb": "install", "rpm": "install", "flatpak": "install",
+    "aur": "manual", "installer": "restart",
+}
+# The release lane's minisign public key (the .pub file's base64 line). Empty: AppImage
+# updates are checked by SHA-256 from the HTTPS feed only.
+# ponytail: no key shipped yet; set it once the release lane signs AppImages.
+MINISIGN_PUBLIC_KEY = ""
+# A swapped-in AppImage that isn't ready (app_versions.mark_ready) by then is rolled back.
+HEALTHY_WITHIN_S = 60
+# Leftovers of the AppImage process that would break the watchdog or the next AppImage.
+_RUNTIME_ENV = ("APPDIR", "APPIMAGE", "ARGV0", "OWD", "PYTHONHOME", "PYTHONPATH", "_MEIPASS2")
+_PACKAGE_TIMEOUT_S = 1800.0
+
+# Runs detached from the old AppImage: starts the new one, waits for its ready mark, and
+# puts the old file back (then starts it) when the new one exits or never gets ready.
+_WATCHDOG_SH = r"""
+app=$1 prev=$2 ok=$3 failed=$4 timeout=$5 old=$6 new=$7 pid=$8
+"$app" --after-update "$pid" &
+child=$!
+i=0
+while [ "$i" -lt "$timeout" ]; do
+  [ -e "$ok" ] && exit 0
+  kill -0 "$child" 2>/dev/null || break
+  sleep 1
+  i=$((i+1))
+done
+[ -e "$ok" ] && exit 0
+kill "$child" 2>/dev/null
+mv -f "$prev" "$app" || exit 1
+printf '{"from": "%s", "to": "%s", "at": %s}' "$new" "$old" "$(date +%s)" > "$failed"
+exec "$app"
+"""
+
+
+def _os_name(plat: str | None = None) -> str:
+    plat = plat or sys.platform
+    if plat == "win32":
+        return "windows"
+    if plat.startswith("linux"):
+        return "linux"
+    return "macos" if plat == "darwin" else plat
+
+
+def _install_kind() -> str:
+    from frontend.install_info import install_kind
+
+    return install_kind()
+
+
+def pick_asset(
+    payload: dict[str, Any],
+    *,
+    plat: str | None = None,
+    machine: str | None = None,
+    kind: str | None = None,
+) -> dict[str, Any] | None:
+    """The feed's ``assets`` row for this OS, CPU and install kind, e.g. an AppImage on
+    aarch64 -> ``linux/arm64/appimage``. Windows falls back to the old top-level
+    installerUrl / installerSha256 (records from before ``assets``, always x64 Setup)."""
+    import platform
+
+    os_name = _os_name(plat)
+    raw_machine = platform.machine() if machine is None else machine
+    arch = _ARCH_NAMES.get(raw_machine.lower(), raw_machine.lower())
+    package = _PACKAGE_FOR_KIND.get(kind if kind is not None else _install_kind())
+    if package is None:
+        return None
+    for row in payload.get("assets") or []:
+        if isinstance(row, dict) and (row.get("os"), row.get("arch"), row.get("package")) == (
+            os_name, arch, package,
+        ):
+            return row
+    if os_name == "windows" and package == "setup" and arch == "x64":
+        url = payload.get("installerUrl") or payload.get("installer_url")
+        if url:
+            sha = payload.get("installerSha256") or payload.get("sha256")
+            return {"os": "windows", "arch": "x64", "package": "setup", "url": url,
+                    "sha256": sha, "sig_url": None}
+    return None
+
+
+def linux_update_status(
+    *, payload: dict[str, Any] | None = None, kind: str | None = None
+) -> dict[str, Any]:
+    """The Linux counterpart of version_check.get_app_update_status(): same keys, plus
+    ``install_kind``, ``update_action`` (restart | install | manual | none), ``asset``
+    and ``last_failure`` (an AppImage update that was rolled back)."""
+    from frontend import app_versions
+    from frontend.version_check import (
+        _extract_remote_version,
+        absolute_installer_url,
+        download_page_url,
+        feed_is_paused,
+        fetch_remote_payload,
+        update_base_url,
+    )
+
+    kind = kind or _install_kind()
+    result: dict[str, Any] = {
+        "local_version": __version__,
+        "remote_version": None,
+        "update_available": False,
+        "installed": False,
+        "channel": "portable" if kind == "source" else "installed",
+        "install_kind": kind,
+        "update_action": UPDATE_ACTIONS.get(kind, "none"),
+        "asset": None,
+        "installer_url": None,
+        "installer_sha256": None,
+        "release_notes": None,
+        "download_url": download_page_url(),
+        "feed_status": "none",
+        "error": None,
+        "last_failure": app_versions.appimage_swap_failure(),
+    }
+    if kind == "source":
+        return result
+    error = None
+    if payload is None:
+        payload, error = fetch_remote_payload(timeout=5.0, attempts=2)
+    if error or not payload:
+        result.update(feed_status="error", error=error or "Empty version-check response")
+        return result
+    result["release_notes"] = payload.get("releaseNotes") or payload.get("notes")
+    if feed_is_paused(payload):
+        result["feed_status"] = "paused"
+        return result
+    remote = _extract_remote_version(payload)
+    result["remote_version"] = remote
+    if not remote:
+        result["feed_status"] = "no_release"
+        return result
+    if not is_remote_newer(__version__, remote):
+        result["feed_status"] = "up_to_date"
+        return result
+    asset = pick_asset(payload, kind=kind)
+    if asset is not None:
+        asset = dict(asset)
+        base = update_base_url()
+        asset["url"] = absolute_installer_url(asset.get("url"), base_url=base)
+        asset["sig_url"] = absolute_installer_url(asset.get("sig_url"), base_url=base)
+        result.update(installer_url=asset["url"], installer_sha256=asset.get("sha256"))
+    result.update(feed_status="update_available", update_available=True, asset=asset)
+    return result
+
+
+def apply_linux_update(*, status: dict[str, Any] | None = None, run: Any = None) -> dict[str, Any]:
+    """'Restart' on an AppImage (download, verify, swap, restart, roll back if it doesn't
+    start); 'Install' on deb / rpm / Flatpak (the package manager does it)."""
+    status = status or linux_update_status()
+    if not status["update_available"]:
+        return _result(ok=False, error=status.get("error") or "No update available.", stage="check")
+    kind = status["install_kind"]
+    if kind in ("deb", "rpm", "flatpak"):
+        return hand_off_to_package_manager(kind, run=run)
+    if kind == "aur":
+        return _result(ok=False, error="Update with your AUR helper, e.g. yay -Syu uefn-ducky.",
+                       stage="check")
+    if kind != "appimage":
+        return _result(ok=False, error="This copy can't update itself — get the new version from "
+                       f"{status['download_url']}.", stage="check")
+    asset = status.get("asset") or {}
+    url, sha256 = asset.get("url"), asset.get("sha256")
+    if not url or not sha256:
+        return _result(ok=False, error="The update feed has no AppImage for this computer.",
+                       stage="check")
+    if not installer_url_allowed(url):
+        return _result(ok=False, error=f"Refusing non-HTTPS update URL: {url}", stage="check")
+    app = Path(os.environ.get("APPIMAGE") or "")
+    if not app.is_file():
+        return _result(ok=False, error="Can't find the running AppImage ($APPIMAGE).", stage="check")
+    _stop_all_agents()
+    # ponytail: full download every time; add the .zsync delta when AppImages get big.
+    new = app.with_name(app.name + ".new")
+    error = _download(url, new)
+    sig_url = asset.get("sig_url")
+    sig_file = new.with_name(new.name + ".minisig")
+    if not error and sig_url:
+        error = _download(sig_url, sig_file)
+    if error:
+        _unlink_quiet(new)
+        _unlink_quiet(sig_file)
+        return _result(ok=False, error=error, stage="download")
+    _set_progress(stage="verify", error=None)
+    sig = None
+    if sig_url:
+        try:
+            sig = sig_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            sig = ""
+        _unlink_quiet(sig_file)
+    error = install_appimage(app, new, sha256=sha256, signature=sig,
+                             version=str(status["remote_version"]))
+    if error:
+        return _result(ok=False, error=error, stage="verify")
+    _set_progress(stage="restarting", error=None)
+    try:
+        start_watchdog(app, version=str(status["remote_version"]))
+    except OSError as exc:
+        restore_previous(app)
+        return _result(ok=False, error=f"Couldn't start the new version: {exc}", stage="launch")
+    _exit_self_after_delay()
+    return _result(ok=True, error=None, stage="restarting")
+
+
+def verify_minisign(path: Path, signature: str, public_key: str) -> str | None:
+    """Check a minisign signature (prehashed ``ED`` or legacy ``Ed``) and its trusted
+    comment against ``public_key``. Returns an error string or ``None``."""
+    import base64
+
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    bad = "The update's signature doesn't match — refusing to install it."
+    try:
+        key = base64.b64decode([ln for ln in public_key.splitlines() if ln.strip()][-1])
+        lines = [ln for ln in signature.splitlines() if ln.strip()]
+        sig = base64.b64decode(lines[1])
+        trusted = lines[2]
+        global_sig = base64.b64decode(lines[3])
+    except (IndexError, ValueError):
+        return bad
+    if (len(key) != 42 or len(sig) != 74 or len(global_sig) != 64
+            or not trusted.startswith("trusted comment: ") or sig[2:10] != key[2:10]):
+        return bad
+    try:
+        if sig[:2] == b"ED":
+            digest = hashlib.blake2b(digest_size=64)
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            message = digest.digest()
+        elif sig[:2] == b"Ed":
+            message = path.read_bytes()
+        else:
+            return bad
+        public = Ed25519PublicKey.from_public_bytes(key[10:])
+        public.verify(sig[10:], message)
+        public.verify(global_sig, sig[10:] + trusted[len("trusted comment: "):].encode())
+    except (InvalidSignature, OSError, ValueError):
+        return bad
+    return None
+
+
+def install_appimage(
+    app: Path, new: Path, *, sha256: str, signature: str | None, version: str
+) -> str | None:
+    """Verify ``new`` and swap it in for ``app``; the old file stays as ``<app>.previous``.
+    On any error ``new`` is deleted and ``app`` is untouched."""
+    from frontend import app_versions
+
+    error = _verify_sha256(new, sha256)
+    if not error and MINISIGN_PUBLIC_KEY:
+        error = (verify_minisign(new, signature, MINISIGN_PUBLIC_KEY) if signature
+                 else "The update has no signature — refusing to install it.")
+    if not error:
+        with new.open("rb") as f:
+            if f.read(4) != b"\x7fELF":
+                error = "The download isn't an AppImage."
+    if error:
+        _unlink_quiet(new)
+        return error
+    previous = app.with_name(app.name + ".previous")
+    try:
+        os.chmod(new, 0o755)
+        # A hard link keeps $APPIMAGE in place the whole time; the rename is atomic.
+        _unlink_quiet(previous)
+        try:
+            os.link(app, previous)
+        except OSError:
+            shutil.copy2(app, previous)
+        os.replace(new, app)
+    except OSError as exc:
+        _unlink_quiet(new)
+        return f"Couldn't replace the AppImage: {exc}"
+    app_versions.begin_appimage_swap(version, from_version=__version__, app=app, previous=previous)
+    return None
+
+
+def restore_previous(app: Path) -> bool:
+    previous = app.with_name(app.name + ".previous")
+    try:
+        os.replace(previous, app)
+        return True
+    except OSError:
+        return False
+
+
+def _clean_child_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k not in _RUNTIME_ENV}
+    # PyInstaller points LD_LIBRARY_PATH into its own bundle; give back the person's own.
+    orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    env.pop("LD_LIBRARY_PATH", None)
+    if orig:
+        env["LD_LIBRARY_PATH"] = orig
+    return env
+
+
+def start_watchdog(
+    app: Path, *, version: str, timeout_s: int = HEALTHY_WITHIN_S, sh: str = "/bin/sh"
+) -> subprocess.Popen[Any]:
+    """Start the swapped-in AppImage under the rollback watchdog, detached from this one."""
+    from frontend import app_versions
+
+    _state, ok, failed = app_versions.appimage_swap_paths()
+    previous = app.with_name(app.name + ".previous")
+    return subprocess.Popen(
+        [sh, "-c", _WATCHDOG_SH, "ducky-update-watch", str(app), str(previous), str(ok),
+         str(failed), str(int(timeout_s)), __version__, version, str(os.getpid())],
+        env=_clean_child_env(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        start_new_session=True,
+    )
+
+
+def _run_package_command(cmd: list[str]) -> tuple[int, str]:
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                              timeout=_PACKAGE_TIMEOUT_S)
+    except FileNotFoundError:
+        return 127, ""
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, str(exc)
+    return done.returncode, (done.stdout or "") + (done.stderr or "")
+
+
+def package_update_command(kind: str, *, env: dict[str, str] | None = None) -> list[str]:
+    from frontend.install_info import LINUX_PACKAGE
+
+    env = os.environ if env is None else env
+    if kind == "flatpak":
+        app_id = env.get("FLATPAK_ID") or ""
+        # Inside the sandbox flatpak itself lives on the host.
+        return ["flatpak-spawn", "--host", "flatpak", "update", "-y", "--noninteractive", app_id]
+    # pkcon is PackageKit's own client: it asks packagekitd over D-Bus, and polkit asks
+    # the person for their password. Never write over the package's files ourselves.
+    return ["pkcon", "-y", "update", LINUX_PACKAGE]
+
+
+def hand_off_to_package_manager(
+    kind: str, *, run: Any = None, env: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """deb / rpm through PackageKit, Flatpak through flatpak. The new version is used from
+    the next start."""
+    cmd = package_update_command(kind, env=env)
+    if kind == "flatpak" and not cmd[-1]:
+        return _result(ok=False, error="Can't tell this Flatpak's app id ($FLATPAK_ID).", stage="check")
+    _set_progress(stage="installing", error=None)
+    code, output = (run or _run_package_command)(cmd)
+    if code == 127:
+        manager = "Flatpak" if kind == "flatpak" else "PackageKit"
+        return _result(ok=False, error=f"{manager} isn't available — update UEFN Ducky from your "
+                       "software updater.", stage="installing")
+    if code != 0:
+        tail = (output or "").strip().splitlines()[-1:] or [f"exit code {code}"]
+        return _result(ok=False, error=f"The update didn't install: {tail[0]}", stage="installing")
+    return _result(ok=True, error=None, stage="installed")
