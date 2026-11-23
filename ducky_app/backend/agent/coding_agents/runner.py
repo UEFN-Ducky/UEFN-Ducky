@@ -772,6 +772,21 @@ def _emit_assistant(
     }
 
 
+_CLI_NAMES = {"claude_code": "claude", "claude": "claude", "codex": "codex",
+              "gemini": "gemini", "gemini_cli": "gemini"}
+
+
+def linux_cli(agent_id: str, cli_path: str, env: dict[str, str]) -> str:
+    """Linux only: put the login PATH (nvm, ~/.local/bin, ~/.npm-global) in ``env`` and
+    resolve the agent's CLI on it, so a desktop-launched app finds ``claude``/``codex``/``gemini``."""
+    from backend.mcp_plugins.login_path import login_path, which
+
+    env["PATH"] = login_path(env.get("PATH"))
+    if cli_path:
+        return cli_path
+    return which(_CLI_NAMES.get(agent_id, agent_id), env["PATH"])
+
+
 def _agent_host_env() -> dict[str, str]:
     """In an agent host: the env with which the ``uefn`` server asks this host for steer and
     question checks (D20); {} outside one."""
@@ -1088,6 +1103,10 @@ def _run_coding_agent_message(
                **_account_env(agent_id, conv.id)},
         identity=run_ctx,
     )
+    from backend.mcp_plugins.login_path import IS_LINUX
+
+    if IS_LINUX:
+        cli_path = linux_cli(agent_id, cli_path, env)
     # The CLI is next: from here a quiet stream is the model or a tool, never a stuck setup.
     stall.set_step("")
 

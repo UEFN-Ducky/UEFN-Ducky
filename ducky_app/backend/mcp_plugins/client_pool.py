@@ -446,8 +446,11 @@ class PluginClientPool:
                             sse_client(block["url"], **_http_transport_kwargs(block))
                         )
                     else:
+                        from backend.mcp_plugins.login_path import IS_LINUX, posix_stdio_block
+
+                        sb = posix_stdio_block(block) if IS_LINUX else block
                         params = StdioServerParameters(
-                            command=block["command"], args=block["args"], env=block.get("env") or None,
+                            command=sb["command"], args=sb["args"], env=sb.get("env") or None,
                         )
                         transport = await stack.enter_async_context(stdio_client(params))
                     session = await stack.enter_async_context(ClientSession(transport[0], transport[1]))
