@@ -84,12 +84,21 @@ jobs:
           sudo apt-get install -y zsync
           python build/linux/appimage/build_appimage.py --arch ${{ matrix.arch }}
           ls -la dist/*.AppImage dist/*.zsync
+      # Keys only from repository secrets (release/sign_linux.py reads the environment).
+      - name: Sign (minisign)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then echo "::notice::no MINISIGN_SECRET_KEY secret: unsigned CI build"; exit 0; fi
+          python release/sign_linux.py dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage.zsync
       - uses: actions/upload-artifact@v4
         with:
           name: uefn-ducky-appimage-${{ matrix.arch }}
           path: |
             dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage
             dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage.zsync
+            dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage*.minisig
           retention-days: 7
 
   # Clean distros: nothing but a virtual display is installed before the AppImage starts.
