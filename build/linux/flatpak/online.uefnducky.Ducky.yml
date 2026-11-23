@@ -1,0 +1,80 @@
+# UEFN Ducky as a Flatpak. The app is the prebuilt one-dir build (dist/uefn-ducky.tar from
+# build_exes.py, put next to this file); the GNOME runtime brings GTK 3 and WebKitGTK 4.1.
+# The terminal and git must reach the user's real system, so uefn-ducky.sh puts
+# flatpak-spawn --host shims for shells and git first on PATH (needs org.freedesktop.Flatpak).
+# For Flathub, the uefn-ducky.tar source becomes the release URL + sha256.
+app-id: online.uefnducky.Ducky
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: uefn-ducky
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # projects, islands and repos live anywhere in the user's home
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Notifications
+  # tray icon (StatusNotifierItem)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.kde.StatusNotifierItem-2-1
+  # keyring (libsecret)
+  - --talk-name=org.freedesktop.secrets
+  # terminal and git run on the host through flatpak-spawn --host
+  - --talk-name=org.freedesktop.Flatpak
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - "*.la"
+  - "*.a"
+modules:
+  # sounddevice (the mic) loads libportaudio.so.2
+  - name: portaudio
+    buildsystem: autotools
+    config-opts: [--disable-static, --without-jack]
+    sources:
+      - type: git
+        url: https://github.com/PortAudio/portaudio.git
+        tag: v19.7.0
+        commit: 147dd722548358763a8b649b3e4b41dfffbcfbb6
+
+  # read-aloud: backend/voice/linux_tts.py runs espeak-ng --stdout
+  - name: espeak-ng
+    buildsystem: autotools
+    config-opts: [--disable-static, --with-pcaudiolib=no]
+    no-parallel-make: true
+    sources:
+      - type: git
+        url: https://github.com/espeak-ng/espeak-ng.git
+        tag: 1.52.0
+        commit: 4870adfa25b1a32b4361592f1be8a40337c58d6c
+
+  - name: uefn-ducky
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib && cp -a bundle /app/lib/uefn-ducky
+      - install -Dm755 uefn-ducky.sh /app/bin/uefn-ducky
+      - install -Dm755 host-run.sh /app/libexec/host-bin/host-run
+      - for cmd in bash zsh fish git pwsh; do ln -s host-run /app/libexec/host-bin/$cmd; done
+      - sed -e 's/^Icon=.*/Icon=online.uefnducky.Ducky/' uefn-ducky.desktop > online.uefnducky.Ducky.desktop
+      - install -Dm644 online.uefnducky.Ducky.desktop /app/share/applications/online.uefnducky.Ducky.desktop
+      - install -Dm644 online.uefnducky.Ducky.metainfo.xml /app/share/metainfo/online.uefnducky.Ducky.metainfo.xml
+      - for png in icons/hicolor/*/apps/uefn-ducky.png; do install -Dm644 "$png" "/app/share/${png%uefn-ducky.png}online.uefnducky.Ducky.png"; done
+    sources:
+      - type: archive
+        path: uefn-ducky.tar
+        dest: bundle
+      - type: file
+        path: uefn-ducky.sh
+      - type: file
+        path: host-run.sh
+      - type: file
+        path: online.uefnducky.Ducky.metainfo.xml
+      - type: file
+        path: ../../../packaging/linux/uefn-ducky.desktop
+      - type: dir
+        path: ../../../packaging/linux/icons
+        dest: icons

@@ -74,3 +74,22 @@ jobs:
           run-id: ${{ env.BUILD_RUN }}
           github-token: ${{ github.token }}
       - run: bash build/linux/rpm/ci_test.sh "$CI_VERSION" artifact/uefn-ducky.tar
+
+  flatpak:
+    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: uefn-ducky-linux-x86_64
+          path: artifact
+          run-id: ${{ env.BUILD_RUN }}
+          github-token: ${{ github.token }}
+      - run: bash build/linux/flatpak/ci_test.sh "$CI_VERSION" artifact/uefn-ducky.tar dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefn-ducky-flatpak-x86_64
+          path: dist/*.flatpak
+          retention-days: 7

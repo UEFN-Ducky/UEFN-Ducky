@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>online.uefnducky.Ducky</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary=https://uefnducky.org</project_license>
+  <name>UEFN Ducky</name>
+  <summary>AI assistant for Unreal Editor for Fortnite</summary>
+  <developer id="online.uefnducky">
+    <name>Mindful Path Company, LLC</name>
+  </developer>
+  <description>
+    <p>UEFN Ducky runs AI agents, Verse tools and the UEFN editor bridge from one desktop app.</p>
+    <p>Its terminal and git run on your system through the Flatpak host portal.</p>
+  </description>
+  <launchable type="desktop-id">online.uefnducky.Ducky.desktop</launchable>
+  <url type="homepage">https://uefnducky.org</url>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+</component>
