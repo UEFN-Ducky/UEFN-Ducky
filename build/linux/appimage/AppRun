@@ -58,7 +58,13 @@ uninstall() {
     # Only folders this left empty (icons/hicolor/<size>/apps ... icons).
     rmdir "$DATA/icons/$(dirname "$rel")" "$DATA/icons/$(dirname "$(dirname "$rel")")" 2>/dev/null
   done < <(icon_files)
-  rmdir "$DATA/icons/hicolor" "$DATA/icons" "$DATA/applications" "$CONFIG/autostart" 2>/dev/null
+  # gtk-update-icon-cache's index: drop it when no other app's icon is left beside it.
+  if [ -d "$DATA/icons/hicolor" ] && [ -z "$(find "$DATA/icons/hicolor" -type f ! -name icon-theme.cache)" ]; then
+    rm -f "$DATA/icons/hicolor/icon-theme.cache"
+    find "$DATA/icons/hicolor" -depth -type d -empty -delete 2>/dev/null
+  fi
+  # Folders go only when empty: other apps' menu and autostart entries stay.
+  rmdir "$DATA/icons" "$DATA/applications" "$CONFIG/autostart" 2>/dev/null
   # The uefn-ducky:// handler line xdg-mime wrote; everything else in the file stays.
   for f in "$CONFIG/mimeapps.list" "$DATA/applications/mimeapps.list"; do
     [ -f "$f" ] && sed -i "\|^$SCHEME=|d" "$f"

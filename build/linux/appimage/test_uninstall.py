@@ -36,14 +36,23 @@ def appdir(tmp_path: Path) -> Path:
         pytest.skip("symlinks unavailable")
 
 
+DESKTOP_TOOLS = ("xdg-mime", "update-desktop-database", "gtk-update-icon-cache")
+
+
 def _run(appdir: Path, home: Path, *args: str) -> str:
     env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
     env.update(HOME=str(home), APPIMAGE=str(home / "Apps" / "UEFN Ducky.AppImage"))
-    # No desktop tools: the result must not depend on what the runner has installed.
-    env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep)
-                                  if not any((Path(p) / t).exists() for t in ("xdg-mime", "update-desktop-database")))
+    # The desktop tools are no-op stubs ahead of PATH, so the result never depends on what the
+    # runner has installed. (Dropping their folders from PATH also dropped /usr/bin: no mkdir.)
+    stubs = home.parent / "stub-bin"
+    stubs.mkdir(exist_ok=True)
+    for tool in DESKTOP_TOOLS:
+        (stubs / tool).write_bytes(b"#!/bin/sh\nexit 0\n")
+        (stubs / tool).chmod(0o755)
+    env["PATH"] = os.pathsep.join([str(stubs), env.get("PATH", "")])
     proc = subprocess.run([BASH, str(appdir / "AppRun"), *args], env=env, capture_output=True, text=True, timeout=60)
     assert proc.returncode == 0, proc.stderr
+    assert "command not found" not in proc.stderr, proc.stderr
     return proc.stdout
 
 
@@ -97,6 +106,31 @@ def test_purge_also_deletes_chats_settings_and_caches(appdir: Path, tmp_path: Pa
     _run(appdir, home, "--install-integration")
     _run(appdir, home, "--uninstall", "--purge")
     assert _tree(home) == [".cache", ".config", ".config/mimeapps.list", ".local", ".local/share"]
+
+
+def test_other_apps_entries_survive_the_purge(appdir: Path, tmp_path: Path) -> None:
+    home = _home(tmp_path)
+    other = {
+        ".config/autostart/other-app.desktop": "[Desktop Entry]\nName=Other\n",
+        ".local/share/applications/other-app.desktop": "[Desktop Entry]\nName=Other\n",
+        ".local/share/icons/hicolor/48x48/apps/other-app.png": "png",
+    }
+    for rel, text in other.items():
+        (home / rel).parent.mkdir(parents=True, exist_ok=True)
+        (home / rel).write_text(text, encoding="utf-8")
+    _run(appdir, home, "--install-integration")
+    (home / ".local/share/icons/hicolor/icon-theme.cache").write_bytes(b"cache")  # shared index
+    _run(appdir, home, "--uninstall", "--purge")
+    files = sorted(p.relative_to(home).as_posix() for p in home.rglob("*") if p.is_file())
+    assert files == sorted([".config/mimeapps.list", ".local/share/icons/hicolor/icon-theme.cache", *other])
+
+
+def test_icon_cache_goes_when_only_ducky_used_it(appdir: Path, tmp_path: Path) -> None:
+    home = _home(tmp_path)
+    _run(appdir, home, "--install-integration")
+    (home / ".local/share/icons/hicolor/icon-theme.cache").write_bytes(b"cache")
+    _run(appdir, home, "--uninstall")
+    assert not (home / ".local/share/icons").exists()
 
 
 def test_uninstall_without_integration_is_harmless(appdir: Path, tmp_path: Path) -> None:
