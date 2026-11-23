@@ -34,10 +34,21 @@ pytestmark = pytest.mark.xfail(not STRICT, reason="Linux parity lands seat by se
 PLATFORMS = {"windows": ("win32", "Windows"), "linux": ("linux", "Linux")}
 
 _CHILD = r"""
-import asyncio, json, platform, sys, types
+import asyncio, importlib, json, platform, sys, sysconfig, types
 
 plat, system = sys.argv[1], sys.argv[2]
 host_windows = sys.platform == "win32"
+# Stdlib and libraries that read sys.platform or sysconfig while importing load as the
+# host's before the swap (sysconfig after it looks for _sysconfigdata__win32_* on Linux,
+# mcp's stdio client imports pywin32). Only the app's own imports see the target OS.
+sysconfig.get_config_vars()
+for name in ("zoneinfo", "subprocess", "shutil", "tempfile", "uuid", "ssl", "ctypes", "ctypes.util",
+             "locale", "mimetypes", "multiprocessing", "concurrent.futures", "sqlite3", "site", "getpass",
+             "mcp.server.fastmcp"):
+    try:
+        importlib.import_module(name)
+    except ImportError:
+        pass
 sys.platform = plat
 platform.system = lambda: system
 if plat == "win32" and not host_windows:
