@@ -619,6 +619,67 @@ def upload_update_pack(base: str, api_key: str, version: str) -> dict | None:
     return fields
 
 
+# The Linux build job's output: every package of a version, each with an optional
+# detached `<file>.sig` beside it.
+LINUX_DIST = ROOT / "dist" / "linux"
+LINUX_PACKAGES = {".appimage": "appimage", ".deb": "deb", ".rpm": "rpm", ".flatpak": "flatpak"}
+LINUX_ARCHES = {"x86_64": "x64", "amd64": "x64", "x64": "x64", "aarch64": "arm64", "arm64": "arm64"}
+
+
+def linux_artifacts(version: str, folder: Path = LINUX_DIST) -> list[dict]:
+    """The Linux packages of ``version`` in ``folder``: ``{path, sig, os, arch, package}``."""
+    found: list[dict] = []
+    if not folder.is_dir():
+        return found
+    for path in sorted(folder.iterdir()):
+        package = LINUX_PACKAGES.get(path.suffix.lower())
+        if not package or not path.is_file() or version not in path.name:
+            continue
+        arches = {LINUX_ARCHES[t] for t in re.findall(r"x86_64|amd64|aarch64|arm64|x64", path.stem.lower())}
+        if len(arches) != 1:
+            raise SystemExit(f"{path.name}: the name must say x86_64/amd64 or aarch64/arm64")
+        arch = arches.pop()
+        if any(a["arch"] == arch and a["package"] == package for a in found):
+            raise SystemExit(f"{path.name}: a second linux-{arch}-{package} for {version}")
+        sig = path.with_name(path.name + ".sig")
+        found.append({"path": path, "sig": sig if sig.is_file() else None,
+                      "os": "linux", "arch": arch, "package": package})
+    return found
+
+
+def _uploaded_url(uploaded: dict, path: Path, digest: str) -> str:
+    file_id = str(uploaded.get("fileId") or "")
+    remote_sha = str(uploaded.get("sha256") or "").lower()
+    if not file_id or (remote_sha and remote_sha != digest):
+        raise SystemExit(f"{path.name}: upload gave fileId={file_id!r} sha256={remote_sha!r}, expected {digest}")
+    return f"/api/v1/files/{file_id}/content"
+
+
+def release_assets(base: str, api_key: str, version: str, installer_url: str, sha256: str,
+                   folder: Path = LINUX_DIST) -> list[dict]:
+    """The ``assets`` of uds_app_release: the Windows Setup plus every Linux package and
+    signature, uploaded here. ``[]`` without Linux builds (a Windows-only release sends
+    what it always did). Any failed upload raises before anything is registered."""
+    linux = linux_artifacts(version, folder)
+    if not linux:
+        return []
+    assets = [{"os": "windows", "arch": "x64", "package": "setup",
+               "url": installer_url, "sha256": sha256, "sig_url": ""}]
+    for art in linux:
+        path, sig = art["path"], art["sig"]
+        digest = sha256_file(path)
+        print(f"  uploading {path.name} ({path.stat().st_size} bytes)")
+        url = _uploaded_url(upload_app_release(base, api_key, path), path, digest)
+        sig_url = ""
+        if sig is not None:
+            sig_url = _uploaded_url(upload_app_release(base, api_key, sig), sig, sha256_file(sig))
+        else:
+            print(f"  WARNING: {path.name} has no .sig beside it")
+        assets.append({"os": "linux", "arch": art["arch"], "package": art["package"],
+                       "url": url, "sha256": digest, "sig_url": sig_url})
+    return assets
+
+
 
 UPLOAD_CHUNK = 256 * 1024
 PROGRESS_EVERY_S = 10.0
@@ -1409,6 +1470,7 @@ def main() -> None:
     print(f"  uploaded fileId={file_id}")
     print(f"  installerUrl={installer_url}")
     update = upload_update_pack(base, key, version)
+    assets = release_assets(base, key, version, installer_url, digest)
 
     result = mcp_call(
         base,
@@ -1423,6 +1485,7 @@ def main() -> None:
             "notes": args.notes or "",
             "items": getattr(args, "note_items", []),
             **({"update": update} if update else {}),
+            **({"assets": assets} if assets else {}),
         },
     )
     print(json.dumps(result, indent=2))
