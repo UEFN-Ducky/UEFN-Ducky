@@ -47,12 +47,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb xdotool zsh fish libportaudio2 espeak-ng libsecret-1-0 \
-            libgtk-3-0 libayatana-appindicator3-1
+            libgtk-3-0 libayatana-appindicator3-1 \
+            libgirepository1.0-dev libcairo2-dev pkg-config gobject-introspection \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.1 gir1.2-ayatanaappindicator3-0.1
 
       - name: Install
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
+          # Users get gi from the distro (python3-gi); CI's setup-python can't see that, so build it.
+          # <3.51: newer PyGObject needs girepository-2.0, which ubuntu-22.04 lacks.
+          python -m pip install "PyGObject<3.51" pycairo
           npm ci --prefix ducky_app/frontend/ui_web/web
 
       - name: pytest
