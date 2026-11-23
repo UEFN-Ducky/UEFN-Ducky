@@ -26,8 +26,9 @@ def test_spec_names_the_file_publish_app_expects():
 
 def test_repo_metadata_is_signed_and_checked():
     script = (HERE / "build_dnf_repo.sh").read_text(encoding="utf-8")
-    assert "createrepo_c" in script and "release/sign_linux.py repo" in script
-    assert 'detach "$repo/repodata/repomd.xml" "$repo/repodata/repomd.xml.asc"' in script
+    assert "createrepo_c" in script and "release/sign_linux.py}" in script
+    assert '--repo-meta "$repo/repodata/repomd.xml"' in script
+    assert 'test -s "$repo/repodata/repomd.xml.asc"' in script
     repo = configparser.ConfigParser()
     repo.read(HERE / "uefn-ducky.repo", encoding="utf-8")
     assert repo["uefn-ducky"]["repo_gpgcheck"] == "1"

@@ -1,0 +1,38 @@
+# Maintainer: UEFN Ducky <noreply@uefnducky.org>
+# The release AppImage's contents (usr/bin = the one-dir build) go to /opt/uefn-ducky.
+# The release lane sets pkgver and runs updpkgsums before pushing to the AUR.
+pkgname=uefn-ducky-bin
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="AI assistant for Unreal Editor for Fortnite"
+arch=('x86_64' 'aarch64')
+url="https://uefnducky.org"
+license=('LicenseRef-Ducky-Source-Available')
+depends=('webkit2gtk-4.1' 'libayatana-appindicator' 'libsecret' 'gtk3' 'espeak-ng' 'portaudio')
+optdepends=('git: version control in the terminal'
+            'wl-clipboard: clipboard on Wayland'
+            'xclip: clipboard on X11')
+provides=('uefn-ducky')
+conflicts=('uefn-ducky')
+options=('!strip' '!debug')
+_base=https://uefnducky.org/downloads/linux
+source_x86_64=("UEFN-Ducky-${pkgver}-x86_64.AppImage::${_base}/UEFN-Ducky-${pkgver}-x86_64.AppImage")
+source_aarch64=("UEFN-Ducky-${pkgver}-aarch64.AppImage::${_base}/UEFN-Ducky-${pkgver}-aarch64.AppImage")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+prepare() {
+  rm -rf squashfs-root
+  chmod +x "UEFN-Ducky-${pkgver}-${CARCH}.AppImage"
+  "./UEFN-Ducky-${pkgver}-${CARCH}.AppImage" --appimage-extract >/dev/null
+  chmod -R u+rwX,go+rX,go-w squashfs-root
+}
+
+package() {
+  cd squashfs-root
+  install -d "$pkgdir/opt" "$pkgdir/usr/bin" "$pkgdir/usr/share"
+  cp -a usr/bin "$pkgdir/opt/uefn-ducky"
+  ln -s /opt/uefn-ducky/uefn-ducky "$pkgdir/usr/bin/uefn-ducky"
+  install -Dm644 usr/share/applications/uefn-ducky.desktop "$pkgdir/usr/share/applications/uefn-ducky.desktop"
+  cp -a usr/share/icons "$pkgdir/usr/share/icons"
+}

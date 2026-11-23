@@ -30,6 +30,6 @@ def test_control_is_filled_in_by_build_deb():
 
 def test_repo_release_is_signed_through_sign_linux():
     script = (HERE / "build_apt_repo.sh").read_text(encoding="utf-8")
-    assert "release/sign_linux.py repo" in script
-    assert "clearsign dists/stable/Release dists/stable/InRelease" in script
-    assert "detach dists/stable/Release dists/stable/Release.gpg" in script
+    assert "release/sign_linux.py}" in script
+    assert '"${signer[@]}" --repo-meta dists/stable/Release' in script
+    assert "test -s dists/stable/InRelease && test -s dists/stable/Release.gpg" in script

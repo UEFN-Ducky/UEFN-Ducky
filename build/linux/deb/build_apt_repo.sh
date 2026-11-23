@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # A signed apt repo (suite "stable", component "main") from .deb files:
 #   build_apt_repo.sh <repo-dir> <file.deb>...
-# Release is signed through release/sign_linux.py (InRelease + Release.gpg);
-# DUCKY_REPO_SIGNER replaces that command (same "detach|clearsign <in> <out>" arguments).
+# Release is signed by `release/sign_linux.py --repo-meta` (InRelease + Release.gpg);
+# DUCKY_REPO_SIGNER replaces that command (same "--repo-meta <file>" arguments).
 set -euo pipefail
 repo=$1; shift
 root=$(cd "$(dirname "$0")/../../.." && pwd)
-read -r -a signer <<< "${DUCKY_REPO_SIGNER:-python3 $root/release/sign_linux.py repo}"
+read -r -a signer <<< "${DUCKY_REPO_SIGNER:-python3 $root/release/sign_linux.py}"
 
 mkdir -p "$repo/pool/main"
 cp "$@" "$repo/pool/main/"
@@ -26,5 +26,5 @@ apt-ftparchive \
   -o APT::FTPArchive::Release::Components=main \
   release dists/stable > dists/stable/Release.tmp
 mv dists/stable/Release.tmp dists/stable/Release
-"${signer[@]}" clearsign dists/stable/Release dists/stable/InRelease
-"${signer[@]}" detach dists/stable/Release dists/stable/Release.gpg
+"${signer[@]}" --repo-meta dists/stable/Release
+test -s dists/stable/InRelease && test -s dists/stable/Release.gpg

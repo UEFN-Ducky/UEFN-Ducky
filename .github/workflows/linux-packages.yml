@@ -93,3 +93,17 @@ jobs:
           name: uefn-ducky-flatpak-x86_64
           path: dist/*.flatpak
           retention-days: 7
+
+  aur:
+    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-24.04
+    container: "archlinux:base-devel"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: uefn-ducky-appimage-x86_64
+          path: artifact
+          run-id: ${{ env.BUILD_RUN }}
+          github-token: ${{ github.token }}
+      - run: bash build/linux/aur/ci_test.sh "$(find artifact -name 'UEFN-Ducky-*-x86_64.AppImage' | head -n1)"

@@ -1,0 +1,27 @@
+pkgbase = uefn-ducky-bin
+	pkgdesc = AI assistant for Unreal Editor for Fortnite
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://uefnducky.org
+	arch = x86_64
+	arch = aarch64
+	license = LicenseRef-Ducky-Source-Available
+	depends = webkit2gtk-4.1
+	depends = libayatana-appindicator
+	depends = libsecret
+	depends = gtk3
+	depends = espeak-ng
+	depends = portaudio
+	optdepends = git: version control in the terminal
+	optdepends = wl-clipboard: clipboard on Wayland
+	optdepends = xclip: clipboard on X11
+	provides = uefn-ducky
+	conflicts = uefn-ducky
+	options = !strip
+	options = !debug
+	source_x86_64 = UEFN-Ducky-1.0.0-x86_64.AppImage::https://uefnducky.org/downloads/linux/UEFN-Ducky-1.0.0-x86_64.AppImage
+	sha256sums_x86_64 = SKIP
+	source_aarch64 = UEFN-Ducky-1.0.0-aarch64.AppImage::https://uefnducky.org/downloads/linux/UEFN-Ducky-1.0.0-aarch64.AppImage
+	sha256sums_aarch64 = SKIP
+
+pkgname = uefn-ducky-bin
