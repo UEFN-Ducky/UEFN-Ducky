@@ -260,6 +260,22 @@ _NEEDS_X = pytest.mark.skipif(not _x11_tk_ready(), reason="needs Linux, Xvfb, tk
 
 @_NEEDS_X
 def test_x11_overlay_window_is_shaped_click_through_and_on_top(own_display):
+    # Tk loads its own libX11 state; in an xdist worker other tests already made Tk / GTK / Xlib
+    # connections, and on ubuntu-22.04 that combination took the worker down. A fresh child
+    # process (on the fixture's private display) runs the real X calls and reports back.
+    import subprocess
+    from pathlib import Path
+
+    app_root = Path(__file__).resolve().parents[2]
+    env = {**os.environ, "PYTHONPATH": str(app_root) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    child = subprocess.run(
+        [sys.executable, "-c", "from frontend.ui_web.test_window_spotlight import _overlay_case; _overlay_case(); print('overlay ok')"],
+        cwd=app_root, env=env, capture_output=True, text=True, timeout=60,
+    )
+    assert child.returncode == 0 and "overlay ok" in child.stdout, (child.returncode, child.stdout, child.stderr)
+
+
+def _overlay_case() -> None:
     import tkinter as tk
 
     from PIL import Image
