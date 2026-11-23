@@ -10,10 +10,22 @@ import pytest
 import backend.agent.coding_agents.base as base
 
 
+def _join_refreshes() -> None:
+    """A refresh left running clears _detect_refresh_inflight and writes the cache in the
+    next test (an extra probe in the exact-count test), so none crosses a test boundary."""
+    for t in threading.enumerate():
+        if t.name == "refresh-coding-agents":
+            t.join(30)
+            assert not t.is_alive(), "a refresh-coding-agents thread never finished"
+
+
 @pytest.fixture(autouse=True)
 def _saved_detect_in_tmp(monkeypatch, tmp_path):
+    _join_refreshes()
     monkeypatch.setattr(base, "_detect_saved_path", lambda: tmp_path / "coding_agents_detect.json")
     monkeypatch.setattr(base, "_detect_saved_read", True)  # tests opt in to the boot read
+    yield
+    _join_refreshes()
 
 
 def _reset_detect() -> None:
@@ -72,9 +84,6 @@ def test_detect_all_returns_stale_cache_while_refreshing(monkeypatch):
     with base._detect_refresh_lock:
         assert base._detect_refresh_inflight is True
     release.set()
-    for t in threading.enumerate():
-        if t.name == "refresh-coding-agents":
-            t.join(30)  # never leak this refresh into the next test's cache
 
 
 def test_fast_agent_publishes_before_slow_agent(monkeypatch):
