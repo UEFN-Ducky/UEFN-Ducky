@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import ctypes
 import sys
-from ctypes import POINTER, WINFUNCTYPE, byref, c_ulong, c_void_p, c_wchar_p
+from ctypes import POINTER, byref, c_ulong, c_void_p, c_wchar_p
+
+WINFUNCTYPE = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)  # Windows-only name; lets Linux import us
 
 _CLSID_FACTORY = "{7AB36653-1796-484B-BDFA-E74F1DB7C1DC}"
 _IID_FACTORY = "{8E018A9D-2415-4677-BF08-794EA61F94BB}"
@@ -100,6 +102,48 @@ def suggest(word: str) -> list[str] | None:
         return _with_checker(run)
     except OSError:
         return None
+
+
+def linux_languages(env=None) -> list[str]:
+    """The user's spelling languages from LANGUAGE / LC_ALL / LC_MESSAGES / LANG as WebKitGTK
+    (enchant) codes such as ``ja_JP``, most wanted first, ``en_US`` last as the fallback."""
+    import os
+
+    env = os.environ if env is None else env
+    raw: list[str] = []
+    for key in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        raw += str(env.get(key) or "").split(":")
+    out: list[str] = []
+    for item in raw + ["en_US"]:
+        code = item.split(".")[0].split("@")[0].replace("-", "_").strip()
+        if code and code not in ("C", "POSIX") and code not in out:
+            out.append(code)
+    return out
+
+
+def _webkit_view(widget):
+    """The WebKit WebView inside a Gtk widget tree (pywebview's ``window.native``)."""
+    if hasattr(widget, "get_context") and hasattr(widget, "load_uri"):
+        return widget
+    kids = widget.get_children() if hasattr(widget, "get_children") else []
+    for kid in kids:
+        found = _webkit_view(kid)
+        if found is not None:
+            return found
+    return None
+
+
+def enable_linux(native) -> list[str]:
+    """Turn on WebKitGTK's spellcheck (enchant/hunspell: the red underlines and the native
+    menu's fixes) for the panel's WebView with the user's languages. Call on the GTK thread
+    once the window exists. Returns the languages WebKit kept (it drops ones with no dictionary)."""
+    view = _webkit_view(native)
+    if view is None:
+        return []
+    ctx = view.get_context()
+    ctx.set_spell_checking_enabled(True)
+    ctx.set_spell_checking_languages(linux_languages())
+    return list(ctx.get_spell_checking_languages() or [])
 
 
 def add_word(word: str) -> bool:
