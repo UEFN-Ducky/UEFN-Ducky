@@ -201,14 +201,17 @@ AGENT_HARD_RULES = CORE_RULES + ISLAND_RULES
 
 
 def hard_rules_for(project_root: str) -> str:
-    """The rules for an agent working in ``project_root``: no island rules in a folder project."""
+    """The rules for an agent working in ``project_root``: no island rules in a folder project.
+    On Linux the shell words follow the OS (:func:`for_platform`)."""
+    from backend.agent.prompts.platform_text import for_platform
+
     root = (project_root or "").strip()
     if root:
         try:
             from frontend.project_kind import is_folder_project
 
             if is_folder_project(root):
-                return CORE_RULES
+                return for_platform(CORE_RULES)
         except Exception:
             pass
-    return AGENT_HARD_RULES
+    return for_platform(AGENT_HARD_RULES)

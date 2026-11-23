@@ -484,7 +484,9 @@ def assemble_system_prompt(parts: dict[str, str], *, omit: frozenset[str] | None
         chunks.append(parts["personality"])
     if "rules" not in omitted:
         chunks.append(parts["rules"])
-    return "".join(chunks)
+    from backend.agent.prompts.platform_text import for_platform
+
+    return for_platform("".join(chunks))
 
 
 def compact_messages(

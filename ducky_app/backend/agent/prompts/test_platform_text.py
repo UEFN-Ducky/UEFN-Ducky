@@ -30,3 +30,18 @@ def test_coding_agent_bootstrap_text_on_linux():
               "working around it with PowerShell.\nnative WebSearch, the Browser tab, Bash, PowerShell, Glob")
     out = for_platform(sample, linux=True)
     assert "powershell" not in out.lower() and '(shell "bash",' in out and "Bash, Glob" in out
+
+
+def test_every_prompt_an_agent_gets_goes_through_the_switch(monkeypatch):
+    from backend.agent import hard_rules
+    from backend.agent.coding_agents import mcp_inject
+    from backend.agent.prompt import assemble_system_prompt
+    from backend.agent.prompts import platform_text
+
+    windows = mcp_inject.bootstrap_system_prompt(project_root="", conv_id="c1")
+    monkeypatch.setattr(platform_text, "IS_LINUX", True)
+    parts = {"mcp": "", "skill": "", "memory": "", "runtime": "Run py -3 here.", "rules": AGENT_HARD_RULES}
+    for text in (hard_rules.hard_rules_for(""), mcp_inject.bootstrap_system_prompt(project_root="", conv_id="c1"),
+                 assemble_system_prompt(parts)):
+        assert "py -3" not in text and "powershell" not in text.lower()
+    assert "py -3" in windows  # Windows keeps its text

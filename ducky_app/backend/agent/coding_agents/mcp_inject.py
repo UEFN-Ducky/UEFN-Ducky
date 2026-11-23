@@ -322,7 +322,9 @@ def bootstrap_system_prompt(
                 'Not sure which pack or file? `skill_search("<what you need>")` returns the section and '
                 "the exact `skill_read_subskill(..., section=...)` call.\n"
             )
-    return (
+    from backend.agent.prompts.platform_text import for_platform
+
+    return for_platform(
         "You are running as a coding agent inside UEFN-Ducky.\n"
         f"Project root: {root}\n"
         f"{folder_note}"
