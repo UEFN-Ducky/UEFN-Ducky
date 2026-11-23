@@ -7,7 +7,7 @@ from frontend import app_paths
 
 def _env(monkeypatch, platform: str, **env: str) -> None:
     monkeypatch.setattr(app_paths.sys, "platform", platform)
-    for var in ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
+    for var in ("DUCKY_TESTS_ISOLATED_APPDATA", "LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
         monkeypatch.delenv(var, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -20,6 +20,13 @@ def test_conftest_isolates_linux_xdg_folders(monkeypatch, tmp_path):
     assert app_paths.resolve_app_data_dir() == root / "UEFN-Ducky"
     assert app_paths.config_base().is_relative_to(root)
     assert app_paths.cache_base().is_relative_to(root)
+
+
+def test_linux_tests_that_repoint_localappdata_are_followed(monkeypatch, tmp_path):
+    _env(monkeypatch, "linux", LOCALAPPDATA=str(tmp_path), XDG_DATA_HOME=str(tmp_path / "xdg"))
+    assert app_paths.local_app_data_base() == tmp_path / "xdg"  # a real install: XDG wins
+    monkeypatch.setenv("DUCKY_TESTS_ISOLATED_APPDATA", str(tmp_path))
+    assert app_paths.local_app_data_base() == tmp_path  # under the test conftest
 
 
 def test_isolated_appdata_fixture_redirects_xdg(isolated_appdata, monkeypatch):

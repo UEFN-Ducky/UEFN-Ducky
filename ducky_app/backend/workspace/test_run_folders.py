@@ -25,7 +25,8 @@ def _as(conv_id: str):
 def test_a_named_folder_is_lent_but_never_a_broad_or_private_one(out: Path, monkeypatch) -> None:
     assert run_folders.usable_folder(str(out)) == os.path.realpath(out)
     monkeypatch.setenv("TRAILERS_TEST", str(out))
-    assert run_folders.usable_folder("%TRAILERS_TEST%") == os.path.realpath(out)
+    named = "%TRAILERS_TEST%" if os.name == "nt" else "$TRAILERS_TEST"  # each OS's env syntax
+    assert run_folders.usable_folder(named) == os.path.realpath(out)
     home = Path.home()
     for raw in (
         "",

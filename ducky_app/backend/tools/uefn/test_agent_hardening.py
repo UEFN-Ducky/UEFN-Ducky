@@ -329,7 +329,6 @@ def test_hard_rules_show_me_lives_in_ducky_ui_show():
 def test_built_in_agent_prompt_has_the_hard_rules_once():
     # The server instructions shrank to a pointer, so the in-panel agent gets the rules here.
     from backend.agent.prompt import assemble_system_prompt, get_system_prompt_parts
-
     from backend.agent.prompts.platform_text import for_platform
 
     text = assemble_system_prompt(get_system_prompt_parts(listener_online=False, listener_port=4200))
@@ -489,6 +488,13 @@ def test_digest_paths_are_recognised():
     assert not is_uefn_digest_path("Content/Verse/Economy/economy_manager.verse")
 
 
+def _os_path(win: str) -> str:
+    """A Windows test path as this OS spells it (``C:\\P\\a`` -> ``/P/a`` off Windows)."""
+    import os
+
+    return win if os.name == "nt" else win[2:].replace("\\", "/")
+
+
 def test_every_path_inside_the_island_is_writable():
     from backend.workspace.paths import require_inside_project
 
@@ -502,9 +508,9 @@ def test_every_path_inside_the_island_is_writable():
         r"C:\Fortnite Projects\Roguelike\Content\Python\init_unreal.py",
         r"C:\Fortnite Projects\Roguelike\Content\Python\tool.py",
     ):
-        require_inside_project(path, root)
+        require_inside_project(_os_path(path), _os_path(root))
     try:
-        require_inside_project(r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse", root)
+        require_inside_project(_os_path(r"C:\AppData\VerseProject\P\Assets\Assets.digest.verse"), _os_path(root))
         raise AssertionError("a path outside the project must still be refused")
     except ValueError as exc:
         assert "outside the project" in str(exc)

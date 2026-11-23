@@ -116,7 +116,7 @@ def test_write_tool_takes_path_like_the_read_tool(project, monkeypatch) -> None:
 def test_read_tool_picks_one_file_from_both_path_spellings() -> None:
     # Oct 17 2026: relative_path="." with an absolute path read the project folder itself
     # ("Not a file: ...\Content"), and the model kept retrying.
-    absolute = str(Path("C:/Trailers/run/bible.json"))
+    absolute = str(Path("C:/Trailers/run/bible.json" if os.name == "nt" else "/Trailers/run/bible.json"))
     assert system._file_arg(".", absolute) == absolute
     assert system._file_arg("", "bible.json") == "bible.json"
     assert system._file_arg("Verse/ui.verse", "") == "Verse/ui.verse"

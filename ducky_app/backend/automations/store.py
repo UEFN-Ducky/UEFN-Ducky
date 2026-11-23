@@ -258,6 +258,12 @@ def get_workflow(workflow_id: str) -> dict[str, Any] | None:
     return _view(doc, owned.owner_view(scope), owned.state(aid, wid), owned.runs(aid, wid))
 
 
+def _next_updated(existing: dict[str, Any] | None) -> float:
+    """Now, but always past the stale check's 1 ms slack over the copy it replaces: two saves
+    inside 1 ms (Linux's fine clock) left a later save looking no newer than the first."""
+    return max(time.time(), float((existing or {}).get("updated") or 0.0) + 2e-3)
+
+
 class StaleWorkflowError(ValueError):
     """The saver's copy is older than the stored one: saving it would undo newer changes."""
 
@@ -692,7 +698,7 @@ def _db_save(doc: dict[str, Any], owner: str, *, archive: bool = True) -> dict[s
         out["id"] = wid
     _merge(out, doc, shared=scope["kind"] == "shared")
     if archive:  # filing keeps its place in the list
-        out["updated"] = time.time()
+        out["updated"] = _next_updated(existing)
     aid = scope["account"]
     first = (existing,) if existing and not versions_repo.has_versions(wid) else ()
     owned.write(scope, out, versions=(*first, out) if archive else ())
@@ -850,7 +856,7 @@ def _files_save(doc: dict[str, Any], *, archive: bool = True) -> dict[str, Any]:
         out["id"] = wid
     _merge(out, doc)
     if archive:
-        out["updated"] = time.time()
+        out["updated"] = _next_updated(existing)
         if existing and not any(directory(out["id"]).glob("*.json")):
             archive_file(existing)
         archive_file(out)

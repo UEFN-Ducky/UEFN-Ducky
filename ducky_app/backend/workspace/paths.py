@@ -48,6 +48,23 @@ def normalize_rel(path: str) -> str:
     return p.lstrip("/")
 
 
+def posix_full_path(path: str) -> str:
+    """POSIX only: ``path`` when it is a real full path (``/home/u/P/a.verse``), else "".
+
+    ``normalize_rel`` strips a leading ``/`` because ``/Content/x`` means project-relative;
+    on Linux that also turned every full path into a project-relative one.
+    ponytail: "full" = its top folder exists on disk (/home, /tmp, /mnt); a project with a
+    top-level folder named like one of those would need an explicit flag instead.
+    """
+    if os.name == "nt":
+        return ""
+    p = (path or "").strip()
+    if not p.startswith("/") or p.startswith("//"):
+        return ""
+    top = p.split("/", 2)[1] if len(p) > 1 else ""
+    return p if top and os.path.isdir("/" + top) else ""
+
+
 def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:HASH_HEX_CHARS]
 

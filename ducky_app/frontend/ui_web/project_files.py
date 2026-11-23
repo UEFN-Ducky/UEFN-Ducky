@@ -157,7 +157,9 @@ def content_root_rel() -> str:
 
 def _is_project_root_rel(rel: str) -> bool:
     """The project folder itself (deleting or moving it would take the whole project)."""
-    norm = (rel or "").strip().replace("\\", "/").strip("/")
+    norm = (rel or "").strip().replace("\\", "/")
+    # POSIX full paths keep their leading "/" (stripping it made /home/u/P relative).
+    norm = norm.rstrip("/") if os.name != "nt" and len(norm) > 1 and norm.startswith("/") else norm.strip("/")
     norm = _abs_to_content_rel(norm) if _abs_to_content_rel(norm) is not None else norm
     return norm in {"", "."}
 

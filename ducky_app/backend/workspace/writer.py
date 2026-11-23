@@ -36,6 +36,7 @@ from backend.workspace.paths import (
     content_hash,
     island_root,
     normalize_rel,
+    posix_full_path,
     real_path,
     rel_from_root,
     require_inside_project,
@@ -43,6 +44,11 @@ from backend.workspace.paths import (
 from backend.workspace.policy import Decision, WritePolicy, WriteRequest, evaluate
 
 log = logging.getLogger(__name__)
+
+
+def _rel(path: str) -> str:
+    """``normalize_rel``, except a real POSIX full path stays full (always "" on Windows)."""
+    return posix_full_path(path) or normalize_rel(path)
 
 
 def _beside_content(rel: str, root: str) -> str:
@@ -307,7 +313,7 @@ class ProjectWriter:
         with self._lock_many((full,)):
             if tool.startswith("workspace_") or (ctx is not None and ctx.source == identity.SOURCE_AGENT):
                 from backend.workspace.ai_ignore import require_ai_mutation
-                require_ai_mutation(os.path.join(root, normalize_rel(rel)))
+                require_ai_mutation(os.path.join(root, _rel(rel)))
                 require_ai_mutation(full)
             decision = self._decide(request)
             before, existed = self._read_text(full)
@@ -435,9 +441,9 @@ class ProjectWriter:
         with self._lock_many(lock_paths):
             if tool.startswith("workspace_") or (ctx is not None and ctx.source == identity.SOURCE_AGENT):
                 from backend.workspace.ai_ignore import require_ai_mutation, require_ai_path_operation
-                require_ai_mutation(os.path.join(root, normalize_rel(path)))
+                require_ai_mutation(os.path.join(root, _rel(path)))
                 if source:
-                    require_ai_mutation(os.path.join(root, normalize_rel(source)))
+                    require_ai_mutation(os.path.join(root, _rel(source)))
                 require_ai_path_operation(_src_full if source else dst_full, dst_full if source else None)
             decision = self._decide(request)
             existed = os.path.exists(dst_full)
@@ -490,7 +496,7 @@ class ProjectWriter:
 
     def _resolve(self, rel_in: str) -> tuple[str, str, str]:
         """(canonical project-relative path, absolute path, project root)."""
-        rel = normalize_rel(rel_in)
+        rel = _rel(rel_in)
         if not rel:
             raise ValueError("Path must not be empty.")
         root = self._active_root(rel)
@@ -547,7 +553,7 @@ class ProjectWriter:
         return "" if os.path.normcase(root) == os.path.normcase(active) else root
 
     def _resolve_for_read(self, rel_in: str) -> tuple[str, str, str]:
-        rel = normalize_rel(rel_in)
+        rel = _rel(rel_in)
         if not rel:
             raise ValueError("Path must not be empty.")
         from backend.workspace.ai_ignore import require_ai_access

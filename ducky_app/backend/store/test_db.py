@@ -743,7 +743,9 @@ def test_a_source_checkout_never_upgrades_the_real_database(tmp_path: Path, monk
     # Oct 16 2026: repo code opened the owner's live ducky.db and took it from schema 15 to
     # 18; the installed app then refuses the file on its next start.
     home = tmp_path / "home"
-    real = home / "AppData" / "Local" / "UEFN-Ducky"
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    real = db.installed_app_dir()  # Windows: home/AppData/Local/UEFN-Ducky; Linux: home/.local/share/...
     real.mkdir(parents=True)
     old = sqlite3.connect(str(real / db.DB_NAME), isolation_level=None)
     for number, path in db.migration_files():
@@ -753,8 +755,6 @@ def test_a_source_checkout_never_upgrades_the_real_database(tmp_path: Path, monk
             old.execute(stmt)
     old.execute("PRAGMA user_version=15")
     old.close()
-    monkeypatch.setenv("USERPROFILE", str(home))
-    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("DUCKY_TESTS_REAL_APPDATA", "1")  # past the test guard: this checks the next one
     db.reset_for_tests()
     with pytest.raises(db.StoreError, match="refusing to upgrade the real ducky.db"):
@@ -771,9 +771,10 @@ def test_a_source_checkout_never_upgrades_the_real_database(tmp_path: Path, monk
 def test_the_real_database_is_refused_in_any_pytest_process(tmp_path: Path, monkeypatch) -> None:
     # PYTEST_CURRENT_TEST is unset while test modules are imported and collected.
     home = tmp_path / "home"
-    (home / "AppData" / "Local" / "UEFN-Ducky").mkdir(parents=True)
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("HOME", str(home))
+    real = db.installed_app_dir()
+    real.mkdir(parents=True)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
     with pytest.raises(RuntimeError, match="refusing to open the real ducky.db"):
-        db.connect(home / "AppData" / "Local" / "UEFN-Ducky")
+        db.connect(real)

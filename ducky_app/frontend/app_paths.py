@@ -28,6 +28,10 @@ def _xdg(var: str, default: str) -> Path:
 def local_app_data_base() -> Path:
     """Base folder for app data: ``%LOCALAPPDATA%`` on Windows, ``$XDG_DATA_HOME`` on Linux."""
     if _is_linux():
+        # ponytail: under the test conftest (which sets DUCKY_TESTS_ISOLATED_APPDATA) a test that
+        # repoints only LOCALAPPDATA is followed, as on Windows; a real Linux install never has it.
+        if os.environ.get("DUCKY_TESTS_ISOLATED_APPDATA") and os.path.isabs(os.environ.get("LOCALAPPDATA") or ""):
+            return Path(os.environ["LOCALAPPDATA"])
         return _xdg("XDG_DATA_HOME", ".local/share")
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if base:

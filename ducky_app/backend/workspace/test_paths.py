@@ -74,10 +74,25 @@ def test_a_write_may_go_anywhere_in_the_project_any_file_type() -> None:
         r"C:\P\Plugins\P\Verse.digest.verse",
         r"C:\P\.git\config",
     ):
-        paths.require_inside_project(ok, r"C:\P")
+        paths.require_inside_project(_os_path(ok), _os_path(r"C:\P"))
     for bad in (r"C:\P", r"C:\Other\a.txt", r"C:\P\..\Other\a.txt"):
         with pytest.raises(ValueError, match="outside the project"):
-            paths.require_inside_project(bad, r"C:\P")
+            paths.require_inside_project(_os_path(bad), _os_path(r"C:\P"))
+
+
+def _os_path(win: str) -> str:
+    """A Windows test path as this OS spells it (``C:\\P\\a`` -> ``/P/a`` off Windows)."""
+    return win if paths.os.name == "nt" else win[2:].replace("\\", "/")
+
+
+def test_a_posix_full_path_stays_full(tmp_path) -> None:
+    full = str(tmp_path / "P" / "a.verse")
+    if paths.os.name == "nt":
+        assert paths.posix_full_path(full) == ""
+        return
+    assert paths.posix_full_path(full) == full
+    assert paths.posix_full_path("/Content/Verse/a.verse") == ""  # no /Content folder: project-relative
+    assert paths.posix_full_path("Content/a.verse") == ""
 
 
 windows_only = pytest.mark.skipif(paths.os.name != "nt", reason="Windows realpath race")

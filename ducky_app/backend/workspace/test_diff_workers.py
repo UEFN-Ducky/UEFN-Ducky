@@ -45,8 +45,10 @@ def test_idle_pool_closes_and_a_later_diff_reopens_it(monkeypatch):
         while workers._pool is not None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert workers._pool is None, "idle diff workers kept running"
+        # _pool goes None before close()/join() run, and a spawn worker still importing (slow on a
+        # loaded Linux runner) exits only once it reads the stop sentinel: allow it the time.
         for child in children:
-            child.join(5)
+            child.join(30)
         assert all(not child.is_alive() for child in children)
         assert workers.compare(before, after) == serial_delta(before, after)
     finally:
