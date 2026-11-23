@@ -1,7 +1,7 @@
 """Every process on the PC in one call: pid, parent, name, memory, threads, handles, CPU time.
 
 On Windows one NtQuerySystemInformation call returns them all, so a look at the whole PC costs
-milliseconds even when it is out of memory. psutil asks each process on its own (an OpenProcess
+milliseconds even when it is out of memory. Linux reads ``/proc`` directly (``_linux_table``). psutil asks each process on its own (an OpenProcess
 per process per field), and on a busy PC that took 50-120 ms a process: minutes for one look
 at ~700 processes, exactly when someone asks why the PC is slow.
 """
@@ -34,6 +34,8 @@ def table() -> dict[int, Proc]:
             return _nt_table()
         except OSError:
             pass
+    elif sys.platform.startswith("linux") and os.path.isdir("/proc/self"):
+        return _linux_table()
     return _psutil_table()
 
 
@@ -119,6 +121,53 @@ def group(pgid: int, proc_root: str = "/proc") -> list[int]:
         fields = stat[stat.rfind(b")") + 2:].split()
         if len(fields) > 2 and fields[0] != b"Z" and int(fields[2]) == int(pgid):
             out.append(int(name))
+    return out
+
+
+def _linux_table(proc_root: str = "/proc") -> dict[int, Proc]:
+    """Linux: every process from ``/proc/<pid>/stat`` and ``statm`` (two small reads each, no psutil objects)."""
+    tick = os.sysconf("SC_CLK_TCK") or 100
+    page = os.sysconf("SC_PAGE_SIZE") or 4096
+    boot = 0.0
+    try:
+        with open(f"{proc_root}/stat", "rb") as fh:
+            for line in fh:
+                if line.startswith(b"btime "):
+                    boot = float(line.split()[1])
+                    break
+    except OSError:
+        pass
+    out: dict[int, Proc] = {}
+    for entry in os.listdir(proc_root):
+        if not entry.isdigit():
+            continue
+        base = f"{proc_root}/{entry}"
+        try:
+            with open(f"{base}/stat", "rb") as fh:
+                stat = fh.read()
+            with open(f"{base}/statm", "rb") as fh:
+                statm = fh.read().split()
+        except OSError:
+            continue  # it exited
+        # "pid (comm) state ppid ...": comm may hold spaces and parens, so split after the last ")".
+        close = stat.rfind(b")")
+        name = stat[stat.find(b"(") + 1:close].decode("utf-8", "replace")
+        f = stat[close + 2:].split()
+        if len(f) < 22 or len(statm) < 3:
+            continue
+        if len(name) == 15:  # comm is cut at 15 chars: the real name is argv[0]'s file name
+            try:
+                with open(f"{base}/cmdline", "rb") as fh:
+                    argv0 = os.path.basename(fh.read().split(b"\0", 1)[0].decode("utf-8", "replace"))
+                if argv0.startswith(name):
+                    name = argv0
+            except OSError:
+                pass
+        resident, shared = int(statm[1]) * page, int(statm[2]) * page
+        out[int(entry)] = Proc(
+            int(entry), int(f[1]), name, resident, max(0, resident - shared), int(f[17]), 0,
+            (int(f[11]) + int(f[12])) / tick, boot + int(f[19]) / tick if boot else 0.0,
+        )
     return out
 
 

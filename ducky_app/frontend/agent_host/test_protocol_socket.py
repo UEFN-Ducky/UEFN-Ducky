@@ -6,6 +6,7 @@ import os
 import socket
 import stat
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -26,9 +27,15 @@ def test_windows_pipe_name_is_unchanged():
 
 
 @posix
-def test_socket_lives_in_runtime_dir_and_stays_short(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    assert protocol.pipe_name(3, 42) == str(tmp_path / "uefn-ducky" / "uefn-ducky-host-42-3.sock")
+def test_socket_lives_in_runtime_dir_and_stays_short(monkeypatch):
+    # a short folder: xdist's tmp_path (/tmp/pytest-of-runner/pytest-0/popen-gw1/...) already hashes
+    run = tempfile.mkdtemp(prefix="ud", dir="/tmp")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", run)
+    try:
+        assert protocol.pipe_name(3, 42) == os.path.join(run, "uefn-ducky", "uefn-ducky-host-42-3.sock")
+    finally:
+        os.rmdir(run)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", "/tmp")
     long_slot = "rpc-" + "x" * 200
     name = protocol.pipe_name(long_slot, 42)
     assert len(os.fsencode(name)) <= protocol._MAX_SUN_PATH

@@ -24,7 +24,8 @@ def test_the_table_matches_psutil_for_this_process():
     assert len(table) > 10
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="one NtQuerySystemInformation call")
+@pytest.mark.skipif(sys.platform != "win32" and not sys.platform.startswith("linux"),
+                    reason="one NtQuerySystemInformation call / one /proc read")
 def test_one_table_is_fast():
     # Best of five: a busy test machine can stall any single call; the per-process psutil
     # scan this replaces took minutes on a busy PC, the table takes well under a second.
@@ -34,6 +35,34 @@ def test_one_table_is_fast():
         proc_table.table()
         times.append(time.perf_counter() - start)
     assert min(times) < 1.0, times
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Linux /proc reader")
+def test_linux_table_reads_proc_without_psutil(tmp_path, monkeypatch):
+    monkeypatch.setattr(psutil, "process_iter", lambda *a, **k: pytest.fail("psutil per-process scan"))
+    (tmp_path / "stat").write_text("cpu 1 2 3\nbtime 1000\n")
+    tick, page = os.sysconf("SC_CLK_TCK"), os.sysconf("SC_PAGE_SIZE")
+
+    def proc(pid, comm, ppid, argv0=""):
+        d = tmp_path / str(pid)
+        d.mkdir()
+        rest = ["S", str(ppid)] + ["0"] * 9 + [str(3 * tick), str(tick)] + ["0"] * 4 + ["7", "0", str(50 * tick)]
+        (d / "stat").write_text(f"{pid} ({comm}) {' '.join(rest)} 0 0\n")
+        (d / "statm").write_text("1000 300 100 1 0 50 0\n")
+        (d / "cmdline").write_bytes(argv0.encode() + b"\0--flag\0")
+
+    proc(1, "systemd", 0)
+    proc(42, "UEFN-Ducky-Brid", 1, "/opt/ducky/UEFN-Ducky-Bridge")  # comm is cut at 15 chars
+    proc(43, "odd) name", 42)
+    (tmp_path / "self").mkdir()  # not a pid
+    table = proc_table._linux_table(str(tmp_path))
+    assert sorted(table) == [1, 42, 43]
+    bridge = table[42]
+    assert bridge.name == "UEFN-Ducky-Bridge" and bridge.ppid == 1 and bridge.threads == 7
+    assert bridge.rss == 300 * page and bridge.private == 200 * page
+    assert bridge.cpu_s == 4.0 and bridge.started == 1050.0
+    assert table[43].name == "odd) name" and table[43].ppid == 42
+    assert proc_table.tree(table, 42) == [42, 43]
 
 
 def test_ancestor_finds_the_launcher_above_a_hand_off_stub():
