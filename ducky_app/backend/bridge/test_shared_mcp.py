@@ -165,6 +165,7 @@ def test_adapter_stops_stale_daemon_before_spawn(monkeypatch, tmp_path) -> None:
     from frontend import shared_mcp_adapter as ad
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux app data reads XDG
     monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "9.9.9")
     state_dir = tmp_path / "UEFN-Ducky"
     state_dir.mkdir()
@@ -195,6 +196,7 @@ def test_adapter_falls_back_when_no_daemon(monkeypatch, tmp_path) -> None:
     from frontend import shared_mcp_adapter as ad
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux app data reads XDG
     spawned: list[list[str]] = []
     monkeypatch.setattr(ad, "_spawn_daemon", lambda args: spawned.append(args))
     assert ad.connect(["--port", "4200"], timeout_s=0.3) is None
@@ -725,6 +727,7 @@ def test_an_adapter_reconnects_when_the_daemon_dies(monkeypatch, tmp_path) -> No
     from frontend import shared_mcp_adapter as ad
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux app data reads XDG
     monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.0.0")
     state_dir = tmp_path / "UEFN-Ducky"
     state_dir.mkdir()
@@ -793,6 +796,7 @@ def test_an_adapter_outlives_a_long_ducky_restart(monkeypatch, tmp_path) -> None
     from frontend import shared_mcp_adapter as ad
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux app data reads XDG
     monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.0.0")
     state_dir = tmp_path / "UEFN-Ducky"
     state_dir.mkdir()
@@ -874,6 +878,7 @@ def test_an_adapter_keeps_asking_a_running_app_that_said_starting(monkeypatch, t
     from frontend import shared_mcp_adapter as ad
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux app data reads XDG
     monkeypatch.setenv("UEFN_DUCKY_APP_VERSION", "1.0.0")
     state_dir = tmp_path / "UEFN-Ducky"
     state_dir.mkdir()
@@ -937,6 +942,7 @@ def test_an_adapter_asks_the_app_on_the_port_it_moved_to(monkeypatch, tmp_path) 
     from frontend import shared_mcp_adapter as ad
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))  # Linux app data reads XDG
     monkeypatch.delenv("UEFN_DUCKY_PANEL_PORT", raising=False)
     monkeypatch.setattr(ad, "_PANEL_PORT", 4199)
     assert ad._panel_port() == 4199  # no port file: the port it started with
