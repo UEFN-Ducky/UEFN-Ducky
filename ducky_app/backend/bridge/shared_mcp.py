@@ -855,6 +855,12 @@ def _handle_mcp(mcp: Any, msg: dict[str, Any], ident: Any, conn_id: int) -> dict
     if method == "tools/call":
         name = str(params.get("name") or "")
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+        if sys.platform != "win32":
+            from backend.bridge.plugin_gate import no_uefn_route_error
+
+            blocked = no_uefn_route_error(name)
+            if blocked:
+                return {"content": [{"type": "text", "text": blocked}], "isError": True}
         fut = asyncio.run_coroutine_threadsafe(_call_tool(mcp, name, args, ident), _ensure_loop())
         _inflight[key] = fut
         try:

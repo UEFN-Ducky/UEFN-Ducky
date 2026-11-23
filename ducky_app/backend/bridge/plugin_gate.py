@@ -9,7 +9,9 @@ loads Store plugins on a background thread. Without this gate, Cursor's first
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sys
 from typing import Any
 
 _log = logging.getLogger("uefn.bridge_plugin_gate")
@@ -53,8 +55,51 @@ def lean_tool_list(tools: list[Any]) -> list[Any]:
 
         hidden = store_plugin_tool_names() - HOST_DISK_TOOLS
     except Exception:
-        return tools
-    return [t for t in tools if getattr(t, "name", "") not in hidden]
+        hidden = None
+    if hidden is not None:
+        tools = [t for t in tools if getattr(t, "name", "") not in hidden]
+    if sys.platform != "win32" and _no_uefn_route():
+        tools = [t for t in tools if not _uefn_only(getattr(t, "name", ""))]
+    return tools
+
+
+NO_UEFN_ROUTE = (
+    "No UEFN can run for this Ducky: this PC has no UEFN under Proton and no linked Windows PC. "
+    "Install Fortnite (UEFN) through Heroic or Steam with Proton, or open UEFN Ducky on your "
+    "Windows PC, signed in to the same account with Remote access on; then call it again."
+)
+
+
+def _no_uefn_route() -> bool:
+    """Off Windows: True when no UEFN runs here, none is installed under Proton, and no PC is linked."""
+    try:
+        from backend.bridge.editor_presence import route
+
+        return route() == "none"
+    except Exception:
+        return False
+
+
+def _uefn_only(name: str) -> bool:
+    """A tool that only works with a live UEFN editor (the listener or Epic's MCP)."""
+    if not name:
+        return False
+    if name.startswith("unreal__"):
+        return True
+    try:
+        from backend.agent.tools import _requires_uefn_listener
+
+        return _requires_uefn_listener(name)
+    except Exception:
+        return False
+
+
+def no_uefn_route_error(name: str) -> str:
+    """The ``{"ok": false, ...}`` text a direct call to a UEFN-only tool gets when no UEFN
+    can run (Linux, no Proton UEFN, no linked PC); "" when the call may go ahead."""
+    if sys.platform == "win32" or not _uefn_only(name) or not _no_uefn_route():
+        return ""
+    return json.dumps({"ok": False, "error": f"{name}: {NO_UEFN_ROUTE}", "reason": "no_uefn_route"})
 
 
 # Arguments the server fills in itself; clients never need to see them.
@@ -179,6 +224,8 @@ def install_bridge_plugin_gate(mcp: Any, *, timeout: float = _DEFAULT_TIMEOUT_S)
             blocked = plan_mutator_block_reason(name)
         except Exception:
             blocked = None
+        if not blocked and sys.platform != "win32":
+            blocked = no_uefn_route_error(name) or None
         if blocked:
             try:
                 from mcp.types import CallToolResult, TextContent

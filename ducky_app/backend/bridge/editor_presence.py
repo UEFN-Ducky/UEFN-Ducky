@@ -156,7 +156,7 @@ def linked_pc() -> dict | None:
         return None
     with _link_lock:
         now = _mono()
-        if _link and now - float(_link["at"]) < LINK_CACHE_SEC:  # type: ignore[arg-type]
+        if "at" in _link and now - float(_link["at"]) < LINK_CACHE_SEC:  # type: ignore[arg-type]
             return _link["pc"]  # type: ignore[return-value]
         try:
             from frontend.ducky_link import list_duckies
@@ -173,8 +173,31 @@ def linked_pc() -> dict | None:
         return pc
 
 
+def proton_uefn() -> bool:
+    """Off Windows: True when UEFN is installed in a Heroic or Steam/Proton prefix."""
+    if sys.platform == "win32":
+        return False
+    with _link_lock:
+        now = _mono()
+        if "proton_at" in _link and now - float(_link["proton_at"]) < LINK_CACHE_SEC:  # type: ignore[arg-type]
+            return bool(_link["proton"])
+    try:
+        from backend.tools.uefn.proton import find_prefix
+
+        find_prefix()
+        found = True
+    except Exception:
+        found = False
+    with _link_lock:
+        _link.update(proton_at=now, proton=found)
+    return found
+
+
 def route() -> str:
-    """Where editor calls go: ``local`` (UEFN here), ``remote`` (a linked PC) or ``none``."""
-    if uefn_running():
+    """Where editor calls go: ``local`` (UEFN running here, Windows always), ``proton``
+    (UEFN installed under Proton here), ``remote`` (a linked PC) or ``none``."""
+    if sys.platform == "win32" or uefn_running():
         return "local"
+    if proton_uefn():
+        return "proton"
     return "remote" if linked_pc() else "none"
