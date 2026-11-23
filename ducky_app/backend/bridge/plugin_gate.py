@@ -87,9 +87,9 @@ def _uefn_only(name: str) -> bool:
     if name.startswith("unreal__"):
         return True
     try:
-        from backend.agent.tools import _requires_uefn_listener
+        from backend.agent.tools import requires_uefn_listener
 
-        return _requires_uefn_listener(name)
+        return requires_uefn_listener(name)
     except Exception:
         return False
 

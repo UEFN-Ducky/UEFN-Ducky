@@ -646,7 +646,7 @@ def is_host_only_tool(name: str) -> bool:
     return name.startswith(("ducky_", "workspace_", "project_memory_", "blender_"))
 
 
-def _requires_uefn_listener(name: str) -> bool:
+def requires_uefn_listener(name: str) -> bool:
     """Opt-in: only tools that talk to the live UEFN editor HTTP listener.
 
     Host tools (Verse writes, digests, ducky_*, blender_*), nested MCP
@@ -674,6 +674,10 @@ def _requires_uefn_listener(name: str) -> bool:
     except Exception:
         pass
     return True
+
+
+# Callers in this module (and tests that patch it) use the old private name.
+_requires_uefn_listener = requires_uefn_listener
 
 
 _PLUGIN_GONE_HINT = (
