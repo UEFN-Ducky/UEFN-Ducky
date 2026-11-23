@@ -437,6 +437,8 @@ def test_spec_linux_bundles_pygobject_and_keeps_the_host_gtk() -> None:
     assert "_webkit_libs = _ldd(_webkit)" in SPEC_TEXT and "dest in _webkit_libs" in SPEC_TEXT
     # ...and so does whatever the host-side GIO modules / pixbuf loaders link (22.04's gnutls on fedora).
     assert "_webkit_libs |= _ldd(_e[1])" in SPEC_TEXT
+    # PyInstaller puts GIO modules (libgiognutls.so, which links gnutls) in gio_modules/.
+    assert 'LINUX_HOST_DIRS = ("gio_modules",' in SPEC_TEXT
     # PyInstaller has no WebKit2/JavaScriptCore hooks: ours collect the 4.1 typelibs.
     assert 'hookspath=[str(LINUX_DIR / "pyi_hooks")] if LINUX else [],' in SPEC_TEXT
     hooks = BUILD / "linux" / "appimage" / "pyi_hooks"

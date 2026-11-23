@@ -54,7 +54,7 @@ LINUX_HOST_LIBS = (
     "libwayland", "libdbus-1.",
 )
 LINUX_WEBKIT = "libwebkit2gtk-4.1.so.0"
-LINUX_HOST_DIRS = ("lib/gio", "lib/gdk-pixbuf", "lib/gtk-3.0")
+LINUX_HOST_DIRS = ("gio_modules", "lib/gio", "lib/gdk-pixbuf", "lib/gtk-3.0")
 # PyInstaller's GTK/GIO/pixbuf runtime hooks point GTK at bundled data and modules (themes,
 # input methods, TLS); with the host's GTK the host's own must stay. pyi_rth_gi (typelibs) stays.
 LINUX_HOST_RTH = ("pyi_rth_gtk", "pyi_rth_gio", "pyi_rth_gdkpixbuf")
