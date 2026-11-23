@@ -114,7 +114,8 @@ jobs:
       - name: System packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libportaudio2 xvfb zsync dpkg-dev
+          sudo apt-get install -y libgtk-3-dev libportaudio2 xvfb zsync dpkg-dev \
+            libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-gtk-3.0 gir1.2-webkit2-4.1
       - name: Dependencies
         run: |
           python -m pip install -r requirements-dev.txt
