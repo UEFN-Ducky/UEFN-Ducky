@@ -23,7 +23,7 @@ def posix_login_path(shell: str = "bash") -> str:
         try:
             out = subprocess.run(
                 [shell, "-ilc", f'printf "{_PATH_MARK}%s{_PATH_MARK}" "$PATH"'],
-                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
                 # Its own session: an interactive bash takes over a controlling terminal it
                 # shares, and Ducky (then a background job on it) was stopped by SIGTTOU.
                 start_new_session=True,
