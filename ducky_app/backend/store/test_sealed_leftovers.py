@@ -231,6 +231,12 @@ def test_one_rebuild_after_sealing_leaves_no_old_plaintext_in_the_file(who: _Who
             assert json.loads(marker.read_text())["waits"] == 7 and marker.is_file()
     finally:
         holder.close()
+    # A real restart ends every thread of this process. Here, writer threads that earlier
+    # tests in this worker left running (usage_stats, error_log) keep their own cached
+    # connection to whatever ducky.db is current, and on Windows that handle reads as
+    # "another process holds it": the rebuild waited (3 in 28 runs). The holder above is
+    # gone, so no other process has the file; the rebuild itself still runs for real.
+    monkeypatch.setattr(db, "_held_elsewhere", lambda _path: False)
     db.reset_for_tests()
     db.connect()
     assert not marker.exists()
