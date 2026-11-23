@@ -44,7 +44,7 @@ LINUX_SYSTEM_AUDIO = ("libasound.so", "libjack.so", "libpulse")
 # target distro ships it (the .deb/.rpm/AUR depend on it; the AppImage start check installs it).
 # A bundled glib/GTK beside the host's WebKitGTK would load two glibs into one process.
 LINUX_GI_VERSIONS = {"Gtk": "3.0", "Gdk": "3.0", "WebKit2": "4.1", "Soup": "3.0"}
-LINUX_GI_MODULES = ("GLib", "GObject", "Gio", "Gdk", "Gtk", "WebKit2", "Soup")
+LINUX_GI_MODULES = ("GLib", "GObject", "Gio", "Gdk", "Gtk", "WebKit2", "JavaScriptCore", "Soup")
 # Shared libraries (basename prefixes) and module folders that stay the host's.
 LINUX_HOST_LIBS = (
     "libglib-2.0.", "libgobject-2.0.", "libgio-2.0.", "libgmodule-2.0.", "libgthread-2.0.",
@@ -421,7 +421,8 @@ a = Analysis(
         "backend.agent.runner",
         "backend.agent.hard_rules",
     ],
-    hookspath=[],
+    # WebKit2 / JavaScriptCore: PyInstaller has no hooks for them (their typelibs).
+    hookspath=[str(LINUX_DIR / "pyi_hooks")] if LINUX else [],
     hooksconfig={"gi": {"module-versions": LINUX_GI_VERSIONS, "icons": [], "themes": [], "languages": []}}
     if LINUX
     else {},

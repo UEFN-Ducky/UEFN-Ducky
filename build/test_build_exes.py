@@ -433,6 +433,13 @@ def test_spec_linux_bundles_pygobject_and_keeps_the_host_gtk() -> None:
     # Windows gets the same empty hooksconfig as before.
     assert 'hooksconfig={"gi": {"module-versions": LINUX_GI_VERSIONS' in SPEC_TEXT
     assert "    if LINUX\n    else {}," in SPEC_TEXT
+    # PyInstaller has no WebKit2/JavaScriptCore hooks: ours collect the 4.1 typelibs.
+    assert 'hookspath=[str(LINUX_DIR / "pyi_hooks")] if LINUX else [],' in SPEC_TEXT
+    hooks = BUILD / "linux" / "appimage" / "pyi_hooks"
+    for mod in ("WebKit2", "JavaScriptCore"):
+        assert f'GiModuleInfo("{mod}", "4.1")' in (hooks / f"hook-gi.repository.{mod}.py").read_text(encoding="utf-8")
+        assert "add_runtime_module" in (hooks / "pre_safe_import_module" / f"hook-gi.repository.{mod}.py").read_text(
+            encoding="utf-8")
 
 
 def test_runtime_smoke_builds_a_webview_on_linux_only() -> None:
