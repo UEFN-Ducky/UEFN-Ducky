@@ -1,0 +1,7 @@
+[uefn-ducky]
+name=UEFN Ducky
+baseurl=https://uefnducky.org/linux/rpm
+enabled=1
+gpgcheck=0
+repo_gpgcheck=1
+gpgkey=https://uefnducky.org/linux/uefn-ducky.asc

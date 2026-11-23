@@ -60,3 +60,17 @@ jobs:
           run-id: ${{ env.BUILD_RUN }}
           github-token: ${{ github.token }}
       - run: bash build/linux/deb/ci_test.sh "$CI_VERSION" artifact/uefn-ducky.tar
+
+  rpm:
+    if: ${{ github.event_name != 'push' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-24.04
+    container: "fedora:41"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: uefn-ducky-linux-x86_64
+          path: artifact
+          run-id: ${{ env.BUILD_RUN }}
+          github-token: ${{ github.token }}
+      - run: bash build/linux/rpm/ci_test.sh "$CI_VERSION" artifact/uefn-ducky.tar
