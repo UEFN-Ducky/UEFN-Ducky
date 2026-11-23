@@ -41,6 +41,8 @@ def form(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(chrome, "_OriginalBrowserForm", None)
     monkeypatch.setattr(chrome, "_hwnd_from_pywebview", lambda window: 101)
+    # The fake hwnd has no placement; user32 is absent on the Linux CI.
+    monkeypatch.setattr(chrome, "_normal_size", lambda hwnd: None)
     monkeypatch.setattr(chrome, "_force_frame_changed", Mock())
     monkeypatch.setattr(chrome, "reset_webview_pin", Mock())
     monkeypatch.setattr(chrome, "_pin_webview_once", Mock())
