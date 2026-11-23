@@ -246,23 +246,26 @@ def test_one_rebuild_after_sealing_leaves_no_old_plaintext_in_the_file(who: _Who
     assert not marker.exists()
 
 
-def test_the_rebuild_never_waits_on_this_process_own_checkpoint_thread(monkeypatch) -> None:
+def test_the_rebuild_never_waits_on_this_process_own_checkpoint_thread(monkeypatch, tmp_path) -> None:
     """The wal-checkpoint thread's short-lived connection, open as the panel starts, is
     this process, not another one: the rebuild still runs that start."""
     import sqlite3
     import threading
 
+    # A root of its own: writer threads earlier tests left running follow LOCALAPPDATA,
+    # and their cached connection to that ducky.db would read as another process.
+    root = tmp_path / "private"
     db.reset_for_tests()
-    db.connect()
-    db.request_vacuum()
-    marker = db.db_path().parent / db.VACUUM_PENDING_NAME
+    db.connect(root)
+    db.request_vacuum(root)
+    marker = db.db_path(root).parent / db.VACUUM_PENDING_NAME
     db.reset_for_tests()
     monkeypatch.setattr(db, "_rebuild_here", True)
     opened, done = threading.Event(), threading.Event()
 
     def checkpoint_thread() -> None:
         with db._ckpt_open:
-            conn = sqlite3.connect(str(db.db_path()))
+            conn = sqlite3.connect(str(db.db_path(root)))
             opened.set()
             time.sleep(0.3)
             conn.close()
@@ -271,7 +274,7 @@ def test_the_rebuild_never_waits_on_this_process_own_checkpoint_thread(monkeypat
     worker = threading.Thread(target=checkpoint_thread)
     worker.start()
     assert opened.wait(5)
-    db.connect()
+    db.connect(root)
     worker.join(5)
     assert done.is_set()
     assert not marker.exists(), "rebuilt this start, not counted as a wait"
