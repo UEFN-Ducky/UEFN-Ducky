@@ -147,6 +147,7 @@ wb.save_bounds('focus:py', 3, 4, 500, 400)\n";
         .arg(script)
         .arg(&app)
         .env("LOCALAPPDATA", &localappdata)
+        .env("XDG_DATA_HOME", &localappdata) // Linux: app_paths reads XDG data, not LOCALAPPDATA
         .output()
         .unwrap_or_else(|e| panic!("could not run {py:?}: {e}"));
     assert!(out.status.success(), "python failed: {}", String::from_utf8_lossy(&out.stderr));
