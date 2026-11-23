@@ -68,25 +68,38 @@ def _start(xvfb: str, timeout_s: float = 10.0) -> str:
     return _display
 
 
+def _find_xvfb() -> str:
+    """Xvfb on this process's PATH, else on the system's default PATH (a desktop session or a
+    caller may have a PATH without /usr/bin)."""
+    return shutil.which("Xvfb") or shutil.which("Xvfb", path=os.pathsep.join(("/usr/bin", "/bin", "/usr/local/bin"))) or ""
+
+
 def hidden_display() -> str:
-    """``:N`` of the shared Xvfb (started now if needed), or '' when Xvfb isn't installed."""
+    """``:N`` of the shared Xvfb (started now if needed), or '' (``last_error`` says why)."""
+    global last_error
     with _lock:
         if _proc is not None and _proc.poll() is None and _display:
             return _display
-        xvfb = shutil.which("Xvfb")
-        return _start(xvfb) if xvfb else ""
+        xvfb = _find_xvfb()
+        if not xvfb:
+            last_error = "Xvfb is not installed (apt install xvfb): GUI apps get no display."
+            return ""
+        return _start(xvfb)
+
+
+_SESSION_DISPLAY = ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY")
 
 
 def hidden_env(env: dict[str, str]) -> dict[str, str]:
-    """``env`` on the hidden display (Wayland dropped so toolkits use it). Unchanged when
-    Xvfb is missing: the app then shows on the person's desktop, as before."""
+    """``env`` with the person's own display taken out and the hidden Xvfb put in. Without a
+    working Xvfb the child gets no display at all: a GUI app fails headless (``last_error``
+    says why) instead of opening on the person's screen."""
+    out = {k: v for k, v in env.items() if k not in _SESSION_DISPLAY}
     display = hidden_display()
-    if not display:
-        return env
-    out = {k: v for k, v in env.items() if k != "WAYLAND_DISPLAY"}
-    out["DISPLAY"] = display
-    out["GDK_BACKEND"] = "x11"
-    out["QT_QPA_PLATFORM"] = "xcb"
+    if display:
+        out["DISPLAY"] = display
+        out["GDK_BACKEND"] = "x11"
+        out["QT_QPA_PLATFORM"] = "xcb"
     return out
 
 
