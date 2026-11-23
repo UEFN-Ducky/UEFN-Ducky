@@ -1,0 +1,93 @@
+{
+  "build_exes": {
+    "defaults": {
+      "dev": false,
+      "no_bump": false
+    },
+    "options": [
+      "--dev",
+      "--help",
+      "--no-bump",
+      "-h"
+    ],
+    "required": [],
+    "stale_patterns": [
+      "UEFN-Ducky-*.exe",
+      "*.pending.exe"
+    ],
+    "stale_patterns_dev": [
+      "UEFN-Ducky-Dev-*.exe",
+      "UEFN-Ducky-Dev-*.pending.exe"
+    ],
+    "launcher_exe": "Ducky-Launcher.exe",
+    "output_lines": [
+      "exe_stem = \"UEFN-Ducky-Dev\" if dev_build else \"UEFN-Ducky\"",
+      "bridge_stem = f\"{exe_stem}-Bridge\"",
+      "out = out_dir / f\"{exe_stem}-{app_version}\""
+    ]
+  },
+  "launcher": {
+    "from_source": true,
+    "modes": [
+      "--adapter",
+      "--after-update",
+      "--browser-relock",
+      "--panel-recovery-smoke",
+      "--port",
+      "--runtime-smoke",
+      "--shared-daemon",
+      "--verify-panel",
+      "agent-host",
+      "bridge",
+      "db"
+    ]
+  },
+  "requirements": {
+    "requirements.txt": [
+      "anthropic",
+      "anyio",
+      "certifi",
+      "cryptography",
+      "filelock",
+      "fsspec",
+      "google-genai",
+      "httpx",
+      "iced-x86",
+      "idna",
+      "mcp",
+      "mini-racer",
+      "numpy",
+      "openai",
+      "pillow",
+      "psutil",
+      "pyasn1",
+      "pydantic-settings",
+      "pyjwt",
+      "pypdf",
+      "pystray",
+      "python-multipart",
+      "pywebview",
+      "pywinpty",
+      "starlette",
+      "tokenizers",
+      "toon-format",
+      "truststore",
+      "tzdata",
+      "urllib3"
+    ],
+    "requirements-dev.txt": [
+      "jsonschema",
+      "pytest",
+      "pytest-timeout",
+      "pytest-xdist",
+      "ruff"
+    ]
+  },
+  "pytest": {
+    "testpaths": [
+      "ducky_app",
+      "tests"
+    ],
+    "collected": 8423
+  }
+}

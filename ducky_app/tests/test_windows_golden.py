@@ -191,3 +191,54 @@ def test_real_dpapi_round_trip() -> None:
     assert secrets.unprotect_bytes(sealed, b"adk:" + g.ADK) == b"payload"
     with pytest.raises(OSError):
         secrets.unprotect_bytes(sealed, b"adk:" + b"\x00" * 32)
+
+
+# --- the Windows dev workflow (dev_workflow.json) -------------------------------------
+
+
+@pytest.fixture(scope="module")
+def dev_golden() -> dict:
+    return json.loads((GOLDEN / "dev_workflow.json").read_text(encoding="utf-8"))
+
+
+def test_build_exes_runs_with_no_arguments_as_today(dev_golden) -> None:
+    import dev_workflow
+
+    now = dev_workflow.build_exes()
+    was = dev_golden["build_exes"]
+    assert now["required"] == [], "build_exes.py must keep building Windows with no arguments"
+    assert now["defaults"] == was["defaults"], "a default changed: Windows builds differently"
+    assert set(was["options"]) <= set(now["options"]), "an option the person uses is gone"
+    for key in ("stale_patterns", "stale_patterns_dev", "launcher_exe", "output_lines"):
+        assert now[key] == was[key], f"Windows build output names changed ({key})"
+
+
+def test_running_from_source_keeps_its_modes(dev_golden) -> None:
+    import dev_workflow
+
+    now = dev_workflow.launcher()
+    assert now["from_source"] is True, "python -m frontend is how the person runs from source"
+    missing = set(dev_golden["launcher"]["modes"]) - set(now["modes"])
+    assert not missing, f"launcher modes gone: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("name", ["requirements.txt", "requirements-dev.txt"])
+def test_windows_installs_the_same_packages(dev_golden, name) -> None:
+    import dev_workflow
+
+    now, was = set(dev_workflow.windows_requirements(name)), set(dev_golden["requirements"][name])
+    assert not now - was, (
+        f"{name}: Windows now installs {sorted(now - was)}. A Linux-only package needs "
+        "'; sys_platform == \"linux\"'; a new Windows one means rebuilding dev_workflow.json on purpose."
+    )
+    assert not was - now, f"{name}: Windows no longer installs {sorted(was - now)}"
+
+
+def test_the_same_tests_run_on_windows(dev_golden) -> None:
+    import dev_workflow
+
+    assert dev_workflow.pytest_setup()["testpaths"] == dev_golden["pytest"]["testpaths"]
+    collected = dev_workflow.collected_tests()
+    assert collected >= dev_golden["pytest"]["collected"], (
+        f"Windows collects {collected} tests, {dev_golden['pytest']['collected']} on the golden day"
+    )
