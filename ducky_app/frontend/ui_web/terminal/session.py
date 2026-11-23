@@ -80,6 +80,26 @@ _PS_QUOTE_RE = re.compile("(['‘’‚‛])")
 
 def _ps_literal(text: str) -> str:
     return "'" + _PS_QUOTE_RE.sub(r"\1\1", text) + "'"
+
+
+def _fish_literal(text: str) -> str:
+    """fish single quotes: only \\ and \\' are escapes inside them."""
+    return "'" + text.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _fish_wrap(cmd: str, tag: str, background: bool) -> str:
+    """An agent command typed into fish, with the same begin and done markers as bash's. Inline
+    like bash's rather than a fish_postexec hook: the marker carries this run's tag and the
+    person's own commands print none."""
+    if background:
+        # fish can't put eval in the background; a child fish runs it there.
+        return f"env {_BASH_AGENT_ENV} fish -c {_fish_literal(cmd)} &\n"
+    agent_env = " ".join(f"set -lx {k} {v};" for k, v in _AGENT_ENV)
+    # $status after `end` is the eval's; the block keeps the variables to this command only.
+    return (
+        f"printf '__DUCKY_%s__\\n' BEGIN_{tag}; begin; {agent_env} eval {_fish_literal(cmd)}; end; "
+        f"printf '__DUCKY_DONE_%s__%s__\\n' {tag} $status\n"
+    )
 # Escape sequences that ask the terminal to REPLY (device attributes ESC[c,
 # status reports ESC[5n/6n, window/cell size reports ESC[14t…21t). Replaying
 # them makes xterm.js answer again, and the answer reaches the shell as typed
@@ -880,15 +900,20 @@ class TerminalSession:
                 f'Write-Output ("__DUCKY_DONE_{tag}__{{0}}__" -f $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} '
                 "elseif ($__duckyOk) { 0 } else { 1 }))\r"
             )
+        if self.shell == "fish":
+            return _fish_wrap(cmd, tag, background)
         # Variables in front of eval last for that command only, while a `cd` or an assignment
         # in it stays. Quoted, a trailing "# comment" or a "!" can't eat the done marker.
+        # zsh reads this line the same way bash does.
         run = f"{_BASH_AGENT_ENV} eval {shlex.quote(cmd)}"
-        # eval reads the command after this, so the aliases are gone for it already.
-        first = "" if self._winpty_dropped else f"{_BASH_DROP_WINPTY}; "
+        # eval reads the command after this, so the aliases are gone for it already. Linux has
+        # no winpty aliases, and its pty turns \r into Enter (so \r\n would be two).
+        first = "" if self._winpty_dropped or os.name != "nt" else f"{_BASH_DROP_WINPTY}; "
         self._winpty_dropped = True
+        end = "\r\n" if os.name == "nt" else "\n"
         if background:
-            return f"{first}({run}) &\r\n"
-        return f"{first}printf '__DUCKY_%s__\\n' BEGIN_{tag}; {run}; echo __DUCKY_DONE_{tag}__$?__\r\n"
+            return f"{first}({run}) &{end}"
+        return f"{first}printf '__DUCKY_%s__\\n' BEGIN_{tag}; {run}; echo __DUCKY_DONE_{tag}__$?__{end}"
 
     def background_alive(self, snapshot: ProcessSnapshot | None = None) -> bool:
         """Whether a background command started here still runs; once none does, the terminal
