@@ -55,6 +55,27 @@ def pick_artifact(record: dict[str, Any], os_name: str | None = None, arch: str 
     return next((a for a in files if a.get("os") == ANY), None)
 
 
+def download_problem(payload: dict[str, Any], os_name: str | None = None, arch: str | None = None) -> str:
+    """Why a Store download response is not this machine's build, '' when it is.
+
+    The response names its file on top (``sha256``) and, from a Store with per-platform builds,
+    lists them all in ``artifacts``. ``compiled`` rides the signed record when not on top.
+    """
+    rec = dict(payload)
+    sig = payload.get("signature")
+    if "compiled" not in rec and isinstance(sig, dict):
+        rec["compiled"] = sig.get("compiled")
+    art = pick_artifact(rec, os_name, arch)
+    want_os, want_arch = os_name or mp.host_os(), mp.norm_arch(arch or mp.host_arch())
+    label = mp._OS_LABELS.get(want_os, want_os)
+    if art is None:
+        same_os = any(a.get("os") == want_os for a in record_artifacts(rec))
+        return f"This plugin has no {label} {want_arch} build yet" if same_os else f"This plugin has no {label} build yet"
+    if str(art.get("sha256") or "").lower() != str(payload.get("sha256") or "").lower():
+        return f"The Store sent a build for another platform, not {label} {want_arch}. Try again later."
+    return ""
+
+
 def put_artifact(record: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
     """The record with ``artifact`` added, replacing the one for its platform. Windows (or a
     source build) also fills the top-level fields old apps read."""

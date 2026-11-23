@@ -2561,8 +2561,22 @@ def _store_download_and_install_unlocked(
     body: dict[str, Any] = {"slug": slug, "isUpdate": bool(is_update)}
     if version:
         body["version"] = str(version).strip()
+    from backend.uefn_plugins import manifest_platform as mp
+
+    # Windows asks as it always has (the Store serves it the version's own zip); any other OS
+    # names itself so the Store serves that platform's build.
+    other_os = mp.host_os() != mp.WINDOWS
+    if other_os:
+        body.update(os=mp.host_os(), arch=mp.host_arch())
     # Signed in → sent as the account (api_request attaches it); signed out → anonymous.
     payload = _store_collect("download", body, allow_anonymous=True, timeout=120.0)
+    if other_os and payload.get("sha256"):
+        from backend.store.plugin_artifacts import download_problem
+
+        # Checked before a byte is fetched or written: no build for this PC installs nothing.
+        problem = download_problem(payload)
+        if problem:
+            raise DuckyOSAccountError(problem, code="no_platform_build")
     # Small zips inline, big ones by link — verified (sha256 + size) before the install
     # and signature checks below ever see the bytes.
     raw = store_zip_bytes(payload)

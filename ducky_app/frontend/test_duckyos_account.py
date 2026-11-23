@@ -1239,3 +1239,107 @@ def test_store_zips_download_even_when_the_certificate_cant_be_verified(monkeypa
     monkeypatch.setattr(update_network, "download_resumable", fake)
     assert acc._fetch_store_zip_url("https://bucket.example/p.zip", 3) == b"zip"
     assert seen["content_checked"] is True  # store_zip_bytes checks the Store's sha256
+
+
+def _plugin_zip(tag: str) -> bytes:
+    import io
+    import json
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("plugin.json", json.dumps({"id": "blender", "version": "2.0.0", "tag": tag}))
+    return buf.getvalue()
+
+
+def _platform_store(monkeypatch, builds: dict, *, os_name: str, arch: str, artifacts: bool = True):
+    """A Store holding ``builds`` ({(os, arch): zip}) for a PC on ``os_name``/``arch``.
+    Returns (requests, installs)."""
+    from backend.uefn_plugins import manifest_platform as mp
+    from backend.uefn_plugins import store
+    from frontend import duckyos_account as acc
+
+    sha = {k: hashlib.sha256(v).hexdigest() for k, v in builds.items()}
+    listed = [{"os": o, "arch": a, "file": f"blender-{o}-{a}.zip", "sha256": sha[(o, a)], "size": len(builds[(o, a)])}
+              for (o, a) in builds]
+    requests: list[dict] = []
+    installs: list[bytes] = []
+
+    def collect(kind, body, **_kw):
+        requests.append(dict(body))
+        slot = (body["os"], body["arch"]) if "os" in body else ("windows", "x86_64")
+        raw = builds.get(slot, builds[("windows", "x86_64")])  # a Store before per-platform builds
+        out = {"slug": "blender", "version": "2.0.0", "zipB64": base64.b64encode(raw).decode(),
+               "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw),
+               "signature": {"compiled": True, "sha256": hashlib.sha256(raw).hexdigest(), "signature": "s"}}
+        if artifacts and "os" in body:
+            out["artifacts"] = listed
+        return out
+
+    monkeypatch.setattr(mp, "host_os", lambda: os_name)
+    monkeypatch.setattr(mp, "host_arch", lambda: arch)
+    monkeypatch.setattr(acc, "_store_collect", collect)
+    monkeypatch.setattr(store, "import_plugin_from_bytes", lambda raw, **kw: installs.append(raw) or {"ok": True})
+    return requests, installs
+
+
+THREE = {("windows", "x86_64"): _plugin_zip("win"), ("linux", "x86_64"): _plugin_zip("lx64"),
+         ("linux", "aarch64"): _plugin_zip("larm")}
+
+
+def test_each_os_installs_its_own_build_of_a_three_artifact_release(monkeypatch) -> None:
+    from frontend import duckyos_account as acc
+
+    requests, installs = _platform_store(monkeypatch, THREE, os_name="linux", arch="x86_64")
+    assert acc._store_download_and_install_unlocked("blender")["ok"] is True
+    assert installs == [THREE[("linux", "x86_64")]]
+    assert requests[0]["os"] == "linux" and requests[0]["arch"] == "x86_64"
+
+    requests, installs = _platform_store(monkeypatch, THREE, os_name="windows", arch="x86_64")
+    assert acc._store_download_and_install_unlocked("blender")["ok"] is True
+    assert installs == [THREE[("windows", "x86_64")]]
+    assert "os" not in requests[0] and "arch" not in requests[0]  # Windows asks exactly as before
+
+
+def test_a_windows_only_plugin_on_linux_says_so_and_writes_nothing(monkeypatch) -> None:
+    import pytest
+
+    from frontend import duckyos_account as acc
+
+    only_windows = {("windows", "x86_64"): THREE[("windows", "x86_64")]}
+    _requests, installs = _platform_store(monkeypatch, only_windows, os_name="linux", arch="x86_64", artifacts=False)
+    with pytest.raises(acc.DuckyOSAccountError) as no_build:
+        acc._store_download_and_install_unlocked("blender")
+    assert no_build.value.message == "This plugin has no Linux build yet"
+    assert no_build.value.code == "no_platform_build"
+    assert installs == []
+
+
+def test_a_linux_build_that_fails_its_hash_is_refused(monkeypatch) -> None:
+    import pytest
+
+    from frontend import duckyos_account as acc
+
+    _requests, installs = _platform_store(monkeypatch, THREE, os_name="linux", arch="aarch64")
+    real = acc._store_collect
+
+    def tampered(kind, body, **kw):
+        out = real(kind, body, **kw)
+        out["zipB64"] = base64.b64encode(_plugin_zip("evil")).decode()  # same size, other bytes
+        return out
+
+    monkeypatch.setattr(acc, "_store_collect", tampered)
+    with pytest.raises(acc.DuckyOSAccountError) as bad:
+        acc._store_download_and_install_unlocked("blender")
+    assert bad.value.code == "store_hash_mismatch"
+    assert installs == []
+
+
+def test_download_problem_names_the_missing_build() -> None:
+    from backend.store.plugin_artifacts import download_problem
+
+    lx = {"os": "linux", "arch": "x86_64", "sha256": "aa"}
+    assert download_problem({"sha256": "aa", "artifacts": [lx]}, "linux", "x86_64") == ""
+    assert download_problem({"sha256": "aa", "artifacts": [lx]}, "linux", "aarch64") == "This plugin has no Linux aarch64 build yet"
+    assert download_problem({"sha256": "bb", "artifacts": [lx]}, "linux", "x86_64").startswith("The Store sent a build for another platform")
+    assert download_problem({"sha256": "cc", "compiled": False}, "linux", "x86_64") == ""  # source runs anywhere
