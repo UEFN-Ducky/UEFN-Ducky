@@ -18,6 +18,17 @@ def _tts():
     return windows_tts
 
 
+def _stt():
+    """Desktop dictation backend for this OS (same API and events on Windows and Linux)."""
+    if sys.platform.startswith("linux"):
+        from backend.voice import linux_speech
+
+        return linux_speech
+    from backend.voice import windows_speech
+
+    return windows_speech
+
+
 def voice_transcribe_audio(self, b64_audio: str, mime: str = "audio/webm") -> dict[str, Any]:
     """Batch Whisper transcription (prefer via bridge_job_start)."""
     from backend.voice.transcription import transcribe_audio
@@ -46,35 +57,25 @@ def voice_win_tts_poll(self, job_id: str) -> dict[str, Any]:
 
 def voice_win_stt_prewarm(self) -> dict[str, Any]:
     """Spawn the Windows speech helper early so the first mic press starts fast."""
-    from backend.voice.windows_speech import prewarm
-
-    return prewarm()
+    return _stt().prewarm()
 
 
 def voice_win_stt_start(self, lang: str = "") -> dict[str, Any]:
     """Start Windows dictation (desktop mic, no key); returns session + poll cursor."""
-    from backend.voice.windows_speech import start_session
-
-    return start_session(str(lang or ""))
+    return _stt().start_session(str(lang or ""))
 
 
 def voice_win_stt_poll(self, session: str, cursor: int = 0, wait_ms: int = 400) -> dict[str, Any]:
     """Long-poll Windows dictation events (interim / final / ended)."""
-    from backend.voice.windows_speech import poll_session
-
-    return poll_session(str(session or ""), cursor, wait_ms)
+    return _stt().poll_session(str(session or ""), cursor, wait_ms)
 
 
 def voice_win_stt_stop(self, session: str) -> dict[str, Any]:
-    from backend.voice.windows_speech import stop_session
-
-    return stop_session(str(session or ""))
+    return _stt().stop_session(str(session or ""))
 
 
 def voice_win_stt_cancel(self, session: str) -> dict[str, Any]:
-    from backend.voice.windows_speech import cancel_session
-
-    return cancel_session(str(session or ""))
+    return _stt().cancel_session(str(session or ""))
 
 
 def voice_open_windows_settings(self, page: str) -> dict[str, Any]:
