@@ -387,7 +387,7 @@ def test_linux_cache_root_follows_xdg(tmp_path: Path, monkeypatch) -> None:
 def test_linux_build_folder_check(tmp_path: Path) -> None:
     app, bridge = be.linux_names(dev_build=False)
     assert "uefn-ducky" in be.missing_linux_files(tmp_path, app, bridge)
-    for name in (app, bridge, be.LINUX_LAUNCHER, "_internal/libportaudio.so.2",
+    for name in (app, bridge, be.LINUX_LAUNCHER, "_internal/libportaudio.so.2", "_internal/libXss.so.1",
                  *(f"_internal/models/search/{n}" for n in be.SEARCH_MODEL_FILES)):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_bytes(b"x")
@@ -412,6 +412,15 @@ def test_linux_build_deps_name_the_missing_headers() -> None:
     have.add("gobject-introspection-1.0")
     assert be.missing_linux_build_deps(run=run, which=lambda _: "/usr/bin/pkg-config") == []
     assert "libgirepository1.0-dev" in be.LINUX_BUILD_APT and "gir1.2-webkit2-4.1" in be.LINUX_BUILD_APT
+    assert "libxss1" in be.LINUX_BUILD_APT
+
+
+def test_spec_linux_branch_bundles_libxss_for_tkinter() -> None:
+    # libX* stays the host's, but libXss is not on every WebKitGTK host: it must ship.
+    assert 'LINUX_XSS = "libXss.so.1"' in SPEC_TEXT
+    assert "_linux_bins.append((str(_xss)" in SPEC_TEXT
+    assert "if dest in _tk_keep:" in SPEC_TEXT and "_webkit_libs -= _tk_keep" in SPEC_TEXT
+    assert "frozen build is missing {LINUX_XSS}" in SPEC_TEXT
 
 
 def test_linux_freeze_installs_pygobject_below_girepository_2() -> None:

@@ -448,7 +448,7 @@ LINUX_TARGETS = {
 }
 # PyGObject (the window's GTK backend) has no wheels: pip builds it against these headers, and
 # the GI typelibs the spec bundles come from the gir1.2 packages (WebKitGTK itself stays the host's).
-LINUX_BUILD_APT = ("libgirepository1.0-dev", "libcairo2-dev", "pkg-config", "gir1.2-gtk-3.0", "gir1.2-webkit2-4.1")
+LINUX_BUILD_APT = ("libgirepository1.0-dev", "libcairo2-dev", "pkg-config", "gir1.2-gtk-3.0", "gir1.2-webkit2-4.1", "libxss1")
 LINUX_BUILD_PKGCONFIG = ("gobject-introspection-1.0", "cairo")
 
 
@@ -514,8 +514,8 @@ def build_linux_launcher(
 
 def missing_linux_files(app_dir: Path, app: str, bridge: str) -> list[str]:
     """What a Linux build folder must hold to start: both entry points, the launcher,
-    PortAudio for the microphone and the search model."""
-    need = [app, bridge, LINUX_LAUNCHER, "_internal/libportaudio.so.2"]
+    PortAudio for the microphone, libXss for tkinter and the search model."""
+    need = [app, bridge, LINUX_LAUNCHER, "_internal/libportaudio.so.2", "_internal/libXss.so.1"]
     missing = [name for name in need if not (app_dir / name).is_file()]
     # The window: PyGObject's extension and the WebKit2 typelib (pywebview's GTK backend).
     if not any((app_dir / "_internal" / "gi").glob("_gi*.so")):

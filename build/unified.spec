@@ -54,6 +54,9 @@ LINUX_HOST_LIBS = (
     "libwayland", "libdbus-1.",
 )
 LINUX_WEBKIT = "libwebkit2gtk-4.1.so.0"
+# Tk's X screensaver library: the frozen _tkinter links it (webview_app imports tkinter on every
+# start), WebKitGTK does not, so a host with WebKitGTK may lack it (no libxss1: fatal ImportError).
+LINUX_XSS = "libXss.so.1"
 LINUX_HOST_DIRS = ("gio_modules", "lib/gio", "lib/gdk-pixbuf", "lib/gtk-3.0")
 # PyInstaller's GTK/GIO/pixbuf runtime hooks point GTK at bundled data and modules (themes,
 # input methods, TLS); with the host's GTK the host's own must stay. pyi_rth_gi (typelibs) stays.
@@ -334,6 +337,10 @@ if LINUX:
             "not work in the AppImage. Install libportaudio2 on the build machine."
         )
     _linux_bins.append((str(_pa), "."))
+    _xss = next((Path(d) / LINUX_XSS for d in LINUX_LIB_DIRS if (Path(d) / LINUX_XSS).is_file()), None)
+    if _xss is None:
+        raise RuntimeError(f"unified.spec: {LINUX_XSS} not found in {LINUX_LIB_DIRS}: apt install libxss1")
+    _linux_bins.append((str(_xss), "."))
     _linux_hidden = ["ptyprocess", "sounddevice", "_sounddevice", "jeepney", "keyring"]
     # sounddevice's wheel data package (PortAudio builds for Windows/macOS) when present.
     if importlib.util.find_spec("_sounddevice_data") is not None:
@@ -467,9 +474,16 @@ if LINUX:
     if _webkit is None:
         raise RuntimeError(f"unified.spec: {LINUX_WEBKIT} not found in {LINUX_LIB_DIRS}: apt install gir1.2-webkit2-4.1")
     _webkit_libs = _ldd(_webkit)
+    # Whatever Tk links beyond WebKitGTK's closure is not on every WebKitGTK host: it ships.
+    _tk_keep = {LINUX_XSS}
+    for _e in a.binaries:
+        if Path(str(_e[0])).name.startswith(("_tkinter", "libtk", "libtcl")):
+            _tk_keep |= _ldd(_e[1]) - _webkit_libs
 
     def _host_side(entry) -> bool:
         dest = str(entry[0]).replace("\\", "/")
+        if dest in _tk_keep:
+            return False
         # Top level only: system libraries land there; wheels keep their own (pillow.libs/...).
         top = "/" not in dest and (dest.startswith(LINUX_HOST_LIBS) or dest in _webkit_libs)
         return top or dest.startswith(LINUX_HOST_DIRS)
@@ -477,7 +491,10 @@ if LINUX:
     for _e in [e for e in a.binaries if _host_side(e)]:
         _webkit_libs |= _ldd(_e[1])  # ldd is transitive: one pass covers the closure
     _webkit_libs.discard(LINUX_PORTAUDIO)
+    _webkit_libs -= _tk_keep
     a.binaries = [e for e in a.binaries if not _host_side(e)]
+    if not any(str(e[0]) == LINUX_XSS for e in a.binaries):
+        raise RuntimeError(f"unified.spec: frozen build is missing {LINUX_XSS} (tkinter)")
     a.datas = [e for e in a.datas if not str(e[0]).startswith(LINUX_HOST_DIRS)]
     a.scripts = [e for e in a.scripts if e[0] not in LINUX_HOST_RTH]
 

@@ -105,11 +105,44 @@ def _check_gtk_window() -> dict:
     view = WebKit2.WebView()
     view.destroy()
     import webview.platforms.gtk  # noqa: F401  (what webview.start(gui="gtk") loads)
+
+    # webview_app imports tkinter on every start: a frozen _tkinter missing libXss.so.1 died
+    # there while this smoke still passed.
+    import tkinter
+
+    root = tkinter.Tk()
+    root.destroy()
     return {
         "gi": gi.__version__,
         "gtk": f"{Gtk.get_major_version()}.{Gtk.get_minor_version()}.{Gtk.get_micro_version()}",
         "webkit2": f"4.1 ({WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.{WebKit2.get_micro_version()})",
+        "tk": tkinter.TkVersion,
+        "page_started_seconds": _start_real_window(),
     }
+
+
+def _start_real_window(timeout: float = 30.0, webview_mod=None) -> float:
+    """The real start: ``webview.start(gui="gtk", icon=<the app's icon>)`` until the page
+    loads. A .ico icon made GTK create no window, which an unshown WebView never sees."""
+    import threading
+
+    from frontend.ui_web.webview_app import webview_icon_path
+
+    if webview_mod is None:
+        import webview as webview_mod
+    started = time.perf_counter()
+    loaded = threading.Event()
+    window = webview_mod.create_window("UEFN Ducky smoke", html="<p>smoke</p>", hidden=False)
+    window.events.loaded += loaded.set
+
+    def watch() -> None:
+        loaded.wait(timeout)
+        window.destroy()
+
+    webview_mod.start(watch, gui="gtk", icon=str(webview_icon_path()))
+    if not loaded.is_set():
+        raise RuntimeError(f"window page did not start within {timeout:.0f}s")
+    return round(time.perf_counter() - started, 2)
 
 
 def check_panel_recovery(output: str) -> int:

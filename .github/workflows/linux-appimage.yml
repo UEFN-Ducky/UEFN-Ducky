@@ -59,7 +59,7 @@ jobs:
           # ripgrep: the panel's prebuild (scripts/check-shipped-ui.mjs) greps with rg.
           sudo apt-get install -y libgtk-3-dev libportaudio2 xvfb ripgrep
           # PyGObject builds from source; the freeze bundles its typelibs (build_exes.LINUX_BUILD_APT).
-          sudo apt-get install -y libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-gtk-3.0 gir1.2-webkit2-4.1
+          sudo apt-get install -y libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-gtk-3.0 gir1.2-webkit2-4.1 libxss1
       - name: Panel dependencies
         run: npm ci --prefix ducky_app/frontend/ui_web/web
       # build/ and release/ sit outside pytest's testpaths: run the packaging tests here.
