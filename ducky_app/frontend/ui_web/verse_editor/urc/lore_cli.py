@@ -259,6 +259,8 @@ def _files_only(project_root: str, entries: list[tuple[str, str]]) -> list[tuple
 
 def _run_lore(project_root: str, args: list[str], timeout: float) -> tuple[bool, str]:
     """Run ``lore.exe -P --repository <root> <args>``. Returns (ok, stdout or error)."""
+    if sys.platform.startswith("linux"):
+        return _run_lore_wine(project_root, args, timeout)
     detected = detect_lore_executable()
     if not detected.get("available"):
         return False, str(detected.get("error") or "lore.exe not found")
@@ -275,6 +277,42 @@ def _run_lore(project_root: str, args: list[str], timeout: float) -> tuple[bool,
         kwargs["creationflags"] = _CREATE_NO_WINDOW
     try:
         proc = subprocess.run(cmd, **kwargs)  # type: ignore[arg-type]
+    except subprocess.TimeoutExpired:
+        return False, f"lore {args[0]} timed out after {timeout:g}s"
+    except OSError as exc:
+        return False, f"lore {args[0]} failed: {exc}"
+    stdout = proc.stdout or ""
+    if proc.returncode != 0 or stdout.lstrip().startswith("[Error]"):
+        err = (proc.stderr or stdout).strip().splitlines()
+        return False, (err[0] if err else f"lore {args[0]} exited {proc.returncode}")
+    return True, stdout
+
+
+def lore_wine_command(project_root: str, args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """UEFN under Wine/Proton: ``lore.exe`` from the editor's folder, run in its prefix, with the
+    island path as the prefix sees it (``Z:\\home\\...``). RuntimeError when it is not there."""
+    import os
+
+    from backend.tools.uefn.proton import find_prefix, prefix_tool, to_windows, wine_command
+
+    pre = find_prefix()
+    override = os.environ.get("LORE_CLI_LOCATION", "").strip()
+    exe = Path(override) if override and Path(override).is_file() else prefix_tool(pre, "lore.exe")
+    if exe is None:
+        raise RuntimeError(f"lore.exe not found beside {pre.exe} — set LORE_CLI_LOCATION")
+    return wine_command(pre, exe, ["-P", "--repository", to_windows(pre.pfx, project_root), *args])
+
+
+def _run_lore_wine(project_root: str, args: list[str], timeout: float) -> tuple[bool, str]:
+    import os
+
+    try:
+        cmd, env = lore_wine_command(project_root, args)
+    except RuntimeError as exc:
+        return False, str(exc)
+    try:
+        proc = subprocess.run(cmd, cwd=project_root, env={**os.environ, **env}, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return False, f"lore {args[0]} timed out after {timeout:g}s"
     except OSError as exc:

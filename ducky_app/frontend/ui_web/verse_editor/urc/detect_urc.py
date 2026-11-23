@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 _DRIVE_LETTERS = "CDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -48,4 +49,13 @@ def detect_urc_executable() -> dict[str, object]:
 
 def detect_lore_executable() -> dict[str, object]:
     """Return {available, path, source, error} for the Lore CLI UEFN ships next to urc.exe."""
-    return _detect("lore.exe", ("LORE_CLI_LOCATION",))
+    out = _detect("lore.exe", ("LORE_CLI_LOCATION",))
+    if out["available"] or not sys.platform.startswith("linux"):
+        return out
+    try:  # UEFN under Wine/Proton: beside the editor in its prefix
+        from backend.tools.uefn.proton import find_prefix, prefix_tool
+
+        exe = prefix_tool(find_prefix(), "lore.exe")
+    except RuntimeError:
+        exe = None
+    return {"available": True, "path": str(exe), "source": "wine_prefix", "error": ""} if exe else out

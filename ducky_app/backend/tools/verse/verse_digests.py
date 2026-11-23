@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -183,7 +184,28 @@ def _saved_verse_names(project_name: str = "") -> list[str]:
     return names
 
 
+# UEFN under Wine/Proton keeps Saved/VerseProject in its prefix's %LOCALAPPDATA%.
+_LINUX = sys.platform.startswith("linux")
+
+
+def _wine_verse_project_dir(project_name: str = "") -> str:
+    try:
+        from backend.tools.uefn.proton import find_prefix, local_appdata_dirs
+
+        bases = local_appdata_dirs(find_prefix())
+    except RuntimeError:
+        return ""  # no UEFN prefix on this PC
+    for base in bases:
+        for name in _saved_verse_names(project_name):
+            path = os.path.join(str(base), "UnrealEditorFortnite", "Saved", "VerseProject", name)
+            if os.path.isdir(path):
+                return path
+    return ""
+
+
 def _verse_project_dir(project_name: str = "") -> str:
+    if _LINUX:
+        return _wine_verse_project_dir(project_name)
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("USERPROFILE") or ""
     if not base:
         return ""

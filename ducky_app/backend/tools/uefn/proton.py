@@ -188,19 +188,36 @@ def find_prefix(home: Path | None = None) -> UefnPrefix:
 # --- launch ---------------------------------------------------------------
 
 
-def launch_command(pre: UefnPrefix, project: str | os.PathLike[str] | None = None) -> tuple[list[str], dict[str, str]]:
-    """argv and the extra environment that start the editor in its prefix."""
-    args = [str(pre.exe), *[a for a in pre.extra if a.strip()]]
-    if project:
-        args.append(f"-ValkyrieProject={to_windows(pre.pfx, project)}")
+def local_appdata_dirs(pre: UefnPrefix) -> list[Path]:
+    """``%LOCALAPPDATA%`` of the prefix's users (``steamuser`` under Proton, ``$USER`` under Wine)."""
+    return [p for p in sorted(pre.pfx.glob("drive_c/users/*/AppData/Local")) if p.parent.parent.name != "Public"]
+
+
+def prefix_tool(pre: UefnPrefix, name: str) -> Path | None:
+    """A tool UEFN ships beside its editor (``lore.exe``, ``urc.exe``) in FortniteGame/Binaries/Win64."""
+    dirs = [pre.exe.parent]
+    if len(pre.exe.parents) > 3:
+        dirs.append(pre.exe.parents[3] / "FortniteGame" / "Binaries" / "Win64")
+    return next((d / name for d in dirs if (d / name).is_file()), None)
+
+
+def wine_command(pre: UefnPrefix, exe: str | os.PathLike[str], args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """argv and the extra environment that run one Windows exe in the prefix."""
     if pre.runner == "proton":
         env = {"STEAM_COMPAT_DATA_PATH": str(pre.compat or pre.pfx.parent)}
         steam = next(iter(_steam_roots(_home())), None)
         if steam:
             env["STEAM_COMPAT_CLIENT_INSTALL_PATH"] = str(steam)
-        return [pre.bin, "run", *args], env
-    return [pre.bin, *args], {"WINEPREFIX": str(pre.pfx)}
+        return [pre.bin, "run", str(exe), *args], env
+    return [pre.bin, str(exe), *args], {"WINEPREFIX": str(pre.pfx)}
 
+
+def launch_command(pre: UefnPrefix, project: str | os.PathLike[str] | None = None) -> tuple[list[str], dict[str, str]]:
+    """argv and the extra environment that start the editor in its prefix."""
+    args = [a for a in pre.extra if a.strip()]
+    if project:
+        args.append(f"-ValkyrieProject={to_windows(pre.pfx, project)}")
+    return wine_command(pre, pre.exe, args)
 
 def _start(pre: UefnPrefix, project: Path | None) -> list[str]:
     import subprocess
