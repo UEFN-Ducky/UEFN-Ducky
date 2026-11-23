@@ -46,6 +46,16 @@ def test_connection_refused_is_panel_not_open(monkeypatch):
     monkeypatch.setattr(rpc_mod, "_http", fake_http)
     out = rpc_mod.panel_rpc("ask_user", {}, timeout=float("inf"))
     assert out.get("error") == "panel not open"
+    assert "timed_out" not in out
+
+
+def test_a_request_the_app_answers_late_says_so(monkeypatch):
+    """It reached the app (which may act on it): callers must not treat it as no app."""
+    def fake_http(method: str, url: str, body, timeout: float):
+        raise rpc_mod._Unreachable("timed out", timed_out=True)
+
+    monkeypatch.setattr(rpc_mod, "_http", fake_http)
+    assert rpc_mod.panel_rpc("workflow_start", {}, timeout=10.0) == {"error": "panel not open", "timed_out": True}
 
 
 def test_question_gate_retries_until_answer_and_fails_closed(monkeypatch):

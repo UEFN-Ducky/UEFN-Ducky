@@ -775,13 +775,22 @@ async def _record_release_run(plugin: str, workflow_id: str, known: set[str], ru
         await asyncio.sleep(0.05)
 
 
+# run_id -> the thread running it here: a start request asked again (its first answer came
+# late) finds the run it already started. ponytail: ids are kept for the app's life (a few
+# per session); prune finished ones if that ever grows.
+_STARTED: dict[str, threading.Thread] = {}
+_STARTED_LOCK = threading.Lock()
+
+
 def start_background_run(workflow_id: str, run_id: str, caller: str, *, prompt: str = "",
                          files: list[Any] | None = None, payload: dict[str, Any] | None = None,
                          trigger_id: str = "", started_by: str = "") -> threading.Thread:
     """Run a workflow on its own thread in this process; the caller chat hears when it ends.
     The app calls this for agents (``workflow_start`` on ``/__panel_rpc``): a run inside the
     shared tool server died with it ("The process running this workflow ended") whenever that
-    server restarted or idled out, Nov 3 2026, five releases in one morning."""
+    server restarted or idled out, Nov 3 2026, five releases in one morning.
+
+    One run id starts once: asked again, it returns the thread already running it."""
     from backend.automations.runner import public_payload
     from backend.automations.runner import run_workflow as _run
 
@@ -807,26 +816,43 @@ def start_background_run(workflow_id: str, run_id: str, caller: str, *, prompt: 
                 reset(token)
         _tell_caller(caller, workflow_id, out)
 
-    thread = threading.Thread(target=contextvars.copy_context().run, args=(work,),
-                              name=f"workflow-{workflow_id}-{run_id}", daemon=True)
-    thread.start()
+    with _STARTED_LOCK:
+        if run_id and run_id in _STARTED:
+            return _STARTED[run_id]
+        thread = threading.Thread(target=contextvars.copy_context().run, args=(work,),
+                                  name=f"workflow-{workflow_id}-{run_id}", daemon=True)
+        if run_id:
+            _STARTED[run_id] = thread
+        thread.start()
     return thread
 
 
+# How long each ask waits: a late first answer is asked again (the app starts a run id once).
+_APP_START_WAITS = (10.0, 30.0)
+
+
 def _start_in_app(workflow_id: str, run_id: str, caller: str, *, prompt: str, files: list[Any] | None,
-                  payload: dict[str, Any] | None, trigger_id: str) -> bool:
-    """Ask the app to run it (it lives as long as Ducky is open); False when it can't."""
+                  payload: dict[str, Any] | None, trigger_id: str) -> bool | None:
+    """Ask the app to run it (it lives as long as Ducky is open). True: the app runs it.
+    False: no app took it (run it here). None: the app got the request but never answered,
+    so it may be running it: never start a second copy here."""
     from backend.panel.rpc import panel_rpc
 
-    try:
-        out = panel_rpc("workflow_start", {
-            "workflow_id": workflow_id, "run_id": run_id, "caller": caller, "prompt": prompt,
-            "files": files or [], "payload": payload or {}, "trigger_id": trigger_id,
-            "started_by": _caller_chat(""),
-        }, timeout=10.0)
-    except Exception:
-        return False
-    return bool(out.get("ok"))
+    params = {
+        "workflow_id": workflow_id, "run_id": run_id, "caller": caller, "prompt": prompt,
+        "files": files or [], "payload": payload or {}, "trigger_id": trigger_id,
+        "started_by": _caller_chat(""),
+    }
+    for wait in _APP_START_WAITS:
+        try:
+            out = panel_rpc("workflow_start", params, timeout=wait)
+        except Exception:
+            return False
+        if out.get("ok"):
+            return True
+        if not out.get("timed_out"):
+            return False  # refused: no app there
+    return None
 
 
 def _caller_chat(conv_id: str) -> str:
@@ -969,10 +995,17 @@ async def run_workflow(
     if not plugin:
         # ponytail: plugin releases and wait=true stay here (the caller is connected the whole
         # time, and a release run's bookkeeping watches this process); move them when one dies.
-        if not wait and await asyncio.to_thread(
-                _start_in_app, workflow_id, run_id, caller, prompt=prompt, files=files,
-                payload=public_payload(payload), trigger_id=trigger_id):
+        in_app = None if wait else await asyncio.to_thread(
+            _start_in_app, workflow_id, run_id, caller, prompt=prompt, files=files,
+            payload=public_payload(payload), trigger_id=trigger_id)
+        if in_app:
             return tool_json({"ok": True, "run_id": run_id, "status": "running", "workflow": workflow_id},
+                             pretty=pretty)
+        if in_app is None and not wait:
+            # A second copy here could publish a release twice: the app has the request.
+            return tool_json({"ok": True, "run_id": run_id, "status": "requested", "workflow": workflow_id,
+                              "note": "The app took the start request but answered late. It starts this "
+                                      "run at most once; don't start it again. This chat hears when it ends."},
                              pretty=pretty)
         return await result(start())
     else:

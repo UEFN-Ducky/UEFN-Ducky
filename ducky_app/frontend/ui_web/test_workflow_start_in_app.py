@@ -16,7 +16,16 @@ def _quiet(monkeypatch) -> list[tuple]:
     monkeypatch.setattr(pa, "_reveal_graph", lambda *a, **k: None)
     monkeypatch.setattr(pa, "release_plugin_of", lambda wid, payload: "")
     monkeypatch.setattr(pa, "_tell_caller", lambda chat, wid, out: told.append((chat, wid, out)))
+    monkeypatch.setattr(pa, "_STARTED", {})  # run ids this test starts are its own
     return told
+
+
+def _wait_for(check, seconds: float = 5.0) -> bool:
+    for _ in range(int(seconds / 0.02)):
+        if check():
+            return True
+        threading.Event().wait(0.02)
+    return check()
 
 
 def test_the_app_runs_it_when_it_answers(monkeypatch):
@@ -35,16 +44,61 @@ def test_the_app_runs_it_when_it_answers(monkeypatch):
 
 def test_without_the_app_it_still_runs_here(monkeypatch):
     told = _quiet(monkeypatch)
-    monkeypatch.setattr("backend.panel.rpc.panel_rpc", lambda method, params, timeout=30.0: {"error": "panel not open"})
-    ran = threading.Event()
-    monkeypatch.setattr(runner, "run_workflow", lambda wid, **k: ran.set() or {"ok": True, "id": wid, "run": k["run_id"]})
+    asked: list[str] = []
+    monkeypatch.setattr("backend.panel.rpc.panel_rpc",
+                        lambda method, params, timeout=30.0: asked.append(method) or {"error": "panel not open"})
+    runs: list[str] = []
+    monkeypatch.setattr(runner, "run_workflow", lambda wid, **k: runs.append(k["run_id"]) or {"ok": True, "id": wid, "run": k["run_id"]})
     out = json.loads(asyncio.run(pa.run_workflow("rel", caller_conv_id="lead")))
-    assert out["ok"] and ran.wait(5)
-    for _ in range(50):
-        if told:
-            break
-        threading.Event().wait(0.05)
-    assert told and told[0][0] == "lead"
+    assert out["ok"] and out["status"] == "running" and _wait_for(lambda: told)
+    assert runs == [out["run_id"]] and asked == ["workflow_start"]  # refused: asked once, ran here once
+    assert len(told) == 1 and told[0][0] == "lead"
+
+
+def _late_app(monkeypatch, answers: list[dict]) -> tuple[list[str], list[str], threading.Event]:
+    """An app that starts every request it gets (as /__panel_rpc does) but answers with
+    ``answers`` in turn: a timed-out answer means the request reached it all the same."""
+    asked: list[str] = []
+    runs: list[str] = []
+    gate = threading.Event()
+
+    def late(method, params, timeout=30.0):
+        asked.append(params["run_id"])
+        pa.start_background_run(params["workflow_id"], params["run_id"], params["caller"])
+        return answers[len(asked) - 1]
+
+    def run(wid, **k):
+        runs.append(k["run_id"])
+        gate.wait(5)  # still running when it is asked again
+        return {"ok": True, "id": wid, "run": k["run_id"]}
+
+    monkeypatch.setattr("backend.panel.rpc.panel_rpc", late)
+    monkeypatch.setattr(runner, "run_workflow", run)
+    return asked, runs, gate
+
+
+def test_a_late_app_answer_never_starts_the_run_twice(monkeypatch):
+    told = _quiet(monkeypatch)
+    late = {"error": "panel not open", "timed_out": True}
+    asked, runs, gate = _late_app(monkeypatch, [late, {"ok": True}])
+    out = json.loads(asyncio.run(pa.run_workflow("rel", caller_conv_id="lead")))
+    assert out["ok"] and out["status"] == "running"
+    assert asked == [out["run_id"], out["run_id"]]  # asked again with the same run id
+    gate.set()
+    assert _wait_for(lambda: told)
+    pa._STARTED[out["run_id"]].join(5)
+    assert runs == [out["run_id"]] and len(told) == 1  # one run, one notice
+
+
+def test_an_app_that_never_answers_keeps_the_run_and_none_starts_here(monkeypatch):
+    told = _quiet(monkeypatch)
+    late = {"error": "panel not open", "timed_out": True}
+    asked, runs, gate = _late_app(monkeypatch, [late, late])
+    out = json.loads(asyncio.run(pa.run_workflow("rel", caller_conv_id="lead")))
+    assert out["ok"] and out["status"] == "requested" and "don't start it again" in out["note"]
+    gate.set()
+    pa._STARTED[out["run_id"]].join(5)
+    assert runs == [out["run_id"]] and len(told) == 1 and len(asked) == 2
 
 
 def test_the_apps_rpc_starts_the_run_in_the_app(monkeypatch, tmp_path):

@@ -104,8 +104,10 @@ def _panel_rpc(method: str, params: dict[str, Any] | None, timeout: float, holde
     url = _rpc_url()
     try:
         resp = _http("POST", url, body, timeout=min(_ROUND_TIMEOUT_S, float(timeout) + 2.0))
-    except _Unreachable:
-        return {"error": "panel not open"}
+    except _Unreachable as exc:
+        # timed_out: the app took the request but answered late, so it may have acted on it
+        # (run_workflow must not then start the same run itself).
+        return {"error": "panel not open", "timed_out": True} if exc.timed_out else {"error": "panel not open"}
 
     while resp.get("pending"):
         request_id = str(resp.get("request_id") or "")
