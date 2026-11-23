@@ -280,7 +280,7 @@ def _child(name: str) -> int:
 
 @pytest.mark.parametrize("name", CASES)
 def test_case(name: str) -> None:
-    env = {**os.environ, "PYTHONPATH": str(APP), "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS": "1"}
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, (str(APP), os.environ.get("PYTHONPATH")))), "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS": "1"}
     proc = subprocess.run([sys.executable, __file__, name], cwd=APP, env=env, capture_output=True,
                           text=True, timeout=120)
     if proc.returncode == NO_WEBKIT:

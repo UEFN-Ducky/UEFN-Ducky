@@ -670,7 +670,11 @@ def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
 
 def install(bo: Any) -> None:
     """Point browser_overlay's WebView2-only pieces at these. Its pane bookkeeping,
-    open/close/bounds/navigate/back/forward code then runs as it is on Windows."""
+    open/close/bounds/navigate/back/forward code then runs as it is on Windows. The WebView2
+    originals stay in ``bo._webview2`` (its tests drive them with fakes on any OS)."""
+    names = ("_ui", "_ui_sync", "_on_ui_thread", "_create_control", "_apply_bounds",
+             "snapshot", "evaluate", "devtools", "clear_browsing_data")
+    bo.__dict__.setdefault("_webview2", {n: getattr(bo, n) for n in names})
     bo._ui, bo._ui_sync, bo._on_ui_thread = ui, ui_sync, on_ui_thread
     bo._create_control, bo._apply_bounds = create_control, apply_bounds
     bo.snapshot, bo.evaluate, bo.devtools = snapshot, evaluate, devtools

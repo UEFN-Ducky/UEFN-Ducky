@@ -4,6 +4,31 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _webview2_host(monkeypatch) -> None:
+    """These tests drive the WebView2 host with fakes. On Linux gtk_panes put the WebKitGTK
+    host in its place (tested in native_host/test_pane_host_linux.py): put WebView2 back."""
+    from frontend.ui_web import browser_overlay as bo
+
+    for name, fn in getattr(bo, "_webview2", {}).items():
+        monkeypatch.setattr(bo, name, fn)
+
+
+def test_linux_host_refuses_scripts_and_devtools_on_sites_the_person_uses(monkeypatch) -> None:
+    """The WebKitGTK host keeps the Windows refusals; they come before any GTK call."""
+    from frontend.native_host import gtk_panes
+    from frontend.ui_web import browser_overlay as bo
+
+    monkeypatch.setattr(bo, "agent_sites", lambda: [])
+    monkeypatch.setitem(bo._panes, "ev", bo._Pane(pane_id="ev", window=None, control=object(), ready=True,
+                                                  url="https://mail.google.com/"))
+    assert "only run" in gtk_panes.evaluate("ev", "document.cookie")["error"]
+    assert "only run" in gtk_panes.devtools("ev", "Page.captureScreenshot")["error"]
+    assert gtk_panes.devtools("missing", "Input.insertText")["error"] == "pane not open"
+
 
 def test_normalize_url() -> None:
     from frontend.ui_web.browser_overlay import normalize_url
