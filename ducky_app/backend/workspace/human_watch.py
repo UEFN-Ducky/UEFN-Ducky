@@ -393,7 +393,8 @@ def _gdbus(args: list[str]) -> tuple[int, str]:
     import subprocess
 
     try:
-        done = subprocess.run(["gdbus", "call", "--session", *args], capture_output=True, text=True, timeout=3)
+        done = subprocess.run(["gdbus", "call", "--session", *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=3)
     except (OSError, subprocess.TimeoutExpired):
         return 127, ""
     return done.returncode, done.stdout
