@@ -355,6 +355,14 @@ def test_list_workflow_nodes_for_one_plugin_is_small(monkeypatch):
     assert any(n["type"] == "tool.call" for n in json.loads(list_workflow_nodes())["nodes"])  # no filter: unchanged
 
 
+def _join_runs(workflow_id: str) -> None:
+    """Wait for this test's run threads: one still ending after its test called the next test's
+    patched send_notice, and that test saw two finish notices (Linux CI, Nov 23 2026)."""
+    for thread in [t for t in threading.enumerate() if t.name.startswith(f"workflow-{workflow_id}-")]:
+        thread.join(10)
+        assert not thread.is_alive(), thread.name
+
+
 _RELEASE_GRAPH = {"nodes": [
     {"id": "in", "type": "flow.input", "config": {"inputs": [{"name": "plugin", "default": "island-media-kit"}]}},
     {"id": "repo", "type": "tool.call", "config": {"name": "ducky_plugin_find_repo", "arguments": {"plugin": "{{plugin}}"}}},
@@ -418,6 +426,7 @@ def test_release_workflow_holds_the_plugin_and_refuses_a_second_run(monkeypatch,
         finish.set()
 
     asyncio.run(check())
+    _join_runs("rel")
 
 
 def _slow_run(monkeypatch):
@@ -460,7 +469,9 @@ def test_run_workflow_returns_at_once_and_tells_the_caller_when_it_ends(monkeypa
         return out["run_id"]
 
     run_id = asyncio.run(check())
-    assert len(notices) == 1 and notices[0]["receiver_conv_id"] == "lead"
+    _join_runs("rel")  # the run is over: nothing can still add a notice
+    assert len(notices) == 1, notices  # exactly one finish notice
+    assert notices[0]["receiver_conv_id"] == "lead" and notices[0]["sender_conv_id"] == "workflow:rel"
     assert f"UEFN Ducky Release finished: ok (run `{run_id}`)" in notices[0]["body"]
     assert "Released 1.2.3" in notices[0]["body"]
 
@@ -480,4 +491,5 @@ def test_cancelling_the_callers_turn_leaves_the_run_going(monkeypatch):
 
     asyncio.run(check())
     assert ended.wait(5)  # the run finished after its caller's turn was cancelled
+    _join_runs("rel")
     assert notices == []  # wait=true: the caller's own tool result is the report
