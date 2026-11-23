@@ -24,6 +24,64 @@ def _epic_mcp_tcp_up(host: str = "127.0.0.1", port: int = 8000, timeout: float =
         return False
 
 
+_EPIC_PORT = 8000
+_WINE_PROBE_S = 1.0
+_WINE_EVERY_S = 2.0
+
+
+def _under_wine() -> bool:
+    """UEFN's Python says win32 under Wine/Proton too; Wine's ntdll gives it away."""
+    if os.environ.get("WINEPREFIX") or os.environ.get("STEAM_COMPAT_DATA_PATH"):
+        return True
+    try:
+        import ctypes
+
+        return hasattr(ctypes.WinDLL("ntdll"), "wine_get_version")
+    except Exception:
+        return False
+
+
+def _wine_grace_s() -> float:
+    # ponytail: calibration knob; Toolsets under Proton bound :8000 ~20 s after boot.
+    try:
+        return float(os.environ.get("UEFN_DUCKY_EPIC_GRACE_S") or 60.0)
+    except ValueError:
+        return 60.0
+
+
+def _defer_epic_check(grace: float | None = None, every: float = _WINE_EVERY_S) -> None:
+    """Under Wine, Epic's Toolsets bind :8000 well after this boot file runs.
+
+    Probe from the slate tick (a refused loopback connect returns at once) until
+    it is up or ``grace`` runs out; only then call StartServer, so a slow Toolsets
+    start is never fought.
+    """
+    import time
+
+    deadline = time.monotonic() + (_wine_grace_s() if grace is None else grace)
+    state: dict = {"next": 0.0, "handle": None}
+
+    def tick(_dt: float) -> None:
+        now = time.monotonic()
+        if state["handle"] is None or now < state["next"]:
+            return
+        state["next"] = now + every
+        up = _epic_mcp_tcp_up(port=_EPIC_PORT, timeout=_WINE_PROBE_S)
+        if not up and now < deadline:
+            return
+        unreal.unregister_slate_post_tick_callback(state["handle"])
+        state["handle"] = None
+        if up:
+            log_msg(f"Epic MCP came up on :{_EPIC_PORT} under Wine — skip StartServer")
+            return
+        try:
+            _ensure_epic_mcp()
+        except Exception:
+            pass
+
+    state["handle"] = unreal.register_slate_post_tick_callback(tick)
+
+
 def _running_this_code() -> bool:
     """True when a live listener was started from the source that is loaded now."""
     thread = unreal._mcp_server_thread
@@ -63,6 +121,9 @@ def run(*, ensure_epic: bool | None = None) -> None:
                 ensure_epic = True
             else:
                 # auto: do not interfere when Epic UEFN MCP Toolsets already bound :8000
+                if _under_wine() and not _epic_mcp_tcp_up(port=_EPIC_PORT, timeout=_WINE_PROBE_S):
+                    _defer_epic_check()
+                    return
                 ensure_epic = not _epic_mcp_tcp_up()
         if ensure_epic:
             try:
