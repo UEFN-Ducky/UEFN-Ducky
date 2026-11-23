@@ -32,6 +32,19 @@ def card_badge(manifest: dict[str, Any], os_name: str | None = None, arch: str |
     return mp.platform_label(manifest) if load_problem(manifest, os_name, arch) else ""
 
 
+def store_badge(plugin_id: str) -> str:
+    """The Store row's badge for an installed plugin whose build can't load here, else ''.
+
+    ponytail: installed plugins only; catalog rows get one when the Store sends each
+    record's python_abi (the install already picks the right artifact)."""
+    try:
+        from backend.uefn_plugins.store import load_plugin_manifest
+
+        return card_badge(load_plugin_manifest(plugin_id) or {})
+    except Exception:  # noqa: BLE001 - an unreadable manifest gets no badge, the row still shows
+        return ""
+
+
 def find_compiled(root: Path, manifest: dict[str, Any], mod_name: str, os_name: str | None = None) -> Path | None:
     """The compiled module at the plugin root: ``backend.compiled`` when present, else the
     newest ``<mod_name>*<suffix>`` for this OS."""

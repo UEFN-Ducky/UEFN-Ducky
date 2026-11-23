@@ -2219,10 +2219,7 @@ def store_catalog() -> dict[str, Any]:
         seen_slugs.add(slug)
 
     # Local-only / bundled plugins not in the remote catalog.
-    from backend.uefn_plugins.plugin_version import (
-        format_plugin_version as _fmt_pv,
-        plugin_version_rank as _rank_pv,
-    )
+    from backend.uefn_plugins.plugin_version import format_plugin_version as _fmt_pv, plugin_version_rank as _rank_pv
 
     for pid, plug in installed_plugins.items():
         if pid in seen_slugs:
@@ -2246,6 +2243,9 @@ def store_catalog() -> dict[str, Any]:
                 **_local_plugin_icon_fields(plug),
             }
         )
+    from backend.uefn_plugins.loader_platform import store_badge
+    for it in items_out:  # 'Windows only' on an installed build this OS can't load
+        it["platform_badge"] = store_badge(it["slug"]) if it["slug"] in installed_plugins else ""
     # Private audiences are optional: only when the spaces provider says so does the
     # library show its Shared category.
     try:

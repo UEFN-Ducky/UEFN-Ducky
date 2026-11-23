@@ -53,3 +53,16 @@ def test_windows_still_loads_its_pyd(tmp_path: Path) -> None:
 def test_wrong_cpu_is_named() -> None:
     with pytest.raises(lp.PlatformError, match="no Linux aarch64 build yet"):
         lp.check_loadable(LINUX_BUILD, "linux", "arm64")
+
+
+def test_store_badge_reads_the_installed_manifest(monkeypatch) -> None:
+    from backend.uefn_plugins import manifest_platform, store
+
+    manifests = {"win": WINDOWS_BUILD, "src": SOURCE}
+    monkeypatch.setattr(store, "load_plugin_manifest", lambda pid: manifests.get(pid))
+    monkeypatch.setattr(manifest_platform, "host_os", lambda: "linux")
+    monkeypatch.setattr(manifest_platform, "host_arch", lambda: "x86_64")
+    assert lp.store_badge("win") == "Windows only"
+    assert lp.store_badge("src") == "" and lp.store_badge("gone") == ""
+    monkeypatch.setattr(store, "load_plugin_manifest", lambda pid: 1 / 0)
+    assert lp.store_badge("win") == ""  # an unreadable manifest gets no badge
