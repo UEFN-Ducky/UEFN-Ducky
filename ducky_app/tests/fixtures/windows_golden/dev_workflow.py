@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[4]
@@ -99,15 +100,25 @@ def pytest_setup() -> dict:
 
 def collected_tests() -> int:
     """``python -m pytest --collect-only`` from the repo root, as the person runs it."""
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "COV_"))}
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
-        cwd=REPO, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
-    )
-    tail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else proc.stderr[-2000:]
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "COV_", "DUCKY_TESTS_"))}
+    # Run inside a test, LOCALAPPDATA is that test's AppData: the child's real-AppData guard
+    # would watch it and fail with rc 3 when the parent's leftover threads write there.
+    # The child gets an empty AppData of its own, which nothing else writes into.
+    with tempfile.TemporaryDirectory(prefix="ducky-golden-collect-", ignore_cleanup_errors=True) as home:
+        env.update(LOCALAPPDATA=home, APPDATA=os.path.join(home, "Roaming"), XDG_DATA_HOME=home,
+                   XDG_CONFIG_HOME=os.path.join(home, ".config"), XDG_CACHE_HOME=os.path.join(home, ".cache"))
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider"],
+            cwd=REPO, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+        )
+    tail = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
     m = re.search(r"(\d+) tests? collected", tail)
     if proc.returncode != 0 or not m or "error" in tail:
-        raise AssertionError(f"pytest --collect-only failed (rc {proc.returncode}): {tail}")
+        out = "\n".join(line for line in proc.stdout.splitlines() if not line.startswith(("ducky_app/", "tests/")))
+        raise AssertionError(
+            f"pytest --collect-only failed (rc {proc.returncode}): {tail}\n"
+            f"--- stdout (test ids left out) ---\n{out[-4000:]}\n--- stderr ---\n{proc.stderr[-4000:]}"
+        )
     return int(m.group(1))
 
 
