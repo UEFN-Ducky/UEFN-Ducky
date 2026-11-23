@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -223,16 +224,14 @@ def test_exit_21_and_22_run_python_with_the_same_argv(
     assert len(failures) == (0 if code == 22 else 1)
 
 
-def _at(monkeypatch: pytest.MonkeyPatch, when: float) -> None:
-    monkeypatch.setattr(ns.time, "time", lambda: when)
-
 def test_on_still_tries_the_launcher_during_the_hold(
     appdata: Path, starts: list, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _setting("on")
-    now = 1_800_000_000.0
-    _at(monkeypatch, now)
-    ns._write_json(ns.crash_loop_path(), {"failures": [], "until": now + 3600})
+    # The real clock: ns.time is the time module, so patching ns.time.time froze it for every
+    # thread in the worker, and a store's deadline loop kept rewriting app data under _snapshot.
+    ns._write_json(ns.crash_loop_path(), {"failures": [], "until": time.time() + 3600})
+    assert ns.crash_loop_active()
     cmds = _spawn_exiting(monkeypatch, ns.EXIT_PROTOCOL)
     _falls_back(appdata, list(ARGV))
     assert len(cmds) == 1 and starts == [("python", None, None, "protocol")]
