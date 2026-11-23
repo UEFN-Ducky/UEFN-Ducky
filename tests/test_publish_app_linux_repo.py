@@ -113,6 +113,21 @@ def test_next_version():
     assert pub.next_version("1.2.600", "1.2.610", "1.3.0") == "1.3.0"
 
 
+def test_print_next_version_is_alone_on_stdout(capsys):
+    pub = _load()
+
+    def noisy(base):
+        print("  warn: could not read store version (offline)")
+        return "1.2.700"
+
+    pub.fetch_store_version, pub.read_version = noisy, lambda: "1.2.600"
+    pub.print_next_version("")
+    out = capsys.readouterr()
+    assert out.out == "1.2.701\n" and "warn" in out.err
+    pub.print_next_version("1.3.0")
+    assert capsys.readouterr().out == "1.3.0\n"
+
+
 def test_minisig_is_picked_up(tmp_path):
     pub = _load()
     deb = tmp_path / f"uefn-ducky_{VERSION}_amd64.deb"

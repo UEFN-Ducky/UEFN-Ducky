@@ -16,6 +16,9 @@
 # its upload step then registers Windows and Linux in one uds_app_release call.
 # linux-bumps updates the AUR package and opens the Flathub PR after the release.
 # dry_run=true builds everything and uploads nothing (bumps print their diffs).
+# The app's "UEFN Ducky Release" workflow builds Windows on the PC and dispatches
+# mode=linux-packages (set_version = its version) for the Linux side, then
+# mode=linux-bumps (linux_run = that run) once the release is live.
 name: Ducky Plugin Library Publish
 
 on:
@@ -36,6 +39,17 @@ on:
         required: false
         default: false
         type: boolean
+      mode:
+        description: "release = everything; linux-packages = only the Linux artifacts; linux-bumps = only AUR/Flathub"
+        required: false
+        default: release
+        type: choice
+        options: [release, linux-packages, linux-bumps]
+      linux_run:
+        description: "linux-bumps: the run whose linux-dist-* artifacts to use"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: store-publish-${{ github.repository }}
@@ -44,10 +58,12 @@ concurrency:
 permissions:
   contents: write
   id-token: write
+  actions: read
 
 jobs:
   linux-version:
     name: release version
+    if: inputs.mode != 'linux-bumps'
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.v.outputs.version }}
@@ -61,7 +77,7 @@ jobs:
           DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
           SET_VERSION: ${{ inputs.set_version }}
         run: |
-          v="$(python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; p.print_next_version(sys.argv[1])" "${SET_VERSION}" | tail -n1)"
+          v="$(python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; p.print_next_version(sys.argv[1])" "${SET_VERSION}")"
           [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $v"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "Release version: $v"
@@ -202,6 +218,7 @@ jobs:
   publish:
     name: build, sign and publish Setup
     needs: [linux-version, linux-build, linux-repo]
+    if: inputs.mode == 'release'
     runs-on: windows-latest
     timeout-minutes: 120
     env:
@@ -350,10 +367,10 @@ jobs:
   # diffs and pushes nothing; a release without AUR_SSH_PRIVATE_KEY / FLATHUB_TOKEN skips that one.
   linux-bumps:
     name: AUR + Flathub bumps
-    needs: [linux-version, publish]
+    needs: [publish]
+    if: ${{ !cancelled() && (inputs.mode == 'linux-bumps' || (inputs.mode == 'release' && needs.publish.result == 'success')) }}
     runs-on: ubuntu-22.04
     env:
-      VERSION: ${{ needs.linux-version.outputs.version }}
       DRY_RUN: ${{ inputs.dry_run }}
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
       FLATHUB_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
@@ -367,8 +384,12 @@ jobs:
           pattern: linux-dist-*
           path: dist/linux
           merge-multiple: true
+          run-id: ${{ inputs.linux_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Checksums
         run: |
+          VERSION="$(basename dist/linux/UEFN-Ducky-*-x86_64.AppImage | sed -E 's/^UEFN-Ducky-(.+)-x86_64\.AppImage$/\1/')"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "SHA_X86_64=$(sha256sum dist/linux/UEFN-Ducky-$VERSION-x86_64.AppImage | cut -d' ' -f1)" >> "$GITHUB_ENV"
           echo "SHA_AARCH64=$(sha256sum dist/linux/UEFN-Ducky-$VERSION-aarch64.AppImage | cut -d' ' -f1)" >> "$GITHUB_ENV"
 

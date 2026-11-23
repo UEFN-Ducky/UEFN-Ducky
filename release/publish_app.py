@@ -743,9 +743,11 @@ def next_version(local: str, store: str | None, set_version: str = "") -> str:
 
 
 def print_next_version(set_version: str = "") -> None:
-    """store-publish.yml's linux-version job: the version both platforms build."""
-    store = None if set_version.strip() else fetch_store_version(
-        assert_uefn_ducky_store_base(os.environ.get("DUCKYOS_BASE_URL") or DEFAULT_BASE))
+    """The version both platforms build, alone on stdout (store warnings go to stderr):
+    store-publish.yml's linux-version job and the release workflow read it with $(...)."""
+    with contextlib.redirect_stdout(sys.stderr):
+        store = None if set_version.strip() else fetch_store_version(
+            assert_uefn_ducky_store_base(os.environ.get("DUCKYOS_BASE_URL") or DEFAULT_BASE))
     print(next_version(read_version(), store, set_version))
 
 
