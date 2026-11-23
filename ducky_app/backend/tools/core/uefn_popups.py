@@ -735,7 +735,7 @@ def close_uefn_windows_x11() -> int:
             win = d.create_resource_object("window", int(w["hwnd"]))
             win.send_event(protocol.event.ClientMessage(
                 window=win, client_type=protocols, data=(32, [delete, X.CurrentTime, 0, 0, 0])))
-        d.flush()
+        d.sync()  # a round trip: the server has sent them before this connection closes
         return len(mains)
     finally:
         d.close()

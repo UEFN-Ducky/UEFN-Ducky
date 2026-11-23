@@ -224,7 +224,7 @@ def save_modal_watchdog(
     an earlier Ducky call opened it) and is never pressed.
     """
     events: list[dict[str, Any]] = []
-    if sys.platform != "win32":
+    if sys.platform != "win32" and not _LINUX:
         yield events
         return
     stop = threading.Event()

@@ -119,20 +119,37 @@ def test_fake_wine_windows_under_xvfb(monkeypatch) -> None:
     pytest.importorskip("Xlib")
     from Xlib import X, Xatom, display
 
-    disp = ":%d" % (90 + os.getpid() % 50)
-    xvfb = subprocess.Popen(["Xvfb", disp, "-nolisten", "tcp", "-screen", "0", "1280x800x24"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        monkeypatch.setenv("DISPLAY", disp)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-        d = None
+    # A display of our own: a fixed number collided with xvfb-run's server or another xdist
+    # worker's, Xvfb exited, and the test talked to that other server. An Xvfb still running
+    # once we are connected is ours. (-displayfd would pick one, but loops forever where
+    # /tmp/.X11-unix is read-only, as under WSLg.)
+    xvfb = d = None
+    for n in range(150 + os.getpid() % 500, 1000, 7):
+        disp = f":{n}"
+        if os.path.exists(f"/tmp/.X{n}-lock"):
+            continue
+        xvfb = subprocess.Popen(["Xvfb", disp, "-nolisten", "tcp", "-screen", "0", "1280x800x24"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(50):
+            if xvfb.poll() is not None:
+                break
             try:
                 d = display.Display(disp)
                 break
             except Exception:
                 time.sleep(0.1)
-        assert d is not None, "Xvfb did not start"
+        time.sleep(0.2)  # an Xvfb that lost the display exits right away
+        if d is not None and xvfb.poll() is None:
+            break
+        if d is not None:
+            d.close()
+        d = None
+        xvfb.kill()
+        xvfb.wait(timeout=5)
+    assert d is not None, "Xvfb did not start"
+    try:
+        monkeypatch.setenv("DISPLAY", disp)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         root = d.screen().root
         atom = d.intern_atom
 

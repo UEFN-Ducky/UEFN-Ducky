@@ -291,6 +291,11 @@ def test_editor_process_tools_go_through_gateway(spy, monkeypatch: pytest.Monkey
     monkeypatch.setattr(window_view, "launch_uefn_project", lambda root: {"launched": True})
     monkeypatch.setattr(window_view, "close_uefn", lambda: {"closed": True})
     monkeypatch.setattr(window_view, "restart_uefn_project", lambda root, wait, timeout: {"restarted": True})
+    from backend.tools.uefn import proton  # Linux: the same three, on UEFN's Proton prefix
+
+    monkeypatch.setattr(proton, "launch_uefn_project", lambda root: {"launched": True})
+    monkeypatch.setattr(proton, "close_uefn", lambda: {"closed": True})
+    monkeypatch.setattr(proton, "restart_uefn_project", lambda root, wait, timeout: {"restarted": True})
 
     assert "launched" in ducky_panel.ducky_launch_uefn()
     assert "closed" in ducky_panel.ducky_close_uefn()

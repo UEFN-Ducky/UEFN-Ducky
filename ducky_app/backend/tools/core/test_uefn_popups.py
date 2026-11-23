@@ -21,6 +21,17 @@ def _img(name: str) -> Image.Image:
     return Image.open(_FIX / f"{name}.png")
 
 
+def _fake_clicks(monkeypatch, inject_pointer) -> None:
+    """Fake the click on both platforms: Win32 injects pointer events into the window, X11
+    (UEFN under Wine) clicks through xdotool. Both reach ``inject_pointer(hwnd, kind, nx, ny)``."""
+    def x11_click(xid, popup, b):
+        inject_pointer(int(xid), "down", b["nx"], b["ny"])
+        inject_pointer(int(xid), "up", b["nx"], b["ny"])
+
+    monkeypatch.setattr("frontend.window_view.inject_pointer", inject_pointer)
+    monkeypatch.setattr("backend.tools.core.app_popups._x11_click", x11_click)
+
+
 @pytest.fixture(autouse=True)
 def focus(monkeypatch):
     """No real Win32 from a test: the person is in window 5 with the pointer at (40, 50)."""
@@ -97,7 +108,7 @@ def screen(monkeypatch, tmp_path):
 
     monkeypatch.setattr(popups, "list_popups", list_popups)
     monkeypatch.setattr(popups, "_grab", grab)
-    monkeypatch.setattr("frontend.window_view.inject_pointer", inject_pointer)
+    _fake_clicks(monkeypatch, inject_pointer)
     return state
 
 
@@ -253,8 +264,8 @@ def test_uefns_own_message_box_is_pressed_though_the_editor_window_stays_enabled
     monkeypatch.setattr(popups, "_grab", lambda rect, hwnd=0: _img("unable_to_refresh"))
     monkeypatch.setattr(popups, "_save_capture", lambda img, found: "")
     monkeypatch.setattr(popups, "_retry", {})
-    monkeypatch.setattr("frontend.window_view.inject_pointer",
-                        lambda hwnd, kind, nx, ny, **_: (clicks.append(hwnd), up.clear()) if kind == "up" else None)
+    _fake_clicks(monkeypatch,
+                 lambda hwnd, kind, nx, ny, **_: (clicks.append(hwnd), up.clear()) if kind == "up" else None)
     assert [d["title"] for d in popups.press_lone_button_popups()] == ["Message"]
     assert clicks == [515]
 
@@ -302,7 +313,7 @@ def uefn_popup(monkeypatch):
     monkeypatch.setattr(popups, "_grab", lambda rect, hwnd=0: _img(state["image"]))
     monkeypatch.setattr(popups, "_save_capture", lambda img, buttons: "C:/chat/attachments/uefn_popup_1.png")
     monkeypatch.setattr(popups, "_retry", {})
-    monkeypatch.setattr("frontend.window_view.inject_pointer", inject_pointer)
+    _fake_clicks(monkeypatch, inject_pointer)
     state["show"] = show
     return state
 
@@ -332,6 +343,7 @@ def test_the_conflicting_changes_dialog_is_never_pressed(uefn_popup, title) -> N
     assert popups.find_conflict_dialog()["title"] == title
 
 
+@pytest.mark.windows_only("Win32 focus and pointer; on X11 app_popups._x11_click puts them back")
 def test_a_press_gives_the_person_their_window_and_pointer_back(uefn_popup, focus) -> None:
     uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")
     popups.press_button(515, 1)
@@ -367,7 +379,6 @@ def _epic_pool(monkeypatch, popup_state, *, look: float = 2.0, ducky_left_it: bo
     monkeypatch.setattr(client_pool, "ensure_plugin_prefix_cache", lambda: None)
     monkeypatch.setattr(client_pool, "_EPIC_POPUP_LOOK_SEC", look)
     monkeypatch.setattr(epic, "probe_epic_mcp", lambda **_k: {"epic_mcp_online": True, "epic_mcp_editor": "uefn"})
-    monkeypatch.setattr(uefn_modal.sys, "platform", "win32")
     monkeypatch.setattr(uefn_modal, "_LONE_BUTTON_AFTER_SEC", 0.0)
     monkeypatch.setattr(uefn_modal, "auto_dismiss_save_modal", lambda **_: None)
     monkeypatch.setattr(uefn_modal, "_uefn_window_hwnds",

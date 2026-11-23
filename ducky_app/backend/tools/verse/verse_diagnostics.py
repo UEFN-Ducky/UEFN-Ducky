@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -58,6 +59,21 @@ def _wait_for_build(client: Any) -> tuple[str, Any]:
     return call_limits.wait_job(job, call_limits.VERSE_BUILD_LIMIT_S, call_limits.VERSE_POPUP_CHECK_S)
 
 
+def _mtime_any_case(root: str, rel: str) -> float:
+    """mtime of ``rel`` (a lower-case diagnostics key) under ``root``. On a case-sensitive
+    file system (Linux) each part is matched without case, as Windows does. OSError if absent."""
+    try:
+        return Path(root, rel).stat().st_mtime
+    except OSError:
+        if not sys.platform.startswith("linux"):
+            raise
+    path = Path(root)
+    for part in Path(rel).parts:
+        low = part.lower()
+        path = next((p for p in path.iterdir() if p.name.lower() == low), path / part)
+    return path.stat().st_mtime
+
+
 def _defer_to_clean_build(root: str, payload: dict[str, Any]) -> None:
     """A clean UEFN build newer than every flagged file outranks verse-lsp: report its 0 errors."""
     built = _LAST_COMPILE.get(root)
@@ -65,7 +81,7 @@ def _defer_to_clean_build(root: str, payload: dict[str, Any]) -> None:
     if not built or built[1] or not flagged:
         return
     try:
-        newest = max(Path(root, f["path"]).stat().st_mtime for f in flagged)
+        newest = max(_mtime_any_case(root, f["path"]) for f in flagged)
     except (OSError, KeyError, ValueError):
         return
     if newest >= built[0]:

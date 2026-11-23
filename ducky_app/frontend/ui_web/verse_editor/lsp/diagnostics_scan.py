@@ -361,7 +361,9 @@ def _run_scan(
     scan_keys = [_registry_key(rel) for rel, _ in files] if full else sorted(stale_set)
     # Newest first: the file an agent just wrote is checked in the first batch, so a check
     # stopped early (first scan of a big project) has still answered for it.
-    scan_keys.sort(key=lambda k: -_mtime(Path(root) / k))
+    # Keys are lower case; a case-sensitive file system (Linux) needs the file's own spelling.
+    real_rel = {_registry_key(rel): rel for rel, _ in files}
+    scan_keys.sort(key=lambda k: -_mtime(Path(root) / real_rel.get(k, k)))
     # Dedupe registry keys (same basename in different folders is fine — keys are full rel paths).
     seen_keys: set[str] = set()
     deduped_scan_keys: list[str] = []

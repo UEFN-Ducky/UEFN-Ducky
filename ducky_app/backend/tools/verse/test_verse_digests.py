@@ -182,6 +182,10 @@ def test_a_new_assets_digest_is_found_without_waiting_for_the_memo(tmp_path: Pat
     assets = tmp_path / "Digests" / "Island-Assets"
     assets.mkdir()
     _write_digest(assets, name="Assets.digest.verse", text="Island := module:\n")
+    # Linux stamps a folder with a coarse clock (~4 ms): this mkdir can keep the mtime the
+    # first scan saw. UEFN's build adds the folder seconds later; move the stamp like that did.
+    st = (tmp_path / "Digests").stat()
+    os.utime(tmp_path / "Digests", ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
     names = [os.path.basename(p) for p in vd.discover_digest_files(extra_roots=roots)]
     assert sorted(names) == ["Assets.digest.verse", "Fortnite.digest.verse"]
     # Nothing moved: the memo answers again.

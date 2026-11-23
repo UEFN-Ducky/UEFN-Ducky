@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from backend.workspace.verse_cleanup import prune_empty_parents, revert_uefn_for_deleted_verse
@@ -17,7 +18,7 @@ def test_deleted_verse_device_asks_uefn_to_drop_the_class(monkeypatch) -> None:
     revert_uefn_for_deleted_verse(
         "Content/Verse/SnakeGame/game.verse",
         "class snake_game_device:\n",
-        r"C:\islands\ExampleProject1",
+        os.path.join(os.path.abspath(os.sep), "islands", "ExampleProject1"),  # this OS's own path form
     )
     ids = {(p[1].get("kind"), p[1].get("id")) for p in posted}
     assert ("asset", "/ExampleProject1/Verse/SnakeGame/snake_game_device") in ids
