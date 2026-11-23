@@ -989,10 +989,10 @@ UPDATE_ACTIONS = {
     "appimage": "restart", "deb": "install", "rpm": "install", "flatpak": "install",
     "aur": "manual", "installer": "restart",
 }
-# The release lane's minisign public key (the .pub file's base64 line). Empty: AppImage
-# updates are checked by SHA-256 from the HTTPS feed only.
-# ponytail: no key shipped yet; set it once the release lane signs AppImages.
-MINISIGN_PUBLIC_KEY = ""
+# The release lane's minisign public key (the .pub file's base64 line, key id
+# CB88729E70843096); its secret half is the MINISIGN_SECRET_KEY CI secret. Every AppImage
+# update must carry a matching .minisig. Empty would mean SHA-256 from the HTTPS feed only.
+MINISIGN_PUBLIC_KEY = "RWSWMIRwnnKIy4h1XdDWMtouy9laP5uw5K1gGe3HVNh5DFIWT7woHBvM"
 # A swapped-in AppImage that isn't ready (app_versions.mark_ready) by then is rolled back.
 HEALTHY_WITHIN_S = 60
 # Leftovers of the AppImage process that would break the watchdog or the next AppImage.

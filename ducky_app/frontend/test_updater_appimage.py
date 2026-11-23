@@ -80,7 +80,13 @@ def test_a_missing_signature_or_another_key_is_refused(tmp_path, monkeypatch) ->
     assert app.read_bytes() == A
 
 
-def test_a_sha_mismatch_or_a_non_elf_download_leaves_a_alone(tmp_path) -> None:
+def test_the_shipped_release_key_is_a_minisign_ed25519_public_key() -> None:
+    raw = base64.b64decode(updater.MINISIGN_PUBLIC_KEY, validate=True)
+    assert len(raw) == 42 and raw[:2] == b"Ed"
+
+
+def test_a_sha_mismatch_or_a_non_elf_download_leaves_a_alone(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
     app, new = _files(tmp_path)
     assert "SHA256" in updater.install_appimage(app, new, sha256="0" * 64, signature=None, version="9.9.9")
     new.write_bytes(b"<html>not an appimage</html>")
@@ -106,6 +112,7 @@ def test_restart_to_update_downloads_swaps_and_restarts(tmp_path, monkeypatch) -
     started: list[Path] = []
     exited: list[bool] = []
     monkeypatch.setenv("APPIMAGE", str(app))
+    monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
     monkeypatch.setattr(updater, "_stop_all_agents", lambda: None)
     monkeypatch.setattr(updater, "start_watchdog", lambda path, version: started.append(path))
     monkeypatch.setattr(updater, "_exit_self_after_delay", lambda: exited.append(True))
