@@ -185,7 +185,9 @@ def test_portal_snip_mocked(tmp_path) -> None:
 
 
 def _x11_ready() -> bool:
-    if not sys.platform.startswith("linux") or not os.environ.get("DISPLAY"):
+    import shutil
+
+    if not sys.platform.startswith("linux") or not shutil.which("Xvfb"):
         return False
     try:
         import mss  # noqa: F401
@@ -193,6 +195,33 @@ def _x11_ready() -> bool:
     except ImportError:
         return False
     return True
+
+
+@pytest.fixture
+def own_display(monkeypatch):
+    """A private Xvfb for this test: xdist workers sharing one display steal each other's grabs."""
+    import subprocess
+
+    read_fd, write_fd = os.pipe()
+    server = subprocess.Popen(
+        ["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "320x240x24", "-nolisten", "tcp"],
+        pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    os.close(write_fd)
+    number = b""
+    while not number.endswith(b"\n"):
+        chunk = os.read(read_fd, 16)
+        if not chunk:
+            break
+        number += chunk
+    os.close(read_fd)
+    if not number.strip():
+        server.kill()
+        pytest.fail("Xvfb did not start")
+    monkeypatch.setenv("DISPLAY", ":" + number.decode().strip())
+    yield
+    server.terminate()
+    server.wait(5)
 
 
 def _drive_x11(actions) -> dict:
@@ -203,6 +232,7 @@ def _drive_x11(actions) -> dict:
 
     from frontend.ui_web import snip_overlay as so
 
+    so.xlib_without_select_limit()
     out: dict = {}
     errors: list = []
 
@@ -240,11 +270,16 @@ def _drive_x11(actions) -> dict:
     t.join(10)
     d.close()
     assert not t.is_alive()
+    if errors:
+        raise errors[0]
     return out
 
 
-@pytest.mark.skipif(not _x11_ready(), reason="needs Linux X11 (xvfb), mss and python-xlib")
-def test_x11_snip_drag_under_xvfb() -> None:
+_NEEDS_X = pytest.mark.skipif(not _x11_ready(), reason="needs Linux, Xvfb, mss and python-xlib")
+
+
+@_NEEDS_X
+def test_x11_snip_drag_under_xvfb(own_display) -> None:
     out = _drive_x11([("move", (10, 10)), ("down", 1), ("move", (40, 30)), ("move", (60, 40)), ("up", 1)])
     assert out["ok"] is True, out
     assert (out["width"], out["height"]) == (50, 30)
@@ -252,8 +287,42 @@ def test_x11_snip_drag_under_xvfb() -> None:
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
 
 
-@pytest.mark.skipif(not _x11_ready(), reason="needs Linux X11 (xvfb), mss and python-xlib")
-def test_x11_snip_escape_cancels_under_xvfb() -> None:
+@_NEEDS_X
+def test_x11_snip_works_with_its_display_fd_above_1024(own_display) -> None:
+    # A long-running app (or an xdist worker) holds many fds; select() fails past 1024.
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft < 1200:
+        if hard != resource.RLIM_INFINITY and hard < 1200:
+            pytest.skip("fd limit too low to open 1100 files")
+        resource.setrlimit(resource.RLIMIT_NOFILE, (4096 if hard == resource.RLIM_INFINITY else min(hard, 4096), hard))
+    held = [os.open(os.devnull, os.O_RDONLY) for _ in range(1100)]
+    try:
+        out = _drive_x11([("move", (10, 10)), ("down", 1), ("move", (30, 30)), ("up", 1)])
+    finally:
+        for fd in held:
+            os.close(fd)
+    assert out["ok"] is True and (out["width"], out["height"]) == (20, 20), out
+
+
+def test_poll_select_reports_ready_fds_like_select() -> None:
+    if not hasattr(__import__("select"), "poll"):
+        pytest.skip("no poll() on this platform")
+    from frontend.ui_web.snip_overlay import _PollSelect
+
+    read_fd, write_fd = os.pipe()
+    try:
+        assert _PollSelect.select([read_fd], [write_fd], [], 0) == ([], [write_fd], [])
+        os.write(write_fd, b"x")
+        assert _PollSelect.select([read_fd], [], [], 1.0) == ([read_fd], [], [])
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
+@_NEEDS_X
+def test_x11_snip_escape_cancels_under_xvfb(own_display) -> None:
     from Xlib import XK
 
     out = _drive_x11([("move", (10, 10)), ("key", XK.XK_Escape)])

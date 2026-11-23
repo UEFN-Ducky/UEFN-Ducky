@@ -209,7 +209,9 @@ def test_wayland_says_the_desktop_spotlight_is_in_app_only(monkeypatch):
 
 
 def _x11_tk_ready() -> bool:
-    if not sys.platform.startswith("linux") or not os.environ.get("DISPLAY"):
+    import shutil
+
+    if not sys.platform.startswith("linux") or not shutil.which("Xvfb"):
         return False
     try:
         import tkinter  # noqa: F401
@@ -220,8 +222,44 @@ def _x11_tk_ready() -> bool:
     return True
 
 
-@pytest.mark.skipif(not _x11_tk_ready(), reason="needs Linux X11 (xvfb), tkinter and python-xlib")
-def test_x11_overlay_window_is_shaped_click_through_and_on_top():
+@pytest.fixture
+def own_display(monkeypatch):
+    """A private Xvfb and a fresh shared Xlib connection: xdist workers on one display race."""
+    import subprocess
+
+    from frontend.ui_web import window_spotlight as ws
+
+    read_fd, write_fd = os.pipe()
+    server = subprocess.Popen(
+        ["Xvfb", "-displayfd", str(write_fd), "-screen", "0", "640x480x24", "-nolisten", "tcp"],
+        pass_fds=(write_fd,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    os.close(write_fd)
+    number = b""
+    while not number.endswith(b"\n"):
+        chunk = os.read(read_fd, 16)
+        if not chunk:
+            break
+        number += chunk
+    os.close(read_fd)
+    if not number.strip():
+        server.kill()
+        pytest.fail("Xvfb did not start")
+    monkeypatch.setenv("DISPLAY", ":" + number.decode().strip())
+    monkeypatch.setattr(ws, "_x_disp", None)
+    yield
+    if ws._x_disp is not None:
+        ws._x_disp.close()
+        ws._x_disp = None
+    server.terminate()
+    server.wait(5)
+
+
+_NEEDS_X = pytest.mark.skipif(not _x11_tk_ready(), reason="needs Linux, Xvfb, tkinter and python-xlib")
+
+
+@_NEEDS_X
+def test_x11_overlay_window_is_shaped_click_through_and_on_top(own_display):
     import tkinter as tk
 
     from PIL import Image
@@ -252,8 +290,8 @@ def test_x11_overlay_window_is_shaped_click_through_and_on_top():
         root.destroy()
 
 
-@pytest.mark.skipif(not _x11_tk_ready(), reason="needs Linux X11 (xvfb), tkinter and python-xlib")
-def test_x11_pointer_button_and_escape_reads():
+@_NEEDS_X
+def test_x11_pointer_button_and_escape_reads(own_display):
     from Xlib import X, XK
     from Xlib.ext import xtest
 

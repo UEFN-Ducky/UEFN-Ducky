@@ -245,6 +245,55 @@ def _x11_snip(timeout_s: float = _WAIT_TIMEOUT_S) -> dict[str, Any]:
     return _png_result(full.crop(box))
 
 
+class _PollSelect:
+    """``select`` module stand-in whose ``select()`` runs on ``poll()``, which has no fd limit."""
+
+    error = OSError
+
+    def __getattr__(self, name: str) -> Any:
+        import select
+
+        return getattr(select, name)
+
+    @staticmethod
+    def select(rlist: list, wlist: list, xlist: list, timeout: float | None = None) -> tuple[list, list, list]:
+        import math
+        import select
+
+        def fd(obj: Any) -> int:
+            return obj if isinstance(obj, int) else obj.fileno()
+
+        masks: dict[int, int] = {}
+        for objs, bit in ((rlist, select.POLLIN), (wlist, select.POLLOUT), (xlist, select.POLLPRI)):
+            for obj in objs:
+                masks[fd(obj)] = masks.get(fd(obj), 0) | bit
+        poller = select.poll()
+        for f, mask in masks.items():
+            poller.register(f, mask)
+        wait = None if timeout is None else max(0, math.ceil(timeout * 1000))
+        ready = dict(poller.poll(wait))
+        gone = select.POLLHUP | select.POLLERR
+        return (
+            [o for o in rlist if ready.get(fd(o), 0) & (select.POLLIN | gone)],
+            [o for o in wlist if ready.get(fd(o), 0) & (select.POLLOUT | gone)],
+            [o for o in xlist if ready.get(fd(o), 0) & select.POLLPRI],
+        )
+
+
+def xlib_without_select_limit() -> None:
+    """python-xlib waits on its socket with ``select()``, which raises once the fd is past 1024
+    (a long-running app, an xdist worker). Swap in the poll-based stand-in, once per process.
+
+    ponytail: patches python-xlib's module global; drop it when python-xlib moves to poll/selectors.
+    """
+    import select
+
+    import Xlib.protocol.display as xproto
+
+    if getattr(xproto, "select", None) is select:
+        xproto.select = _PollSelect()
+
+
 def _x11_pick_rect(mon: dict[str, int], bgra: bytes, timeout_s: float) -> tuple[int, int, int, int] | None:
     """Show the frozen grab full-screen, let the user drag a box. Esc / right-click / timeout cancel."""
     import select
@@ -252,6 +301,7 @@ def _x11_pick_rect(mon: dict[str, int], bgra: bytes, timeout_s: float) -> tuple[
     from Xlib import XK, X
     from Xlib import display as xdisplay
 
+    xlib_without_select_limit()
     d = xdisplay.Display()
     win = None
     try:
@@ -294,13 +344,16 @@ def _x11_pick_rect(mon: dict[str, int], bgra: bytes, timeout_s: float) -> tuple[
         d.sync()
 
         deadline = time.monotonic() + timeout_s
+        # poll, not select: a long-running app can hold fds past select()'s 1024 limit.
+        poller = select.poll()
+        poller.register(d.fileno(), select.POLLIN)
 
         def next_event() -> Any | None:
             while not d.pending_events():
                 left = deadline - time.monotonic()
                 if left <= 0:
                     return None
-                select.select([d], [], [], min(left, 0.1))
+                poller.poll(int(min(left, 0.1) * 1000) + 1)
             return d.next_event()
 
         while True:  # wait until mapped, or the grabs fail

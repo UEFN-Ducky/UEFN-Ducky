@@ -567,6 +567,9 @@ def _xd() -> Any:
         if _x_disp is None:
             from Xlib import display
 
+            from frontend.ui_web.snip_overlay import xlib_without_select_limit
+
+            xlib_without_select_limit()
             _x_disp = display.Display()
         return _x_disp
 
