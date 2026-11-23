@@ -220,6 +220,31 @@ def new_job_cap_mb() -> int:
     return split_mb(numbers["budget_mb"], len(live) + 1)
 
 
+def posix_child_limits(cap_mb: int):
+    """Linux: what an agent terminal's Windows job does, as a preexec function for its shell:
+    a memory cap and below-normal priority, inherited by everything it starts.
+
+    RLIMIT_DATA, not RLIMIT_AS: node and the JVM reserve far more address space than they use.
+    ponytail: the cap is per process, not shared by the tree; a cgroup (systemd-run --scope
+    -p MemoryMax) if one tree's total must be held."""
+    # Imported here, not in the child: an import after fork can deadlock on the import lock.
+    import resource
+
+    def apply() -> None:
+        if cap_mb > 0:
+            limit = int(cap_mb) * 1024 * 1024
+            try:
+                resource.setrlimit(resource.RLIMIT_DATA, (limit, limit))
+            except (ValueError, OSError):
+                pass
+        try:
+            os.nice(10)
+        except OSError:
+            pass
+
+    return apply
+
+
 def last_split() -> dict[str, int]:
     with _last_lock:
         return dict(_last)

@@ -611,9 +611,14 @@ class TerminalSession:
         env = env_with_fresh_path()
         if self.env_extra:
             env.update(self.env_extra)
+        spawn_extra: dict[str, Any] = {}
         if os.name != "nt":
             # A desktop app's environment often has no TERM; the panel is an xterm.js.
             env.setdefault("TERM", "xterm-256color")
+            if self.agent:  # Linux's stand-in for the Windows job: a memory cap, lower priority
+                from frontend.ui_web.terminal import resource_guard
+
+                spawn_extra["preexec_fn"] = resource_guard.posix_child_limits(resource_guard.new_job_cap_mb())
         elif self.shell == "bash" and not self.spawn_argv:
             # Runs once, before the first prompt, after the profile scripts made the aliases.
             env.setdefault("PROMPT_COMMAND", f"{_BASH_DROP_WINPTY}; unset PROMPT_COMMAND")
@@ -628,6 +633,7 @@ class TerminalSession:
                     cwd=self.cwd,
                     env=env,
                     dimensions=(self._rows, self._cols),
+                    **spawn_extra,
                 )
             self.console_hosts = console_hosts() - hosts_before
             with _live_lock:

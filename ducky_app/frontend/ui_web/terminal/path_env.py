@@ -3,12 +3,53 @@
 from __future__ import annotations
 
 import os
+import subprocess
+
+# Linux: the login shell's PATH, read once (None = not read yet).
+_login_path: str | None = None
+_PATH_MARK = "__DUCKY_PATH__"
+
+
+def posix_login_path(shell: str = "bash") -> str:
+    """PATH as the person's interactive login bash sets it ('' when it can't say), read once.
+
+    A desktop app starts with the session's bare PATH; nvm, ~/.local/bin and pyenv live in
+    the shell's rc files, and nvm's lines sit after .bashrc's interactive-only guard, hence
+    -i. The marks fence the value off from anything the rc files print.
+    """
+    global _login_path
+    if _login_path is None:
+        value = ""
+        try:
+            out = subprocess.run(
+                [shell, "-ilc", f'printf "{_PATH_MARK}%s{_PATH_MARK}" "$PATH"'],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10,
+                # Its own session: an interactive bash takes over a controlling terminal it
+                # shares, and Ducky (then a background job on it) was stopped by SIGTTOU.
+                start_new_session=True,
+            )
+            parts = out.stdout.split(_PATH_MARK)
+            value = parts[-2] if len(parts) >= 3 else ""
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _login_path = value
+    return _login_path
+
+
+def _posix_merged_path() -> str:
+    """The login shell's PATH first, then this process's entries it lacks."""
+    parts: list[str] = []
+    for chunk in (posix_login_path(), os.environ.get("PATH", "")):
+        for part in chunk.split(os.pathsep):
+            if part and part not in parts:
+                parts.append(part)
+    return os.pathsep.join(parts)
 
 
 def windows_merged_path() -> str:
     """Machine + User Path from the registry (not the stale process env)."""
     if os.name != "nt":
-        return os.environ.get("Path") or os.environ.get("PATH") or ""
+        return _posix_merged_path()
     try:
         import winreg
 
