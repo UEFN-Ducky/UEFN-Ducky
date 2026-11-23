@@ -38,6 +38,10 @@ _FINGERPRINT: tuple[tuple[str, int], ...] | None = None
 _FINGERPRINT_ROOT = ""
 _FINGERPRINT_AT = 0.0
 _FINGERPRINT_TTL = 1.0
+# Bumped by invalidate_plugin_skill_caches(): a fingerprint or skill list computed
+# before an invalidate is never stored after it (a background thread that stat'd the
+# tree before an install wrote its folder would otherwise pin the old tree for the TTL).
+_CACHE_GEN = 0
 
 # One plugin tree mutation at a time. Update All used to overlap the previous
 # install's skill-sync (open modules.md) with the next plugin's rmtree → WinError 32.
@@ -609,6 +613,7 @@ def _plugin_tree_fingerprint(root: Path) -> tuple[tuple[str, int], ...]:
         fresh = _FINGERPRINT is not None and (now - _FINGERPRINT_AT) < _FINGERPRINT_TTL
         if fresh and _FINGERPRINT_ROOT == key:
             return _FINGERPRINT
+        gen = _CACHE_GEN
     try:
         fingerprint = tuple(
             sorted((c.name, c.stat().st_mtime_ns) for c in root.iterdir() if c.is_dir())
@@ -616,9 +621,10 @@ def _plugin_tree_fingerprint(root: Path) -> tuple[tuple[str, int], ...]:
     except OSError:
         fingerprint = ()
     with _OWNED_SKILLS_LOCK:
-        _FINGERPRINT = fingerprint
-        _FINGERPRINT_ROOT = key
-        _FINGERPRINT_AT = now
+        if gen == _CACHE_GEN:
+            _FINGERPRINT = fingerprint
+            _FINGERPRINT_ROOT = key
+            _FINGERPRINT_AT = now
     return fingerprint
 
 
@@ -629,8 +635,9 @@ def plugin_tree_fingerprint(root: Path) -> tuple[tuple[str, int], ...]:
 
 def invalidate_plugin_skill_caches() -> None:
     """Drop plugin-owned-skill caches after install / uninstall / enable changes."""
-    global _FINGERPRINT, _FINGERPRINT_AT, _FINGERPRINT_ROOT
+    global _FINGERPRINT, _FINGERPRINT_AT, _FINGERPRINT_ROOT, _CACHE_GEN
     with _OWNED_SKILLS_LOCK:
+        _CACHE_GEN += 1
         _FINGERPRINT = None
         _FINGERPRINT_ROOT = ""
         _FINGERPRINT_AT = 0.0
@@ -664,6 +671,8 @@ def list_plugin_owned_skills() -> list[dict[str, str]]:
     root = appdata_uefn_plugins_dir()
     if not root.is_dir():
         return []
+    with _OWNED_SKILLS_LOCK:
+        gen = _CACHE_GEN
     fingerprint = _plugin_tree_fingerprint(root)
     with _OWNED_SKILLS_LOCK:
         cached = _OWNED_SKILLS_CACHE.get(fingerprint)
@@ -689,8 +698,9 @@ def list_plugin_owned_skills() -> list[dict[str, str]]:
                 }
             )
     with _OWNED_SKILLS_LOCK:
-        _OWNED_SKILLS_CACHE.clear()  # single entry — only the live tree matters
-        _OWNED_SKILLS_CACHE[fingerprint] = [dict(row) for row in out]
+        if gen == _CACHE_GEN:
+            _OWNED_SKILLS_CACHE.clear()  # single entry — only the live tree matters
+            _OWNED_SKILLS_CACHE[fingerprint] = [dict(row) for row in out]
     return out
 
 
