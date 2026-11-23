@@ -368,18 +368,23 @@ def test_a_host_agent_starts_from_the_kept_answers_while_its_host_is_silent(monk
 def test_a_host_that_answers_late_is_joined_beside_the_turn(monkeypatch, app_data, changed) -> None:
     """The agent hears of a tool change only when the host's list really differs from the kept
     one: a change notice makes it list its tools again, which moves its cached prompt."""
+    import threading
     import time
 
     _short_waits(monkeypatch)
     kept = _kept(app_data)
     rows = [*_ROWS, {"name": "new_tool", "description": "N", "inputSchema": {"type": "object"}}] if changed else _ROWS
     asked: list = []
+    # The host answers only once the agent has started from the kept answers. Answering the
+    # late join at once raced the agent's first requests (Linux won it: they went to the host).
+    started = threading.Event()
 
     def _serve(n: int, conn) -> None:
         with conn:
             if n == 1:
                 time.sleep(0.6)  # busy: the at-once hello gets no answer
                 return
+            started.wait(5)
             ad._read_frame(conn)
             ad._write_frame(conn, {"op": "hello_ok"})
             while True:
@@ -402,6 +407,7 @@ def test_a_host_that_answers_late_is_joined_beside_the_turn(monkeypatch, app_dat
         assert agent.hear()["result"] == _INIT
         agent.say({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         assert agent.hear()["result"] == kept["tools"]
+        started.set()
         agent.say({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "alpha", "arguments": {}}})
         heard = [agent.hear(), agent.hear()] if changed else [agent.hear()]
         assert {"jsonrpc": "2.0", "id": 2, "result": {"content": []}} in heard
