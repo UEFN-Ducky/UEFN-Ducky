@@ -1,0 +1,84 @@
+# The full suite on Linux on every push to main, beside windows-tests: pytest (ducky_app)
+# under a virtual X display, with every shell the terminal supports, and the panel's vitest.
+# No retry: a test that fails here is fixed, never re-run until it passes.
+name: linux-tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: linux-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  linux-tests:
+    name: linux-tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ducky_app/frontend/ui_web/web/package-lock.json
+
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool zsh fish libportaudio2 espeak-ng libsecret-1-0 \
+            libgtk-3-0 libayatana-appindicator3-1
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix ducky_app/frontend/ui_web/web
+
+      - name: pytest
+        run: xvfb-run -a python -m pytest ducky_app -q -rs -n auto -p no:cacheprovider
+
+      # CI has no UEFN: the Verse editor's grammar imports get empty stand-ins (as in windows-tests).
+      - name: Verse language stand-ins
+        if: ${{ !cancelled() }}
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          stand_ins = {
+              "verse.tmGrammar.json": {"scopeName": "source.verse", "patterns": [], "repository": {}},
+              "language-configuration.json": {},
+              "verse-snippets.json": {},
+              "verse-dark.tmTheme.json": {"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []},
+          }
+          lang = Path("ducky_app/frontend/ui_web/web/src/verse-editor/lang")
+          lang.mkdir(parents=True, exist_ok=True)
+          for name, doc in stand_ins.items():
+              if not (lang / name).is_file():
+                  (lang / name).write_text(json.dumps(doc), encoding="utf-8")
+
+      - name: vitest
+        if: ${{ !cancelled() }}
+        working-directory: ducky_app/frontend/ui_web/web
+        run: npm test

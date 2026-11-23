@@ -28,6 +28,15 @@ openai>=1.40.0
 google-genai>=1.0
 # Windows terminal backend; no wheels on macOS/Linux (pip-audit CI runs on ubuntu).
 pywinpty>=2.0.13; platform_system == "Windows"
+# Linux only (the markers keep Windows installs as they were): the terminal's pty, the
+# secrets master key in the desktop keyring, the microphone (PortAudio), X11 windows and
+# capture, and D-Bus portals (Wayland capture, notifications). PyGObject comes from the
+# distro (python3-gi), never pip.
+ptyprocess>=0.7.0; sys_platform == "linux"
+keyring>=25.0; sys_platform == "linux"
+sounddevice>=0.5.0; sys_platform == "linux"
+python-xlib>=0.33; sys_platform == "linux"
+jeepney>=0.9.0; sys_platform == "linux"
 # Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
 # PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
 toon_format @ git+https://github.com/toon-format/toon-python.git@536a508d486847cb01ec1869cf21d1f7556b0db0
