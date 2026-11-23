@@ -238,6 +238,29 @@ def write_json_plain(path: Path | str, data: Any, **dumps_kwargs: Any) -> None:
     write_text_atomic(path, json.dumps(data, **dumps_kwargs))
 
 
+def read_text_shared(path: Path | str) -> str:
+    """Read *path* without blocking a writer's replace of it.
+
+    Windows' ``open()`` leaves out FILE_SHARE_DELETE, so ``os.replace`` over a file a
+    reader holds open fails with Access is denied; this reader opens it with all three
+    share flags.
+    """
+    if os.name != "nt":
+        return Path(path).read_text(encoding="utf-8")
+    import _winapi
+    import msvcrt
+
+    share_all = 0x1 | 0x2 | 0x4  # FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+    handle = _winapi.CreateFile(str(path), _winapi.GENERIC_READ, share_all, 0, _winapi.OPEN_EXISTING, 0, 0)
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+    except BaseException:
+        _winapi.CloseHandle(handle)
+        raise
+    with open(fd, encoding="utf-8") as f:
+        return f.read()
+
+
 def read_json_object(path: Path) -> dict[str, Any]:
     if not path.is_file():
         return {}

@@ -281,9 +281,11 @@ def _clear_state() -> None:
 
 
 def read_state() -> dict[str, Any] | None:
-    path = state_path()
+    from frontend.atomic_json import read_text_shared
+
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # A plain open() here made a writer's replace fail with Access is denied on Windows.
+        data = json.loads(read_text_shared(state_path()))
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None

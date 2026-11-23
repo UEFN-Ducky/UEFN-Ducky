@@ -49,16 +49,10 @@ jobs:
           python -m pip install -r requirements-dev.txt
           npm ci --prefix ducky_app/frontend/ui_web/web
 
-      # A 4-core runner is slower than a dev PC: a timing test that loses its race runs
-      # once more on its own. A real failure fails both times and stays red.
+      # No retries: a test that fails once is a bug to fix.
       - name: pytest
         id: pytest
-        run: |
-          python -m pytest ducky_app -q -n auto --junitxml="${{ runner.temp }}/pytest.xml"
-          if ($LASTEXITCODE -eq 0) { exit 0 }
-          Write-Output "::warning::retrying the failed tests once, one at a time"
-          python -m pytest ducky_app -q --lf --junitxml="${{ runner.temp }}/pytest-retry.xml"
-          exit $LASTEXITCODE
+        run: python -m pytest ducky_app -q -n auto --junitxml="${{ runner.temp }}/pytest.xml"
 
       # The Verse grammar and theme come from the person's own UEFN install (Epic's files,
       # never in the repo; scripts/ensure-verse-assets.mjs). CI has no UEFN: the editor's
@@ -108,16 +102,13 @@ jobs:
 
           temp = Path(r"${{ runner.temp }}")
           baseline = int(os.environ["BASELINE_PASSED"])
-          first, retry = counts(temp / "pytest.xml"), counts(temp / "pytest-retry.xml")
+          first = counts(temp / "pytest.xml")
           lines = []
           if first is None:
               lines.append("windows-tests: pytest wrote no report")
           else:
               passed, failed, skipped = first
-              if retry is not None:
-                  passed, failed = passed + retry[0], retry[1]
-                  lines.append(f"{retry[0]:,} passed on the retry (flaky on this runner)")
-              lines.insert(0, f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped")
+              lines.append(f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped, no retries")
               if passed < baseline:
                   lines.append(f"**{baseline - passed:,} fewer passing than the baseline.**")
           lines.append("pytest: ${{ steps.pytest.outcome }} · vitest: ${{ steps.vitest.outcome }}")

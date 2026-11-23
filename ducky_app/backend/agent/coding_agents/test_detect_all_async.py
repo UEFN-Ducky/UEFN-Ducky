@@ -67,8 +67,14 @@ def test_detect_all_returns_stale_cache_while_refreshing(monkeypatch):
         base._detect_cache_at = 0.0
     payload = base.detect_all()
     assert payload is stale
-    assert started.wait(timeout=1.0)
+    # detect_all marks the refresh in flight before it returns; waiting for the worker
+    # to reach the probe only timed how fast a busy runner starts a thread.
+    with base._detect_refresh_lock:
+        assert base._detect_refresh_inflight is True
     release.set()
+    for t in threading.enumerate():
+        if t.name == "refresh-coding-agents":
+            t.join(30)  # never leak this refresh into the next test's cache
 
 
 def test_fast_agent_publishes_before_slow_agent(monkeypatch):

@@ -61,34 +61,22 @@ class _Stop:
         return self._ev.is_set()
 
 
-def _count_wakeups(loop: asyncio.AbstractEventLoop) -> list[int]:
-    n = [0]
-    real = loop._run_once  # type: ignore[attr-defined]
-
-    def counted() -> None:
-        n[0] += 1
-        real()
-
-    loop._run_once = counted  # type: ignore[attr-defined]
-    return n
+async def _timers_due_within(seconds: float) -> list[float]:
+    """Inside a wrapped call: every live timer on this loop due in under ``seconds``."""
+    await asyncio.sleep(0.05)  # the wrapper has set up its wait by now
+    loop = asyncio.get_running_loop()
+    left = [h.when() - loop.time() for h in loop._scheduled if not h.cancelled()]  # type: ignore[attr-defined]
+    return [t for t in left if t < seconds]
 
 
 def test_a_call_without_a_stop_event_never_wakes_early() -> None:
     import pytest
 
-    def wakeups(wrap) -> int:
-        loop = asyncio.new_event_loop()
-        try:
-            woke = _count_wakeups(loop)
-            assert loop.run_until_complete(wrap(asyncio.sleep(1.5, "done"))) == "done"
-        finally:
-            loop.close()
-        return woke[0]
-
-    bare = wakeups(lambda coro: coro)  # the loop's own (Windows timers wake a little early)
+    # A poll (0.2 s) shows up as a timer due soon. Counting loop wakeups instead measured
+    # how early a busy Windows runner's timers fire: (8, 4) on CI.
     for signal in (None, _Stop()):
-        wrapped = wakeups(lambda coro: tool_writes.await_cancellable(coro, cancel_event=signal))
-        assert wrapped <= bare + 3, (wrapped, bare)  # 0.2 s polling added 7 or more
+        soon = asyncio.run(tool_writes.await_cancellable(_timers_due_within(1.0), cancel_event=signal))
+        assert soon == [], soon
     with pytest.raises(asyncio.TimeoutError, match="timed out after 1"):
         asyncio.run(tool_writes.await_cancellable(asyncio.sleep(5), cancel_event=None, timeout=1.0))
 

@@ -45,6 +45,7 @@ class FakeMcp:
 
     def __init__(self) -> None:
         self.seen: list[str] = []
+        self.unblock = threading.Event()
         tools = _fake_tools()
         self._tool_manager = SimpleNamespace(_tools={t.name: t for t in tools})
 
@@ -64,7 +65,7 @@ class FakeMcp:
         if (arguments or {}).get("block"):
             # Blocks the daemon loop the way ducky_ask_user does. tools/list
             # must still return from the tool-manager snapshot.
-            time.sleep(4)
+            self.unblock.wait(30)
         return [{"type": "text", "text": f"{name}:{run_id}"}]
 
 
@@ -398,12 +399,11 @@ def test_tools_list_returns_while_a_call_blocks_the_loop(monkeypatch, tmp_path) 
             },
         )
         time.sleep(0.3)
-        started = time.monotonic()
+        # The call stays blocked until the list is back, so an answer at all (within the
+        # socket's 8 s) proves tools/list never waited for it; a 2 s budget timed the runner.
         listed = _rpc(b, "tools/list")
-        assert time.monotonic() - started < 2.0
         assert [t["name"] for t in listed["tools"]] == ["ping", "workspace_write_file"]
-        # Let the blocked call finish so its thread does not write a closed socket.
-        time.sleep(4.2)
+        mcp.unblock.set()  # let the call finish so its thread does not write a closed socket
         try:
             shared_mcp.read_frame(a)
         except Exception:
@@ -1413,13 +1413,16 @@ def test_two_writers_of_the_state_file_never_collide(monkeypatch, tmp_path) -> N
         except BaseException as exc:  # noqa: BLE001 — the test reports it
             errors.append(exc)
 
+    from frontend.atomic_json import read_text_shared
+
     def read() -> None:
+        # Reads the way read_state does: a reader holding the file open must never
+        # make a writer's replace fail (it did with a plain open() on Windows).
         while not done.is_set():
-            path = tmp_path / "shared_mcp-h0.json"
             try:
-                text = path.read_text(encoding="utf-8")
-            except OSError:
-                continue  # not there yet, or mid-replace on Windows
+                text = read_text_shared(tmp_path / "shared_mcp-h0.json")
+            except FileNotFoundError:
+                continue  # the first write has not landed yet
             try:
                 json.loads(text)
             except ValueError:
