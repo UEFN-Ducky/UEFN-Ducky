@@ -12,13 +12,27 @@ if command -v apt-get >/dev/null; then
 elif command -v dnf >/dev/null; then
   dnf install -y -q xorg-x11-server-Xvfb xorg-x11-xauth python3 which findutils >/dev/null
 elif command -v pacman >/dev/null; then
-  pacman -Sy --noconfirm --needed xorg-server-xvfb xorg-xauth python >/dev/null
+  # -Syu, not -Sy: a partial upgrade conflicts with the image's own packages (openssl).
+  pacman -Syu --noconfirm --needed xorg-server-xvfb xorg-xauth python >/dev/null
 fi
 . /etc/os-release && echo "== $PRETTY_NAME ($(uname -m))"
 chmod +x "$app"
 export APPIMAGE_EXTRACT_AND_RUN=1
 if [ -n "$want_update" ]; then
-  got="$("$app" --appimage-updateinformation)"
+  # Read the runtime's .upd_info ELF section: with APPIMAGE_EXTRACT_AND_RUN the runtime hands
+  # --appimage-updateinformation to the app instead of answering it.
+  got="$(python3 - "$app" <<'PY'
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+shoff, = struct.unpack_from("<Q", d, 0x28)
+shentsize, shnum, shstrndx = struct.unpack_from("<HHH", d, 0x3A)
+sec = [struct.unpack_from("<IIQQQQ", d, shoff + i * shentsize) for i in range(shnum)]
+strtab = sec[shstrndx][4]
+for name, _t, _f, _a, off, size in sec:
+    if d[strtab + name:d.index(b"\0", strtab + name)] == b".upd_info":
+        print(d[off:off + size].split(b"\0")[0].decode())
+PY
+)"
   [ "$got" = "$want_update" ] || { echo "update info: $got != $want_update"; exit 1; }
 fi
 report="$(mktemp -d)/smoke.json"
