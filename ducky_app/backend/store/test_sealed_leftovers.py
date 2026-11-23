@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 
 import pytest
@@ -358,7 +359,18 @@ def test_a_restored_sealed_backup_goes_to_its_owner_whoever_is_signed_in(who: _W
     assert owners == {alice} and bob != alice
 
 
-def test_a_corrupt_database_restores_from_a_plain_snapshot_first(who: _Who, monkeypatch) -> None:
+def _corrupt_store_of_its_own(tmp_path):
+    """The snapshots beside a damaged ducky.db in a root of its own. A writer thread an
+    earlier test left running follows LOCALAPPDATA and can hold the shared ducky.db
+    (on Windows that fails the rename); in the app a restore runs at the first open,
+    before any such thread exists. Sealed snapshots still open with the signed-in keys."""
+    root = tmp_path / "private"
+    shutil.copytree(db.snapshot_dir(), db.snapshot_dir(root))  # copy2 keeps the mtime order
+    db.db_path(root).write_bytes(b"not a database")
+    return root
+
+
+def test_a_corrupt_database_restores_from_a_plain_snapshot_first(who: _Who, monkeypatch, tmp_path) -> None:
     who.key = ALICE
     _database_from_before(monkeypatch)
     alice = account_rows.current()
@@ -368,12 +380,13 @@ def test_a_corrupt_database_restores_from_a_plain_snapshot_first(who: _Who, monk
     assert sealed_files.is_sealed_file(old)
     [kept] = list(db.snapshot_dir().glob("ducky-*-sealed.db"))
     _age(kept, 7300)  # older than the sealed one, still tried first
-    assert db.restore_snapshot() == kept
+    root = _corrupt_store_of_its_own(tmp_path)
+    assert db.restore_snapshot(root) == db.snapshot_dir(root) / kept.name
     db.reset_for_tests()
-    assert db.integrity_check(db.connect()) == "ok"
+    assert db.integrity_check(db.connect(root)) == "ok"
 
 
-def test_with_only_sealed_snapshots_one_is_opened_before_the_swap(who: _Who, monkeypatch) -> None:
+def test_with_only_sealed_snapshots_one_is_opened_before_the_swap(who: _Who, monkeypatch, tmp_path) -> None:
     who.key = ALICE
     _database_from_before(monkeypatch)
     alice = account_rows.current()
@@ -382,12 +395,13 @@ def test_with_only_sealed_snapshots_one_is_opened_before_the_swap(who: _Who, mon
     account_rows.seal_pending(alice, pause_s=0)
     for plain in db.snapshot_dir().glob("ducky-*-sealed.db"):
         plain.unlink()
+    root = _corrupt_store_of_its_own(tmp_path)
     started = time.monotonic()
-    assert db.restore_snapshot() == old
+    assert db.restore_snapshot(root) == db.snapshot_dir(root) / old.name
     assert time.monotonic() - started < 30, "never waits on its own open lock"
     db.reset_for_tests()
-    assert db.integrity_check(db.connect()) == "ok"
-    assert not list(db.snapshot_dir().glob("*" + sealed_files.TMP_SUFFIX))
+    assert db.integrity_check(db.connect(root)) == "ok"
+    assert not list(db.snapshot_dir(root).glob("*" + sealed_files.TMP_SUFFIX))
 
 
 def test_parked_copies_are_sealed_for_the_account_that_claimed_them(who: _Who) -> None:
