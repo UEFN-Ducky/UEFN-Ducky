@@ -862,10 +862,36 @@ def test_no_splash_pid_writes_nothing(monkeypatch, tmp_path) -> None:
     assert not (tmp_path / "launcher").exists()
 
 
+def test_linux_window_icon_is_a_png_gdkpixbuf_reads(monkeypatch) -> None:
+    from frontend import platform_info
+    from frontend.ui_web import webview_app
+
+    monkeypatch.setattr(platform_info, "IS_LINUX", True)
+    icon = webview_app.webview_icon_path()
+    assert icon is not None and icon.suffix == ".png" and icon.is_file()
+    gi = pytest.importorskip("gi")
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+
+    assert GdkPixbuf.Pixbuf.new_from_file(str(icon)).get_width() > 0
+
+
+def test_windows_window_icon_stays_the_ico(monkeypatch) -> None:
+    from pathlib import Path
+
+    from frontend import platform_info, tray_icon
+    from frontend.ui_web import webview_app
+
+    monkeypatch.setattr(platform_info, "IS_LINUX", False)
+    monkeypatch.setattr(tray_icon, "resolve_app_icon_path", lambda: Path("app_icon.ico"))
+    assert webview_app.webview_icon_path() == Path("app_icon.ico")
+
+
 _GTK_SMOKE = r"""
 import functools, http.server, json, os, tempfile, threading, time
 import webview
 from frontend.ui_web.ui_dispatch import ensure_started
+from frontend.ui_web.webview_app import webview_icon_path
 from frontend.ui_web.win_frameless import install_pywebview_chrome_patches, install_sync_drag_bridge
 
 install_pywebview_chrome_patches()
@@ -906,7 +932,8 @@ def probe():
     w.destroy()
 
 
-webview.start(probe, gui="gtk")
+# The icon webview_app passes: a .ico here made GTK create no window at all.
+webview.start(probe, gui="gtk", icon=str(webview_icon_path()))
 print("RESULT " + json.dumps(result), flush=True)
 """
 

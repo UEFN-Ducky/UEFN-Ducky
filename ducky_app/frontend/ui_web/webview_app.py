@@ -38,6 +38,17 @@ def _allow_screencast_without_gesture() -> None:
         pass
 
 
+def webview_icon_path() -> Path | None:
+    """Window icon for ``webview.start``. GTK's GdkPixbuf can't read the ``.ico``
+    ("Compressed icons are not supported") and pywebview then makes no window at all,
+    so Linux gets the PNG the tray draws."""
+    from frontend.tray_icon import resolve_app_icon_path, resolve_status_png_path
+
+    if platform_info.IS_LINUX:
+        return resolve_status_png_path("online")
+    return resolve_app_icon_path()
+
+
 def _since_boot_ms() -> float:
     raw = os.environ.get("UEFN_DUCKY_BOOT_T0")
     try:
@@ -886,7 +897,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     window.events.closing += on_closing
 
-    from frontend.tray_icon import resolve_app_icon_path
     from frontend.ui_web.ui_dispatch import ensure_started
 
     ensure_started()
@@ -949,7 +959,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
         start_session_services(api, window_holder, tk_root_holder, handover)
 
-    icon_path = resolve_app_icon_path()
+    icon_path = webview_icon_path()
     _start_later(background_work["start"], _BACKGROUND_FALLBACK_S)
     _boot_trace("ready_for_webview_start", time.perf_counter())
     # Dev only: native Inspect menu + DevTools. Store EXE stays shipped; ErrorBoundary
