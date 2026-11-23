@@ -304,6 +304,7 @@ def main() -> None:
     # Isolate AppData (+ IDE skill deploy roots) for this check.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         os.environ["LOCALAPPDATA"] = tmp
+        os.environ["XDG_DATA_HOME"] = tmp  # Linux app data reads XDG
         os.environ["USERPROFILE"] = tmp
         os.environ["HOME"] = tmp
         from backend.uefn_plugins.store import (
@@ -941,7 +942,7 @@ def test_self_check(monkeypatch) -> None:
 
 
 def _isolated_appdata(monkeypatch, tmp_path: Path) -> None:
-    for key in ("LOCALAPPDATA", "USERPROFILE", "HOME"):
+    for key in ("LOCALAPPDATA", "USERPROFILE", "HOME", "XDG_DATA_HOME"):
         monkeypatch.setenv(key, str(tmp_path))
 
 

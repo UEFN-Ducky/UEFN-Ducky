@@ -6,6 +6,12 @@ import os
 import sys
 import types
 
+from backend.uefn_plugins import manifest_platform as mp
+
+# This OS's compiled module (.pyd on Windows, .so on Linux); a Linux build names its ABI.
+EXT = mp.module_suffix(mp.host_os())
+ABI = {} if sys.platform == "win32" else {"python_abi": mp.python_abi(mp.host_os(), mp.host_arch())}
+
 
 class _CountingLoader:
     """Stands in for ExtensionFileLoader: counts how often the extension's init runs."""
@@ -38,7 +44,7 @@ def test_a_loaded_compiled_backend_is_never_executed_again(monkeypatch, tmp_path
     patch_host(monkeypatch, "_restore_compiled_from_quarantine", lambda *_a: None)
     patch_host(monkeypatch, "is_plugin_enabled", lambda _pid: True)
     monkeypatch.delitem(sys.modules, name, raising=False)
-    old = tmp_path / f"{name}.pyd"
+    old = tmp_path / f"{name}{EXT}"
     old.write_bytes(b"v1")
 
     first = backends._import_compiled_backend(pid, tmp_path, manifest)
@@ -56,7 +62,7 @@ def test_a_loaded_compiled_backend_is_never_executed_again(monkeypatch, tmp_path
     assert _CountingLoader.runs == 1 and state._RESTART_PENDING == {}
 
     # A newer build: still the running module, and the plugin says to restart.
-    new = tmp_path / f"{name}_v2.pyd"
+    new = tmp_path / f"{name}_v2{EXT}"
     new.write_bytes(b"v2")
     later = old.stat().st_mtime + 10
     os.utime(new, (later, later))
@@ -88,17 +94,17 @@ def test_a_new_version_loads_next_to_the_running_one_without_restart(monkeypatch
     for n in (base, v1, v2):
         monkeypatch.delitem(sys.modules, n, raising=False)
 
-    (tmp_path / f"{v1}.pyd").write_bytes(b"v1")
-    m1 = {"label": "Fake V", "backend": {"compiled": f"{v1}.pyd", "module": v1}}
+    (tmp_path / f"{v1}{EXT}").write_bytes(b"v1")
+    m1 = {"label": "Fake V", "backend": {"compiled": f"{v1}{EXT}", "module": v1}, **ABI}
     first = backends._import_compiled_backend(pid, tmp_path, m1)
     assert _CountingLoader.runs == 1 and sys.modules[base] is first
 
     # The Store update: new file, new name -> its own init runs, nothing waits for a restart.
     lifecycle._drop_plugin_runtime(pid, base)
     assert base not in sys.modules and sys.modules[v1] is first  # the running copy stays mapped
-    (tmp_path / f"{v1}.pyd").unlink()
-    (tmp_path / f"{v2}.pyd").write_bytes(b"v2")
-    m2 = {"label": "Fake V", "backend": {"compiled": f"{v2}.pyd", "module": v2}}
+    (tmp_path / f"{v1}{EXT}").unlink()
+    (tmp_path / f"{v2}{EXT}").write_bytes(b"v2")
+    m2 = {"label": "Fake V", "backend": {"compiled": f"{v2}{EXT}", "module": v2}, **ABI}
     second = backends._import_compiled_backend(pid, tmp_path, m2)
     assert second is not first and _CountingLoader.runs == 2
     assert sys.modules[base] is second and state._RESTART_PENDING == {}

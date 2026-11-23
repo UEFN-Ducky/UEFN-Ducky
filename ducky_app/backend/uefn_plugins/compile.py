@@ -589,13 +589,13 @@ def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tu
 
 def _assert_runs_on_every_cpu(pyd: Path) -> None:
     """Refuse a build with instructions some PCs lack: loading it would close Ducky there."""
-    if IS_LINUX:
-        # ponytail: cpu_check reads PE images only; Linux relies on the -march baseline flags.
-        # Add an ELF reader to cpu_check when a Linux build is caught with newer instructions.
-        return
-    from backend.uefn_plugins.cpu_check import problems
+    from backend.uefn_plugins.cpu_check import ELF_AARCH64, elf_machine, problems
 
-    found = problems(pyd.read_bytes())
+    image = pyd.read_bytes()
+    if elf_machine(image) == ELF_AARCH64:
+        # ponytail: no arm64 disassembler here; arm64 builds rely on gcc's armv8-a baseline.
+        return
+    found = problems(image)
     if found:
         raise CompileError(
             f"{pyd.name} uses instructions that some PCs don't have, so Ducky would close on them "

@@ -153,20 +153,35 @@ def _zip_of(files: dict[str, bytes]) -> bytes:
     return buf.getvalue()
 
 
+def _real_extension() -> tuple[str, str, Path] | None:
+    """(name, a function it has, its file): an extension module of this Python, in this OS's form."""
+    ext = ".pyd" if sys.platform == "win32" else ".so"
+    for name, func in (("winsound", "Beep"), ("_csv", "reader"), ("select", "select"), ("array", "array"),
+                       ("_json", "scanstring"), ("math", "sqrt")):
+        spec = importlib.util.find_spec(name)
+        origin = Path(spec.origin or "") if spec else Path()
+        if origin.suffix.lower() == ext:
+            return name, func, origin
+    return None
+
+
 def test_a_build_is_loaded_before_it_is_written(tmp_path: Path) -> None:
     # A real extension module of this Python stands in for a plugin's compiled backend.
-    origin = Path(importlib.util.find_spec("winsound").origin or "")
-    if origin.suffix.lower() != ".pyd":
+    found = _real_extension()
+    if found is None:
         pytest.skip("no extension module to load on this platform")
-    good = _zip_of({"winsound.pyd": origin.read_bytes(), "plugin.json": b"{}"})
+    name, func, origin = found
+    ext = origin.suffix.lower()
+    good = _zip_of({f"{name}{ext}": origin.read_bytes(), "plugin.json": b"{}"})
     (tmp_path / "good").mkdir()
-    assert build_engine._check_build_loads(good, tmp_path / "good", "winsound", "winsound.pyd", "Beep") == ("", "")
+    assert build_engine._check_build_loads(good, tmp_path / "good", name, f"{name}{ext}", func) == ("", "")
     (tmp_path / "noreg").mkdir()
-    broken, unchecked = build_engine._check_build_loads(good, tmp_path / "noreg", "winsound", "winsound.pyd", "register")
+    broken, unchecked = build_engine._check_build_loads(good, tmp_path / "noreg", name, f"{name}{ext}", "register")
     assert (broken, unchecked) == ("the backend has no register()", "")
     # A file that is no module at all: the load fails, and the check says what Python said.
     (tmp_path / "bad").mkdir()
     broken, unchecked = build_engine._check_build_loads(
-        _zip_of({"demo.pyd": b"not a module"}), tmp_path / "bad", "demo", "demo.pyd", "register")
+        _zip_of({f"demo{ext}": b"not a module"}), tmp_path / "bad", "demo", f"demo{ext}", "register")
     assert broken.startswith("ImportError") and unchecked == ""
+    shutil.rmtree(tmp_path, ignore_errors=True)
     shutil.rmtree(tmp_path, ignore_errors=True)

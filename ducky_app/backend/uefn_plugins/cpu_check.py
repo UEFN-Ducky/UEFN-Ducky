@@ -5,6 +5,7 @@ with an illegal instruction (0xC000001D) on every CPU without it. The build engi
 baseline x86-64 (compile.BASELINE_CPU_FLAGS); this proves the result: every instruction
 in a Windows module's code must be one that any CPU running 64-bit Windows has. The
 UEFN Ducky Store runs the same check (same disassembler, same list) on each upload.
+A Linux x86_64 build (an ELF ``.so``) is held to the same list.
 """
 
 from __future__ import annotations
@@ -22,14 +23,50 @@ BASELINE_FEATURES = frozenset({
 })
 # TZCNT is BSF with a prefix older CPUs ignore, so they run it; compilers emit it for baseline.
 BASELINE_MNEMONICS = frozenset({"TZCNT"})
+# Linux gcc marks every function with ENDBR64 (control-flow protection): a hint NOP that CPUs
+# without CET skip, so it runs everywhere. Windows builds never carry it.
+ELF_BASELINE_MNEMONICS = frozenset({"ENDBR64", "ENDBR32"})
 
 _IMAGE_SCN_CNT_CODE = 0x00000020
 _IMAGE_SCN_MEM_EXECUTE = 0x20000000
 _MAX_EXAMPLES = 3
 
+ELF_MAGIC = b"\x7fELF"
+ELF_X86_64 = 0x3E
+ELF_AARCH64 = 0xB7
+_SHF_EXECINSTR = 0x4
+_SHT_NOBITS = 8
+
+
+def elf_machine(image: bytes) -> int | None:
+    """``e_machine`` of a 64-bit little-endian ELF image, None when it is not one."""
+    if len(image) < 0x40 or image[:4] != ELF_MAGIC or image[4] != 2 or image[5] != 1:
+        return None
+    return struct.unpack_from("<H", image, 0x12)[0]
+
+
+def _elf_code_sections(image: bytes) -> list[tuple[str, int, bytes]]:
+    """The executable sections of an x86_64 ELF image (a Linux .so): (name, address, bytes)."""
+    machine = elf_machine(image)
+    if machine != ELF_X86_64:
+        raise ValueError(f"not a 64-bit x86 module (machine 0x{machine or 0:04x})")
+    shoff = struct.unpack_from("<Q", image, 0x28)[0]
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", image, 0x3A)
+    headers = [struct.unpack_from("<IIQQQQ", image, shoff + shentsize * i) for i in range(shnum)]
+    names_at = headers[shstrndx][4] if shstrndx < shnum else 0
+    out: list[tuple[str, int, bytes]] = []
+    for name_off, kind, flags, addr, offset, size in headers:
+        if flags & _SHF_EXECINSTR and kind != _SHT_NOBITS:
+            end = image.find(b"\0", names_at + name_off)
+            name = image[names_at + name_off:end].decode("ascii", "replace") if names_at else ""
+            out.append((name, addr, image[offset:offset + size]))
+    return out
+
 
 def code_sections(image: bytes) -> list[tuple[str, int, bytes]]:
-    """The executable sections of a PE image (a .pyd/.dll): (name, rva, bytes)."""
+    """The executable sections of a PE image (a .pyd/.dll) or x86_64 ELF (.so): (name, rva, bytes)."""
+    if image[:4] == ELF_MAGIC:
+        return _elf_code_sections(image)
     if len(image) < 0x40 or image[:2] != b"MZ":
         raise ValueError("not a Windows module (no MZ header)")
     pe = struct.unpack_from("<I", image, 0x3C)[0]
@@ -59,7 +96,8 @@ def problems(image: bytes) -> list[str]:
 
     names = {getattr(iced_x86.CpuidFeature, n): n for n in dir(iced_x86.CpuidFeature) if n.isupper()}
     mnemonics = {getattr(iced_x86.Mnemonic, n): n for n in dir(iced_x86.Mnemonic) if n.isupper()}
-    allowed = {m for m, n in mnemonics.items() if n in BASELINE_MNEMONICS}
+    baseline = BASELINE_MNEMONICS | ELF_BASELINE_MNEMONICS if image[:4] == ELF_MAGIC else BASELINE_MNEMONICS
+    allowed = {m for m, n in mnemonics.items() if n in baseline}
     found: dict[str, list[str]] = {}
     formatter = iced_x86.Formatter(iced_x86.FormatterSyntax.INTEL)
     for section, rva, code in code_sections(image):

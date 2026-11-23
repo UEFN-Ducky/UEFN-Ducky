@@ -93,6 +93,7 @@ def test_uninstall_returns_fast_and_removes_dir(monkeypatch) -> None:
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("XDG_DATA_HOME", tmp)  # Linux app data reads XDG
         monkeypatch.setenv("USERPROFILE", tmp)
         monkeypatch.setenv("HOME", tmp)
 
@@ -189,6 +190,7 @@ def test_hung_register_does_not_wedge_store_toggles(monkeypatch) -> None:
     # ignore_cleanup_errors: hung register() keeps the .py module mapped on Windows.
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("XDG_DATA_HOME", tmp)  # Linux app data reads XDG
         monkeypatch.setenv("USERPROFILE", tmp)
         monkeypatch.setenv("HOME", tmp)
 
@@ -328,6 +330,7 @@ def test_parallel_plugin_replaces_do_not_overlap_their_swaps(monkeypatch) -> Non
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("XDG_DATA_HOME", tmp)  # Linux app data reads XDG
         monkeypatch.setenv("USERPROFILE", tmp)
         monkeypatch.setenv("HOME", tmp)
         with patch.object(st, "_refresh_plugin_skills_async", lambda: None):
@@ -431,6 +434,7 @@ def test_a_copy_with_no_recorded_source_takes_store_updates_but_a_local_copy_doe
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         monkeypatch.setenv("LOCALAPPDATA", tmp)
+        monkeypatch.setenv("XDG_DATA_HOME", tmp)  # Linux app data reads XDG
         monkeypatch.setenv("USERPROFILE", tmp)
         monkeypatch.setenv("HOME", tmp)
         with patch.object(st, "_refresh_plugin_skills_async", lambda: None), \
