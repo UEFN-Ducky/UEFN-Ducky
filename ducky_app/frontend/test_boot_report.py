@@ -126,6 +126,34 @@ def test_heartbeat_counts_the_launchers_webview2(monkeypatch) -> None:
     assert "WebView2 0.6 GB" in boot_report._heartbeat_lines(beat, None)[0]
 
 
+def test_linux_heartbeat_counts_webkit_children(monkeypatch) -> None:
+    # T1 v17: Linux beats said webview_gb 0.0 while WebKitGTK's helpers held ~500 MB.
+    from backend.util import proc_table
+
+    mb = 1024**2
+    me = os.getpid()
+
+    def proc(pid, ppid, name, private):
+        return proc_table.Proc(pid, ppid, name, 0, private, 1, 0, 0.0, 1.0)
+
+    procs = {
+        me: proc(me, 1, "python3", 300 * mb),
+        900010: proc(900010, me, "WebKitWebProcess", 410 * mb),
+        900011: proc(900011, me, "WebKitNetworkPr", 102 * mb),  # comm cut at 15 chars
+        900012: proc(900012, me, "claude", 200 * mb),  # an agent, not the WebView
+        900013: proc(900013, 1, "WebKitWebProcess", 900 * mb),  # another app's
+    }
+    monkeypatch.setattr(proc_table, "table", lambda: procs)
+    monkeypatch.setattr(boot_report, "_linux_memory", lambda: {})
+    monkeypatch.delenv("UEFN_DUCKY_NATIVE_CHILD", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    beat = boot_report._memory_sample(None)
+    assert beat["webview_mb"] == 512.0 and beat["webview_gb"] == 0.5
+    assert beat["agents_n"] == 1 and beat["agents_mb"] == 200
+    monkeypatch.setattr(sys, "platform", "win32")  # Windows counts only msedgewebview2.exe
+    assert boot_report._memory_sample(None)["webview_gb"] == 0.0
+
+
 
 def test_a_ducky_stopped_by_pid_on_purpose_is_not_a_crash(crash, tmp_path: Path) -> None:
     # Oct 25 2026: the speed test ended each sandboxed 1.2.430 by PID between scenarios and

@@ -1009,7 +1009,7 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
             launcher = (proc_table.ancestor(procs, me.pid, "Ducky-Launcher.exe")
                         if os.environ.get("UEFN_DUCKY_NATIVE_CHILD") == "1" else None)
             mine = proc_table.tree(procs, launcher.pid if launcher else me.pid)
-            webview = sum(procs[p].private for p in mine if procs[p].name.lower() == WEBVIEW_EXE)
+            webview = sum(procs[p].private for p in mine if _is_webview(procs[p].name))
             beat.update(webview_gb=round(webview / gb, 2), webview_mb=round(webview / 1024**2, 1))
             if launcher:
                 beat["launcher_mb"] = round(launcher.private / 1024**2, 1)
@@ -1029,6 +1029,17 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
 
 
 WEBVIEW_EXE = "msedgewebview2.exe"
+# Linux (WebKitGTK): the page, network and GPU helpers. Prefixes, so a comm cut at 15 chars still matches.
+_WEBKIT_PREFIXES = ("webkitwebproc", "webkitnetworkp", "webkitgpuproc")
+
+
+def _is_webview(name: str) -> bool:
+    """A WebView helper process: ``msedgewebview2.exe``; on Linux also WebKitGTK's helpers."""
+    name = name.lower()
+    if name == WEBVIEW_EXE:
+        return True
+    return sys.platform.startswith("linux") and name.startswith(_WEBKIT_PREFIXES)
+
 TOP_OTHER_N = 3
 # Windows' own memory accounting, not programs anyone can close.
 _NOT_PROGRAMS = {"system", "registry", "memory compression", "secure system", "idle", "system idle process", ""}
@@ -1048,7 +1059,7 @@ def process_census(procs: dict[int, Any], root: int, mine: list[int] | None = No
         mine = proc_table.tree(procs, root)
     ours = set(mine)
     mb = 1024**2
-    agents = [procs[p] for p in mine if p not in (root, launcher_pid) and procs[p].name.lower() != WEBVIEW_EXE]
+    agents = [procs[p] for p in mine if p not in (root, launcher_pid) and not _is_webview(procs[p].name)]
     by_name: dict[str, int] = {}
     for pid, proc in procs.items():
         if pid in ours or proc.name.lower() in _NOT_PROGRAMS:
