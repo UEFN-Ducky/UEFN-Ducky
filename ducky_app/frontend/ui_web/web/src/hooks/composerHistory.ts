@@ -117,10 +117,22 @@ export function redoComposer(chatId: string): ComposerSnapshot | null {
   return history.present;
 }
 
+/** Linux desktop: Super (metaKey) belongs to GNOME/KDE (overview, tiling, launchers), so
+ *  no shortcut of ours binds it there. Windows and macOS keep Ctrl/Cmd as today. */
+export function superIsOsKey(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Linux/i.test(navigator.platform) && !/Android/i.test(navigator.userAgent);
+}
+
+/** The shortcut modifier: Ctrl, or Cmd/Win where Super isn't the desktop's. */
+export function primaryMod(event: { ctrlKey: boolean; metaKey: boolean }): boolean {
+  return event.ctrlKey || (event.metaKey && !superIsOsKey());
+}
+
 /** Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes; anything else is not ours. */
 export function composerHistoryKey(event: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }):
   "undo" | "redo" | null {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+  if (!primaryMod(event) || event.altKey) return null;
   const key = event.key.toLowerCase();
   if (key === "z") return event.shiftKey ? "redo" : "undo";
   if (key === "y" && !event.shiftKey) return "redo";

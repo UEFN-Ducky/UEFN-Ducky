@@ -73,6 +73,36 @@ import {
 
 type Attachments = ReturnType<typeof useComposerAttachments>;
 
+/** A key the input method (IBus, Fcitx, Windows IME) owns: Enter here commits the
+ *  composition, never sends. WebKit fires the commit keydown with keyCode 229 and
+ *  isComposing already false, so both are checked. */
+export function isImeKey(e: { keyCode?: number; nativeEvent?: { isComposing?: boolean } }): boolean {
+  return Boolean(e.nativeEvent?.isComposing) || e.keyCode === 229;
+}
+
+/** `file://` URI for an attachment saved on disk at an absolute path; "" otherwise. */
+export function attachmentFileUri(att: { kind: string; storedPath?: string }): string {
+  const p = att.kind === "image" ? String(att.storedPath || "") : "";
+  if (p.startsWith("/")) return `file://${encodeURI(p)}`;
+  if (/^[A-Za-z]:[\\/]/.test(p)) return `file:///${encodeURI(p.replace(/\\/g, "/"))}`;
+  return "";
+}
+
+/** Drag an attachment's thumbnail out of the composer (Nautilus, Dolphin, Explorer) as
+ *  `text/uri-list`. Thumbnails are `<img>`s, so the browser starts the drag; we add the file. */
+export function dragAttachmentOut(
+  e: { target: EventTarget | null; dataTransfer: DataTransfer | null },
+  attachments: readonly { kind: string; dataUrl?: string; storedPath?: string }[],
+): boolean {
+  const src = (e.target as HTMLElement | null)?.getAttribute?.("src");
+  const att = src ? attachments.find((a) => a.dataUrl === src) : undefined;
+  const uri = att ? attachmentFileUri(att) : "";
+  if (!uri || !e.dataTransfer) return false;
+  e.dataTransfer.setData("text/uri-list", `${uri}\r\n`);
+  e.dataTransfer.effectAllowed = "copy";
+  return true;
+}
+
 /** Shown while the @ / slash catalog loads for the first time; picking it does nothing. */
 const LOADING_REF: ChatRef = { trigger: "@", id: "__loading__", label: "Loading…", group: "", href: "" };
 const REF_TRIGGER = /[@/~]/;
@@ -908,13 +938,15 @@ export const ChatComposer = memo(function ChatComposer({
             )}
             {slashStatus ? <div className="slash-command-status">{slashStatus}</div> : null}
             {queuedNote ? <div className="slash-command-status" role="status">{queuedNote}</div> : null}
-            <ComposerAttachmentChips
-              attachments={attachments}
-              readInParts={readInParts}
-              onRemove={removeAttachment}
-              onPreview={(att) => setPreviewAttachmentId(att.id)}
-              onRetry={retryVideo}
-            />
+            <div style={{ display: "contents" }} onDragStart={(e) => void dragAttachmentOut(e, attachments)}>
+              <ComposerAttachmentChips
+                attachments={attachments}
+                readInParts={readInParts}
+                onRemove={removeAttachment}
+                onPreview={(att) => setPreviewAttachmentId(att.id)}
+                onRetry={retryVideo}
+              />
+            </div>
             <AttachmentPreviewModal
               open={previewAttachment !== null}
               attachment={previewAttachment}
@@ -935,6 +967,7 @@ export const ChatComposer = memo(function ChatComposer({
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               onKeyDown={(e) => {
+                if (isImeKey(e)) return;
                 if (onHistoryKey(e)) return;
                 if (slashMenuOpen) {
                   const count = pickerCount;

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { primaryMod } from "../hooks/composerHistory";
 
 /** Focus contexts that own their own undo (text editing) — VS Code lets those handle
  * Ctrl+Z themselves, so tree undo must stay out of the way. */
@@ -28,7 +29,7 @@ export function undoScopeFor(el: Element | null): string | null {
 export function useUndoShortcuts(undo: (scope: string) => void, redo: (scope: string) => void): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
+      const mod = primaryMod(e);
       if (!mod || e.altKey) return;
       const key = e.key.toLowerCase();
       const isUndo = key === "z" && !e.shiftKey;
