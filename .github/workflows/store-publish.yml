@@ -8,6 +8,14 @@
 # uninstaller, Ducky Setup host) and upload. Signing runs inside publish_app
 # through release/sign_windows.py, with Azure Artifact Signing when the Azure
 # secrets are set; without them the release is unsigned (plain Inno Setup).
+#
+# Linux ships in the same run: linux-build (ubuntu-22.04 x86_64 + arm64) freezes the
+# app at the version the Windows build step will make, packs AppImage/.deb/.rpm/Flatpak
+# and minisigns them; linux-repo builds the signed apt + dnf repos. The Windows job only
+# starts once both pass, so a Linux failure stops the release before anything uploads;
+# its upload step then registers Windows and Linux in one uds_app_release call.
+# linux-bumps updates the AUR package and opens the Flathub PR after the release.
+# dry_run=true builds everything and uploads nothing (bumps print their diffs).
 name: Ducky Plugin Library Publish
 
 on:
@@ -23,6 +31,11 @@ on:
         required: false
         default: ""
         type: string
+      dry_run:
+        description: "Build every artifact, upload nothing"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: store-publish-${{ github.repository }}
@@ -33,8 +46,162 @@ permissions:
   id-token: write
 
 jobs:
+  linux-version:
+    name: release version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - id: v
+        env:
+          DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+          SET_VERSION: ${{ inputs.set_version }}
+        run: |
+          v="$(python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; p.print_next_version(sys.argv[1])" "${SET_VERSION}" | tail -n1)"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $v"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Release version: $v"
+
+  linux-build:
+    name: linux build (${{ matrix.arch }})
+    needs: linux-version
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, arch: x86_64, deb: amd64 }
+          - { runner: ubuntu-22.04-arm, arch: aarch64, deb: arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: "1"
+      VERSION: ${{ needs.linux-version.outputs.version }}
+      MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+      MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ducky_app/frontend/ui_web/web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: native_launcher }
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libportaudio2 xvfb zsync dpkg-dev
+      - name: Dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix ducky_app/frontend/ui_web/web
+      # ponytail: build_exes.py always bumps patch, so it starts one below the release
+      # version (x.y.0 starts at x.y.-1, which int() bumps to x.y.0).
+      - name: Set the release version
+        run: |
+          python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; a, b, c = sys.argv[1].split('.'); p.write_version(f'{a}.{b}.{int(c) - 1}')" "$VERSION"
+      - name: Freeze (PyInstaller) + runtime smoke
+        run: |
+          xvfb-run -a python build/build_exes.py
+          built="$(python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; print(p.read_version())")"
+          [ "$built" = "$VERSION" ] || { echo "built $built, expected $VERSION"; exit 1; }
+      - name: Packages
+        run: |
+          mkdir -p dist/linux
+          tar -C dist -cf dist/uefn-ducky.tar uefn-ducky
+          python build/linux/appimage/build_appimage.py --arch ${{ matrix.arch }}
+          mv dist/UEFN-Ducky-"$VERSION"-${{ matrix.arch }}.AppImage dist/*.zsync dist/linux/
+          bash build/linux/deb/build_deb.sh "$VERSION" ${{ matrix.deb }} dist/uefn-ducky dist/linux
+          docker run --rm -v "$PWD:/w" -w /w fedora:41 bash -c \
+            'dnf install -y rpm-build tar >/dev/null && bash build/linux/rpm/build_rpm.sh "$0" dist/uefn-ducky.tar dist/linux' "$VERSION"
+          sudo chown -R "$(id -u):$(id -g)" dist/linux
+      - name: Flatpak
+        if: matrix.arch == 'x86_64'
+        run: bash build/linux/flatpak/ci_test.sh "$VERSION" dist/uefn-ducky.tar dist/linux
+      - name: Sign (minisign)
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then echo "::notice::dry run without MINISIGN_SECRET_KEY: unsigned"; exit 0; fi
+            echo "MINISIGN_SECRET_KEY is not set: a release never ships unsigned Linux files"; exit 1
+          fi
+          python release/sign_linux.py dist/linux/*"$VERSION"* dist/linux/*.zsync
+      - name: Every package carries the release version
+        run: |
+          ls -la dist/linux
+          for f in dist/linux/*.AppImage dist/linux/*.deb dist/linux/*.rpm; do
+            case "$(basename "$f")" in *"$VERSION"*) ;; *) echo "$f is not $VERSION"; exit 1 ;; esac
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-dist-${{ matrix.arch }}
+          path: dist/linux/
+          if-no-files-found: error
+          retention-days: 14
+
+  linux-repo:
+    name: apt + dnf repos
+    needs: [linux-version, linux-build]
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.linux-version.outputs.version }}
+      LINUX_REPO_GPG_PRIVATE_KEY: ${{ secrets.LINUX_REPO_GPG_PRIVATE_KEY }}
+      LINUX_REPO_GPG_PASSPHRASE: ${{ secrets.LINUX_REPO_GPG_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-dist-*
+          path: dist/linux
+          merge-multiple: true
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apt-utils createrepo-c gnupg
+          python -m pip install cryptography
+      - name: Build and sign the repos
+        run: |
+          repo=dist/linux-repo
+          mkdir -p "$repo"
+          if [ -n "$LINUX_REPO_GPG_PRIVATE_KEY" ]; then
+            export GNUPGHOME="$(mktemp -d)"
+            printf '%s' "$LINUX_REPO_GPG_PRIVATE_KEY" | gpg --batch --import
+            gpg --batch --export > "$repo/uefn-ducky.gpg"
+            gpg --batch --armor --export > "$repo/uefn-ducky.asc"
+            unset GNUPGHOME
+          elif [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "::notice::dry run without LINUX_REPO_GPG_PRIVATE_KEY: throwaway CI key"
+            export DUCKY_REPO_SIGNER="bash $PWD/build/linux/deb/test_repo_signer.sh" GNUPGHOME="$RUNNER_TEMP/gnupg"
+          else
+            echo "LINUX_REPO_GPG_PRIVATE_KEY is not set: the apt/dnf repos must be signed"; exit 1
+          fi
+          bash build/linux/deb/build_apt_repo.sh "$repo/apt" dist/linux/*"$VERSION"*.deb
+          bash build/linux/rpm/build_dnf_repo.sh "$repo/rpm" dist/linux/*"$VERSION"*.rpm
+          cp build/linux/rpm/uefn-ducky.repo "$repo/rpm/"
+          if [ -n "${DUCKY_REPO_SIGNER:-}" ]; then
+            cp "$GNUPGHOME/repo.gpg" "$repo/uefn-ducky.gpg"; cp "$GNUPGHOME/repo.asc" "$repo/uefn-ducky.asc"
+          fi
+          find "$repo" -type f | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-repo
+          path: dist/linux-repo/
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: build, sign and publish Setup
+    needs: [linux-version, linux-build, linux-repo]
     runs-on: windows-latest
     timeout-minutes: 120
     env:
@@ -138,7 +305,38 @@ jobs:
           if [ -n "${SET_VERSION}" ]; then extra+=(--set-version "${SET_VERSION}"); fi
           .venv/Scripts/python -u release/publish_app.py --phase build "${extra[@]}"
 
+      - name: Windows and Linux are the same version
+        shell: bash
+        env:
+          LINUX_VERSION: ${{ needs.linux-version.outputs.version }}
+        run: |
+          built="$(.venv/Scripts/python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; print(p.read_version())")"
+          if [ "$built" != "$LINUX_VERSION" ]; then
+            echo "Windows built $built but Linux built $LINUX_VERSION (the Store moved?): re-run the release."
+            exit 1
+          fi
+
+      # publish_app's upload step registers dist/linux and publishes dist/linux-repo.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-dist-*
+          path: dist/linux
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-repo
+          path: dist/linux-repo
+
+      - name: Dry run (uploads nothing)
+        if: inputs.dry_run
+        shell: bash
+        run: |
+          ls -la dist/*.exe dist/linux
+          find dist/linux-repo -type f | sort
+          .venv/Scripts/python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; v = p.read_version(); print([(a['os'], a['arch'], a['package'], a['path'].name, a['sig'] and a['sig'].name) for a in p.linux_artifacts(v)]); print(sorted(p.linux_repo_files()))"
+
       - name: Upload to the Store
+        if: ${{ !inputs.dry_run }}
         shell: bash
         env:
           NOTES: ${{ inputs.notes }}
@@ -146,3 +344,106 @@ jobs:
           extra=()
           if [ -n "${NOTES}" ]; then extra+=(--notes "${NOTES}"); fi
           .venv/Scripts/python -u release/publish_app.py --phase upload --notes-from-git "${extra[@]}"
+
+  # After the release is live: the AUR package and the Flathub manifest point at the new
+  # AppImages (uefnducky.org/downloads/linux/…) with their sha256. A dry run prints both
+  # diffs and pushes nothing; a release without AUR_SSH_PRIVATE_KEY / FLATHUB_TOKEN skips that one.
+  linux-bumps:
+    name: AUR + Flathub bumps
+    needs: [linux-version, publish]
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.linux-version.outputs.version }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      FLATHUB_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-dist-*
+          path: dist/linux
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          echo "SHA_X86_64=$(sha256sum dist/linux/UEFN-Ducky-$VERSION-x86_64.AppImage | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          echo "SHA_AARCH64=$(sha256sum dist/linux/UEFN-Ducky-$VERSION-aarch64.AppImage | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: AUR (uefn-ducky-bin)
+        run: |
+          out="$RUNNER_TEMP/aur"
+          mkdir -p "$out"
+          for f in PKGBUILD .SRCINFO; do
+            sed -E -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^pkgrel=.*/pkgrel=1/" \
+              -e "s/^sha256sums_x86_64=.*/sha256sums_x86_64=('$SHA_X86_64')/" \
+              -e "s/^sha256sums_aarch64=.*/sha256sums_aarch64=('$SHA_AARCH64')/" \
+              -e "s/^(\tpkgver = ).*/\1$VERSION/" -e "s/^(\tpkgrel = ).*/\11/" \
+              -e "s/UEFN-Ducky-[0-9]+\.[0-9]+\.[0-9]+-/UEFN-Ducky-$VERSION-/g" \
+              -e "s/^(\tsha256sums_x86_64 = ).*/\1$SHA_X86_64/" \
+              -e "s/^(\tsha256sums_aarch64 = ).*/\1$SHA_AARCH64/" \
+              "build/linux/aur/$f" > "$out/$f"
+            diff -u "build/linux/aur/$f" "$out/$f" || true
+          done
+          grep -q "pkgver = $VERSION" "$out/.SRCINFO" && grep -q "$SHA_X86_64" "$out/.SRCINFO"
+          if [ "$DRY_RUN" = "true" ]; then echo "dry run: AUR not pushed"; exit 0; fi
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then echo "::warning::no AUR_SSH_PRIVATE_KEY: AUR not bumped"; exit 0; fi
+          install -m700 -d ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes"
+          git clone ssh://aur@aur.archlinux.org/uefn-ducky-bin.git "$RUNNER_TEMP/aur-repo"
+          cp "$out/PKGBUILD" "$out/.SRCINFO" "$RUNNER_TEMP/aur-repo/"
+          cd "$RUNNER_TEMP/aur-repo"
+          git -c user.name="UEFN Ducky" -c user.email="noreply@uefnducky.org" commit -am "Update to $VERSION" || exit 0
+          git push origin HEAD:master
+
+      - name: Flathub (online.uefnducky.Ducky)
+        env:
+          GH_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+        run: |
+          python -m pip install pyyaml
+          out="$RUNNER_TEMP/flathub"
+          mkdir -p "$out"
+          if [ "$DRY_RUN" != "true" ] && [ -n "$FLATHUB_TOKEN" ]; then
+            gh repo clone flathub/online.uefnducky.Ducky "$out" -- --depth 1
+          fi
+          cp -f "$out/online.uefnducky.Ducky.yml" "$RUNNER_TEMP/flathub-before.yml" 2>/dev/null || : > "$RUNNER_TEMP/flathub-before.yml"
+          # Flathub builds from released files: the local uefn-ducky.tar becomes the AppImage
+          # of each arch (url + sha256), extracted to the same bundle/ folder; the repo's
+          # other files are copied beside the manifest.
+          python - "$out" <<'PY'
+          import os, shutil, sys
+          from pathlib import Path
+          import yaml
+          out, src = Path(sys.argv[1]), Path("build/linux/flatpak")
+          v, base = os.environ["VERSION"], "https://uefnducky.org/downloads/linux"
+          doc = yaml.safe_load((src / "online.uefnducky.Ducky.yml").read_text())
+          mod = next(m for m in doc["modules"] if isinstance(m, dict) and m.get("name") == "uefn-ducky")
+          sources = []
+          for s in mod["sources"]:
+              if s.get("path") == "uefn-ducky.tar":
+                  for arch, sha in (("x86_64", os.environ["SHA_X86_64"]), ("aarch64", os.environ["SHA_AARCH64"])):
+                      sources.append({"type": "file", "url": f"{base}/UEFN-Ducky-{v}-{arch}.AppImage",
+                                      "sha256": sha, "dest-filename": "uefn-ducky.AppImage", "only-arches": [arch]})
+                  continue
+              p = (src / s["path"]).resolve()
+              (shutil.copytree(p, out / p.name, dirs_exist_ok=True) if p.is_dir() else shutil.copy(p, out / p.name))
+              sources.append({**s, "path": p.name})
+          mod["sources"] = sources
+          mod["build-commands"] = ["chmod +x uefn-ducky.AppImage", "./uefn-ducky.AppImage --appimage-extract >/dev/null",
+                                   "mv squashfs-root/usr/bin bundle", *mod["build-commands"]]
+          (out / "online.uefnducky.Ducky.yml").write_text(yaml.safe_dump(doc, sort_keys=False))
+          PY
+          diff -u "$RUNNER_TEMP/flathub-before.yml" "$out/online.uefnducky.Ducky.yml" || true
+          if [ "$DRY_RUN" = "true" ]; then echo "dry run: Flathub PR not opened"; exit 0; fi
+          if [ -z "$FLATHUB_TOKEN" ]; then echo "::warning::no FLATHUB_TOKEN: Flathub not bumped"; exit 0; fi
+          cd "$out"
+          git checkout -b "update-$VERSION"
+          git add -A
+          git -c user.name="UEFN Ducky" -c user.email="noreply@uefnducky.org" commit -m "Update to $VERSION" || exit 0
+          git push origin "update-$VERSION"
+          gh pr create --repo flathub/online.uefnducky.Ducky --title "Update to $VERSION" \
+            --body "UEFN Ducky $VERSION (released from UEFN-Ducky store-publish)."

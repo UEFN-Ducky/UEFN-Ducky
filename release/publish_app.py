@@ -641,8 +641,10 @@ def linux_artifacts(version: str, folder: Path = LINUX_DIST) -> list[dict]:
         arch = arches.pop()
         if any(a["arch"] == arch and a["package"] == package for a in found):
             raise SystemExit(f"{path.name}: a second linux-{arch}-{package} for {version}")
-        sig = path.with_name(path.name + ".sig")
-        found.append({"path": path, "sig": sig if sig.is_file() else None,
+        # sign_linux.py writes <file>.minisig; older builds left <file>.sig.
+        sig = next((s for s in (path.with_name(path.name + ".minisig"), path.with_name(path.name + ".sig"))
+                    if s.is_file()), None)
+        found.append({"path": path, "sig": sig,
                       "os": "linux", "arch": arch, "package": package})
     return found
 
@@ -678,6 +680,73 @@ def release_assets(base: str, api_key: str, version: str, installer_url: str, sh
         assets.append({"os": "linux", "arch": art["arch"], "package": art["package"],
                        "url": url, "sha256": digest, "sig_url": sig_url})
     return assets
+
+
+# The signed apt + dnf repos the Linux release jobs build (build/linux/deb/build_apt_repo.sh,
+# build/linux/rpm/build_dnf_repo.sh): apt/…, rpm/…, uefn-ducky.gpg at the top.
+LINUX_REPO = ROOT / "dist" / "linux-repo"
+_REPO_SEGMENT = re.compile(r"^[A-Za-z0-9._+~-]+$")
+
+
+def linux_repo_files(folder: Path = LINUX_REPO) -> dict[str, Path]:
+    """``{repo path: file}`` of every file in the repo folder; ``{}`` without one."""
+    if not folder.is_dir():
+        return {}
+    files = {p.relative_to(folder).as_posix(): p for p in sorted(folder.rglob("*")) if p.is_file()}
+    for rel in files:
+        if len(rel) > 200 or not all(_REPO_SEGMENT.match(s) for s in rel.split("/")):
+            raise SystemExit(f"linux repo path {rel!r}: only [A-Za-z0-9._+~-] per segment, at most 200 characters")
+    if files and "uefn-ducky.gpg" not in files:
+        raise SystemExit(f"{folder}: the repo has no uefn-ducky.gpg (the key apt and dnf trust)")
+    return files
+
+
+def publish_linux_repo(base: str, api_key: str, version: str, folder: Path = LINUX_REPO) -> dict | None:
+    """Upload each repo file under a name unique to this release, then swap the live repo
+    with one uds_linux_repo call. ``None`` without a repo (Windows-only release). Any failed
+    upload or a refused swap raises, so uds_app_release never runs on a half repo."""
+    import tempfile
+
+    files = linux_repo_files(folder)
+    if not files:
+        return None
+    ids: dict[str, str] = {}
+    with tempfile.TemporaryDirectory(prefix="ducky-linux-repo-") as tmp:
+        for rel, path in files.items():
+            # A reused name would overwrite the live file before the swap.
+            named = Path(tmp) / f"linux-repo-{version}-{rel.replace('/', '_')}"
+            shutil.copyfile(path, named)
+            print(f"  uploading repo file {rel}")
+            url = _uploaded_url(upload_app_release(base, api_key, named), named, sha256_file(named))
+            ids[rel] = url.split("/")[-2]
+    result = mcp_call(base, api_key, "uds_linux_repo", {"version": version, "files": ids})
+    reply = result.get("payload") if isinstance(result.get("payload"), dict) else result
+    if reply.get("ok") is not True:
+        raise SystemExit(f"uds_linux_repo refused the {version} repo: {reply.get('error') or reply}")
+    print(f"  linux repo {version}: {len(ids)} files live")
+    return reply
+
+
+def next_version(local: str, store: str | None, set_version: str = "") -> str:
+    """The version the build step will make: ``set_version``, else one patch past the newer
+    of local and Store (sync_local_at_least_store + build_exes' bump)."""
+    if set_version.strip():
+        parse_version_tuple(set_version.strip())
+        return set_version.strip()
+    newest = local
+    if store:
+        with contextlib.suppress(ValueError):
+            if parse_version_tuple(store) > parse_version_tuple(local):
+                newest = store
+    major, minor, patch = parse_version_tuple(newest)
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def print_next_version(set_version: str = "") -> None:
+    """store-publish.yml's linux-version job: the version both platforms build."""
+    store = None if set_version.strip() else fetch_store_version(
+        assert_uefn_ducky_store_base(os.environ.get("DUCKYOS_BASE_URL") or DEFAULT_BASE))
+    print(next_version(read_version(), store, set_version))
 
 
 
@@ -1471,6 +1540,7 @@ def main() -> None:
     print(f"  installerUrl={installer_url}")
     update = upload_update_pack(base, key, version)
     assets = release_assets(base, key, version, installer_url, digest)
+    publish_linux_repo(base, key, version)
 
     result = mcp_call(
         base,
