@@ -5,8 +5,8 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
-# SPECPATH[0] is the directory containing this file (PyInstaller).
-_spec_root = Path(SPECPATH[0]).resolve()  # type: ignore[name-defined]
+# SPECPATH is the directory containing this file (PyInstaller); a str, so never index it.
+_spec_root = Path(SPECPATH).resolve()  # type: ignore[name-defined]
 ROOT = _spec_root if (_spec_root / "ducky_app" / "frontend" / "launcher.py").is_file() else _spec_root.parent
 DUCKY_APP = ROOT / "ducky_app"
 FRONTEND = DUCKY_APP / "frontend"
