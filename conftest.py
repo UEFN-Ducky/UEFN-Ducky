@@ -411,6 +411,12 @@ def _join_host_workers(timeout: float = 5.0) -> None:
             if t.ident is None:
                 continue
             t.join(timeout)
+    # The usage-stats writer never ends: rows it still held went into the next test's
+    # ducky.db (made at today's schema before that test's own first open, and holding
+    # it open, which fails a Windows rename). Write them here, into this test's.
+    usage_stats = sys.modules.get("frontend.usage_stats")
+    if usage_stats is not None:
+        usage_stats._write_pending()
 
 
 @pytest.fixture
