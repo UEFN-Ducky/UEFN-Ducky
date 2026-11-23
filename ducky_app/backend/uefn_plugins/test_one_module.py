@@ -166,22 +166,22 @@ def _real_extension() -> tuple[str, str, Path] | None:
 
 
 def test_a_build_is_loaded_before_it_is_written(tmp_path: Path) -> None:
+    # A file that is no module at all: the load-check process starts on every OS, the load
+    # fails, and the check says what Python said.
+    ext = ".pyd" if sys.platform == "win32" else ".so"
+    (tmp_path / "bad").mkdir()
+    broken, unchecked = build_engine._check_build_loads(
+        _zip_of({f"demo{ext}": b"not a module"}), tmp_path / "bad", "demo", f"demo{ext}", "register")
+    assert broken.startswith("ImportError") and unchecked == ""
     # A real extension module of this Python stands in for a plugin's compiled backend.
     found = _real_extension()
     if found is None:
         pytest.skip("no extension module to load on this platform")
     name, func, origin = found
-    ext = origin.suffix.lower()
     good = _zip_of({f"{name}{ext}": origin.read_bytes(), "plugin.json": b"{}"})
     (tmp_path / "good").mkdir()
     assert build_engine._check_build_loads(good, tmp_path / "good", name, f"{name}{ext}", func) == ("", "")
     (tmp_path / "noreg").mkdir()
     broken, unchecked = build_engine._check_build_loads(good, tmp_path / "noreg", name, f"{name}{ext}", "register")
     assert (broken, unchecked) == ("the backend has no register()", "")
-    # A file that is no module at all: the load fails, and the check says what Python said.
-    (tmp_path / "bad").mkdir()
-    broken, unchecked = build_engine._check_build_loads(
-        _zip_of({f"demo{ext}": b"not a module"}), tmp_path / "bad", "demo", f"demo{ext}", "register")
-    assert broken.startswith("ImportError") and unchecked == ""
-    shutil.rmtree(tmp_path, ignore_errors=True)
     shutil.rmtree(tmp_path, ignore_errors=True)
