@@ -163,10 +163,13 @@ def _lag_sample(late_ms: float) -> None:
 
 
 def _watch_lag() -> None:
+    # Event.wait and perf_counter, not time.sleep/monotonic: tests patch those process-wide
+    # with fake clocks, and this thread would spin and push their clock forward.
+    tick = threading.Event()
     while True:
-        t0 = time.monotonic()
-        time.sleep(LAG_TICK_S)
-        _lag_sample(max(0.0, (time.monotonic() - t0 - LAG_TICK_S) * 1000))
+        t0 = time.perf_counter()
+        tick.wait(LAG_TICK_S)
+        _lag_sample(max(0.0, (time.perf_counter() - t0 - LAG_TICK_S) * 1000))
 
 
 def _ensure_watch() -> None:
