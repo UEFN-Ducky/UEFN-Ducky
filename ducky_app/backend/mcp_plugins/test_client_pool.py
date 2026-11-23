@@ -14,6 +14,7 @@ from mcp.types import TextContent
 from backend.bridge import call_limits
 from backend.mcp_plugins import client_pool, epic, epic_array_set, registry
 from backend.tools.core import uefn_modal
+from frontend import uefn_events
 
 
 def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
@@ -48,6 +49,10 @@ def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
     monkeypatch.setattr(call_limits, "stall_reason", lambda op, limit: {"ok": False, "reason": "no_answer",
                                                                        "message": "UEFN has not answered."})
     monkeypatch.setattr(uefn_modal, "save_modal_watchdog", lambda label: nullcontext([]))
+    # The real deadline event sends analytics and scans every process for UEFN's release
+    # (psutil holds the GIL): ~0.25 s on this loop's time, 1.5 s on a loaded CI box.
+    sent: list[tuple] = []
+    monkeypatch.setattr(uefn_events, "deadline", lambda why, heavy, steps: sent.append((why["reason"], steps)))
 
     began = time.monotonic()
     with pytest.raises(RuntimeError) as late:
@@ -56,3 +61,4 @@ def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
     why = json.loads(str(late.value))
     assert why["steps_finished"] == "1 of 3" and "1 of 3 steps finished." in why["message"]
     assert calls == [{"n": 1}, {"n": 2}]  # the late step keeps running; the third is never sent
+    assert sent == [("no_answer", 3)]

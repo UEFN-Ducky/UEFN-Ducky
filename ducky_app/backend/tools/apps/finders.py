@@ -41,8 +41,8 @@ def _flatpak_info(app_id: str) -> str:
     if not flatpak:
         return ""
     try:
-        out = subprocess.run([flatpak, "info", app_id], capture_output=True, text=True, timeout=10,
-                             stdin=subprocess.DEVNULL)
+        out = subprocess.run([flatpak, "info", app_id], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=10, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return out.stdout if out.returncode == 0 else ""
