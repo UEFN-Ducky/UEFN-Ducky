@@ -4,6 +4,8 @@
 
 mod first_paint;
 pub use first_paint::{first_paint, FirstPaint};
+#[cfg(target_os = "linux")]
+pub mod linux;
 
 /// Theme background, the same `#0a0a0a` as `webview_app.py` / critical.css.
 pub const BACKGROUND_RGB: (u8, u8, u8) = (0x0A, 0x0A, 0x0A);
@@ -46,6 +48,22 @@ impl Splash {
     pub fn on_painted(&mut self) -> bool {
         std::mem::replace(&mut self.visible, false)
     }
+}
+
+/// What a splash that waits on its own (Linux, where the Python app owns the main window)
+/// does next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    Wait,
+    Close,
+}
+
+/// The panel is `ready`, `cap` has passed, or the splash was never shown: close it for good.
+pub fn step(splash: &mut Splash, ready: bool, elapsed: std::time::Duration, cap: std::time::Duration) -> Step {
+    if !splash.visible() || ((ready || elapsed >= cap) && splash.on_painted()) {
+        return Step::Close;
+    }
+    Step::Wait
 }
 
 /// Paint the splash into a window DC: the theme background only, no logo, so the window

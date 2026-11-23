@@ -14,8 +14,15 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+#[cfg(windows)]
 pub const LAUNCHER_EXE: &str = "Ducky-Launcher.exe";
+#[cfg(windows)]
 pub const STUB_EXE: &str = "UEFN-Ducky.exe";
+/// Linux has no `.exe`: the bundle (S23) ships `uefn-ducky` beside `Ducky-Launcher`.
+#[cfg(not(windows))]
+pub const LAUNCHER_EXE: &str = "Ducky-Launcher";
+#[cfg(not(windows))]
+pub const STUB_EXE: &str = "uefn-ducky";
 /// Tells `UEFN-Ducky.exe` to use the Python window and never start a launcher.
 pub const NO_NATIVE_ENV: &str = "UEFN_DUCKY_NO_NATIVE";
 /// Why this launcher started the Python window instead (`native_switch.NO_NATIVE_WHY_ENV`):
@@ -175,6 +182,11 @@ impl Spawn {
 
     /// Start it and let it run on its own (this launcher exits right after).
     pub fn start(&self) -> std::io::Result<()> {
+        self.command().spawn().map(drop)
+    }
+
+    /// The process [`Self::start`] starts, for a caller that waits on it (Linux).
+    pub fn command(&self) -> std::process::Command {
         let mut cmd = std::process::Command::new(&self.exe);
         cmd.args(&self.args)
             .stdin(std::process::Stdio::null())
@@ -197,7 +209,7 @@ impl Spawn {
         if let Some(dir) = self.exe.parent() {
             cmd.current_dir(dir);
         }
-        cmd.spawn().map(drop)
+        cmd
     }
 }
 

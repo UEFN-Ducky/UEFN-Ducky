@@ -149,6 +149,8 @@ pub fn wide_fixed(s: &str, units: usize) -> Vec<u16> {
 
 #[cfg(windows)]
 pub mod win;
+#[cfg(target_os = "linux")]
+pub mod sni;
 
 #[cfg(test)]
 mod tests {

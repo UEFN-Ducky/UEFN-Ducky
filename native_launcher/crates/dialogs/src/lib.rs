@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 
 #[cfg(windows)]
 mod win;
+#[cfg(target_os = "linux")]
+pub mod portal;
 
 /// pywebview's `FileDialog` values (`OPEN_DIALOG=10`, `FOLDER_DIALOG=20`, `SAVE_DIALOG=30`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,9 +174,17 @@ pub fn show(owner_hwnd: isize, req: &DialogRequest) -> Result<Option<Vec<String>
     win::show(owner_hwnd, req)
 }
 
-#[cfg(not(windows))]
+/// Linux: the XDG portal's picker. `owner_hwnd` has no meaning here.
+// ponytail: no parent window handle, so the portal centres the picker on its own; pass the
+// window's xdg-foreign handle if a picker ever opens behind Ducky.
+#[cfg(target_os = "linux")]
+pub fn show(_owner_hwnd: isize, req: &DialogRequest) -> Result<Option<Vec<String>>, String> {
+    Ok(portal::show_with(req, portal::portal))
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn show(_owner_hwnd: isize, _req: &DialogRequest) -> Result<Option<Vec<String>>, String> {
-    Err("native dialogs are Windows only".into())
+    Err("native dialogs are Windows and Linux only".into())
 }
 
 /// `show` then `result_value`: the value to send back where pywebview's return went.

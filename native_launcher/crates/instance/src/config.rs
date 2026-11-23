@@ -20,10 +20,10 @@ pub struct Config {
 }
 
 impl Config {
-    /// From this process's environment; None without LOCALAPPDATA / APPDATA.
+    /// From this process's environment; None without LOCALAPPDATA / APPDATA (Linux:
+    /// XDG_DATA_HOME / HOME).
     pub fn from_env() -> Option<Config> {
-        let base = non_empty_env("LOCALAPPDATA").or_else(|| non_empty_env("APPDATA"))?;
-        let app_data = PathBuf::from(base).join(APP_DATA_DIR_NAME);
+        let app_data = app_data_base()?.join(APP_DATA_DIR_NAME);
         let listener = listener_port(non_empty_env(PANEL_PORT_ENV).as_deref(), &app_data);
         Some(Config {
             ui_port: listener.saturating_sub(1),
@@ -35,6 +35,23 @@ impl Config {
     pub fn panel_pid_path(&self) -> PathBuf {
         self.app_data.join(PANEL_PID_FILE)
     }
+}
+
+#[cfg(windows)]
+fn app_data_base() -> Option<PathBuf> {
+    non_empty_env("LOCALAPPDATA").or_else(|| non_empty_env("APPDATA")).map(PathBuf::from)
+}
+
+/// `$XDG_DATA_HOME`, else `~/.local/share` (the XDG default).
+#[cfg(not(windows))]
+fn app_data_base() -> Option<PathBuf> {
+    xdg_data_home(non_empty_env("XDG_DATA_HOME"), non_empty_env("HOME"))
+}
+
+pub fn xdg_data_home(xdg: Option<String>, home: Option<String>) -> Option<PathBuf> {
+    xdg.map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| home.map(|h| PathBuf::from(h).join(".local").join("share")))
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -73,6 +90,16 @@ mod tests {
         assert_eq!(saved_port(r#"{"port": 80}"#), None);
         assert_eq!(saved_port(r#"{"port": 99999}"#), None);
         assert_eq!(saved_port("not json"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn xdg_data_home_then_home_local_share() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(xdg_data_home(s("/x/data"), s("/home/a")), Some(PathBuf::from("/x/data")));
+        // The spec ignores a relative XDG_DATA_HOME.
+        assert_eq!(xdg_data_home(s("rel"), s("/home/a")), Some(Path::new("/home/a").join(".local").join("share")));
+        assert_eq!(xdg_data_home(None, None), None);
     }
 
     #[test]

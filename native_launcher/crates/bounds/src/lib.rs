@@ -65,9 +65,79 @@ impl Bounds {
 }
 
 /// `%LOCALAPPDATA%/UEFN-Ducky/window_bounds.json`, resolved per call like Python's `_path()`.
+#[cfg(windows)]
 pub fn default_path() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA").unwrap_or_default();
     PathBuf::from(base).join("UEFN-Ducky").join("window_bounds.json")
+}
+
+/// `$XDG_DATA_HOME/UEFN-Ducky/window_bounds.json` (default `~/.local/share`), the same app
+/// data folder as `ducky_instance::Config`.
+#[cfg(not(windows))]
+pub fn default_path() -> PathBuf {
+    let env = |k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let base = env("XDG_DATA_HOME")
+        .filter(|p| p.is_absolute())
+        .or_else(|| env("HOME").map(|h| h.join(".local").join("share")))
+        .unwrap_or_default();
+    base.join("UEFN-Ducky").join("window_bounds.json")
+}
+
+/// One monitor as the Linux window host sees it: its work area in physical pixels and its
+/// scale factor (1.0, 1.25, 1.5, 2.0 ...).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Monitor {
+    pub area: Rect,
+    pub scale: f64,
+}
+
+/// Where and how big to open on Linux. `position` is None on Wayland, where a client can't
+/// place its own window (the compositor picks the monitor).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub position: Option<(i32, i32)>,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Wayland session, and GTK not forced onto XWayland.
+pub fn is_wayland(wayland_display: Option<&str>, gdk_backend: Option<&str>) -> bool {
+    wayland_display.is_some_and(|d| !d.is_empty()) && !gdk_backend.is_some_and(|b| b.starts_with("x11"))
+}
+
+fn scaled(v: i32, scale: f64) -> i32 {
+    (v as f64 * scale.max(1.0)).round() as i32
+}
+
+/// Linux restore. Saved bounds are physical pixels, as Windows saves them (the same file).
+/// The minimum and default sizes are logical, so they grow with the monitor's scale; a
+/// window whose top edge is off every screen moves onto the nearest one ([`clamp_to_screens`]).
+/// `monitors` primary first.
+pub fn place(saved: Option<Bounds>, monitors: &[Monitor], can_position: bool) -> Placement {
+    let monitors: Vec<Monitor> = monitors.iter().copied().filter(|m| m.area.width() > 0 && m.area.height() > 0).collect();
+    let areas: Vec<Rect> = monitors.iter().map(|m| m.area).collect();
+    let primary = monitors.first().copied().unwrap_or(Monitor { area: Rect { left: 0, top: 0, right: 1920, bottom: 1080 }, scale: 1.0 });
+    let on = |b: &Bounds| monitors.iter().copied().find(|m| m.area == best_area(b, &areas)).unwrap_or(primary);
+    let b = match saved {
+        Some(b) => {
+            let s = if areas.is_empty() { primary.scale } else { on(&b).scale };
+            let b = Bounds { width: b.width.max(scaled(MIN_WIDTH, s)), height: b.height.max(scaled(MIN_HEIGHT, s)), ..b };
+            clamp_to_screens(b, &areas)
+        }
+        None => {
+            let a = primary.area;
+            let width = scaled(DEFAULT_WIDTH, primary.scale).min(a.width());
+            let height = scaled(DEFAULT_HEIGHT, primary.scale).min(a.height());
+            Bounds { x: a.left + (a.width() - width) / 2, y: a.top + (a.height() - height) / 2, width, height }
+        }
+    };
+    if can_position {
+        return Placement { position: Some((b.x, b.y)), width: b.width, height: b.height };
+    }
+    // Wayland: the size only, never bigger than the largest screen it could land on.
+    let (max_w, max_h) = areas.iter().fold((0, 0), |(w, h), a| (w.max(a.width()), h.max(a.height())));
+    let (max_w, max_h) = if areas.is_empty() { (b.width, b.height) } else { (max_w, max_h) };
+    Placement { position: None, width: b.width.min(max_w), height: b.height.min(max_h) }
 }
 
 fn load(path: &Path) -> Map<String, Value> {

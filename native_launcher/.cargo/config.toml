@@ -1,0 +1,4 @@
+# Linux arm64 from an x86_64 host (Debian/Ubuntu gcc-aarch64-linux-gnu, arm64 GTK dev libs
+# through multiarch). A native arm64 runner ignores this.
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

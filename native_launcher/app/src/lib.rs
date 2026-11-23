@@ -5,6 +5,8 @@ pub mod argv;
 pub mod console;
 pub mod dialog;
 pub mod exit;
+#[cfg(unix)]
+pub mod linux;
 pub mod page;
 pub mod repoint;
 pub mod start;
@@ -29,10 +31,12 @@ pub const LOCK_WAIT: Duration =
 /// Ducky's app version (the Python `frontend.__version__` this launcher ships with).
 pub const APP_VERSION: &str = env!("DUCKY_APP_VERSION");
 
+#[cfg(windows)]
 fn env_is(name: &str, value: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v.trim() == value)
 }
 
+#[cfg(windows)]
 const BROWSER_ARGS_ENV: &str = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
 
 /// The running Ducky notes how full the graphics card is every 30 s (`launcher/gpu.json`,
@@ -85,9 +89,9 @@ pub fn run(args: Vec<OsString>) -> u8 {
     start::launch(&mut host, &plan, !native_child)
 }
 
-#[cfg(not(windows))]
-pub fn run(_args: Vec<OsString>) -> u8 {
-    exit::START_ERROR
+#[cfg(unix)]
+pub fn run(args: Vec<OsString>) -> u8 {
+    linux::run(args)
 }
 
 #[cfg(test)]

@@ -5,5 +5,9 @@ edition = "2021"
 publish = false
 description = "Logo-on-theme splash painted in the launcher window until the page has painted"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+tao = "0.34"
+gtk = "0.18"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi"] }
