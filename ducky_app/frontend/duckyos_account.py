@@ -2213,7 +2213,7 @@ def store_catalog() -> dict[str, Any]:
                 "state": state,
                 "contributes_summary": contrib_summary,
                 **audience,
-                **icon_fields,
+                **icon_fields, "platforms": raw.get("platforms"),
             }
         )
         seen_slugs.add(slug)
@@ -2244,8 +2244,8 @@ def store_catalog() -> dict[str, Any]:
             }
         )
     from backend.uefn_plugins.loader_platform import store_badge
-    for it in items_out:  # 'Windows only' on an installed build this OS can't load
-        it["platform_badge"] = store_badge(it["slug"]) if it["slug"] in installed_plugins else ""
+    for it in items_out:  # 'Windows only': an installed build this OS can't load, or a catalog one without its build
+        it["platform_badge"] = store_badge(it["slug"], None if it["slug"] in installed_plugins else it)
     # Private audiences are optional: only when the spaces provider says so does the
     # library show its Shared category.
     try:
@@ -2561,25 +2561,11 @@ def _store_download_and_install_unlocked(
     body: dict[str, Any] = {"slug": slug, "isUpdate": bool(is_update)}
     if version:
         body["version"] = str(version).strip()
-    from backend.uefn_plugins import manifest_platform as mp
-
-    # Windows asks as it always has (the Store serves it the version's own zip); any other OS
-    # names itself so the Store serves that platform's build.
-    other_os = mp.host_os() != mp.WINDOWS
-    if other_os:
-        body.update(os=mp.host_os(), arch=mp.host_arch())
-    # Signed in → sent as the account (api_request attaches it); signed out → anonymous.
-    payload = _store_collect("download", body, allow_anonymous=True, timeout=120.0)
-    if other_os and payload.get("sha256"):
-        from backend.store.plugin_artifacts import download_problem
-
-        # Checked before a byte is fetched or written: no build for this PC installs nothing.
-        problem = download_problem(payload)
-        if problem:
-            raise DuckyOSAccountError(problem, code="no_platform_build")
-    # Small zips inline, big ones by link — verified (sha256 + size) before the install
-    # and signature checks below ever see the bytes.
-    raw = store_zip_bytes(payload)
+    from backend.store.plugin_artifacts import ask_for_this_platform, refuse_other_build
+    other_os = ask_for_this_platform(body)  # off Windows the Store is told which build to send
+    payload = _store_collect("download", body, allow_anonymous=True, timeout=120.0)  # signed in → as the account
+    refuse_other_build(payload, other_os, DuckyOSAccountError)  # before a byte is fetched or written
+    raw = store_zip_bytes(payload)  # inline or by link; sha256 + size checked before install sees it
 
     is_plugin = False
     try:

@@ -76,6 +76,22 @@ def download_problem(payload: dict[str, Any], os_name: str | None = None, arch: 
     return ""
 
 
+def ask_for_this_platform(body: dict[str, Any]) -> bool:
+    """Off Windows, name this OS/CPU in a Store download request; Windows asks as it always has."""
+    if mp.host_os() == mp.WINDOWS:
+        return False
+    body.update(os=mp.host_os(), arch=mp.host_arch())
+    return True
+
+
+def refuse_other_build(payload: dict[str, Any], other_os: bool, error: type[Exception]) -> None:
+    """Raise ``error(reason, code="no_platform_build")`` when the download is not this PC's build,
+    before anything is fetched or written. A refused response (no sha256) keeps its own reason."""
+    problem = download_problem(payload) if other_os and payload.get("sha256") else ""
+    if problem:
+        raise error(problem, code="no_platform_build")  # type: ignore[call-arg]
+
+
 def put_artifact(record: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
     """The record with ``artifact`` added, replacing the one for its platform. Windows (or a
     source build) also fills the top-level fields old apps read."""

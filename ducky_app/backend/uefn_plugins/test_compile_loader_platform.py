@@ -66,3 +66,18 @@ def test_store_badge_reads_the_installed_manifest(monkeypatch) -> None:
     assert lp.store_badge("src") == "" and lp.store_badge("gone") == ""
     monkeypatch.setattr(store, "load_plugin_manifest", lambda pid: 1 / 0)
     assert lp.store_badge("win") == ""  # an unreadable manifest gets no badge
+
+
+def test_catalog_rows_say_windows_only_before_install(monkeypatch) -> None:
+    from backend.uefn_plugins import manifest_platform
+
+    only_win = {"slug": "win", "platforms": ["windows-x86_64"]}
+    three = {"slug": "all", "platforms": ["windows-x86_64", "linux-x86_64", "linux-aarch64"]}
+    monkeypatch.setattr(manifest_platform, "host_os", lambda: "linux")
+    monkeypatch.setattr(manifest_platform, "host_arch", lambda: "x86_64")
+    assert lp.store_badge("win", only_win) == "Windows only"
+    assert lp.store_badge("all", three) == ""
+    assert lp.store_badge("src", {"slug": "src"}) == "" and lp.store_badge("old", {"platforms": None}) == ""
+    assert lp.catalog_badge({"platforms": ["windows-x86_64", "linux-x86_64"]}, "linux", "aarch64") == "No Linux aarch64 build"
+    monkeypatch.setattr(manifest_platform, "host_os", lambda: "windows")
+    assert lp.store_badge("win", only_win) == "" and lp.store_badge("all", three) == ""

@@ -32,11 +32,28 @@ def card_badge(manifest: dict[str, Any], os_name: str | None = None, arch: str |
     return mp.platform_label(manifest) if load_problem(manifest, os_name, arch) else ""
 
 
-def store_badge(plugin_id: str) -> str:
-    """The Store row's badge for an installed plugin whose build can't load here, else ''.
+def catalog_badge(item: dict[str, Any], os_name: str | None = None, arch: str | None = None) -> str:
+    """The badge for a catalog row whose ``platforms`` (``os-arch`` builds) lack this machine's, else ''.
+    No ``platforms`` (a source plugin, or a Store before Linux builds) gets none."""
+    platforms = item.get("platforms")
+    if not isinstance(platforms, list) or not platforms:
+        return ""
+    want_os, want_arch = os_name or mp.host_os(), mp.norm_arch(arch or mp.host_arch())
+    if f"{want_os}-{want_arch}" in platforms:
+        return ""
+    if all(str(p).startswith(mp.WINDOWS + "-") for p in platforms):
+        return "Windows only"
+    label = mp._OS_LABELS.get(want_os, want_os)
+    if any(str(p).startswith(want_os + "-") for p in platforms):
+        return f"No {label} {want_arch} build"
+    return f"No {label} build"
 
-    ponytail: installed plugins only; catalog rows get one when the Store sends each
-    record's python_abi (the install already picks the right artifact)."""
+
+def store_badge(plugin_id: str, item: dict[str, Any] | None = None) -> str:
+    """The Store row's badge: from the catalog ``item`` when given (not installed), else from the
+    installed plugin's manifest when its build can't load here; '' otherwise."""
+    if item is not None:
+        return catalog_badge(item)
     try:
         from backend.uefn_plugins.store import load_plugin_manifest
 
