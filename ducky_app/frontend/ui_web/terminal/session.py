@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import codecs
 import os
 import re
+import signal
 import shlex
 import threading
 import time
@@ -123,8 +125,45 @@ def agent_command_output(raw: str, tag: str = "") -> str:
     return text.strip("\n")[-_AGENT_OUTPUT_CHARS:]
 
 
+def _proc_stat(pid: int | str) -> tuple[str, str, int] | None:
+    """Linux /proc/<pid>/stat → (name, state, parent pid); None once it is gone."""
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            raw = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    # The name is in parentheses and may hold spaces or parentheses itself.
+    head, _, tail = raw.rpartition(")")
+    fields = tail.split()
+    if len(fields) < 2:
+        return None
+    return head.partition("(")[2].lower(), fields[0], int(fields[1])
+
+
+def _posix_snapshot() -> tuple[dict[int, list[int]], dict[int, str]]:
+    """Every process in /proc → ({parent pid: [child pids]}, {pid: name}); zombies left out."""
+    children: dict[int, list[int]] = {}
+    names: dict[int, str] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return children, names
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        stat = _proc_stat(entry)
+        if stat is None or stat[1] == "Z":
+            continue
+        pid = int(entry)
+        children.setdefault(stat[2], []).append(pid)
+        names[pid] = stat[0]
+    return children, names
+
+
 def _process_snapshot() -> tuple[dict[int, list[int]], dict[int, str]]:
     """One Toolhelp snapshot → ({parent pid: [child pids]}, {pid: exe name})."""
+    if os.name != "nt":
+        return _posix_snapshot()
     import ctypes
     from ctypes import wintypes
 
@@ -266,8 +305,60 @@ def terminate_pid(pid: int) -> None:
             k32.CloseHandle(handle)
 
 
+# Linux: how long a stopped tree gets to end on SIGINT/SIGHUP before SIGKILL.
+_POSIX_KILL_GRACE_S = 3.0
+
+
+def _posix_alive(pid: int) -> bool:
+    stat = _proc_stat(pid)
+    return stat is not None and stat[1] != "Z"
+
+
+def posix_kill_tree(pid: int, grace_s: float = _POSIX_KILL_GRACE_S) -> None:
+    """Linux: SIGINT and SIGHUP to ``pid``, its descendants and their process groups (a
+    job-control shell gives each job its own), then SIGKILL to what is left after ``grace_s``.
+    Ducky's own process group is never signalled."""
+    children, _names = _posix_snapshot()
+    pids, todo = {int(pid)}, [int(pid)]
+    while todo:
+        for kid in children.get(todo.pop(), []):
+            if kid not in pids:
+                pids.add(kid)
+                todo.append(kid)
+    groups: set[int] = set()
+    for p in pids:
+        try:
+            groups.add(os.getpgid(p))
+        except OSError:
+            pass
+    groups.discard(os.getpgrp())
+
+    def send(sig: int) -> None:
+        for group in groups:
+            try:
+                os.killpg(group, sig)
+            except OSError:
+                pass
+        for p in pids:
+            try:
+                os.kill(p, sig)
+            except OSError:
+                pass
+
+    send(signal.SIGINT)
+    send(signal.SIGHUP)  # an interactive shell ignores SIGINT; a hangup ends it
+    deadline = time.monotonic() + max(0.0, grace_s)
+    while time.monotonic() < deadline and any(_posix_alive(p) for p in pids):
+        time.sleep(0.05)
+    if any(_posix_alive(p) for p in pids):
+        send(signal.SIGKILL)
+
+
 def kill_process_tree(pid: int) -> None:
     """Force-kill ``pid`` and every descendant (running command + its children)."""
+    if os.name != "nt":
+        posix_kill_tree(pid)
+        return
     import subprocess
 
     try:
@@ -334,6 +425,22 @@ def ctrl_c_on_for_children():
         finally:
             if ignoring:
                 ctypes.windll.kernel32.SetConsoleCtrlHandler(None, True)
+
+
+def _posix_exit_code(pty: Any, wait_s: float = 2.0) -> int:
+    """A ptyprocess child's exit code once it is reaped; 128 + N for signal N (as a shell
+    reports it). The pty reaches EOF a moment before the process is gone."""
+    deadline = time.monotonic() + wait_s
+    try:
+        while pty.isalive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if pty.exitstatus is not None:
+            return int(pty.exitstatus)
+        if pty.signalstatus is not None:
+            return 128 + int(pty.signalstatus)
+    except Exception:
+        pass
+    return 1
 
 
 def normalize_exit_code(code: int) -> int:
@@ -460,9 +567,14 @@ class TerminalSession:
         # A background test or build started here beside UEFN: the terminal stays at idle
         # priority until it ends (background_alive).
         self._bg_idle = False
+        # Linux: the pty gives bytes, and a UTF-8 character can be split across two reads.
+        self._decoder = codecs.getincrementaldecoder("utf-8")("replace")
 
     def spawn(self) -> None:
-        from winpty import PtyProcess
+        if os.name == "nt":
+            from winpty import PtyProcess
+        else:
+            from ptyprocess import PtyProcess
 
         from frontend.ui_web.terminal.path_env import env_with_fresh_path
 
@@ -479,7 +591,10 @@ class TerminalSession:
         env = env_with_fresh_path()
         if self.env_extra:
             env.update(self.env_extra)
-        if self.shell == "bash" and not self.spawn_argv:
+        if os.name != "nt":
+            # A desktop app's environment often has no TERM; the panel is an xterm.js.
+            env.setdefault("TERM", "xterm-256color")
+        elif self.shell == "bash" and not self.spawn_argv:
             # Runs once, before the first prompt, after the profile scripts made the aliases.
             env.setdefault("PROMPT_COMMAND", f"{_BASH_DROP_WINPTY}; unset PROMPT_COMMAND")
         global _spawning
@@ -543,7 +658,7 @@ class TerminalSession:
             if not chunk:
                 time.sleep(0.02)
                 continue
-            text = chunk.decode("utf-8", errors="replace") if isinstance(chunk, bytes) else str(chunk)
+            text = self._decoder.decode(chunk) if isinstance(chunk, bytes) else str(chunk)
             if not text:
                 continue
             self.last_activity = time.time()
@@ -565,10 +680,13 @@ class TerminalSession:
             if match and self._pending_done is not None:
                 self._pending_exit_code = int(match.group(2))
                 self._pending_done.set()
-        try:
-            code = int(getattr(pty, "exitstatus", 1) or 1) if pty is not None else 1
-        except Exception:
-            code = 1
+        if os.name != "nt":
+            code = _posix_exit_code(pty)
+        else:
+            try:
+                code = int(getattr(pty, "exitstatus", 1) or 1) if pty is not None else 1
+            except Exception:
+                code = 1
         self._exit_code = normalize_exit_code(code)
         self.set_busy(False)
         if self._pending_done is not None and not self._pending_done.is_set():
@@ -611,7 +729,7 @@ class TerminalSession:
         if pty is None or not self.is_alive():
             raise RuntimeError("terminal session not running")
         with self._write_lock:
-            pty.write(data)
+            pty.write(data if os.name == "nt" else data.encode("utf-8"))
         self.last_activity = time.time()
         if "\x03" in data:
             # Ctrl+C drops the rest of the line, a background run's end mark included.
