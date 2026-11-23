@@ -133,6 +133,23 @@ def test_icon_cache_goes_when_only_ducky_used_it(appdir: Path, tmp_path: Path) -
     assert not (home / ".local/share/icons").exists()
 
 
+def test_desktop_database_caches_go_when_only_ducky_used_them(appdir: Path, tmp_path: Path) -> None:
+    # Arch's update-desktop-database writes mimeinfo.cache and intent.cache beside the entry.
+    home = _home(tmp_path)
+    _run(appdir, home, "--install-integration")
+    apps = home / ".local/share/applications"
+    for name in ("mimeinfo.cache", "intent.cache"):
+        (apps / name).write_text("[MIME Cache]\n", encoding="utf-8")
+    _run(appdir, home, "--uninstall")
+    assert not apps.exists()
+    # Another app's entry keeps the folder and its caches.
+    _run(appdir, home, "--install-integration")
+    (apps / "other.desktop").write_text("[Desktop Entry]\nName=Other\n", encoding="utf-8")
+    (apps / "mimeinfo.cache").write_text("[MIME Cache]\n", encoding="utf-8")
+    _run(appdir, home, "--uninstall")
+    assert sorted(p.name for p in apps.iterdir()) == ["mimeinfo.cache", "other.desktop"]
+
+
 def test_uninstall_without_integration_is_harmless(appdir: Path, tmp_path: Path) -> None:
     home = tmp_path / "empty"
     home.mkdir()

@@ -434,7 +434,9 @@ def test_spec_linux_bundles_pygobject_and_keeps_the_host_gtk() -> None:
     assert 'hooksconfig={"gi": {"module-versions": LINUX_GI_VERSIONS' in SPEC_TEXT
     assert "    if LINUX\n    else {}," in SPEC_TEXT
     # The host WebKitGTK's whole ldd closure stays the host's (22.04's libnghttp2 broke 24.04's libsoup).
-    assert 'subprocess.run(["ldd", str(_webkit)]' in SPEC_TEXT and "dest in _webkit_libs" in SPEC_TEXT
+    assert "_webkit_libs = _ldd(_webkit)" in SPEC_TEXT and "dest in _webkit_libs" in SPEC_TEXT
+    # ...and so does whatever the host-side GIO modules / pixbuf loaders link (22.04's gnutls on fedora).
+    assert "_webkit_libs |= _ldd(_e[1])" in SPEC_TEXT
     # PyInstaller has no WebKit2/JavaScriptCore hooks: ours collect the 4.1 typelibs.
     assert 'hookspath=[str(LINUX_DIR / "pyi_hooks")] if LINUX else [],' in SPEC_TEXT
     hooks = BUILD / "linux" / "appimage" / "pyi_hooks"

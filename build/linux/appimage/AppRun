@@ -63,6 +63,11 @@ uninstall() {
     rm -f "$DATA/icons/hicolor/icon-theme.cache"
     find "$DATA/icons/hicolor" -depth -type d -empty -delete 2>/dev/null
   fi
+  # update-desktop-database's indexes (mimeinfo.cache; intent.cache on newer desktop-file-utils):
+  # drop them when no other app's entry is left beside them.
+  if [ -d "$DATA/applications" ] && [ -z "$(find "$DATA/applications" -type f ! -name '*.cache')" ]; then
+    rm -f "$DATA/applications/"*.cache
+  fi
   # Folders go only when empty: other apps' menu and autostart entries stay.
   rmdir "$DATA/icons" "$DATA/applications" "$CONFIG/autostart" 2>/dev/null
   # The uefn-ducky:// handler line xdg-mime wrote; everything else in the file stays.

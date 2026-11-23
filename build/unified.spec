@@ -453,14 +453,20 @@ if LINUX:
 
     # Everything the host's WebKitGTK links is on every machine that has it, and a bundled older
     # copy (ubuntu-22.04's) shadows the host's: libsoup on ubuntu 24.04 died on 22.04's libnghttp2.
-    # So the whole closure, as ldd sees it on the freeze host, stays the host's too.
+    # So the whole closure, as ldd sees it on the freeze host, stays the host's too. The same for
+    # whatever the host-side GIO modules / pixbuf loaders link: the bootloader puts _internal on
+    # LD_LIBRARY_PATH, so the host's GIO loaded 22.04's libgnutls (needs libunistring.so.2, which
+    # fedora 41 does not have).
     import subprocess
+
+    def _ldd(path) -> set:
+        out = subprocess.run(["ldd", str(path)], capture_output=True, text=True).stdout
+        return {line.split()[0] for line in out.splitlines() if "=>" in line}
 
     _webkit = next((Path(d) / LINUX_WEBKIT for d in LINUX_LIB_DIRS if (Path(d) / LINUX_WEBKIT).is_file()), None)
     if _webkit is None:
         raise RuntimeError(f"unified.spec: {LINUX_WEBKIT} not found in {LINUX_LIB_DIRS}: apt install gir1.2-webkit2-4.1")
-    _ldd = subprocess.run(["ldd", str(_webkit)], capture_output=True, text=True, check=True).stdout
-    _webkit_libs = {line.split()[0] for line in _ldd.splitlines() if "=>" in line} - {LINUX_PORTAUDIO}
+    _webkit_libs = _ldd(_webkit)
 
     def _host_side(entry) -> bool:
         dest = str(entry[0]).replace("\\", "/")
@@ -468,6 +474,9 @@ if LINUX:
         top = "/" not in dest and (dest.startswith(LINUX_HOST_LIBS) or dest in _webkit_libs)
         return top or dest.startswith(LINUX_HOST_DIRS)
 
+    for _e in [e for e in a.binaries if _host_side(e)]:
+        _webkit_libs |= _ldd(_e[1])  # ldd is transitive: one pass covers the closure
+    _webkit_libs.discard(LINUX_PORTAUDIO)
     a.binaries = [e for e in a.binaries if not _host_side(e)]
     a.datas = [e for e in a.datas if not str(e[0]).startswith(LINUX_HOST_DIRS)]
     a.scripts = [e for e in a.scripts if e[0] not in LINUX_HOST_RTH]
