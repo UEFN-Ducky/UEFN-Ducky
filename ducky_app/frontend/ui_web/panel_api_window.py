@@ -808,12 +808,12 @@ class PanelApiWindowMixin:
         webbrowser.open(u)
 
     def snip_screen(self, conv_id: str = "") -> dict[str, Any]:
-        """Open the Windows region snipper and attach the result to the chat.
+        """Open the region snipper (Windows; Linux X11 or the Wayland portal) and attach the result to the chat.
 
         Accepted snips are saved in that chat's AppData attachments folder.
         Never Temp, tool_captures, or the UEFN project.
         """
-        if _pa.sys.platform != "win32":
+        if _pa.sys.platform != "win32" and not _pa.sys.platform.startswith("linux"):
             return {"ok": False, "reason": "unsupported"}
         from frontend.ui_web.snip_overlay import snip_screen_interactive
 

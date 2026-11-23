@@ -92,6 +92,16 @@ def test_snip_needs_no_window(monkeypatch):
     assert _Api().snip_screen("c1") == {"ok": False, "reason": "cancelled"}
 
 
+def test_snip_reaches_the_linux_snipper_and_stays_off_elsewhere(monkeypatch):
+    from frontend.ui_web import snip_overlay
+
+    monkeypatch.setattr(snip_overlay, "snip_screen_interactive", lambda root: {"ok": False, "reason": "cancelled"})
+    monkeypatch.setattr(panel_api_window._pa.sys, "platform", "linux")
+    assert _Api().snip_screen("c1") == {"ok": False, "reason": "cancelled"}
+    monkeypatch.setattr(panel_api_window._pa.sys, "platform", "darwin")
+    assert _Api().snip_screen("c1") == {"ok": False, "reason": "unsupported"}
+
+
 def test_native_menu_pick_goes_to_the_launcher(monkeypatch):
     monkeypatch.setenv(NATIVE_CHILD_ENV, "1")
     monkeypatch.setattr(webview_native_menu, "pick", lambda _t, _c: False)

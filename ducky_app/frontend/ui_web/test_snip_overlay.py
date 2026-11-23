@@ -103,12 +103,59 @@ def test_linux_dispatch_by_session() -> None:
 
 
 def test_portal_options_interactive() -> None:
-    pytest.importorskip("dbus_next")
     from frontend.ui_web.snip_overlay import _portal_options
 
-    opts = _portal_options("tok")
-    assert opts["interactive"].signature == "b" and opts["interactive"].value is True
-    assert opts["handle_token"].value == "tok"
+    assert _portal_options("tok") == {"interactive": ("b", True), "handle_token": ("s", "tok")}
+
+
+def test_portal_request_over_jeepney(monkeypatch) -> None:
+    """Fake session bus: the Screenshot call goes to the portal, the Response signal comes back
+    on the matching request path, and its variants arrive as plain values."""
+    import types
+
+    from frontend.ui_web import snip_overlay as so
+
+    sent: list = []
+
+    class _Conn:
+        unique_name = ":1.42"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def filter(self, rule):
+            sent.append(("match", rule.path))
+            return self
+
+        def send_and_get_reply(self, msg):
+            sent.append(("call", msg))
+            return types.SimpleNamespace(header=types.SimpleNamespace(message_type=types.SimpleNamespace(name="method_return")))
+
+        def recv_until_filtered(self, _queue, timeout):
+            return types.SimpleNamespace(body=(0, {"uri": ("s", "file:///tmp/s.png")}))
+
+    jeepney = types.ModuleType("jeepney")
+    jeepney.DBusAddress = lambda path, bus_name, interface: (path, bus_name, interface)
+    jeepney.MatchRule = lambda **kw: types.SimpleNamespace(**kw)
+    jeepney.message_bus = object()
+    jeepney.new_method_call = lambda addr, method, sig, body: (addr, method, sig, body)
+    blocking = types.ModuleType("jeepney.io.blocking")
+    blocking.open_dbus_connection = lambda bus: _Conn()
+    blocking.Proxy = lambda _bus, _conn: types.SimpleNamespace(AddMatch=lambda rule: sent.append(("add", rule.path)))
+    monkeypatch.setitem(sys.modules, "jeepney", jeepney)
+    monkeypatch.setitem(sys.modules, "jeepney.io", types.ModuleType("jeepney.io"))
+    monkeypatch.setitem(sys.modules, "jeepney.io.blocking", blocking)
+
+    code, results = so._portal_request(timeout_s=1)
+    assert (code, results) == (0, {"uri": "file:///tmp/s.png"})
+    path = sent[0][1]
+    assert path.startswith("/org/freedesktop/portal/desktop/request/1_42/ducky_snip_") and sent[1] == ("match", path)
+    (addr, method, sig, (parent, opts)) = sent[2][1]
+    assert addr[2] == "org.freedesktop.portal.Screenshot" and (method, sig, parent) == ("Screenshot", "sa{sv}", "")
+    assert opts["interactive"] == ("b", True) and path.endswith(opts["handle_token"][1])
 
 
 class _Variant:

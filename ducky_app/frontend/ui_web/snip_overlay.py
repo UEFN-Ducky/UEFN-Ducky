@@ -361,52 +361,31 @@ def _x11_pick_rect(mon: dict[str, int], bgra: bytes, timeout_s: float) -> tuple[
 
 
 def _portal_options(token: str) -> dict[str, Any]:
-    from dbus_next import Variant
-
-    return {"interactive": Variant("b", True), "handle_token": Variant("s", token)}
+    """Screenshot options as jeepney variants: (signature, value)."""
+    return {"interactive": ("b", True), "handle_token": ("s", token)}
 
 
 def _portal_request(timeout_s: float = _WAIT_TIMEOUT_S) -> tuple[int, dict[str, Any]]:
-    """org.freedesktop.portal.Screenshot.Screenshot; returns the Request's (response, results)."""
-    import asyncio
+    """org.freedesktop.portal.Screenshot.Screenshot over jeepney (as native_capture.PortalBus);
+    returns the Request's (response, results) with plain values. Timeout raises TimeoutError."""
+    from jeepney import DBusAddress, MatchRule, message_bus, new_method_call
+    from jeepney.io.blocking import Proxy, open_dbus_connection
 
-    async def run() -> tuple[int, dict[str, Any]]:
-        from dbus_next import Message, MessageType
-        from dbus_next.aio import MessageBus
-
-        bus = await MessageBus().connect()
-        try:
-            token = f"ducky_snip_{os.getpid()}_{int(time.time() * 1000)}"
-            sender = bus.unique_name.lstrip(":").replace(".", "_")
-            req_path = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
-            done: asyncio.Future = asyncio.get_running_loop().create_future()
-
-            def on_msg(msg: Any) -> None:
-                if (msg.message_type == MessageType.SIGNAL and msg.member == "Response"
-                        and msg.path == req_path and not done.done()):
-                    done.set_result(msg.body)
-
-            bus.add_message_handler(on_msg)
-            # Subscribe before calling so a fast reply is not missed.
-            await bus.call(Message(
-                destination="org.freedesktop.DBus", path="/org/freedesktop/DBus",
-                interface="org.freedesktop.DBus", member="AddMatch", signature="s",
-                body=[f"type='signal',interface='org.freedesktop.portal.Request',"
-                      f"member='Response',path='{req_path}'"],
-            ))
-            reply = await bus.call(Message(
-                destination="org.freedesktop.portal.Desktop", path="/org/freedesktop/portal/desktop",
-                interface="org.freedesktop.portal.Screenshot", member="Screenshot",
-                signature="sa{sv}", body=["", _portal_options(token)],
-            ))
-            if reply.message_type == MessageType.ERROR:
-                raise RuntimeError(f"{reply.error_name}: {reply.body}")
-            code, results = await asyncio.wait_for(done, timeout_s)
-            return int(code), dict(results)
-        finally:
-            bus.disconnect()
-
-    return asyncio.run(run())
+    with open_dbus_connection(bus="SESSION") as conn:
+        token = f"ducky_snip_{os.getpid()}_{int(time.time() * 1000)}"
+        sender = conn.unique_name.lstrip(":").replace(".", "_")
+        req_path = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
+        rule = MatchRule(type="signal", interface="org.freedesktop.portal.Request", member="Response", path=req_path)
+        Proxy(message_bus, conn).AddMatch(rule)  # subscribe before calling so a fast reply is not missed
+        with conn.filter(rule) as queue:
+            addr = DBusAddress("/org/freedesktop/portal/desktop", bus_name="org.freedesktop.portal.Desktop",
+                               interface="org.freedesktop.portal.Screenshot")
+            reply = conn.send_and_get_reply(new_method_call(addr, "Screenshot", "sa{sv}", ("", _portal_options(token))))
+            if reply.header.message_type.name == "error":
+                raise RuntimeError(f"Screenshot portal: {reply.body}")
+            signal = conn.recv_until_filtered(queue, timeout=timeout_s)
+    code, results = signal.body
+    return int(code), {k: v[1] for k, v in results.items()}
 
 
 def _portal_result(code: int, results: dict[str, Any]) -> dict[str, Any]:
