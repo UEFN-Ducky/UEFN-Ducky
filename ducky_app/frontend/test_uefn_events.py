@@ -58,6 +58,9 @@ def test_answers_that_read_as_success(sent: list) -> None:
 
 def test_epic_status_once_a_day_per_state(sent: list, monkeypatch: pytest.MonkeyPatch) -> None:
     meta: dict[str, str] = {}
+    # The in-process day cache is checked first: an Epic probe in an earlier test on this
+    # worker (backend/mcp_plugins/epic.py) already marked today's "online" and "port_taken".
+    monkeypatch.setattr(uefn_events, "_status_day", {})
     monkeypatch.setattr(usage_stats, "_meta_get", meta.get)
     monkeypatch.setattr(usage_stats, "_meta_set", meta.__setitem__)
     for reason in ("", "", "port_taken", "weird"):
