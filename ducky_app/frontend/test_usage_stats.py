@@ -1181,9 +1181,12 @@ def test_tool_done_never_writes_on_the_calling_thread(db_queue, monkeypatch) -> 
     monkeypatch.setattr(db, "write_txn", recorded)
     for _ in range(3):
         us.tool_done("spawn_actor", ok=True, duration_ms=5.0, conv_id="c1")
-    assert threading.current_thread().name not in writers
+    me = threading.current_thread().name
+    assert me not in writers
     _written(db_queue, 3)
-    assert writers and set(writers) == {"usage-stats-writer"}
+    # Only who wrote the usage rows: another test's leftover thread (mcp-nested-proxy-retry on
+    # Linux CI) may write its own rows to the shared database meanwhile.
+    assert "usage-stats-writer" in writers and me not in writers
 
 
 def test_queued_rows_are_written_in_one_batch(db_queue, monkeypatch) -> None:

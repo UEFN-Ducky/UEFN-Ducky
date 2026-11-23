@@ -529,7 +529,11 @@ def test_500_new_threads_connect_at_once_as_fast_as_sqlite_opens() -> None:
     store's part is measured against a burst of plain opens of the same file."""
     path = str(db.db_path())
     db.connect()
-    raw = _burst(lambda: sqlite3.connect(path, check_same_thread=False).execute("SELECT 1").fetchone())
+    # The plain open reads the file once (journal_mode), as any real use does: sqlite3.connect is
+    # lazy and SELECT 1 never touches the file. On Linux that first read (WAL header, -shm map,
+    # locks) is ~0.48 ms against 0.03 ms for the lazy open, so SELECT 1 measured no open at all
+    # and the store looked 10x slower than SQLite (CI, Nov 23 2026); Windows' open is the slow part.
+    raw = _burst(lambda: sqlite3.connect(path, check_same_thread=False).execute("PRAGMA journal_mode").fetchone())
     took = _burst(lambda: db.connect().execute("SELECT 1").fetchone())
     assert took < raw * 1.5 + 0.25, f"500 threads took {took:.2f} s to connect (plain opens {raw:.2f} s)"
 

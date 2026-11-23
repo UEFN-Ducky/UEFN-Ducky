@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 import threading
 import time
 from concurrent.futures import CancelledError, ThreadPoolExecutor
@@ -49,7 +51,16 @@ def test_idle_pool_closes_and_a_later_diff_reopens_it(monkeypatch):
         # loaded Linux runner) exits only once it reads the stop sentinel: allow it the time.
         for child in children:
             child.join(30)
-        assert all(not child.is_alive() for child in children)
+        # A pid reaped by another waitpid makes is_alive() stay True for ever (ECHILD): on Linux
+        # the kernel's own view decides, and the message names each worker's state for the next CI.
+        def state(child):
+            status = f"/proc/{child.pid}/status"
+            if not os.path.exists(status):
+                return "gone" if sys.platform.startswith("linux") else ("alive" if child.is_alive() else "gone")
+            with open(status) as f:
+                return next((line for line in f if line.startswith("State:")), "State: ?").strip()
+        states = [(child.pid, child.exitcode, state(child)) for child in children]
+        assert all(s == "gone" or s.startswith("State:\tZ") for _, _, s in states), states
         assert workers.compare(before, after) == serial_delta(before, after)
     finally:
         workers.close()

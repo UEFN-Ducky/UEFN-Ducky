@@ -26,9 +26,10 @@ DEFAULT_MAKER_SETTINGS = ("default_image_provider", "default_mesh_provider", "de
 
 
 def default_app_data_dir() -> Path:
-    from frontend.app_paths import _is_linux, resolve_app_data_dir
+    from frontend.app_paths import resolve_app_data_dir
+    from frontend.platform_info import IS_LINUX
 
-    if _is_linux():
+    if IS_LINUX:
         return resolve_app_data_dir()
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if base:

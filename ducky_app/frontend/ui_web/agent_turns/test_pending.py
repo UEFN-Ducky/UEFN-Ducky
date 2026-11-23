@@ -19,6 +19,9 @@ def empty(monkeypatch):
         monkeypatch.setattr(pending, name, box)
     monkeypatch.setattr(pending, "_held_messages", {})
     monkeypatch.setattr(a2a_broker, "_retry_queue_later", lambda cid: None)
+    # A real delivery thread finds the test chat idle and runs (pops) the queued send before
+    # the test reads it: Linux CI lost that race every time (KeyError 'c').
+    monkeypatch.setattr(pending, "_deliver_when_idle", lambda cid: None)
 
 
 def test_a_chat_with_no_model_keeps_each_message_once(empty, monkeypatch):
