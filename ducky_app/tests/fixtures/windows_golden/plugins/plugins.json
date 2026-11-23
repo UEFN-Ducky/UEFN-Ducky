@@ -1,0 +1,28 @@
+{
+  "_about": "Windows plugins as today's app installs them (1.2.516). manifest = the plugin.json in the zip; backend = the file put next to it; tools = what loading it lists. store_records = version records as the Store serves them to a Windows app today (no artifacts list).",
+  "plugins": {
+    "goldensrc": {
+      "manifest": {"id": "goldensrc", "label": "Golden source", "version": "1.0.0", "backend": {"entry": "backend"}},
+      "backend": ["backend.py", "plugin_backend.py"],
+      "tools": {"goldensrc_echo": ["text"]}
+    },
+    "goldenpyd": {
+      "manifest": {
+        "id": "goldenpyd", "label": "Golden compiled", "version": "1.0.0", "compiled": true,
+        "python_abi": "cp313-win_amd64", "visibility": "public",
+        "backend": {"entry": "backend", "register": "register", "compiled": "uefn_plugin_goldenpyd_v1.cp313-win_amd64.pyd", "module": "uefn_plugin_goldenpyd_v1"}
+      },
+      "backend": ["uefn_plugin_goldenpyd_v1.cp313-win_amd64.pyd", "plugin_backend.py"],
+      "tools": {"goldenpyd_echo": ["text"]}
+    },
+    "goldenold": {
+      "manifest": {"id": "goldenold", "label": "Golden compiled before python_abi", "version": "1.0.0", "compiled": true, "backend": {"compiled": "uefn_plugin_goldenold.pyd"}},
+      "backend": ["uefn_plugin_goldenold.pyd", "plugin_backend.py"],
+      "tools": {"goldenold_echo": ["text"]}
+    }
+  },
+  "store_records": {
+    "compiled": {"id": "goldenpyd", "version": "1.0.0", "compiled": true, "file": "goldenpyd.zip", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size": 4096},
+    "source": {"id": "goldensrc", "version": "1.0.0", "file": "goldensrc.zip", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size": 1024}
+  }
+}

@@ -242,3 +242,107 @@ def test_the_same_tests_run_on_windows(dev_golden) -> None:
     assert collected >= dev_golden["pytest"]["collected"], (
         f"Windows collects {collected} tests, {dev_golden['pytest']['collected']} on the golden day"
     )
+
+
+# --- Windows plugins and old clients (plugins/plugins.json) --------------------------
+
+PLUGINS = GOLDEN / "plugins"
+
+
+@pytest.fixture(scope="module")
+def plugins_golden() -> dict:
+    return json.loads((PLUGINS / "plugins.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def plugin_host(monkeypatch: pytest.MonkeyPatch):
+    """The app's plugin host with every golden plugin enabled; each one's runtime dropped after."""
+    import importlib.machinery
+
+    from backend.uefn_plugins.plugin_host import state, tool_registry
+
+    monkeypatch.setattr(tool_registry, "is_plugin_enabled", lambda pid: True)
+    monkeypatch.setenv("UEFN_DUCKY_PROCESS_ROLE", "app")
+    # The golden .pyd files are Python source: loaded the way the host loads an extension.
+    real = importlib.machinery.ExtensionFileLoader
+
+    def extension_loader(name: str, path: str):
+        if Path(path).name.startswith(("uefn_plugin_goldenpyd", "uefn_plugin_goldenold")):
+            return importlib.machinery.SourceFileLoader(name, path)
+        return real(name, path)  # every real extension (pywintypes, …) as before
+
+    monkeypatch.setattr(importlib.machinery, "ExtensionFileLoader", extension_loader)
+    loaded: list[tuple[str, dict]] = []
+    yield loaded
+    from backend.server import mcp
+    from backend.uefn_plugins.plugin_host.lifecycle import invalidate_plugin_runtime
+
+    for pid, spec in loaded:
+        invalidate_plugin_runtime(pid)
+        module = str(spec["manifest"].get("backend", {}).get("module") or "")
+        for name in {f"uefn_plugin_{pid}", module} - {""}:
+            sys.modules.pop(name, None)
+            state._COMPILED_LOADED.pop(name, None)
+        with state._LOCK:
+            state._REGISTERED.discard(pid)
+            state._API_TOOL_REGISTRY.pop(pid, None)
+            state._CONTRIBUTIONS["agent_tools"].pop(pid, None)
+            for tool in spec["tools"]:
+                mcp._tool_manager._tools.pop(tool, None)
+                state._PLUGIN_TOOL_NAMES.discard(tool)
+                state._PLUGIN_TOOL_OWNER.pop(tool, None)
+                state._TOOL_LAST_OWNER.pop(tool, None)
+                state._PLUGIN_HOST_ONLY_TOOLS.discard(tool)
+            tool_registry._rebuild_intent_row(pid, set())
+
+
+@pytest.mark.parametrize("pid", ["goldensrc", "goldenpyd", "goldenold"])
+def test_windows_plugins_load_and_list_the_same_tools(plugin_host, plugins_golden, pid) -> None:
+    import asyncio
+
+    from backend.server import mcp
+    from backend.uefn_plugins.plugin_host import loader, state
+    from backend.uefn_plugins.store import appdata_uefn_plugins_dir
+
+    spec = plugins_golden["plugins"][pid]
+    root = appdata_uefn_plugins_dir() / pid
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "plugin.json").write_text(json.dumps(spec["manifest"]), encoding="utf-8")
+    name, source = spec["backend"]
+    shutil.copy2(PLUGINS / source, root / name)
+    plugin_host.append((pid, spec))
+
+    loader._load_one(pid, root, spec["manifest"])
+    assert state._LOAD_FAILURES.get(pid) is None, state._LOAD_FAILURES.get(pid)
+    tools = mcp._tool_manager._tools
+    listed = {t: sorted(tools[t].parameters.get("properties", {})) for t in spec["tools"] if t in tools}
+    assert listed == spec["tools"], "a Windows plugin lists different tools than it did"
+    [tool] = spec["tools"]
+    out = asyncio.run(mcp._tool_manager.call_tool(tool, {"text": "golden"}, convert_result=False))
+    assert "golden" in str(out)
+
+
+def test_windows_compiles_plugins_as_today() -> None:
+    from backend.uefn_plugins import compile as plugin_compile
+
+    assert plugin_compile.PY_ABI == f"cp{sys.version_info[0]}{sys.version_info[1]}-win_amd64"
+    assert plugin_compile.MODULE_SUFFIX == ".pyd"
+
+
+def test_the_store_gives_windows_its_windows_file(plugins_golden) -> None:
+    from backend.store import plugin_artifacts as pa
+
+    compiled, source = plugins_golden["store_records"]["compiled"], plugins_golden["store_records"]["source"]
+    files = ("file", "sha256", "size")
+    # Today's records name no os/arch: still a Windows install, picked with no platform given.
+    for rec in (compiled, source):
+        assert {k: pa.pick_artifact(rec)[k] for k in files} == {k: rec[k] for k in files}
+        assert {k: pa.pick_artifact(rec, "windows", "AMD64")[k] for k in files} == {k: rec[k] for k in files}
+    # The same version with a Linux build added: Windows still installs the Windows file.
+    linux = pa.artifact_for_build("goldenpyd", {"compiled": True, "python_abi": "cpython-313-x86_64-linux-gnu"},
+                                  "3" * 64, 9)
+    both = pa.put_artifact(compiled, linux)
+    assert pa.pick_artifact(both, "windows", "AMD64")["sha256"] == compiled["sha256"]
+    # An app from before Linux builds sends no platform and is served today's record, unchanged.
+    assert pa.legacy_view(both) == compiled
+    assert pa.legacy_view(compiled) == compiled
