@@ -263,14 +263,90 @@ def _ensure_loop() -> asyncio.AbstractEventLoop:
     return loop
 
 
+def _posix_replace(tmp: Path, target: Path) -> bool:
+    """Windows: rename *tmp* over *target* with POSIX semantics (Windows 10 1809+, NTFS).
+
+    ``os.replace`` (MoveFileEx) fails with Access is denied while a reader holds the target,
+    even one opened with FILE_SHARE_DELETE (``read_text_shared``); a reader polling the file
+    could starve a writer through all its retries. False: not available here, use os.replace.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    if ctypes.sizeof(ctypes.c_void_p) != 8:
+        return False
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    k32.SetFileInformationByHandle.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    # DELETE access, share read/write/delete, OPEN_EXISTING.
+    handle = k32.CreateFileW(str(tmp), 0x00010000, 0x7, None, 3, 0, None)
+    if not handle or handle == ctypes.c_void_p(-1).value:
+        return False
+    try:
+        name = str(target.resolve()).encode("utf-16-le")
+        # FILE_RENAME_INFO (x64): ULONG Flags, pad, HANDLE RootDirectory, ULONG FileNameLength,
+        # WCHAR FileName[]. Flags: REPLACE_IF_EXISTS | POSIX_SEMANTICS.
+        buf = ctypes.create_string_buffer(struct.pack("<I4xQI", 0x1 | 0x2, 0, len(name)) + name + b"\0\0")
+        return bool(k32.SetFileInformationByHandle(handle, 22, buf, len(buf)))  # FileRenameInfoEx
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _replace_patiently(tmp: Path, path: Path, limit_s: float = 5.0) -> None:
+    """Replace *path* with *tmp*. Something else holding either file (a plain-open reader in
+    another process, a virus scan of the fresh temp) only delays it: writers hold the lock, so
+    waiting here costs nobody else a write."""
+    deadline = time.monotonic() + limit_s
+    delay = 0.01
+    while True:
+        if os.name == "nt" and _posix_replace(tmp, path):
+            return
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+        time.sleep(delay)
+        delay = min(delay * 2, 0.2)
+
+
 def _write_state(token: str, key: dict[str, str], *, host: str, port: int) -> None:
     path = state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"host": host, "port": port, "token": token, "key": key, "pid": os.getpid()}
-    from frontend.atomic_json import write_json_plain
+    import tempfile
 
+    # Writers in every process take the sidecar lock, so write-then-replace never interleaves.
     # A unique temp per write: one fixed temp name raced between two writers (WinError 5).
-    write_json_plain(path, payload)
+    with open(path.with_name(path.name + ".lock"), "a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)  # retries for up to 10 s
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+                f.write(json.dumps(payload))
+            _replace_patiently(tmp, path)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            # Closing the file releases both locks; msvcrt wants its byte unlocked first.
+            if os.name == "nt":
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def _clear_state() -> None:

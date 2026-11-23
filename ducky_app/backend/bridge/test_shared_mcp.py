@@ -1450,3 +1450,27 @@ def test_two_writers_of_the_state_file_never_collide(monkeypatch, tmp_path) -> N
     assert errors == [] and bad_reads == []
     assert shared_mcp.read_state()["host"] == "127.0.0.1"
     assert not list(tmp_path.glob("*.tmp"))  # no temp left behind
+
+
+def test_a_write_lands_while_a_reader_holds_the_state_file_open(monkeypatch, tmp_path) -> None:
+    """Windows CI: os.replace over a file a reader held open (even with FILE_SHARE_DELETE)
+    failed with PermissionError after all its retries."""
+    path = tmp_path / "shared_mcp-h0.json"
+    monkeypatch.setattr(shared_mcp, "state_path", lambda: path)
+    shared_mcp._write_state("first", {"k": "v"}, host="127.0.0.1", port=1)
+    if os.name == "nt":
+        import _winapi
+
+        held = _winapi.CreateFile(str(path), _winapi.GENERIC_READ, 0x7, 0, _winapi.OPEN_EXISTING, 0, 0)
+        release = lambda: _winapi.CloseHandle(held)  # noqa: E731
+    else:
+        held = open(path, "rb")  # noqa: SIM115
+        release = held.close
+    try:
+        began = time.monotonic()
+        shared_mcp._write_state("second", {"k": "v"}, host="127.0.0.1", port=2)
+        assert time.monotonic() - began < 1.0  # no retry loop waiting on the reader
+    finally:
+        release()
+    assert shared_mcp.read_state()["token"] == "second"
+    assert not list(tmp_path.glob("*.tmp"))
