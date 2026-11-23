@@ -166,6 +166,10 @@ _ACTIVE_UEFN_AGENT_IDS: ContextVar[tuple[str, ...] | None] = ContextVar(
 
 # ABI of this interpreter. A compiled plugin built for another ABI is not imported.
 PY_ABI = f"cp{sys.version_info.major}{sys.version_info.minor}-win_amd64"
+if sys.platform.startswith("linux"):
+    from backend.uefn_plugins import manifest_platform as _mp
+
+    PY_ABI = _mp.python_abi(_mp.LINUX, _mp.host_arch())  # same tag compile.PY_ABI builds
 # Where a compiled .pyd lands while its old copy is still mapped in-process (Windows
 # never unloads an extension, so the file stays locked until Ducky exits). Moving the
 # old file here lets the Store overwrite the plugin folder; swept on next launch.

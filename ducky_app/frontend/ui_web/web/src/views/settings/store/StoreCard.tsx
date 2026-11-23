@@ -22,6 +22,7 @@ export function StoreCard({ item, busy, actionBusy, handlers, onOpen }: Props) {
   // Badge only while Update is the pressable action — hide during install overlay.
   const showUpdateBadge = state === "update" && !busy && !actionBusy;
   const audience = audienceBadge(item);
+  const platform = (item.platform_badge || "").trim();
 
   const open = () => onOpen(item);
   const onKeyDown = (e: KeyboardEvent) => {
@@ -76,6 +77,11 @@ export function StoreCard({ item, busy, actionBusy, handlers, onOpen }: Props) {
             title={audience}
           >
             {audience}
+          </span>
+        ) : null}
+        {platform ? (
+          <span className="ds-audience-chip ds-platform-chip" title={platform}>
+            {platform}
           </span>
         ) : null}
         <div className="ds-card-stats">

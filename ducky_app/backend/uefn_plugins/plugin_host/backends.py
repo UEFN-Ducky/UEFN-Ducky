@@ -10,6 +10,15 @@ from typing import Any
 
 from backend.uefn_plugins.store import appdata_uefn_plugins_dir
 
+_WINDOWS = sys.platform == "win32"
+# Compiled module file types this host handles: Windows .pyd only, as before; Linux .so too.
+_COMPILED_SUFFIXES = (".pyd",) if _WINDOWS else (".pyd", ".so")
+
+
+def _compiled_files(folder: Path, pattern: str) -> list[Path]:
+    """``pattern`` ends with ``{suffix}``: every match for each compiled suffix."""
+    return [p for s in _COMPILED_SUFFIXES for p in folder.glob(pattern.format(suffix=s))]
+
 
 def _manifest_is_compiled(manifest: dict[str, Any]) -> bool:
     """True when plugin.json ships a compiled backend instead of .py source."""
@@ -27,6 +36,10 @@ def _compiled_backend_pyd(root: Path, manifest: dict[str, Any], mod_name: str) -
     Prefers the exact ``backend.compiled`` path from plugin.json; falls back to the
     newest ``<mod_name>*.pyd`` for this ABI so a rename or missing field still loads.
     """
+    if not _WINDOWS:
+        from backend.uefn_plugins.loader_platform import find_compiled
+
+        return find_compiled(root, manifest, mod_name)
     backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
     rel = str(backend.get("compiled") or "").strip()
     if rel:
@@ -76,6 +89,9 @@ def _import_compiled_backend(pid: str, root: Path, manifest: dict[str, Any]) -> 
     if module_name in sys.modules:
         return sys.modules[module_name]
 
+    from backend.uefn_plugins.loader_platform import check_loadable
+
+    check_loadable(manifest)  # PlatformError: 'This plugin has no Linux build yet'
     abi = str(manifest.get("python_abi") or "").strip()
     if abi and abi != PY_ABI:
         raise RuntimeError(
@@ -174,7 +190,7 @@ def release_locked_compiled_backends(plugin_id: str, *, attempts: int = 12) -> l
     mod_name = backend_module_name(pid)
     quarantine = _compiled_quarantine_dir() / pid
     stuck: list[Path] = []
-    for pyd in list(root.glob(f"{mod_name}*.pyd")):
+    for pyd in _compiled_files(root, f"{mod_name}*{{suffix}}"):
         for i in range(max(1, attempts)):
             try:
                 quarantine.mkdir(parents=True, exist_ok=True)
@@ -202,13 +218,13 @@ def _restore_compiled_from_quarantine(pid: str, root: Path) -> None:
     """
     try:
         mod_name = backend_module_name(pid)
-        if any(root.glob(f"{mod_name}*.pyd")):
+        if _compiled_files(root, f"{mod_name}*{{suffix}}"):
             return
         quarantine = _compiled_quarantine_dir() / pid
         if not quarantine.is_dir():
             return
         parked = sorted(
-            (p for p in quarantine.glob(f"*__{mod_name}*.pyd.bin") if p.is_file()),
+            (p for p in _compiled_files(quarantine, f"*__{mod_name}*{{suffix}}.bin") if p.is_file()),
             key=lambda p: p.stat().st_mtime,
         )
         if not parked:
@@ -226,7 +242,7 @@ def sweep_compiled_quarantine() -> None:
     root = _compiled_quarantine_dir()
     if not root.is_dir():
         return
-    for child in list(root.glob("*/*.pyd.bin")):
+    for child in _compiled_files(root, "*/*{suffix}.bin"):
         try:
             child.unlink()
         except OSError:
@@ -262,7 +278,7 @@ def sweep_orphan_compiled_folders() -> None:
             if not files or not all(
                 f.is_file()
                 and f.name.startswith("uefn_plugin_")
-                and f.suffix == ".pyd"
+                and f.suffix in _COMPILED_SUFFIXES
                 and now - f.stat().st_mtime >= _ORPHAN_PYD_MIN_AGE_S
                 for f in files
             ):
