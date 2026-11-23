@@ -314,3 +314,123 @@ def test_both_files_present_builds_and_places(tmp_path: Path) -> None:
 def test_cache_root_is_under_localappdata(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert be.launcher_cache_root() == tmp_path / "UEFN-Ducky" / "build_cache" / "launcher"
+
+
+# --- Linux build ---------------------------------------------------------------------
+BUILD = Path(__file__).resolve().parent
+SPEC_TEXT = (BUILD / "unified.spec").read_text(encoding="utf-8")
+
+
+class _FakeLinuxBuild:
+    def __init__(self, rc: int = 0) -> None:
+        self.calls: list[list[str]] = []
+        self.envs: list[dict] = []
+        self.rc = rc
+
+    def __call__(self, cmd, cwd=None, env=None):
+        self.calls.append(list(cmd))
+        self.envs.append(env)
+        if self.rc == 0:
+            out = Path(env["CARGO_TARGET_DIR"]) / cmd[-1] / "release"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / be.LINUX_LAUNCHER).write_bytes(b"\x7fELF launcher")
+
+        class _P:
+            returncode = self.rc
+
+        return _P()
+
+
+def _linux_launcher_src(tmp_path: Path) -> Path:
+    src = _launcher_src(tmp_path)
+    (src / "linux-build.sh").write_text("#!/bin/bash\n", encoding="utf-8")
+    return src
+
+
+def test_linux_names_keep_the_bridge_stem_the_launcher_looks_for() -> None:
+    assert be.linux_names(dev_build=False) == ("uefn-ducky", "uefn-ducky-bridge")
+    assert be.linux_names(dev_build=True) == ("uefn-ducky-dev", "uefn-ducky-dev-bridge")
+    assert all(name.lower().endswith("-bridge") for name in (be.linux_names(dev_build=False)[1],))
+
+
+def test_linux_launcher_target_per_cpu() -> None:
+    assert be.linux_launcher_target("x86_64") == "x86_64-unknown-linux-gnu"
+    assert be.linux_launcher_target("aarch64") == "aarch64-unknown-linux-gnu"
+    with pytest.raises(SystemExit):
+        be.linux_launcher_target("riscv64")
+
+
+def test_linux_launcher_builds_once_per_source_and_version(tmp_path: Path) -> None:
+    src = _linux_launcher_src(tmp_path)
+    run = _FakeLinuxBuild()
+    kw = dict(target="x86_64-unknown-linux-gnu", cache_root=tmp_path / "c", run=run)
+    first = be.build_linux_launcher(src, app_version="1.2.3", **kw)
+    assert first.read_bytes() == b"\x7fELF launcher" and first.name == "Ducky-Launcher"
+    assert run.calls[0][0] == "bash" and run.calls[0][1:] == [str(src / "linux-build.sh"), "x86_64-unknown-linux-gnu"]
+    assert run.envs[0]["DUCKY_APP_VERSION"] == "1.2.3"
+    assert be.build_linux_launcher(src, app_version="1.2.3", **kw) == first and len(run.calls) == 1
+    assert be.build_linux_launcher(src, app_version="1.2.4", **kw) != first and len(run.calls) == 2
+
+
+def test_linux_launcher_failure_stops_the_build(tmp_path: Path) -> None:
+    src = _linux_launcher_src(tmp_path)
+    assert "rc=1" in _fails(be.build_linux_launcher, src, app_version="1", target="t", cache_root=tmp_path / "c",
+                            run=_FakeLinuxBuild(rc=1))
+    _fails(be.build_linux_launcher, tmp_path / "none", app_version="1", target="t", cache_root=tmp_path / "c")
+
+
+def test_linux_cache_root_follows_xdg(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    assert be.linux_cache_root() == tmp_path / "UEFN-Ducky" / "build_cache" / "launcher"
+
+
+def test_linux_build_folder_check(tmp_path: Path) -> None:
+    app, bridge = be.linux_names(dev_build=False)
+    assert "uefn-ducky" in be.missing_linux_files(tmp_path, app, bridge)
+    for name in (app, bridge, be.LINUX_LAUNCHER, "_internal/libportaudio.so.2",
+                 *(f"_internal/models/search/{n}" for n in be.SEARCH_MODEL_FILES)):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"x")
+    assert be.missing_linux_files(tmp_path, app, bridge) == []
+
+
+def test_main_sends_linux_to_its_own_build_and_windows_runs_as_before() -> None:
+    text = Path(be.__file__).read_text(encoding="utf-8")
+    main = text[text.index("def main() -> int:"):]
+    head = main[: main.index("dev_build")]
+    assert 'if sys.platform.startswith("linux"):\n        return main_linux(args)' in head
+    linux = text[text.index("def main_linux("): text.index("def main() -> int:")]
+    # Shared with Windows: the same version file, bump and PyInstaller pin.
+    assert "_bump_package_version(init_py)" in linux and "pyinstaller==6.22.3" in main
+    assert linux.index("_bump_package_version") < linux.index("build_linux_launcher(")
+    assert "pyinstaller==6.22.3" in linux
+
+
+def test_spec_linux_branch_bundles_sounddevice_and_portaudio() -> None:
+    assert 'LINUX_PORTAUDIO = "libportaudio.so.2"' in SPEC_TEXT
+    for name in ('"sounddevice"', '"_sounddevice"', '"_sounddevice_data"', '"ptyprocess"', '"keyring.backends"'):
+        assert name in SPEC_TEXT, name
+    assert "runtime_hooks=_linux_rth" in SPEC_TEXT and "_linux_bins" in SPEC_TEXT
+    hook = BUILD / "linux" / "appimage" / "pyi_rth_portaudio.py"
+    assert 'name == "portaudio"' in hook.read_text(encoding="utf-8")
+
+
+def test_spec_windows_parts_stay_on_for_windows() -> None:
+    # Windows still requires its ffmpeg zip and winpty; only LINUX skips them.
+    assert 'if not LINUX and not (_ffmpeg_bundle / "ffmpeg.exe").is_file():' in SPEC_TEXT
+    assert "if not LINUX and not _pty_bins and not _pty_datas:" in SPEC_TEXT
+    assert 'LINUX = sys.platform.startswith("linux")' in SPEC_TEXT
+
+
+def test_portaudio_hook_finds_the_bundled_library(tmp_path: Path, monkeypatch) -> None:
+    import ctypes.util
+    import runpy
+
+    real = ctypes.util.find_library
+    (tmp_path / "libportaudio.so.2").write_bytes(b"\x7fELF")
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    try:
+        runpy.run_path(str(BUILD / "linux" / "appimage" / "pyi_rth_portaudio.py"))
+        assert ctypes.util.find_library("portaudio") == str(tmp_path / "libportaudio.so.2")
+    finally:
+        ctypes.util.find_library = real

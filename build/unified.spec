@@ -25,6 +25,19 @@ from runtime_versions import validate as validate_runtime_versions
 
 _runtime_versions = validate_runtime_versions(ROOT / "requirements.txt")
 
+# Linux freezes on ubuntu-22.04 (glibc 2.35) into dist/uefn-ducky/ (build_exes.main_linux).
+# Windows keeps every line below exactly as before; Linux-only parts sit behind LINUX.
+LINUX = sys.platform.startswith("linux")
+LINUX_DIR = ROOT / "build" / "linux" / "appimage"
+# PortAudio for sounddevice (backend/voice/linux_speech.py): the AppImage has no package
+# manager to pull it in. Bundled next to the Python libs; pyi_rth_portaudio.py points
+# sounddevice's find_library("portaudio") at it.
+LINUX_PORTAUDIO = "libportaudio.so.2"
+LINUX_LIB_DIRS = ("/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/usr/lib64", "/usr/lib")
+# The desktop's own audio stack: a bundled copy breaks PipeWire/Pulse ALSA plugins
+# (AppImage excludelist). PortAudio loads the system ones.
+LINUX_SYSTEM_AUDIO = ("libasound.so", "libjack.so", "libpulse")
+
 backend_hidden = collect_submodules("backend")
 mcp_hidden = collect_submodules("mcp")
 
@@ -116,9 +129,10 @@ if _listener.is_dir():
         _datas.append((str(path), _dest_dir))
 # ffmpeg (LGPL, pinned) ships under tools/ffmpeg; build/fetch_ffmpeg.py populates the folder.
 _ffmpeg_bundle = ROOT / "build" / "ffmpeg-bundle"
-if not (_ffmpeg_bundle / "ffmpeg.exe").is_file():
+# ponytail: Linux uses the distro's ffmpeg (fetch_ffmpeg.py pins the Windows zip only).
+if not LINUX and not (_ffmpeg_bundle / "ffmpeg.exe").is_file():
     raise RuntimeError("unified.spec: ffmpeg bundle missing - run build/fetch_ffmpeg.py")
-for path in sorted(_ffmpeg_bundle.iterdir()):
+for path in [] if LINUX else sorted(_ffmpeg_bundle.iterdir()):
     if path.is_file() and path.name != ".installed":
         _datas.append((str(path), "tools/ffmpeg"))
 # Skill and tool search model (MIT, pinned); build/fetch_search_model.py populates the folder.
@@ -261,10 +275,11 @@ try:
     # collect_all("pywinpty") silently collects NOTHING, which drops conpty.dll /
     # OpenConsole.exe / winpty.dll / winpty-agent.exe from the frozen exe — shells
     # then die instantly with STATUS_CONTROL_C_EXIT (shown as exit 130).
-    _pty_datas, _pty_bins, _pty_hidden = collect_all("winpty")
+    if not LINUX:
+        _pty_datas, _pty_bins, _pty_hidden = collect_all("winpty")
 except Exception:
     pass
-if not _pty_bins and not _pty_datas:
+if not LINUX and not _pty_bins and not _pty_datas:
     raise RuntimeError(
         "unified.spec: collect_all('winpty') found no binaries — terminal shells "
         "would break in the frozen exe. Is pywinpty installed in the build env?"
@@ -286,10 +301,32 @@ if not any("mini_racer" in str(entry[0]).lower() for entry in _v8_bins + _v8_dat
         "code nodes would fail in the frozen exe. Is mini-racer installed in the build env?"
     )
 
+# Linux only: the terminal's pty, keyring + D-Bus (secrets), X11, the microphone.
+_linux_bins, _linux_hidden, _linux_rth = [], [], []
+if LINUX:
+    import importlib.util
+
+    _pa = next((Path(d) / LINUX_PORTAUDIO for d in LINUX_LIB_DIRS if (Path(d) / LINUX_PORTAUDIO).is_file()), None)
+    if _pa is None:
+        raise RuntimeError(
+            f"unified.spec: {LINUX_PORTAUDIO} not found in {LINUX_LIB_DIRS}: the microphone would "
+            "not work in the AppImage. Install libportaudio2 on the build machine."
+        )
+    _linux_bins.append((str(_pa), "."))
+    _linux_hidden = ["ptyprocess", "sounddevice", "_sounddevice", "jeepney", "keyring"]
+    # sounddevice's wheel data package (PortAudio builds for Windows/macOS) when present.
+    if importlib.util.find_spec("_sounddevice_data") is not None:
+        _linux_hidden.append("_sounddevice_data")
+    for _pkg in ("keyring.backends", "jeepney", "Xlib", "ptyprocess"):
+        _linux_hidden += collect_submodules(_pkg)
+    _linux_rth = [str(LINUX_DIR / "pyi_rth_portaudio.py")]
+    # ponytail: no PyGObject in the freeze. The Linux window and tray are the native
+    # launcher (system GTK 3 + WebKitGTK, like espeak-ng a system dependency).
+
 a = Analysis(
     [str(FRONTEND / "launcher.py")],
     pathex=[str(ROOT), str(DUCKY_APP)],
-    binaries=_tz_bins + _pty_bins + _v8_bins,
+    binaries=_tz_bins + _pty_bins + _v8_bins + _linux_bins,
     datas=_datas + _runtime_datas + _tz_datas + _pty_datas + _v8_datas,
     hiddenimports=list(backend_hidden)
     + list(mcp_hidden)
@@ -301,6 +338,7 @@ a = Analysis(
     + list(_PLUGIN_HOST_CODING)
     # HTTPS verified by Windows (frontend/ssl_boot.py); runtime smoke fails without it.
     + collect_submodules("truststore")
+    + _linux_hidden
     + [
         "frontend",
         "frontend.launcher",
@@ -361,7 +399,7 @@ a = Analysis(
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=_linux_rth,
     excludes=_HEAVY_EXCLUDES,
     noarchive=False,
 )
@@ -370,7 +408,7 @@ a = Analysis(
 # PyInstaller's dependency scan of those EXEs also put the same DLLs at the top of
 # _internal: a second byte-identical copy (~130 MB, ~40 MB of the download) that
 # nothing loads. build_exes.py fails the build if one comes back.
-_ffmpeg_dlls = {p.name.lower() for p in _ffmpeg_bundle.iterdir() if p.suffix.lower() == ".dll"}
+_ffmpeg_dlls = set() if LINUX else {p.name.lower() for p in _ffmpeg_bundle.iterdir() if p.suffix.lower() == ".dll"}
 
 
 def _top_level_ffmpeg_dll(entry) -> bool:
@@ -380,6 +418,10 @@ def _top_level_ffmpeg_dll(entry) -> bool:
 
 a.binaries = [entry for entry in a.binaries if not _top_level_ffmpeg_dll(entry)]
 a.datas = [entry for entry in a.datas if not _top_level_ffmpeg_dll(entry)]
+if LINUX:
+    a.binaries = [e for e in a.binaries if not Path(str(e[0])).name.startswith(LINUX_SYSTEM_AUDIO)]
+    if not any(Path(str(e[0])).name == LINUX_PORTAUDIO for e in a.binaries):
+        raise RuntimeError(f"unified.spec: frozen build is missing {LINUX_PORTAUDIO} (microphone)")
 
 # Fail the freeze if Store plugin host modules were tree-shaken out (empty LLMs).
 # TOC entries are (name, path, typecode).
@@ -399,7 +441,8 @@ if _missing_host:
 
 # ADR 0003: fail the freeze if the SQLite extension module did not make it in.
 _binary_names = {str(_b[0]) for _b in a.binaries if isinstance(_b, tuple) and _b}
-if not any(_n.startswith("_sqlite3") for _n in _binary_names):
+# Linux puts extension modules under lib-dynload/: compare the file name.
+if not any(_n.replace("\\", "/").rsplit("/", 1)[-1].startswith("_sqlite3") for _n in _binary_names):
     raise RuntimeError(
         "unified.spec: frozen build is missing _sqlite3 (sqlite3.dll). ducky.db cannot open. "
         "Check the sqlite3 hidden import and the Python install's DLLs folder."

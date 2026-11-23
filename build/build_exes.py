@@ -434,8 +434,187 @@ def place_launcher(launcher: Path | None, app_dir: Path) -> Path:
     return dest
 
 
+# --- Linux (ubuntu-22.04 builders: glibc 2.35 is the oldest distro the build runs on) ---
+# dist/uefn-ducky/: uefn-ducky (app), uefn-ducky-bridge (IDE MCP stdio), Ducky-Launcher
+# (native window, S02) and _internal/. build/linux/appimage/build_appimage.py packs it;
+# the .deb/.rpm/Flatpak recipes take the same folder.
+LINUX_APP = "uefn-ducky"
+LINUX_LAUNCHER = "Ducky-Launcher"
+LINUX_TARGETS = {
+    "x86_64": "x86_64-unknown-linux-gnu",
+    "amd64": "x86_64-unknown-linux-gnu",
+    "aarch64": "aarch64-unknown-linux-gnu",
+    "arm64": "aarch64-unknown-linux-gnu",
+}
+
+
+def linux_names(*, dev_build: bool) -> tuple[str, str]:
+    """(app, bridge) file names; launcher.is_bridge_exe() matches the ``-bridge`` stem."""
+    app = f"{LINUX_APP}-dev" if dev_build else LINUX_APP
+    return app, f"{app}-bridge"
+
+
+def linux_launcher_target(machine: str | None = None) -> str:
+    """Rust target for this CPU. PyInstaller cannot cross-freeze: arm64 builds on an arm64 runner."""
+    import platform
+
+    raw = (machine or platform.machine()).lower()
+    if raw not in LINUX_TARGETS:
+        raise SystemExit(f"ERROR: no Linux build for CPU {raw!r} (x86_64 and aarch64 only)")
+    return LINUX_TARGETS[raw]
+
+
+def linux_cache_root() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "UEFN-Ducky" / "build_cache" / "launcher"
+
+
+def build_linux_launcher(
+    src: Path,
+    *,
+    app_version: str,
+    target: str,
+    cache_root: Path | None = None,
+    run=subprocess.run,
+) -> Path:
+    """The cached Linux ``Ducky-Launcher`` for ``src`` + version, running
+    ``native_launcher/linux-build.sh <target>`` only on a miss. No launcher stops the build."""
+    script = src / "linux-build.sh"
+    if not script.is_file():
+        raise launcher_missing(f"no {script}")
+    cache_root = cache_root or linux_cache_root()
+    digest = launcher_source_hash(src, app_version)
+    cached = cache_root / f"linux-{target}" / digest / LINUX_LAUNCHER
+    if cached.is_file():
+        print(f"{LINUX_LAUNCHER}: cache hit {digest} ({cached})")
+        return cached
+    target_dir = cache_root / "target-linux"
+    env = {**os.environ, "DUCKY_APP_VERSION": app_version, "CARGO_TARGET_DIR": str(target_dir)}
+    cmd = ["bash", str(script), target]
+    print(f"{LINUX_LAUNCHER}: cache miss {digest}")
+    print(">", " ".join(cmd))
+    try:
+        proc = run(cmd, cwd=str(src), env=env)
+    except OSError as exc:
+        raise launcher_missing(f"linux-build.sh could not start ({exc})") from exc
+    built = target_dir / target / "release" / LINUX_LAUNCHER
+    if getattr(proc, "returncode", 1) != 0 or not built.is_file():
+        raise launcher_missing(f"linux-build.sh {target} failed (rc={getattr(proc, 'returncode', '?')})")
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cached.with_name(cached.name + ".tmp")
+    shutil.copy2(built, tmp)
+    os.replace(tmp, cached)
+    print(f"{LINUX_LAUNCHER}: cached {cached}")
+    return cached
+
+
+def missing_linux_files(app_dir: Path, app: str, bridge: str) -> list[str]:
+    """What a Linux build folder must hold to start: both entry points, the launcher,
+    PortAudio for the microphone and the search model."""
+    need = [app, bridge, LINUX_LAUNCHER, "_internal/libportaudio.so.2"]
+    missing = [name for name in need if not (app_dir / name).is_file()]
+    return missing + [f"_internal/models/search/{n}" for n in missing_search_model_files(app_dir)]
+
+
+def main_linux(args: argparse.Namespace) -> int:
+    """Linux freeze into ``dist/uefn-ducky/``. Same version bump, panel and spec as Windows."""
+    dev_build = bool(args.dev)
+    app_name, bridge_name = linux_names(dev_build=dev_build)
+    here = Path(__file__).resolve().parent
+    root = here.parent
+    req, spec = root / "requirements.txt", here / "unified.spec"
+    init_py = root / "ducky_app" / "frontend" / "__init__.py"
+    work = Path(tempfile.gettempdir()) / "uefn-ducky-pyi-work"
+    for p in (req, spec, init_py):
+        if not p.is_file():
+            print(f"Missing {p}", file=sys.stderr)
+            return 1
+    _validate_listener_source(root / "ducky_app" / "uefn_listener")
+    sys.path.insert(0, str(here))
+    from fetch_search_model import ensure_model as ensure_search_model
+
+    ensure_search_model()
+    _build_react_panel(root)
+    panel_stage = tempfile.TemporaryDirectory(prefix="uefn-ducky-panel-build-")
+    panel_snap = Path(panel_stage.name) / "dist"
+    shutil.copytree(root / "ducky_app" / "frontend" / "ui_web" / "web" / "dist", panel_snap)
+    from frontend.ui_web.panel_assets import create_panel_archive, verify_bundled_panel
+
+    panel_archive = Path(panel_stage.name) / "panel-dist.zip"
+    create_panel_archive(panel_snap, panel_archive)
+    os.environ["UEFN_DUCKY_PANEL_ARCHIVE"] = str(panel_archive)
+    os.environ["UEFN_DUCKY_PANEL_DIST"] = str(panel_snap)
+
+    app_version = _read_package_version(init_py) if args.no_bump else _bump_package_version(init_py)
+    launcher = build_linux_launcher(
+        root / "native_launcher", app_version=app_version, target=linux_launcher_target()
+    )
+
+    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller==6.22.3", "-r", str(req)]
+    stamp = pip_stamp([req, here / "build_exes.py"])
+    if pip_fresh(stamp):
+        print(f"pip: same requirements installed under a day ago ({stamp.name}): skipped")
+    else:
+        print(">", " ".join(pip))
+        subprocess.run(pip, check=True, cwd=str(root))
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+
+    ducky_app = root / "ducky_app"
+    from frontend.tray_icon import write_ico
+
+    ico_path = here / "app_icon.ico"
+    write_ico(ico_path)  # the spec ships it under frontend/ (tray, window icon)
+    os.environ["UEFN_DUCKY_BUILD_ICON"] = str(ico_path)
+    os.environ["UEFN_DUCKY_EXE_BASENAME"] = app_name
+    os.environ["UEFN_DUCKY_BRIDGE_BASENAME"] = bridge_name
+    # The spec insists on VERSIONINFO files; PyInstaller ignores them off Windows.
+    for key, stem, desc in (
+        ("UEFN_DUCKY_BUILD_VERSION_FILE", app_name, APP_DESCRIPTION),
+        ("UEFN_DUCKY_BRIDGE_VERSION_FILE", bridge_name, BRIDGE_DESCRIPTION),
+    ):
+        vf = Path(tempfile.gettempdir()) / f"{stem}_version_info.txt"
+        vf.write_text(_version_info_text(app_version, stem, desc), encoding="utf-8")
+        os.environ[key] = str(vf)
+
+    dist_stage = here / "pyinstaller-dist"
+    (work / "unified").mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(dist_stage),
+           "--workpath", str(work), str(spec)]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        p for p in (str(ducky_app), str(root), os.environ.get("PYTHONPATH", "")) if p)}
+    print(">", " ".join(cmd))
+    subprocess.run(cmd, check=True, cwd=str(root), env=env)
+
+    out = root / "dist" / app_name
+    if out.exists():
+        shutil.rmtree(out)
+    shutil.copytree(dist_stage / app_name, out, symlinks=True)
+    shutil.copy2(launcher, out / LINUX_LAUNCHER)
+    (out / LINUX_LAUNCHER).chmod(0o755)
+    shutil.rmtree(dist_stage, ignore_errors=True)
+
+    missing = missing_linux_files(out, app_name, bridge_name)
+    if missing:
+        print(f"ERROR: {out} is missing {', '.join(missing)}", file=sys.stderr)
+        return 1
+    packaged_panel = out / "_internal" / "frontend" / "ui_web" / "web" / "dist"
+    try:
+        verify_bundled_panel(packaged_panel, packaged_panel.parent.parent / "panel-dist.zip")
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: packaged panel is incomplete: {exc}", file=sys.stderr)
+        return 1
+    if _run_runtime_smoke(out / app_name) != 0:
+        return 1
+    print(f"\nDone. Fresh Linux build: v{app_version}\n  {out / app_name}\n  IDEs get: {out / bridge_name}")
+    print("  AppImage: python3 build/linux/appimage/build_appimage.py")
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
+    if sys.platform.startswith("linux"):
+        return main_linux(args)
     dev_build = bool(args.dev)
     exe_stem = "UEFN-Ducky-Dev" if dev_build else "UEFN-Ducky"
     here = Path(__file__).resolve().parent
