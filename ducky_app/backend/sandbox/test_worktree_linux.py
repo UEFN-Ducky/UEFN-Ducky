@@ -75,9 +75,11 @@ def test_launch_under_xvfb_is_hidden_and_shared(monkeypatch):
     monkeypatch.setenv("PATH", "/nonexistent")
     try:
         # The runner's own DISPLAY / WAYLAND_DISPLAY must not reach the child.
-        env = launch_display.hidden_env({**os.environ, "DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0"})
+        # A made-up parent display: on a headless runner Xvfb itself may well be :0.
+        env = launch_display.hidden_env({**os.environ, "DISPLAY": ":4242", "WAYLAND_DISPLAY": "wayland-0"})
         display = env.get("DISPLAY", "")
-        assert display not in ("", ":0") and "WAYLAND_DISPLAY" not in env, launch_display.last_error
+        assert display and display != ":4242" and "WAYLAND_DISPLAY" not in env, launch_display.last_error
+        assert display == launch_display._display and launch_display._proc.poll() is None  # our Xvfb
         assert Path(f"/tmp/.X11-unix/X{display[1:]}").exists()
         assert launch_display.hidden_display() == display  # one Xvfb, reused
         code = "import tkinter as t; r = t.Tk(); r.update(); print(r.winfo_screenwidth()); r.destroy()"
