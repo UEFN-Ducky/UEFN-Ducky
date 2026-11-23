@@ -67,12 +67,16 @@ def is_remote_newer(local: str, remote: str) -> bool:
     return remote_t > local_t
 
 
-def _extract_remote_version(payload: dict[str, Any]) -> str | None:
+def extract_remote_version(payload: dict[str, Any]) -> str | None:
     for key in ("currentVersion", "current_version", "version"):
         raw = payload.get(key)
         if raw is not None and str(raw).strip():
             return str(raw).strip()
     return None
+
+
+# The old name: this module's own callers and tests still use it.
+_extract_remote_version = extract_remote_version
 
 
 def _extract_str(payload: dict[str, Any], key: str) -> str | None:

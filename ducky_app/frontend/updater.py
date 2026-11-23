@@ -1075,9 +1075,9 @@ def linux_update_status(
     and ``last_failure`` (an AppImage update that was rolled back)."""
     from frontend import app_versions
     from frontend.version_check import (
-        _extract_remote_version,
         absolute_installer_url,
         download_page_url,
+        extract_remote_version,
         feed_is_paused,
         fetch_remote_payload,
         update_base_url,
@@ -1113,7 +1113,7 @@ def linux_update_status(
     if feed_is_paused(payload):
         result["feed_status"] = "paused"
         return result
-    remote = _extract_remote_version(payload)
+    remote = extract_remote_version(payload)
     result["remote_version"] = remote
     if not remote:
         result["feed_status"] = "no_release"
