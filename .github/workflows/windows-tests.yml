@@ -54,6 +54,12 @@ jobs:
         id: pytest
         run: python -m pytest ducky_app -q -n auto --junitxml="${{ runner.temp }}/pytest.xml"
 
+      # Repo-root tests/ (release workflow guards, build drift) and release/ run in no other job.
+      - name: pytest tests release
+        id: pytest_root
+        if: ${{ !cancelled() }}
+        run: python -m pytest tests release -q
+
       # The Verse grammar and theme come from the person's own UEFN install (Epic's files,
       # never in the repo; scripts/ensure-verse-assets.mjs). CI has no UEFN: the editor's
       # imports get empty stand-ins of the same shape.
@@ -111,7 +117,7 @@ jobs:
               lines.append(f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped, no retries")
               if passed < baseline:
                   lines.append(f"**{baseline - passed:,} fewer passing than the baseline.**")
-          lines.append("pytest: ${{ steps.pytest.outcome }} · vitest: ${{ steps.vitest.outcome }}")
+          lines.append("pytest: ${{ steps.pytest.outcome }} · tests+release: ${{ steps.pytest_root.outcome }} · vitest: ${{ steps.vitest.outcome }}")
           text = "\n\n".join(lines) + "\n"
           print(text)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:

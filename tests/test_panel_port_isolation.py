@@ -65,9 +65,24 @@ def test_app_default_and_explicit_override(override, expected):
     assert result.stdout.strip() == f"{expected} {expected}"
 
 
+def _plugin_repo(name):
+    """The sibling plugin checkout, also from a git worktree of this repo (next to the main checkout)."""
+    homes = [ROOT.parent]
+    common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                            cwd=ROOT, capture_output=True, text=True)
+    if common.returncode == 0 and common.stdout.strip():
+        homes.append(Path(common.stdout.strip()).parent.parent)
+    for home in homes:
+        repo = home / "uefn-plugins" / f"uefn-plugin-{name}"
+        if repo.is_dir():
+            return repo
+    # ponytail: CI checks out this repo alone, so only a local run with the plugin checkouts proves these.
+    pytest.skip(f"uefn-plugin-{name} is not checked out next to this repo")
+
+
 @pytest.mark.parametrize("repo", ["app", "openai", "anthropic", "cursor"])
 def test_bootstrap_overrides_inherited_live_address_before_import(repo):
-    root = ROOT if repo == "app" else ROOT.parent / "uefn-plugins" / f"uefn-plugin-{repo}"
+    root = ROOT if repo == "app" else _plugin_repo(repo)
     bootstrap = root / "conftest.py"
     assert bootstrap.is_file(), bootstrap
     env = dict(os.environ, UEFN_DUCKY_PANEL_PORT="4200", PYTHONPATH=str(ROOT / "ducky_app"))
