@@ -59,6 +59,11 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libportaudio2 xvfb
       - name: Panel dependencies
         run: npm ci --prefix ducky_app/frontend/ui_web/web
+      # build/ and release/ sit outside pytest's testpaths: run the packaging tests here.
+      - name: Packaging tests
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q -p no:cacheprovider build/test_build_exes.py build/linux/appimage $(ls release/test_sign_linux.py 2>/dev/null)
       # build_exes.py runs the frozen app's --runtime-smoke itself (panel archive and
       # every asset verified, MCP server answers); xvfb gives it a display.
       - name: Freeze (PyInstaller) + runtime smoke
@@ -74,3 +79,42 @@ jobs:
           name: uefn-ducky-linux-${{ matrix.arch }}
           path: dist/uefn-ducky.tar
           retention-days: 7
+      - name: AppImage (zsync update info)
+        run: |
+          sudo apt-get install -y zsync
+          python build/linux/appimage/build_appimage.py --arch ${{ matrix.arch }}
+          ls -la dist/*.AppImage dist/*.zsync
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefn-ducky-appimage-${{ matrix.arch }}
+          path: |
+            dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage
+            dist/UEFN-Ducky-*-${{ matrix.arch }}.AppImage.zsync
+          retention-days: 7
+
+  # Clean distros: nothing but a virtual display is installed before the AppImage starts.
+  containers:
+    name: start on ${{ matrix.image }} (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        image: ["ubuntu:22.04", "ubuntu:24.04", "fedora:41", "archlinux:latest"]
+        exclude:
+          - arch: aarch64
+            image: "archlinux:latest" # no official arm64 image
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: uefn-ducky-appimage-${{ matrix.arch }}
+          path: out
+      - name: Start the AppImage
+        run: |
+          app="$(ls out/UEFN-Ducky-*-${{ matrix.arch }}.AppImage)"
+          want="$(python3 -c "import sys; sys.path.insert(0, 'build/linux/appimage'); import build_appimage as b; print(b.update_info('${{ matrix.arch }}'))")"
+          docker run --rm -v "$PWD:/w" -w /w "${{ matrix.image }}" \
+            bash build/linux/appimage/smoke_container.sh "/w/$app" "$want"

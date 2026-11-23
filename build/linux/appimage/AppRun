@@ -1,0 +1,82 @@
+#!/bin/bash
+# UEFN Ducky AppImage entry point.
+#   UEFN-Ducky-<ver>-<arch>.AppImage [args]          start Ducky (args go to uefn-ducky)
+#   ... --install-integration                         menu entry, icons, uefn-ducky:// links
+#   ... --uninstall [--purge]                         remove menu entry, icons, link handler and
+#                                                     autostart; --purge also deletes chats,
+#                                                     settings and caches (kept otherwise)
+# The app itself rewrites the menu entry on every start (frontend/open_files.py), so a moved
+# AppImage heals; this script adds the icons it names.
+set -u
+HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+APP_ID=uefn-ducky
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}"
+SCHEME=x-scheme-handler/uefn-ducky
+
+icon_files() {
+  (cd "$HERE/usr/share/icons" && find hicolor -type f -name "$APP_ID.*")
+}
+
+install_icons() {
+  local rel
+  while read -r rel; do
+    mkdir -p "$DATA/icons/$(dirname "$rel")"
+    cp -f "$HERE/usr/share/icons/$rel" "$DATA/icons/$rel"
+  done < <(icon_files)
+  command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "$DATA/icons/hicolor" 2>/dev/null
+  return 0
+}
+
+install_integration() {
+  local exe="${APPIMAGE:-$HERE/AppRun}"
+  # Desktop Entry Exec quoting: backslash-escape " ` $ \ inside double quotes.
+  local quoted
+  quoted="$(printf '%s' "$exe" | sed -e 's/[\\"`$]/\\\\&/g' -e 's/[|&]/\\&/g')"
+  mkdir -p "$DATA/applications"
+  sed "s|^Exec=.*|Exec=\"$quoted\" %U|" "$HERE/$APP_ID.desktop" > "$DATA/applications/$APP_ID.desktop"
+  install_icons
+  command -v xdg-mime >/dev/null && xdg-mime default "$APP_ID.desktop" "$SCHEME" 2>/dev/null
+  command -v update-desktop-database >/dev/null && update-desktop-database -q "$DATA/applications" 2>/dev/null
+  echo "UEFN Ducky: menu entry and icons installed for $exe"
+}
+
+uninstall() {
+  local purge=$1 rel f
+  rm -f "$DATA/applications/$APP_ID.desktop" "$CONFIG/autostart/$APP_ID.desktop"
+  while read -r rel; do
+    rm -f "$DATA/icons/$rel"
+    # Only folders this left empty (icons/hicolor/<size>/apps ... icons).
+    rmdir "$DATA/icons/$(dirname "$rel")" "$DATA/icons/$(dirname "$(dirname "$rel")")" 2>/dev/null
+  done < <(icon_files)
+  rmdir "$DATA/icons/hicolor" "$DATA/icons" "$DATA/applications" "$CONFIG/autostart" 2>/dev/null
+  # The uefn-ducky:// handler line xdg-mime wrote; everything else in the file stays.
+  for f in "$CONFIG/mimeapps.list" "$DATA/applications/mimeapps.list"; do
+    [ -f "$f" ] && sed -i "\|^$SCHEME=|d" "$f"
+  done
+  command -v update-desktop-database >/dev/null && [ -d "$DATA/applications" ] \
+    && update-desktop-database -q "$DATA/applications" 2>/dev/null
+  if [ "$purge" = 1 ]; then
+    rm -rf "$DATA/UEFN-Ducky" "$CONFIG/UEFN-Ducky" "$CACHE/UEFN-Ducky"
+    echo "UEFN Ducky: removed, with its chats, settings and caches."
+  else
+    echo "UEFN Ducky: removed from the menu. Chats and settings stay in $DATA/UEFN-Ducky (--purge deletes them)."
+  fi
+  [ -n "${APPIMAGE:-}" ] && echo "Delete $APPIMAGE to finish."
+  return 0
+}
+
+case "${1:-}" in
+  --install-integration)
+    install_integration
+    exit 0
+    ;;
+  --uninstall)
+    [ "${2:-}" = --purge ] && uninstall 1 || uninstall 0
+    exit 0
+    ;;
+esac
+
+[ -f "$DATA/icons/hicolor/256x256/apps/$APP_ID.png" ] || install_icons
+exec "$HERE/usr/bin/$APP_ID" "$@"
