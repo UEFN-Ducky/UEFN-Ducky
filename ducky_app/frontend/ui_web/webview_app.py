@@ -9,6 +9,7 @@ import time
 import logging
 from pathlib import Path
 
+from frontend import platform_info
 from frontend.bundle_root import is_packaged_runtime, packaged_data_root
 from frontend.frozen_process import (
     claim_panel_process,
@@ -35,6 +36,30 @@ def _allow_screencast_without_gesture() -> None:
             winreg.CloseKey(key)
     except Exception:
         pass
+
+
+def _since_boot_ms() -> float:
+    raw = os.environ.get("UEFN_DUCKY_BOOT_T0")
+    try:
+        return round((time.perf_counter() - float(raw)) * 1000.0, 1) if raw else 0.0
+    except ValueError:
+        return 0.0
+
+
+def write_splash_ready(window_ms: float, painted_ms: float) -> Path | None:
+    """Linux: tell the launcher's splash the panel painted (``launcher/ready-<pid>.json``).
+
+    The Linux launcher passes its pid as ``UEFN_DUCKY_SPLASH_PID`` and closes the splash when
+    this file appears. No pid: nothing to tell, returns None.
+    """
+    pid = os.environ.get("UEFN_DUCKY_SPLASH_PID", "").strip()
+    if not pid.isdigit():
+        return None
+    from frontend import native_switch
+
+    path = native_switch.ready_path(int(pid))
+    native_switch._write_json(path, {"window_ms": window_ms, "painted_ms": painted_ms})
+    return path
 
 
 def _web_root() -> Path:
@@ -591,6 +616,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         ensure_app_user_model_id,
         install_pywebview_chrome_patches,
         install_sync_drag_bridge,
+        use_system_decorations,
     )
 
     ensure_app_user_model_id()
@@ -642,6 +668,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
                 w.restore()
             except Exception:
                 pass
+            if platform_info.IS_LINUX:
+                from frontend.ui_web import focus_windows
+
+                # show() alone never takes focus from another app on Linux; a second launch
+                # leaves its xdg-activation token in XDG_ACTIVATION_TOKEN.
+                focus_windows.raise_main_window()
             return w
 
         def _on_open_files(paths: list[str]) -> None:
@@ -728,7 +760,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         resizable=True,
         hidden=start_hidden,
         maximized=bool(handover.get("maximized")) and not start_hidden,
-        frameless=True,
+        # Linux can opt into the desktop's own title bar (KDE); Windows is always frameless.
+        frameless=not use_system_decorations(),
         easy_drag=False,
         # Match boot splash / critical.css so the chrome never flashes white.
         background_color="#0a0a0a",
@@ -749,6 +782,17 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     api.bind_window(window, on_hide=on_hide, on_exit=on_exit)
     _boot_trace("create_window", t_window)
     _start_boot_meters()
+
+    if platform_info.IS_LINUX:
+        window_ms = _since_boot_ms()
+
+        def _on_loaded_splash() -> None:
+            try:
+                write_splash_ready(window_ms, _since_boot_ms())
+            except Exception:
+                pass
+
+        window.events.loaded += _on_loaded_splash
 
     # Copy files dropped from Explorer onto the Content tree (hooks window.events.loaded).
     try:
@@ -857,7 +901,12 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         """A Windows notification was clicked: the app comes up on that chat or workflow."""
         restore()
         w = window_holder.get("window")
-        if w is not None:
+        if w is not None and platform_info.IS_LINUX:
+            from frontend.ui_web import focus_windows
+
+            # The click left its xdg-activation token in XDG_ACTIVATION_TOKEN (notifications.py).
+            focus_windows.raise_main_window()
+        elif w is not None:
             from frontend.ui_web.win_frameless import force_window_foreground
 
             force_window_foreground(w)
@@ -924,8 +973,11 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     # No WebView2 runtime: say so, instead of a window on the IE engine stuck on "loading".
     webview2_runtime.require()
+    # Linux: pywebview's GTK backend (WebKitGTK), never its Qt fallback.
+    gui = {"gui": "gtk"} if platform_info.IS_LINUX else {}
     webview.start(
         _after_gui_start,
+        **gui,
         debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
         storage_path=storage_path,

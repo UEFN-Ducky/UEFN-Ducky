@@ -288,10 +288,16 @@ def linux_toast(title: str, message: str, on_click: Callable[[], None] | None = 
     found = re.search(r"uint32 (\d+)", reply or "")
     if not found:
         return False
-    if on_click is not None:
-        with _lock:
-            _linux_clicks[int(found.group(1))] = on_click
+    with _lock:
+        # No caller action: a click still brings the window up (with the click's token).
+        _linux_clicks[int(found.group(1))] = on_click or _raise_main_window
     return True
+
+
+def _raise_main_window() -> None:
+    from frontend.ui_web import focus_windows
+
+    focus_windows.raise_main_window()
 
 
 def handle_linux_signal(line: str) -> None:

@@ -15,6 +15,7 @@ _main_window: Any = None
 _base_url: str = ""
 _api: Any = None
 _connection_mode: str = "offline"
+_activation_token: str = ""
 
 
 @dataclass
@@ -103,10 +104,77 @@ def _bring_to_front(window: Any) -> None:
     _force_foreground(window)
 
 
+def note_activation_token(token: str | None) -> None:
+    """Keep an xdg-activation token for the next raise (Linux; used once).
+
+    Wayland only lets a window take focus with a token from the action that asked for it:
+    a second launch's or a notification click's ``XDG_ACTIVATION_TOKEN``.
+    """
+    global _activation_token
+    _activation_token = (token or "").strip()
+
+
+def _take_activation_token() -> str:
+    """The noted token, else the one a second launch / notification click left in the env."""
+    import os
+
+    global _activation_token
+    token, _activation_token = _activation_token, ""
+    return token or os.environ.pop("XDG_ACTIVATION_TOKEN", "").strip()
+
+
+def raise_main_window(token: str | None = None) -> None:
+    """Show the main window and bring it to the front (second launch, notification click)."""
+    if token:
+        note_activation_token(token)
+    if _main_window is not None:
+        _bring_to_front(_main_window)
+
+
+def _raise_linux(window: Any, token: str) -> bool:
+    """Present the GTK window on the GTK main thread.
+
+    The token goes to ``set_startup_id`` (xdg-activation on Wayland, startup-notification on
+    X11). On X11, ``present_with_time`` with a fresh X server timestamp makes GDK send
+    ``_NET_ACTIVE_WINDOW``, which the window manager's focus-stealing guard accepts.
+    """
+    gw = getattr(window, "native", None)
+    if gw is None or not hasattr(gw, "present_with_time"):
+        return False
+    from gi.repository import GLib
+
+    from frontend import platform_info
+
+    x11 = platform_info.session_type() == "x11"
+
+    def op() -> bool:
+        try:
+            if token:
+                gw.set_startup_id(token)
+            if x11:
+                from gi.repository import GdkX11
+
+                gw.present_with_time(GdkX11.x11_get_server_time(gw.get_window()))
+            else:
+                gw.present()
+        except Exception:
+            pass
+        return False  # one-shot idle callback
+
+    GLib.idle_add(op)
+    return True
+
+
 def _force_foreground(window: Any) -> None:
-    """Best-effort raise above other applications (Windows)."""
+    """Best-effort raise above other applications (Windows, Linux)."""
     import sys
 
+    if sys.platform.startswith("linux"):
+        try:
+            _raise_linux(window, _take_activation_token())
+        except Exception:
+            pass
+        return
     if sys.platform != "win32":
         return
     try:

@@ -383,6 +383,7 @@ def test_button_only_inject_does_not_raise(monkeypatch) -> None:
     assert raised == []
 
 
+@pytest.mark.windows_only("VkKeyScanW keyboard layout")
 def test_inject_key_skips_raise_on_keyup(monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -397,6 +398,7 @@ def test_inject_key_skips_raise_on_keyup(monkeypatch) -> None:
     assert raised == [5]
 
 
+@pytest.mark.windows_only("VkKeyScanW keyboard layout")
 def test_chord_does_not_raise_between_keys(monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -511,6 +513,7 @@ def test_desktop_pointer_skips_raise(monkeypatch) -> None:
     assert raised == []
 
 
+@pytest.mark.windows_only("GetSystemMetrics screen size")
 def test_trackpad_scroll_and_buttons_leave_the_cursor_where_it_is(monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -523,6 +526,7 @@ def test_trackpad_scroll_and_buttons_leave_the_cursor_where_it_is(monkeypatch) -
     assert sent == [[(0, 0, -240, 0x0800)], [(5, -3, 0, 0x0001)], [(0, 0, 0, 0x0008)]]
 
 
+@pytest.mark.windows_only("GetSystemMetrics screen size")
 def test_only_trackpad_moves_show_the_big_pointer(monkeypatch) -> None:
     import frontend.window_view as wv
     from frontend.ui_web import trackpad_cursor
@@ -829,3 +833,117 @@ def test_monitors_survive_another_modules_monitorinfo_argtypes():
         assert wv._monitors()[0][2] == width
     finally:
         shared.argtypes = before
+
+
+# --- Linux main window host (ui_web/webview_app.py on pywebview GTK) --------------------
+
+
+def test_splash_ready_file(monkeypatch, tmp_path) -> None:
+    import json
+
+    from frontend import native_switch
+    from frontend.ui_web import webview_app
+
+    monkeypatch.setattr(native_switch, "launcher_dir", lambda: tmp_path / "launcher")
+    monkeypatch.setenv("UEFN_DUCKY_SPLASH_PID", "4242")
+    target = webview_app.write_splash_ready(120.5, 480.0)
+    assert target == tmp_path / "launcher" / "ready-4242.json"
+    assert json.loads(target.read_text(encoding="utf-8")) == {"window_ms": 120.5, "painted_ms": 480.0}
+    assert list((tmp_path / "launcher").iterdir()) == [target]
+
+
+def test_no_splash_pid_writes_nothing(monkeypatch, tmp_path) -> None:
+    from frontend import native_switch
+    from frontend.ui_web import webview_app
+
+    monkeypatch.setattr(native_switch, "launcher_dir", lambda: tmp_path / "launcher")
+    monkeypatch.delenv("UEFN_DUCKY_SPLASH_PID", raising=False)
+    assert webview_app.write_splash_ready(1.0, 2.0) is None
+    assert not (tmp_path / "launcher").exists()
+
+
+_GTK_SMOKE = r"""
+import functools, http.server, json, os, tempfile, threading, time
+import webview
+from frontend.ui_web.ui_dispatch import ensure_started
+from frontend.ui_web.win_frameless import install_pywebview_chrome_patches, install_sync_drag_bridge
+
+install_pywebview_chrome_patches()
+install_sync_drag_bridge()
+ensure_started()
+root = tempfile.mkdtemp()
+with open(os.path.join(root, "index.html"), "w") as f:
+    f.write("<!doctype html><html><head><script>window.__first = !!window.__uefnLinuxChrome;"
+            "window.addEventListener('pywebviewready', function () {"
+            " window.pywebview.api.ping().then(function (v) { window.__pong = v; }); });"
+            "</script></head><body><header class='app-header drag-region'>UEFN Ducky</header></body></html>")
+handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=root)
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+
+class Api:
+    def ping(self):
+        return "pong"
+
+
+w = webview.create_window("UEFN Ducky", url=f"http://127.0.0.1:{srv.server_port}/", js_api=Api(),
+                          frameless=True, easy_drag=False, background_color="#0a0a0a")
+result = {}
+
+
+def probe():
+    if not w.events.loaded.wait(60):
+        result["error"] = "page never loaded"
+    else:
+        result["chrome_first"] = w.evaluate_js("window.__first")
+        for _ in range(100):
+            result["api"] = w.evaluate_js("window.__pong || null")
+            if result["api"]:
+                break
+            time.sleep(0.1)
+        result["native_drag"] = hasattr(w.native, "begin_move_drag")
+    w.destroy()
+
+
+webview.start(probe, gui="gtk")
+print("RESULT " + json.dumps(result), flush=True)
+"""
+
+
+def _gtk_stack_missing() -> str:
+    import os
+
+    if not sys.platform.startswith("linux"):
+        return "Linux window host only"
+    if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        return "no display (run under xvfb-run)"
+    try:
+        import gi
+        import webview  # noqa: F401
+
+        gi.require_version("Gtk", "3.0")
+        try:
+            gi.require_version("WebKit2", "4.1")
+        except ValueError:
+            gi.require_version("WebKit2", "4.0")
+    except Exception as exc:  # PyGObject, WebKitGTK typelib or pywebview not installed
+        return f"GTK/WebKitGTK/pywebview not installed: {exc}"
+    return ""
+
+
+@pytest.mark.skipif(bool(_gtk_stack_missing()), reason=_gtk_stack_missing() or "ok")
+def test_gtk_main_window_opens_reports_ready_and_closes() -> None:
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+
+    app_root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ, PYTHONPATH=str(app_root), WEBKIT_DISABLE_COMPOSITING_MODE="1")
+    proc = subprocess.run([sys.executable, "-c", _GTK_SMOKE], cwd=app_root, env=env,
+                          capture_output=True, text=True, timeout=120)
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT ")]
+    assert proc.returncode == 0 and lines, proc.stdout + proc.stderr
+    result = json.loads(lines[-1][len("RESULT "):])
+    assert result == {"chrome_first": True, "api": "pong", "native_drag": True}

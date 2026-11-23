@@ -423,3 +423,208 @@ def test_real_hidden_hwnd_has_no_top_gap_and_retains_native_resize_frame():
     assert hwnd not in chrome._native_subclass
     assert hwnd not in chrome._native_subclass_orig
     assert hwnd not in chrome._window_min_track
+
+
+# --- Linux (pywebview GTK): fake Gtk window and gi, so these run on every OS ------------
+
+
+class FakeGtkWindow:
+    def __init__(self, maximized: bool = False):
+        self.calls: list[tuple] = []
+        self.maximized = maximized
+
+    def begin_move_drag(self, button, x, y, timestamp):
+        self.calls.append(("move", button, x, y, timestamp))
+
+    def begin_resize_drag(self, edge, button, x, y, timestamp):
+        self.calls.append(("resize", edge, button, x, y, timestamp))
+
+    def is_maximized(self):
+        return self.maximized
+
+    def maximize(self):
+        self.calls.append(("maximize",))
+
+    def unmaximize(self):
+        self.calls.append(("unmaximize",))
+
+    # focus / raise
+    def set_startup_id(self, token):
+        self.calls.append(("startup_id", token))
+
+    def present_with_time(self, ts):
+        self.calls.append(("present_with_time", ts))
+
+    def present(self):
+        self.calls.append(("present",))
+
+    def get_window(self):
+        return "gdk-window"
+
+
+@pytest.fixture
+def fake_gi(monkeypatch):
+    """gi with Gdk edges, GLib.idle_add that runs at once and an X server answering time 777."""
+    import types
+
+    repo = types.ModuleType("gi.repository")
+    repo.Gdk = SimpleNamespace(WindowEdge=SimpleNamespace(**{n: n for n in chrome._GDK_EDGES.values()}))
+    repo.GLib = SimpleNamespace(idle_add=lambda fn: fn())
+    repo.GdkX11 = SimpleNamespace(x11_get_server_time=lambda w: 777 if w == "gdk-window" else -1)
+    gi = types.ModuleType("gi")
+    gi.repository = repo
+    monkeypatch.setitem(sys.modules, "gi", gi)
+    monkeypatch.setitem(sys.modules, "gi.repository", repo)
+    monkeypatch.setattr(sys, "platform", "linux")
+    return monkeypatch
+
+
+def test_linux_header_drag_starts_compositor_move(fake_gi):
+    gtk = FakeGtkWindow()
+    assert chrome.begin_native_window_move(SimpleNamespace(native=gtk), 640, 12) is True
+    assert gtk.calls == [("move", 1, 640, 12, 0)]
+
+
+def test_linux_every_edge_maps_to_a_gdk_resize(fake_gi):
+    for edge, name in chrome._GDK_EDGES.items():
+        gtk = FakeGtkWindow()
+        w = SimpleNamespace(native=gtk)
+        assert chrome.begin_native_window_resize(w, edge.upper(), screen_x=5, screen_y=6) is True
+        assert gtk.calls == [("resize", name, 1, 5, 6, 0)]
+    gtk = FakeGtkWindow()
+    w = SimpleNamespace(native=gtk)
+    assert chrome.begin_native_window_resize(w, "top") is False
+    assert chrome.begin_native_window_resize(w, "n", double_click=True) is False
+    assert gtk.calls == []
+
+
+def test_linux_bridge_calls_dispatch(fake_gi):
+    gtk = FakeGtkWindow()
+    w = SimpleNamespace(native=gtk)
+    assert chrome.linux_chrome_call(w, "uefnNativeWindowMove", [10, 20]) is True
+    assert chrome.linux_chrome_call(w, "uefnNativeWindowResize", ["se", False, 30, 40]) is True
+    assert chrome.linux_chrome_call(w, "uefnToggleMaximize", []) is True
+    assert gtk.calls == [("move", 1, 10, 20, 0), ("resize", "SOUTH_EAST", 1, 30, 40, 0), ("maximize",)]
+    assert chrome.linux_chrome_call(w, "list_chats", None) is False
+    gtk = FakeGtkWindow(maximized=True)
+    chrome.linux_chrome_call(SimpleNamespace(native=gtk), "uefnToggleMaximize", [])
+    assert gtk.calls == [("unmaximize",)]
+
+
+def test_linux_no_gtk_window_is_a_no_op(fake_gi):
+    assert chrome.begin_native_window_move(SimpleNamespace(native=None), 1, 2) is False
+    assert chrome.linux_chrome_call(SimpleNamespace(), "uefnNativeWindowMove", "junk") is True
+
+
+def test_linux_sync_bridge_patches_gtks_copy(fake_gi):
+    import types
+
+    monkeypatch = fake_gi
+    monkeypatch.delattr(chrome.install_sync_drag_bridge, "_installed", raising=False)
+    seen: list[str] = []
+    util = types.ModuleType("webview.util")
+    util.js_bridge_call = lambda window, name, param, vid: seen.append(name)
+    gtk_mod = types.ModuleType("webview.platforms.gtk")
+    webview = types.ModuleType("webview")
+    webview.util = util
+    monkeypatch.setitem(sys.modules, "webview", webview)
+    monkeypatch.setitem(sys.modules, "webview.util", util)
+    monkeypatch.setitem(sys.modules, "webview.platforms.gtk", gtk_mod)
+    monkeypatch.setattr(chrome, "_js_api_func", lambda window, name: None)
+    monkeypatch.setattr(chrome, "_QueuedReturn", lambda window, name: window)
+    try:
+        chrome.install_sync_drag_bridge()
+        assert gtk_mod.js_bridge_call is util.js_bridge_call
+        gtk = FakeGtkWindow()
+        gtk_mod.js_bridge_call(SimpleNamespace(native=gtk), "uefnNativeWindowMove", [3, 4], "id")
+        gtk_mod.js_bridge_call(SimpleNamespace(native=gtk), "pywebviewEventHandler", {}, "id")
+        assert gtk.calls == [("move", 1, 3, 4, 0)]
+        assert seen == ["pywebviewEventHandler"]
+    finally:
+        monkeypatch.delattr(chrome.install_sync_drag_bridge, "_installed", raising=False)
+
+
+def test_linux_script_uses_the_panels_drag_selectors():
+    """LINUX_CHROME_JS copies utils/windowDrag.ts's selectors; fail when they drift apart."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).parent / "web" / "src"
+    drag = (src / "utils" / "windowDrag.ts").read_text(encoding="utf-8")
+    assert re.search(r'const DRAG_ROOT =\s*"([^"]+)"', drag).group(1) in chrome.LINUX_CHROME_JS
+    interactive = re.search(r'const INTERACTIVE =\s*"([^"]+)"', drag).group(1)
+    for selector in interactive.split(", "):
+        assert selector in chrome.LINUX_CHROME_JS
+    grips = (src / "components" / "WindowResize.tsx").read_text(encoding="utf-8")
+    assert "window-resize-grip--${edge}" in grips
+
+
+@pytest.mark.parametrize(("env", "expected"), [("1", True), ("on", True), ("0", False), ("off", False)])
+def test_linux_system_decorations_env(monkeypatch, env, expected):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("UEFN_DUCKY_SYSTEM_DECORATIONS", env)
+    assert chrome.use_system_decorations() is expected
+
+
+def test_system_decorations_never_on_windows(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("UEFN_DUCKY_SYSTEM_DECORATIONS", "1")
+    assert chrome.use_system_decorations() is False
+
+
+# --- Linux focus / raise (focus_windows) -----------------------------------------------
+
+
+@pytest.fixture
+def raise_env(fake_gi):
+    from frontend.ui_web import focus_windows
+
+    for name in ("XDG_SESSION_TYPE", "WAYLAND_DISPLAY", "DISPLAY", "XDG_ACTIVATION_TOKEN"):
+        fake_gi.delenv(name, raising=False)
+    focus_windows.note_activation_token(None)
+    return fake_gi, focus_windows
+
+
+def test_x11_raise_uses_the_x_servers_time(raise_env):
+    monkeypatch, fw = raise_env
+    monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+    gtk = FakeGtkWindow()
+    fw._force_foreground(SimpleNamespace(native=gtk))
+    assert gtk.calls == [("present_with_time", 777)]
+
+
+def test_wayland_raise_uses_a_token_once(raise_env):
+    monkeypatch, fw = raise_env
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    gtk = FakeGtkWindow()
+    shown: list[str] = []
+    main = SimpleNamespace(native=gtk, show=lambda: shown.append("show"), restore=lambda: shown.append("restore"))
+    monkeypatch.setattr(fw, "_main_window", main)
+    fw.raise_main_window("  launch-token  ")
+    fw.raise_main_window()
+    assert shown == ["show", "restore", "show", "restore"]
+    assert gtk.calls == [("startup_id", "launch-token"), ("present",), ("present",)]
+
+
+def test_notification_click_token_reaches_set_startup_id(raise_env):
+    monkeypatch, fw = raise_env
+    from frontend import notifications
+
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    gtk = FakeGtkWindow()
+    monkeypatch.setattr(fw, "_main_window", SimpleNamespace(native=gtk, show=lambda: None, restore=lambda: None))
+    monkeypatch.setitem(notifications._linux_clicks, 42, notifications._raise_main_window)
+    notifications.handle_linux_signal(
+        "/org/freedesktop/Notifications: org.freedesktop.Notifications.ActivationToken (uint32 42, 'tok-42')")
+    notifications.handle_linux_signal(
+        "/org/freedesktop/Notifications: org.freedesktop.Notifications.ActionInvoked (uint32 42, 'default')")
+    assert gtk.calls == [("startup_id", "tok-42"), ("present",)]
+    import os
+
+    assert "XDG_ACTIVATION_TOKEN" not in os.environ
+
+
+def test_raise_without_a_window_does_nothing(raise_env):
+    _, fw = raise_env
+    fw._force_foreground(SimpleNamespace(native=None))
+    fw.raise_main_window()
