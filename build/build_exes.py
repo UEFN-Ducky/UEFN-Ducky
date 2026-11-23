@@ -446,6 +446,10 @@ LINUX_TARGETS = {
     "aarch64": "aarch64-unknown-linux-gnu",
     "arm64": "aarch64-unknown-linux-gnu",
 }
+# PyGObject (the window's GTK backend) has no wheels: pip builds it against these headers, and
+# the GI typelibs the spec bundles come from the gir1.2 packages (WebKitGTK itself stays the host's).
+LINUX_BUILD_APT = ("libgirepository1.0-dev", "libcairo2-dev", "pkg-config", "gir1.2-gtk-3.0", "gir1.2-webkit2-4.1")
+LINUX_BUILD_PKGCONFIG = ("gobject-introspection-1.0", "cairo")
 
 
 def linux_names(*, dev_build: bool) -> tuple[str, str]:
@@ -513,7 +517,19 @@ def missing_linux_files(app_dir: Path, app: str, bridge: str) -> list[str]:
     PortAudio for the microphone and the search model."""
     need = [app, bridge, LINUX_LAUNCHER, "_internal/libportaudio.so.2"]
     missing = [name for name in need if not (app_dir / name).is_file()]
+    # The window: PyGObject's extension and the WebKit2 typelib (pywebview's GTK backend).
+    if not any((app_dir / "_internal" / "gi").glob("_gi*.so")):
+        missing.append("_internal/gi/_gi*.so")
+    if not (app_dir / "_internal" / "gi_typelibs" / "WebKit2-4.1.typelib").is_file():
+        missing.append("_internal/gi_typelibs/WebKit2-4.1.typelib")
     return missing + [f"_internal/models/search/{n}" for n in missing_search_model_files(app_dir)]
+
+
+def missing_linux_build_deps(run=subprocess.run, which=shutil.which) -> list[str]:
+    """pkg-config modules PyGObject's source build needs, missing on this machine."""
+    if which("pkg-config") is None:
+        return ["pkg-config"]
+    return [m for m in LINUX_BUILD_PKGCONFIG if run(["pkg-config", "--exists", m]).returncode != 0]
 
 
 def main_linux(args: argparse.Namespace) -> int:
@@ -550,11 +566,17 @@ def main_linux(args: argparse.Namespace) -> int:
         root / "native_launcher", app_version=app_version, target=linux_launcher_target()
     )
 
-    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller==6.22.3", "-r", str(req)]
-    stamp = pip_stamp([req, here / "build_exes.py"])
+    gi_req = here / "linux" / "appimage" / "requirements-gi.txt"
+    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller==6.22.3", "-r", str(req), "-r", str(gi_req)]
+    stamp = pip_stamp([req, gi_req, here / "build_exes.py"])
     if pip_fresh(stamp):
         print(f"pip: same requirements installed under a day ago ({stamp.name}): skipped")
     else:
+        no_headers = missing_linux_build_deps()
+        if no_headers:
+            print(f"ERROR: PyGObject cannot build: pkg-config is missing {', '.join(no_headers)}.\n"
+                  f"  sudo apt-get install -y {' '.join(LINUX_BUILD_APT)}", file=sys.stderr)
+            return 1
         print(">", " ".join(pip))
         subprocess.run(pip, check=True, cwd=str(root))
         stamp.parent.mkdir(parents=True, exist_ok=True)

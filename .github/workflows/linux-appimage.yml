@@ -58,6 +58,8 @@ jobs:
           sudo apt-get update
           # ripgrep: the panel's prebuild (scripts/check-shipped-ui.mjs) greps with rg.
           sudo apt-get install -y libgtk-3-dev libportaudio2 xvfb ripgrep
+          # PyGObject builds from source; the freeze bundles its typelibs (build_exes.LINUX_BUILD_APT).
+          sudo apt-get install -y libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-gtk-3.0 gir1.2-webkit2-4.1
       - name: Panel dependencies
         run: npm ci --prefix ducky_app/frontend/ui_web/web
       # build/ and release/ sit outside pytest's testpaths: run the packaging tests here.
@@ -91,7 +93,7 @@ jobs:
       - name: Starts under xvfb
         run: |
           xvfb-run -a dist/uefn-ducky/uefn-ducky --runtime-smoke "$RUNNER_TEMP/smoke.json"
-          python -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['panel']['all_assets_verified'], r" "$RUNNER_TEMP/smoke.json"
+          python -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['panel']['all_assets_verified'] and r['window'], r; print(r['window'])" "$RUNNER_TEMP/smoke.json"
       - name: Pack the build folder
         run: tar -C dist -cf dist/uefn-ducky.tar uefn-ducky
       - uses: actions/upload-artifact@v4

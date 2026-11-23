@@ -37,6 +37,26 @@ LINUX_LIB_DIRS = ("/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu", "/u
 # The desktop's own audio stack: a bundled copy breaks PipeWire/Pulse ALSA plugins
 # (AppImage excludelist). PortAudio loads the system ones.
 LINUX_SYSTEM_AUDIO = ("libasound.so", "libjack.so", "libpulse")
+# The window is pywebview's GTK backend (webview_app.py: gui="gtk"), so PyGObject ships: the gi
+# package, pycairo and the GI typelibs (PyInstaller's gi hooks, versions pinned below, as
+# pywebview requires them). The GTK + WebKitGTK stack itself is the host's, never bundled:
+# libwebkit2gtk-4.1 is ~100 MB, runs its own helper processes from the system path, and every
+# target distro ships it (the .deb/.rpm/AUR depend on it; the AppImage start check installs it).
+# A bundled glib/GTK beside the host's WebKitGTK would load two glibs into one process.
+LINUX_GI_VERSIONS = {"Gtk": "3.0", "Gdk": "3.0", "WebKit2": "4.1", "Soup": "3.0"}
+LINUX_GI_MODULES = ("GLib", "GObject", "Gio", "Gdk", "Gtk", "WebKit2", "Soup")
+# Shared libraries (basename prefixes) and module folders that stay the host's.
+LINUX_HOST_LIBS = (
+    "libglib-2.0.", "libgobject-2.0.", "libgio-2.0.", "libgmodule-2.0.", "libgthread-2.0.",
+    "libgtk-3.", "libgdk-3.", "libgdk_pixbuf-2.0.", "libpixbufloader", "libwebkit2gtk-",
+    "libjavascriptcoregtk-", "libsoup-", "libcairo", "libpango", "libharfbuzz", "libatk",
+    "libatspi", "libepoxy", "libfontconfig", "libfreetype", "libX", "libxcb", "libxkbcommon",
+    "libwayland", "libdbus-1.",
+)
+LINUX_HOST_DIRS = ("lib/gio", "lib/gdk-pixbuf", "lib/gtk-3.0")
+# PyInstaller's GTK/GIO/pixbuf runtime hooks point GTK at bundled data and modules (themes,
+# input methods, TLS); with the host's GTK the host's own must stay. pyi_rth_gi (typelibs) stays.
+LINUX_HOST_RTH = ("pyi_rth_gtk", "pyi_rth_gio", "pyi_rth_gdkpixbuf")
 
 backend_hidden = collect_submodules("backend")
 mcp_hidden = collect_submodules("mcp")
@@ -320,8 +340,12 @@ if LINUX:
     for _pkg in ("keyring.backends", "jeepney", "Xlib", "ptyprocess"):
         _linux_hidden += collect_submodules(_pkg)
     _linux_rth = [str(LINUX_DIR / "pyi_rth_portaudio.py")]
-    # ponytail: no PyGObject in the freeze. The Linux window and tray are the native
-    # launcher (system GTK 3 + WebKitGTK, like espeak-ng a system dependency).
+    if importlib.util.find_spec("gi") is None:
+        raise RuntimeError(
+            "unified.spec: PyGObject (gi) is not installed: the Linux window would not open. "
+            "build_exes.py installs build/linux/appimage/requirements-gi.txt."
+        )
+    _linux_hidden += ["gi", "cairo"] + [f"gi.repository.{m}" for m in LINUX_GI_MODULES]
 
 a = Analysis(
     [str(FRONTEND / "launcher.py")],
@@ -398,7 +422,9 @@ a = Analysis(
         "backend.agent.hard_rules",
     ],
     hookspath=[],
-    hooksconfig={},
+    hooksconfig={"gi": {"module-versions": LINUX_GI_VERSIONS, "icons": [], "themes": [], "languages": []}}
+    if LINUX
+    else {},
     runtime_hooks=_linux_rth,
     excludes=_HEAVY_EXCLUDES,
     noarchive=False,
@@ -422,6 +448,15 @@ if LINUX:
     a.binaries = [e for e in a.binaries if not Path(str(e[0])).name.startswith(LINUX_SYSTEM_AUDIO)]
     if not any(Path(str(e[0])).name == LINUX_PORTAUDIO for e in a.binaries):
         raise RuntimeError(f"unified.spec: frozen build is missing {LINUX_PORTAUDIO} (microphone)")
+
+    def _host_side(entry) -> bool:
+        dest = str(entry[0]).replace("\\", "/")
+        # Top level only: system libraries land there; wheels keep their own (pillow.libs/...).
+        return ("/" not in dest and dest.startswith(LINUX_HOST_LIBS)) or dest.startswith(LINUX_HOST_DIRS)
+
+    a.binaries = [e for e in a.binaries if not _host_side(e)]
+    a.datas = [e for e in a.datas if not str(e[0]).startswith(LINUX_HOST_DIRS)]
+    a.scripts = [e for e in a.scripts if e[0] not in LINUX_HOST_RTH]
 
 # Fail the freeze if Store plugin host modules were tree-shaken out (empty LLMs).
 # TOC entries are (name, path, typecode).

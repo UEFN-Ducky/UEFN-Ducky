@@ -89,6 +89,29 @@ async def _check_mcp() -> dict:
         cp.stdio_client, cp.ClientSession, cp.resolve_server_block = original_stdio, original_session, original_resolve
 
 
+def _check_gtk_window() -> dict:
+    """Linux: the window is pywebview's GTK backend. Load it the way pywebview does and build
+    (never show) a WebView, so a missing gi, typelib or host WebKitGTK fails smoke, not the GUI."""
+    import sys
+
+    import gi
+
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("WebKit2", "4.1")
+    from gi.repository import Gtk, WebKit2
+
+    if not Gtk.init_check(sys.argv[:1])[0]:
+        raise RuntimeError("Gtk.init_check failed: no display")
+    view = WebKit2.WebView()
+    view.destroy()
+    import webview.platforms.gtk  # noqa: F401  (what webview.start(gui="gtk") loads)
+    return {
+        "gi": gi.__version__,
+        "gtk": f"{Gtk.get_major_version()}.{Gtk.get_minor_version()}.{Gtk.get_micro_version()}",
+        "webkit2": f"4.1 ({WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.{WebKit2.get_micro_version()})",
+    }
+
+
 def check_panel_recovery(output: str) -> int:
     """Exercise the GUI's root selection without starting windows or services."""
     report = {"ok": False}
@@ -174,6 +197,11 @@ def _run(output: str, report: dict) -> int:
         name: importlib.metadata.version(name) for name in ("mcp", "anyio", "httpx")
     }
     report["mcp"] = asyncio.run(_check_mcp())
+    from frontend import platform_info
+
+    if platform_info.IS_LINUX:
+        report["window"] = _check_gtk_window()
+        print("runtime smoke: gi {gi}, Gtk {gtk}, WebKit2 {webkit2} ok".format(**report["window"]))
     workers = DiffWorkers()
     before = "".join(f"Value_{n}:int = {n}\n" for n in range(10000))
     pairs = [(before, before.replace(f"Value_{n}:int = {n}", f"Value_{n}:int = 99999")) for n in range(4)]

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Start the AppImage on a clean distro (CI: docker run <image> bash smoke_container.sh <AppImage>).
-# Installs only a virtual display, then runs the frozen app's --runtime-smoke (imports, MCP,
+# Installs a virtual display and the host's WebKitGTK 4.1 (the AppImage bundles PyGObject and the
+# GI typelibs, never the GTK/WebKit stack: unified.spec LINUX_HOST_LIBS), then runs the frozen app's --runtime-smoke (imports, MCP,
 # every bundled panel asset) through the AppImage runtime without FUSE, checks the embedded
 # update info, and checks the menu integration installs and uninstalls cleanly.
 set -euo pipefail
@@ -8,12 +9,12 @@ app="$(readlink -f "$1")"
 want_update="${2:-}"
 if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq && apt-get install -y -qq xvfb xauth python3 >/dev/null
+  apt-get update -qq && apt-get install -y -qq xvfb xauth python3 libwebkit2gtk-4.1-0 >/dev/null
 elif command -v dnf >/dev/null; then
-  dnf install -y -q xorg-x11-server-Xvfb xorg-x11-xauth python3 which findutils >/dev/null
+  dnf install -y -q xorg-x11-server-Xvfb xorg-x11-xauth python3 which findutils webkit2gtk4.1 >/dev/null
 elif command -v pacman >/dev/null; then
   # -Syu, not -Sy: a partial upgrade conflicts with the image's own packages (openssl).
-  pacman -Syu --noconfirm --needed xorg-server-xvfb xorg-xauth python >/dev/null
+  pacman -Syu --noconfirm --needed xorg-server-xvfb xorg-xauth python webkit2gtk-4.1 >/dev/null
 fi
 . /etc/os-release && echo "== $PRETTY_NAME ($(uname -m))"
 chmod +x "$app"
@@ -36,12 +37,15 @@ PY
   [ "$got" = "$want_update" ] || { echo "update info: $got != $want_update"; exit 1; }
 fi
 report="$(mktemp -d)/smoke.json"
-xvfb-run -a "$app" --runtime-smoke "$report"
+# A container has no user namespaces for WebKit's bubblewrap sandbox; a desktop does.
+export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
+xvfb-run -a "$app" --runtime-smoke "$report" 2>&1 | tee "$report.log"
+! grep -q "GTK cannot be loaded" "$report.log" || { echo "pywebview could not load GTK"; exit 1; }
 python3 - "$report" <<'PY'
 import json, sys
 r = json.load(open(sys.argv[1]))
-assert r.get("ok") and r.get("panel", {}).get("all_assets_verified"), r
-print("runtime-smoke ok:", r.get("python"), r.get("versions"))
+assert r.get("ok") and r.get("panel", {}).get("all_assets_verified") and r.get("window"), r
+print("runtime-smoke ok:", r.get("python"), r.get("versions"), r["window"])
 PY
 # Menu integration round trip in a throwaway HOME: user data stays, everything else goes.
 export HOME="$(mktemp -d)"

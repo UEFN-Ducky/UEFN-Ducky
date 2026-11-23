@@ -391,7 +391,59 @@ def test_linux_build_folder_check(tmp_path: Path) -> None:
                  *(f"_internal/models/search/{n}" for n in be.SEARCH_MODEL_FILES)):
         (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / name).write_bytes(b"x")
+    # No PyGObject: the window cannot open, so the folder is not done.
+    assert be.missing_linux_files(tmp_path, app, bridge) == [
+        "_internal/gi/_gi*.so", "_internal/gi_typelibs/WebKit2-4.1.typelib"]
+    for name in ("_internal/gi/_gi.cpython-312-x86_64-linux-gnu.so", "_internal/gi_typelibs/WebKit2-4.1.typelib"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes(b"x")
     assert be.missing_linux_files(tmp_path, app, bridge) == []
+
+
+def test_linux_build_deps_name_the_missing_headers() -> None:
+    class Done:
+        def __init__(self, rc):
+            self.returncode = rc
+
+    assert be.missing_linux_build_deps(which=lambda _: None) == ["pkg-config"]
+    have = {"cairo"}
+    run = lambda cmd: Done(0 if cmd[-1] in have else 1)  # noqa: E731
+    assert be.missing_linux_build_deps(run=run, which=lambda _: "/usr/bin/pkg-config") == ["gobject-introspection-1.0"]
+    have.add("gobject-introspection-1.0")
+    assert be.missing_linux_build_deps(run=run, which=lambda _: "/usr/bin/pkg-config") == []
+    assert "libgirepository1.0-dev" in be.LINUX_BUILD_APT and "gir1.2-webkit2-4.1" in be.LINUX_BUILD_APT
+
+
+def test_linux_freeze_installs_pygobject_below_girepository_2() -> None:
+    req = (BUILD / "linux" / "appimage" / "requirements-gi.txt").read_text(encoding="utf-8")
+    assert 'PyGObject>=3.42,<3.50; sys_platform == "linux"' in req
+    # Not in requirements.txt: installs without the GI headers (linux-tests, Windows) stay as they were.
+    lines = (BUILD.parent / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    assert not [ln for ln in lines if ln.lower().startswith(("pygobject", "pycairo"))]
+    text = Path(be.__file__).read_text(encoding="utf-8")
+    linux = text[text.index("def main_linux("): text.index("def main() -> int:")]
+    assert '"-r", str(gi_req)' in linux and "missing_linux_build_deps()" in linux
+    assert "gi_req" not in text[text.index("def main() -> int:"):]
+
+
+def test_spec_linux_bundles_pygobject_and_keeps_the_host_gtk() -> None:
+    for name in ('_linux_hidden += ["gi", "cairo"]', '"WebKit2": "4.1"', '"Gtk": "3.0"', '"Soup": "3.0"',
+                 '"libwebkit2gtk-"', '"libglib-2.0."', '"pyi_rth_gtk"', "a.scripts = [e for e in a.scripts"):
+        assert name in SPEC_TEXT, name
+    # Windows gets the same empty hooksconfig as before.
+    assert 'hooksconfig={"gi": {"module-versions": LINUX_GI_VERSIONS' in SPEC_TEXT
+    assert "    if LINUX\n    else {}," in SPEC_TEXT
+
+
+def test_runtime_smoke_builds_a_webview_on_linux_only() -> None:
+    smoke = (BUILD.parent / "ducky_app" / "frontend" / "runtime_smoke.py").read_text(encoding="utf-8")
+    check = smoke[smoke.index("def _check_gtk_window"):smoke.index("def check_panel_recovery")]
+    for name in ('require_version("Gtk", "3.0")', 'require_version("WebKit2", "4.1")', "WebKit2.WebView()",
+                 "import webview.platforms.gtk"):
+        assert name in check, name
+    assert 'if platform_info.IS_LINUX:\n        report["window"] = _check_gtk_window()' in smoke
+    container = (BUILD / "linux" / "appimage" / "smoke_container.sh").read_text(encoding="utf-8")
+    assert 'r.get("window")' in container and "GTK cannot be loaded" in container
 
 
 def test_main_sends_linux_to_its_own_build_and_windows_runs_as_before() -> None:
