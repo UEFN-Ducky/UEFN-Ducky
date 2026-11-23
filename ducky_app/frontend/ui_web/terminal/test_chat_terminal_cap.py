@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import sys
 
 import pytest
 
@@ -488,6 +489,17 @@ def test_kill_closes_a_pty_whose_shell_already_exited(mgr, tmp_path):
     assert pty.closed == 1
 
 
+def test_the_pty_child_ends_with_its_terminal(mgr, tmp_path, monkeypatch):
+    # Linux has no console host: the pty's child (the shell) is what ends, with its whole tree.
+    killed: list[int] = []
+    monkeypatch.setattr(session_module, "kill_process_tree", killed.append)
+    shell = mgr.get_session(_open(mgr, tmp_path)["session_id"])
+    pty = shell._pty
+    mgr.kill(shell.id)
+    assert killed == [pty.pid] and pty.closed == 1 and not pty.alive
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="console hosts (conhost/OpenConsole) are Windows' ConPTY")
 def test_the_recorded_console_host_ends_with_its_terminal(mgr, tmp_path, monkeypatch):
     import os as _os
 
