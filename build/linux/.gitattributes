@@ -1,0 +1,10 @@
+# Everything here runs or is parsed on Linux (bash refuses "pipefail\r", makepkg diffs
+# .SRCINFO byte for byte): keep LF in a Windows checkout too.
+* text=auto eol=lf
+*.sh text eol=lf
+PKGBUILD text eol=lf
+.SRCINFO text eol=lf
+*.spec text eol=lf
+control text eol=lf
+*.desktop text eol=lf
+*.yml text eol=lf
