@@ -116,7 +116,7 @@ def test_the_persons_own_save_prompt_is_skipped(wine, monkeypatch) -> None:
 
 @pytest.mark.skipif(not sys.platform.startswith("linux") or not shutil.which("Xvfb"), reason="needs Linux + Xvfb")
 def test_fake_wine_windows_under_xvfb(monkeypatch) -> None:
-    Xlib = pytest.importorskip("Xlib")
+    pytest.importorskip("Xlib")
     from Xlib import X, Xatom, display
 
     disp = ":%d" % (90 + os.getpid() % 50)
