@@ -155,6 +155,8 @@ function fanOut(event: AgentEvent) {
 
 let busInstalled = false;
 let httpPollStarted = false;
+/** Bumped by stopAgentEventPoll: a loop still awaiting its fetch or retry ends when it wakes. */
+let httpPollGeneration = 0;
 let httpCursor = 0;
 /** Newest server event when this page first polled; the backlog up to it is history. */
 let replayUntil = -1;
@@ -196,10 +198,14 @@ function pluginPush(event: AgentEvent): void {
 function startHttpEventPoll() {
   if (httpPollStarted) return;
   httpPollStarted = true;
+  const generation = httpPollGeneration;
+  // The page's window is gone (a test's jsdom torn down): nothing left to poll for, and the
+  // retry timer below would throw an unhandled "window is not defined".
+  const live = () => httpPollStarted && generation === httpPollGeneration && typeof window !== "undefined";
   const poll = async () => {
     let retryMs = EVENT_POLL_RETRY_MIN_MS;
     let catchUpDone = false;
-    while (httpPollStarted) {
+    while (live()) {
       try {
         const response = await fetch(`/__panel_events?since=${httpCursor}`, {
           cache: "no-store",
@@ -239,12 +245,20 @@ function startHttpEventPoll() {
         }
         catchUpDone = true;
       } catch {
+        if (!live()) return;
         await new Promise<void>((resolve) => window.setTimeout(resolve, retryMs));
         retryMs = nextEventPollRetryMs(retryMs);
       }
     }
   };
   void poll();
+}
+
+/** Ends the HTTP event poll (tests); the next installAgentEventBus starts a fresh one. */
+export function stopAgentEventPoll(): void {
+  httpPollStarted = false;
+  busInstalled = false;
+  httpPollGeneration += 1;
 }
 
 export function installAgentEventBus() {
