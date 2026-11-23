@@ -12,7 +12,35 @@ export type AppUpdateStage =
   | "launch"
   | "installing"
   | "restarting"
+  | "installed"
   | "error";
+
+/** Linux-only keys of get_app_update_status (frontend.updater.linux_update_status). */
+export type UpdateAction = "restart" | "install" | "manual" | "none";
+export interface LinuxUpdateFields {
+  install_kind?: string;
+  update_action?: UpdateAction;
+  last_failure?: { from?: string; to?: string } | null;
+}
+
+/** The update button: AppImage "Restart", deb / rpm / Flatpak "Install"; Windows (no
+ * update_action) keeps "Update now". */
+export function updateButtonLabel(s: LinuxUpdateFields): string {
+  if (s.update_action === "install") return "Install";
+  if (s.update_action === "restart") return "Restart";
+  return "Update now";
+}
+
+/** Toast title: "Update ready" when this copy updates itself, else "Update available". */
+export function updateTitle(s: LinuxUpdateFields, selfUpdates: boolean): string {
+  if (s.update_action === "install" || s.update_action === "manual") return "Update available";
+  return selfUpdates ? "Update ready" : "Update available";
+}
+
+/** An AppImage update that didn't start and was rolled back. */
+export function updateFailureNote(s: LinuxUpdateFields): string | null {
+  return s.last_failure?.to ? `Update failed, back on v${s.last_failure.to}` : null;
+}
 
 export interface AppUpdateState {
   active: boolean;
@@ -76,6 +104,7 @@ function mapStage(raw: string | undefined | null): AppUpdateStage {
     case "launch":
     case "installing":
     case "restarting":
+    case "installed":
     case "error":
     case "idle":
       return raw;
@@ -144,6 +173,13 @@ export function startAppUpdate(opts?: {
       const result = await runBridgeJob<UpdaterResult>("apply_update", [], 600_000);
       signal.stop = true;
       await poller.catch(() => {});
+
+      if (result?.ok && result.stage === "installed") {
+        // Linux package manager finished: this copy keeps running, the next start is new.
+        clearStuckTimer();
+        publish({ ...IDLE, stage: "installed" });
+        return;
+      }
 
       if (result?.ok) {
         publish({

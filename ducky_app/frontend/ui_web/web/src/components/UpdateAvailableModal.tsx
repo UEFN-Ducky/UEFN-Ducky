@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { getApi } from "../hooks/usePanelApi";
 import type { AppUpdateStatus } from "../types/panel";
-import { getAppUpdateState, startAppUpdate, subscribeAppUpdate } from "../update/appUpdate";
+import {
+  getAppUpdateState,
+  startAppUpdate,
+  subscribeAppUpdate,
+  updateButtonLabel,
+  updateFailureNote,
+  updateTitle,
+  type LinuxUpdateFields,
+} from "../update/appUpdate";
 
 interface UpdateAvailableModalProps {
   open: boolean;
@@ -33,7 +41,10 @@ export function UpdateAvailableModal({ open, status, onDismiss }: UpdateAvailabl
   // Hide the toast while the full-app lock overlay owns the update UX.
   if (!open || lockActive) return null;
 
-  const installed = status.channel === "installed" || status.installed;
+  const linux = status as AppUpdateStatus & LinuxUpdateFields;
+  const installed =
+    (status.channel === "installed" || status.installed) && linux.update_action !== "manual";
+  const failure = updateFailureNote(linux);
 
   return createPortal(
     <div className="update-toast no-drag" role="status" aria-live="polite">
@@ -52,7 +63,7 @@ export function UpdateAvailableModal({ open, status, onDismiss }: UpdateAvailabl
 
         <div className="update-toast-header">
           <span className="update-toast-dot" aria-hidden />
-          <span className="update-toast-title">{installed ? "Update ready" : "Update available"}</span>
+          <span className="update-toast-title">{updateTitle(linux, Boolean(installed))}</span>
           <span className="update-toast-version">v{status.remote_version}</span>
         </div>
 
@@ -60,6 +71,7 @@ export function UpdateAvailableModal({ open, status, onDismiss }: UpdateAvailabl
           <p className="update-toast-body">
             <strong>v{status.local_version}</strong> → <strong>v{status.remote_version}</strong>
             {status.release_notes ? <> — {status.release_notes}</> : null}
+            {failure ? <span className="update-toast-hint"> {failure}</span> : null}
           </p>
         ) : (
           <>
@@ -82,7 +94,7 @@ export function UpdateAvailableModal({ open, status, onDismiss }: UpdateAvailabl
               className="update-toast-btn update-toast-btn-primary"
               onClick={handleUpdateNow}
             >
-              Update now
+              {updateButtonLabel(linux)}
             </button>
           ) : (
             <button type="button" className="update-toast-btn update-toast-btn-primary" onClick={handleDownload}>
