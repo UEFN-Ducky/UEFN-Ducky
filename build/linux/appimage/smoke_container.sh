@@ -39,7 +39,8 @@ fi
 report="$(mktemp -d)/smoke.json"
 # A container has no user namespaces for WebKit's bubblewrap sandbox; a desktop does.
 export WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1
-xvfb-run -a "$app" --runtime-smoke "$report" 2>&1 | tee "$report.log"
+xvfb-run -a "$app" --runtime-smoke "$report" 2>&1 | tee "$report.log" \
+  || { echo "runtime-smoke failed:"; cat "$report" 2>/dev/null; exit 1; }
 ! grep -q "GTK cannot be loaded" "$report.log" || { echo "pywebview could not load GTK"; exit 1; }
 python3 - "$report" <<'PY'
 import json, sys

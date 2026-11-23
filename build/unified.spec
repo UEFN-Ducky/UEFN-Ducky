@@ -53,6 +53,7 @@ LINUX_HOST_LIBS = (
     "libatspi", "libepoxy", "libfontconfig", "libfreetype", "libX", "libxcb", "libxkbcommon",
     "libwayland", "libdbus-1.",
 )
+LINUX_WEBKIT = "libwebkit2gtk-4.1.so.0"
 LINUX_HOST_DIRS = ("lib/gio", "lib/gdk-pixbuf", "lib/gtk-3.0")
 # PyInstaller's GTK/GIO/pixbuf runtime hooks point GTK at bundled data and modules (themes,
 # input methods, TLS); with the host's GTK the host's own must stay. pyi_rth_gi (typelibs) stays.
@@ -450,10 +451,22 @@ if LINUX:
     if not any(Path(str(e[0])).name == LINUX_PORTAUDIO for e in a.binaries):
         raise RuntimeError(f"unified.spec: frozen build is missing {LINUX_PORTAUDIO} (microphone)")
 
+    # Everything the host's WebKitGTK links is on every machine that has it, and a bundled older
+    # copy (ubuntu-22.04's) shadows the host's: libsoup on ubuntu 24.04 died on 22.04's libnghttp2.
+    # So the whole closure, as ldd sees it on the freeze host, stays the host's too.
+    import subprocess
+
+    _webkit = next((Path(d) / LINUX_WEBKIT for d in LINUX_LIB_DIRS if (Path(d) / LINUX_WEBKIT).is_file()), None)
+    if _webkit is None:
+        raise RuntimeError(f"unified.spec: {LINUX_WEBKIT} not found in {LINUX_LIB_DIRS}: apt install gir1.2-webkit2-4.1")
+    _ldd = subprocess.run(["ldd", str(_webkit)], capture_output=True, text=True, check=True).stdout
+    _webkit_libs = {line.split()[0] for line in _ldd.splitlines() if "=>" in line} - {LINUX_PORTAUDIO}
+
     def _host_side(entry) -> bool:
         dest = str(entry[0]).replace("\\", "/")
         # Top level only: system libraries land there; wheels keep their own (pillow.libs/...).
-        return ("/" not in dest and dest.startswith(LINUX_HOST_LIBS)) or dest.startswith(LINUX_HOST_DIRS)
+        top = "/" not in dest and (dest.startswith(LINUX_HOST_LIBS) or dest in _webkit_libs)
+        return top or dest.startswith(LINUX_HOST_DIRS)
 
     a.binaries = [e for e in a.binaries if not _host_side(e)]
     a.datas = [e for e in a.datas if not str(e[0]).startswith(LINUX_HOST_DIRS)]
