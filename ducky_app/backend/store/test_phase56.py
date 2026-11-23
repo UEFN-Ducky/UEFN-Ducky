@@ -391,9 +391,13 @@ def test_a_settings_change_alone_is_enough_for_a_new_snapshot(appdata: Path) -> 
     from frontend import appdata_maintenance as am
 
     am.maintain_appdata(appdata)
+    before = [list(map(str, row)) for row in db.fingerprint_summary(db.connect())]
     _age_snapshots(2)
     kv.set_doc("cache_docs", "models", {"list": [1, 2]})  # a cache refresh is not
-    assert am.maintain_appdata(appdata)["db_snapshot"] == 0
+    took = am.maintain_appdata(appdata)["db_snapshot"]
+    # It failed once under load with no cause shown: name the tables that moved.
+    moved = [row for row in (list(map(str, r)) for r in db.fingerprint_summary(db.connect())) if row not in before]
+    assert took == 0, f"tables changed since the snapshot (before {before}): {moved}"
     kv.set_doc("settings", "theme", "dark")
     assert am.maintain_appdata(appdata)["db_snapshot"] == 1
 

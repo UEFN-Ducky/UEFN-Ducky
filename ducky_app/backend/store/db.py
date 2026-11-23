@@ -1025,6 +1025,11 @@ def data_fingerprint(conn: sqlite3.Connection) -> str:
     """Row count, highest rowid and newest ``updated`` of every table holding the
     user's data, hashed. Equal fingerprints mean no row was added, removed or
     stamped as updated in between; search indexes and caches are left out."""
+    return hashlib.sha256(json.dumps(fingerprint_summary(conn), default=str).encode("utf-8")).hexdigest()
+
+
+def fingerprint_summary(conn: sqlite3.Connection) -> list[list[object]]:
+    """What :func:`data_fingerprint` hashes: ``[table, count, max rowid, max updated]`` per table."""
     tables = conn.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -1041,7 +1046,7 @@ def data_fingerprint(conn: sqlite3.Connection) -> str:
         if "updated" in columns:
             exprs.append("max(updated)")
         summary.append([name, *conn.execute(f'SELECT {", ".join(exprs)} FROM "{name}"').fetchone()])
-    return hashlib.sha256(json.dumps(summary, default=str).encode("utf-8")).hexdigest()
+    return summary
 
 
 def snapshot(root: Path | None = None, *, label: str = "") -> Path:

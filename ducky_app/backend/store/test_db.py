@@ -339,17 +339,18 @@ def _remove_sidecars(path: Path) -> None:
 
 
 def test_corrupt_database_is_restored_from_snapshot(tmp_path: Path) -> None:
-    conn = db.connect()
+    root = _private_root(tmp_path)  # a leftover writer thread held the LOCALAPPDATA file for good
+    conn = db.connect(root)
     with db.write_txn(conn):
         conn.execute("INSERT INTO settings(key, value, updated) VALUES ('keep', '1', 0)")
-    db.snapshot(label="good")
+    db.snapshot(root, label="good")
     db.reset_for_tests()
-    path = db.db_path()
+    path = db.db_path(root)
     data = bytearray(path.read_bytes())
     data[:100] = b"\0" * 100
     path.write_bytes(bytes(data))
     _remove_sidecars(path)
-    conn = db.open_checked()
+    conn = db.open_checked(root)
     assert conn.execute("SELECT value FROM settings WHERE key='keep'").fetchone()[0] == "1"
     assert (path.parent / (db.DB_NAME + ".corrupt")).exists()
     note = conn.execute("SELECT value FROM meta WHERE key='last_restore'").fetchone()[0]
@@ -357,13 +358,14 @@ def test_corrupt_database_is_restored_from_snapshot(tmp_path: Path) -> None:
 
 
 def test_corrupt_database_without_snapshot_is_loud(tmp_path: Path) -> None:
-    db.connect()
+    root = _private_root(tmp_path)
+    db.connect(root)
     db.reset_for_tests()
-    path = db.db_path()
+    path = db.db_path(root)
     path.write_bytes(b"not a database at all")
     _remove_sidecars(path)
     with pytest.raises(db.StoreError):
-        db.open_checked()
+        db.open_checked(root)
 
 
 def test_is_store_file_names_every_sidecar() -> None:
@@ -440,38 +442,48 @@ def _is_open(conn: sqlite3.Connection) -> bool:
         return False
 
 
-def test_finished_threads_do_not_leave_connections_open(monkeypatch) -> None:
+def _private_root(tmp_path: Path) -> Path:
+    """A database only this test opens. Writer threads left running by earlier tests in
+    the worker (usage_stats, error_log) open ``app_root()``, the LOCALAPPDATA one, and
+    keep that connection: counted as this test's, or holding the file a restore renames."""
+    return tmp_path / "private"
+
+
+def test_finished_threads_do_not_leave_connections_open(tmp_path: Path, monkeypatch) -> None:
     """Every short-lived thread that read the store (one per panel HTTP request,
     per pywebview call, per model warm) left its connection — three file
     handles and its page cache — open until a full garbage collection. An idle
     panel piled up hundreds per hour."""
-    db.connect()
+    root = _private_root(tmp_path)
+    db.connect(root)
+    mine = str(db.db_path(root))
     made: list[sqlite3.Connection] = []
     real_connect = db.sqlite3.connect
 
     def counting_connect(*a, **k):
         conn = real_connect(*a, **k)
-        made.append(conn)
+        if a and a[0] == mine:  # other threads' opens of other files are not this test's
+            made.append(conn)
         return conn
 
     monkeypatch.setattr(db.sqlite3, "connect", counting_connect)
     gc.disable()  # the leak only ever cleared on a full collection
     try:
         for _ in range(50):
-            _run_in_thread(lambda: db.connect().execute("SELECT count(*) FROM settings").fetchone())
+            _run_in_thread(lambda: db.connect(root).execute("SELECT count(*) FROM settings").fetchone())
         # A burst of threads alive at the same time, then one more after they finish.
         barrier = threading.Barrier(20)
 
         def burst() -> None:
             barrier.wait(timeout=5)
-            db.connect().execute("SELECT 1").fetchone()
+            db.connect(root).execute("SELECT 1").fetchone()
 
         threads = [threading.Thread(target=burst) for _ in range(20)]
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=10)
-        _run_in_thread(lambda: db.connect().execute("SELECT 1").fetchone())
+        _run_in_thread(lambda: db.connect(root).execute("SELECT 1").fetchone())
         # Finished threads close their connections as they exit; under a loaded full suite
         # that can trail the join by a moment (a real leak never settles).
         deadline = time.monotonic() + 2.0
@@ -538,16 +550,24 @@ def test_500_new_threads_connect_at_once_as_fast_as_sqlite_opens() -> None:
     assert took < raw * 1.5 + 0.25, f"500 threads took {took:.2f} s to connect (plain opens {raw:.2f} s)"
 
 
-def test_a_pooled_thread_opens_no_new_connection(monkeypatch) -> None:
+def test_a_pooled_thread_opens_no_new_connection(tmp_path: Path, monkeypatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
-    db.connect()
+    root = _private_root(tmp_path)
+    db.connect(root)
+    mine = str(db.db_path(root))
     with ThreadPoolExecutor(4) as pool:
-        list(pool.map(lambda _: db.connect().execute("SELECT 1").fetchone(), range(8)))  # warm
+        list(pool.map(lambda _: db.connect(root).execute("SELECT 1").fetchone(), range(8)))  # warm
         calls: list[int] = []
         real_connect = db.sqlite3.connect
-        monkeypatch.setattr(db.sqlite3, "connect", lambda *a, **k: (calls.append(1), real_connect(*a, **k))[1])
-        list(pool.map(lambda _: db.connect().execute("SELECT 1").fetchone(), range(200)))
+
+        def counting_connect(*a, **k):
+            if a and a[0] == mine:
+                calls.append(1)
+            return real_connect(*a, **k)
+
+        monkeypatch.setattr(db.sqlite3, "connect", counting_connect)
+        list(pool.map(lambda _: db.connect(root).execute("SELECT 1").fetchone(), range(200)))
     assert calls == []
 
 
@@ -650,17 +670,20 @@ def test_open_checked_never_restores_over_a_locked_database(monkeypatch) -> None
 def test_a_staged_restore_keeps_the_previous_database_whole(tmp_path: Path) -> None:
     import shutil
 
-    conn = db.connect()
+    # The app swaps a staged restore in at its process's first open, before any other
+    # thread holds the file; a leftover thread holding the LOCALAPPDATA one blocked the
+    # rename on Windows, and the restore rightly stayed pending.
+    root = _private_root(tmp_path)
+    conn = db.connect(root)
     conn.execute("CREATE TABLE notes (x TEXT)")
     with db.write_txn(conn):
         conn.execute("INSERT INTO notes VALUES ('before')")
-    snap = db.snapshot(label="test")
+    snap = db.snapshot(root, label="test")
     with db.write_txn(conn):
         conn.execute("INSERT INTO notes VALUES ('after the snapshot')")
-    root = tmp_path / "UEFN-Ducky"
     shutil.copy2(snap, root / db.RESTORE_PENDING_NAME)
     db.reset_for_tests()
-    conn = db.connect()
+    conn = db.connect(root)
     assert [r[0] for r in conn.execute("SELECT x FROM notes")] == ["before"]
     backups = [p for p in root.iterdir() if p.name.startswith(f"{db.DB_NAME}.replaced-") and not p.name.endswith(("-wal", "-shm"))]
     assert len(backups) == 1
