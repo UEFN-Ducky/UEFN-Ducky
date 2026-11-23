@@ -44,7 +44,8 @@ _NEXT_LAUNCH = textwrap.dedent(
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux signals")
 def test_a_crash_and_a_crashed_child_are_in_the_next_report(tmp_path: Path) -> None:
-    env = dict(os.environ, XDG_DATA_HOME=str(tmp_path))
+    # Both: a real install reads XDG_DATA_HOME, the test conftest's app_paths hook LOCALAPPDATA.
+    env = dict(os.environ, XDG_DATA_HOME=str(tmp_path), LOCALAPPDATA=str(tmp_path))
     env.pop("DUCKY_SANDBOX", None)
     first = subprocess.run([sys.executable, "-c", _CRASHING_LAUNCH, str(_APP_ROOT)],
                            env=env, capture_output=True, text=True, timeout=60)

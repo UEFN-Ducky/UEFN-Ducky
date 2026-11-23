@@ -82,10 +82,11 @@ _page: dict[str, Any] = {"started": False, "watching": False, "errors": [], "web
 
 def _dir() -> Path:
     if sys.platform.startswith("linux"):
-        # Same folder as app_paths.local_app_data_base (this module loads before it can).
-        xdg = os.environ.get("XDG_DATA_HOME") or ""
-        base = xdg if os.path.isabs(xdg) else str(Path.home() / ".local" / "share")
-        return Path(base) / "UEFN-Ducky" / "crash"
+        # app_paths is stdlib-only, and native_crash writes child reports through it: one rule
+        # for both, or a reader and its writer disagree (the test hook, a future override).
+        from frontend.app_paths import local_app_data_base
+
+        return local_app_data_base() / "UEFN-Ducky" / "crash"
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
     return Path(base) / "UEFN-Ducky" / "crash"
 
