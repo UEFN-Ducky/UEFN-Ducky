@@ -8,9 +8,21 @@ import threading
 import time
 from unittest.mock import patch
 
+import pytest
+
 import frontend.ui_web.panel_api as pa
 from backend.agent.model_fetch import _CAPABILITY_CACHE, ModelInfo, get_model_info
 from backend.uefn_plugins.plugin_host.testing import host_patched, patch_host
+
+
+@pytest.fixture(autouse=True)
+def _no_refresh_crosses_a_test(monkeypatch):
+    """A refresh-models thread left by an earlier test fingerprints the old _model_cache,
+    then the new one this test patches in, and announces a change through this test's hook.
+    Wait before the test patches anything, and again before monkeypatch undoes it."""
+    _wait_refresh_done(timeout=30.0)
+    yield
+    _wait_refresh_done(timeout=30.0)
 
 
 def test_model_cache_disk_round_trip(tmp_path, monkeypatch):
