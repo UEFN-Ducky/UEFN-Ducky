@@ -358,6 +358,7 @@ _PUBLIC_METHODS = frozenset({
     'move_chats_to_project',
     'move_conversation',
     'move_project_entry',
+    'move_to_linux',
     'notify_activity',
     'notify_focus_tab_active',
     'open_appdata',
