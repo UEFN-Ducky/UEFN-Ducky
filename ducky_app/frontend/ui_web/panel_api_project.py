@@ -53,6 +53,20 @@ class PanelApiProjectMixin:
             "islands": islands_inside(root) if kind == FOLDER else [],
         }
 
+    def move_to_linux(self, action: str, path: str, passphrase: str) -> dict[str, Any]:
+        """Settings > Move to Linux: ``export`` writes the archive into folder ``path``;
+        ``import`` restores archive ``path`` here (skipping chats and keys already here)."""
+        from backend.store import migrate_export
+
+        try:
+            if action == "export":
+                return {"ok": True, **migrate_export.export_archive(path, passphrase)}
+            if action == "import":
+                return {"ok": True, **migrate_export.import_archive(path, passphrase)}
+            return {"ok": False, "error": f"unknown action: {action}"}
+        except Exception as exc:  # noqa: BLE001 — wrong passphrase, damaged file, locked account: shown as-is
+            return {"ok": False, "error": str(exc)}
+
     def _forget_listener_project(self) -> None:
         """After a switch or removal, status must not fall back to the last project's
         UEFN name and folder, or carry its stale-tick count into the next one."""

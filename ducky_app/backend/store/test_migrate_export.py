@@ -101,6 +101,22 @@ def test_round_trip_to_another_pc(tmp_path, monkeypatch):
     assert secrets.load_keys(use_cache=False) == {"anthropic": "sk-test-123"}
 
 
+def test_panel_route(tmp_path, monkeypatch):
+    import frontend.ui_web.panel_api  # noqa: F401 — loads the mixins in their order
+    from frontend.ui_web.panel_api_project import PanelApiProjectMixin
+
+    api = PanelApiProjectMixin()
+    _fill()
+    out = api.move_to_linux("export", str(tmp_path), PASS)
+    assert out["ok"] and out["counts"]["chats"] == 1
+    _new_pc(tmp_path, monkeypatch, "linux-pc")
+    bad = api.move_to_linux("import", out["path"], "wrong passphrase!")
+    assert bad == {"ok": False, "error": "Wrong passphrase, or the archive was changed."}
+    good = api.move_to_linux("import", out["path"], PASS)
+    assert good["ok"] and good["summary"] == "1 chats, 1 keys imported, 0 skipped"
+    assert api.move_to_linux("nope", "", "")["ok"] is False
+
+
 def test_existing_chat_and_key_are_skipped(tmp_path, monkeypatch):
     _fill()
     path = Path(mx.export_archive(tmp_path, PASS)["path"])
