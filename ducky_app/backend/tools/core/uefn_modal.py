@@ -34,6 +34,9 @@ import threading
 import time
 from typing import Any, Callable, Iterator
 
+# UEFN under Wine/Proton: its windows are X11 clients (EWMH, Xwayland too), pressed through XTest.
+_LINUX = sys.platform.startswith("linux")
+
 SAVE_LISTENER_COMMANDS: frozenset[str] = frozenset(
     {
         "save_current_level",
@@ -134,6 +137,11 @@ def dismiss_uefn_save_modal(
     from a busy save must not send Enter to the main editor. ``skip``: windows
     (hwnds) never to press — the person's own.
     """
+    if _LINUX:
+        try:
+            return _dismiss_x11(allow_bare_enter=allow_bare_enter, skip=skip)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "clicked": False}
     if sys.platform != "win32":
         return {"ok": False, "error": "Windows only", "clicked": False}
     try:
@@ -144,7 +152,7 @@ def dismiss_uefn_save_modal(
 
 def find_uefn_save_dialog() -> dict[str, Any] | None:
     """Title of the UEFN Save prompt currently on screen, or None (read-only)."""
-    if sys.platform != "win32":
+    if sys.platform != "win32" and not _LINUX:
         return None
     try:
         for win in _enum_uefn_windows():
@@ -454,6 +462,8 @@ def _pid_is_uefn(pid: int) -> bool:
 
 def _enum_uefn_windows() -> list[dict[str, Any]]:
     """Visible top-level windows of the UEFN process (title, class, owner)."""
+    if _LINUX:
+        return _x11_uefn_windows()
     import ctypes
     from ctypes import wintypes
 
@@ -614,3 +624,56 @@ def _dismiss_win32(*, allow_bare_enter: bool, skip: frozenset[int] = frozenset()
         return {**base, **_enter(target["hwnd"]), "window_title": target["title"]}
 
     return {**base, "reason": "no save dialog"}
+
+
+# --------------------------------------------------------------------------- Linux (Wine/X11)
+
+
+def _x11_uefn_windows() -> list[dict[str, Any]]:
+    """_enum_uefn_windows for UEFN under Wine: the EWMH clients whose ``_NET_WM_PID`` is UEFN.
+
+    ponytail: every Wine top-level of the UEFN pid counts as a Slate ``UnrealWindow`` (Wine's
+    X class is the exe name); ``owned`` is X's transient-for, Wine's mapping of a Win32 owner.
+    """
+    from backend.tools.uefn.proton import uefn_pids
+    from frontend.native_capture import x11_windows
+
+    pids = set(uefn_pids())
+    if not pids:
+        return []
+    return [
+        {"hwnd": int(w["xid"]), "title": w["title"], "cls": "UnrealWindow", "owned": bool(w["transient_for"]),
+         "dialog_cls": False, "modal": bool(w["modal"]), "rect": w["rect"], "pid": int(w["pid"])}
+        for w in x11_windows() if w["pid"] in pids
+    ]
+
+
+def _dismiss_x11(*, allow_bare_enter: bool, skip: frozenset[int] = frozenset()) -> dict[str, Any]:
+    """_dismiss_win32 for X11: Slate dialogs have no X buttons, so Enter presses the default.
+
+    Enter is a real XTest key, sent only once the dialog really has the keyboard, so it can
+    never land in the person's window; their window gets the keyboard back after.
+    """
+    from backend.tools.core.app_popups import _xdotool
+
+    windows = [w for w in _enum_uefn_windows() if int(w["hwnd"] or 0) not in skip]
+    base = {"ok": True, "uefn_windows": len(windows), "clicked": False, "sent_enter": False}
+    dialogs = [w for w in windows if is_save_dialog_title(w["title"])]
+    if dialogs:
+        target = dialogs[0]
+    elif allow_bare_enter and windows:
+        target = next((w for w in windows if w["owned"]), windows[0])
+    else:
+        return {**base, "reason": "no save dialog"}
+    xid = int(target["hwnd"])
+    had = _xdotool("getactivewindow").strip()
+    try:
+        _xdotool("windowactivate", xid)
+        time.sleep(0.15)
+        if _xdotool("getactivewindow").strip() != str(xid):
+            return {**base, "method": "enter_foreground_denied", "window_title": target["title"]}
+        _xdotool("key", "Return")
+    finally:
+        if had and had != str(xid):
+            _xdotool("windowactivate", had)
+    return {**base, "sent_enter": True, "method": "enter_xtest", "window_title": target["title"]}

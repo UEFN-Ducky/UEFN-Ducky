@@ -53,6 +53,8 @@ def is_conflict_dialog_title(title: str) -> bool:
     return bool(_CONFLICT_TITLE_RE.search(str(title or "").strip().lower()))
 
 _MAIN_TITLE = "unreal editor for fortnite"
+# UEFN under Wine/Proton: X11 windows (EWMH), S13's capture and XTest click (see uefn_modal).
+_LINUX = sys.platform.startswith("linux")
 _MIN_BUTTON_W = 36
 _MIN_BUTTON_H = 14
 
@@ -168,6 +170,8 @@ def annotate(img: Any, buttons: list[dict[str, Any]]) -> Any:
 
 def list_popups() -> list[dict[str, Any]]:
     """UEFN's windows other than the main editor (dialogs, popups), with their rect."""
+    if _LINUX:
+        return _x11_popups()
     if sys.platform != "win32":
         return []
     from backend.tools.core.uefn_modal import _enum_uefn_windows
@@ -300,6 +304,10 @@ def _print_window(hwnd: int, width: int, height: int) -> Any | None:
 def _grab(rect: dict[str, Any], hwnd: int = 0) -> Any:
     """A capture of the popup. Its own pixels first: Ducky's window (or any other) on
     top of it hid the Continue button from a screen grab, live on Oct 2 2026."""
+    if _LINUX:
+        from frontend.native_capture import grab_image
+
+        return grab_image(int(rect["left"]), int(rect["top"]), int(rect["width"]), int(rect["height"]))
     if hwnd and sys.platform == "win32":
         try:
             img = _print_window(int(hwnd), int(rect["width"]), int(rect["height"]))
@@ -361,6 +369,8 @@ def press_button(hwnd: int, n: int) -> dict[str, Any]:
     if not 1 <= int(n) <= len(buttons):
         return {"ok": False, "error": f"button {n} not found; this popup shows {len(buttons)}", "title": popup["title"]}
     b = buttons[int(n) - 1]
+    if _LINUX:
+        return _press_x11(popup, int(n), b)
     from backend.tools.core import uefn_modal
     from frontend.window_view import inject_pointer
 
@@ -536,7 +546,7 @@ _GUARD_POLL_S = 1.5
 def start_popup_guard() -> None:
     """Answer the known Verse popups whenever UEFN shows them (one daemon thread)."""
     global _guard_started
-    if sys.platform != "win32":
+    if sys.platform != "win32" and not _LINUX:
         return
     with _guard_lock:
         if _guard_started:
@@ -581,6 +591,10 @@ def _skip_file() -> Path:
 
 
 def _uefn_pids() -> set[int]:
+    if _LINUX:
+        from backend.tools.uefn.proton import uefn_pids
+
+        return set(uefn_pids())
     if sys.platform != "win32":
         return set()
     import ctypes
@@ -656,6 +670,75 @@ def reload_level_after_clean_build() -> dict[str, Any] | None:
         clear_verse_skip()
         return result
     return {"loaded": False, "error": str((out or {}).get("stderr") or "load_level returned false")[:300]}
+
+
+# --------------------------------------------------------------------------- Linux (Wine/X11)
+
+
+def _x11_popups() -> list[dict[str, Any]]:
+    """list_popups for X11. X has no disabled windows: the editor counts as blocked while one
+    of UEFN's windows is modal; a transient (Wine's owned window) or modal one is a dialog."""
+    from backend.tools.core.uefn_modal import _enum_uefn_windows
+
+    windows = _enum_uefn_windows()
+    blocked = any(w.get("modal") for w in windows)
+    out = []
+    for win in windows:
+        title = str(win.get("title") or "")
+        rect = win.get("rect") or {}
+        if title.strip().lower() == _MAIN_TITLE or rect.get("width", 0) <= 0 or rect.get("height", 0) <= 0:
+            continue
+        out.append({"hwnd": int(win["hwnd"]), "title": title, "rect": rect, "blocking": blocked,
+                    "dialog": bool(win.get("owned") or win.get("modal")), "enabled": True})
+    return out
+
+
+def _press_x11(popup: dict[str, Any], n: int, b: dict[str, Any]) -> dict[str, Any]:
+    """press_button for X11: S13's XTest click (it puts the pointer and the person's window back)."""
+    from backend.tools.core.app_popups import _x11_click
+
+    hwnd = int(popup["hwnd"])
+    try:
+        _x11_click(hwnd, popup, b)
+    except OSError as exc:
+        return {"ok": False, "error": str(exc), "title": popup["title"]}
+    closed = False
+    deadline = time.time() + 2.0
+    while time.time() < deadline:
+        if _popup(hwnd) is None:
+            closed = True
+            break
+        time.sleep(0.1)
+    if closed and popup["title"].strip().lower() in ("data loss warning", "verse validation errors"):
+        mark_verse_skip()
+    return {"ok": True, "title": popup["title"], "pressed": n, "closed": closed,
+            "open_popups": [p["title"] for p in list_popups()]}
+
+
+def close_uefn_windows_x11() -> int:
+    """Ask UEFN's main windows to close (WM_DELETE_WINDOW, Wine's WM_CLOSE). Needs no window
+    manager. How many were asked; 0 when UEFN or the X server is not there."""
+    from backend.tools.core.uefn_modal import _enum_uefn_windows
+
+    mains = [w for w in _enum_uefn_windows() if not w.get("owned")]
+    if not mains:
+        return 0
+    try:
+        from Xlib import X, display, protocol
+
+        d = display.Display()
+    except Exception:
+        return 0
+    try:
+        protocols, delete = d.intern_atom("WM_PROTOCOLS"), d.intern_atom("WM_DELETE_WINDOW")
+        for w in mains:
+            win = d.create_resource_object("window", int(w["hwnd"]))
+            win.send_event(protocol.event.ClientMessage(
+                window=win, client_type=protocols, data=(32, [delete, X.CurrentTime, 0, 0, 0])))
+        d.flush()
+        return len(mains)
+    finally:
+        d.close()
 
 
 SKIP_SAVE_ERROR = (
