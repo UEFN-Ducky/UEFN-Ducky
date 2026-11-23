@@ -34,11 +34,17 @@ def _load():
     return mod
 
 
-def _repo(tmp_path: Path, files=REPO) -> Path:
+ARMORED = b"-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmQ\n-----END PGP PUBLIC KEY BLOCK-----\n"
+SITE_REPO = ("[uefn-ducky]\nname=UEFN Ducky\nbaseurl=https://uefnducky.org/linux/rpm\nenabled=1\n"
+             "gpgcheck=0\nrepo_gpgcheck=1\ngpgkey=https://uefnducky.org/linux/uefn-ducky.gpg\n")
+
+
+def _repo(tmp_path: Path, files=REPO, content: dict | None = None) -> Path:
     root = tmp_path / "linux-repo"
+    content = {"uefn-ducky.gpg": ARMORED, "rpm/uefn-ducky.repo": SITE_REPO.encode(), **(content or {})}
     for rel in files:
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
-        (root / rel).write_bytes(rel.encode())
+        (root / rel).write_bytes(content.get(rel, rel.encode()))
     return root
 
 
@@ -103,6 +109,42 @@ def test_bad_paths_and_a_missing_key_are_refused(tmp_path):
         pub.linux_repo_files(_repo(tmp_path / "a", REPO[1:]))
     with pytest.raises(SystemExit, match="segment"):
         pub.linux_repo_files(_repo(tmp_path / "b", REPO + ("apt/pool/main/bad name.deb",)))
+
+
+def test_only_the_store_allow_list_passes(tmp_path):
+    pub = _load()
+    assert set(pub.linux_repo_files(_repo(tmp_path / "ok"))) == set(REPO)
+    for stray in ("uefn-ducky.asc", "README", "deb/x.deb", "aptx/Release"):
+        with pytest.raises(SystemExit, match="the Store takes only"):
+            pub.linux_repo_files(_repo(tmp_path / stray.replace("/", "_"), REPO + (stray,)))
+
+
+def test_the_key_must_be_armored(tmp_path):
+    pub = _load()
+    with pytest.raises(SystemExit, match="armored"):
+        pub.linux_repo_files(_repo(tmp_path, content={"uefn-ducky.gpg": b"\x99\x01\x8d binary key"}))
+
+
+@pytest.mark.parametrize("field,old", [("baseurl", "https://uefnducky.org/downloads/linux/rpm"),
+                                       ("gpgkey", "https://uefnducky.org/downloads/linux/uefn-ducky.asc")])
+def test_dnf_urls_must_match_the_site(tmp_path, field, old):
+    pub = _load()
+    good = dict(line.split("=", 1) for line in SITE_REPO.splitlines()[1:])
+    bad = SITE_REPO.replace(f"{field}={good[field]}", f"{field}={old}")
+    with pytest.raises(SystemExit, match=field):
+        pub.linux_repo_files(_repo(tmp_path, content={"rpm/uefn-ducky.repo": bad.encode()}))
+
+
+def test_the_shipped_repo_template_passes(tmp_path):
+    pub = _load()
+    template = (RELEASE.parent / "build" / "linux" / "rpm" / "uefn-ducky.repo").read_bytes()
+    pub.linux_repo_files(_repo(tmp_path, content={"rpm/uefn-ducky.repo": template}))
+
+
+def test_a_bad_repo_stops_the_release_before_any_upload():
+    src = (RELEASE / "publish_app.py").read_text(encoding="utf-8")
+    main = src[src.index("commit_and_push_before_publish(ROOT"):]
+    assert main.index("linux_repo_files()") < main.index("upload_app_release(")
 
 
 def test_next_version():

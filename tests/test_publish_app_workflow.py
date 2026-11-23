@@ -46,3 +46,10 @@ def test_no_other_linux_job_is_skipped_or_soft_failed():
             run = step.get("run", "")
             assert "::warning::" not in run, (name, step.get("name"))
             assert "AUR_SSH_PRIVATE_KEY" not in run and "FLATHUB_TOKEN" not in run, (name, step.get("name"))
+
+
+def test_linux_repo_writes_only_an_armored_uefn_ducky_gpg_at_the_root():
+    run = "\n".join(s.get("run", "") for s in _jobs()["linux-repo"]["steps"])
+    assert "uefn-ducky.asc" not in run  # the Store's uds_linux_repo refuses any other root file
+    assert 'gpg --batch --armor --export > "$repo/uefn-ducky.gpg"' in run
+    assert 'cp "$GNUPGHOME/repo.asc" "$repo/uefn-ducky.gpg"' in run

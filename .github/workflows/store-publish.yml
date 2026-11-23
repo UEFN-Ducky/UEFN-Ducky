@@ -193,8 +193,8 @@ jobs:
           if [ -n "$LINUX_REPO_GPG_PRIVATE_KEY" ]; then
             export GNUPGHOME="$(mktemp -d)"
             printf '%s' "$LINUX_REPO_GPG_PRIVATE_KEY" | gpg --batch --import
-            gpg --batch --export > "$repo/uefn-ducky.gpg"
-            gpg --batch --armor --export > "$repo/uefn-ducky.asc"
+            # Armored: the site's install commands dearmor it; the Store takes no other root file.
+            gpg --batch --armor --export > "$repo/uefn-ducky.gpg"
             unset GNUPGHOME
           elif [ "${{ inputs.dry_run }}" = "true" ]; then
             echo "::notice::dry run without LINUX_REPO_GPG_PRIVATE_KEY: throwaway CI key"
@@ -206,7 +206,7 @@ jobs:
           bash build/linux/rpm/build_dnf_repo.sh "$repo/rpm" dist/linux/*"$VERSION"*.rpm
           cp build/linux/rpm/uefn-ducky.repo "$repo/rpm/"
           if [ -n "${DUCKY_REPO_SIGNER:-}" ]; then
-            cp "$GNUPGHOME/repo.gpg" "$repo/uefn-ducky.gpg"; cp "$GNUPGHOME/repo.asc" "$repo/uefn-ducky.asc"
+            cp "$GNUPGHOME/repo.asc" "$repo/uefn-ducky.gpg"
           fi
           find "$repo" -type f | sort
       - uses: actions/upload-artifact@v4

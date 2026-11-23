@@ -686,6 +686,9 @@ def release_assets(base: str, api_key: str, version: str, installer_url: str, sh
 # build/linux/rpm/build_dnf_repo.sh): apt/…, rpm/…, uefn-ducky.gpg at the top.
 LINUX_REPO = ROOT / "dist" / "linux-repo"
 _REPO_SEGMENT = re.compile(r"^[A-Za-z0-9._+~-]+$")
+# Where the site serves the repo (uefnducky.org/linux/…), so where dnf must look.
+LINUX_REPO_SITE = "https://uefnducky.org/linux"
+_REPO_URLS = {"baseurl": f"{LINUX_REPO_SITE}/rpm", "gpgkey": f"{LINUX_REPO_SITE}/uefn-ducky.gpg"}
 
 
 def linux_repo_files(folder: Path = LINUX_REPO) -> dict[str, Path]:
@@ -696,8 +699,22 @@ def linux_repo_files(folder: Path = LINUX_REPO) -> dict[str, Path]:
     for rel in files:
         if len(rel) > 200 or not all(_REPO_SEGMENT.match(s) for s in rel.split("/")):
             raise SystemExit(f"linux repo path {rel!r}: only [A-Za-z0-9._+~-] per segment, at most 200 characters")
+        # uds_linux_repo's allow-list: one stray file refuses the whole repo after Windows uploaded.
+        if rel != "uefn-ducky.gpg" and not rel.startswith(("apt/", "rpm/")):
+            raise SystemExit(f"linux repo path {rel!r}: the Store takes only uefn-ducky.gpg, apt/… and rpm/…")
     if files and "uefn-ducky.gpg" not in files:
         raise SystemExit(f"{folder}: the repo has no uefn-ducky.gpg (the key apt and dnf trust)")
+    if files and not files["uefn-ducky.gpg"].read_bytes().startswith(b"-----BEGIN PGP PUBLIC KEY BLOCK-----"):
+        raise SystemExit(f"{folder}/uefn-ducky.gpg: must be the armored public key (gpg --armor --export)")
+    if "rpm/uefn-ducky.repo" in files:
+        import configparser
+
+        conf = configparser.ConfigParser()
+        conf.read_string(files["rpm/uefn-ducky.repo"].read_text(encoding="utf-8"))
+        for field, want in _REPO_URLS.items():
+            got = conf.get("uefn-ducky", field, fallback="")
+            if got != want:
+                raise SystemExit(f"rpm/uefn-ducky.repo {field}={got!r}: the site serves it at {want}")
     return files
 
 
@@ -1531,6 +1548,7 @@ def main() -> None:
         except ValueError:
             pass
 
+    linux_repo_files()  # refuse a bad Linux repo before the first upload, not after Windows is live
     uploaded = upload_app_release(base, key, exe_path)
     file_id = str(uploaded.get("fileId") or "")
     remote_sha = str(uploaded.get("sha256") or "").lower()
