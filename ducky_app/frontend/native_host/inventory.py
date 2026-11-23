@@ -184,7 +184,7 @@ _JS_API: dict[str, str] = {
         get_verse_workflow_status import_external_entries inspect_project_folder
         is_verse_editor_enabled list_changesets list_file_history list_known_projects
         list_plugin_references list_project_file_paths list_project_files list_recent_projects
-        list_workspace_roots load_verse_diagnostics_cache move_project_entry
+        list_workspace_roots load_verse_diagnostics_cache move_project_entry move_to_linux
         open_asset_in_uefn open_project_file project_file_media_url push_verse_changes
         read_file_history_entry read_import_drop_target read_project_file
         record_external_file_change rename_project_entry replace_workspace
