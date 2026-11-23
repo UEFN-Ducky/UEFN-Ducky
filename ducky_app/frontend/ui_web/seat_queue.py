@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import threading
 import time
 from collections import deque
@@ -103,6 +104,12 @@ def start_failed(detail: str) -> bool:
 
 
 def total_memory_gb() -> float:
+    if sys.platform.startswith("linux"):
+        from frontend.low_memory import meminfo
+
+        total = meminfo().get("MemTotal")
+        if total:
+            return total / 1024**3
     try:
         import ctypes
 

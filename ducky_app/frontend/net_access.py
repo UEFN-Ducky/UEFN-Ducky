@@ -10,6 +10,10 @@ every urllib call in the process:
   cached; anything that fails means direct, never an error.
 - ``socket.create_connection`` gets a short first try per address and alternates IPv6
   and IPv4, so a PC with dead IPv6 connects over IPv4 in about 2 s.
+
+Off Windows there is no WinHTTP: the config is empty, so every URL takes the environment's
+proxy (``https_proxy`` / ``http_proxy`` / ``no_proxy``, what curl and most Linux apps use) or
+goes direct. PAC/WPAD needs a JavaScript engine, so Linux has no equivalent of it here.
 """
 from __future__ import annotations
 
