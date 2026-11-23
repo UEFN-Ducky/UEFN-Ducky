@@ -179,6 +179,11 @@ impl Host for UiHost {
         // Held until the backend said hello (it has claimed panel.pid by then), so a second
         // launch waits for this one and then hands off to it.
         self.lock = Some(InstanceLock::acquire(LOCK_WAIT));
+        // This launch was a click, so it may bring a window forward; the living Ducky raises
+        // its own on the hand-off (`show`), which Windows refuses a background process otherwise.
+        unsafe {
+            let _ = AllowSetForegroundWindow(ASFW_ANY);
+        }
         match ducky_instance::Config::from_env() {
             Some(cfg) => matches!(
                 ducky_instance::decide_launch(&self.args, &cfg, &RealSystem),
@@ -472,6 +477,7 @@ fn end_with(end: End) {
 fn on_event(name: &str, data: Value) {
     match name {
         "quit" => hide_all(), // Exit chosen in the app: the backend says so before it starts to stop
+        "show" => show_main(), // a second launch was handed to this Ducky
         "toast" => {
             let event = json!({"t": "event", "name": name, "data": data});
             with(|u| u.tray.as_ref().map(|t| t.handle_event(&event)));
