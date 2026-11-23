@@ -1,23 +1,20 @@
-"""Native WebView2 browser panes pinned inside app windows (plugin web panes).
+"""Native browser panes pinned inside app windows (plugin web panes): a real WebView2
+control in the WinForms form that hosts the app's own WebView2 (Linux: a WebKitGTK view in
+the app's Gtk.Window, native_host/gtk_panes.py) — NOT an iframe (X-Frame-Options sites
+still load) and NOT a pywebview window (no js_api bridge is injected, so foreign pages get
+a plain browser context with no path back into the app).
 
-A "browser pane" is a real WebView2 control added to the WinForms form that already
-hosts the app's own WebView2 — NOT an iframe (sites that send X-Frame-Options /
-frame-ancestors still load) and NOT a pywebview window (no js_api bridge is injected,
-so foreign pages get a plain browser context with no path back into the app).
-
-React owns the tab chrome (toolbar / URL bar) and reports the content rect in CSS px;
-this module keeps the native control pinned to that rect. Navigation state (url / title
-/ history / loading) is pushed to the hosting window's React bundle via
-``window.__uefnPanelPush`` events of type ``browser_pane_state``.
+React owns the tab chrome (toolbar / URL bar) and reports the content rect in CSS px; this
+module pins the native control to it. Navigation state (url / title / history / loading)
+goes to the window's React bundle as ``window.__uefnPanelPush`` ``browser_pane_state`` events.
 
 Only http(s) and about: navigations are allowed — anything else (file:, ms-appx:, …)
 is cancelled so a hostile page cannot navigate the pane at local content.
 
-Self-embed / Droste block: navigating the pane to the app's own panel UI
-(127.0.0.1 / localhost on the panel HTTP port or Vite :5173) is refused so the shell
-cannot render inside itself. Bounds calibration always uses ``form.webview`` (the app's
-Dock.Fill host), never a sibling browser pane — bad scale would shrink the pane every
-frame (infinite tunnel).
+Self-embed / Droste block: navigating the pane to the app's own panel UI (127.0.0.1 /
+localhost on the panel HTTP port or Vite :5173) is refused: no shell inside itself.
+Bounds calibration always uses the app's own view, never a sibling browser pane: bad scale
+would shrink the pane every frame (infinite tunnel).
 """
 
 from __future__ import annotations
@@ -1267,8 +1264,8 @@ def _create_control(pane: _Pane) -> None:
 
 
 def open_pane(pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:
-    if sys.platform != "win32":
-        return {"ok": False, "error": "browser panes are Windows-only"}
+    if sys.platform != "win32" and not sys.platform.startswith("linux"):
+        return {"ok": False, "error": "browser panes are Windows and Linux only"}
     pid = (pane_id or "").strip()
     if not pid:
         return {"ok": False, "error": "pane_id required"}
@@ -1622,3 +1619,6 @@ def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
         "removed": removed,
         "errors": errors,
     }
+
+if sys.platform.startswith("linux"):  # gtk_panes.install() rebinds the WebView2-only helpers above
+    from frontend.native_host import gtk_panes  # noqa: F401

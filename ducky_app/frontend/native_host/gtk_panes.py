@@ -145,7 +145,7 @@ def overlay_of(window: Any) -> Any:
             ov.add(child)
         native.add(ov)
         ov.show()
-    ov.connect("size-allocate", lambda _o, rect: _relayout(window, (rect.width, rect.height)))
+    ov.connect("size-allocate", _relayout)  # never a closure over the window (see _wire)
     _overlays[id(native)] = ov
     return ov
 
@@ -153,18 +153,20 @@ def overlay_of(window: Any) -> Any:
 _last_size: dict[int, tuple[int, int]] = {}
 
 
-def _relayout(window: Any, size: tuple[int, int]) -> None:
+def _relayout(ov: Any, rect: Any) -> None:
     """The overlay got a new size (first layout, window resize): place its panes again,
     after this allocation pass (margins set inside one would queue another)."""
-    key = id(window.native)
+    key, size = id(ov), (rect.width, rect.height)
     if _last_size.get(key) == size:
         return
     _last_size[key] = size
     bo = _bo()
 
     def run() -> bool:
+        native = ov.get_parent()
         with bo._lock:
-            panes = [p for p in bo._panes.values() if p.window is window and p.control is not None]
+            panes = [p for p in bo._panes.values()
+                     if p.control is not None and getattr(p.window, "native", None) is native]
         for p in panes:
             apply_bounds(p)
         return False
@@ -241,10 +243,12 @@ class View:
         self.view.stop_loading()
 
     def Dispose(self) -> None:  # noqa: N802
+        """UI thread. Lets go of the GTK objects here too: the View itself may be freed on
+        an RPC thread, and a WebKit object released off the GTK thread aborts the process."""
         self.view.destroy()
         if self.offscreen is not None:
             self.offscreen.destroy()
-            self.offscreen = None
+        self.view = self.offscreen = None
 
 
 def _put(view: Any, parent: Any, overlay: bool) -> None:
@@ -295,29 +299,31 @@ def create_control(pane: Any) -> None:
 
 
 def _wire(pane: Any, control: View) -> None:
+    """The view's signals. Callbacks use the view GTK hands them, never a captured one: a
+    closure holding the view that holds the closure is a cycle through C, and Python's gc
+    would break it on whatever thread it runs (a WebKit object freed there aborts)."""
     _, _, WebKit2 = _gi()
     bo = _bo()
-    view = control.view
     Decision = WebKit2.PolicyDecisionType
 
-    def history() -> None:
-        pane.can_back, pane.can_forward = bool(view.can_go_back()), bool(view.can_go_forward())
+    def history(v: Any) -> None:
+        pane.can_back, pane.can_forward = bool(v.can_go_back()), bool(v.can_go_forward())
 
-    def on_uri(*_a: Any) -> None:
-        pane.url = str(view.get_uri() or "")
-        history()
+    def on_uri(v: Any, *_a: Any) -> None:
+        pane.url = str(v.get_uri() or "")
+        history(v)
         bo._push_state(pane)
 
-    def on_title(*_a: Any) -> None:
-        pane.title = str(view.get_title() or "")
+    def on_title(v: Any, *_a: Any) -> None:
+        pane.title = str(v.get_title() or "")
         bo._push_state(pane)
 
-    def on_load(_v: Any, event: Any) -> None:
+    def on_load(v: Any, event: Any) -> None:
         if event == WebKit2.LoadEvent.STARTED:
             pane.loading, pane.failed, pane.cert_error, pane.cert_error_status = True, "", "", ""
         elif event == WebKit2.LoadEvent.FINISHED:
             pane.loading = False
-        history()
+        history(v)
         bo._push_state(pane)
 
     def on_policy(_v: Any, decision: Any, kind: Any) -> bool:
@@ -352,6 +358,7 @@ def _wire(pane: Any, control: View) -> None:
         pane.visible = False  # a dead view on top of the app would be a blank rectangle
         apply_bounds(pane)
 
+    view = control.view
     view.connect("notify::uri", on_uri)
     view.connect("notify::title", on_title)
     view.connect("load-changed", on_load)

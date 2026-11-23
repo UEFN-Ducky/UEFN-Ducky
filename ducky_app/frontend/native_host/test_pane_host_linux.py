@@ -1,14 +1,26 @@
-"""Browser panes on Linux (gtk_panes): real WebKitGTK views in a Gtk.Window under Xvfb."""
+"""Browser panes on Linux (gtk_panes + browser_overlay): real WebKitGTK views in a Gtk.Window
+under Xvfb.
+
+WebKitGTK only lives on a process's main thread (a view made on another thread aborts the
+process at exit), as in the app, where pywebview runs GTK on the main thread. So each case
+runs in a child process: GTK's loop on its main thread, the case on a worker thread, calling
+in through the same helpers the panel's RPC threads use.
+"""
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import threading
 import time
-from types import SimpleNamespace
+import traceback
+from pathlib import Path
 
 import pytest
+
+APP = Path(__file__).resolve().parents[2]  # ducky_app/
+NO_WEBKIT = 77
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux") or not os.environ.get("DISPLAY"),
                                 reason="Linux with an X display (xvfb-run)")
@@ -23,118 +35,200 @@ def _wait(pred, timeout: float = 20.0) -> bool:
     return False
 
 
-@pytest.fixture(scope="module")
-def app_window():
-    """A Gtk.Window laid out like pywebview's (a box holding the app's WebKit view), with
-    the GTK main loop on its own thread. Yields the pywebview-like window (``native``)."""
-    try:
-        from frontend.native_host import gtk_panes as gp
-
-        GLib, Gtk, WebKit2 = gp._gi()
-    except (ImportError, ValueError) as exc:
-        pytest.skip(f"needs python3-gi with Gtk 3 and WebKit2 4.1: {exc}")
-    box: dict = {}
-    up = threading.Event()
-
-    def run() -> None:
-        win = Gtk.Window()
-        win.set_default_size(800, 600)
-        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        host = WebKit2.WebView()
-        host.load_html("<body style='background:#222'>app page</body>", "http://127.0.0.1/")
-        page.pack_start(host, True, True, 0)
-        win.add(page)
-        win.show_all()
-        box.update(win=win, host=host)
-        up.set()
-        Gtk.main()
-
-    loop = threading.Thread(target=run, name="gtk-main", daemon=True)
-    loop.start()
-    assert up.wait(20)
-    window = SimpleNamespace(native=box["win"])
-    assert _wait(lambda: gp.ui_sync(window, lambda: box["host"].get_allocated_width()) >= 800)
-    # The CSS viewport the app page reports: its view's size at zoom 1.
-    window.viewport = gp.ui_sync(window, lambda: (float(box["host"].get_allocated_width()),
-                                                  float(box["host"].get_allocated_height())))
-    yield window
-    # Ended and joined here: a GTK loop still running at interpreter exit aborts the process.
-    GLib.idle_add(lambda: (box["win"].destroy(), Gtk.main_quit(), False)[-1])
-    loop.join(10)
+# --- cases (run in the child, on a worker thread) ----------------------------------------
 
 
-@pytest.fixture
-def pushed(monkeypatch):
-    from frontend.ui_web import browser_overlay as bo
-
-    events: list[dict] = []
-    monkeypatch.setattr(bo, "_push_page", lambda _w, e: events.append(dict(e)))
-    monkeypatch.setattr(bo, "_mode", "memory")
-    return events
-
-
-def test_a_pane_opens_over_the_page_at_its_rect(app_window, pushed) -> None:
+def case_a_pane_opens_over_the_page_at_its_rect(window, pushed) -> None:
     from frontend.native_host import gtk_panes as gp
     from frontend.ui_web import browser_overlay as bo
 
-    pane = bo._Pane(pane_id="lx1", window=app_window, pending_url="about:blank")
-    pane.css_bounds, pane.css_viewport = (10.0, 20.0, 300.0, 200.0), app_window.viewport
-    gp.ui(app_window, lambda: gp.create_control(pane))
+    pane = bo._Pane(pane_id="lx1", window=window, pending_url="about:blank")
+    pane.css_bounds, pane.css_viewport = (10.0, 20.0, 300.0, 200.0), window.viewport
+    gp.ui(window, lambda: gp.create_control(pane))
     assert _wait(lambda: pane.ready), pane.failed
     assert any(e.get("pane_id") == "lx1" and e.get("ready") for e in pushed)
 
     def placed():
         v = pane.control.view
-        ov = gp.overlay_of(app_window)
+        ov = gp.overlay_of(window)
         return (v.get_parent() is ov, gp.host_view(ov) is not v, v.get_margin_start(), v.get_margin_top(),
                 tuple(v.get_size_request()), v.get_visible())
 
-    assert gp.ui_sync(app_window, placed) == (True, True, 10, 20, (300, 200), True)
+    assert gp.ui_sync(window, placed) == (True, True, 10, 20, (300, 200), True)
     # The page under it is still the window's own view, inside the overlay.
-    assert gp.ui_sync(app_window, lambda: app_window.native.get_child() is gp.overlay_of(app_window))
+    assert gp.ui_sync(window, lambda: window.native.get_child() is gp.overlay_of(window))
 
     # Moved and resized: the same view, new margins and size.
     pane.css_bounds = (40.0, 50.0, 400.0, 300.0)
-    gp.ui(app_window, lambda: gp.apply_bounds(pane))
-    assert gp.ui_sync(app_window, placed) == (True, True, 40, 50, (400, 300), True)
+    gp.ui(window, lambda: gp.apply_bounds(pane))
+    assert gp.ui_sync(window, placed) == (True, True, 40, 50, (400, 300), True)
 
     # Hidden: off screen, still in the overlay. An agent's pane: drawn offscreen instead.
     pane.visible = False
-    gp.ui(app_window, lambda: gp.apply_bounds(pane))
-    assert gp.ui_sync(app_window, lambda: pane.control.view.get_visible()) is False
+    gp.ui(window, lambda: gp.apply_bounds(pane))
+    assert gp.ui_sync(window, lambda: pane.control.view.get_visible()) is False
     pane.behind_until = time.monotonic() + 30
-    gp.ui(app_window, lambda: gp.apply_bounds(pane))
-    assert gp.ui_sync(app_window, lambda: pane.control.view.get_parent() is pane.control.offscreen)
+    gp.ui(window, lambda: gp.apply_bounds(pane))
+    assert gp.ui_sync(window, lambda: pane.control.view.get_parent() is pane.control.offscreen)
     pane.visible, pane.behind_until = True, 0.0
-    gp.ui(app_window, lambda: gp.apply_bounds(pane))
-    assert gp.ui_sync(app_window, placed)[0] is True
+    gp.ui(window, lambda: gp.apply_bounds(pane))
+    assert gp.ui_sync(window, placed)[0] is True
 
-    # Closed: the view is gone from the window.
-    view = pane.control.view
-    gp.ui_sync(app_window, pane.control.Dispose)
-    assert gp.ui_sync(app_window, lambda: view not in gp.overlay_of(app_window).get_children())
+    # Closed: the view is gone from the window (only the page is left in the overlay).
+    gp.ui_sync(window, pane.control.Dispose)
+    assert pane.control.view is None
+    assert gp.ui_sync(window, lambda: len(gp.overlay_of(window).get_children())) == 1
 
 
-def test_page_zoom_scales_the_rect(app_window, pushed) -> None:
+def case_page_zoom_scales_the_rect(window, pushed) -> None:
     """CSS px map to the host view's pixels: a page that reports half the viewport is 2x."""
     from frontend.native_host import gtk_panes as gp
     from frontend.ui_web import browser_overlay as bo
 
-    pane = bo._Pane(pane_id="lx2", window=app_window)
-    vw, vh = app_window.viewport
+    pane = bo._Pane(pane_id="lx2", window=window)
+    vw, vh = window.viewport
     pane.css_bounds, pane.css_viewport = (10.0, 10.0, 100.0, 50.0), (vw / 2, vh / 2)
-    gp.ui(app_window, lambda: gp.create_control(pane))
+    gp.ui(window, lambda: gp.create_control(pane))
     assert _wait(lambda: pane.ready), pane.failed
-    got = gp.ui_sync(app_window, lambda: (pane.control.view.get_margin_start(),
-                                          tuple(pane.control.view.get_size_request())))
-    assert got == (20, (200, 100))
-    gp.ui_sync(app_window, pane.control.Dispose)
+    got = gp.ui_sync(window, lambda: (pane.control.view.get_margin_start(),
+                                      tuple(pane.control.view.get_size_request())))
+    assert got == (20, (200, 100)), got
+    gp.ui_sync(window, pane.control.Dispose)
 
 
-def test_ui_helpers_run_on_the_gtk_loop(app_window) -> None:
+def _site() -> str:
+    """Two loopback pages, /a and /b, each with its own title."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            body = f"<title>Page {self.path.strip('/').upper()}</title><p>{self.path}</p>".encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_a) -> None:
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Page)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def case_browser_tab_opens_a_local_page_and_reads_its_title(window, pushed) -> None:
+    """The Browser tab's calls (browser_overlay's public API) on Linux: open, bounds,
+    navigate, back/forward, script, capture, close."""
+    from frontend.native_host import gtk_panes as gp
+    from frontend.ui_web import browser_overlay as bo
+
+    site = _site()
+    bo.configure(main_window=window)
+    assert bo.open_pane("lxb", f"{site}/a")["ok"]
+    assert bo.set_bounds("lxb", 0, 0, 400, 300, *window.viewport, True)["ok"]
+    title = lambda want: _wait(lambda: bo.get_state("lxb").get("title") == want)  # noqa: E731
+    assert title("Page A"), bo.get_state("lxb")
+    assert bo.get_state("lxb")["url"] == f"{site}/a"
+    assert any(e.get("pane_id") == "lxb" and e.get("title") == "Page A" for e in pushed)
+
+    assert bo.navigate("lxb", f"{site}/b")["ok"]
+    assert title("Page B") and _wait(lambda: bo.get_state("lxb")["can_back"])
+    assert bo.command("lxb", "back")["ok"]
+    assert title("Page A") and _wait(lambda: bo.get_state("lxb")["can_forward"])
+    assert bo.command("lxb", "forward")["ok"]
+    assert title("Page B")
+
+    assert bo.evaluate("lxb", "document.title") == {"ok": True, "value": "Page B"}
+    assert bo.evaluate("lxb", "Promise.resolve(6 * 7)") == {"ok": True, "value": 42}
+    assert bo.evaluate("lxb", "nope()")["ok"] is False
+    snap = bo.snapshot("lxb")
+    assert snap["ok"] and snap["data"].startswith("data:image/jpeg;base64,"), snap
+    assert bo.devtools("lxb", "Page.captureScreenshot")["ok"] is False
+    assert bo.clear_browsing_data("cookies")["ok"]
+
+    assert bo.navigate("lxb", "file:///etc/passwd")["ok"] is False
+    assert bo.navigate("lxb", "http://127.0.0.1:5173/")["ok"] is False  # never the app inside itself
+
+    assert bo.close_pane("lxb") == {"ok": True, "closed": True}
+    assert _wait(lambda: gp.ui_sync(window, lambda: len(gp.overlay_of(window).get_children())) == 1)
+    assert bo.get_state("lxb")["ok"] is False
+
+
+def case_ui_helpers_run_on_the_gtk_loop(window, pushed) -> None:
     from frontend.native_host import gtk_panes as gp
 
     assert gp.on_ui_thread() is False
-    assert gp.ui_sync(app_window, gp.on_ui_thread) is True
-    with pytest.raises(ZeroDivisionError):
-        gp.ui_sync(app_window, lambda: 1 / 0)
+    assert gp.ui_sync(window, gp.on_ui_thread) is True
+    try:
+        gp.ui_sync(window, lambda: 1 / 0)
+    except ZeroDivisionError:
+        pass
+    else:
+        raise AssertionError("ui_sync must raise what the call raised")
+
+
+CASES = sorted(n for n in dir() if n.startswith("case_"))
+
+
+# --- the child ---------------------------------------------------------------------------
+
+
+def _child(name: str) -> int:
+    """A window laid out like pywebview's (a box holding the app's WebKit view), GTK on this
+    main thread, case ``name`` on a worker."""
+    from types import SimpleNamespace
+
+    try:
+        from frontend.native_host import gtk_panes as gp
+
+        GLib, Gtk, WebKit2 = gp._gi()
+    except (ImportError, ValueError) as exc:
+        print(f"no WebKitGTK: {exc}")
+        return NO_WEBKIT
+    from frontend.ui_web import browser_overlay as bo
+
+    pushed: list[dict] = []
+    bo._push_page = lambda _w, e: pushed.append(dict(e))
+    bo._mode = "memory"
+    win = Gtk.Window()
+    win.set_default_size(800, 600)
+    page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    host = WebKit2.WebView()
+    host.load_html("<body style='background:#222'>app page</body>", "http://127.0.0.1/")
+    page.pack_start(host, True, True, 0)
+    win.add(page)
+    win.show_all()
+    window = SimpleNamespace(native=win)
+    ok: list[bool] = []
+
+    def work() -> None:
+        try:
+            assert _wait(lambda: gp.ui_sync(window, host.get_allocated_width) >= 800)
+            # The CSS viewport the app page reports: its view's size at zoom 1.
+            window.viewport = gp.ui_sync(window, lambda: (float(host.get_allocated_width()),
+                                                          float(host.get_allocated_height())))
+            globals()[name](window, pushed)
+            ok.append(True)
+        except BaseException:
+            traceback.print_exc()
+        finally:
+            GLib.idle_add(Gtk.main_quit)
+
+    threading.Thread(target=work, name=name, daemon=True).start()
+    Gtk.main()
+    return 0 if ok else 1
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_case(name: str) -> None:
+    env = {**os.environ, "PYTHONPATH": str(APP), "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS": "1"}
+    proc = subprocess.run([sys.executable, __file__, name], cwd=APP, env=env, capture_output=True,
+                          text=True, timeout=120)
+    if proc.returncode == NO_WEBKIT:
+        pytest.skip(proc.stdout.strip() or "needs python3-gi with Gtk 3 and WebKit2 4.1")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+if __name__ == "__main__":
+    sys.exit(_child(sys.argv[1]))
