@@ -374,7 +374,10 @@ def list_coding_agents(settings: Any | None = None) -> list[CodingAgentInfo]:
 _DETECT_TTL_SEC = 600.0
 _detect_lock = threading.Lock()
 _detect_cache: dict[str, Any] | None = None
-_detect_cache_at = 0.0
+# -inf = expired. time.monotonic() counts from boot: 0.0 read as fresh for the first
+# 10 minutes of a Linux box's uptime, so a change in that window never re-probed.
+_NEVER = float("-inf")
+_detect_cache_at = _NEVER
 _detect_refresh_lock = threading.Lock()
 _detect_refresh_inflight = False
 _detect_updated_hook: Any = None
@@ -438,7 +441,7 @@ def invalidate_detect_cache() -> None:
     """
     global _detect_cache_at
     with _detect_lock:
-        _detect_cache_at = 0.0
+        _detect_cache_at = _NEVER
 
 
 def _instant_detect_payload() -> dict[str, Any]:

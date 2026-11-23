@@ -53,7 +53,10 @@ def test_bootstrap_sends_file_reads_to_ducky_tools_not_the_shell() -> None:
     # Codex runs tools from a code runner and reads other projects by absolute path.
     assert "tools.mcp__uefn__workspace_search" in text
     assert "other Ducky projects" in text
-    for shell_read in ("Get-Content", "Select-String", "rg", "git grep"):
+    from backend.agent.prompts.platform_text import IS_LINUX
+
+    readers = ("cat", "rg", "git grep") if IS_LINUX else ("Get-Content", "Select-String", "rg", "git grep")
+    for shell_read in readers:
         assert shell_read in text
 
 

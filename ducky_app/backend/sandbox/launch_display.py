@@ -19,15 +19,23 @@ IS_LINUX = sys.platform.startswith("linux")
 _lock = threading.Lock()
 _proc: subprocess.Popen | None = None
 _display = ""
+last_error = ""  # why the last start gave no display (Xvfb's exit code and stderr)
 
 
 def _start(xvfb: str, timeout_s: float = 10.0) -> str:
-    global _proc, _display
+    global _proc, _display, last_error
+    import tempfile
+
+    log = tempfile.TemporaryFile()
     r, w = os.pipe()
     try:
         _proc = subprocess.Popen([xvfb, "-displayfd", str(w), "-screen", "0", "1920x1080x24", "-nolisten", "tcp"],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=log,
                                  pass_fds=(w,), start_new_session=True)
+    except OSError as exc:
+        os.close(r)
+        last_error = f"Xvfb did not start: {exc}"
+        return ""
     finally:
         os.close(w)
     import select
@@ -44,8 +52,18 @@ def _start(xvfb: str, timeout_s: float = 10.0) -> str:
         os.close(r)
     num = buf.strip()
     if not num.isdigit():
+        code = None
+        try:
+            code = _proc.wait(timeout=1) if _proc is not None else None  # EOF: it is exiting
+        except subprocess.TimeoutExpired:
+            pass
         stop()
+        log.seek(0)
+        tail = log.read()[-600:].decode("utf-8", "replace").strip()
+        last_error = f"Xvfb gave no display (exit {code}, wrote {buf!r}): {tail}"
         return ""
+    log.close()  # a running Xvfb keeps writing to its own copy; nothing reads it
+    last_error = ""
     _display = f":{num.decode()}"
     return _display
 

@@ -330,8 +330,10 @@ def test_built_in_agent_prompt_has_the_hard_rules_once():
     # The server instructions shrank to a pointer, so the in-panel agent gets the rules here.
     from backend.agent.prompt import assemble_system_prompt, get_system_prompt_parts
 
+    from backend.agent.prompts.platform_text import for_platform
+
     text = assemble_system_prompt(get_system_prompt_parts(listener_online=False, listener_port=4200))
-    assert text.count(AGENT_HARD_RULES) == 1
+    assert text.count(for_platform(AGENT_HARD_RULES)) == 1  # this OS's wording
     for rule in ("Separate systems", "Check off the plan"):
         assert text.count(rule) == 1, rule
 
@@ -399,9 +401,11 @@ def test_folder_projects_skip_island_rules(monkeypatch):
     from backend.agent import hard_rules as hr
 
     monkeypatch.setattr("frontend.project_kind.is_folder_project", lambda root: root == "C:/repo")
-    assert hr.hard_rules_for("C:/repo") == hr.CORE_RULES
+    from backend.agent.prompts.platform_text import for_platform
+
+    assert hr.hard_rules_for("C:/repo") == for_platform(hr.CORE_RULES)
     assert "UEFN popups" not in hr.CORE_RULES and "### Verse" not in hr.CORE_RULES
-    assert hr.hard_rules_for("C:/Fortnite Projects/Island") == hr.AGENT_HARD_RULES
+    assert hr.hard_rules_for("C:/Fortnite Projects/Island") == for_platform(hr.AGENT_HARD_RULES)
     assert "UEFN popups" in hr.AGENT_HARD_RULES
     # Teams, plans and the offline rule reach every agent.
     assert "ducky_swarm_create" in hr.CORE_RULES and "Check off the plan" in hr.CORE_RULES

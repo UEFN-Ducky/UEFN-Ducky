@@ -17,14 +17,17 @@ _SWAPS = (
     ("Windows shell: `py -3`.", "Shell: bash, `python3`."),
     ('(shell "bash" or "powershell",', '(shell "bash",'),
     ("Bash, PowerShell,", "Bash,"),
+    # The "never read files through a terminal" list: Linux's own readers, same rule.
+    ("no Get-Content, Select-String, Get-ChildItem, dir, ls, cat, type, rg, grep, findstr,",
+     "no cat, less, head, tail, ls, find, rg, grep,"),
     ("py -3", "python3"),
     ("%LOCALAPPDATA%/", "~/.local/share/"),
     ("PowerShell", "bash"),
     ("powershell", "bash"),
 )
 
-# A line naming one of these is a Windows-only rule (the PowerShell no-pipe list).
-_WINDOWS_ONLY = ("Select-Object", "Out-Null", "Get-Content", "Get-ChildItem")
+# A line naming this is the Windows-only no-pipe rule (PowerShell holds piped output back).
+_WINDOWS_ONLY = ("`Select-Object -Last/-First`",)
 
 
 def for_platform(text: str, linux: bool | None = None) -> str:

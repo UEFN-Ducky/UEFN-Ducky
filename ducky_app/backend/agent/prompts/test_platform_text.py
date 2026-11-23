@@ -38,8 +38,12 @@ def test_every_prompt_an_agent_gets_goes_through_the_switch(monkeypatch):
     from backend.agent.prompt import assemble_system_prompt
     from backend.agent.prompts import platform_text
 
+    monkeypatch.setattr(platform_text, "IS_LINUX", False)
     windows = mcp_inject.bootstrap_system_prompt(project_root="", conv_id="c1")
     monkeypatch.setattr(platform_text, "IS_LINUX", True)
+    linux = mcp_inject.bootstrap_system_prompt(project_root="", conv_id="c1")
+    # The switch swaps words, never drops the terminal how-to.
+    assert "`ducky_terminal_run(session_id, command)`" in linux and "no cat, less" in linux
     parts = {"mcp": "", "skill": "", "memory": "", "runtime": "Run py -3 here.", "rules": AGENT_HARD_RULES}
     for text in (hard_rules.hard_rules_for(""), mcp_inject.bootstrap_system_prompt(project_root="", conv_id="c1"),
                  assemble_system_prompt(parts)):

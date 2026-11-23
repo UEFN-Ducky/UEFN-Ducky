@@ -50,13 +50,16 @@ def test_no_xvfb_leaves_env_alone(monkeypatch):
 
 def test_fake_xvfb_displayfd_started_once(tmp_path, monkeypatch):
     fake = tmp_path / "Xvfb"
-    fake.write_text('#!/bin/sh\necho 77 >&"$2"\nexec sleep 30\n')  # argv: -displayfd <fd> …
+    # Python, not sh: dash redirects only fds 0-9, and under xdist the pipe's fd is higher.
+    fake.write_text(f"#!{sys.executable}\nimport os, sys, time\n"
+                    "os.write(int(sys.argv[2]), b'77\\n')  # argv: -displayfd <fd> …\ntime.sleep(30)\n")
     fake.chmod(0o755)
     monkeypatch.setattr(launch_display, "_proc", None)
     monkeypatch.setattr(launch_display.shutil, "which", lambda name: str(fake))
     try:
         env = launch_display.hidden_env({"WAYLAND_DISPLAY": "w", "A": "1"})
-        assert env == {"A": "1", "DISPLAY": ":77", "GDK_BACKEND": "x11", "QT_QPA_PLATFORM": "xcb"}
+        assert env == {"A": "1", "DISPLAY": ":77", "GDK_BACKEND": "x11", "QT_QPA_PLATFORM": "xcb"}, \
+            launch_display.last_error
         first = launch_display._proc
         assert launch_display.hidden_display() == ":77" and launch_display._proc is first
     finally:
@@ -67,9 +70,10 @@ def test_fake_xvfb_displayfd_started_once(tmp_path, monkeypatch):
 @pytest.mark.skipif(not shutil.which("Xvfb"), reason="needs Xvfb")
 def test_launch_under_xvfb_is_hidden_and_shared():
     try:
-        env = launch_display.hidden_env({"DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0"})
+        # The runner's own DISPLAY / WAYLAND_DISPLAY must not reach the child.
+        env = launch_display.hidden_env({**os.environ, "DISPLAY": ":0", "WAYLAND_DISPLAY": "wayland-0"})
         display = env["DISPLAY"]
-        assert display != ":0" and "WAYLAND_DISPLAY" not in env
+        assert display != ":0" and "WAYLAND_DISPLAY" not in env, launch_display.last_error
         assert Path(f"/tmp/.X11-unix/X{display[1:]}").exists()
         assert launch_display.hidden_display() == display  # one Xvfb, reused
         code = "import tkinter as t; r = t.Tk(); r.update(); print(r.winfo_screenwidth()); r.destroy()"
@@ -77,7 +81,7 @@ def test_launch_under_xvfb_is_hidden_and_shared():
             import tkinter  # noqa: F401
         except ImportError:
             return
-        out = subprocess.run([sys.executable, "-c", code], env={**os.environ, **env},
+        out = subprocess.run([sys.executable, "-c", code], env=env,
                              capture_output=True, text=True, timeout=30)
         assert out.returncode == 0 and out.stdout.strip() == "1920", out.stderr
     finally:

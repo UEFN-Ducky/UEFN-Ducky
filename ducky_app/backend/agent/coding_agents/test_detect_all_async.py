@@ -19,7 +19,7 @@ def _saved_detect_in_tmp(monkeypatch, tmp_path):
 def _reset_detect() -> None:
     with base._detect_lock:
         base._detect_cache = None
-        base._detect_cache_at = 0.0
+        base._detect_cache_at = base._NEVER
     with base._detect_refresh_lock:
         base._detect_refresh_inflight = False
 
@@ -64,7 +64,7 @@ def test_detect_all_returns_stale_cache_while_refreshing(monkeypatch):
     _reset_detect()
     with base._detect_lock:
         base._detect_cache = stale
-        base._detect_cache_at = 0.0
+        base._detect_cache_at = base._NEVER
     payload = base.detect_all()
     assert payload is stale
     # detect_all marks the refresh in flight before it returns; waiting for the worker
@@ -188,6 +188,19 @@ def test_a_start_serves_the_saved_result_and_probes_a_minute_later(monkeypatch) 
     base.detect_all()
     wait_refresh()
     assert calls == [1, 1]  # probed again a minute after the start
+
+
+def test_an_invalidated_cache_reprobes_right_after_boot(monkeypatch) -> None:
+    """monotonic() is small on a just-booted Linux box: an expired cache must still expire."""
+    from types import SimpleNamespace
+
+    _reset_detect()
+    with base._detect_lock:
+        base._detect_cache = {"agents": []}
+    monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: 42.0))  # 42 s of uptime
+    base.invalidate_detect_cache()
+    with base._detect_lock:
+        assert not (42.0 - base._detect_cache_at) < base._DETECT_TTL_SEC
 
 
 def test_a_checking_agent_already_names_its_gateway(monkeypatch) -> None:
