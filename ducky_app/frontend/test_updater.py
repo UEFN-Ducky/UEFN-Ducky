@@ -199,7 +199,15 @@ def test_shutdown_after_delay_always_exits() -> None:
         updater.threading.Timer = original_timer  # type: ignore[assignment]
 
 
-def test_apply_update_dev_sets_check_error() -> None:
+def _fake_status_everywhere(monkeypatch, status: dict) -> None:
+    """The same status for the Windows path and the Linux one (an AppImage whose asset is
+    the feed's installer fields), so the check runs on both CI jobs."""
+    linux = {**status, "install_kind": "appimage", "download_url": "https://example.test/download",
+             "asset": {"url": status["installer_url"], "sha256": status["installer_sha256"]}}
+    monkeypatch.setattr(updater, "linux_update_status", lambda: linux)
+
+
+def test_apply_update_dev_sets_check_error(monkeypatch) -> None:
     """Dev channel fails at check and surfaces stage/error via get_update_progress."""
     _reset_progress()
 
@@ -214,6 +222,7 @@ def test_apply_update_dev_sets_check_error() -> None:
             "install_scope": None,
         }
 
+    _fake_status_everywhere(monkeypatch, fake_status())
     original = updater.get_app_update_status
     updater.get_app_update_status = fake_status  # type: ignore[assignment]
     try:
@@ -229,7 +238,7 @@ def test_apply_update_dev_sets_check_error() -> None:
         _reset_progress()
 
 
-def test_apply_update_requires_sha256() -> None:
+def test_apply_update_requires_sha256(monkeypatch) -> None:
     _reset_progress()
 
     def fake_status() -> dict:
@@ -243,6 +252,7 @@ def test_apply_update_requires_sha256() -> None:
             "install_scope": "user",
         }
 
+    _fake_status_everywhere(monkeypatch, fake_status())
     original = updater.get_app_update_status
     updater.get_app_update_status = fake_status  # type: ignore[assignment]
     try:
@@ -465,6 +475,7 @@ def test_installer_url_allowed_https_anywhere_http_only_loopback() -> None:
     assert not updater.installer_url_allowed("")
 
 
+@pytest.mark.windows_only("runs where.exe as the Inno Setup; Linux updates are test_updater_appimage.py")
 def test_local_feed_rehearsal_downloads_verifies_and_launches(tmp_path, monkeypatch, _never_exit_the_test_runner) -> None:
     """The exact path build/upgrade_proof/serve_update_feed.py exercises: feed
     override → update_available → download from loopback → sha256 → Setup

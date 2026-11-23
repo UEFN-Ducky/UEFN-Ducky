@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from frontend.app_paths import (
     exe_name_matches,
     kill_process_ps_filter,
@@ -68,6 +70,7 @@ def _dotnet() -> str | None:
     return shutil.which("dotnet")
 
 
+@pytest.mark.windows_only("the .NET Setup host is the Windows installer")
 def test_setup_host_self_check() -> None:
     """Builds and runs release/installer/host.tests (pure host logic, never an installer)."""
     import subprocess

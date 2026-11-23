@@ -259,6 +259,11 @@ def _status(scope: str, sha: str, version: str = "1.2.343") -> dict:
     }
 
 
+# The .NET Setup host is the Windows installer; Linux updates are test_updater_appimage.py
+# and test_updater_packages.py.
+_WINDOWS_SETUP = pytest.mark.windows_only("apply_update's Inno Setup host path is the Windows installer")
+
+
 @pytest.fixture
 def harness(monkeypatch, tmp_path, fast):
     cache = tmp_path / "cache"
@@ -279,6 +284,7 @@ def harness(monkeypatch, tmp_path, fast):
     _reset()
 
 
+@_WINDOWS_SETUP
 def test_stale_unsigned_cache_is_replaced_by_signed_download(monkeypatch, harness, _never_exit) -> None:
     cache, calls = harness
     signed = b"MZ signed ducky setup host 1.2.343"
@@ -301,6 +307,7 @@ def test_stale_unsigned_cache_is_replaced_by_signed_download(monkeypatch, harnes
     assert _never_exit == ["shutdown"]
 
 
+@_WINDOWS_SETUP
 def test_matching_cache_is_reused_without_download(monkeypatch, harness) -> None:
     cache, calls = harness
     signed = b"MZ signed"
@@ -312,6 +319,7 @@ def test_matching_cache_is_reused_without_download(monkeypatch, harness) -> None
     assert args[:-1] == [*LEGACY_ARGV, "/ALLUSERS"] and waited is True
 
 
+@_WINDOWS_SETUP
 def test_bad_digest_never_launches(monkeypatch, harness) -> None:
     cache, calls = harness
     monkeypatch.setattr(updater, "get_app_update_status", lambda: _status("user", "0" * 64))
@@ -327,6 +335,7 @@ def test_bad_digest_never_launches(monkeypatch, harness) -> None:
     assert not (cache / "Setup-1.2.343.exe").exists()
 
 
+@_WINDOWS_SETUP
 def test_declined_uac_keeps_verified_cache(monkeypatch, harness, _never_exit) -> None:
     cache, calls = harness
     signed = b"MZ signed"
@@ -339,6 +348,7 @@ def test_declined_uac_keeps_verified_cache(monkeypatch, harness, _never_exit) ->
     assert _never_exit == []
 
 
+@_WINDOWS_SETUP
 def test_host_finished_install_clears_cache_and_exits(monkeypatch, harness, _never_exit) -> None:
     cache, calls = harness
     signed = b"MZ signed"

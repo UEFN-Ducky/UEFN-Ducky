@@ -1103,6 +1103,11 @@ def linux_update_status(
     }
     if kind == "source":
         return result
+    from frontend.ui_web.web_dev import is_frozen_dev_exe
+
+    if is_frozen_dev_exe():
+        result["channel"] = "dev"
+        return result
     error = None
     if payload is None:
         payload, error = fetch_remote_payload(timeout=5.0, attempts=2)
@@ -1136,6 +1141,13 @@ def apply_linux_update(*, status: dict[str, Any] | None = None, run: Any = None)
     """'Restart' on an AppImage (download, verify, swap, restart, roll back if it doesn't
     start); 'Install' on deb / rpm / Flatpak (the package manager does it)."""
     status = status or linux_update_status()
+    if status.get("channel") == "dev":
+        # Same words as the Windows path in apply_update().
+        return _result(
+            ok=False,
+            error="Dev builds cannot self-update — only production installs update from the Store.",
+            stage="check",
+        )
     if not status["update_available"]:
         return _result(ok=False, error=status.get("error") or "No update available.", stage="check")
     kind = status["install_kind"]
@@ -1149,9 +1161,12 @@ def apply_linux_update(*, status: dict[str, Any] | None = None, run: Any = None)
                        f"{status['download_url']}.", stage="check")
     asset = status.get("asset") or {}
     url, sha256 = asset.get("url"), asset.get("sha256")
-    if not url or not sha256:
+    if not url:
         return _result(ok=False, error="The update feed has no AppImage for this computer.",
                        stage="check")
+    if not sha256:
+        return _result(ok=False, error="Update feed is missing the AppImage's sha256 — refusing to "
+                       "install.", stage="check")
     if not installer_url_allowed(url):
         return _result(ok=False, error=f"Refusing non-HTTPS update URL: {url}", stage="check")
     app = Path(os.environ.get("APPIMAGE") or "")
