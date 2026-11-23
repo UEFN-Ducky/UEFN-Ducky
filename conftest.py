@@ -85,6 +85,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "ducky_app"))
 _REAL_LOCAL = os.environ.get("LOCALAPPDATA") or ""
 _REAL_ROAMING = os.environ.get("APPDATA") or ""
 _OPT_OUT = os.environ.get("DUCKY_TESTS_REAL_APPDATA") == "1"
+_REAL_XDG_DATA = os.environ.get("XDG_DATA_HOME") or ""
+
+
+def _real_app_root() -> Path | None:
+    """The developer's real UEFN-Ducky data folder (what ``app_paths`` resolves outside tests)."""
+    if sys.platform.startswith("linux"):
+        base = Path(_REAL_XDG_DATA) if os.path.isabs(_REAL_XDG_DATA) else Path.home() / ".local" / "share"
+        return base / "UEFN-Ducky"
+    return Path(_REAL_LOCAL) / "UEFN-Ducky" if _REAL_LOCAL else None
+
+
+def _xdg_env(root: Path) -> dict[str, str]:
+    """Linux ``app_paths`` reads XDG, not LOCALAPPDATA: point data at the same root (so
+    ``<root>/UEFN-Ducky`` is the app folder on both OSes), config and cache beneath it.
+    Unused on Windows."""
+    return {
+        "XDG_DATA_HOME": str(root),
+        "XDG_CONFIG_HOME": str(root / ".config"),
+        "XDG_CACHE_HOME": str(root / ".cache"),
+    }
 
 
 # Areas the *running* app rewrites on its own timers (backups of every save,
@@ -246,9 +266,10 @@ def pytest_configure(config: pytest.Config) -> None:
     (root / "Roaming").mkdir()
     os.environ["LOCALAPPDATA"] = str(root)
     os.environ["APPDATA"] = str(root / "Roaming")
+    os.environ.update(_xdg_env(root))
     os.environ["DUCKY_TESTS_ISOLATED_APPDATA"] = str(root)
     config._ducky_isolated_root = root  # type: ignore[attr-defined]
-    real = Path(_REAL_LOCAL) / "UEFN-Ducky" if _REAL_LOCAL else None
+    real = _real_app_root()
     config._ducky_real_root = real  # type: ignore[attr-defined]
     live = bool(real) and _panel_is_running(real)
     config._ducky_live_panel = live  # type: ignore[attr-defined]
@@ -343,6 +364,8 @@ def _appdata_per_test(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (root / "Roaming").mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("LOCALAPPDATA", str(root))
     monkeypatch.setenv("APPDATA", str(root / "Roaming"))
+    for key, value in _xdg_env(root).items():
+        monkeypatch.setenv(key, value)
     # Island discovery scans Documents/Fortnite Projects and the boot deploy writes into
     # every island it finds: tests get an empty Documents, never the person's islands.
     monkeypatch.setenv("UEFN_DUCKY_DOCUMENTS_DIR", str(tmp_path / ".ducky-documents"))
@@ -408,6 +431,8 @@ def isolated_appdata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A per-test AppData root (``%LOCALAPPDATA%``) for tests that want their own."""
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    for key, value in _xdg_env(tmp_path).items():
+        monkeypatch.setenv(key, value)
     (tmp_path / "Roaming").mkdir(exist_ok=True)
     _reset_store_memos()
     return tmp_path

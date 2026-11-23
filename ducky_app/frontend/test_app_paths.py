@@ -13,6 +13,21 @@ def _env(monkeypatch, platform: str, **env: str) -> None:
         monkeypatch.setenv(k, v)
 
 
+def test_conftest_isolates_linux_xdg_folders(monkeypatch, tmp_path):
+    # The root conftest's per-test fixture must redirect XDG too, or Linux tests hit ~/.local/share.
+    monkeypatch.setattr(app_paths.sys, "platform", "linux")
+    root = tmp_path / ".ducky-appdata"
+    assert app_paths.resolve_app_data_dir() == root / "UEFN-Ducky"
+    assert app_paths.config_base().is_relative_to(root)
+    assert app_paths.cache_base().is_relative_to(root)
+
+
+def test_isolated_appdata_fixture_redirects_xdg(isolated_appdata, monkeypatch):
+    monkeypatch.setattr(app_paths.sys, "platform", "linux")
+    assert app_paths.resolve_app_data_dir() == isolated_appdata / "UEFN-Ducky"
+    assert app_paths.cache_base().is_relative_to(isolated_appdata)
+
+
 def test_windows_uses_localappdata_for_data_cache_and_config(monkeypatch, tmp_path):
     local = str(tmp_path / "Local")
     _env(monkeypatch, "win32", LOCALAPPDATA=local, XDG_DATA_HOME=str(tmp_path / "xdg"))
