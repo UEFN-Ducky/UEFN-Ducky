@@ -110,6 +110,7 @@ def test_the_launch_count_tags_answer_and_free_bucket(monkeypatch) -> None:
     assert sent[0]["code"] == "low_memory_start" and sent[0]["at"] == "launch.auto.under_0_5gb"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the default launch message is a Windows message box")
 def test_the_default_message_times_out_for_30_s_then_waits(monkeypatch, pc) -> None:
     pc["free"] = [0.6]
     clock, waits = [0.0], []

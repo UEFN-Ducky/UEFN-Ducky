@@ -13,6 +13,7 @@ running member turns from it.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -35,7 +36,14 @@ _warned = {"low": False}  # a low-memory warning went out and memory has not rec
 
 
 def free_memory_gb() -> float:
-    """Physical memory free right now, in GB (GlobalMemoryStatusEx; psutil elsewhere)."""
+    """Physical memory free right now, in GB (GlobalMemoryStatusEx; Linux /proc/meminfo
+    MemAvailable; psutil elsewhere)."""
+    if sys.platform.startswith("linux"):
+        from frontend.low_memory import meminfo
+
+        avail = meminfo().get("MemAvailable")
+        if avail is not None:
+            return avail / 1024**3
     try:
         import ctypes
         from ctypes import wintypes

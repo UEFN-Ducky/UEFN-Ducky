@@ -97,8 +97,8 @@ def test_a_failing_compact_never_raises(monkeypatch) -> None:
     assert got["freed_mb"] == 0.0 and "no heap" in got["error"]
 
 
-def test_noop_off_windows(monkeypatch) -> None:
-    monkeypatch.setattr(heap_trim.sys, "platform", "linux")
+def test_noop_off_windows_and_linux(monkeypatch) -> None:
+    monkeypatch.setattr(heap_trim.sys, "platform", "darwin")  # Linux trims with malloc_trim
     monkeypatch.setattr(heap_trim, "_compact", lambda: pytest.fail("compacted off Windows"))
     assert heap_trim.trim() == {"freed_mb": 0.0, "took_ms": 0.0, "skipped": "not win32"}
     assert heap_trim.maybe_trim(now=1000.0) is False

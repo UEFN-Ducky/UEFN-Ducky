@@ -14,12 +14,16 @@ in UEFN:
   most every WARN_EVERY_S;
 - a stronger alert below RUN_GB (critical), which never waits for the warning's quiet time and
   repeats at most every RUN_EVERY_S.
+On Linux free memory is /proc/meminfo MemAvailable, and memory pressure (/proc/pressure/memory
+"full" avg10 at or over PSI_FULL_PCT: every task stalled on memory) warns like a fast drop.
+The launch message is Windows-only (it is a Windows message box).
 """
 
 from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 from collections import deque
 from typing import Any, Callable
@@ -37,6 +41,7 @@ WARN_EVERY_S = 600.0
 DROP_GB = 2.0
 DROP_WINDOW_S = 60.0
 DROP_UNDER_GB = 4.0
+PSI_FULL_PCT = 10.0  # Linux: share of the last 10 s every task waited on memory
 DUCKY_LABEL = "UEFN Ducky + agents"
 # Windows' own memory accounting, not programs the person can close.
 _NOT_PROGRAMS = {"system", "registry", "memory compression", "secure system", "idle", "system idle process"}
@@ -71,6 +76,45 @@ _recent: deque[tuple[float, float]] = deque()  # (monotonic, free GB) within DRO
 
 def _gb(size: int) -> float:
     return round(size / 1024**3, 1)
+
+
+def meminfo(path: str = "/proc/meminfo") -> dict[str, int]:
+    """Linux /proc/meminfo in bytes (``{"MemTotal": ..., "MemAvailable": ...}``), {} when unreadable."""
+    out: dict[str, int] = {}
+    try:
+        with open(path, encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                parts = rest.split()
+                if parts and parts[0].isdigit():
+                    out[key] = int(parts[0]) * (1024 if parts[1:] == ["kB"] else 1)
+    except OSError:
+        pass
+    return out
+
+
+def pressure(path: str = "/proc/pressure/memory") -> dict[str, float] | None:
+    """Linux PSI avg10 percentages ``{"some": 1.2, "full": 0.3}``; None without PSI (old kernel, off Linux)."""
+    out: dict[str, float] = {}
+    try:
+        with open(path, encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                kind, *fields = line.split()
+                for field in fields:
+                    name, _, value = field.partition("=")
+                    if name == "avg10":
+                        out[kind] = float(value)
+    except (OSError, ValueError):
+        return None
+    return out or None
+
+
+def _stalled() -> bool:
+    """Linux: the PC spends PSI_FULL_PCT or more of its time with every task waiting on memory."""
+    if not sys.platform.startswith("linux"):
+        return False
+    psi = pressure()
+    return bool(psi) and float(psi.get("full", 0.0)) >= PSI_FULL_PCT
 
 
 def biggest(n: int = 3) -> list[dict[str, Any]]:
@@ -177,7 +221,8 @@ def check_at_launch(ask: Callable[[float, str], str] | None = None,
 
     ``ask(free_gb, names)`` answers 'cancel' / 'try' / 'continue' / 'timeout'; the default box
     times out every AUTO_EVERY_S for the first AUTO_FOR_S, and each timeout or Try Again rechecks."""
-    if os.name != "nt" or os.environ.get("DUCKY_SKIP_LOW_MEMORY_CHECK"):
+    # Off Windows there is no message box to ask with, so only a caller's own ``ask`` runs the check.
+    if (os.name != "nt" and ask is None) or os.environ.get("DUCKY_SKIP_LOW_MEMORY_CHECK"):
         return True
     from frontend.ui_web.admission import free_memory_gb
 
@@ -355,7 +400,7 @@ def _check_ram(beat: dict[str, Any]) -> None:
     if not isinstance(free, (int, float)) or isinstance(free, bool):
         return
     now = time.monotonic()
-    dropped = _fast_drop(now, float(free))
+    dropped = _fast_drop(now, float(free)) or _stalled()
     warn_at = warn_below_gb(beat.get("total_gb"))
     freed: dict[str, Any] = {}
     if free >= warn_at:

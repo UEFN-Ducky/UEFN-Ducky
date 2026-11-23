@@ -7,7 +7,8 @@ CRT's ``_heapmin()``, which decommit the free ranges.
 
 ``maybe_trim()`` is the idle-tick entry: at most every EVERY_S, only when the heaps hold more
 than FREE_OVER_MB committed but unused, and on its own background thread (HeapCompact takes
-10-100 ms and the gc pass holds the GIL), never the caller's. Off Windows everything is a no-op.
+10-100 ms and the gc pass holds the GIL), never the caller's. On Linux the same is glibc's
+``malloc_trim(0)``, measured with mallinfo2 and /proc/self/status. Elsewhere it is a no-op.
 """
 
 from __future__ import annotations
@@ -26,6 +27,11 @@ FREE_OVER_MB = 200.0
 POINTLESS_MB = 20.0
 BACKOFF_S = 3600.0
 MB = 1024 * 1024
+
+
+def _linux() -> bool:
+    return sys.platform.startswith("linux")  # read per call: tests set sys.platform
+
 
 _lock = threading.Lock()  # one trim at a time
 _last = 0.0  # monotonic time of the last trim started by maybe_trim
@@ -57,7 +63,13 @@ def _heaps(k32: Any) -> list[Any]:
 
 
 def heap_free_mb() -> float:
-    """Committed minus allocated over every process heap, in MB (0.0 off Windows or on error)."""
+    """Committed minus allocated over every process heap, in MB (0.0 off Windows or on error).
+    Linux: malloc's free bytes (mallinfo2 fordblks)."""
+    if _linux():
+        from frontend.memory_report import mallinfo
+
+        heap = mallinfo()
+        return round(heap["free"] / MB, 1) if heap else 0.0
     if sys.platform != "win32":
         return 0.0
     try:
@@ -82,6 +94,11 @@ def heap_free_mb() -> float:
 
 
 def _private_bytes() -> int:
+    if _linux():
+        from frontend.memory_report import proc_status
+
+        status = proc_status()
+        return int(status.get("RssAnon") or status.get("VmRSS") or 0)
     try:
         import psutil
 
@@ -126,9 +143,17 @@ def _compact() -> None:
         pass
 
 
+def _malloc_trim() -> None:
+    import ctypes
+
+    ctypes.CDLL(None).malloc_trim(ctypes.c_size_t(0))
+
+
 def trim() -> dict[str, Any]:
     """gc, then give the heaps' free ranges back: ``{"freed_mb", "took_ms"}`` (private bytes
     before minus after). Off Windows: ``{"freed_mb": 0.0, "took_ms": 0.0, "skipped": "not win32"}``."""
+    if _linux():
+        return _trim_with(_malloc_trim)
     if sys.platform != "win32":
         return {"freed_mb": 0.0, "took_ms": 0.0, "skipped": "not win32"}
     with _lock:
@@ -138,6 +163,21 @@ def trim() -> dict[str, Any]:
         try:
             _compact()
         except Exception as exc:  # noqa: BLE001 — a failed trim must never hurt the caller
+            return {"freed_mb": 0.0, "took_ms": round((time.perf_counter() - t0) * 1000, 1), "error": str(exc)[:200]}
+        after = _private_bytes()
+        return {"freed_mb": round(max(before - after, 0) / MB, 1),
+                "took_ms": round((time.perf_counter() - t0) * 1000, 1)}
+
+
+def _trim_with(compact: Any) -> dict[str, Any]:
+    """trim() on Linux: the same steps with glibc's malloc_trim(0) as the compaction."""
+    with _lock:
+        t0 = time.perf_counter()
+        before = _private_bytes()
+        gc.collect()
+        try:
+            compact()
+        except Exception as exc:  # noqa: BLE001 — musl has no malloc_trim; never hurt the caller
             return {"freed_mb": 0.0, "took_ms": round((time.perf_counter() - t0) * 1000, 1), "error": str(exc)[:200]}
         after = _private_bytes()
         return {"freed_mb": round(max(before - after, 0) / MB, 1),
@@ -156,7 +196,7 @@ def _run() -> None:
 def maybe_trim(*, now: float | None = None) -> bool:
     """Idle tick: start a background trim when due and worth it. True when one was started."""
     global _last, _running
-    if sys.platform != "win32" or _running:
+    if (sys.platform != "win32" and not _linux()) or _running:
         return False
     now = time.monotonic() if now is None else now
     if _last and now - _last < EVERY_S:

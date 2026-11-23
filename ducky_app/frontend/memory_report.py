@@ -49,6 +49,42 @@ def _mb(n: float) -> float:
     return round(float(n) / MB, 1)
 
 
+def proc_status(path: str = "/proc/self/status") -> dict[str, int]:
+    """Linux /proc/<pid>/status sizes in bytes (``{"VmRSS": ..., "RssAnon": ..., "VmHWM": ...}``),
+    {} when unreadable."""
+    out: dict[str, int] = {}
+    try:
+        with open(path, encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                key, _, rest = line.partition(":")
+                parts = rest.split()
+                if len(parts) == 2 and parts[1] == "kB" and parts[0].isdigit():
+                    out[key] = int(parts[0]) * 1024
+    except OSError:
+        pass
+    return out
+
+
+def mallinfo() -> dict[str, int] | None:
+    """glibc's heap totals (mallinfo2, glibc 2.33+): ``{"allocated", "free", "mmapped"}`` in bytes;
+    None off glibc. ``free`` is what malloc_trim(0) can hand back."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        import ctypes
+
+        class Mallinfo2(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_size_t) for n in ("arena", "ordblks", "smblks", "hblks", "hblkhd", "usmblks",
+                                                      "fsmblks", "uordblks", "fordblks", "keepcost")]
+
+        fn = ctypes.CDLL(None).mallinfo2
+        fn.restype = Mallinfo2
+        info = fn()
+        return {"allocated": int(info.uordblks), "free": int(info.fordblks), "mmapped": int(info.hblkhd)}
+    except (OSError, AttributeError):
+        return None
+
+
 def _process() -> dict[str, Any]:
     out: dict[str, Any] = {"pid": os.getpid()}
     try:
@@ -60,6 +96,13 @@ def _process() -> dict[str, Any]:
                    peak_wset_mb=_mb(getattr(mem, "peak_wset", 0) or 0), threads=proc.num_threads())
     except Exception as exc:  # noqa: BLE001 — the rest still says plenty
         out["error"] = f"psutil: {exc}"
+    if sys.platform.startswith("linux"):
+        status = proc_status()
+        if status:  # Linux has no private bytes / peak working set: anonymous RSS and VmHWM are the same idea
+            out.pop("error", None)
+            out.update(rss_mb=_mb(status.get("VmRSS", 0)), private_mb=_mb(status.get("RssAnon", 0)),
+                       peak_wset_mb=_mb(status.get("VmHWM", 0)))
+            out.setdefault("threads", threading.active_count())
     names = collections.Counter(re.sub(r"[-_ ]?\d+$", "", t.name) or "?" for t in threading.enumerate())
     out["python_threads"] = len(threading.enumerate())
     out["python_threads_by_name"] = dict(names.most_common(15))
@@ -73,6 +116,10 @@ def _native(top: int = 12) -> dict[str, Any]:
     heaps' own totals, and the .NET runtime's GC heap when pythonnet hosts one."""
     out: dict[str, Any] = {}
     if sys.platform != "win32":
+        heap = mallinfo()
+        if heap is not None:
+            out.update(heaps_allocated_mb=_mb(heap["allocated"]), heap_free_mb=_mb(heap["free"]),
+                       heap_mmapped_mb=_mb(heap["mmapped"]))
         return out
     import ctypes
     from ctypes import wintypes
