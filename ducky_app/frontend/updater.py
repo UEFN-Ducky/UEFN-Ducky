@@ -993,7 +993,8 @@ UPDATE_ACTIONS = {
 # CB88729E70843096); its secret half is the MINISIGN_SECRET_KEY CI secret. Every AppImage
 # update must carry a matching .minisig. Empty would mean SHA-256 from the HTTPS feed only.
 MINISIGN_PUBLIC_KEY = "RWSWMIRwnnKIy4h1XdDWMtouy9laP5uw5K1gGe3HVNh5DFIWT7woHBvM"
-# A swapped-in AppImage that isn't ready (app_versions.mark_ready) by then is rolled back.
+# A swapped-in AppImage whose page hasn't started (boot stage page_started, which
+# session_services turns into app_versions.confirm_appimage_swap) by then is rolled back.
 HEALTHY_WITHIN_S = 60
 # Leftovers of the AppImage process that would break the watchdog or the next AppImage.
 _RUNTIME_ENV = ("APPDIR", "APPIMAGE", "ARGV0", "OWD", "PYTHONHOME", "PYTHONPATH", "_MEIPASS2")

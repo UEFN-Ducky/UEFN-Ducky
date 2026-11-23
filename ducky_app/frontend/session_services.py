@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -22,6 +23,22 @@ def _mark_ready(ctx: dict[str, Any]) -> None:
     from frontend import app_versions
 
     app_versions.mark_ready(str(__version__))
+    if sys.platform.startswith("linux"):
+        _confirm_appimage_swap_at_page_started(str(__version__))
+
+
+def _confirm_appimage_swap_at_page_started(version: str) -> None:
+    """A swapped-in AppImage counts as good only once its page ran (boot stage page_started),
+    not when the backend booted: a build whose window never opens is rolled back."""
+    from frontend import app_versions, boot_report
+
+    def on_stage(name: str, _ms: int) -> None:
+        if name == "page_started":
+            app_versions.confirm_appimage_swap(version)
+
+    boot_report.on_stage(on_stage)
+    if boot_report._page.get("started"):  # the page beat this step (backend-only start)
+        app_versions.confirm_appimage_swap(version)
 
 
 def _update_swap(ctx: dict[str, Any]) -> None:

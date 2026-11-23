@@ -231,9 +231,8 @@ def copy_launcher_files(src_dir: Path, dst_dir: Path) -> list[str]:
 
 def mark_ready(version: str) -> None:
     """The panel of ``version`` came up: its failed-start count goes back to zero, and the
-    install's root launcher becomes this version's (:func:`refresh_root_launcher`)."""
-    if sys.platform.startswith("linux"):
-        confirm_appimage_swap(version)
+    install's root launcher becomes this version's (:func:`refresh_root_launcher`).
+    An AppImage swap is confirmed later, at page_started (session_services._mark_ready)."""
     write_current(version)
     try:
         refresh_root_launcher()
@@ -270,7 +269,7 @@ def begin_appimage_swap(version: str, *, from_version: str, app: Path, previous:
 
 
 def confirm_appimage_swap(version: str) -> bool:
-    """The swapped-in AppImage reached ready: its watchdog stops waiting."""
+    """The swapped-in AppImage's page started: its watchdog stops waiting."""
     state, ok, _failed = appimage_swap_paths()
     try:
         if json.loads(state.read_text(encoding="utf-8")).get("version") != version:

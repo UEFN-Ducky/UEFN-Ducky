@@ -56,6 +56,35 @@ def test_a_b_that_gets_ready_stays(tmp_path) -> None:
     assert av.appimage_swap_failure() is None
 
 
+def test_backend_boot_does_not_confirm_the_swap_only_page_started_does(monkeypatch, tmp_path) -> None:
+    """1.2.517's window never opened, yet its backend booted: that must not confirm the swap."""
+    from frontend import boot_report, session_services
+
+    monkeypatch.setattr(av, "mark_ready", lambda version: None)  # root launcher etc.: not this test
+    monkeypatch.setattr(boot_report, "_stage_listeners", [])
+    monkeypatch.setattr(boot_report, "_state", {})
+    monkeypatch.setattr(boot_report, "_page", {"started": False, "watching": False, "errors": [], "webview": None})
+    av.begin_appimage_swap(updater.__version__, from_version="1.2.516", app=tmp_path / "a", previous=tmp_path / "b")
+    ok = av.appimage_swap_paths()[1]
+    session_services._mark_ready({})
+    assert not ok.exists()
+    boot_report.stage("ui_drawn")
+    assert not ok.exists()
+    boot_report.page_started()
+    assert ok.is_file()
+
+
+def test_a_page_that_started_before_the_services_confirms_at_once(monkeypatch, tmp_path) -> None:
+    from frontend import boot_report, session_services
+
+    monkeypatch.setattr(av, "mark_ready", lambda version: None)
+    monkeypatch.setattr(boot_report, "_stage_listeners", [])
+    monkeypatch.setattr(boot_report, "_page", {"started": True, "watching": False, "errors": [], "webview": None})
+    av.begin_appimage_swap(updater.__version__, from_version="1.2.516", app=tmp_path / "a", previous=tmp_path / "b")
+    session_services._mark_ready({})
+    assert av.appimage_swap_paths()[1].is_file()
+
+
 def test_ready_marks_only_the_swapped_in_version(tmp_path) -> None:
     av.begin_appimage_swap("9.9.9", from_version="1.2.600", app=tmp_path / "a", previous=tmp_path / "b")
     assert not av.confirm_appimage_swap("1.2.600")
