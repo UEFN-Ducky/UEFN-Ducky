@@ -53,6 +53,16 @@ from backend.uefn_plugins.store import PLUGIN_MANIFEST, normalize_plugin_id
 
 # ABI of the running interpreter — the compiled module must target the app's ABI.
 PY_ABI = f"cp{sys.version_info.major}{sys.version_info.minor}-win_amd64"
+MODULE_SUFFIX = ".pyd"
+# Linux builds for the machine they run on (x86_64 or aarch64): Nuitka needs the target's own
+# Python, so an aarch64 .so is built on an aarch64 machine (CI: an arm runner).
+IS_LINUX = sys.platform.startswith("linux")
+if IS_LINUX:
+    from backend.uefn_plugins import manifest_platform as _mp
+
+    LINUX_ARCH = _mp.host_arch()
+    PY_ABI = _mp.python_abi(_mp.LINUX, LINUX_ARCH)
+    MODULE_SUFFIX = ".so"
 
 # Build kit — official, no-admin, pinned sources. Bump KIT_VERSION to force a rebuild.
 KIT_VERSION = "1"
@@ -70,6 +80,31 @@ ESBUILD_URL = (
     f"win32-x64-{ESBUILD_VERSION}.tgz"
 )
 ESBUILD_SHA256 = "7286c3611b6f1f4c4d9ec90adcbc478407ff0d28ead96567f361d53e67613e19"
+# Linux kit: python-build-standalone (Astral's relocatable CPython, headers included) and the
+# system C compiler (gcc / cc), per CPU.
+PBS_TAG = "20261110"
+PBS_PYTHON_VERSION = "3.13.18"
+PBS_SHA256 = {
+    "x86_64": "50c774f6674740739f791c05a9177ed03e2fe02abebda9bca3512eb7309b37cc",
+    "aarch64": "d25a65036d5e149db902fa52ad65878d0c00e9301360ec197832f99063087e9e",
+}
+ESBUILD_LINUX = {  # npm package name, sha256
+    "x86_64": ("linux-x64", "9573bb2233aab0f9ea7647d5cca9726113cc1768de61d66b17267f4db84488f6"),
+    "aarch64": ("linux-arm64", "a96dbfa41d3ef5dbd1ef22b1c10d5187be9267e86093a870f06402a7ec931596"),
+}
+LINUX_BASELINE_CPU_FLAGS = {"x86_64": "-march=x86-64 -mtune=generic", "aarch64": "-march=armv8-a"}
+
+
+def pbs_python_url(arch: str) -> str:
+    return (
+        "https://github.com/astral-sh/python-build-standalone/releases/download/"
+        f"{PBS_TAG}/cpython-{PBS_PYTHON_VERSION}+{PBS_TAG}-{arch}-unknown-linux-gnu-install_only.tar.gz"
+    )
+
+
+def esbuild_linux_url(arch: str) -> str:
+    pkg = ESBUILD_LINUX[arch][0]
+    return f"https://registry.npmjs.org/@esbuild/{pkg}/-/{pkg}-{ESBUILD_VERSION}.tgz"
 # zig builds for the CPU of the machine it runs on. Nuitka pins the compile step to
 # baseline x86-64 but not the link, so zig's own C runtime (memcpy and friends) came
 # out with AVX-512 and BMI2 from the build PC, and Ducky crashed with an illegal
@@ -128,14 +163,20 @@ def build_kit_dir() -> Path:
 
 
 def _kit_python(kit: Path) -> Path:
+    if IS_LINUX:
+        return kit / "python" / "bin" / "python3"
     return kit / "python" / "python.exe"
 
 
 def _kit_esbuild(kit: Path) -> Path:
+    if IS_LINUX:
+        return kit / "esbuild" / "esbuild"
     return kit / "esbuild" / "esbuild.exe"
 
 
 def _kit_marker_value() -> str:
+    if IS_LINUX:
+        return "|".join([KIT_VERSION, "linux", LINUX_ARCH, PBS_TAG, PBS_PYTHON_VERSION, NUITKA_SPEC, ESBUILD_VERSION])
     return "|".join(
         [KIT_VERSION, NUGET_PYTHON_VERSION, NUITKA_SPEC, ZIGLANG_SPEC, ESBUILD_VERSION]
     )
@@ -180,20 +221,55 @@ def _extract_nuget_python(nupkg: bytes, dest: Path) -> None:
         raise CompileError("NuGet Python archive missing python.exe")
 
 
-def _extract_esbuild(tgz: bytes, dest: Path) -> None:
+def _extract_esbuild(tgz: bytes, dest: Path, exe: str = "esbuild.exe") -> None:
     dest.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tf:
         member = None
         for m in tf.getmembers():
-            if m.isfile() and m.name.replace("\\", "/").endswith("esbuild.exe"):
+            if m.isfile() and m.name.replace("\\", "/").endswith("/" + exe if exe == "esbuild" else exe):
                 member = m
                 break
         if member is None:
-            raise CompileError("esbuild archive missing esbuild.exe")
+            raise CompileError(f"esbuild archive missing {exe}")
         src = tf.extractfile(member)
         if src is None:
             raise CompileError("esbuild archive could not be read")
-        (dest / "esbuild.exe").write_bytes(src.read())
+        (dest / exe).write_bytes(src.read())
+    if exe == "esbuild":
+        (dest / exe).chmod(0o755)
+
+
+def _extract_pbs_python(tgz: bytes, dest_root: Path) -> None:
+    """Unpack python-build-standalone's ``python/`` tree under ``dest_root`` (no paths outside it)."""
+    with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tf:
+        members = [m for m in tf.getmembers() if m.name.split("/", 1)[0] == "python"]
+        tf.extractall(dest_root, members=members, filter="data")
+    if not _kit_python(dest_root).is_file():
+        raise CompileError("Python toolchain archive missing bin/python3")
+
+
+def _linux_c_compiler() -> str:
+    cc = os.environ.get("CC", "").strip() or shutil.which("gcc") or shutil.which("cc") or ""
+    if not cc:
+        raise CompileError("No C compiler found: install gcc (for example: sudo apt install gcc).")
+    return cc
+
+
+def _ensure_linux_kit(staging: Path, progress: ProgressFn | None) -> None:
+    _progress(progress, 0.05, "Downloading Python build toolchain…")
+    tgz = _download_verified(pbs_python_url(LINUX_ARCH), PBS_SHA256[LINUX_ARCH], "Python toolchain")
+    _extract_pbs_python(tgz, staging)
+    kpy = _kit_python(staging)
+    _progress(progress, 0.45, "Installing Nuitka…")
+    res = subprocess.run(
+        [str(kpy), "-m", "pip", "install", "--no-warn-script-location", "--disable-pip-version-check", NUITKA_SPEC],
+        capture_output=True, text=True, errors="replace",
+    )
+    if res.returncode != 0:
+        raise CompileError(f"Build kit pip install failed:\n{res.stdout}\n{res.stderr}")
+    _progress(progress, 0.8, "Downloading esbuild…")
+    tgz = _download_verified(esbuild_linux_url(LINUX_ARCH), ESBUILD_LINUX[LINUX_ARCH][1], "esbuild")
+    _extract_esbuild(tgz, staging / "esbuild", "esbuild")
 
 
 def _kit_ready(kit: Path) -> bool:
@@ -219,6 +295,12 @@ def ensure_build_kit(progress: ProgressFn | None = None) -> Path:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True, exist_ok=True)
     try:
+        if IS_LINUX:
+            _ensure_linux_kit(staging, progress)
+            (staging / ".kit-version").write_text(_kit_marker_value(), encoding="utf-8")
+            shutil.rmtree(kit, ignore_errors=True)
+            staging.replace(kit)
+            return _linux_kit_done(kit, progress)
         _progress(progress, 0.05, "Downloading Python build toolchain…")
         nupkg = _download_verified(NUGET_PYTHON_URL, NUGET_PYTHON_SHA256, "Python toolchain")
         _extract_nuget_python(nupkg, staging / "python")
@@ -249,6 +331,13 @@ def ensure_build_kit(progress: ProgressFn | None = None) -> Path:
         staging.replace(kit)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+    _progress(progress, 1.0, "Build kit ready")
+    if not _kit_ready(kit):
+        raise CompileError("Build kit did not complete.")
+    return kit
+
+
+def _linux_kit_done(kit: Path, progress: ProgressFn | None) -> Path:
     _progress(progress, 1.0, "Build kit ready")
     if not _kit_ready(kit):
         raise CompileError("Build kit did not complete.")
@@ -426,6 +515,8 @@ def _inject_license(
 def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     """Compile ``work/<mod_name>`` to one extension module. Returns (pyd, warnings)."""
     out_dir = work / "out"
+    if IS_LINUX:
+        return _run_nuitka_linux(kpy, work, mod_name, out_dir)
     cmd = [
         str(kpy), "-m", "nuitka",
         "--module", mod_name,
@@ -471,8 +562,37 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     return pyds[0], warnings
 
 
+def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tuple[Path, list[str]]:
+    cmd = [
+        str(kpy), "-m", "nuitka", "--module", mod_name, f"--include-package={mod_name}",
+        f"--output-dir={out_dir}", "--remove-output", "--assume-yes-for-downloads", "--quiet", "--no-progressbar",
+    ]
+    jobs = os.environ.get("DUCKY_NUITKA_JOBS", "").strip()
+    if jobs.isdigit() and int(jobs) > 0:
+        cmd += [f"--jobs={int(jobs)}", "--low-memory"]
+    flags = LINUX_BASELINE_CPU_FLAGS.get(LINUX_ARCH, "")
+    env = dict(os.environ, CC=_linux_c_compiler(), CFLAGS=flags, LDFLAGS=flags)
+    res = subprocess.run(cmd, cwd=str(work), capture_output=True, text=True, errors="replace", env=env)
+    warnings = [
+        line.strip()
+        for line in (res.stderr or "").splitlines()
+        if line.strip() and ("WARNING" in line.upper() or "ERROR" in line.upper())
+    ]
+    if res.returncode != 0:
+        tail = "\n".join((res.stdout or "").splitlines()[-20:] + (res.stderr or "").splitlines()[-20:])
+        raise CompileError(f"Nuitka failed to compile {mod_name}:\n{tail}")
+    built = sorted(out_dir.glob(f"{mod_name}*.so"))
+    if not built:
+        raise CompileError(f"Nuitka produced no .so for {mod_name}")
+    return built[0], warnings
+
+
 def _assert_runs_on_every_cpu(pyd: Path) -> None:
     """Refuse a build with instructions some PCs lack: loading it would close Ducky there."""
+    if IS_LINUX:
+        # ponytail: cpu_check reads PE images only; Linux relies on the -march baseline flags.
+        # Add an ELF reader to cpu_check when a Linux build is caught with newer instructions.
+        return
     from backend.uefn_plugins.cpu_check import problems
 
     found = problems(pyd.read_bytes())
@@ -655,7 +775,7 @@ def build_plugin(
     _check_kit_abi(kpy)
     esbuild = _kit_esbuild(kit)
 
-    final_pyd_name = f"{mod_name}.{PY_ABI}.pyd"
+    final_pyd_name = f"{mod_name}.{PY_ABI}{MODULE_SUFFIX}"
     warnings: list[str] = ([personal_path_message(personal)] if personal else []) + store_errors + store_warnings
     try:
         from backend.uefn_plugins.plugin_lint import check_findability
