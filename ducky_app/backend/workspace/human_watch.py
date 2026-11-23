@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -370,6 +372,90 @@ def _notifier_for(path: str) -> _DirNotifier | None:
         return _DirNotifier(path)
     except OSError:
         return None
+
+
+# --- Is the person at the PC? (Linux) ---------------------------------------------------
+
+AWAY_AFTER_S = 600.0
+_IDLE_REPLY = re.compile(r"\(u?int(?:32|64)\s+(\d+),?\)")
+# (D-Bus call, reply is milliseconds). KDE's org.freedesktop.ScreenSaver answers in ms
+# although the spec says seconds; GNOME answers through Mutter only.
+# ponytail: set the ScreenSaver flag False if a desktop that answers in seconds shows up.
+_IDLE_CALLS = (
+    (["--dest", "org.gnome.Mutter.IdleMonitor", "--object-path", "/org/gnome/Mutter/IdleMonitor/Core",
+      "--method", "org.gnome.Mutter.IdleMonitor.GetIdletime"], True),
+    (["--dest", "org.freedesktop.ScreenSaver", "--object-path", "/org/freedesktop/ScreenSaver",
+      "--method", "org.freedesktop.ScreenSaver.GetSessionIdleTime"], True),
+)
+
+
+def _gdbus(args: list[str]) -> tuple[int, str]:
+    import subprocess
+
+    try:
+        done = subprocess.run(["gdbus", "call", "--session", *args], capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired):
+        return 127, ""
+    return done.returncode, done.stdout
+
+
+def _x11_idle_ms() -> int | None:
+    """XScreenSaverQueryInfo's idle time (X11 / XWayland without a D-Bus idle monitor)."""
+    if not os.environ.get("DISPLAY"):
+        return None
+    import ctypes
+    import ctypes.util
+
+    class _Info(ctypes.Structure):
+        _fields_ = [("window", ctypes.c_ulong), ("state", ctypes.c_int), ("kind", ctypes.c_int),
+                    ("til_or_since", ctypes.c_ulong), ("idle", ctypes.c_ulong), ("eventMask", ctypes.c_ulong)]
+
+    try:
+        x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+        xss = ctypes.CDLL(ctypes.util.find_library("Xss") or "libXss.so.1")
+    except OSError:
+        return None
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x11.XDefaultRootWindow.restype = ctypes.c_ulong
+    x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_Info)
+    xss.XScreenSaverQueryInfo.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_Info)]
+    display = x11.XOpenDisplay(None)
+    if not display:
+        return None
+    try:
+        info = xss.XScreenSaverAllocInfo()
+        if not info or not xss.XScreenSaverQueryInfo(display, x11.XDefaultRootWindow(display), info):
+            return None
+        idle = int(info.contents.idle)
+        x11.XFree(info)
+        return idle
+    finally:
+        x11.XCloseDisplay(display)
+
+
+def idle_seconds(run: Any = None, x11: Any = None) -> float | None:
+    """Seconds since the person last used the keyboard or mouse; None when unknown (and on
+    Windows, which has no idle reader here). *run* / *x11* are test seams."""
+    if not sys.platform.startswith("linux"):
+        return None
+    run = run or _gdbus
+    for args, millis in _IDLE_CALLS:
+        code, out = run(args)
+        hit = _IDLE_REPLY.search(out or "") if code == 0 else None
+        if hit:
+            value = int(hit.group(1))
+            return value / 1000.0 if millis else float(value)
+    ms = (x11 or _x11_idle_ms)()
+    return ms / 1000.0 if ms is not None else None
+
+
+def user_away(threshold_s: float = AWAY_AFTER_S, **seams: Any) -> bool | None:
+    """True after *threshold_s* without input (10 minutes counts as away); None when unknown."""
+    idle = idle_seconds(**seams)
+    return None if idle is None else idle >= threshold_s
 
 
 def _watch_writer() -> dict[str, Any]:
