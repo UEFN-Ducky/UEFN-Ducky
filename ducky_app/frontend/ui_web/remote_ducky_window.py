@@ -9,6 +9,7 @@ other Ducky over the link. Only the handshake comes back here
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 from typing import Any
@@ -54,6 +55,8 @@ def open_remote_ducky(key_id: str, name: str, chat_id: str = "") -> None:
                 _open.pop(key_id, None)
     # Frameless like a focus window: the page draws its own title bar (RemoteDuckyBar),
     # whose buttons reach this window through win_frameless's "uefnWindowChrome".
+    # Off Windows there is no win_frameless, so the window keeps its native frame.
+    windows = sys.platform == "win32"
     window = webview.create_window(
         window_title(name),
         url=url,
@@ -61,7 +64,7 @@ def open_remote_ducky(key_id: str, name: str, chat_id: str = "") -> None:
         height=820,
         min_size=(520, 380),
         resizable=True,
-        frameless=True,
+        frameless=windows,
         easy_drag=False,
         background_color="#0a0a0a",
     )
@@ -69,6 +72,8 @@ def open_remote_ducky(key_id: str, name: str, chat_id: str = "") -> None:
         _open[key_id] = window
 
     def _shown() -> None:
+        if not windows:
+            return
         threading.Thread(target=_apply_chrome, args=(window,), daemon=True, name="remote-ducky-icon").start()
 
     def _closed() -> None:

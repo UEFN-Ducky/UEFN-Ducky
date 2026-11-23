@@ -195,6 +195,19 @@ step 1 without reloading the page; RPC calls queue for up to 30 s.
   RPC calls. If the viewer is older (stale cache), it reloads once.
 - `PROTOCOL_VERSION` mismatch → viewer treats as "update the desktop app".
 
+## Linux desktop
+
+- The desktop page runs in WebKitGTK instead of WebView2; the peer, the
+  channels and the signaling above are unchanged (same `rtc_connect`,
+  same `direct_rtc_answer`, same site session check for the logged-in user).
+- A Linux Ducky opens another Ducky of the account (e.g. a Windows PC) in a
+  `remote_ducky_window` with a native window frame: `win_frameless` is
+  Windows-only, so the page's own title bar buttons are not wired there.
+- The UEFN listener stays loopback-only on every OS; nothing in this
+  protocol exposes it.
+- `frontend/test_remote_direct_peers.py` runs two aiortc peers through this
+  signaling over loopback (skipped where `aiortc` is not installed).
+
 ## Security
 
 - Desktop accepts an offer only for `session` ids it obtained from the site
