@@ -21,17 +21,26 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from frontend.window_view import (
-    _UEFN_EDITOR_EXE,
-    _UEFN_SHIPPING_EXE,
-    _editor_on_root,
-    fortnite_studio_launch_from_item,
-    uefnproject_path,
+from frontend.window_view import fortnite_studio_launch_from_item, uefnproject_path
+
+# ponytail: same names and layout as frontend.window_view's Windows lookup, kept here so the
+# Windows file stays untouched; change both if Epic moves the editor.
+UEFN_EDITOR_EXE = "UnrealEditorFortnite.exe"
+UEFN_SHIPPING_EXE = "UnrealEditorFortnite-Win64-Shipping.exe"
+UEFN_REL_EXES = (
+    Path("FortniteGame") / "Binaries" / "Win64" / UEFN_SHIPPING_EXE,
+    Path("Engine") / "Binaries" / "Win64" / UEFN_EDITOR_EXE,
 )
+
+
+def editor_on_root(root: Path) -> str | None:
+    """The editor exe under a Fortnite install folder, shipping first; None when absent."""
+    return next((str(root / rel) for rel in UEFN_REL_EXES if (root / rel).is_file()), None)
+
 
 _HEROIC_APPS = ("Fortnite_Studio", "Fortnite")
 _MANIFESTS = Path("drive_c/ProgramData/Epic/EpicGamesLauncher/Data/Manifests")
-_EXE_NAMES = frozenset(n.lower() for n in (_UEFN_SHIPPING_EXE, _UEFN_EDITOR_EXE))
+_EXE_NAMES = frozenset(n.lower() for n in (UEFN_SHIPPING_EXE, UEFN_EDITOR_EXE))
 _NOT_FOUND = (
     "Unreal Editor for Fortnite not found in a Heroic or Steam/Proton prefix. "
     "Install Fortnite (UEFN) through Heroic, or add the Epic Games Launcher to Steam with Proton."
@@ -108,7 +117,7 @@ def _heroic_prefix(heroic: Path) -> UefnPrefix | None:
         game = installed.get(app)
         if not isinstance(game, dict):
             continue
-        exe = _editor_on_root(Path(str(game.get("install_path") or "")))
+        exe = editor_on_root(Path(str(game.get("install_path") or "")))
         if not exe:
             continue
         cfg = (_read_json(heroic / "GamesConfig" / f"{app}.json") or {}).get(app) or {}
