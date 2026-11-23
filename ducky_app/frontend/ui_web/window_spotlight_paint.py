@@ -10,6 +10,11 @@ and the ring's glow are blurred the same way the CSS blurs them.
 Everything that touches a window handle acts on the real top-level window
 (``GetAncestor(..., GA_ROOT)``): a Tk Toplevel's ``winfo_id`` is the child window
 inside it, and styles or z-order applied there never reach the screen.
+
+Linux X11 has no per-pixel layered windows without a compositor-aware visual, so
+``LayeredWindow`` there shows the picture on an override-redirect Tk window cut to
+its visible pixels with XShape (``alpha_rects``); partial alpha such as the dim
+becomes window opacity, and only when a compositor is running.
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from frontend import platform_info
 
 # showme.css defaults (the dark theme); hex values taken from the stylesheet.
 ACCENT = (76, 141, 255)  # #4c8dff
@@ -453,6 +460,66 @@ def _bgra_premultiplied(image: Image.Image) -> bytes:
     return Image.merge("RGBA", (b, g, r, a)).tobytes()
 
 
+def _spans(row: bytes) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
+    i = 0
+    while True:
+        start = row.find(b"\xff", i)
+        if start < 0:
+            return out
+        end = row.find(b"\x00", start)
+        if end < 0:
+            end = len(row)
+        out.append((start, end))
+        i = end
+
+
+def alpha_rects(alpha: Image.Image, threshold: int) -> list[tuple[int, int, int, int]]:
+    """The pixels with alpha >= ``threshold`` as (x, y, w, h) rectangles, for an XShape region.
+
+    Identical rows merge into one taller rectangle, so a full-screen dim with one hole is a
+    handful of rectangles, not a million pixels.
+    """
+    w, h = alpha.size
+    data = alpha.point(lambda a: 255 if a >= threshold else 0).tobytes()
+    rects: list[tuple[int, int, int, int]] = []
+    prev: bytes | None = None
+    start_y = 0
+    for y in range(h + 1):
+        row = data[y * w:(y + 1) * w] if y < h else None
+        if row is not None and row == prev:
+            continue
+        if prev is not None:
+            rects.extend((x0, start_y, x1 - x0, y - start_y) for x0, x1 in _spans(prev))
+        prev, start_y = row, y
+    return rects
+
+
+def x11_composited(display: Any) -> bool:
+    """A compositing manager owns ``_NET_WM_CM_Sn``: window opacity will show."""
+    from Xlib import X
+
+    sel = display.intern_atom(f"_NET_WM_CM_S{display.get_default_screen()}")
+    return display.get_selection_owner(sel) != X.NONE
+
+
+def x11_layer(image: Image.Image, composited: bool) -> tuple[Image.Image, float, list[tuple[int, int, int, int]]]:
+    """What an X11 overlay shows for ``image``: opaque RGB, window opacity, shape rectangles.
+
+    The most opaque pixel sets the window opacity (the dim is 0.55 black, the card 1.0) and the
+    shape keeps pixels at least half that opaque. Without a compositor opacity cannot show, so a
+    see-through layer (the dim) shows nothing rather than blacking out the screen.
+    """
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    peak = alpha.getextrema()[1]
+    rgb = Image.new("RGB", rgba.size, (0, 0, 0))
+    if peak == 0 or (peak < 250 and not composited):
+        return rgb, 1.0, []
+    rgb.paste(rgba.convert("RGB"), (0, 0), alpha.point(lambda a: min(255, a * 255 // peak)))
+    return rgb, peak / 255.0, alpha_rects(alpha, max(1, peak // 2))
+
+
 # ---- Windows plumbing -----------------------------------------------------------
 
 _GA_ROOT = 2
@@ -588,6 +655,12 @@ class LayeredWindow:
         self.y = 0
         self.size = (1, 1)
         self._painted = False
+        self._click_through = click_through
+        self._photo: Any = None
+        self._label: Any = None
+        if platform_info.IS_LINUX:
+            # Override-redirect Toplevel: the mapped X window is its wrapper, not winfo_id.
+            self.hwnd = int(self.top.wm_frame(), 16)
         if sys.platform == "win32":
             user = _user32()
             style = int(user.GetWindowLongPtrW(self.hwnd, _GWL_EXSTYLE))
@@ -602,6 +675,9 @@ class LayeredWindow:
         self.x, self.y, self.size = int(x), int(y), (int(w), int(h))
         self.top.geometry(f"{w}x{h}+{int(x)}+{int(y)}")
         self.top.update_idletasks()
+        if platform_info.IS_LINUX:
+            self._paint_x11(image)
+            return
         if sys.platform != "win32":
             return
         user, gdi = _user32(), _gdi32()
@@ -637,6 +713,38 @@ class LayeredWindow:
             gdi.DeleteDC(mem)
             user.ReleaseDC(None, screen)
 
+    def _paint_x11(self, image: Image.Image) -> None:
+        import base64
+        import io
+        import tkinter as tk
+
+        from Xlib import X
+        from Xlib.ext import shape
+
+        from frontend.ui_web.window_spotlight import _xd
+
+        d = _xd()
+        rgb, opacity, rects = x11_layer(image, x11_composited(d))
+        buf = io.BytesIO()
+        rgb.save(buf, "PNG")
+        self._photo = tk.PhotoImage(master=self.top, data=base64.b64encode(buf.getvalue()))
+        if self._label is None:
+            # Child of the Toplevel: the Toplevel's own bindings still fire (bindtags).
+            self._label = tk.Label(self.top, bd=0, highlightthickness=0, padx=0, pady=0)
+            self._label.place(x=0, y=0, relwidth=1, relheight=1)
+        self._label.configure(image=self._photo)
+        try:
+            self.top.attributes("-alpha", opacity)
+        except Exception:
+            pass
+        self.top.update_idletasks()
+        win = d.create_resource_object("window", self.hwnd)
+        win.shape_rectangles(shape.SO.Set, shape.SK.Bounding, X.Unsorted, 0, 0, rects)
+        if self._click_through:
+            win.shape_rectangles(shape.SO.Set, shape.SK.Input, X.Unsorted, 0, 0, [])
+        d.flush()
+        self._painted = True
+
     def move(self, x: int, y: int) -> None:
         if (int(x), int(y)) == (self.x, self.y):
             return
@@ -647,6 +755,8 @@ class LayeredWindow:
 
     def raise_(self) -> None:
         """To the top of the topmost band. Call for the dim, then the ring, then the card."""
+        if platform_info.IS_LINUX:
+            self.top.lift()
         if sys.platform == "win32":
             _user32().SetWindowPos(self.hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_SHOWWINDOW)
 

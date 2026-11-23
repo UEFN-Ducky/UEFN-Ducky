@@ -12,6 +12,11 @@ to match the in-app Show me popup.
 keyboard hook (``SetWindowsHookEx WH_KEYBOARD_LL``) would, if that ever matters.
 ``ponytail:`` corner pinning is wrong for a panel in the middle of a resized
 layout. Re-capture and re-aim on resize when that shows up.
+
+Linux X11: the same three windows are Tk override-redirect windows, shaped with
+XShape (``window_spotlight_paint``); windows, pointer, keys and monitors come from
+python-xlib. Wayland lets no app draw over other apps or read the pointer, so the
+desktop spotlight says so and the in-app spotlight (our own window) is the only one.
 """
 
 from __future__ import annotations
@@ -22,6 +27,8 @@ import re
 import sys
 import threading
 from typing import Any
+
+from frontend import platform_info
 
 _DIM_ALPHA = 140  # rgba(0, 0, 0, 0.55), same as the in-app spotlight
 _GAP = 12
@@ -34,6 +41,15 @@ _loop_lock = threading.Lock()
 _loop_ready = threading.Event()
 _loop_root: Any = None
 _loop_started = False
+
+WAYLAND_NOTE = (
+    "Wayland does not let an app draw over other apps' windows, so the desktop spotlight "
+    "is off here. Ducky can only highlight controls inside its own window."
+)
+
+
+def _wayland() -> bool:
+    return platform_info.IS_LINUX and platform_info.session_type() != "x11"
 
 
 def bind_root(root: Any) -> None:
@@ -196,6 +212,8 @@ def prepare_window_show(steps: list[dict[str, Any]], default_window: str = "uefn
     """Resolve the window, pin each box, and screenshot the first box for the agent."""
     if not steps:
         return {"error": "nothing to show"}
+    if _wayland():
+        return {"error": WAYLAND_NOTE, "reason": "wayland"}
     cache: dict[str, dict[str, Any]] = {}
     prepared: list[dict[str, Any]] = []
     for step in steps:
@@ -266,7 +284,10 @@ def begin_window_show(request_id: str, params: dict[str, Any]) -> None:
     """Show the overlay on its Tk thread. Answers ``request_id`` when up, or on close if ``wait``."""
     from frontend.ui_web import ui_rpc
 
-    if sys.platform != "win32":
+    if _wayland():
+        ui_rpc.respond(request_id, {"ok": False, "error": WAYLAND_NOTE, "reason": "wayland"})
+        return
+    if sys.platform != "win32" and not platform_info.IS_LINUX:
         ui_rpc.respond(request_id, {"ok": False, "error": "desktop spotlight needs the Windows app"})
         return
     try:
@@ -297,9 +318,15 @@ def _largest(wins: list[dict[str, Any]]) -> dict[str, Any]:
     return max(unowned, key=area)
 
 
-def _window_info(hwnd: int) -> dict[str, Any]:
-    from frontend.window_view import _window_box
+def _window_box(hwnd: int) -> tuple[int, int, int, int] | None:
+    if platform_info.IS_LINUX:
+        return _x11_box(hwnd)
+    from frontend.window_view import _window_box as win_box
 
+    return win_box(hwnd)
+
+
+def _window_info(hwnd: int) -> dict[str, Any]:
     box = _window_box(int(hwnd))
     if not box:
         return {"ok": False, "error": f"window {hwnd} is not visible"}
@@ -321,6 +348,8 @@ def _window_info(hwnd: int) -> dict[str, Any]:
 
 
 def _window_title(hwnd: int) -> str:
+    if platform_info.IS_LINUX:
+        return _x11_title(hwnd)
     user32 = ctypes.windll.user32
     length = int(user32.GetWindowTextLengthW(hwnd) or 0)
     buf = ctypes.create_unicode_buffer(length + 1)
@@ -329,8 +358,14 @@ def _window_title(hwnd: int) -> str:
 
 
 def _list_top_windows() -> list[dict[str, Any]]:
-    from frontend.window_view import _window_box
+    if platform_info.IS_LINUX:
+        from frontend.native_capture import x11_windows
 
+        return [
+            {"hwnd": row["xid"], "title": row["title"], "owned": bool(row["transient_for"]), "rect": row["rect"]}
+            for row in x11_windows()
+            if row.get("title")
+        ]
     user32 = ctypes.windll.user32
     rows: list[dict[str, Any]] = []
 
@@ -371,8 +406,6 @@ def _list_top_windows() -> list[dict[str, Any]]:
 
 def _annotate(hwnd: int, box: dict[str, float]) -> dict[str, Any]:
     """Screenshot the window with the box drawn, so the agent can check its aim."""
-    from frontend.window_view import _window_box
-
     rect = _window_box(int(hwnd))
     if not rect:
         return {"capture_error": "window is not visible"}
@@ -421,6 +454,9 @@ def _emit(trigger_id: str, payload: dict[str, Any]) -> None:
 
 
 def _virtual_origin() -> tuple[int, int, int, int]:
+    if platform_info.IS_LINUX:
+        screen = _xd().screen()
+        return 0, 0, int(screen.width_in_pixels), int(screen.height_in_pixels)
     if sys.platform != "win32":
         return 0, 0, 1920, 1080
     user32 = ctypes.windll.user32
@@ -431,6 +467,8 @@ def _monitor_of(x: int, y: int) -> tuple[int, int, int, int]:
     """Monitor rectangle containing a point. Falls back to the virtual screen."""
     left, top, width, height = _virtual_origin()
     fallback = (left, top, left + width, top + height)
+    if platform_info.IS_LINUX:
+        return monitor_containing(_x11_monitors(), x, y, fallback)
     try:
         from ctypes import wintypes
 
@@ -470,11 +508,16 @@ def _monitor_of(x: int, y: int) -> tuple[int, int, int, int]:
 
 
 def _key_down(vk: int) -> bool:
+    if platform_info.IS_LINUX:
+        return _x11_down(vk)
     return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
 
 
 def _button_state(vk: int = 0x01) -> tuple[bool, bool]:
     """(held now, pressed at any moment since the previous call) for a mouse button."""
+    if platform_info.IS_LINUX:
+        # ponytail: X11 has no "pressed since"; a click shorter than one 50 ms poll can be missed.
+        return _x11_down(vk), False
     state = int(ctypes.windll.user32.GetAsyncKeyState(vk))
     return bool(state & 0x8000), bool(state & 0x0001)
 
@@ -497,12 +540,94 @@ def click_in_hole(armed: bool, was_down: bool, down: bool, pressed_since: bool, 
 
 
 def _cursor() -> tuple[int, int]:
+    if platform_info.IS_LINUX:
+        ptr = _xd().screen().root.query_pointer()
+        return int(ptr.root_x), int(ptr.root_y)
+
     class _POINT(ctypes.Structure):
         _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
     pt = _POINT()
     ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
     return int(pt.x), int(pt.y)
+
+
+# ---- Linux X11 -------------------------------------------------------------------
+
+_x_disp: Any = None
+_x_lock = threading.Lock()
+_VK_ESCAPE = 0x1B
+_VK_BUTTONS = {0x01: 1, 0x02: 3, 0x04: 2}  # VK_LBUTTON / RBUTTON / MBUTTON -> X button
+
+
+def _xd() -> Any:
+    """One shared Xlib connection (python-xlib serialises requests itself)."""
+    global _x_disp
+    with _x_lock:
+        if _x_disp is None:
+            from Xlib import display
+
+            _x_disp = display.Display()
+        return _x_disp
+
+
+def _x11_box(xid: int) -> tuple[int, int, int, int] | None:
+    from Xlib import X
+
+    d = _xd()
+    try:
+        win = d.create_resource_object("window", int(xid))
+        if win.get_attributes().map_state != X.IsViewable:
+            return None
+        geo = win.get_geometry()
+        pos = d.screen().root.translate_coords(win, 0, 0)
+    except Exception:
+        return None
+    return int(pos.x), int(pos.y), int(pos.x + geo.width), int(pos.y + geo.height)
+
+
+def _x11_title(xid: int) -> str:
+    d = _xd()
+    try:
+        win = d.create_resource_object("window", int(xid))
+        name = win.get_full_property(d.intern_atom("_NET_WM_NAME"), d.intern_atom("UTF8_STRING"))
+        return name.value.decode("utf-8", "replace") if name else str(win.get_wm_name() or "")
+    except Exception:
+        return ""
+
+
+def _x11_monitors() -> list[tuple[int, int, int, int]]:
+    """RandR monitors as (left, top, right, bottom); [] when RandR is missing."""
+    try:
+        reply = _xd().screen().root.xrandr_get_monitors()
+        return [(m.x, m.y, m.x + m.width_in_pixels, m.y + m.height_in_pixels) for m in reply.monitors]
+    except Exception:
+        return []
+
+
+def monitor_containing(
+    monitors: list[tuple[int, int, int, int]], x: int, y: int, fallback: tuple[int, int, int, int]
+) -> tuple[int, int, int, int]:
+    for left, top, right, bottom in monitors:
+        if left <= x < right and top <= y < bottom:
+            return left, top, right, bottom
+    return fallback
+
+
+def _x11_down(vk: int) -> bool:
+    """A mouse button (from the pointer mask) or Esc (from the keymap) held right now."""
+    from Xlib import X, XK
+
+    d = _xd()
+    if vk == _VK_ESCAPE:
+        code = d.keysym_to_keycode(XK.XK_Escape)
+        keys = d.query_keymap()
+        return bool(code and keys[code // 8] & (1 << (code % 8)))
+    button = _VK_BUTTONS.get(vk)
+    if not button:
+        return False
+    mask = {1: X.Button1Mask, 2: X.Button2Mask, 3: X.Button3Mask}[button]
+    return bool(d.screen().root.query_pointer().mask & mask)
 
 
 class Spotlight:
@@ -596,7 +721,6 @@ class Spotlight:
             self._answer(self._payload(shown=True))
 
     def _layout(self) -> None:
-        from frontend.window_view import _window_box
         from frontend.ui_web.window_spotlight_paint import clear_rect, dpi_scale, render_card, render_dim, render_ring
 
         if self.dim is None or self.ring is None or self.card is None:

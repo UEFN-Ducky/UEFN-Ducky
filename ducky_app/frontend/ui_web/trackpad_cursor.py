@@ -7,6 +7,10 @@ ponytail: Windows draws the real cursor above every window, so the small arrow s
 at the tip. Hiding it takes SetSystemCursor, which is system-wide and survives a crash.
 ponytail: frames are drawn once at the first monitor's scale; re-render on a DPI change if a
 mixed-scale setup looks wrong.
+
+Linux X11: the same click-through window, an override-redirect Tk window shaped with XShape
+(``window_spotlight_paint.LayeredWindow``). Wayland lets no app draw over other apps or read
+the pointer, so there the system cursor is all the user sees (logged once).
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ import time
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter
+
+from frontend import platform_info
 
 log = logging.getLogger(__name__)
 
@@ -139,6 +145,11 @@ def load_duck() -> Image.Image | None:
 
 
 def _cursor_pos() -> tuple[int, int]:
+    if platform_info.IS_LINUX:
+        from frontend.ui_web.window_spotlight import _cursor
+
+        return _cursor()
+
     class Point(ctypes.Structure):
         _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
@@ -229,10 +240,25 @@ def _start() -> None:
         _give_up("no overlay loop")
 
 
+def _linux_ok() -> bool:
+    """X11 draws the pointer; Wayland can't (said once in the log, then quiet)."""
+    global _failed
+    if platform_info.session_type() == "x11":
+        return True
+    _failed = True
+    log.info("trackpad pointer off: Wayland does not let an app draw over other windows")
+    return False
+
+
 def nudge() -> None:
     """The trackpad just moved the mouse. Cheap: called for every move, on the input thread."""
     global _last_move, _running
-    if sys.platform != "win32" or _failed:
+    if _failed:
+        return
+    if platform_info.IS_LINUX:
+        if not _linux_ok():
+            return
+    elif sys.platform != "win32":
         return
     _last_move = time.monotonic()
     with _lock:

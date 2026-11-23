@@ -148,3 +148,133 @@ def test_a_click_on_the_highlight_advances_even_when_it_fits_between_two_polls()
     # Nothing pressed: nothing happens.
     assert click_in_hole(False, False, False, False, True) == (False, False)
 
+
+# ---- Linux ---------------------------------------------------------------------
+
+import os
+import sys
+
+import pytest
+
+
+def test_alpha_rects_cover_exactly_the_visible_pixels_in_few_rectangles():
+    from PIL import Image
+
+    from frontend.ui_web.window_spotlight_paint import alpha_rects, render_dim
+
+    dim = render_dim(400, 300, (100, 80, 60, 40), 12)
+    rects = alpha_rects(dim.getchannel("A"), 70)
+    assert len(rects) < 120  # identical rows merge; the hole's round corners add a few
+    covered = Image.new("L", dim.size, 0)
+    for x, y, w, h in rects:
+        covered.paste(255, (x, y, x + w, y + h))
+    want = dim.getchannel("A").point(lambda a: 255 if a >= 70 else 0)
+    assert covered.tobytes() == want.tobytes()
+    assert covered.getpixel((130, 100)) == 0 and covered.getpixel((5, 5)) == 255
+    assert alpha_rects(Image.new("L", (8, 8), 0), 1) == []
+
+
+def test_x11_layer_opacity_and_no_blackout_without_a_compositor():
+    from frontend.ui_web.window_spotlight_paint import render_card, render_dim, x11_layer, CardState
+
+    dim = render_dim(200, 100, (50, 30, 40, 20), 8)
+    _rgb, opacity, rects = x11_layer(dim, composited=True)
+    assert abs(opacity - 140 / 255) < 0.01 and rects
+    assert x11_layer(dim, composited=False)[2] == []  # never a black screen
+    card = render_card(CardState(title="Settings", body="Open it here", index=0, total=1)).image
+    _rgb, opacity, rects = x11_layer(card, composited=False)
+    assert opacity == 1.0 and rects  # the card shows with or without a compositor
+
+
+def test_monitor_containing_picks_the_screen_under_the_point():
+    from frontend.ui_web.window_spotlight import monitor_containing
+
+    mons = [(0, 0, 1920, 1080), (1920, 0, 3840, 1440)]
+    assert monitor_containing(mons, 2000, 50, (0, 0, 1, 1)) == (1920, 0, 3840, 1440)
+    assert monitor_containing(mons, -5, 50, (0, 0, 1, 1)) == (0, 0, 1, 1)
+
+
+def test_wayland_says_the_desktop_spotlight_is_in_app_only(monkeypatch):
+    from frontend.ui_web import ui_rpc
+    from frontend.ui_web import window_spotlight as ws
+
+    monkeypatch.setattr(ws.platform_info, "IS_LINUX", True)
+    monkeypatch.setattr(ws.platform_info, "session_type", lambda: "wayland")
+    out = ws.prepare_window_show([{"box": {"x": 0, "y": 0, "w": 0.1, "h": 0.1}}])
+    assert out["reason"] == "wayland" and "own window" in out["error"]
+    answers: list = []
+    monkeypatch.setattr(ui_rpc, "respond", lambda rid, payload: answers.append((rid, payload)))
+    ws.begin_window_show("r1", {"steps": []})
+    assert answers == [("r1", {"ok": False, "error": ws.WAYLAND_NOTE, "reason": "wayland"})]
+
+
+def _x11_tk_ready() -> bool:
+    if not sys.platform.startswith("linux") or not os.environ.get("DISPLAY"):
+        return False
+    try:
+        import tkinter  # noqa: F401
+
+        import Xlib  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _x11_tk_ready(), reason="needs Linux X11 (xvfb), tkinter and python-xlib")
+def test_x11_overlay_window_is_shaped_click_through_and_on_top():
+    import tkinter as tk
+
+    from PIL import Image
+    from Xlib.ext import shape
+
+    from frontend.ui_web import window_spotlight as ws
+    from frontend.ui_web.window_spotlight_paint import LayeredWindow
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        ring = LayeredWindow(root, click_through=True)
+        image = Image.new("RGBA", (60, 40), (0, 0, 0, 0))
+        image.paste((76, 141, 255, 255), (10, 10, 50, 30))
+        ring.paint(image, 30, 20)
+        ring.show(True)
+        ring.raise_()
+        root.update()
+        d = ws._xd()
+        win = d.create_resource_object("window", ring.hwnd)
+        assert win.get_attributes().override_redirect
+        bounding = win.shape_get_rectangles(shape.SK.Bounding).rectangles
+        assert [(r.x, r.y, r.width, r.height) for r in bounding] == [(10, 10, 40, 20)]
+        assert win.shape_get_rectangles(shape.SK.Input).rectangles == []
+        assert ws._window_box(ring.hwnd) == (30, 20, 90, 60)
+        ring.destroy()
+    finally:
+        root.destroy()
+
+
+@pytest.mark.skipif(not _x11_tk_ready(), reason="needs Linux X11 (xvfb), tkinter and python-xlib")
+def test_x11_pointer_button_and_escape_reads():
+    from Xlib import X, XK
+    from Xlib.ext import xtest
+
+    from frontend.ui_web import window_spotlight as ws
+
+    d = ws._xd()
+    d.screen().root.warp_pointer(123, 45)
+    d.sync()
+    assert ws._cursor() == (123, 45)
+    assert ws._key_down(0x01) is False
+    xtest.fake_input(d, X.ButtonPress, 1)
+    d.sync()
+    assert ws._key_down(0x01) is True and ws._button_state(0x01) == (True, False)
+    xtest.fake_input(d, X.ButtonRelease, 1)
+    esc = d.keysym_to_keycode(XK.XK_Escape)
+    xtest.fake_input(d, X.KeyPress, esc)
+    d.sync()
+    assert ws._key_down(0x1B) is True
+    xtest.fake_input(d, X.KeyRelease, esc)
+    d.sync()
+    assert ws._key_down(0x1B) is False
+    left, top, right, bottom = ws._monitor_of(10, 10)
+    assert (left, top) == (0, 0) and right > 0 and bottom > 0
+

@@ -63,11 +63,35 @@ def test_nudge_starts_one_animation_and_only_on_windows(monkeypatch) -> None:
     monkeypatch.setattr(tc.threading, "Thread", FakeThread)
     monkeypatch.setattr(tc, "_running", False)
     monkeypatch.setattr(tc, "_failed", False)
-    monkeypatch.setattr(tc.sys, "platform", "linux")
+    monkeypatch.setattr(tc.platform_info, "IS_LINUX", False)
+    monkeypatch.setattr(tc.sys, "platform", "darwin")
     tc.nudge()
     assert started == []
     monkeypatch.setattr(tc.sys, "platform", "win32")
     tc.nudge()
+    tc.nudge()
+    assert started == [1]
+
+
+def test_nudge_on_linux_x11_draws_and_wayland_says_no(monkeypatch) -> None:
+    started: list[object] = []
+
+    class FakeThread:
+        def __init__(self, **_kw) -> None:
+            pass
+
+        def start(self) -> None:
+            started.append(1)
+
+    monkeypatch.setattr(tc.threading, "Thread", FakeThread)
+    monkeypatch.setattr(tc.platform_info, "IS_LINUX", True)
+    monkeypatch.setattr(tc, "_running", False)
+    monkeypatch.setattr(tc, "_failed", False)
+    monkeypatch.setattr(tc.platform_info, "session_type", lambda: "wayland")
+    tc.nudge()
+    assert started == [] and tc._failed is True  # off for the session, logged once
+    monkeypatch.setattr(tc, "_failed", False)
+    monkeypatch.setattr(tc.platform_info, "session_type", lambda: "x11")
     tc.nudge()
     assert started == [1]
 
