@@ -1277,6 +1277,13 @@ def request_stop() -> None:
     _stop.set()
     sock = _listen_sock
     if sock is not None:
+        if sys.platform != "win32":
+            # Linux: close() from another thread leaves a blocked accept() listening (and
+            # taking connections nobody answers) until it returns; shutdown wakes it now.
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         try:
             sock.close()
         except OSError:

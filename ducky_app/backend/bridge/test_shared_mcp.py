@@ -713,6 +713,10 @@ class _FrameDaemon:
             return
 
     def kill(self) -> None:
+        try:
+            self.listen.shutdown(socket.SHUT_RDWR)  # Linux: wakes the blocked accept()
+        except OSError:
+            pass
         self.listen.close()
         for conn in self.conns:
             try:
