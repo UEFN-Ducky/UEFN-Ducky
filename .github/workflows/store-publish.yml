@@ -365,7 +365,8 @@ jobs:
 
   # After the release is live: the AUR package and the Flathub manifest point at the new
   # AppImages (uefnducky.org/downloads/linux/…) with their sha256. A dry run prints both
-  # diffs and pushes nothing; a release without AUR_SSH_PRIVATE_KEY / FLATHUB_TOKEN skips that one.
+  # diffs and pushes nothing; a release without AUR_SSH_PRIVATE_KEY / FLATHUB_TOKEN skips that
+  # one with a warning before doing any work, so missing accounts never fail the release.
   linux-bumps:
     name: AUR + Flathub bumps
     needs: [publish]
@@ -396,6 +397,7 @@ jobs:
 
       - name: AUR (uefn-ducky-bin)
         run: |
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ] && [ "$DRY_RUN" != "true" ]; then echo "::warning::no AUR_SSH_PRIVATE_KEY secret: AUR not bumped"; exit 0; fi
           out="$RUNNER_TEMP/aur"
           mkdir -p "$out"
           for f in PKGBUILD .SRCINFO; do
@@ -411,7 +413,6 @@ jobs:
           done
           grep -q "pkgver = $VERSION" "$out/.SRCINFO" && grep -q "$SHA_X86_64" "$out/.SRCINFO"
           if [ "$DRY_RUN" = "true" ]; then echo "dry run: AUR not pushed"; exit 0; fi
-          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then echo "::warning::no AUR_SSH_PRIVATE_KEY: AUR not bumped"; exit 0; fi
           install -m700 -d ~/.ssh
           printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
@@ -426,6 +427,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
         run: |
+          if [ -z "$FLATHUB_TOKEN" ] && [ "$DRY_RUN" != "true" ]; then echo "::warning::no FLATHUB_TOKEN secret: Flathub not bumped"; exit 0; fi
           python -m pip install pyyaml
           out="$RUNNER_TEMP/flathub"
           mkdir -p "$out"
@@ -461,7 +463,6 @@ jobs:
           PY
           diff -u "$RUNNER_TEMP/flathub-before.yml" "$out/online.uefnducky.Ducky.yml" || true
           if [ "$DRY_RUN" = "true" ]; then echo "dry run: Flathub PR not opened"; exit 0; fi
-          if [ -z "$FLATHUB_TOKEN" ]; then echo "::warning::no FLATHUB_TOKEN: Flathub not bumped"; exit 0; fi
           cd "$out"
           git checkout -b "update-$VERSION"
           git add -A
