@@ -13,6 +13,12 @@ from backend.bridge import editor_presence, plugin_gate
 
 NAMES = ["workspace_read_file", "ducky_launch_uefn", "web_search", "uefn_popups", "spawn_actor", "unreal__call_tool"]
 UEFN_ONLY = {"uefn_popups", "spawn_actor", "unreal__call_tool"}
+_NO_ROUTE = plugin_gate._no_uefn_route  # conftest turns it off for the other bridge tests
+
+
+@pytest.fixture(autouse=True)
+def _route_filter_on(monkeypatch):
+    monkeypatch.setattr(plugin_gate, "_no_uefn_route", _NO_ROUTE)
 
 
 @pytest.fixture
