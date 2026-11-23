@@ -28,6 +28,7 @@ def peer(monkeypatch):
         return {"ok": True, "result": f"{args['op']} done"}
 
     monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv(editor_presence.ROUTE_ENV, raising=False)  # conftest pins it to local
     monkeypatch.setattr(editor_presence, "uefn_running", lambda: False)
     monkeypatch.setattr(editor_presence, "proton_uefn", lambda: False)
     monkeypatch.setattr(ducky_link, "list_duckies", lambda: {"ok": True, "devices": [{"keyId": "me", "mine": True, "live": True}, PC]})

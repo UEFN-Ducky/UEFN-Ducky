@@ -1,14 +1,12 @@
 """Bridge tests list their own fake tools (``ping``...): off Windows, the no-UEFN-route
-filter (plugin_gate) would hide them and ask the account for linked PCs. It stays off
-here; test_tools_list_routes turns it back on."""
+filter (plugin_gate) would hide them and ask the account for linked PCs. The route is
+pinned to ``local`` for the session (env, so daemons the tests start inherit it and a
+test's ``monkeypatch.undo()`` keeps it); route tests clear it with ``monkeypatch.delenv``."""
 
 from __future__ import annotations
 
-import pytest
+import os
 
+from backend.bridge.editor_presence import ROUTE_ENV
 
-@pytest.fixture(autouse=True)
-def _uefn_route_filter_off(monkeypatch):
-    from backend.bridge import plugin_gate
-
-    monkeypatch.setattr(plugin_gate, "_no_uefn_route", lambda: False)
+os.environ.setdefault(ROUTE_ENV, "local")

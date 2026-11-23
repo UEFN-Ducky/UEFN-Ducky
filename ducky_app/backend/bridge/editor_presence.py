@@ -142,6 +142,10 @@ def forget() -> None:
 # account (a Windows PC) over the sealed link (frontend.ducky_link). Windows runs UEFN
 # itself, so there it is always None and nothing here runs.
 LINK_CACHE_SEC = 30.0
+# Pins :func:`route` (local | proton | remote | none): test sessions and their daemons set it
+# so the route never asks the account or the disk.
+ROUTE_ENV = "UEFN_DUCKY_UEFN_ROUTE"
+_ROUTES = ("local", "proton", "remote", "none")
 _link_lock = threading.Lock()
 _link: dict[str, object] = {}
 
@@ -152,7 +156,7 @@ def linked_pc() -> dict | None:
     ponytail: the first live Ducky of the account that isn't this one; a picker setting if
     an account ever links several Windows PCs.
     """
-    if sys.platform == "win32" or uefn_running():
+    if sys.platform == "win32" or _forced_route() not in ("", "remote") or uefn_running():
         return None
     with _link_lock:
         now = _mono()
@@ -171,6 +175,11 @@ def linked_pc() -> dict | None:
         )
         _link.update(at=now, pc=pc)
         return pc
+
+
+def _forced_route() -> str:
+    forced = (os.environ.get(ROUTE_ENV) or "").strip().lower()
+    return forced if forced in _ROUTES else ""
 
 
 def proton_uefn() -> bool:
@@ -196,7 +205,12 @@ def proton_uefn() -> bool:
 def route() -> str:
     """Where editor calls go: ``local`` (UEFN running here, Windows always), ``proton``
     (UEFN installed under Proton here), ``remote`` (a linked PC) or ``none``."""
-    if sys.platform == "win32" or uefn_running():
+    if sys.platform == "win32":
+        return "local"
+    forced = _forced_route()
+    if forced:
+        return forced
+    if uefn_running():
         return "local"
     if proton_uefn():
         return "proton"

@@ -13,12 +13,11 @@ from backend.bridge import editor_presence, plugin_gate
 
 NAMES = ["workspace_read_file", "ducky_launch_uefn", "web_search", "uefn_popups", "spawn_actor", "unreal__call_tool"]
 UEFN_ONLY = {"uefn_popups", "spawn_actor", "unreal__call_tool"}
-_NO_ROUTE = plugin_gate._no_uefn_route  # conftest turns it off for the other bridge tests
 
 
 @pytest.fixture(autouse=True)
-def _route_filter_on(monkeypatch):
-    monkeypatch.setattr(plugin_gate, "_no_uefn_route", _NO_ROUTE)
+def _route_not_pinned(monkeypatch):
+    monkeypatch.delenv(editor_presence.ROUTE_ENV, raising=False)  # conftest pins it to local
 
 
 @pytest.fixture
@@ -67,4 +66,13 @@ def test_route_order_off_windows(monkeypatch) -> None:
     monkeypatch.setattr(editor_presence, "linked_pc", lambda: pytest.fail("Proton comes first"))
     assert editor_presence.route() == "proton"
     monkeypatch.setattr(editor_presence, "uefn_running", lambda: True)
+    assert editor_presence.route() == "local"
+
+
+def test_the_env_pins_the_route_off_windows_only(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(editor_presence, "uefn_running", lambda: pytest.fail("pinned"))
+    monkeypatch.setenv(editor_presence.ROUTE_ENV, "none")
+    assert editor_presence.route() == "none" and editor_presence.linked_pc() is None
+    monkeypatch.setattr(sys, "platform", "win32")
     assert editor_presence.route() == "local"
