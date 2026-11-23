@@ -117,6 +117,7 @@ def test_a_negative_windows_exit_code_still_counts_as_done():
     assert match and match.group(1) == "ab12cd34" and int(match.group(2)) == -1073741819
 
 
+@pytest.mark.windows_only("Git Bash in ConPTY submits with \\r\\n; Linux bash takes \\n")
 def test_bash_commands_print_a_begin_mark_the_echo_cannot_spell():
     session = TerminalSession(shell="bash", cwd=".")
     session._wrap_agent_command("pwd", background=False)
@@ -138,6 +139,7 @@ def test_every_run_gets_its_own_tag():
     assert f'"BEGIN_{tag}"' in first and f"__DUCKY_DONE_{tag}__" in first and tag not in second
 
 
+@pytest.mark.windows_only("Git for Windows' winpty aliases")
 def test_the_first_bash_command_drops_gits_winpty_aliases_once():
     # Oct 31 2026: Git's aliases.sh ran node through winpty, which never exits in a ConPTY
     # terminal, and every agent `node ...` waited out its whole timeout.
@@ -149,6 +151,7 @@ def test_the_first_bash_command_drops_gits_winpty_aliases_once():
     assert not _wrapped("node -v").startswith("for __d")
 
 
+@pytest.mark.windows_only("Git Bash in ConPTY submits with \\r\\n; Linux bash takes \\n")
 def test_a_bash_comment_or_bang_stays_inside_the_command():
     session = TerminalSession(shell="bash", cwd=".")
     wrapped = session._wrap_agent_command('git commit -m "fix!"  # done', background=False)

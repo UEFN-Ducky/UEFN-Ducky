@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import frontend.ui_web.project_files as pf
 
 
+@pytest.mark.windows_only("Windows paths are case-insensitive; Linux paths are not")
 def test_is_path_under_case_insensitive_on_windows(tmp_path: Path, monkeypatch):
     ancestor = tmp_path / "Digests" / "BuiltIn"
     ancestor.mkdir(parents=True)
@@ -19,6 +22,7 @@ def test_is_path_under_case_insensitive_on_windows(tmp_path: Path, monkeypatch):
     assert pf._is_path_under(lower_child, ancestor)  # noqa: SLF001
 
 
+@pytest.mark.windows_only("Windows paths are case-insensitive; Linux paths are not")
 def test_decode_abs_digest_survives_builtin_casing(tmp_path: Path, monkeypatch):
     project = tmp_path / "Island"
     content = project / "Content"

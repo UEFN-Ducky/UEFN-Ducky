@@ -61,7 +61,7 @@ jobs:
           npm ci --prefix ducky_app/frontend/ui_web/web
 
       - name: pytest
-        run: xvfb-run -a python -m pytest ducky_app -q -rs -n auto -p no:cacheprovider
+        run: xvfb-run -a python -m pytest ducky_app -q -rfEs -n auto -p no:cacheprovider
 
       # CI has no UEFN: the Verse editor's grammar imports get empty stand-ins (as in windows-tests).
       - name: Verse language stand-ins
