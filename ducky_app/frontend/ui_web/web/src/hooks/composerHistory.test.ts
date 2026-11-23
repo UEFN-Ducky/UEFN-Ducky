@@ -5,6 +5,7 @@ import {
   composerHistoryKey,
   recordComposer,
   redoComposer,
+  superIsOsKey,
   undoComposer,
 } from "./composerHistory";
 
@@ -82,7 +83,8 @@ describe("composer history", () => {
       composerHistoryKey({ key, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...mods });
     expect(k("z", { ctrlKey: true })).toBe("undo");
     expect(k("Z", { ctrlKey: true, shiftKey: true })).toBe("redo");
-    expect(k("y", { metaKey: true })).toBe("redo");
+    // Linux: Super belongs to the desktop, so Super+Y is not ours there.
+    expect(k("y", { metaKey: true })).toBe(superIsOsKey() ? null : "redo");
     expect(k("z")).toBeNull();
     expect(k("z", { ctrlKey: true, altKey: true })).toBeNull();
     expect(k("a", { ctrlKey: true })).toBeNull();
