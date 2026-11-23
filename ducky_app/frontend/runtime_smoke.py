@@ -121,9 +121,11 @@ def _check_gtk_window() -> dict:
     }
 
 
-def _start_real_window(timeout: float = 30.0, webview_mod=None) -> float:
+def _start_real_window(timeout: float = 60.0, webview_mod=None) -> float:
     """The real start: ``webview.start(gui="gtk", icon=<the app's icon>)`` until the page
-    loads. A .ico icon made GTK create no window, which an unshown WebView never sees."""
+    loads. A .ico icon made GTK create no window, which an unshown WebView never sees.
+    Clean containers load in ~0.2 s; CI runners without a session bus wait out one 25 s
+    D-Bus timeout first, hence the margin."""
     import threading
 
     from frontend.ui_web.webview_app import webview_icon_path
