@@ -156,7 +156,13 @@ class _BigGrabber:
         pass
 
 
-def _stream(monkeypatch, ui, secs, during=None):
+def _frames(core):
+    return [m for m in core.messages if m["type"] == "native-frame"]
+
+
+def _stream(monkeypatch, ui, secs, during=None, until=None):
+    """Stream the desktop, then stop: after ``secs``, or once ``until(core, view)`` holds (15 s at
+    most), so a loaded runner gets the frames it needs instead of a fixed time slice."""
     core = _FakeCore()
     bridge.register(core, object())
     monkeypatch.setattr(bridge, "_on_ui", ui.on_ui)
@@ -165,8 +171,13 @@ def _stream(monkeypatch, ui, secs, during=None):
     assert bridge.start("desktop", 60, rect_fn=lambda: (0, 0, 3840, 1080))["ok"]
     if during:
         during()
-    time.sleep(secs)
     v = bridge._views["desktop"]
+    if until is None:
+        time.sleep(secs)
+    else:
+        deadline = time.monotonic() + 15.0
+        while not until(core, v) and time.monotonic() < deadline:
+            time.sleep(0.02)
     t0 = time.perf_counter()
     assert bridge.stop("desktop") is True
     return core, v, time.perf_counter() - t0
@@ -175,10 +186,12 @@ def _stream(monkeypatch, ui, secs, during=None):
 def test_a_60fps_stream_keeps_each_ui_thread_turn_under_2ms(monkeypatch):
     ui = _FakeUi()
     try:
-        core, v, _ = _stream(monkeypatch, ui, 1.5)
+        # Count frames, not seconds: under -n auto a fixed 1.5 s gave 20 frames (needed > 40).
+        core, v, _ = _stream(monkeypatch, ui, 0.0,
+                             until=lambda c, view: len(_frames(c)) > 40 and view.cap.fps == 60)
     finally:
         ui.close()
-    frames = [m for m in core.messages if m["type"] == "native-frame"]
+    frames = _frames(core)
     assert len(frames) > 40 and v.cap.fps == 60
     costs = sorted(ui.costs)
     assert costs[int(len(costs) * 0.95)] < 0.002  # the UI thread only posts a tiny message
