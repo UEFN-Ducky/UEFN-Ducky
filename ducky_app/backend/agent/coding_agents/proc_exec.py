@@ -120,6 +120,32 @@ def _kill_windows_tree(pid: int) -> None:
     git_lock_cleanup.clean_in_background(repos)
 
 
+def _kill_posix_tree(pid: int) -> None:
+    """Kill the CLI's process group (posix_popen gave it its own session, pgid == pid).
+
+    The shared MCP daemon is spared like on Windows: when it sits in this group, the
+    group's other members are killed one by one instead of with one killpg."""
+    import signal
+
+    from backend.sandbox.jobs import kill_group
+    from backend.util.proc_table import group
+
+    daemon = _shared_daemon_pid()
+    try:
+        daemon_here = bool(daemon) and os.getpgid(daemon) == pid
+    except OSError:
+        daemon_here = False
+    if not daemon_here:
+        kill_group(pid)
+        return
+    for target in group(pid):
+        if target != daemon:
+            try:
+                os.kill(target, signal.SIGKILL)
+            except OSError:
+                pass
+
+
 def _terminate_process_tree(proc: subprocess.Popen) -> None:
     """Cancel this owned CLI tree before killing its parent on Windows.
 
@@ -131,6 +157,8 @@ def _terminate_process_tree(proc: subprocess.Popen) -> None:
         return
     if os.name == "nt":
         _kill_windows_tree(int(proc.pid))
+    else:
+        _kill_posix_tree(int(proc.pid))
     if proc.poll() is None:
         proc.kill()
 
@@ -351,7 +379,13 @@ def run_streaming_process(
             kwargs["creationflags"] |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
     try:
-        proc = subprocess.Popen(argv, **kwargs)
+        if os.name == "nt":
+            proc = subprocess.Popen(argv, **kwargs)
+        else:
+            from backend.sandbox.jobs import posix_popen
+
+            # Own session + dies with Ducky; Stop kills the group (_kill_posix_tree).
+            proc = posix_popen(argv, **kwargs)
     except OSError as exc:
         # WinError 206 / errno-equivalent: command line or env still too long.
         win = getattr(exc, "winerror", None)

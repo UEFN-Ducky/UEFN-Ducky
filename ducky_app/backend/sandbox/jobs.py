@@ -4,17 +4,20 @@ The program starts suspended, joins the job, then resumes, so nothing it starts 
 out of the job first. Stopping the job ends the whole tree; the job is also set to kill
 everything in it when its last handle closes, which happens when Ducky's process ends.
 A memory cap on the job stops a runaway program instead of letting it fill the PC.
-Off Windows the program gets its own process group instead.
+Off Windows the program gets its own session (process group = its pid) instead: stopping kills
+the group, PR_SET_PDEATHSIG (Linux) ends it with Ducky, and RLIMIT_AS caps its memory.
 """
 
 from __future__ import annotations
 
 import ctypes
 import os
+import signal
 import subprocess
 import sys
 import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +38,76 @@ _PROCESS_SET_QUOTA_AND_TERMINATE = 0x0100 | 0x0001
 # (frontend.ui_web.terminal.resource_guard.rebalance), so together they leave room for UEFN.
 _shared: "weakref.WeakSet[_Job]" = weakref.WeakSet()
 _shared_lock = threading.Lock()
+_PR_SET_PDEATHSIG = 1
+_spawn_pool: ThreadPoolExecutor | None = None
+_spawn_lock = threading.Lock()
+
+
+def _prctl() -> Any:
+    """libc prctl, resolved in the parent (never in a forked child). None off Linux."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        fn = ctypes.CDLL(None, use_errno=True).prctl
+        fn.argtypes = (ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong)
+        fn.restype = ctypes.c_int
+        return fn
+    except (OSError, AttributeError):
+        return None
+
+
+def _posix_preexec(memory_mb: int, below_normal: bool) -> Any:
+    """The child-side setup: die with Ducky, cap memory, lower priority. Runs after fork, so it
+    only calls what the parent already resolved and never raises."""
+    prctl = _prctl()
+    parent = os.getpid()
+    cap = max(0, int(memory_mb)) * 1024 * 1024
+
+    def run() -> None:
+        if prctl is not None:
+            prctl(_PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0)
+            if os.getppid() != parent:  # Ducky died before prctl took hold
+                os._exit(1)
+        if cap:
+            import resource
+
+            # ponytail: RLIMIT_AS is per process and counts virtual memory, not the tree's RSS like
+            # a job's cap; a cgroup (systemd-run --user --scope -p MemoryMax) if that falls short.
+            try:
+                resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+            except (ValueError, OSError):
+                pass
+        if below_normal:
+            try:
+                os.nice(10)
+            except OSError:
+                pass
+
+    return run
+
+
+def posix_popen(argv: list[str], *, memory_mb: int = 0, below_normal: bool = False, **kwargs: Any) -> subprocess.Popen:
+    """Popen off Windows: own session (so os.killpg(pid) ends the whole tree), killed when Ducky
+    dies, memory capped at memory_mb (0: none).
+
+    PR_SET_PDEATHSIG fires when the *thread* that forked exits, not the process, so every child
+    is forked from one long-lived spawner thread instead of the caller's (often short) thread."""
+    global _spawn_pool
+    kwargs["start_new_session"] = True
+    kwargs["preexec_fn"] = _posix_preexec(memory_mb, below_normal)
+    with _spawn_lock:
+        if _spawn_pool is None:
+            _spawn_pool = ThreadPoolExecutor(1, thread_name_prefix="posix-spawn")
+    return _spawn_pool.submit(subprocess.Popen, argv, **kwargs).result()
+
+
+def kill_group(pgid: int, sig: int = 0) -> bool:
+    """Signal a POSIX process group (default SIGKILL). False when it is already gone."""
+    try:
+        os.killpg(int(pgid), sig or signal.SIGKILL)  # type: ignore[attr-defined]
+        return True
+    except (OSError, AttributeError):
+        return False
 
 
 def share_budget(job: "_Job") -> None:
@@ -62,6 +135,8 @@ class _Job:
         self.handle: int = 0
         self.memory_mb = max(0, int(memory_mb))
         self._below_normal = bool(below_normal)
+        self._track_only = bool(track_only)
+        self.pgid = 0  # off Windows: the process group assign() took in
         # The most the shared budget may give it (0: no ceiling).
         self.ceiling_mb = 0
         if not _WIN:
@@ -88,6 +163,19 @@ class _Job:
         """Change the job's memory cap while its processes run (other limits stay). Lowered
         below what they hold, their next allocations are refused; nothing is killed."""
         mb = max(1, int(mb))
+        if sys.platform.startswith("linux") and self.pgid:
+            import resource
+
+            cap = mb * 1024 * 1024
+            done = False
+            for pid in self.pids():
+                try:  # ponytail: raising past a lowered hard limit needs CAP_SYS_RESOURCE
+                    resource.prlimit(pid, resource.RLIMIT_AS, (cap, cap))
+                    done = True
+                except (OSError, ValueError):
+                    pass
+            self.memory_mb = mb
+            return done
         if not self.handle:
             self.memory_mb = mb
             return False
@@ -104,6 +192,13 @@ class _Job:
 
     def set_idle(self, idle: bool) -> bool:
         """Run the job's processes at idle priority (True) or back at what it was made with."""
+        if not _WIN and self.pgid:
+            # Back from idle (nice 19) needs CAP_SYS_NICE, so unprivileged that part returns False.
+            try:
+                os.setpriority(os.PRIO_PGRP, self.pgid, 19 if idle else (10 if self._below_normal else 0))
+                return True
+            except OSError:
+                return False
         if not self.handle:
             return False
         info = self._query()
@@ -123,6 +218,9 @@ class _Job:
                                                          ctypes.sizeof(info)))
 
     def assign(self, proc: subprocess.Popen) -> None:
+        if not _WIN:
+            self.pgid = int(proc.pid)  # posix_popen / start_new_session: pgid == pid
+            return
         if self.handle and not _kernel32().AssignProcessToJobObject(self.handle, int(proc._handle)):  # type: ignore[attr-defined]
             raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject failed")
 
@@ -141,6 +239,10 @@ class _Job:
 
     def pids(self) -> list[int]:
         """Every process in the job right now (the program and what it started)."""
+        if not _WIN and self.pgid:
+            from backend.util.proc_table import group
+
+            return group(self.pgid)
         if not self.handle:
             return []
         from ctypes import wintypes
@@ -177,12 +279,18 @@ class _Job:
         return info
 
     def terminate(self) -> None:
+        if not _WIN and self.pgid:
+            kill_group(self.pgid)
         if self.handle:
             _kernel32().TerminateJobObject(self.handle, 1)
 
     def close(self) -> None:
         with _shared_lock:
             _shared.discard(self)
+        if not _WIN and self.pgid:
+            if not self._track_only:  # what KILL_ON_JOB_CLOSE does on Windows
+                kill_group(self.pgid)
+            self.pgid = 0
         if self.handle:
             _kernel32().CloseHandle(self.handle)
             self.handle = 0
@@ -297,10 +405,16 @@ class Launched:
             flags = _CREATE_SUSPENDED | _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP
         log.parent.mkdir(parents=True, exist_ok=True)
         try:
-            self.proc = subprocess.Popen(
-                argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, creationflags=flags, start_new_session=not _WIN,
-            )
+            if _WIN:
+                self.proc = subprocess.Popen(
+                    argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, creationflags=flags, start_new_session=not _WIN,
+                )
+            else:
+                self.proc = posix_popen(
+                    argv, memory_mb=self.job.memory_mb, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                )
         except Exception:
             self.job.close()
             raise
@@ -326,7 +440,7 @@ class Launched:
         return self.proc.poll() is None
 
     def tree(self) -> list[int]:
-        pids = self.job.pids() if _WIN else []
+        pids = self.job.pids()
         return pids or ([self.pid] if self.alive() else [])
 
     def stop(self, timeout_s: float = 5.0) -> int | None:
@@ -334,15 +448,14 @@ class Launched:
         if _WIN:
             self.job.terminate()
         elif self.alive():
-            try:
-                os.killpg(self.proc.pid, 15)  # type: ignore[attr-defined]
-            except OSError:
-                pass
+            kill_group(self.proc.pid, signal.SIGTERM)
         try:
             code = self.proc.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             self.proc.kill()
             code = self.proc.wait(timeout=timeout_s)
+        if not _WIN:
+            kill_group(self.proc.pid)  # anything left in the group after SIGTERM
         self._pump.join(timeout=timeout_s)
         self.job.close()
         return code

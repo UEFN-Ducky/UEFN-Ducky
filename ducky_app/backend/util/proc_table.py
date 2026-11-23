@@ -97,6 +97,31 @@ def orphan(procs: dict[int, Proc], pid: int) -> bool:
     return parent is None or (parent.started and proc.started and parent.started > proc.started)
 
 
+def group(pgid: int, proc_root: str = "/proc") -> list[int]:
+    """Every live process in POSIX process group ``pgid`` (Linux /proc; [] elsewhere).
+
+    A group keeps a program's whole tree, even children whose parent died and were
+    re-parented to init, which a ppid walk (``tree``) loses."""
+    out: list[int] = []
+    try:
+        names = os.listdir(proc_root)
+    except OSError:
+        return out
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"{proc_root}/{name}/stat", "rb") as fh:
+                stat = fh.read()
+        except OSError:
+            continue
+        # "pid (comm) state ppid pgrp ...": comm may hold spaces and parens, so split after the last ")".
+        fields = stat[stat.rfind(b")") + 2:].split()
+        if len(fields) > 2 and fields[0] != b"Z" and int(fields[2]) == int(pgid):
+            out.append(int(name))
+    return out
+
+
 def _psutil_table() -> dict[int, Proc]:
     import psutil
 
@@ -105,9 +130,12 @@ def _psutil_table() -> dict[int, Proc]:
         info = p.info
         mem = info.get("memory_info")
         times = info.get("cpu_times")
+        rss = int(getattr(mem, "rss", 0) or 0)
+        # Linux has no private bytes; rss - shared is the closest, vms (the old fallback) is GBs of reservations.
+        private = getattr(mem, "private", 0) or (rss - int(mem.shared) if hasattr(mem, "shared") else 0)
         out[p.pid] = Proc(
             p.pid, int(info.get("ppid") or 0), str(info.get("name") or ""),
-            int(getattr(mem, "rss", 0) or 0), int(getattr(mem, "private", 0) or getattr(mem, "vms", 0) or 0),
+            rss, int(private or getattr(mem, "vms", 0) or 0),
             int(info.get("num_threads") or 0), 0,
             float(getattr(times, "user", 0.0) or 0.0) + float(getattr(times, "system", 0.0) or 0.0),
             float(info.get("create_time") or 0.0),
