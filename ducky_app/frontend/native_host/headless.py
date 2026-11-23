@@ -373,7 +373,8 @@ def _bind_notifications(writer: LineWriter) -> None:
 
 
 def _bind_open_handlers(writer: LineWriter) -> None:
-    """A second launch's files and links go to the page's queue (the window shows them)."""
+    """A second launch raises the living window (the launcher's ``show`` event), then its
+    files and links go to the page's queue. A launch with neither still raises it."""
     try:
         from frontend.open_files import (
             enqueue_deep_links,
@@ -382,8 +383,13 @@ def _bind_open_handlers(writer: LineWriter) -> None:
             set_open_files_handler,
         )
 
-        set_open_files_handler(lambda paths: enqueue_open_paths(paths) if paths else None)
-        set_deep_link_handler(lambda links: enqueue_deep_links(links) if links else None)
+        def _open(enqueue: Callable[[list[str]], Any], items: list[str]) -> None:
+            writer.event("show", {})
+            if items:
+                enqueue(items)
+
+        set_open_files_handler(lambda paths: _open(enqueue_open_paths, paths))
+        set_deep_link_handler(lambda links: _open(enqueue_deep_links, links))
     except Exception:
         _log.warning("open-files handlers not set", exc_info=True)
 

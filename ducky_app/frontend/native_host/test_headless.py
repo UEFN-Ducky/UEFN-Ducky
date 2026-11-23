@@ -403,6 +403,48 @@ def _post(port: int, origin: str | None, host: str | None = None) -> int:
         conn.close()
 
 
+@pytest.fixture
+def bound_open_handlers(monkeypatch):
+    """The backend's open handlers on a writer that records its events, queues recorded too."""
+    from types import SimpleNamespace
+
+    from frontend import open_files
+
+    monkeypatch.setattr(open_files, "_open_handler", None)
+    monkeypatch.setattr(open_files, "_link_handler", None)
+    order: list = []
+    writer = SimpleNamespace(event=lambda name, data=None: order.append(name) or True)
+    monkeypatch.setattr(open_files, "enqueue_open_paths", lambda p: order.append(("paths", p)))
+    monkeypatch.setattr(open_files, "enqueue_deep_links", lambda links: order.append(("links", links)))
+    headless._bind_open_handlers(writer)
+    return open_files, order
+
+
+def test_a_focus_only_handoff_raises_the_window(internal_ui_server, bound_open_handlers, monkeypatch) -> None:
+    """A second launch with no files or links brought nothing forward: the backend dropped it."""
+    import http.client
+
+    open_files, order = bound_open_handlers
+    # ponytail: stands in for S12's panel_can_take_handoff fix (a --backend has no webview windows)
+    monkeypatch.setattr(open_files, "panel_can_take_handoff", lambda: True)
+    _panel_httpd, _url, _public, port = internal_ui_server
+    body = json.dumps({"paths": [], "links": []})
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request("POST", "/__panel_open_files", body=body,
+                     headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
+        assert conn.getresponse().status == 200
+    finally:
+        conn.close()
+    assert order == ["show"]
+
+
+def test_handed_off_files_and_links_still_queue_after_show(bound_open_handlers) -> None:
+    open_files, order = bound_open_handlers
+    assert open_files.dispatch_open_files(["C:/a.png"]) and open_files.dispatch_deep_links(["uefnducky://x"])
+    assert order == ["show", ("paths", ["C:/a.png"]), "show", ("links", ["uefnducky://x"])]
+
+
 def test_internal_port_keeps_the_public_origin(internal_ui_server) -> None:
     panel_httpd, url, public, internal = internal_ui_server
     assert internal not in (0, public)
