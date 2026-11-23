@@ -1,0 +1,13 @@
+Package: uefn-ducky
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: UEFN Ducky <noreply@uefnducky.org>
+Installed-Size: @SIZE@
+Section: devel
+Priority: optional
+Homepage: https://uefnducky.org
+Depends: libwebkit2gtk-4.1-0, libayatana-appindicator3-1, libsecret-1-0, libgtk-3-0, espeak-ng, libportaudio2
+Recommends: git, wl-clipboard | xclip
+Description: AI assistant for Unreal Editor for Fortnite
+ UEFN Ducky runs AI agents, Verse tools and the UEFN editor bridge
+ from one desktop app.
