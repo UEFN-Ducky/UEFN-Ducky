@@ -1118,6 +1118,25 @@ def test_an_old_editor_copy_never_overwrites_a_newer_save() -> None:
         delete_workflow(wid)
 
 
+def test_two_saves_in_the_same_clock_tick_still_refuse_the_older_copy(monkeypatch) -> None:
+    import pytest
+
+    from backend.automations import store
+    from backend.automations.store import StaleWorkflowError, delete_workflow, save_workflow
+
+    monkeypatch.setattr(store.time, "time", lambda: 1_800_000_000.0)  # a frozen clock: same tick
+    graph = {"nodes": [{"id": "s", "type": "start.manual", "x": 0, "y": 0, "config": {}}], "edges": []}
+    first = save_workflow({"name": "Same tick", "graph": graph})
+    try:
+        newer = save_workflow({**first, "description": "an agent's change"})
+        assert newer["updated"] > first["updated"]
+        with pytest.raises(StaleWorkflowError):
+            save_workflow({**first, "base_updated": first["updated"], "description": "stale drag"})
+        assert save_workflow({**newer, "base_updated": newer["updated"], "description": "on top"})["description"] == "on top"
+    finally:
+        delete_workflow(first["id"])
+
+
 def test_trigger_list_setting_matches_any_shared_value() -> None:
     from backend.automations import runner
 

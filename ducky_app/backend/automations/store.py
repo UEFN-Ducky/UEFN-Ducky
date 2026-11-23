@@ -259,9 +259,9 @@ def get_workflow(workflow_id: str) -> dict[str, Any] | None:
 
 
 def _next_updated(existing: dict[str, Any] | None) -> float:
-    """Now, but always past the stale check's 1 ms slack over the copy it replaces: two saves
-    inside 1 ms (Linux's fine clock) left a later save looking no newer than the first."""
-    return max(time.time(), float((existing or {}).get("updated") or 0.0) + 2e-3)
+    """Now, but always strictly newer than the copy it replaces (two saves in the same clock
+    tick, or a clock step back): the stale check compares these values exactly."""
+    return max(time.time(), float((existing or {}).get("updated") or 0.0) + 1e-6)
 
 
 class StaleWorkflowError(ValueError):
@@ -287,7 +287,7 @@ def save_workflow(doc: dict[str, Any], *, owner: str = "") -> dict[str, Any]:
         wid = str(doc.get("id") or "").strip()
         if base not in (None, "") and wid:
             current = get_workflow(wid)
-            if current is not None and float(current.get("updated") or 0) > float(base) + 1e-3:
+            if current is not None and float(current.get("updated") or 0) > float(base):
                 raise StaleWorkflowError(current)
         out = save_quietly(doc, owner)
     _announce_graphs_changed()
