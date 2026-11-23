@@ -263,3 +263,18 @@ if __name__ == "__main__":
     test_feed_is_paused()
     test_update_channel_dev_blocks_store()
     print("ok")
+
+
+def test_linux_update_status_reaches_the_panel_and_windows_keeps_its_own(monkeypatch) -> None:
+    import sys as _sys
+
+    from frontend import updater, version_check
+
+    linux = {"feed_status": "ok", "channel": "installed", "install_kind": "appimage", "update_action": "restart"}
+    monkeypatch.setattr(updater, "linux_update_status", lambda: dict(linux))
+    monkeypatch.setattr(version_check, "_app_update_status", lambda: {"feed_status": "ok", "channel": "installed",
+                                                                      "update_pack": None, "windows": True})
+    monkeypatch.setattr(_sys, "platform", "linux")
+    assert version_check.get_app_update_status()["install_kind"] == "appimage"  # no update_pack key: still fine
+    monkeypatch.setattr(_sys, "platform", "win32")
+    assert version_check.get_app_update_status()["windows"] is True

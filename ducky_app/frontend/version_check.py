@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import http.client
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -315,11 +316,16 @@ def get_app_update_status() -> dict[str, Any]:
     One payload for the panel UI and the updater: remote version compare plus
     installed-vs-portable state. Read-only.
     """
-    result = _app_update_status()
+    if sys.platform.startswith("linux"):  # AppImage / deb / rpm / Flatpak / AUR: frontend.updater
+        from frontend.updater import linux_update_status
+
+        result = linux_update_status()
+    else:
+        result = _app_update_status()
     try:
         from frontend import usage_stats
 
-        usage_stats.update_checked(result["feed_status"], result["channel"], bool(result["update_pack"]))
+        usage_stats.update_checked(result["feed_status"], result["channel"], bool(result.get("update_pack")))
     except Exception:
         pass
     return result
