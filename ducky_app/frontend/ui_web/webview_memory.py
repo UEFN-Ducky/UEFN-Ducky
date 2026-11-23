@@ -5,7 +5,10 @@ SOFT_IDLE_S past SOFT_GB, and at once on ``trim_now``. WebView2 never sets it ba
 showing or using the window sets ``Normal`` again. Reload (``trim_if_bloated``): hidden past
 TRIM_GB even while agents run, or open but untouched for OPEN_IDLE_S past OPEN_TRIM_GB with no
 agent running; a window in use is never reloaded. "Untouched" is the Ducky window's own idle time
-(window_idle_s): typing in UEFN next to an open Ducky window does not count as using it."""
+(window_idle_s): typing in UEFN next to an open Ducky window does not count as using it.
+
+Windows only (``enabled``): Linux's WebKitGTK page has no memory target level or controller to
+hide, so there every hook here is a no-op; a full graphics card still draws light (busy_pc)."""
 
 from __future__ import annotations
 

@@ -5,6 +5,10 @@ system RAM. DXGI names the main adapter (its dedicated memory, the OS budget and
 IDXGIAdapter3::QueryVideoMemoryInfo only counts the calling process, so the PC-wide usage and
 each program's share come from the GPU performance counters ("GPU Adapter Memory" and
 "GPU Process Memory", Dedicated Usage) of that adapter. Any failure gives None, never an error.
+
+Linux: NVIDIA through NVML (libnvidia-ml, with each program's share), AMD through the amdgpu
+sysfs files (``/sys/class/drm/card*/device/mem_info_vram_{used,total}``, no per-program split).
+Any other card is unknown (None), which never sets light drawing.
 """
 
 from __future__ import annotations
@@ -152,6 +156,79 @@ def _counters(luid: str) -> tuple[int | None, dict[int, int]]:
     return (adapter or None), per_pid
 
 
+class _NvmlMemory(ctypes.Structure):
+    _fields_ = [("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong), ("used", ctypes.c_ulonglong)]
+
+
+class _NvmlProcess(ctypes.Structure):  # nvmlProcessInfo_v1_t: the shape every driver still answers
+    _fields_ = [("pid", ctypes.c_uint), ("usedGpuMemory", ctypes.c_ulonglong)]
+
+
+def _nvml(lib: Any = None) -> dict[str, Any] | None:
+    """The NVIDIA card with the most memory: ``{name, total, used, per_pid}``; None without NVML."""
+    try:
+        lib = lib or ctypes.CDLL("libnvidia-ml.so.1")
+    except OSError:
+        return None
+    if lib.nvmlInit_v2() != 0:
+        return None
+    best: dict[str, Any] | None = None
+    try:
+        count = ctypes.c_uint(0)
+        if lib.nvmlDeviceGetCount_v2(ctypes.pointer(count)) != 0:
+            return None
+        for i in range(count.value):
+            handle = ctypes.c_void_p()
+            mem = _NvmlMemory()
+            if lib.nvmlDeviceGetHandleByIndex_v2(i, ctypes.pointer(handle)) != 0:
+                continue
+            if lib.nvmlDeviceGetMemoryInfo(handle, ctypes.pointer(mem)) != 0 or not mem.total:
+                continue
+            if best and mem.total <= best["total"]:
+                continue
+            name = ctypes.create_string_buffer(96)
+            lib.nvmlDeviceGetName(handle, name, 96)
+            per_pid: dict[int, int] = {}
+            for query in ("nvmlDeviceGetGraphicsRunningProcesses", "nvmlDeviceGetComputeRunningProcesses"):
+                n = ctypes.c_uint(64)
+                rows = (_NvmlProcess * 64)()
+                if getattr(lib, query)(handle, ctypes.pointer(n), rows) == 0:
+                    for row in rows[:min(n.value, 64)]:
+                        # NVML_VALUE_NOT_AVAILABLE (all ones) when the driver can't say per program.
+                        if row.usedGpuMemory and row.usedGpuMemory < 1 << 63:
+                            per_pid[int(row.pid)] = max(per_pid.get(int(row.pid), 0), int(row.usedGpuMemory))
+            best = {"name": name.value.decode("utf-8", "replace"), "total": int(mem.total), "used": int(mem.used),
+                    "per_pid": per_pid}
+    except (OSError, AttributeError, ValueError):
+        return best
+    finally:
+        lib.nvmlShutdown()
+    return best
+
+
+def _amd(drm: str = "/sys/class/drm") -> dict[str, Any] | None:
+    """The amdgpu card with the most VRAM: ``{name, total, used, per_pid: {}}``; None without one."""
+    import glob
+
+    best: dict[str, Any] | None = None
+    for device in sorted(glob.glob(os.path.join(drm, "card*", "device"))):
+        try:
+            with open(os.path.join(device, "mem_info_vram_total"), encoding="ascii") as fh:
+                total = int(fh.read().strip())
+            with open(os.path.join(device, "mem_info_vram_used"), encoding="ascii") as fh:
+                used = int(fh.read().strip())
+        except (OSError, ValueError):
+            continue
+        if total > 0 and (best is None or total > best["total"]):
+            best = {"name": f"AMD {os.path.basename(os.path.dirname(device))}", "total": total, "used": used,
+                    "per_pid": {}}
+    return best
+
+
+def _linux_card() -> dict[str, Any] | None:
+    return _nvml() or _amd()
+
+
 def _table() -> dict[int, Any]:
     from backend.util import proc_table
 
@@ -178,10 +255,18 @@ def read(top: int = 3, procs: dict[int, Any] | None = None) -> dict[str, Any] | 
     main GPU, or None when Windows can't tell (no DXGI, no GPU counters, not Windows). Never
     raises. ``procs``: a process table already read (names the programs without reading another)."""
     try:
-        adapter = _adapter()
-        if not adapter or not adapter.get("dedicated"):
-            return None
-        used, per_pid = _counters(str(adapter["luid"]))
+        if sys.platform.startswith("linux"):
+            card = _linux_card()
+            if not card:
+                return None
+            # The card's own total stands in for Windows' OS budget (Linux keeps none).
+            adapter = {"name": card["name"], "dedicated": card["total"], "budget": card["total"]}
+            used, per_pid = card["used"], dict(card["per_pid"])
+        else:
+            adapter = _adapter()
+            if not adapter or not adapter.get("dedicated"):
+                return None
+            used, per_pid = _counters(str(adapter["luid"]))
         if used is None:
             used = sum(per_pid.values()) or None
         if used is None:

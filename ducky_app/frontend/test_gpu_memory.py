@@ -20,6 +20,7 @@ def gpu(monkeypatch):
             raise OSError("no DXGI")
         return {"name": "NVIDIA GeForce RTX 3070 Ti", "dedicated": 8 * GB, "budget": int(7.4 * GB), "luid": LUID}
 
+    monkeypatch.setattr(gpu_memory.sys, "platform", "win32")  # the DXGI reader; test_linux_gpu has Linux's
     monkeypatch.setattr(gpu_memory, "_adapter", adapter)
     monkeypatch.setattr(gpu_memory, "_counters", lambda luid: (state["used"], {20: int(7.1 * GB), 9001: int(0.2 * GB),
                                                                              9002: int(0.1 * GB)}))
