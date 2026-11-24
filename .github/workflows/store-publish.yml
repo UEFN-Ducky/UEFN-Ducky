@@ -168,9 +168,13 @@ jobs:
           docker run --rm -v "$PWD:/w" -w /w fedora:41 bash -c \
             'dnf install -y rpm-build tar >/dev/null && bash build/linux/rpm/build_rpm.sh "$0" dist/uefn-ducky.tar dist/linux' "$VERSION"
           sudo chown -R "$(id -u):$(id -g)" dist/linux
-      - name: Flatpak
+      - uses: actions/upload-artifact@v4
         if: matrix.arch == 'x86_64'
-        run: bash build/linux/flatpak/ci_test.sh "$VERSION" dist/uefn-ducky.tar dist/linux
+        with:
+          name: linux-onedir-x86_64
+          path: dist/uefn-ducky.tar
+          if-no-files-found: error
+          retention-days: 1
       - name: Sign (minisign)
         run: |
           if [ -z "$MINISIGN_SECRET_KEY" ]; then
@@ -187,6 +191,43 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-dist-${{ matrix.arch }}
+          path: dist/linux/
+          if-no-files-found: error
+          retention-days: 14
+
+  # 22.04's flatpak-builder still runs appstream-compose, which the GNOME 50 SDK dropped;
+  # 24.04's uses appstreamcli (as linux-packages.yml). Same one-dir build as the x86_64 job.
+  linux-flatpak:
+    name: linux flatpak (x86_64)
+    needs: [linux-version, linux-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.linux-version.outputs.version }}
+      MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+      MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-onedir-x86_64
+          path: dist
+      - name: Flatpak
+        run: bash build/linux/flatpak/ci_test.sh "$VERSION" dist/uefn-ducky.tar dist/linux
+      - name: Sign (minisign)
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then echo "::notice::dry run without MINISIGN_SECRET_KEY: unsigned"; exit 0; fi
+            echo "MINISIGN_SECRET_KEY is not set: a release never ships unsigned Linux files"; exit 1
+          fi
+          python -m pip install cryptography
+          python release/sign_linux.py dist/linux/*"$VERSION"*.flatpak
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-dist-flatpak
           path: dist/linux/
           if-no-files-found: error
           retention-days: 14
@@ -246,7 +287,7 @@ jobs:
 
   publish:
     name: build, sign and publish Setup
-    needs: [linux-version, linux-build, linux-repo]
+    needs: [linux-version, linux-build, linux-flatpak, linux-repo]
     if: inputs.mode == 'release'
     runs-on: windows-latest
     timeout-minutes: 120

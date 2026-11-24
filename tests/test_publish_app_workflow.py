@@ -59,6 +59,17 @@ def test_linux_build_unpacks_the_verse_grammar_before_the_freeze():
     assert 'VERSE_LANG_ASSETS is not set: a release never ships the Verse editor without its grammar"; exit 1' in run
 
 
+def test_flatpak_builds_on_24_04_and_the_release_waits_for_it():
+    jobs = _jobs()
+    flatpak = jobs["linux-flatpak"]
+    assert flatpak["runs-on"] == "ubuntu-24.04"  # 22.04's flatpak-builder needs appstream-compose
+    assert all("ci_test.sh" not in s.get("run", "") for s in jobs["linux-build"]["steps"])
+    assert any("build/linux/flatpak/ci_test.sh" in s.get("run", "") for s in flatpak["steps"])
+    uploads = [s["with"]["name"] for s in flatpak["steps"] if s.get("uses", "").startswith("actions/upload-artifact")]
+    assert uploads == ["linux-dist-flatpak"]  # publish and the bumps merge linux-dist-*
+    assert "linux-flatpak" in jobs["publish"]["needs"]
+
+
 def test_linux_repo_writes_only_an_armored_uefn_ducky_gpg_at_the_root():
     run = "\n".join(s.get("run", "") for s in _jobs()["linux-repo"]["steps"])
     assert "uefn-ducky.asc" not in run  # the Store's uds_linux_repo refuses any other root file
