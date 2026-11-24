@@ -72,6 +72,16 @@ def test_der_signatures_and_other_curves_are_refused() -> None:
         rt.load_pub("not base64!")
 
 
+def test_a_webcrypto_signed_offer_verifies() -> None:
+    # Made by WebCrypto (node's crypto.subtle, as viewerKey.ts signs on the phone).
+    pub = ("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx2P8gR6ynBG4u5rb/cjpCHEuO3vItnmwyheOOl+Dl4znk+8VxxFrsoFs"
+           "GLYzld0QdZvxf7QATKXvFL014v91OQ==")
+    sig = "SEOxhwObFkC5RS0JvDNjHqgnOOpik6pXe/zOmaet7f/nVVr8J8cxbboFqtA5X0Tag6Pkri8y2w3IpbEoOXuYfA=="
+    msg = rt.offer_message("s1", 1700000000, "v=0 offer")
+    assert rt.verify_with(pub, msg, sig)
+    assert not rt.verify_with(pub, rt.offer_message("s1", 1700000001, "v=0 offer"), sig)
+
+
 def test_a_request_waits_for_this_pcs_window_and_only_three_wait() -> None:
     _, pub = _viewer()
     out = rt.pair_request({"pub": pub, "label": "  My\nPhone  "})

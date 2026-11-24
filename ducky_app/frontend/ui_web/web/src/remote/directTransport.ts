@@ -35,6 +35,7 @@ import {
   type RpcReply,
   type SessionDescriptionJson,
 } from "./protocol";
+import { ensurePaired, pinnedPc, signOffer, verifyAnswer } from "./viewerKey";
 
 /** `reconnecting`: the link was live and dropped (a phone that slept); it redials on its own. */
 export type DirectState = "idle" | "connecting" | "live" | "reconnecting" | "failed";
@@ -252,11 +253,41 @@ export function startDirectTransport(config: DirectConfig): DirectTransport {
   return singleton;
 }
 
-function parentBridge(): Bridge {
-  const waiters = new Map<string, { resolve: (v: { answer: SessionDescriptionJson; desktop?: { version?: string; protocol?: number } }) => void; reject: (e: Error) => void }>();
+type ParentAnswer = {
+  answer: SessionDescriptionJson;
+  desktop?: { version?: string; protocol?: number };
+  pcSig?: string;
+  pcPub?: string;
+};
+
+/** The PC the site opened (its key id, `?pc=`): the pinned key is kept per PC. */
+function openedPc(): string {
+  return new URLSearchParams(window.location.search).get("pc") || "default";
+}
+
+export const NOT_YOUR_PC = "This connection could not be verified as your PC.";
+
+/**
+ * The site page relays signaling but can't read or forge it: the offer carries this
+ * device's signature and the answer must carry the pinned PC key's (remote_trust.py).
+ * A device that isn't paired yet pairs first; the site shows the code it gets.
+ */
+export function parentBridge(): Bridge {
+  const waiters = new Map<string, { resolve: (v: ParentAnswer) => void; reject: (e: Error) => void }>();
+  const calls = new Map<string, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }>();
+  let nextCall = 1;
   window.addEventListener("message", (ev: MessageEvent) => {
+    if (ev.source && ev.source !== window.parent) return;
     const data = ev.data as Record<string, unknown> | null;
     if (!data || typeof data !== "object") return;
+    if (data.type === "ud-direct-call-result") {
+      const c = calls.get(String(data.id || ""));
+      if (!c) return;
+      calls.delete(String(data.id));
+      if (data.ok === false) c.reject(new Error(String(data.error || "request failed")));
+      else c.resolve((data.result as Record<string, unknown>) || {});
+      return;
+    }
     const session = String(data.session || "");
     const w = waiters.get(session);
     if (!w) return;
@@ -265,24 +296,55 @@ function parentBridge(): Bridge {
       w.resolve({
         answer: data.answer as SessionDescriptionJson,
         desktop: (data.desktop as { version?: string; protocol?: number }) || undefined,
+        pcSig: String(data.pcSig || ""),
+        pcPub: String(data.pcPub || ""),
       });
     } else if (data.type === "ud-direct-error") {
       waiters.delete(session);
       w.reject(new Error(String(data.error || "signaling failed")));
     }
   });
+  const call = (method: "pair_request" | "pair_status", args: Record<string, unknown>) =>
+    new Promise<Record<string, unknown>>((resolve, reject) => {
+      const id = `c${nextCall++}`;
+      calls.set(id, { resolve, reject });
+      window.parent.postMessage({ type: "ud-direct-call", id, method, args }, "*");
+      window.setTimeout(() => {
+        if (calls.delete(id)) reject(new Error("Your PC didn't answer."));
+      }, 45_000);
+    });
+  const pair = (pc: string) =>
+    ensurePaired(pc, call, (code) => window.parent.postMessage({ type: "ud-direct-pair-code", code }, "*"));
+  const offerOnce = async (session: string, offer: SessionDescriptionJson, ice: RTCIceServer[]) => {
+    const signed = await signOffer(session, offer.sdp);
+    return new Promise<ParentAnswer>((resolve, reject) => {
+      waiters.set(session, { resolve, reject });
+      window.parent.postMessage(
+        { type: "ud-direct-offer", session, offer, ice, protocol: PROTOCOL_VERSION, ...signed },
+        "*",
+      );
+      window.setTimeout(() => {
+        if (waiters.delete(session)) reject(new Error("signaling timed out"));
+      }, 45_000);
+    });
+  };
   return {
-    connect(session, offer, ice) {
-      return new Promise((resolve, reject) => {
-        waiters.set(session, { resolve, reject });
-        window.parent.postMessage(
-          { type: "ud-direct-offer", session, offer, ice, protocol: PROTOCOL_VERSION },
-          "*",
-        );
-        window.setTimeout(() => {
-          if (waiters.delete(session)) reject(new Error("signaling timed out"));
-        }, 45_000);
-      });
+    async connect(session, offer, ice) {
+      const pc = openedPc();
+      let pcPub = pinnedPc(pc) || (await pair(pc));
+      let reply: ParentAnswer;
+      try {
+        reply = await offerOnce(session, offer, ice);
+      } catch (err) {
+        // Removed on the PC since (or a new PC behind the same card): pair again, once.
+        if (!/isn't (paired|approved)/.test(String((err as Error)?.message))) throw err;
+        pcPub = await pair(pc);
+        reply = await offerOnce(session, offer, ice);
+      }
+      const ok = reply.pcPub === pcPub
+        && (await verifyAnswer(pcPub, session, offer.sdp, reply.answer?.sdp || "", reply.pcSig || ""));
+      if (!ok) throw new Error(NOT_YOUR_PC);
+      return { answer: reply.answer, desktop: reply.desktop };
     },
     report(payload) {
       try {
