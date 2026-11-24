@@ -127,7 +127,9 @@ def test_pane_opens_inside_another_process_window(tmp_path, monkeypatch) -> None
 
         assert bo.open_pane("t1", "about:blank")["ok"]
         bo.set_bounds("t1", 10, 10, 200, 150, cw, ch, True)
-        deadline = time.monotonic() + 30
+        # 90 s: a cold WebView2 start on a Windows runner 7,700 tests in missed 30 s with no
+        # error (Nov 24 2026); the loop ends as soon as the pane is ready.
+        deadline = time.monotonic() + 90
         # ready is set on the UI thread just before its state push, so wait for both.
         while time.monotonic() < deadline and not (
                 bo._panes["t1"].ready and any(e.get("pane_id") == "t1" for e in pushed)):

@@ -293,7 +293,8 @@ def test_a_batch_traces_how_long_it_waited_for_the_write_lock(monkeypatch) -> No
             writer.submit("waits", 1)
             time.sleep(0.5)
         writer.flush()
-        assert traced and traced[0]["lock_ms"] >= 250 and traced[0]["ms"] >= traced[0]["lock_ms"]
+        # lock_ms is traced rounded to 0.1 ms, which can add up to 0.05 (400.086 total, 400.1 lock).
+        assert traced and traced[0]["lock_ms"] >= 250 and traced[0]["ms"] >= traced[0]["lock_ms"] - 0.05
     finally:
         writer.close()
 
