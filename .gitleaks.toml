@@ -15,7 +15,8 @@ description = "Model ids, fake/test keys, SHA-256 pins, a public OAuth client id
 regexTarget = "line"
 regexes = [
   '''test_key_model\s*=''',
-  '''^_STORE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="''',
+  # Not ^-anchored: a shallow CI clone's single root commit reports the line with its diff prefix.
+  '''_STORE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="''',
   '''^\s*"[\w.-]+\.(json|safetensors|md)": "[0-9a-f]{64}",$''',
   '''^\s*GOLDEN_KEYS = "[0-9a-f]{64}"\s*$''',
   '''^\s*_CLAUDE_OAUTH_CLIENT = "[0-9a-f-]{36}"\s*$''',
