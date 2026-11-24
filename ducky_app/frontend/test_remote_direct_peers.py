@@ -20,8 +20,21 @@ aiortc = pytest.importorskip("aiortc")
 
 
 async def _gathered(pc) -> None:
-    while pc.iceGatheringState != "complete":
-        await asyncio.sleep(0.02)
+    async def done() -> None:
+        while pc.iceGatheringState != "complete":
+            await asyncio.sleep(0.02)
+
+    await asyncio.wait_for(done(), 30)  # ~5 s on a PC with WSL/Hyper-V/VPN interfaces
+
+
+async def _close(pc) -> None:
+    # aioice's close waits for every UDP socket's connection_lost, which Windows' Proactor
+    # loop sometimes never sends: the test then sat out pytest's 300 s timeout after it
+    # had passed. Closing is cleanup here, not what's tested.
+    try:
+        await asyncio.wait_for(pc.close(), 5)
+    except asyncio.TimeoutError:
+        pass
 
 
 def _plain(desc) -> dict:
@@ -69,8 +82,8 @@ def test_viewer_and_page_connect_over_loopback_signaling(monkeypatch) -> None:
             await viewer.setRemoteDescription(aiortc.RTCSessionDescription(**out["answer"]))
             return await asyncio.wait_for(got, 15)
         finally:
-            await viewer.close()
-            await page.close()
+            await _close(viewer)
+            await _close(page)
 
     assert asyncio.run(run()) == '{"id":1,"method":"pong"}'
 
