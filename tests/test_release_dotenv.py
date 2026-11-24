@@ -42,6 +42,8 @@ def test_blank_values_never_hide_a_later_file(tmp_path, monkeypatch):
     main, wt = _repo_with_worktree(tmp_path)
     for key in ("DUCKY_WINDOWS_PFX", "DUCKY_WINDOWS_PFX_PASSWORD", "DUCKY_SIGNTOOL_EXTRA", "DUCKY_SIGN_TIMESTAMP_URL"):
         monkeypatch.setenv(key, "")  # blank = unset, and restored after the test
+    # store-publish.yml exports DUCKY_SIGN_PROVIDER (none/azure) to every later step, tests included.
+    monkeypatch.delenv("DUCKY_SIGN_PROVIDER", raising=False)
     monkeypatch.setenv("DUCKY_SIGN_TIMESTAMP_URL", "http://already.set")
     (wt / ".env").write_text("DUCKY_WINDOWS_PFX=\n", encoding="utf-8")
     # Notepad saves UTF-8 with a BOM; the first key must still be read.
