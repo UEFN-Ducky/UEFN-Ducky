@@ -1646,6 +1646,8 @@ export interface PanelSettingsDto {
   start_with_windows?: boolean;
   /** Low RAM / graphics memory notifications while Ducky runs. Missing key stays on. */
   pc_memory_warnings?: boolean;
+  /** Update feed in use: "beta" | "stable" (the platform default when never saved). */
+  update_channel?: string;
   coding_agents?: Record<
     string,
     {
