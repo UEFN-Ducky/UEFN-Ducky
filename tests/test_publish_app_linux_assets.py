@@ -47,9 +47,12 @@ class FakeStore:
         self.fail_on, self.uploaded, self.calls = fail_on, [], []
 
     def upload(self, base, key, path: Path) -> dict:
-        if path.name == self.fail_on:
-            raise SystemExit(f"Presigned PUT HTTP 500: {path.name}")
-        self.uploaded.append(path.name)
+        # core's allowed_app_release_name: a plain .rpm/.AppImage/.sig is HTTP 400.
+        assert path.name.startswith("linux-repo-") or path.suffix in (".exe", ".zip", ".apk"), path.name
+        name = path.name.removeprefix(f"linux-repo-{VERSION}-")
+        if name == self.fail_on:
+            raise SystemExit(f"Presigned PUT HTTP 500: {name}")
+        self.uploaded.append(name)
         return {"fileId": f"id-{len(self.uploaded)}", "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
     def mcp(self, base, key, name, arguments) -> dict:

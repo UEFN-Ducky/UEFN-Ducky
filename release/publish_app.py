@@ -658,6 +658,19 @@ def _uploaded_url(uploaded: dict, path: Path, digest: str) -> str:
     return f"/api/v1/files/{file_id}/content"
 
 
+def _upload_linux_file(base: str, api_key: str, version: str, path: Path) -> str:
+    """Upload a Linux package or signature as ``linux-repo-<version>-<name>``: the Store
+    takes only .exe/.zip/.apk or a linux-repo-* name for an app release (HTTP 400 on a
+    plain .rpm, after the Windows files were up), and files those under app-releases/linux/."""
+    import tempfile
+
+    digest = sha256_file(path)
+    with tempfile.TemporaryDirectory(prefix="ducky-linux-pkg-") as tmp:
+        named = Path(tmp) / f"linux-repo-{version}-{path.name}"
+        shutil.copyfile(path, named)
+        return _uploaded_url(upload_app_release(base, api_key, named), path, digest)
+
+
 def release_assets(base: str, api_key: str, version: str, installer_url: str, sha256: str,
                    folder: Path = LINUX_DIST) -> list[dict]:
     """The ``assets`` of uds_app_release: the Windows Setup plus every Linux package and
@@ -672,10 +685,10 @@ def release_assets(base: str, api_key: str, version: str, installer_url: str, sh
         path, sig = art["path"], art["sig"]
         digest = sha256_file(path)
         print(f"  uploading {path.name} ({path.stat().st_size} bytes)")
-        url = _uploaded_url(upload_app_release(base, api_key, path), path, digest)
+        url = _upload_linux_file(base, api_key, version, path)
         sig_url = ""
         if sig is not None:
-            sig_url = _uploaded_url(upload_app_release(base, api_key, sig), sig, sha256_file(sig))
+            sig_url = _upload_linux_file(base, api_key, version, sig)
         else:
             print(f"  WARNING: {path.name} has no .sig beside it")
         assets.append({"os": "linux", "arch": art["arch"], "package": art["package"],
