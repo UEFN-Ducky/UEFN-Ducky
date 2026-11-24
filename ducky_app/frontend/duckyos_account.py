@@ -1018,8 +1018,7 @@ def api_request(
     Prefers ``Authorization: Bearer dky_v1_…`` (device key from browser login).
     Falls back to session cookie + CSRF when present. With ``allow_anonymous``
     the request goes out unauthenticated (public endpoints like the Store
-    catalog) instead of raising ``not_logged_in``. ``anonymous`` never attaches
-    the account, signed in or not (usage stats: nothing ties them to a person).
+    catalog) instead of raising ``not_logged_in``. ``anonymous``: never the account.
     """
     blob = _load_blob()
     base = str(blob.get("base_url") or "").rstrip("/")
@@ -1036,7 +1035,7 @@ def api_request(
     # Collect endpoints require Origin to match Host (browser CSRF). Desktop
     # urllib sends neither Origin nor Sec-Fetch-Site → 403 forbidden without this.
     extra_headers["Origin"] = base
-    if anonymous:
+    if anonymous:  # usage stats: no account header at all
         pass
     elif prefer_bearer and blob.get("device_key"):
         extra_headers["Authorization"] = f"Bearer {blob['device_key']}"
@@ -1156,9 +1155,7 @@ RPC_ALLOWLIST = frozenset(
         "remote_snapshot",
         "rtc_connect",
         "rtc_report",
-        # A device asks this PC's window to approve its key (frontend.remote_trust).
-        "pair_request",
-        "pair_status",
+        "pair_request", "pair_status",  # a device asks this PC's window to approve it (remote_trust)
         # Your other UEFN Duckies pull these to sync (frontend.ducky_sync).
         "ducky_sync_duckies",
         "ducky_sync_chats",
@@ -1166,17 +1163,13 @@ RPC_ALLOWLIST = frozenset(
     }
 )
 
-# What the website/phone may send through the site mailbox: WebRTC signaling only.
-# Chats and commands travel inside the peer-to-peer DTLS channel, so the site (or a
-# stolen session) can never read chats or start agent turns through the mailbox.
+# The website's whole mailbox surface: chats and commands only ride the verified peer link.
 WEBSITE_RPC = frozenset({"rtc_connect", "rtc_report", "pair_request", "pair_status"})
 
 REMOTE_DENY = frozenset(
     {
-        # Approving or removing a remote device is this PC's own window, nobody else's.
-        "remote_pair_decide",
-        "remote_devices_list",
-        "remote_device_remove",
+        # This PC's own window approves and removes remote devices.
+        "remote_pair_decide", "remote_devices_list", "remote_device_remove",
         # Only this PC's own window says whether Ducky is in use, and only it updates Ducky.
         "report_update_ui",
         "apply_auto_update_now",
@@ -1346,9 +1339,7 @@ def send_presence_heartbeat(*, only_if_changed: bool = False) -> bool:
     if not (blob.get("device_key") or blob.get("session_value")):
         return False
     email = str(blob.get("email") or "").strip()
-    # The island's folder name leaves the PC only while remote access is on (the remote
-    # view shows it). The usage install id never rides along: that would tie anonymous
-    # usage rows to this email.
+    # Island name only while remote access is on; never the usage install id (ties stats to email).
     body: dict[str, Any] = {
         "source": "desktop",
         "email": email,
@@ -1499,33 +1490,10 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
             return {"ok": True, "result": _remote_snapshot()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
-    if name == "rtc_connect":
-        # Only a device approved in this PC's window may open it, and the answer comes
-        # back signed by this PC: the site relaying both can't sit in the middle.
-        from frontend import remote_trust
-        from frontend.remote_direct import rtc_connect
-
-        why = remote_trust.check_offer(raw)
-        if why:
-            return {"ok": False, "error": why, "result": {"error": why, "pair": True}}
-        try:
-            out = rtc_connect(raw)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-        if out.get("error") and not out.get("answer"):
-            return {"ok": False, "error": str(out["error"]), "result": out}
-        offer = raw.get("offer") if isinstance(raw.get("offer"), dict) else {}
-        answer = out.get("answer") if isinstance(out.get("answer"), dict) else {}
-        msg = remote_trust.answer_message(str(raw.get("session") or ""), str(offer.get("sdp") or ""),
-                                          str(answer.get("sdp") or ""))
-        return {"ok": True, "result": {**out, "pcSig": remote_trust.sign(msg), "pcPub": remote_trust.pc_pub_b64()}}
-    if name in ("pair_request", "pair_status"):
+    if name in ("rtc_connect", "pair_request", "pair_status"):
         from frontend import remote_trust
 
-        try:
-            return getattr(remote_trust, name)(raw)
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        return remote_trust.serve(name, raw)
     if name == "rtc_report":
         from frontend.remote_direct import note_report
 

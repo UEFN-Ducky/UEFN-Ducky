@@ -222,6 +222,32 @@ def sign_offer(args: dict[str, Any]) -> dict[str, Any]:
     return {**args, "viewer": pub_id(pc_pub_b64()), "ts": ts, "sig": sign(msg)}
 
 
+def serve(name: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """The mailbox's rtc_connect / pair_request / pair_status. Only a device approved in this
+    PC's window may open it, and the answer comes back signed by this PC: the site relaying
+    both can't sit in the middle."""
+    if name != "rtc_connect":
+        try:
+            return pair_request(raw) if name == "pair_request" else pair_status(raw)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+    from frontend.remote_direct import rtc_connect
+
+    why = check_offer(raw)
+    if why:
+        return {"ok": False, "error": why, "result": {"error": why, "pair": True}}
+    try:
+        out = rtc_connect(raw)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if out.get("error") and not out.get("answer"):
+        return {"ok": False, "error": str(out["error"]), "result": out}
+    offer = raw.get("offer") if isinstance(raw.get("offer"), dict) else {}
+    answer = out.get("answer") if isinstance(out.get("answer"), dict) else {}
+    msg = answer_message(str(raw.get("session") or ""), str(offer.get("sdp") or ""), str(answer.get("sdp") or ""))
+    return {"ok": True, "result": {**out, "pcSig": sign(msg), "pcPub": pc_pub_b64()}}
+
+
 PINNED_KEY = "remote_pinned_pcs"  # other PC's key id -> its PC public key (b64)
 
 
