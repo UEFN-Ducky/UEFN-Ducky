@@ -586,11 +586,20 @@ function _ensureStarted() {
   // Missed uefn_plugins_changed (push before bus / no window) left Installed empty
   // forever — poll until the first successful contributions snapshot lands.
   const tick = () => {
+    // A timer that outlives its page (a test's torn-down jsdom) has no window left.
+    if (typeof window === "undefined") {
+      _pollId = undefined;
+      return;
+    }
     if (_contrib.ready) {
       _stopPoll();
       return;
     }
     void refresh().finally(() => {
+      if (typeof window === "undefined") {
+        _pollId = undefined;
+        return;
+      }
       if (_contrib.ready) {
         _stopPoll();
         return;

@@ -57,7 +57,9 @@ def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
     began = time.monotonic()
     with pytest.raises(RuntimeError) as late:
         asyncio.run(pool.call_tool("unreal__call_tool", {}))
-    assert time.monotonic() - began < 0.5, "one 0.3 s deadline, not one per step"
+    # A deadline per step would let all three 0.2 s steps finish (no raise, calls == 3), so
+    # the asserts below prove one deadline; the clock only catches a hang (CI boxes stall).
+    assert time.monotonic() - began < 2.0, "one 0.3 s deadline, not one per step"
     why = json.loads(str(late.value))
     assert why["steps_finished"] == "1 of 3" and "1 of 3 steps finished." in why["message"]
     assert calls == [{"n": 1}, {"n": 2}]  # the late step keeps running; the third is never sent
