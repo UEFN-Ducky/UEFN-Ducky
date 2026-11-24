@@ -886,9 +886,9 @@ def _files_put(doc: dict[str, Any]) -> None:
     path = _files_dir() / f"{doc['id']}.json"
     temporary = path.with_suffix(f".{uuid.uuid4()}.tmp")
     temporary.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
-    from backend.store.db import _replace_retrying
+    from backend.store.db import replace_retrying
 
-    _replace_retrying(temporary, path)  # a reader's handle (lists, an indexer) blocks a Windows rename
+    replace_retrying(temporary, path)  # a reader's handle (lists, an indexer) blocks a Windows rename
 
 
 def _files_delete(workflow_id: str) -> bool:

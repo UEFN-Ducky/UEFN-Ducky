@@ -536,9 +536,9 @@ def test_a_restore_swap_outlasts_a_handle_open_for_a_moment(tmp_path, monkeypatc
         return real(self, target)
 
     monkeypatch.setattr(type(src), "replace", flaky)
-    db._replace_retrying(src, dst, pause_s=0)
+    db.replace_retrying(src, dst, pause_s=0)
     assert dst.read_text() == "x" and not src.exists()
     src.write_text("y")
     monkeypatch.setattr(type(src), "replace", lambda self, target: (_ for _ in ()).throw(PermissionError(32, "held")))
     with pytest.raises(PermissionError):
-        db._replace_retrying(src, dst, pause_s=0)
+        db.replace_retrying(src, dst, pause_s=0)

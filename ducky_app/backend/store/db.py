@@ -1204,7 +1204,7 @@ def restore_snapshot(root: Path | None = None) -> Path:
             for name in (DB_NAME, *SIDECAR_NAMES):
                 p = root / name
                 if p.exists():
-                    _replace_retrying(p, root / (name + ".corrupt"))
+                    replace_retrying(p, root / (name + ".corrupt"))
                     moved.append((root / (name + ".corrupt"), p))
             for src in plain:
                 try:
@@ -1223,7 +1223,7 @@ def restore_snapshot(root: Path | None = None) -> Path:
     raise StoreError("ducky.db failed its integrity check and no snapshot here can be opened")
 
 
-def _replace_retrying(src: Path, dst: Path, tries: int = 5, pause_s: float = 0.05) -> None:
+def replace_retrying(src: Path, dst: Path, tries: int = 5, pause_s: float = 0.05) -> None:
     """``src.replace(dst)`` that outlasts a handle open only for a moment (an antivirus or
     indexer reading the file); the last failure is raised."""
     for i in range(tries):
