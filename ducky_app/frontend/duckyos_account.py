@@ -1163,6 +1163,11 @@ RPC_ALLOWLIST = frozenset(
     }
 )
 
+# What the website/phone may send through the site mailbox: WebRTC signaling only.
+# Chats and commands travel inside the peer-to-peer DTLS channel, so the site (or a
+# stolen session) can never read chats or start agent turns through the mailbox.
+WEBSITE_RPC = frozenset({"rtc_connect", "rtc_report"})
+
 REMOTE_DENY = frozenset(
     {
         # Only this PC's own window says whether Ducky is in use, and only it updates Ducky.
@@ -1592,6 +1597,8 @@ def _answer_desktop_rpc(pending: dict[str, Any]) -> None:
         from frontend.ducky_link import answer
 
         out = answer(rid, sender, method, args)
+    elif method not in WEBSITE_RPC:
+        out = {"ok": False, "error": "method not allowed"}
     else:
         out = dispatch_desktop_rpc(method, args if isinstance(args, dict) else {})
     body: dict[str, Any] = {"id": rid, "ok": bool(out.get("ok"))}

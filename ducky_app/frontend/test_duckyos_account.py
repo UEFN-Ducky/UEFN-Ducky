@@ -435,6 +435,25 @@ def test_presence_and_usage_never_tie_stats_to_the_account() -> None:
     assert req.call_args.kwargs.get("anonymous") is True
 
 
+def test_website_mailbox_carries_signaling_only() -> None:
+    """The site relays commands in plain JSON: from it, only WebRTC signaling runs."""
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    posted: list[dict] = []
+    ran: list[str] = []
+    with (
+        patch.object(acc, "_plugin_collect", side_effect=lambda _p, _e, body=None, **_k: posted.append(body) or {}),
+        patch.object(acc, "dispatch_desktop_rpc", side_effect=lambda m, a: ran.append(m) or {"ok": True, "result": 1}),
+    ):
+        for method in ("send_message", "load_messages", "remote_snapshot", "delete_conversation", "rtc_connect"):
+            acc._answer_desktop_rpc({"id": method, "method": method, "args": {}})
+    assert ran == ["rtc_connect"]
+    assert [b["ok"] for b in posted] == [False, False, False, False, True]
+    assert posted[0]["error"] == "method not allowed"
+
+
 def test_unchanged_presence_waits_only_where_the_site_allows() -> None:
     from unittest.mock import patch
 
