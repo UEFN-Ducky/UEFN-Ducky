@@ -718,12 +718,17 @@ def linux_repo_files(folder: Path = LINUX_REPO) -> dict[str, Path]:
     return files
 
 
-def publish_linux_repo(base: str, api_key: str, version: str, folder: Path = LINUX_REPO) -> dict | None:
+def publish_linux_repo(base: str, api_key: str, version: str, folder: Path = LINUX_REPO,
+                       channel: str = "stable") -> dict | None:
     """Upload each repo file under a name unique to this release, then swap the live repo
-    with one uds_linux_repo call. ``None`` without a repo (Windows-only release). Any failed
-    upload or a refused swap raises, so uds_app_release never runs on a half repo."""
+    with one uds_linux_repo call. ``None`` without a repo (Windows-only release) or on beta
+    (apt/dnf follow stable). Any failed upload or a refused swap raises, so
+    uds_app_release never runs on a half repo."""
     import tempfile
 
+    if channel != "stable":
+        print(f"  linux repo: {channel} release, apt/dnf stay on stable")
+        return None
     files = linux_repo_files(folder)
     if not files:
         return None
@@ -742,6 +747,10 @@ def publish_linux_repo(base: str, api_key: str, version: str, folder: Path = LIN
         raise SystemExit(f"uds_linux_repo refused the {version} repo: {reply.get('error') or reply}")
     print(f"  linux repo {version}: {len(ids)} files live")
     return reply
+
+
+# uds_app_release's channels: beta has its own record, stable is what every client reads.
+RELEASE_CHANNELS = ("beta", "stable")
 
 
 def next_version(local: str, store: str | None, set_version: str = "") -> str:
@@ -1388,6 +1397,13 @@ def main() -> None:
         help="The default release in steps: test, then build (bump + Setup), then upload. "
         "Each refuses unless the step before passed on the same commit.",
     )
+    parser.add_argument(
+        "--channel",
+        choices=RELEASE_CHANNELS,
+        default="beta",
+        help="Store release record to write: beta (default, beta clients only) or stable (everyone; "
+        "also swaps the apt/dnf repo)",
+    )
     args = parser.parse_args()
 
     if args.self_check:
@@ -1548,7 +1564,9 @@ def main() -> None:
         except ValueError:
             pass
 
-    linux_repo_files()  # refuse a bad Linux repo before the first upload, not after Windows is live
+    print(f"  channel: {args.channel}")
+    if args.channel == "stable":
+        linux_repo_files()  # refuse a bad Linux repo before the first upload, not after Windows is live
     uploaded = upload_app_release(base, key, exe_path)
     file_id = str(uploaded.get("fileId") or "")
     remote_sha = str(uploaded.get("sha256") or "").lower()
@@ -1560,13 +1578,14 @@ def main() -> None:
     print(f"  installerUrl={installer_url}")
     update = upload_update_pack(base, key, version)
     assets = release_assets(base, key, version, installer_url, digest)
-    publish_linux_repo(base, key, version)
+    publish_linux_repo(base, key, version, channel=args.channel)
 
     result = mcp_call(
         base,
         key,
         "uds_app_release",
         {
+            "channel": args.channel,
             "version": version,
             "installerUrl": installer_url,
             "sha256": digest,
@@ -1595,7 +1614,7 @@ def main() -> None:
             "WARNING: the Store kept no update pack (uefn-ducky-store older than 0.3.9?): "
             "installed copies of this version update with Setup."
         )
-    print(f"ok — desktop apps will see {version} via collect/app-version")
+    print(f"ok — {args.channel} desktop apps will see {version} via collect/app-version")
     publish_panel_bundle(version)
 
 

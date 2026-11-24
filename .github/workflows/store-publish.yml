@@ -39,6 +39,12 @@ on:
         required: false
         default: false
         type: boolean
+      channel:
+        description: "beta = beta clients only; stable = everyone, plus the apt/dnf repo and AUR/Flathub"
+        required: false
+        default: beta
+        type: choice
+        options: [beta, stable]
       mode:
         description: "release = everything; linux-packages = only the Linux artifacts; linux-bumps = only AUR/Flathub"
         required: false
@@ -358,19 +364,20 @@ jobs:
         shell: bash
         env:
           NOTES: ${{ inputs.notes }}
+          CHANNEL: ${{ inputs.channel || 'beta' }}
         run: |
-          extra=()
+          extra=(--channel "${CHANNEL}")
           if [ -n "${NOTES}" ]; then extra+=(--notes "${NOTES}"); fi
           .venv/Scripts/python -u release/publish_app.py --phase upload --notes-from-git "${extra[@]}"
 
-  # After the release is live: the AUR package and the Flathub manifest point at the new
+  # After a stable release is live (beta skips it): the AUR package and the Flathub manifest point at the new
   # AppImages (uefnducky.org/downloads/linux/…) with their sha256. A dry run prints both
   # diffs and pushes nothing; a release without AUR_SSH_PRIVATE_KEY / FLATHUB_TOKEN skips that
   # one with a warning before doing any work, so missing accounts never fail the release.
   linux-bumps:
     name: AUR + Flathub bumps
     needs: [publish]
-    if: ${{ !cancelled() && (inputs.mode == 'linux-bumps' || (inputs.mode == 'release' && needs.publish.result == 'success')) }}
+    if: ${{ !cancelled() && inputs.channel == 'stable' && (inputs.mode == 'linux-bumps' || (inputs.mode == 'release' && needs.publish.result == 'success')) }}
     runs-on: ubuntu-22.04
     env:
       DRY_RUN: ${{ inputs.dry_run }}
