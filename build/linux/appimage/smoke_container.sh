@@ -7,6 +7,9 @@
 set -euo pipefail
 app="$(readlink -f "$1")"
 want_update="${2:-}"
+# "fuse": start it the way a desktop does, mounted through FUSE (docker run --device /dev/fuse
+# --cap-add SYS_ADMIN), with fusermount3 as on stock Ubuntu 24.04 and no libfuse2 anywhere.
+mode="${3:-extract}"
 if command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq && apt-get install -y -qq xvfb xauth python3 libwebkit2gtk-4.1-0 >/dev/null
@@ -18,7 +21,14 @@ elif command -v pacman >/dev/null; then
 fi
 . /etc/os-release && echo "== $PRETTY_NAME ($(uname -m))"
 chmod +x "$app"
-export APPIMAGE_EXTRACT_AND_RUN=1
+if [ "$mode" = fuse ]; then
+  apt-get install -y -qq fuse3 >/dev/null
+  if ldconfig -p | grep -q 'libfuse\.so\.2'; then echo "libfuse2 is installed: not a stock system"; exit 1; fi
+  echo "no libfuse.so.2 here; $(fusermount3 --version 2>&1)"
+  "$app" --appimage-version
+else
+  export APPIMAGE_EXTRACT_AND_RUN=1
+fi
 if [ -n "$want_update" ]; then
   # Read the runtime's .upd_info ELF section: with APPIMAGE_EXTRACT_AND_RUN the runtime hands
   # --appimage-updateinformation to the app instead of answering it.

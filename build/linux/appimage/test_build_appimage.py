@@ -48,8 +48,9 @@ def test_version_comes_from_the_app(tmp_path: Path) -> None:
 
 
 def test_appimagetool_gets_the_update_info_and_no_fuse(tmp_path: Path, monkeypatch) -> None:
-    cmd = ba.appimagetool_cmd(Path("/t/tool"), Path("/a"), Path("/o.AppImage"), "x86_64")
+    cmd = ba.appimagetool_cmd(Path("/t/tool"), Path("/a"), Path("/o.AppImage"), "x86_64", Path("/t/rt"))
     assert cmd[cmd.index("-u") + 1] == ba.update_info("x86_64")
+    assert cmd[cmd.index("--runtime-file") + 1] == str(Path("/t/rt"))
     calls = []
 
     def run(cmd, check=True, env=None, cwd=None):
@@ -61,9 +62,12 @@ def test_appimagetool_gets_the_update_info_and_no_fuse(tmp_path: Path, monkeypat
     if not _can_symlink(tmp_path):
         pytest.skip("symlinks unavailable")
     monkeypatch.setattr(ba, "fetch_appimagetool", lambda arch, cache: Path("/t/tool"))
+    monkeypatch.setattr(ba, "fetch_runtime", lambda arch, cache: Path(f"/t/runtime-{arch}"))
     out = ba.build(_one_dir_build(tmp_path), tmp_path / "dist", arch="aarch64", version="1.2.3",
                    cache=tmp_path / "c", run=run)
     assert out.name == "UEFN-Ducky-1.2.3-aarch64.AppImage"
+    # The static type-2 runtime goes in, never appimagetool's own download.
+    assert calls[0][0][calls[0][0].index("--runtime-file") + 1] == str(Path("/t/runtime-aarch64"))
     assert calls[0][1]["ARCH"] == "aarch64" and calls[0][1]["APPIMAGE_EXTRACT_AND_RUN"] == "1"
     assert not (tmp_path / "dist" / "UEFN-Ducky-aarch64.AppDir").exists()
 
@@ -105,6 +109,14 @@ def test_appimagetool_download_is_pinned(tmp_path: Path, monkeypatch) -> None:
     assert tool.read_bytes() == body
     monkeypatch.setattr(ba.urllib.request, "urlopen", lambda *a, **k: pytest.fail("cached tool re-downloaded"))
     assert ba.fetch_appimagetool("x86_64", tmp_path) == tool
+
+
+def test_static_runtime_is_pinned(tmp_path: Path, monkeypatch) -> None:
+    assert set(ba.RUNTIME_SHA256) == set(ba.APPIMAGETOOL_SHA256) == {"x86_64", "aarch64"}
+    assert "type2-runtime" in ba.RUNTIME_URL and ba.RUNTIME_VERSION != "continuous"
+    monkeypatch.setattr(ba.urllib.request, "urlopen", lambda url, timeout=0: io.BytesIO(b"bad"))
+    with pytest.raises(SystemExit, match="runtime SHA-256"):
+        ba.fetch_runtime("aarch64", tmp_path)
 
 
 def test_apprun_starts_the_app_and_keeps_its_arguments() -> None:

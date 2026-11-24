@@ -125,16 +125,21 @@ jobs:
 
   # Clean distros: nothing but a virtual display is installed before the AppImage starts.
   containers:
-    name: start on ${{ matrix.image }} (${{ matrix.arch }})
+    name: start on ${{ matrix.image }} (${{ matrix.arch }}, ${{ matrix.mode }})
     needs: build
     strategy:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
         image: ["ubuntu:22.04", "ubuntu:24.04", "fedora:41", "archlinux:latest"]
+        mode: [extract]
         exclude:
           - arch: aarch64
             image: "archlinux:latest" # no official arm64 image
+        # Mounted through FUSE like a desktop start: the static runtime, no libfuse2 installed.
+        include:
+          - { arch: x86_64, image: "ubuntu:24.04", mode: fuse }
+          - { arch: aarch64, image: "ubuntu:24.04", mode: fuse }
     runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -147,5 +152,7 @@ jobs:
         run: |
           app="$(ls out/UEFN-Ducky-*-${{ matrix.arch }}.AppImage)"
           want="$(python3 -c "import sys; sys.path.insert(0, 'build/linux/appimage'); import build_appimage as b; print(b.update_info('${{ matrix.arch }}'))")"
-          docker run --rm -v "$PWD:/w" -w /w "${{ matrix.image }}" \
-            bash build/linux/appimage/smoke_container.sh "/w/$app" "$want"
+          fuse=()
+          [ "${{ matrix.mode }}" = fuse ] && fuse=(--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined)
+          docker run --rm "${fuse[@]}" -v "$PWD:/w" -w /w "${{ matrix.image }}" \
+            bash build/linux/appimage/smoke_container.sh "/w/$app" "$want" "${{ matrix.mode }}"

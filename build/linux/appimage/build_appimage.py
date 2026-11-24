@@ -40,6 +40,15 @@ APPIMAGETOOL_SHA256 = {
     "x86_64": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
     "aarch64": "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158",
 }
+# The static type-2 runtime (libfuse3 linked in, needs only fusermount/fusermount3 on PATH): stock
+# Ubuntu 22.04/24.04 ship no libfuse2, which the classic runtime needs. Pinned so appimagetool never
+# embeds its own unpinned "continuous" download.
+RUNTIME_VERSION = "20251108"
+RUNTIME_URL = "https://github.com/AppImage/type2-runtime/releases/download/{v}/runtime-{arch}"
+RUNTIME_SHA256 = {
+    "x86_64": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+    "aarch64": "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
+}
 ARCHES = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}
 # Where the release lane publishes the Linux downloads (the Store site). Override per run.
 UPDATE_BASE = os.environ.get("UEFN_DUCKY_APPIMAGE_UPDATE_BASE", "https://uefnducky.org/downloads/linux")
@@ -105,28 +114,38 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
-def fetch_appimagetool(arch: str, cache: Path) -> Path:
-    """The pinned appimagetool for ``arch``, SHA-256 checked (a mismatch stops the build)."""
-    tool = cache / f"appimagetool-{APPIMAGETOOL_VERSION}-{arch}.AppImage"
-    want = APPIMAGETOOL_SHA256[arch]
-    if not (tool.is_file() and sha256_of(tool) == want):
-        cache.mkdir(parents=True, exist_ok=True)
-        part = tool.with_suffix(".part")
-        url = APPIMAGETOOL_URL.format(v=APPIMAGETOOL_VERSION, arch=arch)
+def _fetch_pinned(what: str, url: str, want: str, dest: Path) -> Path:
+    """``url`` cached at ``dest``, SHA-256 checked (a mismatch stops the build)."""
+    if not (dest.is_file() and sha256_of(dest) == want):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        part = dest.with_suffix(".part")
         print(f"Downloading {url}")
         with urllib.request.urlopen(url, timeout=120) as resp, part.open("wb") as out:
             shutil.copyfileobj(resp, out)
         got = sha256_of(part)
         if got != want:
             part.unlink(missing_ok=True)
-            raise SystemExit(f"ERROR: appimagetool SHA-256 {got} != pinned {want}")
-        os.replace(part, tool)
-    tool.chmod(0o755)
-    return tool
+            raise SystemExit(f"ERROR: {what} SHA-256 {got} != pinned {want}")
+        os.replace(part, dest)
+    dest.chmod(0o755)
+    return dest
 
 
-def appimagetool_cmd(tool: Path, appdir: Path, out: Path, arch: str) -> list[str]:
-    return [str(tool), "--no-appstream", "-u", update_info(arch), str(appdir), str(out)]
+def fetch_appimagetool(arch: str, cache: Path) -> Path:
+    """The pinned appimagetool for ``arch``."""
+    return _fetch_pinned("appimagetool", APPIMAGETOOL_URL.format(v=APPIMAGETOOL_VERSION, arch=arch),
+                         APPIMAGETOOL_SHA256[arch], cache / f"appimagetool-{APPIMAGETOOL_VERSION}-{arch}.AppImage")
+
+
+def fetch_runtime(arch: str, cache: Path) -> Path:
+    """The pinned static type-2 runtime for ``arch`` (no libfuse2 needed where the AppImage runs)."""
+    return _fetch_pinned("runtime", RUNTIME_URL.format(v=RUNTIME_VERSION, arch=arch),
+                         RUNTIME_SHA256[arch], cache / f"runtime-{RUNTIME_VERSION}-{arch}")
+
+
+def appimagetool_cmd(tool: Path, appdir: Path, out: Path, arch: str, runtime: Path) -> list[str]:
+    return [str(tool), "--no-appstream", "--runtime-file", str(runtime), "-u", update_info(arch),
+            str(appdir), str(out)]
 
 
 def build(app_dir: Path, out_dir: Path, *, arch: str, version: str, cache: Path, run=subprocess.run) -> Path:
@@ -134,9 +153,10 @@ def build(app_dir: Path, out_dir: Path, *, arch: str, version: str, cache: Path,
     out = out_dir / appimage_name(version, arch)
     out.unlink(missing_ok=True)
     tool = fetch_appimagetool(arch, cache)
+    runtime = fetch_runtime(arch, cache)
     # No FUSE in CI or containers: the tool unpacks itself instead of mounting.
     env = {**os.environ, "ARCH": arch, "APPIMAGE_EXTRACT_AND_RUN": "1"}
-    cmd = appimagetool_cmd(tool, appdir, out, arch)
+    cmd = appimagetool_cmd(tool, appdir, out, arch, runtime)
     print(">", " ".join(cmd))
     run(cmd, check=True, env=env)
     zsync = out.with_name(out.name + ".zsync")
