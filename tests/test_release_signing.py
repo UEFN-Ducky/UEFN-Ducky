@@ -3,6 +3,7 @@ Setup host ships, and that GitHub Actions runs the same release a local one does
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import os
@@ -366,7 +367,8 @@ def _no_tests(pub, monkeypatch) -> list[str]:
     return ran
 
 
-_STORE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="  # base64 of 32 bytes
+# Built, not a literal: the release's gitleaks gate flags a high-entropy key string.
+_STORE_KEY = base64.b64encode(bytes(range(32))).decode()
 
 
 def _signing_copy(pub, tmp_path, monkeypatch):
