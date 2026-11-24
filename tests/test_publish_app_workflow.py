@@ -48,6 +48,16 @@ def test_no_other_linux_job_is_skipped_or_soft_failed():
             assert "AUR_SSH_PRIVATE_KEY" not in run and "FLATHUB_TOKEN" not in run, (name, step.get("name"))
 
 
+def test_linux_build_unpacks_the_verse_grammar_before_the_freeze():
+    job = _jobs()["linux-build"]
+    names = [s.get("name") for s in job["steps"]]
+    assert names.index("Verse language assets") < names.index("Freeze (PyInstaller) + runtime smoke")
+    assert job["env"]["VERSE_LANG_ASSETS"] == "${{ secrets.VERSE_LANG_ASSETS }}"
+    run = job["steps"][names.index("Verse language assets")]["run"]
+    assert "base64 -d | tar -xzf -" in run
+    assert 'VERSE_LANG_ASSETS is not set: a release never ships the Verse editor without its grammar"; exit 1' in run
+
+
 def test_linux_repo_writes_only_an_armored_uefn_ducky_gpg_at_the_root():
     run = "\n".join(s.get("run", "") for s in _jobs()["linux-repo"]["steps"])
     assert "uefn-ducky.asc" not in run  # the Store's uds_linux_repo refuses any other root file

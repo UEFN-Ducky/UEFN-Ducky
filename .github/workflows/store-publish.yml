@@ -104,6 +104,7 @@ jobs:
       VERSION: ${{ needs.linux-version.outputs.version }}
       MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
       MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+      VERSE_LANG_ASSETS: ${{ secrets.VERSE_LANG_ASSETS }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -131,6 +132,26 @@ jobs:
       - name: Set the release version
         run: |
           python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; a, b, c = sys.argv[1].split('.'); p.write_version(f'{a}.{b}.{int(c) - 1}')" "$VERSION"
+      # The Verse editor's grammar comes from Epic's UEFN install, which CI lacks and this
+      # public repo can't hold: VERSE_LANG_ASSETS is base64 of a tar.gz of src/verse-editor/lang
+      # (made on the release PC: tar -czf - -C <that folder> . | base64 -w0).
+      - name: Verse language assets
+        run: |
+          lang=ducky_app/frontend/ui_web/web/src/verse-editor/lang
+          mkdir -p "$lang"
+          if [ -z "$VERSE_LANG_ASSETS" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::notice::dry run without VERSE_LANG_ASSETS: empty Verse grammar stand-ins"
+              echo '{"scopeName": "source.verse", "patterns": [], "repository": {}}' > "$lang/verse.tmGrammar.json"
+              echo '{}' > "$lang/language-configuration.json"
+              echo '{}' > "$lang/verse-snippets.json"
+              echo '{"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []}' > "$lang/verse-dark.tmTheme.json"
+              exit 0
+            fi
+            echo "VERSE_LANG_ASSETS is not set: a release never ships the Verse editor without its grammar"; exit 1
+          fi
+          printf '%s' "$VERSE_LANG_ASSETS" | base64 -d | tar -xzf - -C "$lang"
+          ls -la "$lang"
       - name: Freeze (PyInstaller) + runtime smoke
         run: |
           xvfb-run -a python build/build_exes.py
