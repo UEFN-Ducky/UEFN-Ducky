@@ -11,6 +11,8 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 
 from frontend import remote_trust as rt
 
+_REAL_ANNOUNCE = rt._announce  # the fixture silences it; one test needs the real one
+
 
 @pytest.fixture(autouse=True)
 def vault(monkeypatch):
@@ -113,6 +115,25 @@ def test_only_this_pcs_window_approves_lists_or_removes_devices() -> None:
     assert [d["id"] for d in api.remote_devices_list(None)["devices"]] == [vid]
     assert api.remote_device_remove(None, vid) == {"ok": True}
     assert rt.approved() == {}
+
+
+def test_a_pair_request_toasts_on_this_pc_only(monkeypatch) -> None:
+    """Hidden in the tray (Linux SNI, Windows tray): one local toast, nothing for the site or phone."""
+    from frontend import notifications
+    from frontend.ui_web import panel_httpd
+
+    toasts: list[dict] = []
+    events: list[dict] = []
+    monkeypatch.setattr(panel_httpd, "publish_panel_events", lambda evs: events.extend(evs))
+    monkeypatch.setattr(notifications, "_app_in_front", lambda: False)
+    monkeypatch.setattr(notifications, "_queue_toast", toasts.append)
+    monkeypatch.setattr(notifications, "_queue_site", lambda item: pytest.fail("a pair request must not reach the site"))
+    _, pub = _viewer()
+    _REAL_ANNOUNCE("v1", {"label": "Pixel 9", "code": "K4M9QZ", "pub": pub})
+    assert events == [{"type": "remote_pair_request", "id": "v1", "label": "Pixel 9", "code": "K4M9QZ"}]
+    assert len(toasts) == 1 and "K4M9QZ" in toasts[0]["text"] and toasts[0]["kind"] == ""
+    monkeypatch.setattr(notifications, "_app_in_front", lambda: True)
+    assert notifications.local_alert("t", "x") is False and len(toasts) == 1  # window in front: the modal is enough
 
 
 def test_sas_is_stable_six_crockford_chars_and_order_matters() -> None:

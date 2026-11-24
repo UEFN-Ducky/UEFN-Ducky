@@ -278,6 +278,13 @@ def _announce(vid: str, row: dict[str, Any]) -> None:
         publish_panel_events([{"type": "remote_pair_request", "id": vid, "label": row["label"], "code": row["code"]}])
     except Exception:
         pass  # ponytail: the Settings list still shows it (pending_requests)
+    try:
+        from frontend import notifications
+
+        # Window hidden in the tray (common on Linux): say so here, never on the site or phone.
+        notifications.local_alert("A device wants to connect", f"{row['label']} · code {row['code']} · approve it in UEFN Ducky")
+    except Exception:
+        pass
 
 
 def pair_request(args: dict[str, Any] | None) -> dict[str, Any]:
