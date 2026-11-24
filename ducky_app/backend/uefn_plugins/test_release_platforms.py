@@ -127,3 +127,13 @@ def test_linux_build_cmd_mounts_the_kit_read_only(tmp_path):
     cmd = rp.linux_build_cmd(tmp_path, "linux-arm64")
     assert f"{rp.DUCKY_REPO}:/ducky:ro" in cmd and "--platform" in cmd and "linux/arm64" in cmd
     assert cmd[-1].endswith("target='linux-arm64')")
+
+
+def test_linux_build_installs_the_engine_pin_before_building(tmp_path):
+    """Every plugin but google died on 'No module named iced_x86' in the bare build image."""
+    (tmp_path / "requirements.txt").write_text("requests==2\niced-x86==1.22.0  # CPU check\n", encoding="utf-8")
+    assert rp.build_pins(tmp_path) == ["iced-x86==1.22.0"]
+    call = rp.linux_build_cmd(tmp_path, "linux-x86_64")[-1]
+    assert call.index("'pip', 'install'") < call.index("build_compiled_zip")
+    assert "iced-x86==" in call
+    compile(call, "<docker python -c>", "exec")

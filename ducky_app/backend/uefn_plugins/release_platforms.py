@@ -55,9 +55,24 @@ def _zip_manifest(path: Path) -> dict:
         return json.loads(zf.read("plugin.json").decode("utf-8"))
 
 
+def build_pins(repo: Path = DUCKY_REPO) -> list[str]:
+    """What the bare build image lacks that the build engine imports: its CPU check's
+    disassembler (iced-x86), at the version Ducky's requirements.txt pins."""
+    lines = (repo / "requirements.txt").read_text(encoding="utf-8").splitlines()
+    pins = [line.split("#")[0].strip() for line in lines if line.strip().lower().startswith("iced-x86")]
+    if not pins:
+        raise SystemExit(f"{repo / 'requirements.txt'} pins no iced-x86 (the build engine's CPU check needs it)")
+    return pins
+
+
 def linux_build_cmd(plugin: Path, target: str) -> list[str]:
     platform = LINUX_TARGETS[target]
-    call = f"import sys; sys.path.insert(0, 'scripts'); import build_zip as b; b.build_compiled_zip(release=True, target={target!r})"
+    # Installed here, not in each plugin's build_zip: only google's had it, so every other
+    # plugin's Linux build died on 'No module named iced_x86'.
+    install = ("import subprocess; subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', "
+               f"'--disable-pip-version-check', '--root-user-action=ignore', *{build_pins()!r}], check=True)")
+    call = (f"import sys; {install}; sys.path.insert(0, 'scripts'); import build_zip as b; "
+            f"b.build_compiled_zip(release=True, target={target!r})")
     return ["docker", "run", "--rm", "--platform", platform,
             "-v", f"{plugin}:/plugin", "-v", f"{DUCKY_REPO}:/ducky:ro",
             # the pinned build kit (python-build-standalone, Nuitka) is cached per arch
