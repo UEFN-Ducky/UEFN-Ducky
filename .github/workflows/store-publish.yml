@@ -275,6 +275,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 120
     env:
+      PYTHONUTF8: "1"  # the runner's console is cp1252: publish_app prints arrows and dashes
       DUCKYOS_API_KEY: ${{ secrets.DUCKYOS_API_KEY }}
       DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
       VERSE_LANG_ASSETS: ${{ secrets.VERSE_LANG_ASSETS }}

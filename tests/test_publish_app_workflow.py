@@ -58,6 +58,11 @@ def test_both_builds_unpack_the_verse_grammar_before_building():
         assert "build/ci_verse_lang.sh" in job["steps"][names.index("Verse language assets")]["run"], name
 
 
+def test_every_build_job_runs_python_in_utf8():
+    for name in ("linux-build", "publish"):
+        assert _jobs()[name]["env"]["PYTHONUTF8"] == "1", name
+
+
 def test_verse_grammar_unpacks_and_a_real_release_needs_the_secret(tmp_path):
     import base64
     import io
