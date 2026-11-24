@@ -176,6 +176,20 @@ def alert(
         return False
 
 
+def local_alert(title: str, text: str) -> bool:
+    """This PC only: a tray (Windows) or desktop (Linux) notification when no Ducky window
+    is in front. Never the account batch, never a phone push. A click opens the window.
+    For what must not travel through the site (a device asking to be approved)."""
+    try:
+        if _app_in_front():
+            return False
+        _queue_toast({"title": _clip(title, 80) or "UEFN Ducky", "text": _clip(text, 240), "kind": "", "id": "", "level": "ask"})
+        return True
+    except Exception:
+        _log.debug("local alert failed", exc_info=True)
+        return False
+
+
 # --- Windows notifications -------------------------------------------------------
 
 
