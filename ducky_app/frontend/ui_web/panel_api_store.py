@@ -226,14 +226,7 @@ class PanelApiStoreMixin:
         out = call(to, "rtc_connect", signed, timeout=45.0)
         result = out.get("result") if isinstance(out.get("result"), dict) else {}
         if not out.get("ok"):
-            if result.get("pair"):
-                # First time: ask the other PC to approve this one; both windows show the code.
-                asked = call(to, "pair_request", {"pub": remote_trust.pc_pub_b64(), "label": "UEFN Ducky PC"})
-                got = asked.get("result") if isinstance(asked.get("result"), dict) else {}
-                if asked.get("ok") and got.get("pcPub"):
-                    if not remote_trust.pinned_pc(to):
-                        remote_trust.pin_pc(to, str(got["pcPub"]))
-                    raise RuntimeError(f"Approve this PC on the other UEFN Ducky (code {got.get('code', '')}), then open it again.")
+            # First time, ducky_link.call asked the other PC to approve this one (code in the error).
             raise RuntimeError(str(out.get("error") or "That UEFN Ducky didn't answer."))
         if not remote_trust.check_answer(remote_trust.pinned_pc(to), signed, result):
             raise RuntimeError("That UEFN Ducky's answer could not be verified. Pair it again.")
