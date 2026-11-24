@@ -1500,15 +1500,25 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
     if name == "rtc_connect":
+        # Only a device approved in this PC's window may open it, and the answer comes
+        # back signed by this PC: the site relaying both can't sit in the middle.
+        from frontend import remote_trust
         from frontend.remote_direct import rtc_connect
 
+        why = remote_trust.check_offer(raw)
+        if why:
+            return {"ok": False, "error": why, "result": {"error": why, "pair": True}}
         try:
             out = rtc_connect(raw)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
         if out.get("error") and not out.get("answer"):
             return {"ok": False, "error": str(out["error"]), "result": out}
-        return {"ok": True, "result": out}
+        offer = raw.get("offer") if isinstance(raw.get("offer"), dict) else {}
+        answer = out.get("answer") if isinstance(out.get("answer"), dict) else {}
+        msg = remote_trust.answer_message(str(raw.get("session") or ""), str(offer.get("sdp") or ""),
+                                          str(answer.get("sdp") or ""))
+        return {"ok": True, "result": {**out, "pcSig": remote_trust.sign(msg), "pcPub": remote_trust.pc_pub_b64()}}
     if name in ("pair_request", "pair_status"):
         from frontend import remote_trust
 

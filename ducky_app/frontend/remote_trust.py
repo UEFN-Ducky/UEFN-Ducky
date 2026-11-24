@@ -169,6 +169,94 @@ def revoke(viewer_id: str) -> bool:
     return gone
 
 
+# --------------------------------------------------------------------------- signed signaling
+
+OFFER_SKEW_S = 120.0
+_SEEN_SIGS: dict[str, float] = {}  # sig -> monotonic; a sig works once (replay)
+
+
+def _h(text: Any) -> str:
+    return hashlib.sha256(str(text or "").encode("utf-8")).hexdigest()
+
+
+def offer_message(session: str, ts: int, offer_sdp: str) -> bytes:
+    return f"rtc1|{session}|{int(ts)}|{_h(offer_sdp)}".encode("utf-8")
+
+
+def answer_message(session: str, offer_sdp: str, answer_sdp: str) -> bytes:
+    return f"rtc1a|{session}|{_h(offer_sdp)}|{_h(answer_sdp)}".encode("utf-8")
+
+
+def check_offer(args: dict[str, Any] | None) -> str:
+    """'' when an approved device signed this offer just now; else why not."""
+    raw = args if isinstance(args, dict) else {}
+    offer = raw.get("offer") if isinstance(raw.get("offer"), dict) else {}
+    sig = str(raw.get("sig") or "")
+    try:
+        ts = int(raw.get("ts") or 0)
+    except (TypeError, ValueError):
+        ts = 0
+    if not sig or not raw.get("viewer"):
+        return "This device isn't paired with this PC yet."
+    if abs(time.time() - ts) > OFFER_SKEW_S:
+        return "The connection request is too old. Check this device's clock."
+    msg = offer_message(str(raw.get("session") or ""), ts, str(offer.get("sdp") or ""))
+    if not verify(str(raw.get("viewer")), msg, sig):
+        return "This device isn't approved on this PC."
+    with _LOCK:
+        now = time.monotonic()
+        for old in [s for s, at in _SEEN_SIGS.items() if now - at > 2 * OFFER_SKEW_S]:
+            _SEEN_SIGS.pop(old, None)
+        if sig in _SEEN_SIGS:
+            return "That connection request was already used."
+        _SEEN_SIGS[sig] = now
+    return ""
+
+
+def sign_offer(args: dict[str, Any]) -> dict[str, Any]:
+    """This PC signs its own offer to another PC (it is that PC's approved device)."""
+    ts = int(time.time())
+    offer = args.get("offer") if isinstance(args.get("offer"), dict) else {}
+    msg = offer_message(str(args.get("session") or ""), ts, str(offer.get("sdp") or ""))
+    return {**args, "viewer": pub_id(pc_pub_b64()), "ts": ts, "sig": sign(msg)}
+
+
+PINNED_KEY = "remote_pinned_pcs"  # other PC's key id -> its PC public key (b64)
+
+
+def pinned_pc(key_id: str) -> str:
+    from backend.agent import secrets
+
+    try:
+        rows = json.loads(secrets.get_key_fresh(PINNED_KEY) or "{}")
+    except (TypeError, ValueError):
+        rows = {}
+    return str(rows.get(str(key_id or "")) or "") if isinstance(rows, dict) else ""
+
+
+def pin_pc(key_id: str, pub_b64: str) -> None:
+    """Remember the other PC's key the first time it answers our pair request."""
+    from backend.agent import secrets
+
+    load_pub(pub_b64)
+    with _LOCK:
+        try:
+            rows = json.loads(secrets.get_key_fresh(PINNED_KEY) or "{}")
+        except (TypeError, ValueError):
+            rows = {}
+        rows = rows if isinstance(rows, dict) else {}
+        rows[str(key_id)] = pub_b64
+        secrets.set_key(PINNED_KEY, json.dumps(rows, separators=(",", ":")))
+
+
+def check_answer(pc_pub: str, args: dict[str, Any], result: dict[str, Any]) -> bool:
+    """The answer to our offer was signed by the PC key we pinned."""
+    offer = args.get("offer") if isinstance(args.get("offer"), dict) else {}
+    answer = result.get("answer") if isinstance(result.get("answer"), dict) else {}
+    msg = answer_message(str(args.get("session") or ""), str(offer.get("sdp") or ""), str(answer.get("sdp") or ""))
+    return bool(pc_pub) and result.get("pcPub") == pc_pub and verify_with(pc_pub, msg, str(result.get("pcSig") or ""))
+
+
 # --------------------------------------------------------------------------- pairing
 
 PENDING_TTL_S = 600.0
