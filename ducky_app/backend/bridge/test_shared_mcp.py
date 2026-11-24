@@ -107,6 +107,9 @@ def _rpc(handle: int, method: str, params: dict | None = None, req_id: int = 1) 
         handle, {"op": "mcp", "id": req_id, "method": method, "params": params or {}}
     )
     reply = shared_mcp.read_frame(handle)
+    # A list_changed or progress notice can arrive first (no id): a client skips it.
+    while reply.get("op") == "mcp" and "method" in reply and reply.get("id") != req_id:
+        reply = shared_mcp.read_frame(handle)
     assert reply.get("op") == "mcp"
     if reply.get("error"):
         raise RuntimeError(reply["error"])

@@ -143,7 +143,10 @@ def test_stop_kills_active_terminal_and_child(local_runs, monkeypatch):
     worker.start()
     child_pid = None
     try:
-        until(pid_file.exists)
+        # A cold ConPTY PowerShell plus Python start takes over 10 s on a loaded CI worker.
+        # Stop waiting early if the run ended without starting the child, and say why.
+        until(lambda: pid_file.exists() or not worker.is_alive(), timeout=45)
+        assert pid_file.exists(), result
         child_pid = int(pid_file.read_text())
         assert psutil.pid_exists(child_pid)
         assert runner.stop_workflow(wid)
