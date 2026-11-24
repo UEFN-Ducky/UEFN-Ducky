@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,8 @@ class FakeStore:
         self.fail_on, self.reply, self.uploaded, self.calls = fail_on, reply, [], []
 
     def upload(self, base, key, path: Path) -> dict:
+        # core's ticket checks `filename` with its identity rule: no `_`, at most 120.
+        assert re.fullmatch(r"[A-Za-z0-9 .'-]{1,120}", path.name), path.name
         if path.name.endswith(self.fail_on) and self.fail_on:
             raise SystemExit(f"Presigned PUT HTTP 500: {path.name}")
         self.uploaded.append(path.name)
@@ -77,12 +80,12 @@ def test_one_swap_with_every_path_and_unique_names(tmp_path):
     assert set(args["files"]) == set(REPO)
     assert len(set(args["files"].values())) == len(REPO)
     assert len(set(store.uploaded)) == len(REPO)
-    assert "linux-repo-1.2.601-apt_dists_stable_Release" in store.uploaded
+    assert "linux-repo-1.2.601-apt-dists-stable-Release" in store.uploaded
     assert all(n.startswith(f"linux-repo-{VERSION}-") and "/" not in n for n in store.uploaded)
 
 
 def test_a_failed_upload_swaps_nothing(tmp_path):
-    pub, store = _load(), FakeStore(fail_on="rpm_repodata_repomd.xml")
+    pub, store = _load(), FakeStore(fail_on="rpm-repodata-repomd.xml")
     _wire(pub, store)
     with pytest.raises(SystemExit):
         pub.publish_linux_repo("https://uefnducky.org", "k", VERSION, _repo(tmp_path))

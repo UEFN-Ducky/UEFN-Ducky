@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import re
 from pathlib import Path
 
 import pytest
@@ -47,8 +48,10 @@ class FakeStore:
         self.fail_on, self.uploaded, self.calls = fail_on, [], []
 
     def upload(self, base, key, path: Path) -> dict:
-        # core's allowed_app_release_name: a plain .rpm/.AppImage/.sig is HTTP 400.
+        # core's allowed_app_release_name: a plain .rpm/.AppImage/.sig is HTTP 400; its
+        # identity rule on `filename`: no `_` (x86_64, foo_1.2_amd64.deb), at most 120.
         assert path.name.startswith("linux-repo-") or path.suffix in (".exe", ".zip", ".apk"), path.name
+        assert re.fullmatch(r"[A-Za-z0-9 .'-]{1,120}", path.name), path.name
         name = path.name.removeprefix(f"linux-repo-{VERSION}-")
         if name == self.fail_on:
             raise SystemExit(f"Presigned PUT HTTP 500: {name}")
@@ -88,14 +91,14 @@ def test_one_call_registers_windows_and_every_linux_package(tmp_path):
 
 
 def test_a_failed_upload_registers_nothing(tmp_path):
-    pub, store = _load(), FakeStore(fail_on=f"uefn-ducky-{VERSION}-1.x86_64.rpm")
+    pub, store = _load(), FakeStore(fail_on=f"uefn-ducky-{VERSION}-1.x86-64.rpm")
     with pytest.raises(SystemExit):
         _publish(pub, store, _dist(tmp_path))
     assert store.calls == []
 
 
 def test_a_failed_signature_upload_registers_nothing(tmp_path):
-    pub, store = _load(), FakeStore(fail_on=f"uefn-ducky_{VERSION}_arm64.deb.sig")
+    pub, store = _load(), FakeStore(fail_on=f"uefn-ducky-{VERSION}-arm64.deb.sig")
     with pytest.raises(SystemExit):
         _publish(pub, store, _dist(tmp_path))
     assert store.calls == []
@@ -112,3 +115,12 @@ def test_a_package_without_an_arch_is_refused(tmp_path):
     (tmp_path / f"uefn-ducky_{VERSION}.deb").write_bytes(b"x")
     with pytest.raises(SystemExit, match="x86_64"):
         pub.linux_artifacts(VERSION, tmp_path)
+
+
+def test_store_names_pass_the_identity_rule_and_stay_unique():
+    pub = _load()
+    assert pub.store_upload_name(VERSION, f"uefn-ducky_{VERSION}_amd64.deb") == \
+        f"linux-repo-{VERSION}-uefn-ducky-{VERSION}-amd64.deb"
+    a = pub.store_upload_name(VERSION, "apt/pool/main/" + "x" * 200 + "_amd64.deb")
+    b = pub.store_upload_name(VERSION, "apt/pool/main/" + "x" * 200 + "_arm64.deb")
+    assert len(a) == 120 and a != b and re.fullmatch(r"[A-Za-z0-9 .'-]+", a)

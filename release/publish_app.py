@@ -658,6 +658,22 @@ def _uploaded_url(uploaded: dict, path: Path, digest: str) -> str:
     return f"/api/v1/files/{file_id}/content"
 
 
+# core's identity rule for the ticket's `filename` (duckyos-input normalize_platform_identity):
+# only [A-Za-z0-9 .'-], at most 120 characters. `_` (x86_64, foo_1.2_amd64.deb) is HTTP 400.
+_STORE_NAME_BAD = re.compile(r"[^A-Za-z0-9.'-]")
+_STORE_NAME_MAX = 120
+
+
+def store_upload_name(version: str, name: str) -> str:
+    """``linux-repo-<version>-<name>`` as the Store accepts it: every other character becomes
+    ``-``, and a name past 120 characters keeps its start plus a hash of the whole name."""
+    safe = _STORE_NAME_BAD.sub("-", f"linux-repo-{version}-{name}")
+    if len(safe) > _STORE_NAME_MAX:
+        tag = hashlib.sha256(name.encode()).hexdigest()[:12]
+        safe = f"{safe[:_STORE_NAME_MAX - len(tag) - 1]}-{tag}"
+    return safe
+
+
 def _upload_linux_file(base: str, api_key: str, version: str, path: Path) -> str:
     """Upload a Linux package or signature as ``linux-repo-<version>-<name>``: the Store
     takes only .exe/.zip/.apk or a linux-repo-* name for an app release (HTTP 400 on a
@@ -666,7 +682,7 @@ def _upload_linux_file(base: str, api_key: str, version: str, path: Path) -> str
 
     digest = sha256_file(path)
     with tempfile.TemporaryDirectory(prefix="ducky-linux-pkg-") as tmp:
-        named = Path(tmp) / f"linux-repo-{version}-{path.name}"
+        named = Path(tmp) / store_upload_name(version, path.name)
         shutil.copyfile(path, named)
         return _uploaded_url(upload_app_release(base, api_key, named), path, digest)
 
@@ -750,7 +766,9 @@ def publish_linux_repo(base: str, api_key: str, version: str, folder: Path = LIN
     with tempfile.TemporaryDirectory(prefix="ducky-linux-repo-") as tmp:
         for rel, path in files.items():
             # A reused name would overwrite the live file before the swap.
-            named = Path(tmp) / f"linux-repo-{version}-{rel.replace('/', '_')}"
+            named = Path(tmp) / store_upload_name(version, rel)
+            if named.exists():
+                raise SystemExit(f"linux repo path {rel!r}: its Store name {named.name} is taken by another file")
             shutil.copyfile(path, named)
             print(f"  uploading repo file {rel}")
             url = _uploaded_url(upload_app_release(base, api_key, named), named, sha256_file(named))
