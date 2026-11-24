@@ -1,9 +1,12 @@
 """UEFN Ducky to UEFN Ducky: one signed-in UEFN Ducky asks another of the same
 account to run an allowlisted panel call, through that Ducky's site mailbox.
 
-- Sealed end to end with the account data key (ADK, the same on every Ducky of the
-  account): the site relays only ciphertext, drops the request once answered and the
-  answer once read (uefn-ducky ``desktop-rpc``).
+- Sealed end to end with a key only the two PCs have: ECDH between their PC keys
+  (:mod:`frontend.remote_trust`), each approved in the other's window. The site hands
+  out the account data key (ADK), so the ADK seals only the public pairing messages
+  (``PAIRING``), which the pairing code checked on both screens protects.
+- The site relays only ciphertext, drops the request once answered and the answer
+  once read (uefn-ducky ``desktop-rpc``).
 - Every message is bound to its request (account, both Duckies, method, id and
   direction), so the site can't swap, redirect or replay one.
 - The asked Ducky answers only while its Remote access is on (the mailbox waiter).
@@ -23,8 +26,11 @@ import uuid
 import zlib
 from typing import Any
 
-MAGIC = b"UDL1"
+MAGIC = b"UDL1"  # ADK-sealed: pairing messages only
+MAGIC_PC = b"UDL2"  # sealed with the two PCs' ECDH key
 _INFO = b"uefn-ducky/ducky-link/v1"
+_INFO_PC = b"uefn-ducky/ducky-link/v2"
+PAIRING = frozenset({"pair_request", "pair_status"})
 # The site takes at most this much sealed text per request or answer.
 SEALED_MAX = 48_000
 _KEY_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -46,31 +52,47 @@ def _aad(account: str, sender: str, receiver: str, method: str, rid: str, direct
     return "|".join((account, sender, receiver, method, rid, direction)).encode("utf-8")
 
 
-def seal(obj: Any, *, adk: bytes, aad: bytes) -> dict[str, str]:
-    """``{"sealed": base64(MAGIC + nonce + AES-256-GCM(zlib(json)))}``."""
+def pc_link_key(peer_pub_b64: str) -> bytes:
+    """The AES key this PC and that PC both derive; the site can't (no private key)."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    from frontend import remote_trust
+
+    shared = remote_trust.pc_key().exchange(ec.ECDH(), remote_trust.load_pub(peer_pub_b64))
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_INFO_PC).derive(shared)
+
+
+def seal(obj: Any, *, adk: bytes = b"", aad: bytes, key: bytes = b"") -> dict[str, str]:
+    """``{"sealed": base64(MAGIC + nonce + AES-256-GCM(zlib(json)))}``; ``key`` = a
+    :func:`pc_link_key` (``UDL2``), else the ADK (``UDL1``, pairing only)."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     plain = zlib.compress(json.dumps(obj, default=str, separators=(",", ":")).encode("utf-8"), 6)
     nonce = os.urandom(12)
-    box = MAGIC + nonce + AESGCM(_derive(adk)).encrypt(nonce, plain, aad)
+    magic, aes = (MAGIC_PC, key) if key else (MAGIC, _derive(adk))
+    box = magic + nonce + AESGCM(aes).encrypt(nonce, plain, aad)
     return {"sealed": base64.b64encode(box).decode("ascii")}
 
 
-def open_sealed(env: Any, *, adk: bytes, aad: bytes) -> Any:
-    """The object inside ``seal``'s envelope; ``LinkError`` for anything else."""
+def open_sealed(env: Any, *, adk: bytes = b"", aad: bytes, key: bytes = b"") -> Any:
+    """The object inside ``seal``'s envelope; ``LinkError`` for anything else (an ADK
+    envelope where a PC key is expected included: no downgrade)."""
     from cryptography.exceptions import InvalidTag
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+    magic, aes = (MAGIC_PC, key) if key else (MAGIC, None)
     text = env.get("sealed") if isinstance(env, dict) else None
     try:
         box = base64.b64decode(str(text or ""), validate=True)
     except ValueError as exc:
         raise LinkError("not a sealed message") from exc
-    if len(box) < len(MAGIC) + 12 + 16 or not box.startswith(MAGIC):
+    if len(box) < len(magic) + 12 + 16 or not box.startswith(magic):
         raise LinkError("not a sealed message")
-    nonce, body = box[len(MAGIC) : len(MAGIC) + 12], box[len(MAGIC) + 12 :]
+    nonce, body = box[len(magic) : len(magic) + 12], box[len(magic) + 12 :]
     try:
-        plain = AESGCM(_derive(adk)).decrypt(nonce, body, aad)
+        plain = AESGCM(aes or _derive(adk)).decrypt(nonce, body, aad)
     except InvalidTag as exc:
         raise LinkError("This message wasn't sealed for this request by your account.") from exc
     return json.loads(zlib.decompress(plain).decode("utf-8"))
@@ -114,8 +136,18 @@ def call(to: str, method: str, args: dict[str, Any] | None = None, *, timeout: f
         return {"ok": False, "error": str(exc)}
     if to == own:
         return {"ok": False, "error": "That's this UEFN Ducky."}
+    from frontend import remote_trust
+
+    link = b""
+    if method not in PAIRING:
+        peer = remote_trust.pinned_pc(to)
+        if not peer:
+            return _ask_to_pair(to)
+        link = pc_link_key(peer)
     rid = uuid.uuid4().hex
-    sealed = seal(args or {}, adk=key, aad=_aad(account, own, to, method, rid, "req"))
+    sealed = seal(args or {}, adk=key, key=link, aad=_aad(account, own, to, method, rid, "req"))
+    if link:
+        sealed["pub"] = remote_trust.pc_pub_b64()
     if len(sealed["sealed"]) > SEALED_MAX:
         return {"ok": False, "error": "That request is too big to send."}
     errors = {"unavailable_code": "link_unavailable", "unavailable_msg": "", "error_code": "link_failed"}
@@ -142,9 +174,26 @@ def call(to: str, method: str, args: dict[str, Any] | None = None, *, timeout: f
     if result is None:
         return {"ok": True, "result": None}
     try:
-        return {"ok": True, "result": open_sealed(result, adk=key, aad=_aad(account, own, to, method, rid, "res"))}
+        opened = open_sealed(result, adk=key, key=link, aad=_aad(account, own, to, method, rid, "res"))
+        return {"ok": True, "result": opened}
     except (LinkError, ValueError, zlib.error) as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _ask_to_pair(to: str) -> dict[str, Any]:
+    """First call to a PC: ask it to approve this one, pin its key, say what to do."""
+    from frontend import remote_trust
+
+    asked = call(to, "pair_request", {"pub": remote_trust.pc_pub_b64(), "label": "UEFN Ducky PC"})
+    got = asked.get("result") if isinstance(asked.get("result"), dict) else {}
+    if not (asked.get("ok") and got.get("pcPub")):
+        return {"ok": False, "error": str(asked.get("error") or NOT_ANSWERING)}
+    try:
+        remote_trust.pin_pc(to, str(got["pcPub"]))
+    except remote_trust.TrustError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": False, "pair": True,
+            "error": f"Approve this PC on the other UEFN Ducky (code {got.get('code', '')}), then try again."}
 
 
 def answer(rid: str, sender: str, method: str, args: Any) -> dict[str, Any]:
@@ -152,14 +201,23 @@ def answer(rid: str, sender: str, method: str, args: Any) -> dict[str, Any]:
     open it, run it like any mailbox call, seal what goes back."""
     from frontend.duckyos_account import dispatch_desktop_rpc
 
+    from frontend import remote_trust
+
+    link = b""
     try:
         account, own, key = _context()
-        opened = open_sealed(args, adk=key, aad=_aad(account, sender, own, method, rid, "req"))
+        if method not in PAIRING:
+            # Anything but pairing needs a PC approved in this window (the ADK is the site's too).
+            pub = str(args.get("pub") or "") if isinstance(args, dict) else ""
+            if not pub or remote_trust.pub_id(pub) not in remote_trust.approved():
+                return {"ok": False, "error": "Approve that PC in this UEFN Ducky's window first."}
+            link = pc_link_key(pub)
+        opened = open_sealed(args, adk=key, key=link, aad=_aad(account, sender, own, method, rid, "req"))
     except (LinkError, ValueError, zlib.error) as exc:
         return {"ok": False, "error": str(exc)}
     out = dispatch_desktop_rpc(method, opened if isinstance(opened, dict) else {})
     if "result" in out:
-        sealed = seal(out["result"], adk=key, aad=_aad(account, sender, own, method, rid, "res"))
+        sealed = seal(out["result"], adk=key, key=link, aad=_aad(account, sender, own, method, rid, "res"))
         if len(sealed["sealed"]) > SEALED_MAX:
             return {"ok": False, "error": "The answer is too big to send back. Ask for less."}
         out = {**out, "result": sealed}

@@ -83,22 +83,17 @@ def test_opening_another_pc_pairs_first_then_checks_its_answer(monkeypatch) -> N
     from frontend.ui_web.panel_api_store import PanelApiStoreMixin as api
 
     other = {"approved": False}
-    calls: list[str] = []
 
     def fake_call(to, method, args=None, timeout=30.0):
-        calls.append(method)
-        if method == "pair_request":
-            return acc.dispatch_desktop_rpc("pair_request", args)
-        if not other["approved"]:
-            return {"ok": False, "error": "not paired", "result": {"pair": True}}
+        if not other["approved"]:  # what ducky_link.call says on first contact
+            return {"ok": False, "pair": True, "error": "Approve this PC on the other UEFN Ducky (code ABC123), then try again."}
         return acc.dispatch_desktop_rpc(method, args)
 
     monkeypatch.setattr(ducky_link, "call", fake_call)
-    monkeypatch.setattr(rt, "_announce", lambda vid, row: None)
     with pytest.raises(RuntimeError, match="Approve this PC"):
         api.ducky_link_rtc_connect(None, {"to": "k2", "session": "s3", "offer": OFFER, "protocol": 1})
-    assert calls == ["rtc_connect", "pair_request"] and rt.pinned_pc("k2") == rt.pc_pub_b64()
-    assert rt.decide(rt.pub_id(rt.pc_pub_b64()), True)
+    rt.pin_pc("k2", rt.pc_pub_b64())
+    rt.approve(rt.pc_pub_b64(), "UEFN Ducky PC")
     other["approved"] = True
     got = api.ducky_link_rtc_connect(None, {"to": "k2", "session": "s4", "offer": OFFER, "protocol": 1})
     assert got["answer"] == ANSWER
