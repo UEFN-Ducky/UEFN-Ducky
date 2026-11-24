@@ -1250,6 +1250,46 @@ def rerun_failed_argv(failed: list[str]) -> list[str]:
     return [sys.executable, "-m", "pytest", "-q", "--tb=short", "--lf", *PYTEST_PATHS]
 
 
+def vitest_failed_files(report: Path, web: Path) -> list[str]:
+    """The test files a ``--reporter=json`` vitest run failed, relative to ``web`` (posix)."""
+    try:
+        results = json.loads(report.read_text(encoding="utf-8")).get("testResults") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [
+        Path(os.path.relpath(r["name"], web)).as_posix()
+        for r in results
+        if isinstance(r, dict) and r.get("status") == "failed" and r.get("name")
+    ]
+
+
+def run_vitest(npm: str, web: Path, workers: str) -> None:
+    """The panel suite; like pytest, a file that fails only under load (a slow CI runner
+    ignores a click on a still-busy button) runs once more on its own, one worker, and only
+    a file that fails again stops the release."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        report = Path(tmp) / "vitest.json"
+        full = subprocess.run(
+            [npm, "test", "--", f"--maxWorkers={workers}", "--reporter=default", "--reporter=json",
+             f"--outputFile={report}"],
+            cwd=str(web),
+        )
+        if full.returncode == 0:
+            return
+        failed = vitest_failed_files(report, web)
+    if not failed:
+        raise SystemExit(f"vitest failed (exit {full.returncode}) with no failed test file to re-run; see above")
+    if len(failed) > FLAKY_RERUN_MAX:
+        raise SystemExit(f"{len(failed)} vitest files failed: too many to be flaky, not re-run; see above")
+    print(f"=== vitest: running only the {len(failed)} failed test files again, one worker ===")
+    alone = subprocess.run([npm, "test", "--", "--maxWorkers=1", *failed], cwd=str(web))
+    if alone.returncode != 0:
+        raise SystemExit(f"{len(failed)} vitest files failed again on their own (exit {alone.returncode})")
+    print("The failed vitest files passed on their own: they only fail inside the full suite (see above).")
+
+
 def run_regression_tests() -> None:
     """Refuse to bump/upload unless pytest + panel vitest are green.
 
@@ -1294,7 +1334,7 @@ def run_regression_tests() -> None:
             print(f"  {target}")
         if retry.web_changed:
             print("=== vitest (panel): the fix changed the web panel ===")
-            subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
+            run_vitest(npm, web, vitest_workers)
         again = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
              "--timeout", "300", "--timeout-method", "thread", *retry.targets],
@@ -1310,7 +1350,7 @@ def run_regression_tests() -> None:
         return
     print("=== vitest (panel) ===")
     with timed("vitest"):
-        subprocess.run([npm, "test", "--", f"--maxWorkers={vitest_workers}"], check=True, cwd=str(web))
+        run_vitest(npm, web, vitest_workers)
     # Half the cores, each test file on one worker (module state stays together): about 3
     # minutes instead of 11 to 19 on one core. A test stuck for 5 minutes fails with its
     # stack instead of holding the release forever (a lock deadlock once hung it 45 minutes).

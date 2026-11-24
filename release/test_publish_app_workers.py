@@ -28,6 +28,55 @@ def test_failed_tests_rerun_from_pytests_cache_never_on_the_command_line() -> No
         pa.rerun_failed_argv(["x.py::t"] * (pa.FLAKY_RERUN_MAX + 1))
 
 
+def _vitest(monkeypatch, tmp_path, codes: list[int], failed: list[str]):
+    """run_vitest with a fake npm: each call returns the next exit code, the full run's
+    JSON report lists ``failed``."""
+    import json
+
+    pa = _load()
+    web = tmp_path / "web"
+    calls: list[list[str]] = []
+
+    class _Done:
+        def __init__(self, code: int) -> None:
+            self.returncode = code
+
+    def fake_run(cmd, **kw):
+        calls.append([str(c) for c in cmd])
+        out = next((c.split("=", 1)[1] for c in cmd if str(c).startswith("--outputFile=")), "")
+        if out:
+            results = [{"name": str(web / f), "status": "failed"} for f in failed]
+            results.append({"name": str(web / "src/ok.test.ts"), "status": "passed"})
+            Path(out).write_text(json.dumps({"testResults": results}), encoding="utf-8")
+        return _Done(codes.pop(0))
+
+    monkeypatch.setattr(pa.subprocess, "run", fake_run)
+    return pa, web, calls
+
+
+def test_a_vitest_file_that_fails_only_under_load_runs_again_alone(monkeypatch, tmp_path) -> None:
+    pa, web, calls = _vitest(monkeypatch, tmp_path, [1, 0], ["src/a.test.tsx"])
+    pa.run_vitest("npm", web, "4")
+    assert calls[1] == ["npm", "test", "--", "--maxWorkers=1", "src/a.test.tsx"]
+
+
+def test_a_vitest_file_that_fails_again_stops_the_release(monkeypatch, tmp_path) -> None:
+    import pytest
+
+    pa, web, calls = _vitest(monkeypatch, tmp_path, [1, 1], ["src/a.test.tsx"])
+    with pytest.raises(SystemExit, match="failed again on their own"):
+        pa.run_vitest("npm", web, "4")
+
+
+def test_vitest_failing_outside_any_file_is_not_re_run(monkeypatch, tmp_path) -> None:
+    import pytest
+
+    pa, web, calls = _vitest(monkeypatch, tmp_path, [1], [])
+    with pytest.raises(SystemExit, match="no failed test file"):
+        pa.run_vitest("npm", web, "4")
+    assert len(calls) == 1
+
+
 def test_uefn_in_the_process_list_means_fewer_workers() -> None:
     pa = _load()
     with_uefn = ["System", "explorer.exe", "UnrealEditorFortnite-Win64-Shipping.exe", "python.exe"]
