@@ -217,18 +217,27 @@ class PanelApiStoreMixin:
     def ducky_link_rtc_connect(self, args: dict | None = None) -> dict[str, Any]:
         """Handshake for a window showing another UEFN Ducky: the page's offer goes to
         that Ducky sealed; its answer comes back. ``{"answer", "version", "protocol"}``."""
+        from frontend import remote_trust
         from frontend.ducky_link import call
 
         raw = args if isinstance(args, dict) else {}
-        out = call(
-            str(raw.get("to") or ""),
-            "rtc_connect",
-            {k: raw.get(k) for k in ("session", "offer", "ice", "protocol")},
-            timeout=45.0,
-        )
+        to = str(raw.get("to") or "")
+        signed = remote_trust.sign_offer({k: raw.get(k) for k in ("session", "offer", "ice", "protocol")})
+        out = call(to, "rtc_connect", signed, timeout=45.0)
+        result = out.get("result") if isinstance(out.get("result"), dict) else {}
         if not out.get("ok"):
+            if result.get("pair"):
+                # First time: ask the other PC to approve this one; both windows show the code.
+                asked = call(to, "pair_request", {"pub": remote_trust.pc_pub_b64(), "label": "UEFN Ducky PC"})
+                got = asked.get("result") if isinstance(asked.get("result"), dict) else {}
+                if asked.get("ok") and got.get("pcPub"):
+                    if not remote_trust.pinned_pc(to):
+                        remote_trust.pin_pc(to, str(got["pcPub"]))
+                    raise RuntimeError(f"Approve this PC on the other UEFN Ducky (code {got.get('code', '')}), then open it again.")
             raise RuntimeError(str(out.get("error") or "That UEFN Ducky didn't answer."))
-        return out.get("result") if isinstance(out.get("result"), dict) else {}
+        if not remote_trust.check_answer(remote_trust.pinned_pc(to), signed, result):
+            raise RuntimeError("That UEFN Ducky's answer could not be verified. Pair it again.")
+        return result
 
     # Remote devices: only this PC's own window may approve or remove one (REMOTE_DENY).
     def remote_pair_decide(self, viewer_id: str = "", allow: bool = False) -> dict[str, Any]:
