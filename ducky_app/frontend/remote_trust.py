@@ -60,13 +60,14 @@ def pc_pub_b64() -> str:
 
 
 def key_protection() -> str:
-    """How the PC key is kept: ``dpapi`` | ``keyring`` | ``file`` (Linux, no Secret Service)."""
+    """How the PC key is kept: ``dpapi`` | ``keyring`` | ``file`` (Linux, no Secret Service:
+    a 0600 key file, as safe as that file) | ``memory`` (other OS: gone at restart)."""
     import sys
 
-    if sys.platform == "win32":
-        return "dpapi"
     from backend.agent import secrets
 
+    if not secrets._is_linux():
+        return "dpapi" if sys.platform == "win32" else "memory"
     try:
         return "file" if secrets.master_key_path().is_file() else "keyring"
     except Exception:
