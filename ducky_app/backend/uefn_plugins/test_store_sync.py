@@ -390,9 +390,12 @@ def test_repair_thread_starts_only_when_a_repair_is_due(monkeypatch, tmp_path) -
 
     patch_host(monkeypatch, "time", fake_time)
     patch_host(monkeypatch, "_repair_missing_backends_worker", _counting_worker)
-    patch_host(monkeypatch, "get_enabled_plugin_ids", lambda: ["alpha", "beta"])
+    # Ids no other test installs: the replace test's alpha/beta reloads run on daemons that can
+    # still be registering when this test starts, and their _REGISTERED changes made a repair
+    # due twice (Linux CI, [1, 1]).
+    patch_host(monkeypatch, "get_enabled_plugin_ids", lambda: ["repair-due-a", "repair-due-b"])
     patch_host(monkeypatch, "appdata_uefn_plugins_dir", lambda: tmp_path)  # no plugin folders
-    patch_host(monkeypatch, "_REGISTERED", {"alpha", "beta"})
+    patch_host(monkeypatch, "_REGISTERED", {"repair-due-a", "repair-due-b"})
     patch_host(monkeypatch, "_REPAIR_ATTEMPTS", {})
     patch_host(monkeypatch, "_REPAIR_THREAD", None)
     patch_host(monkeypatch, "_LOADED", True)
@@ -407,7 +410,7 @@ def test_repair_thread_starts_only_when_a_repair_is_due(monkeypatch, tmp_path) -
     _ensure(100)
     assert runs == []
 
-    state._REGISTERED.discard("beta")  # its register() never finished
+    state._REGISTERED.discard("repair-due-b")  # its register() never finished
     _ensure(100)
     assert runs == [1]
     clock[0] += state._REPAIR_BACKOFF_S
