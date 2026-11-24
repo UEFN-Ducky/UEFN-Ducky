@@ -1338,7 +1338,7 @@ def run_regression_tests() -> None:
             run_vitest(npm, web, vitest_workers)
         again = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
-             "--timeout", "300", "--timeout-method", "thread", *retry.targets],
+             "--max-worker-restart", "0", "--timeout", "300", "--timeout-method", "thread", *retry.targets],
             cwd=str(ROOT),
             env=env,
         )
@@ -1357,10 +1357,14 @@ def run_regression_tests() -> None:
     # stack instead of holding the release forever (a lock deadlock once hung it 45 minutes).
     print("=== pytest (required before Store publish) ===")
     # --durations: the slowest tests are listed every run, so they can be made faster.
+    # --max-worker-restart 0: a worker the 300 s timeout kills fails its file instead of getting
+    # a replacement; with --dist loadfile the replacement got no work and the run never ended
+    # (Nov 24 2026: every test done, the controller waited on the new node for 30+ min).
     with timed("pytest"):
         full = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "--tb=short", "-n", workers, "--dist", "loadfile",
-             "--timeout", "300", "--timeout-method", "thread", "--durations=25", *PYTEST_PATHS],
+             "--max-worker-restart", "0", "--timeout", "300", "--timeout-method", "thread",
+             "--durations=25", *PYTEST_PATHS],
             cwd=str(ROOT),
             env=env,
         )
