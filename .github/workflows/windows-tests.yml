@@ -49,10 +49,24 @@ jobs:
           python -m pip install -r requirements-dev.txt
           npm ci --prefix ducky_app/frontend/ui_web/web
 
-      # No retries: a test that fails once is a bug to fix.
+      # A busy runner made one timing-bound test of ~7,770 miss its limit on most runs (a
+      # different one each time). Only the tests that failed run once more, alone; one that
+      # fails again fails the job, one that passes is listed as FLAKY in the summary (still
+      # a bug to fix). A run that recorded no failure (a crash) reruns nothing and fails.
       - name: pytest
         id: pytest
+        continue-on-error: true
         run: python -m pytest ducky_app -q -n auto --junitxml="${{ runner.temp }}/pytest.xml"
+
+      - name: pytest (failed tests, once more, alone)
+        id: pytest_rerun
+        if: ${{ !cancelled() && steps.pytest.outcome == 'failure' }}
+        continue-on-error: true
+        run: python -m pytest ducky_app -q --last-failed --last-failed-no-failures none --junitxml="${{ runner.temp }}/pytest-rerun.xml"
+
+      - name: pytest gate
+        if: ${{ !cancelled() && steps.pytest.outcome == 'failure' && steps.pytest_rerun.outcome != 'success' }}
+        run: exit 1
 
       # Repo-root tests/ (release workflow guards, build drift) and release/ run in no other job.
       - name: pytest tests release
@@ -106,18 +120,32 @@ jobs:
               skipped = sum(int(s.get("skipped", 0)) for s in suites)
               return total - failed - skipped, failed, skipped
 
+          def failed_names(xml):
+              if not xml.is_file():
+                  return set()
+              return {f"{c.get('classname')}::{c.get('name')}" for c in ET.parse(xml).getroot().iter("testcase")
+                      if c.find("failure") is not None or c.find("error") is not None}
+
           temp = Path(r"${{ runner.temp }}")
           baseline = int(os.environ["BASELINE_PASSED"])
           first = counts(temp / "pytest.xml")
+          rerun = temp / "pytest-rerun.xml"
           lines = []
           if first is None:
               lines.append("windows-tests: pytest wrote no report")
           else:
               passed, failed, skipped = first
-              lines.append(f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped, no retries")
-              if passed < baseline:
-                  lines.append(f"**{baseline - passed:,} fewer passing than the baseline.**")
-          lines.append("pytest: ${{ steps.pytest.outcome }} · tests+release: ${{ steps.pytest_root.outcome }} · vitest: ${{ steps.vitest.outcome }}")
+              lines.append(f"windows-tests: {passed:,} passed (baseline {baseline:,}), {failed:,} failed, {skipped:,} skipped")
+              if passed + (counts(rerun) or (0,))[0] < baseline:
+                  lines.append(f"**Fewer passing than the baseline ({baseline:,}).**")
+          if rerun.is_file():
+              flaky = sorted(failed_names(temp / "pytest.xml") - failed_names(rerun))
+              still = sorted(failed_names(rerun))
+              if flaky:
+                  lines.append("**FLAKY** (failed under load, passed alone; fix them):\n" + "\n".join(f"- `{n}`" for n in flaky))
+              if still:
+                  lines.append("**Failed again alone:**\n" + "\n".join(f"- `{n}`" for n in still))
+          lines.append("pytest: ${{ steps.pytest.outcome }} · rerun: ${{ steps.pytest_rerun.outcome }} · tests+release: ${{ steps.pytest_root.outcome }} · vitest: ${{ steps.vitest.outcome }}")
           text = "\n\n".join(lines) + "\n"
           print(text)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
