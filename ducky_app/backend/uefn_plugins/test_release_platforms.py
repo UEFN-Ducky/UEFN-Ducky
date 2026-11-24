@@ -84,6 +84,17 @@ def test_build_gives_three_platform_zips(plugin):
     assert calls.index(rp.QEMU_SETUP) == 1  # arm64 emulation is set up right before its build
 
 
+def test_the_windows_build_is_told_where_the_kit_is(plugin, monkeypatch):
+    """forge's build_zip looked only next to its own checkout and found no UEFN-Ducky."""
+    import os
+
+    monkeypatch.setenv("DUCKY_REPO", "x")  # recorded, so the value build() sets is undone after
+    monkeypatch.delenv("DUCKY_REPO")
+    run, _ = fake_docker(plugin)
+    rp.build(plugin, run=run)
+    assert os.environ["DUCKY_REPO"] == str(rp.DUCKY_REPO)
+
+
 def test_publish_sends_three_artifacts_in_one_release(plugin, monkeypatch):
     run, _ = fake_docker(plugin)
     zips = rp.build(plugin, run=run)

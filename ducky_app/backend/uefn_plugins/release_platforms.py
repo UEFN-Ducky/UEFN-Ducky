@@ -87,6 +87,9 @@ def build(plugin: Path, run=None) -> list[Path]:
     builds first: its build prunes every older zip, a Linux build only its own target's."""
     run = run or subprocess.run
     bz = _script(plugin, "build_zip")
+    # This kit, as the containers get it: a plugin looking only next to its own checkout
+    # (forge's build_zip) found no UEFN-Ducky from a sandbox worktree.
+    os.environ.setdefault("DUCKY_REPO", str(DUCKY_REPO))
     win = Path(bz.build_compiled_zip(release=True))
     tagged = win.with_name(win.name.replace("-compiled.ducky-plugin.zip", "-windows-x64-compiled.ducky-plugin.zip"))
     win.replace(tagged)
