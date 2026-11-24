@@ -556,8 +556,14 @@ def test_a_pooled_thread_opens_no_new_connection(tmp_path: Path, monkeypatch) ->
     root = _private_root(tmp_path)
     db.connect(root)
     mine = str(db.db_path(root))
+    import threading
+
     with ThreadPoolExecutor(4) as pool:
-        list(pool.map(lambda _: db.connect(root).execute("SELECT 1").fetchone(), range(8)))  # warm
+        # The pool starts threads lazily: quick warm tasks on a slow runner ran on fewer than 4,
+        # and the 4th then opened its connection inside the counted map (Windows CI, [1]).
+        # The barrier holds all 4 workers at once, so each one is warm.
+        everyone = threading.Barrier(4)
+        list(pool.map(lambda _: (db.connect(root).execute("SELECT 1").fetchone(), everyone.wait(30)), range(4)))
         calls: list[int] = []
         real_connect = db.sqlite3.connect
 

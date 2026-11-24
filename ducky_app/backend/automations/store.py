@@ -555,14 +555,17 @@ def append_run(workflow_id: str, run: dict[str, Any]) -> None:
     the workflow's keep_runs go, with their files."""
     at = float(run.get("ended") or run.get("started") or time.time())
     if not use_db("automations"):
-        wf = _read_file(_files_dir() / f"{workflow_id}.json") if _safe_file_id(workflow_id) else None
-        if wf is None:
-            return
-        runs = list(wf.get("runs") or []) + [run]
-        cut = max(len(runs) - keep_runs(wf), 0)
-        dropped, wf["runs"] = runs[:cut], runs[cut:]
-        wf["last_run"] = at
-        _files_put(wf)
+        # Locked: two runs ending together read, append and write the same file (one run
+        # was lost, and on Windows the second rename hit the first's file).
+        with _SAVE_LOCK:
+            wf = _read_file(_files_dir() / f"{workflow_id}.json") if _safe_file_id(workflow_id) else None
+            if wf is None:
+                return
+            runs = list(wf.get("runs") or []) + [run]
+            cut = max(len(runs) - keep_runs(wf), 0)
+            dropped, wf["runs"] = runs[:cut], runs[cut:]
+            wf["last_run"] = at
+            _files_put(wf)
         _drop_run_files(workflow_id, dropped)
         return
     from backend.automations import owned
@@ -883,7 +886,9 @@ def _files_put(doc: dict[str, Any]) -> None:
     path = _files_dir() / f"{doc['id']}.json"
     temporary = path.with_suffix(f".{uuid.uuid4()}.tmp")
     temporary.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    from backend.store.db import _replace_retrying
+
+    _replace_retrying(temporary, path)  # a reader's handle (lists, an indexer) blocks a Windows rename
 
 
 def _files_delete(workflow_id: str) -> bool:
