@@ -93,6 +93,8 @@ it("ticks several apps (Shift for a range) and stops or deletes them together", 
   await waitFor(() => expect(api.sandbox_stop_program).toHaveBeenCalledWith("c1", 7));
   expect(api.sandbox_stop_program).toHaveBeenCalledTimes(1);
 
+  // The bulk buttons stay disabled until the Stop round ends; a click before that is dropped.
+  await waitFor(() => expect(screen.getByRole("button", { name: "Delete 3" })).not.toHaveProperty("disabled", true));
   fireEvent.click(screen.getByRole("button", { name: "Delete 3" }));
   await waitFor(() => expect(api.sandbox_delete).toHaveBeenCalledTimes(3));
   expect(api.sandbox_delete.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["c1", "c2", "c3"]);

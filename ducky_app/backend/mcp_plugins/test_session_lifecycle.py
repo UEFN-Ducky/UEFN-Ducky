@@ -267,7 +267,10 @@ def test_idle_sessions_close_without_any_caller(transport, monkeypatch):
         pool.run_sync(pool.list_tools_for_plugin("one"))
         assert "one" in pool._connections
         deadline = time.monotonic() + 3
-        while pool._connections and time.monotonic() < deadline:
+        # Eviction drops the entry first and closes its scopes after, on the pool loop.
+        while (pool._connections or len(transport.closed) < len(transport.opened)) and (
+            time.monotonic() < deadline
+        ):
             time.sleep(0.05)
         assert pool._connections == {}
         assert_closed(transport)

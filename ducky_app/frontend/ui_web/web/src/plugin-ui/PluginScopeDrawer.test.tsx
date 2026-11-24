@@ -213,14 +213,21 @@ describe("source control tabs", () => {
     expect(screen.queryByRole("button", { name: "Retry deck" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Drop my change to pack" })).toBeNull();
 
+    // Each action holds every button until it's done; a click before that is (rightly) ignored.
+    const enabled = async (name: string) => {
+      const b = screen.getByRole("button", { name }) as HTMLButtonElement;
+      await waitFor(() => expect(b.disabled).toBe(false));
+      return b;
+    };
+
     fireEvent.click(screen.getByRole("button", { name: "Retry scene_1" }));
     await waitFor(() => expect(api.plugin_scope_retry).toHaveBeenCalledWith("forge", "scene_1"));
     await waitFor(() => expect(api.plugin_scope_sync).toHaveBeenCalledWith("forge", true));
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry all" }));
+    fireEvent.click(await enabled("Retry all"));
     await waitFor(() => expect(api.plugin_scope_retry).toHaveBeenLastCalledWith("forge"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Drop my change to art/big.png" }));
+    fireEvent.click(await enabled("Drop my change to art/big.png"));
     expect(await screen.findByText("Drop your change to art/big.png?")).toBeTruthy();
     expect(api.plugin_scope_drop).not.toHaveBeenCalled();
     fireEvent.click(confirmButton("Drop my change"));
@@ -228,7 +235,7 @@ describe("source control tabs", () => {
     expect(onChanged).toHaveBeenLastCalledWith(true);
 
     api.plugin_scope_sync.mockClear();
-    fireEvent.click(screen.getByRole("button", { name: "Sync now" }));
+    fireEvent.click(await enabled("Sync now"));
     await waitFor(() => expect(api.plugin_scope_sync).toHaveBeenCalledWith("forge", true));
   });
 
