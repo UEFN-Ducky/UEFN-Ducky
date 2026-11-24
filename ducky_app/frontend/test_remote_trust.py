@@ -21,7 +21,10 @@ def vault(monkeypatch):
     monkeypatch.setattr(secrets, "get_key_fresh", store.get)
     monkeypatch.setattr(secrets, "set_key", lambda k, v: store.__setitem__(k, v))
     monkeypatch.setattr(secrets, "clear_key", lambda k: store.pop(k, None))
-    return store
+    monkeypatch.setattr(rt, "_announce", lambda vid, row: None)
+    rt._PENDING.clear()
+    yield store
+    rt._PENDING.clear()
 
 
 def _viewer() -> tuple[ec.EllipticCurvePrivateKey, str]:
@@ -65,6 +68,32 @@ def test_der_signatures_and_other_curves_are_refused() -> None:
         rt.load_pub(p384.decode("ascii"))
     with pytest.raises(rt.TrustError):
         rt.load_pub("not base64!")
+
+
+def test_a_request_waits_for_this_pcs_window_and_only_three_wait() -> None:
+    _, pub = _viewer()
+    out = rt.pair_request({"pub": pub, "label": "  My\nPhone  "})
+    assert out["ok"] and out["result"]["pending"] and out["result"]["code"] == rt.sas(rt.pc_pub_b64(), pub)
+    assert rt.pending_requests()[0]["label"] == "My Phone"
+    assert rt.pair_status({"pub": pub})["result"] == {"approved": False, "pending": True}
+    assert rt.decide(rt.pub_id(pub), True)
+    assert rt.pair_status({"pub": pub})["result"] == {"approved": True, "pending": False}
+    assert rt.pair_request({"pub": pub})["result"]["approved"] is True
+    for _ in range(rt.PENDING_MAX):
+        assert rt.pair_request({"pub": _viewer()[1]})["ok"]
+    assert rt.pair_request({"pub": _viewer()[1]})["ok"] is False
+    assert rt.pair_request({"pub": "junk"})["ok"] is False
+
+
+def test_denied_request_is_not_approved_and_mailbox_routes_pairing() -> None:
+    from frontend import duckyos_account as acc
+
+    _, pub = _viewer()
+    got = acc.dispatch_desktop_rpc("pair_request", {"pub": pub, "label": "Tab"})
+    assert got["ok"] and got["result"]["pending"]
+    assert rt.decide(rt.pub_id(pub), False)
+    assert acc.dispatch_desktop_rpc("pair_status", {"pub": pub})["result"]["approved"] is False
+    assert {"pair_request", "pair_status"} <= acc.WEBSITE_RPC
 
 
 def test_sas_is_stable_six_crockford_chars_and_order_matters() -> None:

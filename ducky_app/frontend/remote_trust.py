@@ -167,3 +167,80 @@ def revoke(viewer_id: str) -> bool:
         if gone:
             _save(rows)
     return gone
+
+
+# --------------------------------------------------------------------------- pairing
+
+PENDING_TTL_S = 600.0
+PENDING_MAX = 3
+# viewer id -> {pub, label, code, at}; memory only: a restart asks again.
+_PENDING: dict[str, dict[str, Any]] = {}
+
+
+def _prune_pending(now: float) -> None:
+    for vid in [v for v, row in _PENDING.items() if now - row["at"] > PENDING_TTL_S]:
+        _PENDING.pop(vid, None)
+
+
+def _announce(vid: str, row: dict[str, Any]) -> None:
+    try:
+        from frontend.ui_web.panel_httpd import publish_panel_events
+
+        publish_panel_events([{"type": "remote_pair_request", "id": vid, "label": row["label"], "code": row["code"]}])
+    except Exception:
+        pass  # ponytail: the Settings list still shows it (pending_requests)
+
+
+def pair_request(args: dict[str, Any] | None) -> dict[str, Any]:
+    """A viewer asks to be approved. Never approves anything: only :func:`decide` does,
+    from this PC's window. ``{ok, result:{pcPub, code, pending|approved}}``."""
+    raw = args if isinstance(args, dict) else {}
+    pub = str(raw.get("pub") or "")
+    label = " ".join(str(raw.get("label") or "Device").split())[:40] or "Device"
+    try:
+        vid = pub_id(pub)
+    except TrustError as exc:
+        return {"ok": False, "error": str(exc)}
+    pc = pc_pub_b64()
+    code = sas(pc, pub)
+    if vid in approved():
+        return {"ok": True, "result": {"pcPub": pc, "code": code, "approved": True}}
+    with _LOCK:
+        now = time.monotonic()
+        _prune_pending(now)
+        if vid not in _PENDING and len(_PENDING) >= PENDING_MAX:
+            return {"ok": False, "error": "Too many devices are waiting for approval on this PC."}
+        fresh = vid not in _PENDING
+        row = _PENDING.setdefault(vid, {"pub": pub, "label": label, "code": code, "at": now})
+    if fresh:
+        _announce(vid, row)
+    return {"ok": True, "result": {"pcPub": pc, "code": code, "pending": True}}
+
+
+def pair_status(args: dict[str, Any] | None) -> dict[str, Any]:
+    raw = args if isinstance(args, dict) else {}
+    try:
+        vid = pub_id(str(raw.get("pub") or ""))
+    except TrustError as exc:
+        return {"ok": False, "error": str(exc)}
+    with _LOCK:
+        _prune_pending(time.monotonic())
+        waiting = vid in _PENDING
+    return {"ok": True, "result": {"approved": vid in approved(), "pending": waiting}}
+
+
+def pending_requests() -> list[dict[str, Any]]:
+    with _LOCK:
+        _prune_pending(time.monotonic())
+        return [{"id": v, "label": r["label"], "code": r["code"]} for v, r in _PENDING.items()]
+
+
+def decide(viewer_id: str, allow: bool) -> bool:
+    """This PC's window answers one request. False when it is gone (expired)."""
+    with _LOCK:
+        row = _PENDING.pop(str(viewer_id or ""), None)
+    if row is None:
+        return False
+    if allow:
+        approve(row["pub"], row["label"])
+    return True

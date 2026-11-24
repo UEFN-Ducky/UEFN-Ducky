@@ -1156,6 +1156,9 @@ RPC_ALLOWLIST = frozenset(
         "remote_snapshot",
         "rtc_connect",
         "rtc_report",
+        # A device asks this PC's window to approve its key (frontend.remote_trust).
+        "pair_request",
+        "pair_status",
         # Your other UEFN Duckies pull these to sync (frontend.ducky_sync).
         "ducky_sync_duckies",
         "ducky_sync_chats",
@@ -1166,7 +1169,7 @@ RPC_ALLOWLIST = frozenset(
 # What the website/phone may send through the site mailbox: WebRTC signaling only.
 # Chats and commands travel inside the peer-to-peer DTLS channel, so the site (or a
 # stolen session) can never read chats or start agent turns through the mailbox.
-WEBSITE_RPC = frozenset({"rtc_connect", "rtc_report"})
+WEBSITE_RPC = frozenset({"rtc_connect", "rtc_report", "pair_request", "pair_status"})
 
 REMOTE_DENY = frozenset(
     {
@@ -1502,6 +1505,13 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
         if out.get("error") and not out.get("answer"):
             return {"ok": False, "error": str(out["error"]), "result": out}
         return {"ok": True, "result": out}
+    if name in ("pair_request", "pair_status"):
+        from frontend import remote_trust
+
+        try:
+            return getattr(remote_trust, name)(raw)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
     if name == "rtc_report":
         from frontend.remote_direct import note_report
 
