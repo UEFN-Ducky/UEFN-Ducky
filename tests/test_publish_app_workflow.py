@@ -49,14 +49,47 @@ def test_no_other_linux_job_is_skipped_or_soft_failed():
             assert "AUR_SSH_PRIVATE_KEY" not in run and "FLATHUB_TOKEN" not in run, (name, step.get("name"))
 
 
-def test_linux_build_unpacks_the_verse_grammar_before_the_freeze():
-    job = _jobs()["linux-build"]
-    names = [s.get("name") for s in job["steps"]]
-    assert names.index("Verse language assets") < names.index("Freeze (PyInstaller) + runtime smoke")
-    assert job["env"]["VERSE_LANG_ASSETS"] == "${{ secrets.VERSE_LANG_ASSETS }}"
-    run = job["steps"][names.index("Verse language assets")]["run"]
-    assert "base64 -d | tar -xzf -" in run
-    assert 'VERSE_LANG_ASSETS is not set: a release never ships the Verse editor without its grammar"; exit 1' in run
+def test_both_builds_unpack_the_verse_grammar_before_building():
+    for name, build_step in (("linux-build", "Freeze (PyInstaller) + runtime smoke"), ("publish", "Test")):
+        job = _jobs()[name]
+        names = [s.get("name") for s in job["steps"]]
+        assert names.index("Verse language assets") < names.index(build_step), name
+        assert job["env"]["VERSE_LANG_ASSETS"] == "${{ secrets.VERSE_LANG_ASSETS }}", name
+        assert "build/ci_verse_lang.sh" in job["steps"][names.index("Verse language assets")]["run"], name
+
+
+def test_verse_grammar_unpacks_and_a_real_release_needs_the_secret(tmp_path):
+    import base64
+    import io
+    import os
+    import shutil
+    import subprocess
+    import tarfile
+
+    import pytest
+
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("no bash")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        data = b'{"scopeName": "source.verse"}'
+        info = tarfile.TarInfo("./verse.tmGrammar.json")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+    script = str(ROOT / "build" / "ci_verse_lang.sh")
+    lang = tmp_path / "ducky_app/frontend/ui_web/web/src/verse-editor/lang"
+
+    def run(dry, secret):
+        env = {**os.environ, "VERSE_LANG_ASSETS": secret}
+        return subprocess.run([bash, script, dry], cwd=tmp_path, env=env, capture_output=True, text=True)
+
+    assert run("false", "").returncode == 1
+    assert run("true", "").returncode == 0 and (lang / "verse-dark.tmTheme.json").is_file()
+    shutil.rmtree(lang)
+    r = run("false", base64.b64encode(buf.getvalue()).decode())
+    assert r.returncode == 0, r.stderr
+    assert (lang / "verse.tmGrammar.json").read_bytes() == data
 
 
 def test_flatpak_builds_on_24_04_and_the_release_waits_for_it():

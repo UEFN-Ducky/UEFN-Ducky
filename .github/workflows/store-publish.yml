@@ -133,26 +133,9 @@ jobs:
       - name: Set the release version
         run: |
           python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; a, b, c = sys.argv[1].split('.'); p.write_version(f'{a}.{b}.{int(c) - 1}')" "$VERSION"
-      # The Verse editor's grammar comes from Epic's UEFN install, which CI lacks and this
-      # public repo can't hold: VERSE_LANG_ASSETS is base64 of a tar.gz of src/verse-editor/lang
-      # (made on the release PC: tar -czf - -C <that folder> . | base64 -w0).
+      # Epic's Verse grammar: CI has no UEFN and the public repo can't hold it.
       - name: Verse language assets
-        run: |
-          lang=ducky_app/frontend/ui_web/web/src/verse-editor/lang
-          mkdir -p "$lang"
-          if [ -z "$VERSE_LANG_ASSETS" ]; then
-            if [ "${{ inputs.dry_run }}" = "true" ]; then
-              echo "::notice::dry run without VERSE_LANG_ASSETS: empty Verse grammar stand-ins"
-              echo '{"scopeName": "source.verse", "patterns": [], "repository": {}}' > "$lang/verse.tmGrammar.json"
-              echo '{}' > "$lang/language-configuration.json"
-              echo '{}' > "$lang/verse-snippets.json"
-              echo '{"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []}' > "$lang/verse-dark.tmTheme.json"
-              exit 0
-            fi
-            echo "VERSE_LANG_ASSETS is not set: a release never ships the Verse editor without its grammar"; exit 1
-          fi
-          printf '%s' "$VERSE_LANG_ASSETS" | base64 -d | tar -xzf - -C "$lang"
-          ls -la "$lang"
+        run: bash build/ci_verse_lang.sh "${{ inputs.dry_run }}"
       - name: Freeze (PyInstaller) + runtime smoke
         run: |
           xvfb-run -a python build/build_exes.py
@@ -294,6 +277,7 @@ jobs:
     env:
       DUCKYOS_API_KEY: ${{ secrets.DUCKYOS_API_KEY }}
       DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+      VERSE_LANG_ASSETS: ${{ secrets.VERSE_LANG_ASSETS }}
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -329,8 +313,9 @@ jobs:
         shell: bash
         run: |
           if [ -z "${DUCKYOS_API_KEY}" ]; then
+            if [ "${{ inputs.dry_run }}" = "true" ]; then echo "::notice::dry run without DUCKYOS_API_KEY: nothing is uploaded"; else
             echo "Missing DUCKYOS_API_KEY (repository secret)."
-            exit 1
+            exit 1; fi
           fi
           if [ -z "${DUCKYOS_BASE_URL}" ]; then
             echo "DUCKYOS_BASE_URL=https://uefnducky.org" >> "$GITHUB_ENV"
@@ -377,6 +362,10 @@ jobs:
           if (-not $dlib -or -not $signtool) { throw "Artifact Signing client tools did not install" }
           "DUCKY_AZURE_DLIB=$($dlib.FullName)" >> $env:GITHUB_ENV
           "DUCKY_SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+
+      - name: Verse language assets
+        shell: bash
+        run: bash build/ci_verse_lang.sh "${{ inputs.dry_run }}"
 
       # The same three steps a local release runs (publish_app.RELEASE_STEPS).
       - name: Test

@@ -4,6 +4,8 @@
 # Windows scripts always check out with CRLF.
 *.ps1 text eol=crlf
 *.bat text eol=crlf
+# bash scripts run on the Windows runner too (Git Bash): CRLF breaks them.
+*.sh text eol=lf
 
 # Never touch binaries.
 *.png binary
