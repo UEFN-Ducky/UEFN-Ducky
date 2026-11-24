@@ -1173,6 +1173,10 @@ WEBSITE_RPC = frozenset({"rtc_connect", "rtc_report", "pair_request", "pair_stat
 
 REMOTE_DENY = frozenset(
     {
+        # Approving or removing a remote device is this PC's own window, nobody else's.
+        "remote_pair_decide",
+        "remote_devices_list",
+        "remote_device_remove",
         # Only this PC's own window says whether Ducky is in use, and only it updates Ducky.
         "report_update_ui",
         "apply_auto_update_now",

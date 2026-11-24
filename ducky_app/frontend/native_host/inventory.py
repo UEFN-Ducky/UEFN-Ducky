@@ -113,6 +113,7 @@ _JS_API: dict[str, str] = {
         delete_skill_pack delete_subskill draft_skill_pack draft_subskill
         ducky_link_call ducky_link_list ducky_link_open ducky_link_rtc_connect ducky_sync_copy
         ducky_sync_forget ducky_sync_list ducky_sync_now
+        remote_device_remove remote_devices_list remote_pair_decide
         duckyos_cancel_login duckyos_get_status duckyos_list_pcs
         duckyos_login duckyos_open_site duckyos_revoke_pc
         duckyos_store_catalog duckyos_store_download duckyos_store_versions

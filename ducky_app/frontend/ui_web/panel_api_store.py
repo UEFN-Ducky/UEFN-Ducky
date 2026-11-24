@@ -230,6 +230,29 @@ class PanelApiStoreMixin:
             raise RuntimeError(str(out.get("error") or "That UEFN Ducky didn't answer."))
         return out.get("result") if isinstance(out.get("result"), dict) else {}
 
+    # Remote devices: only this PC's own window may approve or remove one (REMOTE_DENY).
+    def remote_pair_decide(self, viewer_id: str = "", allow: bool = False) -> dict[str, Any]:
+        """Allow or deny one waiting device (the pair modal's buttons)."""
+        from frontend import remote_trust
+
+        if not remote_trust.decide(str(viewer_id or ""), bool(allow)):
+            return {"ok": False, "error": "That request expired. Ask the device to connect again."}
+        return {"ok": True}
+
+    def remote_devices_list(self) -> dict[str, Any]:
+        """Approved devices, devices waiting for approval, and how this PC's key is kept."""
+        from frontend import remote_trust
+
+        rows = [{"id": vid, "label": r.get("label", ""), "added": r.get("added", 0)}
+                for vid, r in remote_trust.approved().items()]
+        return {"ok": True, "devices": rows, "pending": remote_trust.pending_requests(),
+                "protection": remote_trust.key_protection()}
+
+    def remote_device_remove(self, viewer_id: str = "") -> dict[str, Any]:
+        from frontend import remote_trust
+
+        return {"ok": remote_trust.revoke(str(viewer_id or ""))}
+
     def ducky_link_open(self, key_id: str = "", name: str = "", chat_id: str = "") -> dict[str, Any]:
         """Open another of your UEFN Duckies in its own window here (at ``chat_id``, one of its chats)."""
         import re

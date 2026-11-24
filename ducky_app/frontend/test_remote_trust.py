@@ -96,6 +96,25 @@ def test_denied_request_is_not_approved_and_mailbox_routes_pairing() -> None:
     assert {"pair_request", "pair_status"} <= acc.WEBSITE_RPC
 
 
+def test_only_this_pcs_window_approves_lists_or_removes_devices() -> None:
+    from frontend.duckyos_account import remote_denied
+    from frontend.ui_web.panel_api_store import PanelApiStoreMixin as api
+
+    for method in ("remote_pair_decide", "remote_devices_list", "remote_device_remove"):
+        assert remote_denied(method, on_this_pc=True), method
+    _, pub = _viewer()
+    rt.pair_request({"pub": pub, "label": "Tab"})
+    vid = rt.pub_id(pub)
+    listed = api.remote_devices_list(None)
+    assert listed["pending"][0]["id"] == vid and listed["devices"] == []
+    assert listed["protection"] in ("dpapi", "keyring", "file")
+    assert api.remote_pair_decide(None, vid, True) == {"ok": True}
+    assert api.remote_pair_decide(None, vid, True)["ok"] is False  # already answered
+    assert [d["id"] for d in api.remote_devices_list(None)["devices"]] == [vid]
+    assert api.remote_device_remove(None, vid) == {"ok": True}
+    assert rt.approved() == {}
+
+
 def test_sas_is_stable_six_crockford_chars_and_order_matters() -> None:
     _, a = _viewer()
     _, b = _viewer()
