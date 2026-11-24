@@ -45,8 +45,6 @@ def test_blank_values_never_hide_a_later_file(tmp_path, monkeypatch):
     # store-publish.yml exports DUCKY_SIGN_PROVIDER (none/azure) to every later step, tests included.
     monkeypatch.delenv("DUCKY_SIGN_PROVIDER", raising=False)
     monkeypatch.setenv("DUCKY_SIGN_TIMESTAMP_URL", "http://already.set")
-    # store-publish's Windows job sets DUCKY_SIGN_PROVIDER=none, which wins over a PFX.
-    monkeypatch.delenv("DUCKY_SIGN_PROVIDER", raising=False)
     (wt / ".env").write_text("DUCKY_WINDOWS_PFX=\n", encoding="utf-8")
     # Notepad saves UTF-8 with a BOM; the first key must still be read.
     (main / ".env").write_text(

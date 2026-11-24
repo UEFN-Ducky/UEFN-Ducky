@@ -83,7 +83,8 @@ def _alive(data: dict) -> bool:
 # parsed every run of the last day (their outputs too), and the window, the team keeper and
 # the updater all call it on a timer. _write replaces the file, so the file id (inode) changes
 # on every write: Linux moves mtime once per kernel tick, and a same-size rewrite inside one
-# tick looked unchanged. Windows' scandir reports the id as 0 (time and size decide, as before).
+# tick looked unchanged. Windows' scandir reports the id as 0, and NTFS times move in coarse
+# ticks too, so there the id comes from os.stat (one stat per file; parsing is what's saved).
 _PARSED: dict[str, tuple[tuple[int, int, int], dict]] = {}
 
 
@@ -98,7 +99,7 @@ def _files() -> list[tuple[Path, dict]]:
     for entry in entries:
         try:
             stat = entry.stat()
-            stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+            stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino or os.stat(entry.path).st_ino)
             kept = _PARSED.get(entry.path)
             if kept is None or kept[0] != stamp:
                 data = json.loads(Path(entry.path).read_text(encoding="utf-8"))
