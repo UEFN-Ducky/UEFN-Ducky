@@ -915,6 +915,10 @@ if sys.platform == "win32":
     _user32_sc.PostMessageW.argtypes = [wintypes.HWND, ctypes.c_uint, _WPARAM, _LPARAM]
 _native_subclass: dict[int, object] = {}  # hwnd -> WNDPROC callback (kept alive)
 _native_subclass_orig: dict[int, int] = {}  # hwnd -> original window proc pointer
+# Install runs on the UI thread and on callers' threads (refresh_window_chrome). Two at once
+# both passed the "already ours" check; the second got our own proc back as the "original",
+# so every message chained to itself until the stack overflowed (0xC0000409, Nov 24 2026 CI).
+_native_subclass_lock = threading.Lock()
 
 
 def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
@@ -1000,16 +1004,20 @@ def _install_native_chrome_subclass(hwnd: int) -> bool:
     """Replace the window proc with ours (chaining to the original). Idempotent per hwnd."""
     if sys.platform != "win32" or not hwnd:
         return False
-    if hwnd in _native_subclass:
-        return True
     try:
         cb = _native_chrome_callback
-        ctypes.set_last_error(0)
-        orig = _SetWindowLongPtr(hwnd, _GWLP_WNDPROC, ctypes.cast(cb, ctypes.c_void_p))
-        if not orig and ctypes.get_last_error():
-            return False
-        _native_subclass[hwnd] = cb  # keep the callback alive (GC would crash the proc)
-        _native_subclass_orig[hwnd] = int(orig) if orig else 0
+        ours = ctypes.cast(cb, ctypes.c_void_p).value
+        with _native_subclass_lock:
+            if hwnd in _native_subclass:
+                return True
+            ctypes.set_last_error(0)
+            orig = _SetWindowLongPtr(hwnd, _GWLP_WNDPROC, ours)
+            if not orig and ctypes.get_last_error():
+                return False
+            _native_subclass[hwnd] = cb  # keep the callback alive (GC would crash the proc)
+            # Our own proc is never the original: chaining to it would recurse forever.
+            _native_subclass_orig[hwnd] = int(orig) if orig and int(orig) != ours else 0
+        # Outside the lock: SetWindowPos sends WM_NCCALCSIZE to the UI thread and waits.
         _force_frame_changed(hwnd)  # trigger a fresh WM_NCCALCSIZE through our proc now
         return True
     except Exception:

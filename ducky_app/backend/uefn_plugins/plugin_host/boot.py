@@ -124,6 +124,13 @@ def _repair_missing_backends_async() -> None:
     with _REPAIR_THREAD_LOCK:
         if _REPAIR_THREAD is not None and _REPAIR_THREAD.is_alive():
             return
+        # Ask again under the lock: two callers can both see "due" before either gets here,
+        # and the first one's pass may already have run (and set its backoff) by now.
+        try:
+            if not _repair_due():
+                return
+        except Exception:  # noqa: BLE001 — the worker checks again
+            pass
         _REPAIR_THREAD = threading.Thread(
             target=_repair_missing_backends_worker,
             daemon=True,

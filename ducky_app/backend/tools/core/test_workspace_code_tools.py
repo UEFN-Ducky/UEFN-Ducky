@@ -672,9 +672,9 @@ def test_search_that_runs_out_of_time_says_incomplete(project, monkeypatch) -> N
     assert found["complete"] is False and found["note"].startswith("INCOMPLETE:") and found["truncated"] is True
 
 
-def _slow_folders(root: Path, monkeypatch, delay: float = 0.05) -> None:
-    """Forty folders of files no glob matches, each listed slowly."""
-    for i in range(40):
+def _slow_folders(root: Path, monkeypatch, delay: float = 0.05, count: int = 40) -> None:
+    """``count`` folders of files no glob matches, each listed slowly."""
+    for i in range(count):
         (root / "deep" / f"d{i:02}").mkdir(parents=True)
         (root / "deep" / f"d{i:02}" / "a.txt").write_text("Store\n", encoding="utf-8")
     real_scandir = wc.os.scandir
@@ -693,19 +693,21 @@ def test_a_slow_walk_returns_at_the_time_limit_with_what_it_found(project, monke
     import time
 
     root, _ = project
-    _slow_folders(root, monkeypatch)
+    # The whole walk takes 200 x 0.05 = 10 s; stopping at the 0.5 s limit is far below 3 s even
+    # on a loaded Windows runner (40 folders made the whole walk 2 s, too close to tell apart).
+    _slow_folders(root, monkeypatch, count=200)
     monkeypatch.setattr(wc, "_SEARCH_SECONDS", 0.5)
     started = time.monotonic()
     out = _call(wc.workspace_search, "Store", glob="*.zz", format="json")
-    assert time.monotonic() - started < 1.5
+    assert time.monotonic() - started < 3.0
     assert out["truncated"] is True and out["reason"] == "time limit 0 s" and out["complete"] is False
     started = time.monotonic()
     hits = _call(wc.workspace_search, "Store", format="json")
-    assert time.monotonic() - started < 1.5
+    assert time.monotonic() - started < 3.0
     assert hits["truncated"] is True and hits["matches"] and hits["searched_files"] >= 1
     started = time.monotonic()
     found = _call(wc.workspace_find, "*.zz")
-    assert time.monotonic() - started < 1.5
+    assert time.monotonic() - started < 3.0
     assert found["truncated"] is True and found["complete"] is False
 
 

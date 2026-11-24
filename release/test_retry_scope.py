@@ -60,13 +60,17 @@ def _write(root: Path, rel: str, text: str = "x = 1\n") -> None:
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    _git(tmp_path, "init", "-q")
+    # Its own folder: tmp_path also holds the isolated ducky.db, whose -shm file Windows keeps
+    # locked, so `git add -A` there exited 128.
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
     for rel in ("app/core/thing.py", "app/core/test_thing.py", "app/core/test_other.py",
                 "app/ui/test_ui.py", "app/far/test_far.py", "app/ui/web/src/a.ts"):
-        _write(tmp_path, rel)
-    _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-q", "-m", "base")
-    return tmp_path
+        _write(root, rel)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    return root
 
 
 def _fail_then_fix(rs, repo: Path, *changed: str) -> None:

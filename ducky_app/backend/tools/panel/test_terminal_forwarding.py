@@ -341,7 +341,13 @@ def test_linux_output_streams_line_by_line(tmp_path):
         assert out["output_tail"] == "STREAM_1\nSTREAM_2\nSTREAM_3"
 
         def first(line):
-            return next(t for t, text in seen if line + "\r\n" in text)
+            # A line can arrive split over two chunks ("STREAM_1\r" then "\n"): match the joined text.
+            joined = ""
+            for t, text in seen:
+                joined += text
+                if line + "\r\n" in joined:
+                    return t
+            raise AssertionError(f"{line} never reached the panel: {seen!r}")
 
         assert first("STREAM_3") - first("STREAM_1") >= 0.8
     finally:
