@@ -247,7 +247,8 @@ function wireChannel(s: Session, ch: RTCDataChannel) {
     case CHANNEL_EVENTS:
       s.unsubEvents?.();
       s.unsubEvents = subscribeAgentEventsImmediate((event) => {
-        if (event.type === "direct_rtc" || ch.readyState !== "open") return;
+        // A pair request (its code) stays on this PC: the device asking must never see it.
+        if (event.type === "direct_rtc" || event.type === "remote_pair_request" || ch.readyState !== "open") return;
         s.eventSeq += 1;
         const seq = s.eventSeq;
         const text = JSON.stringify({ seq, event });

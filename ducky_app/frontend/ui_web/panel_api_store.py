@@ -332,6 +332,7 @@ class PanelApiStoreMixin:
 
     def remote_status(self) -> dict[str, Any]:
         from frontend.settings import PanelSettings
+        from frontend import remote_trust
         from frontend.ui_web.panel_httpd import remote_session_count, remote_session_summaries
 
         s = PanelSettings.load()
@@ -345,6 +346,9 @@ class PanelApiStoreMixin:
             "site_update_pending": False,
             "sessions": remote_session_count(),
             "session_list": remote_session_summaries(),
+            # Approved devices for the Account panel's list (Remove → remote_device_remove).
+            "devices": self.remote_devices_list()["devices"],
+            "key_protection": remote_trust.key_protection(),
         }
 
     def remote_set_enabled(self, enabled: bool = False) -> dict[str, Any]:

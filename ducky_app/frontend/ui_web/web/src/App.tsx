@@ -13,6 +13,7 @@ import { AppearanceCssBridge } from "./theme/AppearanceCssBridge";
 import { AppearanceSkinBridge } from "./theme/AppearanceSkinBridge";
 import { SoundFxBridge } from "./sfx/SoundFxBridge";
 import { MicPermissionModal } from "./voice/MicPermissionModal";
+import { RemotePairModal } from "./components/RemotePairModal";
 import { loadAudioSettings } from "./voice/audioSettings";
 import { loadFollowCodeSettings } from "./verse-editor/queue/followCodeSettings";
 import { DuckyCatalogProvider } from "./components/ducky/DuckyCatalogContext";
@@ -311,6 +312,7 @@ export default function App() {
       <WhatsNewHost />
       <AutoUpdateActivity showActivity />
       <MicPermissionModal />
+      <RemotePairModal />
       </UndoHistoryProvider>
       </NavigationHistoryProvider>
       </VerseDiagnosticsSettingsProvider>

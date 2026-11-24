@@ -3313,6 +3313,12 @@ body.layout-sidebar-only .project-selector-btn--sidebar-only {
 .mic-permission-text {
   margin: 0; font-size: 14px; line-height: 1.45; color: var(--fg);
 }
+.remote-pair-body p { margin: 0 0 10px; font-size: 14px; line-height: 1.45; color: var(--fg); }
+.remote-pair-code {
+  font: 600 28px/1.2 var(--font-mono, monospace); letter-spacing: 0.25em; text-align: center;
+  padding: 10px; border-radius: var(--radius-sm); background: var(--card); border: 1px solid var(--border);
+}
+.remote-pair-error { color: var(--red); }
 .appearance-status-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px;
 }

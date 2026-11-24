@@ -2161,6 +2161,8 @@ export interface AgentEvent {
     | "run_expect"
     /** Phone panel only (local): the link to the PC is back after a drop; reload what was missed. */
     | "remote_resync"
+    /** A device asks this PC to approve it (id, label, code): RemotePairModal. */
+    | "remote_pair_request"
     /** A page saved its open tabs (`origin`: that page): every other page reloads them. */
     | "editor_workspace_changed";
   text?: string;
@@ -3593,6 +3595,15 @@ export interface PanelApi {
   remote_status?(): Promise<RemoteAccessStatus>;
   remote_set_enabled?(enabled: boolean): Promise<RemoteAccessStatus>;
   remote_sign_out_all?(): Promise<RemoteAccessStatus>;
+  /** PC window only: allow or deny a device waiting to pair. */
+  remote_pair_decide?(viewer_id: string, allow: boolean): Promise<{ ok?: boolean; error?: string }>;
+  remote_devices_list?(): Promise<{
+    ok?: boolean;
+    devices?: Array<{ id: string; label: string; added: number }>;
+    pending?: Array<{ id: string; label: string; code: string }>;
+    protection?: string;
+  }>;
+  remote_device_remove?(viewer_id: string): Promise<{ ok?: boolean }>;
   duckyos_store_catalog?(etag?: string): Promise<DuckyOSStoreCatalog>;
   duckyos_store_versions?(slug: string, latestVersion?: string): Promise<DuckyOSStoreVersions>;
   duckyos_store_download?(
