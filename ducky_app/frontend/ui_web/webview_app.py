@@ -190,6 +190,20 @@ def _install_crash_dumps() -> None:
 _managed_handler: dict[str, object] = {}  # keeps the delegate alive for the process
 
 
+def hidden_tk_root():
+    """The withdrawn Tk root the tray and pop-ups use, or None when there is no X display.
+
+    Tk speaks X11 only: on a pure Wayland session (no Xwayland, no DISPLAY) it can't start,
+    so Linux skips Tk without importing it and the Tk users get None, which they allow."""
+    if platform_info.IS_LINUX and not os.environ.get("DISPLAY"):
+        return None
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    return root
+
+
 def _boot_trace(name: str, t0: float, **meta: object) -> None:
     """Record one cold-start phase; never raises."""
     try:
@@ -620,7 +634,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     t_webview = time.perf_counter()
     if webview_warmup is not None:
         webview_warmup.join(timeout=30)
-    import tkinter as tk
     import webview
 
     from frontend.ui_web.win_frameless import (
@@ -901,12 +914,6 @@ def _run_panel(api_holder: dict[str, object]) -> None:
 
     ensure_started()
 
-    # The pump thread owns the hidden Tk root the tray and pop-ups use.
-    def _hidden_root():
-        root = tk.Tk()
-        root.withdraw()
-        return root
-
     def open_alert(kind: str, target_id: str) -> None:
         """A Windows notification was clicked: the app comes up on that chat or workflow."""
         restore()
@@ -930,7 +937,8 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         # ~0.15 s sooner: the Tk pump, tray, notifications and update switch used to run first.
         # Everything that reads the Tk root goes through tk_root_holder / api, which allow None.
         try:
-            tk_root = start_tk_pump(_hidden_root)
+            # The pump thread owns the hidden Tk root the tray and pop-ups use.
+            tk_root = start_tk_pump(hidden_tk_root)
             tk_root_holder["root"] = tk_root
             api_holder["tk_root"] = tk_root
             api.bind_tk_root(tk_root)

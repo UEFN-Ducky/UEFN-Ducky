@@ -862,6 +862,18 @@ def test_no_splash_pid_writes_nothing(monkeypatch, tmp_path) -> None:
     assert not (tmp_path / "launcher").exists()
 
 
+def test_pure_wayland_skips_tk_without_importing_it(monkeypatch) -> None:
+    from frontend import platform_info
+    from frontend.ui_web import webview_app
+
+    monkeypatch.setattr(platform_info, "IS_LINUX", True)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    # A tkinter import would fail loudly instead of hiding behind an earlier import.
+    monkeypatch.setitem(sys.modules, "tkinter", None)
+    assert webview_app.hidden_tk_root() is None
+
+
 def test_linux_window_icon_is_a_png_gdkpixbuf_reads(monkeypatch) -> None:
     from frontend import platform_info
     from frontend.ui_web import webview_app
