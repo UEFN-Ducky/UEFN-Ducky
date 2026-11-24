@@ -198,8 +198,9 @@ def preflight_signing(*, require: bool) -> None:
         )
 
 
-def ensure_store_env() -> tuple[str, str]:
-    """Ensure DUCKYOS_BASE_URL + DUCKYOS_API_KEY are set; return (base, key)."""
+def ensure_store_env(require_key: bool = True) -> tuple[str, str]:
+    """Ensure DUCKYOS_BASE_URL + DUCKYOS_API_KEY are set; return (base, key). The build step
+    only reads the public Store version, so it passes ``require_key=False``."""
     if not (os.environ.get("DUCKYOS_API_KEY") or "").strip():
         key = _bearer_from_mcp_json()
         if key:
@@ -207,7 +208,7 @@ def ensure_store_env() -> tuple[str, str]:
     base = assert_uefn_ducky_store_base(os.environ.get("DUCKYOS_BASE_URL") or DEFAULT_BASE)
     os.environ["DUCKYOS_BASE_URL"] = base
     key = (os.environ.get("DUCKYOS_API_KEY") or "").strip()
-    if not key:
+    if not key and require_key:
         raise SystemExit(
             "Missing DUCKYOS_API_KEY.\n"
             "Set it in the environment, or add Bearer auth on mcpServers.uefn-duckyos-site "
@@ -1499,7 +1500,7 @@ def main() -> None:
         run_regression_tests()
 
     _load_dotenv()
-    base, key = ensure_store_env()
+    base, key = ensure_store_env(require_key=phase != "build")
 
     if args.exe is not None and not args.no_bump:
         raise SystemExit(

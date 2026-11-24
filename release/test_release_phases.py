@@ -236,6 +236,15 @@ def test_main_build_phase_refuses_without_a_test_run(pa, phases, monkeypatch) ->
     assert "--phase test" in str(exc.value)
 
 
+def test_only_the_upload_needs_the_store_key(pa, monkeypatch) -> None:
+    monkeypatch.delenv("DUCKYOS_API_KEY", raising=False)
+    monkeypatch.setattr(pa, "_bearer_from_mcp_json", lambda: "")
+    base, key = pa.ensure_store_env(require_key=False)
+    assert base and key == ""
+    with pytest.raises(SystemExit, match="Missing DUCKYOS_API_KEY"):
+        pa.ensure_store_env()
+
+
 def test_main_upload_phase_refuses_without_a_build(pa, phases, monkeypatch) -> None:
     monkeypatch.setattr(pa, "commit_subjects_since_release", lambda: [])
     monkeypatch.setattr(pa, "notes_from_git", lambda: "")
