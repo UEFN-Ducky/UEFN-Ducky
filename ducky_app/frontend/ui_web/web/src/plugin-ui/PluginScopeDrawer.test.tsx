@@ -295,17 +295,23 @@ describe("source control tabs", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep mine: deck" }));
     await waitFor(() => expect(api.plugin_scope_resolve).toHaveBeenCalledWith("forge", "doc", "deck", "mine"));
     expect(onChanged).toHaveBeenLastCalledWith(true);
+    // Each action holds every button until it's done; a click before that is (rightly) ignored.
+    const enabled = async (name: string) => {
+      const b = screen.getByRole("button", { name }) as HTMLButtonElement;
+      await waitFor(() => expect(b.disabled).toBe(false));
+      return b;
+    };
 
-    fireEvent.click(screen.getByRole("button", { name: "Accept delete: pack" }));
+    fireEvent.click(await enabled("Accept delete: pack"));
     expect(await screen.findByText("Keep Ben's version of pack?")).toBeTruthy();
     fireEvent.click(confirmButton("Keep theirs"));
     await waitFor(() => expect(api.plugin_scope_resolve).toHaveBeenCalledWith("forge", "doc", "pack", "theirs"));
     expect(screen.getByRole("button", { name: "Restore mine: pack" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Keep both: MEGA_Duel_Stadium" }));
+    fireEvent.click(await enabled("Keep both: MEGA_Duel_Stadium"));
     await waitFor(() => expect(api.plugin_scope_resolve).toHaveBeenCalledWith("forge", "tree", "tree:scenes/ab12", "both"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Compare: deck" }));
+    fireEvent.click(await enabled("Compare: deck"));
     await waitFor(() => expect(api.plugin_scope_resolve).toHaveBeenCalledWith("forge", "doc", "deck", "compare"));
     expect((await screen.findByText(/- hp: 10/)).textContent).toBe("- hp: 10\n+ hp: 12");
     expect(screen.getByRole("button", { name: "Compare: deck" }).getAttribute("aria-pressed")).toBe("true");
