@@ -285,6 +285,15 @@ def test_cache_holds_the_x64_dll_next_to_the_exe(tmp_path: Path) -> None:
     assert sorted(p.name for p in exe.parent.iterdir()) == ["Ducky-Launcher.exe", "WebView2Loader.dll"]
 
 
+@pytest.mark.parametrize("layout", ["webview2-com-sys-0123abcd", "webview2-com-sys/0123abcd"])
+def test_the_loader_dll_is_found_in_either_cargo_build_dir_layout(tmp_path: Path, layout: str) -> None:
+    build = tmp_path / "target" / "release" / "build" / layout / "out"
+    for arch in ("x64", "arm64"):
+        (build / arch).mkdir(parents=True)
+        (build / arch / be.LAUNCHER_DLL).write_bytes(arch.encode())
+    assert be.find_loader_dll(tmp_path / "target") == build / "x64" / be.LAUNCHER_DLL
+
+
 def test_cache_entry_without_the_dll_is_rebuilt(tmp_path: Path) -> None:
     src = _launcher_src(tmp_path)
     cache = tmp_path / "cache"

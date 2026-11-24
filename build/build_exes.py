@@ -320,7 +320,14 @@ LAUNCHER_DLL = "WebView2Loader.dll"
 
 def find_loader_dll(target_dir: Path) -> Path | None:
     """The x64 WebView2Loader.dll webview2-com-sys's build script put under ``target_dir``."""
-    found = list((target_dir / "release" / "build").glob(f"webview2-com-sys-*/out/x64/{LAUNCHER_DLL}"))
+    # Older cargo writes build/webview2-com-sys-<hash>/out, newer build-dir layouts
+    # build/webview2-com-sys/<hash>/out: take either.
+    found = [
+        p
+        for p in target_dir.rglob(LAUNCHER_DLL)
+        if p.parent.name == "x64" and p.parent.parent.name == "out"
+        and any(part.startswith("webview2-com-sys") for part in p.relative_to(target_dir).parts)
+    ]
     # ponytail: newest wins when old build-script dirs linger in the shared target dir.
     return max(found, key=lambda p: p.stat().st_mtime) if found else None
 # Build output and editor/VCS litter never change the launcher binary.
