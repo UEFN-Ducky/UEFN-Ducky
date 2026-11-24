@@ -106,19 +106,26 @@ def _check_gtk_window() -> dict:
     view.destroy()
     import webview.platforms.gtk  # noqa: F401  (what webview.start(gui="gtk") loads)
 
-    # webview_app imports tkinter on every start: a frozen _tkinter missing libXss.so.1 died
-    # there while this smoke still passed.
-    import tkinter
-
-    root = tkinter.Tk()
-    root.destroy()
+    tk_version = _check_tk()
     return {
         "gi": gi.__version__,
         "gtk": f"{Gtk.get_major_version()}.{Gtk.get_minor_version()}.{Gtk.get_micro_version()}",
         "webkit2": f"4.1 ({WebKit2.get_major_version()}.{WebKit2.get_minor_version()}.{WebKit2.get_micro_version()})",
-        "tk": tkinter.TkVersion,
+        "tk": tk_version,
         "page_started_seconds": _start_real_window(),
     }
+
+
+def _check_tk(environ=None) -> float:
+    """webview_app imports tkinter on every start: a frozen _tkinter missing libXss.so.1 died
+    there while this smoke still passed. The import loads _tkinter's libraries; ``Tk()`` needs
+    an X display, so a pure Wayland session (no ``DISPLAY``) skips it."""
+    import os
+    import tkinter
+
+    if (os.environ if environ is None else environ).get("DISPLAY"):
+        tkinter.Tk().destroy()
+    return tkinter.TkVersion
 
 
 def _start_real_window(timeout: float = 60.0, webview_mod=None) -> float:

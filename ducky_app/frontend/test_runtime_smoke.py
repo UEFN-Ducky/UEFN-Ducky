@@ -47,6 +47,20 @@ class _FakeWebview:
         func()
 
 
+def test_tk_check_skips_tk_window_without_display(monkeypatch) -> None:
+    import tkinter
+
+    def no_window():
+        raise AssertionError("Tk() needs DISPLAY; pure Wayland has none")
+
+    monkeypatch.setattr(tkinter, "Tk", no_window)
+    assert runtime_smoke._check_tk(environ={"WAYLAND_DISPLAY": "wayland-0"}) == tkinter.TkVersion
+    import pytest
+
+    with pytest.raises(AssertionError):
+        runtime_smoke._check_tk(environ={"DISPLAY": ":0"})
+
+
 def test_smoke_fails_when_the_page_never_starts() -> None:
     import pytest
 
