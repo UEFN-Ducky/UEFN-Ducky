@@ -399,6 +399,42 @@ def test_publish_device_presence_offline_when_remote_off() -> None:
     assert seen[2]["body"]["live"] is False
 
 
+def test_presence_and_usage_never_tie_stats_to_the_account() -> None:
+    """Presence carries no usage install id and no island name with remote access off;
+    usage batches go out with no account token, signed in or not."""
+    from unittest.mock import MagicMock, patch
+
+    from frontend import duckyos_account as acc
+    from frontend import usage_stats as us
+
+    bodies: list[dict] = []
+    blob = {"device_key": "dk", "device_key_id": "k1", "email": "a@b.c", "base_url": "https://x.test"}
+    acc._PRESENCE_LAST.update(fingerprint=None, at=0.0)
+    with (
+        patch.object(acc, "_load_blob", return_value=dict(blob)),
+        patch.object(acc, "api_request", side_effect=lambda _m, _p, body=None, **_k: bodies.append(body) or (200, {}, "")),
+        patch.object(acc, "_plugin_collect", return_value={}),
+        patch.object(acc, "_presence_project_label", return_value="SecretIsland"),
+        patch.object(acc, "_presence_uefn_online", return_value=False),
+        patch.object(acc, "_remote_access_on", return_value=False),
+        patch.object(us, "enabled", return_value=True),
+    ):
+        acc.send_presence_heartbeat()
+    assert bodies and "installId" not in bodies[0] and bodies[0]["projectLabel"] == ""
+
+    opened = MagicMock()
+    opened.return_value.__enter__.return_value.read.return_value = b"{}"
+    opened.return_value.__enter__.return_value.status = 200
+    with patch.object(acc, "_load_blob", return_value=dict(blob)), patch.object(acc, "_site_urlopen", opened):
+        acc.api_request("POST", "/x", {}, anonymous=True, allow_anonymous=True)
+    headers = {k.lower(): v for k, v in opened.call_args[0][0].header_items()}
+    assert "authorization" not in headers and "cookie" not in headers
+
+    with patch.object(us, "_test_copy", return_value=False), patch.object(acc, "api_request", return_value=(200, {}, "")) as req:
+        us._send({"installId": "a" * 32, "appVersion": "1", "events": []})
+    assert req.call_args.kwargs.get("anonymous") is True
+
+
 def test_unchanged_presence_waits_only_where_the_site_allows() -> None:
     from unittest.mock import patch
 

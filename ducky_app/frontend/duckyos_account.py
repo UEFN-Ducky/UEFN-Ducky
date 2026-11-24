@@ -1009,6 +1009,7 @@ def api_request(
     *,
     prefer_bearer: bool = True,
     allow_anonymous: bool = False,
+    anonymous: bool = False,
     timeout: float = 20.0,
 ) -> tuple[int, dict[str, Any] | None, str]:
     """
@@ -1017,7 +1018,8 @@ def api_request(
     Prefers ``Authorization: Bearer dky_v1_…`` (device key from browser login).
     Falls back to session cookie + CSRF when present. With ``allow_anonymous``
     the request goes out unauthenticated (public endpoints like the Store
-    catalog) instead of raising ``not_logged_in``.
+    catalog) instead of raising ``not_logged_in``. ``anonymous`` never attaches
+    the account, signed in or not (usage stats: nothing ties them to a person).
     """
     blob = _load_blob()
     base = str(blob.get("base_url") or "").rstrip("/")
@@ -1034,7 +1036,9 @@ def api_request(
     # Collect endpoints require Origin to match Host (browser CSRF). Desktop
     # urllib sends neither Origin nor Sec-Fetch-Site → 403 forbidden without this.
     extra_headers["Origin"] = base
-    if prefer_bearer and blob.get("device_key"):
+    if anonymous:
+        pass
+    elif prefer_bearer and blob.get("device_key"):
         extra_headers["Authorization"] = f"Bearer {blob['device_key']}"
     elif blob.get("session_value"):
         headers_cookie = _session_cookie_header(blob)
@@ -1330,23 +1334,19 @@ def send_presence_heartbeat(*, only_if_changed: bool = False) -> bool:
     if not (blob.get("device_key") or blob.get("session_value")):
         return False
     email = str(blob.get("email") or "").strip()
+    # The island's folder name leaves the PC only while remote access is on (the remote
+    # view shows it). The usage install id never rides along: that would tie anonymous
+    # usage rows to this email.
     body: dict[str, Any] = {
         "source": "desktop",
         "email": email,
-        "projectLabel": _presence_project_label(),
+        "projectLabel": _presence_project_label() if _remote_access_on() else "",
         "uefnOnline": _presence_uefn_online(),
         "appVersion": __version__,
         "direct": True,
         "directProtocol": 1,
         "remoteDirect": _remote_direct_report(),
     }
-    try:
-        from frontend import usage_stats
-
-        if usage_stats.enabled():
-            body["installId"] = usage_stats.install_id()
-    except Exception:
-        pass
     fingerprint = _presence_fingerprint(body)
     if (
         only_if_changed

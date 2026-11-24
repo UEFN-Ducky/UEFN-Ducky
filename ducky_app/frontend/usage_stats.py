@@ -3,8 +3,8 @@
 Every event is checked against :mod:`frontend.usage_events` (names and enum or
 bucket props only), queued in ducky.db, and sent in batches to the UEFN Ducky
 Store's ``usage`` collect route: every 5 minutes, or sooner once 50 rows wait.
-Signed out, the batch carries only a random install id made on first run; signed
-in, the account's token goes with it and the server attaches the account.
+The batch carries only a random install id made on first run, signed in or not: the
+account's token never goes with it, so no row can be tied to a person.
 
 The ``usage_stats`` setting (on by default) is the one switch: off means nothing
 is queued, nothing is sent and the queue is emptied. Every public function here
@@ -482,7 +482,7 @@ def _send(body: dict[str, Any]) -> str:
         from frontend.duckyos_account import api_request
 
         status, parsed, _raw = api_request(
-            "POST", _USAGE_ROUTE, body, prefer_bearer=True, allow_anonymous=True, timeout=20.0
+            "POST", _USAGE_ROUTE, body, anonymous=True, allow_anonymous=True, timeout=20.0
         )
         status = int(status)
     except Exception:
