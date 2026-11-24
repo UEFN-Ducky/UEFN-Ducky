@@ -33,6 +33,12 @@ def test_path(bare):
     assert hit["kind"] == "path" and hit["argv"] == [str(exe)]
 
 
+def test_path_blender_asks_its_version(bare):
+    exe = _exe(bare / "bin" / "blender")
+    exe.write_text("#!/bin/sh\necho 'Blender 4.0.2'\necho 'build date: 2024-01-01'\n")
+    assert finders.find("blender", bare / "home")["version"] == "4.0.2"
+
+
 def test_flatpak_blender_42(bare, monkeypatch):
     info = "Blender - Free and open source 3D creation suite\n\n          ID: org.blender.Blender\n     Version: 4.2.1\n"
     monkeypatch.setattr(finders, "_flatpak_info", lambda app_id: info if app_id == "org.blender.Blender" else "")

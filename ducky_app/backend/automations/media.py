@@ -990,6 +990,12 @@ for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES"):
         break
     except TypeError:
         continue
+note = ""
+if scene.render.engine == "CYCLES" and scene.cycles.use_denoising:
+    import _cycles
+    if not getattr(_cycles, "with_openimagedenoise", True):  # ponytail: no OptiX fallback; add when a GPU box needs it
+        scene.cycles.use_denoising = False  # distro Blender builds (Ubuntu apt) ship without OIDN
+        note = "This Blender has no OpenImageDenoise, so the render is not denoised."
 scene.render.resolution_x, scene.render.resolution_y = W, H
 scene.render.film_transparent = {transparent}
 scene.render.image_settings.file_format = "PNG"
@@ -1000,7 +1006,7 @@ for o in made + [cam, sun]:
 if win:
     win.scene = before_scene
 bpy.data.scenes.remove(scene)
-result = {{"image": OUT, "objects": len(made)}}
+result = {{"image": OUT, "objects": len(made), "note": note}}
 """
 
 _EXPORT_CODE = """
@@ -1032,12 +1038,15 @@ def blender_render(cfg: dict[str, Any], inputs: dict[str, Any], folder: Path) ->
     size = int(_number(inputs, cfg, "size", 1024))
     code = _RENDER_CODE.format(src=path, out=out, width=size, height=size, transparent=cfg.get("transparent") is not False)
     try:
-        _blender(code)
+        done = _blender(code)
     except RuntimeError as exc:
         return {"ok": False, "error": f"Blender: {exc}"}
     if not Path(out).is_file():
         return {"ok": False, "error": "Blender finished but wrote no picture."}
-    return {"ok": True, "outputs": {"image": with_url(file_ref(out, "image"))}}
+    step: dict[str, Any] = {"ok": True, "outputs": {"image": with_url(file_ref(out, "image"))}}
+    if done.get("note"):
+        step["note"] = done["note"]
+    return step
 
 
 def blender_export(cfg: dict[str, Any], _inputs: dict[str, Any], folder: Path) -> dict[str, Any]:

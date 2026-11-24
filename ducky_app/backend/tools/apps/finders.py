@@ -2,7 +2,8 @@
 
 Each hit is ``{"app", "kind", "argv", "path", "version"}``; ``argv`` is what starts it
 (``["flatpak", "run", "org.blender.Blender"]`` for a Flatpak). Order: PATH, Flatpak, Steam,
-/opt (and the home folder for Unreal source builds). Nothing here runs the app itself.
+/opt (and the home folder for Unreal source builds). The only app run here is
+``<app> --version`` for Blender and Godot when nothing else gave a version; Unreal never runs.
 """
 
 from __future__ import annotations
@@ -16,9 +17,9 @@ from typing import Any
 OPT = Path("/opt")
 
 _APPS: dict[str, dict[str, Any]] = {
-    "blender": {"names": ["blender"], "flatpak": "org.blender.Blender",
+    "blender": {"names": ["blender"], "flatpak": "org.blender.Blender", "ask_version": True,
                 "steam": "Blender/blender", "opt": ["blender*/blender"]},
-    "godot": {"names": ["godot4", "godot", "Godot"], "flatpak": "org.godotengine.Godot",
+    "godot": {"names": ["godot4", "godot", "Godot"], "flatpak": "org.godotengine.Godot", "ask_version": True,
               "steam": "Godot Engine/godot.x11.opt.tools.64", "opt": ["godot*/godot*"]},
     "unreal": {"names": ["UnrealEditor"], "flatpak": "",
                "steam": "", "opt": ["UnrealEngine*/Engine/Binaries/Linux/UnrealEditor",
@@ -33,6 +34,17 @@ _VER = re.compile(r"(\d+\.\d+(?:\.\d+)?)")
 def _version(text: str) -> str:
     m = _VER.search(text)
     return m.group(1) if m else ""
+
+
+def _ask_version(argv: list[str]) -> str:
+    """Version from the first line of ``<app> --version`` (``Blender 4.0.2``, ``4.3.stable...``)."""
+    try:
+        out = subprocess.run([*argv, "--version"], capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=20, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    lines = out.stdout.strip().splitlines()
+    return _version(lines[0]) if lines else ""
 
 
 def _flatpak_info(app_id: str) -> str:
@@ -65,8 +77,10 @@ def find_all(app: str, home: str | Path | None = None) -> list[dict[str, Any]]:
 
     def add(kind: str, argv: list[str], path: str, version: str = "") -> None:
         if all(x["path"] != path for x in hits):
-            hits.append({"app": app, "kind": kind, "argv": argv, "path": path,
-                         "version": version or _version(path)})
+            version = version or _version(path)
+            if not version and spec.get("ask_version"):
+                version = _ask_version(argv)
+            hits.append({"app": app, "kind": kind, "argv": argv, "path": path, "version": version})
 
     for name in spec["names"]:
         found = shutil.which(name)
