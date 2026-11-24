@@ -308,6 +308,13 @@ def _wait_refresh_done(timeout: float = 5.0) -> None:
 def test_refresh_only_announces_a_real_change(monkeypatch):
     """An unchanged warm used to push models_updated anyway; the picker re-read on it and
     asked again, ~3.5 times a second forever."""
+    import threading
+
+    # test_key's "models-<provider>" thread announces when it ends; ending inside this test
+    # it hit the hook below and counted twice (assert [1, 1] == [1], Nov 24 2026 CI).
+    for thread in threading.enumerate():
+        if thread.name.startswith("models-") or thread.name == "refresh-models":
+            thread.join(10)
     announced: list[int] = []
     monkeypatch.setattr(pa, "_models_updated_hook", lambda: announced.append(1))
     monkeypatch.setattr(pa, "_model_cache", {"openai": [ModelInfo(id="gpt-a")]})

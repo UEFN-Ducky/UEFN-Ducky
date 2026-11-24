@@ -915,20 +915,15 @@ if sys.platform == "win32":
     _user32_sc.PostMessageW.argtypes = [wintypes.HWND, ctypes.c_uint, _WPARAM, _LPARAM]
 _native_subclass: dict[int, object] = {}  # hwnd -> WNDPROC callback (kept alive)
 _native_subclass_orig: dict[int, int] = {}  # hwnd -> original window proc pointer
-# Install runs on the UI thread and on callers' threads (refresh_window_chrome). Two at once
-# both passed the "already ours" check; the second got our own proc back as the "original",
-# so every message chained to itself until the stack overflowed (0xC0000409, Nov 24 2026 CI).
-_native_subclass_lock = threading.Lock()
+_native_subclass_lock = threading.Lock()  # installs race from callers' threads (see install)
 
 
 def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
     """Native window proc: strip the top caption, let the OS own the resize frame.
 
-    Keep the standard L/R/B resize frame (DefWindowProc's inset) so the WebView2 child
-    does NOT cover it — the OS handles side/bottom/corner resize natively (real cursor,
-    Aero Snap, lockstep). Only the top caption is stripped (client top = window top) so
-    there is no title bar and no native min/max/close buttons. The top edge has no OS
-    resize frame, so thin top/corner grips hand off to this same native resize loop.
+    Keep the L/R/B resize frame (DefWindowProc's inset) so the OS resizes natively (cursor,
+    Aero Snap). Only the top caption is stripped: no title bar or native buttons; thin top and
+    corner grips hand off to this same native resize loop.
     """
     orig = _native_subclass_orig.get(hwnd, 0)
     if msg == 0x0082:  # WM_NCDESTROY: the owning UI thread ends this HWND lifetime.
@@ -978,10 +973,8 @@ def _chrome_subclass_proc(hwnd, msg, wparam, lparam):
             if orig:
                 return _user32_sc.CallWindowProcW(orig, hwnd, msg, wparam, -1)
         elif msg == _WM_ENDSESSION and wparam:
-            # Logoff/shutdown kills the process after this returns: clear the running flag
-            # (one meta write) and mark the launch closed, so the next start neither counts an
-            # app_unclean_exit nor asks to send 'closed by itself' (a sign-out isn't a reboot,
-            # so _pc_restarted_since didn't catch it).
+            # Logoff/shutdown kills the process after this returns: clear the running flag and mark
+            # the launch closed, so the next start counts no app_unclean_exit (a sign-out isn't a reboot).
             from frontend import boot_report, usage_stats
 
             try:
@@ -1015,10 +1008,9 @@ def _install_native_chrome_subclass(hwnd: int) -> bool:
             if not orig and ctypes.get_last_error():
                 return False
             _native_subclass[hwnd] = cb  # keep the callback alive (GC would crash the proc)
-            # Our own proc is never the original: chaining to it would recurse forever.
+            # Never our own proc: a racing install got it back, chained to itself, stack overflow.
             _native_subclass_orig[hwnd] = int(orig) if orig and int(orig) != ours else 0
-        # Outside the lock: SetWindowPos sends WM_NCCALCSIZE to the UI thread and waits.
-        _force_frame_changed(hwnd)  # trigger a fresh WM_NCCALCSIZE through our proc now
+        _force_frame_changed(hwnd)  # outside the lock: it sends WM_NCCALCSIZE to the UI thread
         return True
     except Exception:
         return False
