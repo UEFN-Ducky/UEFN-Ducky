@@ -21,6 +21,7 @@ def test_linux_build_installs_build_exes_apt_packages():
     assert install, "linux-build has no apt-get install step"
     installed = set(install.group(1).replace("\\\n", " ").split())
     assert set(wanted) <= installed, sorted(set(wanted) - installed)
+    assert "ripgrep" in installed  # the panel's prebuild check-shipped-ui.mjs runs rg
 
 
 def _jobs():
