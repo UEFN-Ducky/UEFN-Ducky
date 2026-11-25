@@ -365,8 +365,8 @@ FIELD_META: dict[str, FieldMeta] = {
         description="Sentence cap for live voice quick replies: short = 1-2, normal = 3-4, detailed = up to 6.",
     ),
     "voice_stt_provider": FieldMeta(
-        "Listen backend", "Audio", settable=True, enum=("", "openai", "webspeech"),
-        description="Empty = system speech (Windows speech in the app, browser speech on a phone). openai = OpenAI Realtime when a key is saved.",
+        "Listen backend", "Audio", settable=True, enum=("", "openai", "webspeech", "whisper"),
+        description="Empty = system speech (Windows speech in the app, browser speech on a phone). openai = OpenAI Realtime when a key is saved. whisper = offline Whisper Small Q8 for Windows dictation (a 273 MB download on first use); live voice keeps system speech.",
     ),
     "mic_permission": FieldMeta(
         "Microphone permission", "Audio", settable=True, enum=("ask", "allow", "block"),

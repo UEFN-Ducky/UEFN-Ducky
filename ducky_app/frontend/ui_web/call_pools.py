@@ -58,6 +58,8 @@ BLOCKING = frozenset({
     "import_skill_pack",
     "snip_screen",
     "wait_for_agent_idle",
+    "voice_whisper_install",
+    "voice_whisper_transcribe",
     "voice_transcribe_audio",
     "voice_create_realtime_token",
     "voice_summarize_reply",

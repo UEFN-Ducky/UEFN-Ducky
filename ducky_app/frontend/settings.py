@@ -468,7 +468,8 @@ class PanelSettings:
 
     voice_stt_provider: str = ""
     """Live/dictation listen backend: empty = system default (Windows speech in the app, browser speech
-    on a phone), openai = OpenAI Realtime when a key is saved."""
+    on a phone), openai = OpenAI Realtime when a key is saved, whisper = offline Whisper for
+    Windows dictation (live voice keeps system speech)."""
 
     mic_permission: str = "ask"
     """App-level mic consent: ask | allow | block (before getUserMedia)."""
@@ -584,7 +585,7 @@ class PanelSettings:
         if self.voice_reply_length not in ("short", "normal", "detailed"):
             self.voice_reply_length = "short"
         stt = str(self.voice_stt_provider or "").strip().lower()
-        self.voice_stt_provider = stt if stt in ("openai", "webspeech") else ""
+        self.voice_stt_provider = stt if stt in ("openai", "webspeech", "whisper") else ""
         self.mic_device_id = str(self.mic_device_id or "").strip()
         self.output_device_id = str(self.output_device_id or "").strip()
         from backend.agent.coding_agents.base import (

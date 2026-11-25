@@ -643,9 +643,8 @@ class PanelApiStoreMixin:
             "keep_workflow_preview",  # Use this: the steps after a Preview (a save, an import)
             "test_workflow_node",  # a Custom code test can wait on tools for minutes
             "test_mcp_plugin",
-            "voice_transcribe_audio",
-            "voice_create_realtime_token",
-            "voice_summarize_reply",
+            "voice_whisper_install", "voice_whisper_transcribe", "voice_transcribe_audio",
+            "voice_create_realtime_token", "voice_summarize_reply",
             "tester_list_devices",
             "tester_run_tests",
             "tester_results",

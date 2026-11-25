@@ -29,6 +29,24 @@ def _stt():
     return windows_speech
 
 
+def voice_whisper_installed(self) -> bool:
+    from backend.voice.local_whisper import installed
+
+    return installed()
+
+
+def voice_whisper_install(self) -> dict[str, Any]:
+    from backend.voice.local_whisper import install
+
+    return install()
+
+
+def voice_whisper_transcribe(self, b64_audio: str) -> dict[str, Any]:
+    from backend.voice.local_whisper import transcribe
+
+    return transcribe(b64_audio)
+
+
 def voice_transcribe_audio(self, b64_audio: str, mime: str = "audio/webm") -> dict[str, Any]:
     """Batch Whisper transcription (prefer via bridge_job_start)."""
     from backend.voice.transcription import transcribe_audio

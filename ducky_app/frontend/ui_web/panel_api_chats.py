@@ -131,6 +131,9 @@ class PanelApiChatsMixin:
     wait_for_agent_idle = send.wait_for_agent_idle
 
     # -- voice (panel_chats/voice.py) -------------------------------------------
+    voice_whisper_installed = voice.voice_whisper_installed
+    voice_whisper_install = voice.voice_whisper_install
+    voice_whisper_transcribe = voice.voice_whisper_transcribe
     voice_transcribe_audio = voice.voice_transcribe_audio
     voice_create_realtime_token = voice.voice_create_realtime_token
     voice_win_tts_start = voice.voice_win_tts_start
