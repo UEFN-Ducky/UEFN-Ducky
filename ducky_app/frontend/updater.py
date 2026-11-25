@@ -1152,7 +1152,9 @@ def apply_linux_update(*, status: dict[str, Any] | None = None, run: Any = None)
     if not status["update_available"]:
         return _result(ok=False, error=status.get("error") or "No update available.", stage="check")
     kind = status["install_kind"]
-    if kind in ("deb", "rpm", "flatpak"):
+    if kind in ("deb", "rpm"):
+        return install_package_update(kind, status.get("asset") or {}, run=run)
+    if kind == "flatpak":
         return hand_off_to_package_manager(kind, run=run)
     if kind == "aur":
         return _result(ok=False, error="Update with your AUR helper, e.g. yay -Syu uefn-ducky.",
@@ -1331,34 +1333,88 @@ def _run_package_command(cmd: list[str]) -> tuple[int, str]:
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
-def package_update_command(kind: str, *, env: dict[str, str] | None = None) -> list[str]:
-    from frontend.install_info import LINUX_PACKAGE
+# What a deb / rpm copy without PackageKit runs instead (the site's one-line installer).
+INSTALL_SH = "curl -fsSL https://uefnducky.org/linux/install.sh | sh"
 
+
+def package_update_command(kind: str, *, env: dict[str, str] | None = None) -> list[str]:
+    """Flatpak's own update. deb / rpm install a downloaded file instead: package_install_command."""
     env = os.environ if env is None else env
-    if kind == "flatpak":
-        app_id = env.get("FLATPAK_ID") or ""
-        # Inside the sandbox flatpak itself lives on the host.
-        return ["flatpak-spawn", "--host", "flatpak", "update", "-y", "--noninteractive", app_id]
+    app_id = env.get("FLATPAK_ID") or ""
+    # Inside the sandbox flatpak itself lives on the host.
+    return ["flatpak-spawn", "--host", "flatpak", "update", "-y", "--noninteractive", app_id]
+
+
+def package_install_command(path: Path) -> list[str]:
     # pkcon is PackageKit's own client: it asks packagekitd over D-Bus, and polkit asks
     # the person for their password. Never write over the package's files ourselves.
-    return ["pkcon", "-y", "update", LINUX_PACKAGE]
+    # --allow-untrusted: a local file has no repo signature; its SHA-256 and minisign
+    # signature were checked before this runs.
+    return ["pkcon", "-y", "--allow-untrusted", "install-local", str(path)]
+
+
+def _run_manager(cmd: list[str], manager: str, run: Any) -> dict[str, Any]:
+    _set_progress(stage="installing", error=None)
+    code, output = (run or _run_package_command)(cmd)
+    # pkcon exits 0 when packagekitd isn't there at all.
+    if code == 127 or "Failed to contact PackageKit" in (output or ""):
+        fix = (f"run {INSTALL_SH} in a terminal" if manager == "PackageKit"
+               else "update UEFN Ducky from your software updater")
+        return _result(ok=False, error=f"{manager} isn't available — {fix}.", stage="installing")
+    if code != 0:
+        tail = (output or "").strip().splitlines()[-1:] or [f"exit code {code}"]
+        return _result(ok=False, error=f"The update didn't install: {tail[0]}", stage="installing")
+    return _result(ok=True, error=None, stage="installed")
 
 
 def hand_off_to_package_manager(
     kind: str, *, run: Any = None, env: dict[str, str] | None = None
 ) -> dict[str, Any]:
-    """deb / rpm through PackageKit, Flatpak through flatpak. The new version is used from
-    the next start."""
+    """Flatpak through flatpak. The new version is used from the next start."""
     cmd = package_update_command(kind, env=env)
-    if kind == "flatpak" and not cmd[-1]:
+    if not cmd[-1]:
         return _result(ok=False, error="Can't tell this Flatpak's app id ($FLATPAK_ID).", stage="check")
-    _set_progress(stage="installing", error=None)
-    code, output = (run or _run_package_command)(cmd)
-    if code == 127:
-        manager = "Flatpak" if kind == "flatpak" else "PackageKit"
-        return _result(ok=False, error=f"{manager} isn't available — update UEFN Ducky from your "
-                       "software updater.", stage="installing")
-    if code != 0:
-        tail = (output or "").strip().splitlines()[-1:] or [f"exit code {code}"]
-        return _result(ok=False, error=f"The update didn't install: {tail[0]}", stage="installing")
-    return _result(ok=True, error=None, stage="installed")
+    return _run_manager(cmd, "Flatpak", run)
+
+
+def install_package_update(
+    kind: str, asset: dict[str, Any], *, run: Any = None, download: Any = None
+) -> dict[str, Any]:
+    """deb / rpm: download the feed's package, check it like an AppImage update, and have
+    PackageKit install that file. The new version is used from the next start.
+
+    Never ``pkcon update``: the site's installer installs the downloaded file and adds no
+    apt / dnf repo, so PackageKit had no newer version to find ("No packages were found")."""
+    import tempfile
+
+    url, sha256 = asset.get("url"), asset.get("sha256")
+    if not url or not sha256:
+        return _result(ok=False, error=f"The update feed has no .{kind} for this computer — "
+                       f"run {INSTALL_SH} in a terminal.", stage="check")
+    if not installer_url_allowed(url):
+        return _result(ok=False, error=f"Refusing non-HTTPS update URL: {url}", stage="check")
+    download = download or _download
+    folder = Path(tempfile.mkdtemp(prefix="uefn-ducky-update-"))
+    try:
+        # packagekitd and apt's _apt user both read the file.
+        os.chmod(folder, 0o755)
+        pkg = folder / f"uefn-ducky.{kind}"
+        sig_file = folder / (pkg.name + ".minisig")
+        sig_url = asset.get("sig_url")
+        error = download(url, pkg)
+        if not error and sig_url:
+            error = download(sig_url, sig_file)
+        if error:
+            return _result(ok=False, error=error, stage="download")
+        _set_progress(stage="verify", error=None)
+        error = _verify_sha256(pkg, sha256)
+        if not error and MINISIGN_PUBLIC_KEY:
+            sig = sig_file.read_text(encoding="utf-8", errors="replace") if sig_file.is_file() else ""
+            error = (verify_minisign(pkg, sig, MINISIGN_PUBLIC_KEY) if sig
+                     else "The update has no signature — refusing to install it.")
+        if error:
+            return _result(ok=False, error=error, stage="verify")
+        os.chmod(pkg, 0o644)
+        return _run_manager(package_install_command(pkg), "PackageKit", run)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
