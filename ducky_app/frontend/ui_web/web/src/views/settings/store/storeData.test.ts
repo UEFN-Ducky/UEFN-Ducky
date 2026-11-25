@@ -201,6 +201,11 @@ describe("labels", () => {
     expect(
       authorLabelFor({ slug: "physics", kind: "skill", latest_version: "1" }),
     ).toBe("DuckyOS Store");
+    expect(authorLabelFor({ slug: "f", source: "store", audience_label: "Lezzy" })).toBe("Lezzy");
+    expect(
+      authorLabelFor({ slug: "g", kind: "plugin", latest_version: "1", audience_label: "Lezzy" }),
+    ).toBe("Lezzy");
+    expect(authorLabelFor({ slug: "h", source: "ai", audience_label: "Lezzy" })).toBe("AI-made");
   });
 });
 

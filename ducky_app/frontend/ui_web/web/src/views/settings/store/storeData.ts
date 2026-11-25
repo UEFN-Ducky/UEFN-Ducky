@@ -262,12 +262,14 @@ export function itemInitials(item: DuckyOSStoreItemDto): string {
 /** The "author" line under a card title — closest real analog to a publisher. */
 export function authorLabelFor(item: DuckyOSStoreItemDto): string {
   const source = item.source || "";
-  if (source === "store") return "DuckyOS Store";
+  // Publishing team (owner_team_name) when the catalog has one, as on the website.
+  const team = (item.audience_label || "").trim();
+  if (source === "store") return team || "DuckyOS Store";
   if (source === "local") return "Local file";
   if (source === "ai") return "AI-made";
   if (source === "bundled") return "Bundled";
   // Catalog hit with no local source stamp yet (or older panel) — still Store.
-  if (item.latest_version) return "DuckyOS Store";
+  if (item.latest_version) return team || "DuckyOS Store";
   return itemKind(item) === "plugin" ? "Plugin" : "Skill pack";
 }
 
