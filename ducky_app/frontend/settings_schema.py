@@ -395,11 +395,6 @@ FIELD_META: dict[str, FieldMeta] = {
         "Start with Windows", "General", settable=True,
         description="Ducky opens hidden in the tray when you sign in, so opening it is instant.",
     ),
-    "update_channel": FieldMeta(
-        "Beta updates", "General", settable=True, enum=("", "stable", "beta"),
-        description="Update feed: beta or stable (empty = beta on Linux, stable on Windows). "
-        "Switching to stable never downgrades: it waits until stable is newer.",
-    ),
     "pc_memory_warnings": FieldMeta(
         "PC memory warnings", "General", settable=True,
         description="Notify when the PC is low on RAM or graphics memory while Ducky runs. The low-memory message at launch always shows.",

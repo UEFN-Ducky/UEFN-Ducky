@@ -501,9 +501,6 @@ class PanelSettings:
     """Warn when the PC is low on RAM or graphics memory while Ducky runs (frontend/low_memory.py).
     Off: no such notification; the low-memory message at launch still shows."""
 
-    update_channel: str = ""
-    """Update feed: "beta" | "stable"; "" = the platform default (version_check.feed_channel)."""
-
     starter_llm_gateways_seeded: bool = False
     """First-run Store install of every starter gateway already attempted."""
 
@@ -571,8 +568,6 @@ class PanelSettings:
             self.mic_permission = "ask"
         if self.web_access not in ("off", "ask", "on"):
             self.web_access = "ask"
-        if self.update_channel not in ("", "stable", "beta"):
-            self.update_channel = ""
         try:
             self.tts_volume = max(0.0, min(1.0, float(self.tts_volume)))
         except (TypeError, ValueError):
@@ -723,7 +718,6 @@ class PanelSettings:
             or self.default_video_provider.strip()
             or self.default_music_provider.strip()
             or self.web_access != "ask"
-            or self.update_channel
             or not self.prompt_caching_enabled
             or not self.freeze_prompt_prefix
             or self.anthropic_extended_cache_ttl

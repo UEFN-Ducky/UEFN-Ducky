@@ -189,23 +189,6 @@ def clock_skew_message(base: str) -> str | None:
     return describe_clock_skew(date, time.time())
 
 
-def feed_channel(saved: str | None = None) -> str:
-    """"beta" or "stable": the saved Beta updates choice (``saved``, else read from settings),
-    else beta on Linux (no stable release has Linux yet) and stable everywhere else."""
-    from frontend import platform_info
-
-    if saved is None:
-        try:
-            from frontend.settings import PanelSettings
-
-            saved = str(PanelSettings.load().update_channel or "")
-        except Exception:
-            saved = ""
-    if saved in ("stable", "beta"):
-        return saved
-    return "beta" if platform_info.IS_LINUX else "stable"
-
-
 def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[dict[str, Any] | None, str | None]:
     """Return ``(payload, error)`` for the Store app-version collect endpoint.
 
@@ -217,9 +200,8 @@ def fetch_remote_payload(*, timeout: float = 8.0, attempts: int = 0) -> tuple[di
     global last_net_stage, last_fallback
     last_fallback = ""
     base = update_base_url()
+    # Stable only, on every OS: there is no Beta updates choice.
     url = f"{base}/api/v1/plugins/uefn-ducky-store/collect/app-version"
-    if feed_channel() == "beta":
-        url += "?channel=beta"  # stable keeps today's exact request
     # Collect endpoints require Origin to match Host (same as duckyos_account.api_request).
     req = urllib.request.Request(
         url,

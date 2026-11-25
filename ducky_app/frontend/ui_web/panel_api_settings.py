@@ -29,7 +29,6 @@ class PanelApiSettingsMixin:
     def get_settings(self) -> dict[str, Any]:
         s = _pa.PanelSettings.load()
         from backend.agent.coding_agents.settings_helpers import coding_agents_dict
-        from frontend.version_check import feed_channel as _feed_channel
 
         return {
             "agent_provider": s.agent_provider,
@@ -104,7 +103,6 @@ class PanelApiSettingsMixin:
             "show_me_autoplay": bool(getattr(s, "show_me_autoplay", True)),
             "start_with_windows": bool(getattr(s, "start_with_windows", True)),
             "pc_memory_warnings": bool(getattr(s, "pc_memory_warnings", True)),
-            "update_channel": _feed_channel(str(getattr(s, "update_channel", "") or "")),
         }
 
     def get_appearance(self) -> dict[str, Any]:
@@ -640,8 +638,6 @@ class PanelApiSettingsMixin:
         for key in ("first_open_tours", "show_me_autoplay", "pc_memory_warnings"):
             if key in patch:
                 setattr(s, key, bool(patch.get(key)))
-        if patch.get("update_channel") in ("stable", "beta"):
-            s.update_channel = str(patch["update_channel"])
         autostart_error = ""
         if "start_with_windows" in patch:
             try:

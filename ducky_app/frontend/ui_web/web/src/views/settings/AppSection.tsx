@@ -18,7 +18,6 @@ import { useUiTarget } from "../../ui-targets/registry";
 import { openWhatsNew } from "../../components/WhatsNewHost";
 import { GeneralSectionHeader } from "./GeneralSectionHeader";
 import { formatPatchDate } from "./store/storeData";
-import { SettingsToggleRow } from "./SettingsToggleRow";
 
 type AppActionPhase = "idle" | "checking" | "uninstalling";
 /** Result of the last manual update check. */
@@ -103,33 +102,6 @@ function updateProgressLabel(update: AppUpdateState): string {
     default:
       return "Updating…";
   }
-}
-
-/** Beta updates: the beta update feed. The backend reports the platform default (beta on Linux). */
-export function BetaUpdatesSwitch() {
-  const [on, setOn] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => onApiReady(() => {
-    void Promise.resolve(getApi()?.get_settings?.()).then((settings) => {
-      setOn((settings as { update_channel?: string } | undefined)?.update_channel === "beta");
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }), []);
-  return (
-    <div className="general-tab-toggle-card">
-      <SettingsToggleRow
-        id="toggle-beta-updates"
-        label="Beta updates"
-        description="Get new versions before everyone else. Off: you stay on your version until a stable release is newer."
-        checked={on}
-        disabled={!loaded}
-        onChange={(value) => {
-          setOn(value);
-          void getApi()?.save_agent_settings({ update_channel: value ? "beta" : "stable" });
-        }}
-      />
-    </div>
-  );
 }
 
 export function AppSection() {
@@ -449,7 +421,6 @@ export function AppSection() {
           <p className="general-tab-update-progress-label">{updateProgressLabel(updateState)}</p>
         </div>
       ) : null}
-      {canSelfUpdate ? <BetaUpdatesSwitch /> : null}
       {errorText && !updating ? (
         <p className="general-tab-section-note general-tab-section-note--error">{errorText}</p>
       ) : null}

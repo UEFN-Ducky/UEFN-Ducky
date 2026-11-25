@@ -1,4 +1,4 @@
-"""Beta updates: which feed the updater reads, and switching back to stable never downgrades."""
+"""Every copy reads the stable feed: there is no Beta updates choice, on any OS."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import io
 
 import pytest
 
-from frontend import app_stage, platform_info, version_check
+from frontend import platform_info, version_check
 from frontend.settings import PanelSettings
 
 BASE = "https://store.example"
@@ -34,20 +34,12 @@ def sent(monkeypatch):
     return reqs
 
 
-def _use(monkeypatch, *, linux: bool, saved: str = "") -> None:
+@pytest.mark.parametrize("linux", [False, True])
+def test_every_os_reads_the_stable_feed_with_todays_exact_request(monkeypatch, sent, linux):
     monkeypatch.setattr(platform_info, "IS_LINUX", linux)
-    monkeypatch.setattr(PanelSettings, "load", classmethod(lambda cls, *a, **k: PanelSettings(update_channel=saved)))
-
-
-def _shape(req):
-    return (req.full_url, req.get_method(), req.data, sorted(req.header_items()))
-
-
-def test_windows_default_request_is_byte_identical(monkeypatch, sent):
-    _use(monkeypatch, linux=False)
     payload, err = version_check.fetch_remote_payload(attempts=1)
     assert err is None and payload == {"currentVersion": "9.9.9"}
-    assert _shape(sent[0]) == (
+    assert (sent[0].full_url, sent[0].get_method(), sent[0].data, sorted(sent[0].header_items())) == (
         STABLE_URL,
         "POST",
         b"{}",
@@ -60,35 +52,6 @@ def test_windows_default_request_is_byte_identical(monkeypatch, sent):
     )
 
 
-def test_linux_default_reads_beta(monkeypatch, sent):
-    _use(monkeypatch, linux=True)
-    version_check.fetch_remote_payload(attempts=1)
-    assert sent[0].full_url == STABLE_URL + "?channel=beta"
-
-
-def test_beta_setting_adds_channel_on_windows(monkeypatch, sent):
-    _use(monkeypatch, linux=False, saved="beta")
-    version_check.fetch_remote_payload(attempts=1)
-    assert sent[0].full_url == STABLE_URL + "?channel=beta"
-
-
-def test_stable_setting_on_linux_reads_stable(monkeypatch, sent):
-    _use(monkeypatch, linux=True, saved="stable")
-    version_check.fetch_remote_payload(attempts=1)
-    assert sent[0].full_url == STABLE_URL
-
-
-def test_bad_saved_value_falls_back_to_default():
-    s = PanelSettings(update_channel="nightly")
-    s.validate()
-    assert s.update_channel == ""
-
-
-def test_switching_back_to_stable_never_downgrades():
-    # On beta 2.0.1; the stable feed still says 2.0.0: no update, Setup or pack.
-    assert not version_check.is_remote_newer("2.0.1", "2.0.0")
-    stable = {"update": {"version": "2.0.0", "packUrl": "p", "manifestUrl": "m", "manifestSha256": "s"}}
-    assert app_stage.feed_update(stable, current="2.0.1") is None
-    # Once stable passes the beta, it updates.
-    stable["update"]["version"] = "2.0.2"
-    assert app_stage.feed_update(stable, current="2.0.1") is not None
+def test_an_old_saved_beta_choice_is_dropped():
+    # Settings saved by a version with the switch: the key is ignored, the feed stays stable.
+    assert "update_channel" not in PanelSettings.__dataclass_fields__
