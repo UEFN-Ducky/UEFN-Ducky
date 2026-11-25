@@ -1390,11 +1390,32 @@ def hand_off_to_package_manager(
     return _run_manager(cmd, "Flatpak", run)
 
 
+# Waits for this process to end, then starts the installed launcher: the new version's
+# single-instance check would otherwise hand the start back to this old window.
+_RELAUNCH_SH = 'while kill -0 "$1" 2>/dev/null; do sleep 0.2; done; exec "$2"'
+
+
+def package_launcher(exists: Any = os.path.exists) -> str:
+    """The installed launcher: the deb / rpm put a /usr/bin link to /opt/uefn-ducky."""
+    return "/usr/bin/uefn-ducky" if exists("/usr/bin/uefn-ducky") else sys.executable
+
+
+def relaunch_after_exit(sh: str = "/bin/sh") -> None:
+    """Start the freshly installed version once this one has quit, then quit."""
+    subprocess.Popen(
+        [sh, "-c", _RELAUNCH_SH, "ducky-relaunch", str(os.getpid()), package_launcher()],
+        env=_clean_child_env(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True,
+    )
+    _exit_self_after_delay()
+
+
 def install_package_update(
-    kind: str, asset: dict[str, Any], *, run: Any = None, download: Any = None
+    kind: str, asset: dict[str, Any], *, run: Any = None, download: Any = None,
+    relaunch: Any = None,
 ) -> dict[str, Any]:
-    """deb / rpm: download the feed's package, check it like an AppImage update, and have
-    PackageKit install that file. The new version is used from the next start.
+    """deb / rpm: download the feed's package, check it like an AppImage update, have
+    pkexec install that file, then restart into the new version (as Windows and AppImage do).
 
     Never ``pkcon update``: the site's installer installs the downloaded file and adds no
     apt / dnf repo, so PackageKit had no newer version to find ("No packages were found")."""
@@ -1428,6 +1449,14 @@ def install_package_update(
         if error:
             return _result(ok=False, error=error, stage="verify")
         os.chmod(pkg, 0o644)
-        return _run_manager(package_install_command(pkg, kind), "pkexec", run)
+        out = _run_manager(package_install_command(pkg, kind), "pkexec", run)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
+    if not out["ok"]:
+        return out
+    _set_progress(stage="restarting", error=None)
+    try:
+        (relaunch or relaunch_after_exit)()
+    except OSError as exc:  # installed, but the restart is the person's
+        return _result(ok=False, error=f"Installed. Restart UEFN Ducky to use it ({exc}).", stage="launch")
+    return _result(ok=True, error=None, stage="restarting")

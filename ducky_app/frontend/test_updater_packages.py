@@ -4,6 +4,9 @@ Flatpak installs hand the update to flatpak."""
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import frontend.updater as updater
@@ -48,9 +51,12 @@ def test_deb_and_rpm_install_the_downloaded_package_through_pkexec(monkeypatch) 
     # Never pkcon: its confirmation reads the terminal, so the update hung or declined.
     monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
     for kind in ("deb", "rpm"):
-        fake = SeesFile()
-        assert updater.install_package_update(kind, _asset(), run=fake, download=_serve()) == {
-            "ok": True, "error": None, "stage": "installed"}
+        fake, restarted = SeesFile(), []
+        # Installed, then it restarts into the new version (it used to stay on the old one).
+        assert updater.install_package_update(kind, _asset(), run=fake, download=_serve(),
+                                              relaunch=lambda: restarted.append(1)) == {
+            "ok": True, "error": None, "stage": "restarting"}
+        assert restarted == [1]
         [cmd] = fake.calls
         assert cmd[0] == "pkexec" and "pkcon" not in cmd
         assert cmd[-1].endswith(f"uefn-ducky.{kind}") and fake.seen == PACKAGE
@@ -66,6 +72,24 @@ def test_each_distro_installs_with_its_own_tool_without_asking_on_a_terminal() -
         "pkexec", "dnf", "install", "-y"]
     assert updater.package_install_command(rpm, "rpm", which=lambda n: n == "zypper")[:3] == [
         "pkexec", "zypper", "--non-interactive"]
+
+
+def test_a_failed_install_never_restarts(monkeypatch) -> None:
+    monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
+    restarted: list[int] = []
+    out = updater.install_package_update("deb", _asset(), run=FakeManager(code=100, output="E: broken"),
+                                         download=_serve(), relaunch=lambda: restarted.append(1))
+    assert not out["ok"] and restarted == []
+
+
+def test_the_relaunch_waits_for_this_process_then_starts_the_installed_launcher() -> None:
+    assert updater.package_launcher(exists=lambda p: p == "/usr/bin/uefn-ducky") == "/usr/bin/uefn-ducky"
+    # The shell loop: runs the launcher only after the given pid is gone.
+    sh = updater._RELAUNCH_SH
+    assert sh.index('kill -0 "$1"') < sh.index('exec "$2"')
+    if shutil.which("sh") and sys.platform != "win32":
+        done = subprocess.run(["sh", "-c", sh, "x", "999999999", "true"], timeout=10)
+        assert done.returncode == 0
 
 
 def test_apply_linux_update_sends_deb_and_rpm_to_the_package_install() -> None:
