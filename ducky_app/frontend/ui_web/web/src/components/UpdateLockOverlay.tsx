@@ -36,7 +36,7 @@ function stageLabel(state: AppUpdateState): string {
     case "launch":
       return "Launching installer…";
     case "installing":
-      return "Updating installer… waiting for Windows permission";
+      return "Installing update… waiting for your permission";
     case "restarting":
       return state.stuck
         ? "Install is taking too long — the app stayed open. Force close so Setup can finish."

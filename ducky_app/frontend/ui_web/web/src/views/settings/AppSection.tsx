@@ -96,7 +96,7 @@ function updateProgressLabel(update: AppUpdateState): string {
     case "launch":
       return "Launching installer…";
     case "installing":
-      return "Updating installer… waiting for Windows permission";
+      return "Installing update… waiting for your permission";
     case "restarting":
       return "Installing update… UEFN Ducky will restart itself";
     default:
