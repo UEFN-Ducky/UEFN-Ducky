@@ -1,4 +1,4 @@
-"""Crash guard: a marker left by a window that died skips that plugin version next launch."""
+"""Crash guard: a window that died loading a plugin version twice in a row skips it next launch."""
 
 from __future__ import annotations
 
@@ -17,14 +17,34 @@ def markers(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_a_dead_process_marker_becomes_a_crash_record(markers, monkeypatch) -> None:
+def _died_loading(markers, monkeypatch, plugin: str, version: str, process: int) -> None:
+    """A window that ended while loading it; the next launch reads the marker."""
+    monkeypatch.setattr(crash_guard, "_crash_checked", False)
+    (markers / f"{plugin}.{process}.json").write_text(
+        json.dumps({"plugin": plugin, "version": version, "process": process, "role": "app"}))
+
+
+def test_a_dead_process_marker_twice_in_a_row_becomes_a_crash_record(markers, monkeypatch) -> None:
     monkeypatch.setattr(crash_guard, "_process_alive", lambda pid: False)
-    (markers / "boom.4242.json").write_text(json.dumps({"plugin": "boom", "version": "1.2", "process": 4242, "role": "app"}))
+    _died_loading(markers, monkeypatch, "boom", "1.2", 4241)
+    assert crash_guard.plugin_crashed_ducky("boom", "1.2") is False  # one strike: loads once more
+    _died_loading(markers, monkeypatch, "boom", "1.2", 4242)
     assert crash_guard.plugin_crashed_ducky("boom", "1.2") is True
     assert crash_guard.plugin_crashed_ducky("boom", "1.3") is False
     assert not (markers / "boom.4242.json").exists()
     crash_guard.clear_plugin_crash("boom")
     assert crash_guard._read_crashed() == {}
+
+
+def test_one_window_ended_mid_load_then_a_clean_load_skips_nothing(markers, monkeypatch) -> None:
+    # An installer or Task Manager ending Ducky while Ducky Account 1.1.88 loaded (Nov 24 2026).
+    monkeypatch.setattr(crash_guard, "_process_alive", lambda pid: False)
+    _died_loading(markers, monkeypatch, "account", "1.1.88", 4241)
+    assert crash_guard.plugin_crashed_ducky("account", "1.1.88") is False
+    path = crash_guard._load_marker_begin("account", "1.1.88")
+    crash_guard._load_marker_end(path)  # this launch loaded it fine: the strike goes
+    _died_loading(markers, monkeypatch, "account", "1.1.88", 4242)
+    assert crash_guard.plugin_crashed_ducky("account", "1.1.88") is False
 
 
 def test_a_live_process_marker_is_a_load_in_flight(markers, monkeypatch) -> None:
@@ -58,17 +78,18 @@ def test_a_marker_a_tool_server_left_blames_no_plugin(markers, monkeypatch) -> N
     assert not (markers / "account.4242.json").exists() and crash_guard._read_crashed() == {}
 
 
-def test_records_made_while_tool_servers_counted_are_dropped_once(markers, monkeypatch) -> None:
+@pytest.mark.parametrize("old", ["crashed.json", "crashed-app.json"])
+def test_records_made_by_older_rules_are_dropped_once(markers, monkeypatch, old) -> None:
     monkeypatch.setattr(crash_guard, "_process_alive", lambda pid: False)
-    (markers / "crashed.json").write_text(json.dumps({"account": "1.1.82", "kanban": "1.0.3"}))
-    assert crash_guard.plugin_crashed_ducky("account", "1.1.82") is False
-    assert not (markers / "crashed.json").exists()
-    # A window that really dies while loading it is found again, in the new record.
+    (markers / old).write_text(json.dumps({"account": "1.1.88", "kanban": "1.0.3"}))
+    assert crash_guard.plugin_crashed_ducky("account", "1.1.88") is False
+    assert not (markers / old).exists()
+    # A window that really dies while loading it, twice, is found again in the new record.
+    _died_loading(markers, monkeypatch, "account", "1.1.88", 4243)
+    _died_loading(markers, monkeypatch, "account", "1.1.88", 4244)
     monkeypatch.setattr(crash_guard, "_crash_checked", False)
-    (markers / "account.4243.json").write_text(
-        json.dumps({"plugin": "account", "version": "1.1.82", "process": 4243, "role": "app"}))
-    assert crash_guard.plugin_crashed_ducky("account", "1.1.82") is True
-    assert json.loads((markers / "crashed-app.json").read_text()) == {"account": "1.1.82"}
+    crash_guard.plugin_crashed_ducky("account", "1.1.88")
+    assert json.loads((markers / "crashed-twice.json").read_text()) == {"account": "1.1.88"}
 
 
 def test_quitting_or_updating_while_a_plugin_loads_is_no_crash(markers, monkeypatch) -> None:

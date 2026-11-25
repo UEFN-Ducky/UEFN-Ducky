@@ -1058,8 +1058,10 @@ def test_startup_clears_folders_left_holding_only_an_old_pyd(monkeypatch, tmp_pa
 
 
 def _crash_marker(plugin: str, version: str, process: int) -> Path:
+    """The window died loading it, and the launch before died loading it too (two strikes)."""
     folder = crash_guard._markers_dir()
     folder.mkdir(parents=True, exist_ok=True)
+    crash_guard._write_crashed({plugin: version}, crash_guard._SUSPECT_FILE)
     path = folder / f"{plugin}.{process}.json"
     path.write_text(json.dumps({"plugin": plugin, "version": version, "process": process, "role": "app"}),
                     encoding="utf-8")

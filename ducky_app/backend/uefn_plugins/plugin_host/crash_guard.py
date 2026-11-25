@@ -16,6 +16,12 @@ where nothing had crashed. Records from then are not trusted: they are dropped o
 plugin skipped for no reason loads again (one that really crashes is found again on the
 next launch).
 
+One window ended mid-load is no proof either: an installer, Task Manager or a shutdown ends it
+the same way a crash does ("closed while loading Ducky Account 1.1.88" on a Windows PC that
+only updated). A version is skipped only when the window dies loading it twice in a row; a
+load that finishes clears the first strike. A real crasher costs one more crash. Records
+made by the one-strike rule are dropped once, like the Nov 12 ones.
+
 Exiting on purpose is no crash either: Quit, an update and a newer version taking over end
 the process at once, with the start's loads possibly still running. ``boot_report.mark``
 calls :func:`closing_on_purpose` first, which drops this process's markers.
@@ -31,8 +37,11 @@ from pathlib import Path
 from backend.process_role import is_app
 
 _LOAD_MARKERS = ".loading"
-_CRASHED_FILE = "crashed-app.json"  # made from the window's own markers only
-_OLD_CRASHED_FILE = "crashed.json"  # also counted tool servers ended mid-load: dropped, never read
+_CRASHED_FILE = "crashed-twice.json"  # the window died loading this version twice in a row
+_SUSPECT_FILE = "crashed-once.json"  # died loading it once: one more try
+# Dropped, never read: crashed.json also counted tool servers ended mid-load, and
+# crashed-app.json skipped a plugin after one window ended mid-load.
+_OLD_CRASHED_FILES = ("crashed.json", "crashed-app.json")
 _APP_ROLE = "app"
 _crash_lock = threading.Lock()
 _crash_checked = False
@@ -54,16 +63,16 @@ def _process_alive(os_pid: int) -> bool:
         return True  # unknown: never blame a plugin on a guess
 
 
-def _read_crashed() -> dict[str, str]:
+def _read_crashed(name: str = _CRASHED_FILE) -> dict[str, str]:
     try:
-        data = json.loads((_markers_dir() / _CRASHED_FILE).read_text(encoding="utf-8"))
+        data = json.loads((_markers_dir() / name).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
 
-def _write_crashed(crashed: dict[str, str]) -> None:
-    path = _markers_dir() / _CRASHED_FILE
+def _write_crashed(crashed: dict[str, str], name: str = _CRASHED_FILE) -> None:
+    path = _markers_dir() / name
     try:
         if not crashed:
             path.unlink(missing_ok=True)
@@ -86,11 +95,13 @@ def _promote_dead_markers() -> dict[str, str]:
         folder = _markers_dir()
         if not folder.is_dir():
             return crashed
-        try:
-            (folder / _OLD_CRASHED_FILE).unlink(missing_ok=True)
-        except OSError:
-            pass
-        changed = False
+        for old in _OLD_CRASHED_FILES:
+            try:
+                (folder / old).unlink(missing_ok=True)
+            except OSError:
+                pass
+        suspects = _read_crashed(_SUSPECT_FILE)
+        changed = suspects_changed = False
         for marker in folder.glob("*.json"):
             if marker.name == _CRASHED_FILE:
                 continue
@@ -103,16 +114,24 @@ def _promote_dead_markers() -> dict[str, str]:
                 continue  # another live window is loading it now
             # A marker with no role is a leftover of a version where tool servers left them too.
             plugin = str(info.get("plugin") or "") if info.get("role") == _APP_ROLE else ""
-            if plugin:
-                crashed[plugin] = str(info.get("version") or "")
-                changed = True
-                _log.warning("Plugin %s %s was loading when Ducky closed; skipping it", plugin, crashed[plugin])
+            version = str(info.get("version") or "")
+            if plugin and suspects.get(plugin) == version:
+                crashed[plugin] = version
+                suspects.pop(plugin)
+                changed = suspects_changed = True
+                _log.warning("Plugin %s %s was loading when Ducky closed, twice: skipping it", plugin, version)
+            elif plugin:
+                suspects[plugin] = version
+                suspects_changed = True
+                _log.warning("Plugin %s %s was loading when Ducky closed; loading it once more", plugin, version)
             try:
                 marker.unlink()
             except OSError:
                 pass
         if changed:
             _write_crashed(crashed)
+        if suspects_changed:
+            _write_crashed(suspects, _SUSPECT_FILE)
         return crashed
 
 
@@ -229,11 +248,19 @@ def _load_marker_begin(pid: str, version: str) -> Path | None:
 
 
 def _load_marker_end(path: Path | None) -> None:
-    if path is not None:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    # The load finished: a first strike against this plugin was no crash of its own.
+    pid = path.name.rsplit(".", 2)[0]
+    if (path.parent / _SUSPECT_FILE).is_file():
+        with _crash_lock:
+            suspects = _read_crashed(_SUSPECT_FILE)
+            if suspects.pop(pid, None) is not None:
+                _write_crashed(suspects, _SUSPECT_FILE)
 
 
 # Names from the rest of the host, bound after every definition above so the host
