@@ -1988,7 +1988,8 @@ def _store_audience_fields(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "visibility": "private" if raw.get("visibility") == "private" else "public",
         "audience_id": str(extra.get("audience_id") or "") or None,
-        "audience_label": str(extra.get("audience_label") or ""),
+        # Publishing team name (the Store card's author line) even without a spaces provider.
+        "audience_label": str(extra.get("audience_label") or raw.get("owner_team_name") or ""),
         "mine": extra.get("mine") is True,
     }
 

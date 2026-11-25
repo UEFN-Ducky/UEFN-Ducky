@@ -18,6 +18,19 @@ def test_pkce_pair_s256() -> None:
     assert other != verifier
 
 
+def test_store_item_keeps_owner_team_name_without_spaces_provider() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from frontend import duckyos_account as acc
+
+    empty = SimpleNamespace(catalog_item=lambda raw: {})
+    with patch("backend.uefn_plugins.spaces.provider", return_value=empty):
+        fields = acc._store_audience_fields({"owner_team_name": "Lezzy"})
+    assert fields["audience_label"] == "Lezzy"
+    assert fields["mine"] is False
+
+
 def test_logout_disconnects_browser_access_and_removes_account() -> None:
     import sys
     from types import SimpleNamespace
