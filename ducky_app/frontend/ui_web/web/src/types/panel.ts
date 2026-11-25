@@ -4576,6 +4576,9 @@ export interface PanelApi {
   bridge_job_poll?(
     job_id: string,
   ): Promise<Record<string, unknown> & { ok?: boolean; pending?: boolean; job_id?: string; error?: string }>;
+  voice_whisper_installed?(): Promise<boolean>;
+  voice_whisper_install?(): Promise<{ ok: boolean; error?: string }>;
+  voice_whisper_transcribe?(audio: string): Promise<{ ok: boolean; text?: string; error?: string }>;
   voice_transcribe_audio?(
     b64_audio: string,
     mime?: string,

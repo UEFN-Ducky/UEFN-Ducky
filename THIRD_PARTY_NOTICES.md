@@ -33,6 +33,12 @@ not affiliated with or endorsed by Epic Games, Inc.
 
 ---
 
+## Optional offline dictation
+
+The first installation of desktop dictation downloads the multilingual Whisper Small Q8
+model and the Windows CPU build of whisper.cpp. Both projects use the MIT license.
+[Whisper](https://github.com/openai/whisper/blob/main/LICENSE) · [whisper.cpp](https://github.com/ggml-org/whisper.cpp/blob/v1.9.2/LICENSE)
+
 ## Bundled dependencies
 
 ### FFmpeg

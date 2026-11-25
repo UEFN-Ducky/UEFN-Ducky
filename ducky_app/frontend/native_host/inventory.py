@@ -170,6 +170,7 @@ _JS_API: dict[str, str] = {
         set_default_skill_selection set_muted steer_message unarchive_agent_profile
         update_agent_plugin upload_custom_ducky voice_create_realtime_token
         voice_open_windows_settings voice_summarize_reply voice_transcribe_audio
+        voice_whisper_install voice_whisper_installed voice_whisper_transcribe
         voice_win_stt_cancel voice_win_stt_poll voice_win_stt_prewarm voice_win_stt_start
         voice_win_stt_stop voice_win_tts_poll voice_win_tts_start voice_win_tts_voices_start
         wait_for_agent_idle

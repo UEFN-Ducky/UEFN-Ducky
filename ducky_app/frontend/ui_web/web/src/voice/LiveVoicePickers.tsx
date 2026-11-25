@@ -233,7 +233,7 @@ export function LiveVoicePickers({
         size="compact"
         placement="top"
         minWidth={200}
-        value={sttProvider}
+        value={sttProvider === "webspeech" ? "" : sttProvider}
         options={listenOptions}
         onChange={(next) => {
           const value = normalizeSttProvider(next);

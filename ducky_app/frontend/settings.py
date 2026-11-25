@@ -467,7 +467,7 @@ class PanelSettings:
     """How long live voice's quick replies are: short | normal | detailed."""
 
     voice_stt_provider: str = ""
-    """Live/dictation listen backend: empty = system default (Windows speech in the app, browser speech
+    """Empty selects offline Windows dictation and system speech for live voice (browser speech
     on a phone), openai = OpenAI Realtime when a key is saved."""
 
     mic_permission: str = "ask"

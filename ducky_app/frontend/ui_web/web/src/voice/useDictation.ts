@@ -86,7 +86,7 @@ export function useDictation(opts: {
         onStateChange: (s) => {
           if (sessionRef.current !== session) return;
           setStatus(s);
-          if (s === "error") setActive(false);
+          if (s === "idle" || s === "error") setActive(false);
         },
         onInterim: (text) => {
           if (sessionRef.current === session) optsRef.current.onInterim(text);
@@ -137,7 +137,7 @@ export function useDictation(opts: {
       await stop();
       return;
     }
-    if (status === "transcribing") return;
+    if (status === "transcribing" || status === "installing") return;
     await start();
   }, [abort, start, stop, status]);
 
@@ -162,6 +162,6 @@ export function useDictation(opts: {
     toggle,
     abort,
     isRecording: status === "listening",
-    isBusy: status === "connecting" || status === "transcribing",
+    isBusy: status === "connecting" || status === "installing" || status === "transcribing",
   };
 }

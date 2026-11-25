@@ -2,7 +2,7 @@ import { getApi } from "../hooks/usePanelApi";
 import { clampProcessTalk } from "./processNarration";
 
 export type SpokenStyle = "summary" | "speak_along";
-/** empty = system speech (Windows speech in the app, browser speech on a phone). */
+/** Empty selects offline Windows dictation and system speech for live voice or remote devices. */
 export type SttProvider = "" | "openai" | "webspeech";
 
 export function normalizeSttProvider(raw: unknown): SttProvider {

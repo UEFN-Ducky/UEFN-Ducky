@@ -455,13 +455,15 @@ export function VoiceControls({
     ? muted
       ? "Unmute mic — type-only right now"
       : "Mute mic — keep hearing replies"
-    : dictation.status === "connecting"
-      ? "Starting the mic… (click to cancel)"
-      : dictation.isRecording
-        ? "Stop — your words stay in the box, then press Send"
-        : dictation.status === "transcribing"
-          ? "Finishing the last words…"
-          : "Dictate — talk and your words appear in the box";
+    : dictation.status === "installing"
+      ? "Downloading offline dictation…"
+      : dictation.status === "connecting"
+        ? "Starting the mic… (click to cancel)"
+        : dictation.isRecording
+          ? "Stop — your words stay in the box, then press Send"
+          : dictation.status === "transcribing"
+            ? "Finishing the last words…"
+            : "Dictate — talk and your words appear in the box";
 
   const micClass = `voice-btn${
     live
@@ -475,6 +477,9 @@ export function VoiceControls({
 
   return (
     <div className="voice-controls">
+      {!live && dictation.status === "installing" && (
+        <div className="voice-notice voice-notice--info" role="status">Downloading Whisper Small Q8…</div>
+      )}
       {!live && dictation.notice ? (
         <VoiceNoticeToast notice={dictation.notice} onDismiss={dictation.dismissNotice} />
       ) : null}
@@ -494,10 +499,7 @@ export function VoiceControls({
         type="button"
         className={micClass}
         title={micTitle}
-        disabled={!!disabled || (!live && dictation.status === "transcribing")}
-        onPointerEnter={() => {
-          if (!live && !disabled) prewarmSpeech();
-        }}
+        disabled={!!disabled || (!live && (dictation.status === "installing" || dictation.status === "transcribing"))}
         onClick={() => {
           if (live) {
             setMuted((m) => !m);

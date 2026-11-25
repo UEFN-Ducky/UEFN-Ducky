@@ -9,7 +9,7 @@ import { SettingsToggleRow } from "../views/settings/SettingsToggleRow";
 import { SpeedDropdown } from "./SpeedDropdown";
 import { ttsEngine } from "./ttsEngine";
 import { useTtsVoiceOptions } from "./pluginVoices";
-import { windowsSpeechUsable } from "./transcriptionSession";
+import { localWhisperUsable, windowsSpeechUsable } from "./transcriptionSession";
 import {
   getVoiceSettings,
   loadVoiceSettings,
@@ -41,6 +41,7 @@ export function VoiceSettingsSection() {
   const [replyLength, setReplyLength] = useState<ReplyLength>("short");
   const voices = useTtsVoiceOptions();
   const systemListen = windowsSpeechUsable() ? "Windows speech" : "Browser speech";
+  const localDictation = localWhisperUsable();
 
   useEffect(() => {
     void loadVoiceSettings().then((s) => {
@@ -178,9 +179,12 @@ export function VoiceSettingsSection() {
               id="voice-stt-provider"
               aria-label="Listen backend"
               mode="radio"
-              value={sttProvider}
+              value={!localDictation && sttProvider === "webspeech" ? "" : sttProvider}
               options={[
-                { value: "", label: systemListen, hint: "Free, no extra key" },
+                ...(localDictation ? [
+                  { value: "", label: "Whisper Small Q8 (dictation)", hint: "Offline dictation. Live voice uses Windows speech." },
+                ] : []),
+                { value: localDictation ? "webspeech" : "", label: systemListen, hint: "Free, no extra key" },
                 { value: "openai", label: "OpenAI", hint: "Fastest live words — needs an OpenAI key" },
               ]}
               onChange={(next) => {

@@ -366,7 +366,7 @@ FIELD_META: dict[str, FieldMeta] = {
     ),
     "voice_stt_provider": FieldMeta(
         "Listen backend", "Audio", settable=True, enum=("", "openai", "webspeech"),
-        description="Empty = system speech (Windows speech in the app, browser speech on a phone). openai = OpenAI Realtime when a key is saved.",
+        description="Empty uses offline Whisper Small Q8 for Windows desktop dictation and system speech for live voice or phones. webspeech selects system speech. openai uses OpenAI with a saved key.",
     ),
     "mic_permission": FieldMeta(
         "Microphone permission", "Audio", settable=True, enum=("ask", "allow", "block"),
