@@ -51,9 +51,10 @@ def test_deb_and_rpm_install_the_downloaded_package_through_packagekit(monkeypat
         assert updater.install_package_update(kind, _asset(), run=fake, download=_serve()) == {
             "ok": True, "error": None, "stage": "installed"}
         [cmd] = fake.calls
-        assert cmd[:4] == ["pkcon", "-y", "--allow-untrusted", "install-local"]
-        assert cmd[4].endswith(f"uefn-ducky.{kind}") and fake.seen == PACKAGE
-        assert not Path(cmd[4]).exists()
+        # No -y: it makes the transaction non-interactive, so polkit never asks for the password.
+        assert cmd[:3] == ["pkcon", "--allow-untrusted", "install-local"] and "-y" not in cmd
+        assert cmd[3].endswith(f"uefn-ducky.{kind}") and fake.seen == PACKAGE
+        assert not Path(cmd[3]).exists()
 
 
 def test_apply_linux_update_sends_deb_and_rpm_to_the_package_install() -> None:
@@ -96,6 +97,10 @@ def test_a_missing_or_failing_package_manager_says_so(monkeypatch) -> None:
     failed = updater.install_package_update("rpm", _asset(), run=FakeManager(code=4, output="x\nAuth failed"),
                                             download=_serve())
     assert not failed["ok"] and failed["error"].endswith("Auth failed")
+    no_auth = updater.install_package_update(
+        "deb", _asset(), run=FakeManager(code=1, output="Fatal error: Failed to obtain authentication."),
+        download=_serve())
+    assert not no_auth["ok"] and "password" in no_auth["error"] and "install.sh" in no_auth["error"]
     no_id = updater.hand_off_to_package_manager("flatpak", run=FakeManager(), env={})
     assert not no_id["ok"]
 

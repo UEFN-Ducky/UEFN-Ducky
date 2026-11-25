@@ -1324,7 +1324,9 @@ def start_watchdog(
 
 def _run_package_command(cmd: list[str]) -> tuple[int, str]:
     try:
-        done = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+        # pkcon asks "Proceed with changes? [N/y]" on stdin; answer it here instead of
+        # passing -y, which also makes the transaction non-interactive.
+        done = subprocess.run(cmd, input="y\n" * 4, capture_output=True, text=True, errors="replace",
                               timeout=_PACKAGE_TIMEOUT_S)
     except FileNotFoundError:
         return 127, ""
@@ -1348,9 +1350,11 @@ def package_update_command(kind: str, *, env: dict[str, str] | None = None) -> l
 def package_install_command(path: Path) -> list[str]:
     # pkcon is PackageKit's own client: it asks packagekitd over D-Bus, and polkit asks
     # the person for their password. Never write over the package's files ourselves.
+    # Never -y (--noninteractive): it sets the transaction non-interactive, so polkit
+    # shows no password prompt and pkcon fails with "Failed to obtain authentication".
     # --allow-untrusted: a local file has no repo signature; its SHA-256 and minisign
     # signature were checked before this runs.
-    return ["pkcon", "-y", "--allow-untrusted", "install-local", str(path)]
+    return ["pkcon", "--allow-untrusted", "install-local", str(path)]
 
 
 def _run_manager(cmd: list[str], manager: str, run: Any) -> dict[str, Any]:
@@ -1361,6 +1365,10 @@ def _run_manager(cmd: list[str], manager: str, run: Any) -> dict[str, Any]:
         fix = (f"run {INSTALL_SH} in a terminal" if manager == "PackageKit"
                else "update UEFN Ducky from your software updater")
         return _result(ok=False, error=f"{manager} isn't available — {fix}.", stage="installing")
+    if code != 0 and "authentication" in (output or "").lower():
+        return _result(ok=False, error="The update needs your password and it wasn't given. "
+                       f"Press Update again and enter it, or run {INSTALL_SH} in a terminal.",
+                       stage="installing")
     if code != 0:
         tail = (output or "").strip().splitlines()[-1:] or [f"exit code {code}"]
         return _result(ok=False, error=f"The update didn't install: {tail[0]}", stage="installing")
