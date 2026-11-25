@@ -84,6 +84,20 @@ def test_build_gives_three_platform_zips(plugin):
     assert calls.index(rp.QEMU_SETUP) == 1  # arm64 emulation is set up right before its build
 
 
+def test_a_linux_build_that_prunes_deploy_keeps_every_zip(plugin):
+    """forge's Linux build deleted every zip in deploy/, the Windows one included, before the upload."""
+    run, _ = fake_docker(plugin)
+
+    def pruning_run(cmd, check):
+        if cmd != rp.QEMU_SETUP:
+            for old in (plugin / "deploy").glob("*.zip"):
+                old.unlink()
+        run(cmd, check)
+
+    zips = rp.build(plugin, run=pruning_run)
+    assert len(zips) == 3 and all(z.is_file() for z in zips)
+
+
 def test_the_windows_build_is_told_where_the_kit_is(plugin, monkeypatch):
     """forge's build_zip looked only next to its own checkout and found no UEFN-Ducky."""
     import os

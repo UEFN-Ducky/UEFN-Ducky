@@ -22,8 +22,10 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -83,16 +85,19 @@ def linux_build_cmd(plugin: Path, target: str) -> list[str]:
 
 
 def build(plugin: Path, run=None) -> list[Path]:
-    """Windows, linux-x86_64, linux-arm64 zips in ``plugin/deploy``, in that order. Windows
-    builds first: its build prunes every older zip, a Linux build only its own target's."""
+    """Windows, linux-x86_64, linux-arm64 zips, in that order, each moved out of
+    ``plugin/deploy`` into a temp folder as soon as it is built."""
     run = run or subprocess.run
     bz = _script(plugin, "build_zip")
     # This kit, as the containers get it: a plugin looking only next to its own checkout
     # (forge's build_zip) found no UEFN-Ducky from a sandbox worktree.
     os.environ.setdefault("DUCKY_REPO", str(DUCKY_REPO))
+    # Each finished zip waits outside deploy/: a plugin's own build may prune every zip there
+    # (forge's Linux build deleted the Windows one before the upload).
+    hold = Path(tempfile.mkdtemp(prefix=f"ducky-release-{plugin.name}-"))
     win = Path(bz.build_compiled_zip(release=True))
-    tagged = win.with_name(win.name.replace("-compiled.ducky-plugin.zip", "-windows-x64-compiled.ducky-plugin.zip"))
-    win.replace(tagged)
+    tagged = hold / win.name.replace("-compiled.ducky-plugin.zip", "-windows-x64-compiled.ducky-plugin.zip")
+    shutil.move(str(win), str(tagged))
     zips = [tagged]
     for target, platform in LINUX_TARGETS.items():
         if platform == "linux/arm64":
@@ -102,7 +107,7 @@ def build(plugin: Path, run=None) -> list[Path]:
         found = sorted((plugin / "deploy").glob(f"*-{target}-compiled.ducky-plugin.zip"), key=lambda p: p.stat().st_mtime)
         if not found:
             raise SystemExit(f"{target}: the build wrote no *-{target}-compiled.ducky-plugin.zip")
-        zips.append(found[-1])
+        zips.append(Path(shutil.move(str(found[-1]), str(hold / found[-1].name))))
     return zips
 
 
