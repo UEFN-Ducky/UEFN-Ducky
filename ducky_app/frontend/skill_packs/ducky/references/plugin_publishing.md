@@ -26,6 +26,10 @@ metadata:
 
 Paid licenses are not available yet: don't promise a price or a sale.
 
+**Platforms:** a compiled build runs only on the OS and CPU it was built on, and
+`ducky_plugin_publish` builds for this PC's. Windows + Linux x86_64 + Linux arm64 in one
+release, and code that runs on both: `skill_read_subskill("ducky", "plugin_platforms")`.
+
 ## Before you publish
 
 1. The draft passes `ducky_plugin_validate`, `ducky_plugin_test` and

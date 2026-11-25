@@ -4,7 +4,7 @@ description: "UEFN-Ducky control panel — setup, IDE hookup, Skills studio, cha
 license: Ducky Source-Available License v1.0
 metadata:
   label: UEFN Ducky
-  version: 43
+  version: 44
   managed_by: uefn-ducky
   author: UEFN-Ducky
   copyright: Copyright 2026 UEFN-Ducky
@@ -13,7 +13,7 @@ metadata:
 
 # UEFN-Ducky — the app
 
-UEFN-Ducky is a Windows control panel that bundles an MCP server. The panel
+UEFN-Ducky is a control panel for Windows and Linux (x86_64 and arm64) that bundles an MCP server. The panel
 manages IDE hookup, chats, skills, and Verse files; the MCP server bridges AI
 agents to a listener running inside the UEFN editor (port 4200).
 
@@ -222,6 +222,7 @@ rules and a complete plugin, and says which of these to load next:
 | `plugin_look` | Any panel, dock, editor or theme: the UI kit, the app's layout (floating side panels, pill tabs, icon choice rows), every Appearance variable, panel states |
 | `plugin_data` | The plugin stores anything; Local or one shared space; `sensitive` |
 | `plugin_publishing` | Sharing through the Store, licenses, what compiles |
+| `plugin_platforms` | Code that runs on Windows and Linux, a build for each platform, Linux build fixes |
 | `plugin_testing` | After every change: validate, test, errors |
 | `plugin_known_problems` | Before you say it's done |
 | `plugin_examples_ui` | Dashboard tab, dock, file editor, theme |
@@ -235,7 +236,8 @@ storage" → `ducky_storage_put`; read with `ducky_storage_list` / `ducky_storag
 use `api.storage` (`plugin_data` § General storage).
 
 **HARD:** before any plugin file, load every plugin reference above that applies (at
-least `plugin_data`, `plugin_look`, `plugin_testing`, `plugin_known_problems`) and
+least `plugin_data`, `plugin_look`, `plugin_testing`, `plugin_known_problems`,
+`plugin_platforms`) and
 **always ask the person Team or Local only** (`ducky_ask_user`, never your own guess).
 A team plugin is multiplayer and source-control ready the moment you finish it:
 `ai_plugins` rule 15 is the checklist.

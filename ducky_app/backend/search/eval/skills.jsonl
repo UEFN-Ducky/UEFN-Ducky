@@ -57,6 +57,7 @@
 {"q": "send a Forge mesh to the UEFN island", "expect": ["forge/send_to_game"]}
 {"q": "build a desktop plugin with a dock panel", "expect": ["ducky/ai_plugins", "ducky/plugin_examples_ui"]}
 {"q": "publish my plugin to my team", "expect": ["ducky/plugin_publishing"]}
+{"q": "my plugin says Windows only, make it work on Linux", "expect": ["ducky/plugin_platforms"]}
 {"q": "show the user where a setting is in the app", "expect": ["ducky/guided_ui"]}
 {"q": "enemy archer that shoots arrows at players", "expect": ["npc-ai/behaviors_ranged", "verse/sys_npc_ai", "npc-ai/projectiles"]}
 {"q": "make a trailer for my island from a recording", "expect": ["island-media-kit/core"]}

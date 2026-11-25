@@ -23,6 +23,7 @@ free ones too. See `plugin_publishing`.
 | UI kit, every Appearance variable, panel states, hidden tabs, themes | `plugin_look` |
 | `api.data`, Local or one shared space, `sensitive`, encryption, lost access | `plugin_data` |
 | Share through the Store, licenses, what compiles | `plugin_publishing` |
+| Runs on Windows and Linux, a build for each platform, Linux build fixes | `plugin_platforms` |
 | Validate, test, read errors, fix loop | `plugin_testing` |
 | Known problems (read before you say it's done) | `plugin_known_problems` |
 | Examples: tab app or dashboard, dock panel, file editor, theme or skin | `plugin_examples_ui` |
@@ -34,8 +35,8 @@ free ones too. See `plugin_publishing`.
 ### HARD rules (do all of them or the plugin is not done)
 
 0. **Read every reference before the first file.** A new plugin, or a change that adds a
-   panel, data, a tool or a node: load `plugin_data`, `plugin_look`, `plugin_testing` and
-   `plugin_known_problems` (plus the `plugin_examples_*` that matches) in the same turn,
+   panel, data, a tool or a node: load `plugin_data`, `plugin_look`, `plugin_testing`,
+   `plugin_known_problems` and `plugin_platforms` (plus the `plugin_examples_*` that matches) in the same turn,
    before `ducky_plugin_scaffold` or any write. Then `ducky_plugin_reference` for the live
    `api.*` list. Never build from memory: every rule below points at one of them, and a
    plugin that misses one is not done.
