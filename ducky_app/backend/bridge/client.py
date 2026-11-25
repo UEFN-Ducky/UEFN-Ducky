@@ -73,6 +73,7 @@ _CACHE_MAX_BYTES = 16 * 1024 * 1024
 _response_cache: dict[tuple[str, str], tuple[float, dict, int]] = {}
 _cache_lock = threading.Lock()
 _cache_timer: threading.Timer | None = None
+_cache_timer_due = 0.0
 
 
 def _prune_responses() -> None:
@@ -95,12 +96,19 @@ def _expire_responses() -> None:
 
 
 def _schedule_response_expiry() -> None:
-    global _cache_timer
-    if _response_cache and _cache_timer is None:
-        delay = max(.01, min(v[0] for v in _response_cache.values()) - time.monotonic())
-        _cache_timer = threading.Timer(delay, _expire_responses)
-        _cache_timer.daemon = True
-        _cache_timer.start()
+    global _cache_timer, _cache_timer_due
+    if not _response_cache:
+        return
+    due = min(v[0] for v in _response_cache.values())
+    if _cache_timer is not None:
+        if _cache_timer_due <= due:
+            return
+        # A shorter-lived entry than the pending timer: expire it on time, not with the old one.
+        _cache_timer.cancel()
+    _cache_timer_due = due
+    _cache_timer = threading.Timer(max(.01, due - time.monotonic()), _expire_responses)
+    _cache_timer.daemon = True
+    _cache_timer.start()
 
 
 def _remember_response(key, result, ttl) -> None:

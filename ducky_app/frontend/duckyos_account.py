@@ -1977,8 +1977,8 @@ def _local_plugin_icon_fields(plug: dict[str, Any]) -> dict[str, Any]:
 
 
 def _store_audience_fields(raw: dict[str, Any]) -> dict[str, Any]:
-    """Who a Store item is for: public, or private to an audience the spaces provider
-    reads from the Store row (``audience_id``, ``audience_label``, ``mine``)."""
+    """Who a Store item is for: public, or private to an audience the spaces provider reads
+    from the Store row; the label falls back to the publishing team (the card's author line)."""
     try:
         from backend.uefn_plugins.spaces import provider
 
@@ -1988,7 +1988,6 @@ def _store_audience_fields(raw: dict[str, Any]) -> dict[str, Any]:
     return {
         "visibility": "private" if raw.get("visibility") == "private" else "public",
         "audience_id": str(extra.get("audience_id") or "") or None,
-        # Publishing team name (the Store card's author line) even without a spaces provider.
         "audience_label": str(extra.get("audience_label") or raw.get("owner_team_name") or ""),
         "mine": extra.get("mine") is True,
     }

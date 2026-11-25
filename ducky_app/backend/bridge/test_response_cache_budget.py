@@ -18,6 +18,19 @@ def test_response_cache_limits_and_idle_expiry(monkeypatch):
     assert not client._response_cache
 
 
+def test_a_short_entry_expires_on_time_behind_a_long_pending_timer(monkeypatch):
+    monkeypatch.setattr(client, '_response_cache', {})
+    monkeypatch.setattr(client, '_cache_timer', None)
+    client._remember_response(('get_project_info', ''), {'a': 1}, 30)
+    client._remember_response(('list_assets', 'short'), {'a': 2}, .05)
+    deadline = time.monotonic() + 2
+    while ('list_assets', 'short') in client._response_cache and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert ('list_assets', 'short') not in client._response_cache
+    assert ('get_project_info', '') in client._response_cache
+    client._cache_timer.cancel()
+
+
 def test_a_write_keeps_project_info_and_the_trace_splits_queue_from_editor_time(monkeypatch):
     """Nov 16 2026: get_project_info took 8.1 s (every write dropped its cached answer, so it
     queued on the game thread again), and build_widget_tree read 11.7 s with 2.0 s of editor work."""
