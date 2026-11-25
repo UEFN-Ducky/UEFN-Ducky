@@ -1,4 +1,4 @@
-"""deb / rpm installs download, check and install the new package through PackageKit;
+"""deb / rpm installs download, check and install the new package through pkexec;
 Flatpak installs hand the update to flatpak."""
 
 from __future__ import annotations
@@ -36,25 +36,36 @@ def _serve(body: bytes = PACKAGE):
 
 
 class SeesFile(FakeManager):
-    """Records what the package file held while pkcon ran (it is deleted afterwards)."""
+    """Records what the package file held while pkexec ran (it is deleted afterwards)."""
 
     def __call__(self, cmd: list[str]) -> tuple[int, str]:
         self.seen = Path(cmd[-1]).read_bytes()
         return super().__call__(cmd)
 
 
-def test_deb_and_rpm_install_the_downloaded_package_through_packagekit(monkeypatch) -> None:
-    # install.sh copies have no apt/dnf repo: `pkcon update` said "No packages were found".
+def test_deb_and_rpm_install_the_downloaded_package_through_pkexec(monkeypatch) -> None:
+    # install.sh copies have no apt/dnf repo, so the downloaded file itself is installed.
+    # Never pkcon: its confirmation reads the terminal, so the update hung or declined.
     monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
     for kind in ("deb", "rpm"):
         fake = SeesFile()
         assert updater.install_package_update(kind, _asset(), run=fake, download=_serve()) == {
             "ok": True, "error": None, "stage": "installed"}
         [cmd] = fake.calls
-        # No -y: it makes the transaction non-interactive, so polkit never asks for the password.
-        assert cmd[:3] == ["pkcon", "--allow-untrusted", "install-local"] and "-y" not in cmd
-        assert cmd[3].endswith(f"uefn-ducky.{kind}") and fake.seen == PACKAGE
-        assert not Path(cmd[3]).exists()
+        assert cmd[0] == "pkexec" and "pkcon" not in cmd
+        assert cmd[-1].endswith(f"uefn-ducky.{kind}") and fake.seen == PACKAGE
+        assert not Path(cmd[-1]).exists()
+
+
+def test_each_distro_installs_with_its_own_tool_without_asking_on_a_terminal() -> None:
+    pkg = Path("/tmp/u/uefn-ducky.deb")
+    assert updater.package_install_command(pkg, "deb") == [
+        "pkexec", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", str(pkg)]
+    rpm = Path("/tmp/u/uefn-ducky.rpm")
+    assert updater.package_install_command(rpm, "rpm", which=lambda n: n == "dnf")[:4] == [
+        "pkexec", "dnf", "install", "-y"]
+    assert updater.package_install_command(rpm, "rpm", which=lambda n: n == "zypper")[:3] == [
+        "pkexec", "zypper", "--non-interactive"]
 
 
 def test_apply_linux_update_sends_deb_and_rpm_to_the_package_install() -> None:
@@ -64,7 +75,7 @@ def test_apply_linux_update_sends_deb_and_rpm_to_the_package_install() -> None:
         assert not out["ok"] and "install.sh" in out["error"] and fake.calls == []
 
 
-def test_a_package_that_fails_its_checks_never_reaches_packagekit(monkeypatch) -> None:
+def test_a_package_that_fails_its_checks_never_reaches_the_installer(monkeypatch) -> None:
     monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
     fake = FakeManager()
     bad_sum = updater.install_package_update("deb", _asset("0" * 64), run=fake, download=_serve())
@@ -89,18 +100,14 @@ def test_flatpak_updates_its_own_app_on_the_host(monkeypatch) -> None:
 def test_a_missing_or_failing_package_manager_says_so(monkeypatch) -> None:
     monkeypatch.setattr(updater, "MINISIGN_PUBLIC_KEY", "")
     missing = updater.install_package_update("deb", _asset(), run=FakeManager(code=127), download=_serve())
-    assert not missing["ok"] and "PackageKit" in missing["error"] and "install.sh" in missing["error"]
-    no_daemon = updater.install_package_update(
-        "deb", _asset(), run=FakeManager(output="Failed to contact PackageKit: Could not connect"),
-        download=_serve())
-    assert not no_daemon["ok"] and "install.sh" in no_daemon["error"]
+    assert not missing["ok"] and "pkexec" in missing["error"] and "install.sh" in missing["error"]
     failed = updater.install_package_update("rpm", _asset(), run=FakeManager(code=4, output="x\nAuth failed"),
                                             download=_serve())
     assert not failed["ok"] and failed["error"].endswith("Auth failed")
-    no_auth = updater.install_package_update(
-        "deb", _asset(), run=FakeManager(code=1, output="Fatal error: Failed to obtain authentication."),
-        download=_serve())
-    assert not no_auth["ok"] and "password" in no_auth["error"] and "install.sh" in no_auth["error"]
+    for code, output in ((126, ""), (127, "Error executing command as another user: Not authorized")):
+        no_auth = updater.install_package_update("deb", _asset(), run=FakeManager(code=code, output=output),
+                                                 download=_serve())
+        assert not no_auth["ok"] and "password" in no_auth["error"] and "install.sh" in no_auth["error"]
     no_id = updater.hand_off_to_package_manager("flatpak", run=FakeManager(), env={})
     assert not no_id["ok"]
 

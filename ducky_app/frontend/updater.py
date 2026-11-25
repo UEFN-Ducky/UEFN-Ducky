@@ -1324,10 +1324,10 @@ def start_watchdog(
 
 def _run_package_command(cmd: list[str]) -> tuple[int, str]:
     try:
-        # pkcon asks "Proceed with changes? [N/y]" on stdin; answer it here instead of
-        # passing -y, which also makes the transaction non-interactive.
-        done = subprocess.run(cmd, input="y\n" * 4, capture_output=True, text=True, errors="replace",
-                              timeout=_PACKAGE_TIMEOUT_S)
+        # No stdin: nothing may wait on a terminal the person can't see. The person's own
+        # library path, not the frozen bundle's (apt / dnf load the system's libraries).
+        done = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              errors="replace", env=_clean_child_env(), timeout=_PACKAGE_TIMEOUT_S)
     except FileNotFoundError:
         return 127, ""
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -1335,7 +1335,7 @@ def _run_package_command(cmd: list[str]) -> tuple[int, str]:
     return done.returncode, (done.stdout or "") + (done.stderr or "")
 
 
-# What a deb / rpm copy without PackageKit runs instead (the site's one-line installer).
+# What a deb / rpm copy without pkexec runs instead (the site's one-line installer).
 INSTALL_SH = "curl -fsSL https://uefnducky.org/linux/install.sh | sh"
 
 
@@ -1347,25 +1347,30 @@ def package_update_command(kind: str, *, env: dict[str, str] | None = None) -> l
     return ["flatpak-spawn", "--host", "flatpak", "update", "-y", "--noninteractive", app_id]
 
 
-def package_install_command(path: Path) -> list[str]:
-    # pkcon is PackageKit's own client: it asks packagekitd over D-Bus, and polkit asks
-    # the person for their password. Never write over the package's files ourselves.
-    # Never -y (--noninteractive): it sets the transaction non-interactive, so polkit
-    # shows no password prompt and pkcon fails with "Failed to obtain authentication".
-    # --allow-untrusted: a local file has no repo signature; its SHA-256 and minisign
-    # signature were checked before this runs.
-    return ["pkcon", "--allow-untrusted", "install-local", str(path)]
+def package_install_command(path: Path, kind: str, *, which: Any = shutil.which) -> list[str]:
+    """pkexec + the distro's own installer. polkit shows the desktop's password window.
+
+    Never pkcon: it asks "Proceed with changes?" on the controlling terminal (not stdin),
+    so started from a terminal it waited there forever, and without one it declined; and
+    its -y made the transaction non-interactive, so polkit never asked ("Failed to obtain
+    authentication"). Never write over the package's files ourselves. The file's SHA-256
+    and minisign signature were checked before this runs (hence no repo signature check)."""
+    if kind == "deb":
+        return ["pkexec", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", str(path)]
+    if which("dnf") or not which("zypper"):
+        return ["pkexec", "dnf", "install", "-y", "--nogpgcheck", str(path)]
+    return ["pkexec", "zypper", "--non-interactive", "install", "--allow-unsigned-rpm", str(path)]
 
 
 def _run_manager(cmd: list[str], manager: str, run: Any) -> dict[str, Any]:
     _set_progress(stage="installing", error=None)
     code, output = (run or _run_package_command)(cmd)
-    # pkcon exits 0 when packagekitd isn't there at all.
-    if code == 127 or "Failed to contact PackageKit" in (output or ""):
-        fix = (f"run {INSTALL_SH} in a terminal" if manager == "PackageKit"
+    if code == 127 and not (output or "").strip():  # the program itself isn't installed
+        fix = (f"run {INSTALL_SH} in a terminal" if manager == "pkexec"
                else "update UEFN Ducky from your software updater")
         return _result(ok=False, error=f"{manager} isn't available — {fix}.", stage="installing")
-    if code != 0 and "authentication" in (output or "").lower():
+    # pkexec: 126 = the password window was closed, 127 = not authorized.
+    if manager == "pkexec" and code in (126, 127):
         return _result(ok=False, error="The update needs your password and it wasn't given. "
                        f"Press Update again and enter it, or run {INSTALL_SH} in a terminal.",
                        stage="installing")
@@ -1423,6 +1428,6 @@ def install_package_update(
         if error:
             return _result(ok=False, error=error, stage="verify")
         os.chmod(pkg, 0o644)
-        return _run_manager(package_install_command(pkg), "PackageKit", run)
+        return _run_manager(package_install_command(pkg, kind), "pkexec", run)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
