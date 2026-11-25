@@ -1,5 +1,6 @@
 /**
- * TranscriptionSession — Windows desktop dictation defaults to local multilingual Whisper. Other engines:
+ * TranscriptionSession — one interface, three engines (plus offline Whisper for Windows
+ * dictation when Listen is set to "whisper", localDictation.ts):
  *   windows:   Windows dictation through the desktop backend (no key, live words)
  *   webspeech: browser SpeechRecognition — phones / real browsers only
  *   openai:    OpenAI Realtime (live words) when an OpenAI key is saved
@@ -938,7 +939,7 @@ function wrapSession(kind: "batch" | "streaming"): TranscriptionSession {
 
 /** Dictation — words land in the chat box; never sends. */
 export function createBatchTranscriptionSession(): TranscriptionSession {
-  if (!getVoiceSettings().sttProvider && localWhisperUsable()) {
+  if (getVoiceSettings().sttProvider === "whisper" && localWhisperUsable()) {
     return createLocalDictationSession();
   }
   return wrapSession("batch");

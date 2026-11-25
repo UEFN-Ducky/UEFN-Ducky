@@ -500,6 +500,9 @@ export function VoiceControls({
         className={micClass}
         title={micTitle}
         disabled={!!disabled || (!live && (dictation.status === "installing" || dictation.status === "transcribing"))}
+        onPointerEnter={() => {
+          if (!live && !disabled) prewarmSpeech();
+        }}
         onClick={() => {
           if (live) {
             setMuted((m) => !m);

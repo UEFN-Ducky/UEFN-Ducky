@@ -2,12 +2,12 @@ import { getApi } from "../hooks/usePanelApi";
 import { clampProcessTalk } from "./processNarration";
 
 export type SpokenStyle = "summary" | "speak_along";
-/** Empty selects offline Windows dictation and system speech for live voice or remote devices. */
-export type SttProvider = "" | "openai" | "webspeech";
+/** empty = system speech (Windows speech in the app, browser speech on a phone); whisper = offline Windows dictation. */
+export type SttProvider = "" | "openai" | "webspeech" | "whisper";
 
 export function normalizeSttProvider(raw: unknown): SttProvider {
   const s = String(raw || "").trim().toLowerCase();
-  if (s === "openai" || s === "webspeech") return s;
+  if (s === "openai" || s === "webspeech" || s === "whisper") return s;
   return "";
 }
 

@@ -563,7 +563,7 @@ class PanelApiSettingsMixin:
                 s.voice_process_talk = 0.7
         if "voice_stt_provider" in patch:
             stt = str(patch.get("voice_stt_provider") or "").strip().lower()
-            s.voice_stt_provider = stt if stt in ("openai", "webspeech") else ""
+            s.voice_stt_provider = stt if stt in ("openai", "webspeech", "whisper") else ""
         if "mic_permission" in patch:
             perm = str(patch.get("mic_permission") or "ask").strip()
             s.mic_permission = perm if perm in ("ask", "allow", "block") else "ask"

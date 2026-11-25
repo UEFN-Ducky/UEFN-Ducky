@@ -78,11 +78,7 @@ def install() -> dict:
                             shutil.copyfileobj(src, dst)
                 # Publish complete files only. The model is the final readiness marker.
                 for path in [*(stage.glob("*.dll")), stage / _CLI, stage / _MODEL]:
-                    target = root / path.name
-                    if not target.exists() or target.stat().st_size != path.stat().st_size:
-                        path.replace(target)
-            # Remove the previous Ducky-managed model only after the upgrade succeeds.
-            (root / "ggml-tiny-q5_1.bin").unlink(missing_ok=True)
+                    path.replace(root / path.name)
             return {"ok": True}
         except (OSError, ValueError, EOFError, KeyError, zipfile.BadZipFile) as exc:
             return {"ok": False, "error": f"Whisper installation failed: {exc}"}

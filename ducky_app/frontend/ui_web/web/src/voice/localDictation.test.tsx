@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
 import { createBatchTranscriptionSession, localWhisperUsable } from "./transcriptionSession";
 import { useDictation } from "./useDictation";
+import { _resetVoiceSettingsCache, saveVoiceSettings } from "./voiceSettings";
 
 const mock = vi.hoisted(() => ({
   installed: false,
@@ -46,6 +47,7 @@ async function click(label: RegExp) {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+  void saveVoiceSettings({ sttProvider: "whisper" });
   mock.installed = false;
   mock.frame = null;
   mock.job.mockImplementation(async (method: string) => {
@@ -53,7 +55,15 @@ beforeEach(() => {
     return { ok: true, text: "Bonjour" };
   });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); _resetVoiceSettingsCache(); });
+
+it("leaves the default listen setting on system speech: no download offer", async () => {
+  void saveVoiceSettings({ sttProvider: "" });
+  renderDictate();
+  await click(/^Dictate$/);
+  expect(screen.queryByText("Install offline dictation?")).toBeNull();
+  expect(mock.job).not.toHaveBeenCalledWith("voice_whisper_install", expect.anything(), expect.anything());
+});
 
 it("keeps Linux desktop dictation on its system backend", () => {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");

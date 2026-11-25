@@ -179,12 +179,12 @@ export function VoiceSettingsSection() {
               id="voice-stt-provider"
               aria-label="Listen backend"
               mode="radio"
-              value={!localDictation && sttProvider === "webspeech" ? "" : sttProvider}
+              value={sttProvider === "webspeech" || (sttProvider === "whisper" && !localDictation) ? "" : sttProvider}
               options={[
+                { value: "", label: systemListen, hint: "Free, no extra key" },
                 ...(localDictation ? [
-                  { value: "", label: "Whisper Small Q8 (dictation)", hint: "Offline dictation. Live voice uses Windows speech." },
+                  { value: "whisper", label: "Offline Whisper (dictation)", hint: "99 languages, no internet — a 273 MB download on first use. Live voice keeps Windows speech." },
                 ] : []),
-                { value: localDictation ? "webspeech" : "", label: systemListen, hint: "Free, no extra key" },
                 { value: "openai", label: "OpenAI", hint: "Fastest live words — needs an OpenAI key" },
               ]}
               onChange={(next) => {

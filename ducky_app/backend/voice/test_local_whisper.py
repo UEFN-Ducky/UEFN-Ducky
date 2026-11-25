@@ -21,15 +21,10 @@ def test_interrupted_install_can_retry_without_partial_model(tmp_path, monkeypat
     monkeypatch.setattr(whisper, "_MODEL_BYTES", len(model))
     monkeypatch.setattr(whisper, "_MODEL_SHA", hashlib.sha256(model).hexdigest())
     monkeypatch.setattr(whisper.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(responses.pop(0)))
-    previous = tmp_path / "installed" / "ggml-tiny-q5_1.bin"
-    previous.parent.mkdir()
-    previous.write_bytes(b"previous model")
     assert not whisper.installed()
     assert not whisper.install()["ok"]
-    assert previous.exists()
     assert not whisper.installed()
     assert whisper.install()["ok"]
     assert whisper.installed()
-    assert not previous.exists()
     assert whisper.install()["ok"]  # No network on repeat.
     assert not responses
