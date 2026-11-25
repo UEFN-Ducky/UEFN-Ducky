@@ -40,9 +40,9 @@ on:
         default: false
         type: boolean
       channel:
-        description: "beta = beta clients only; stable = everyone, plus the apt/dnf repo and AUR/Flathub"
+        description: "stable = everyone, plus the apt/dnf repo; beta = a record no client reads (no Beta updates switch)"
         required: false
-        default: beta
+        default: stable
         type: choice
         options: [beta, stable]
       mode:
@@ -417,7 +417,7 @@ jobs:
         shell: bash
         env:
           NOTES: ${{ inputs.notes }}
-          CHANNEL: ${{ inputs.channel || 'beta' }}
+          CHANNEL: ${{ inputs.channel || 'stable' }}
         run: |
           extra=(--channel "${CHANNEL}")
           if [ -n "${NOTES}" ]; then extra+=(--notes "${NOTES}"); fi

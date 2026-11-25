@@ -1476,9 +1476,9 @@ def main() -> None:
     parser.add_argument(
         "--channel",
         choices=RELEASE_CHANNELS,
-        default="beta",
-        help="Store release record to write: beta (default, beta clients only) or stable (everyone; "
-        "also swaps the apt/dnf repo)",
+        default="stable",
+        help="Store release record to write: stable (default; every client reads it and the apt/dnf "
+        "repo swaps) or beta (a record no client reads since the Beta updates switch is gone)",
     )
     args = parser.parse_args()
 
