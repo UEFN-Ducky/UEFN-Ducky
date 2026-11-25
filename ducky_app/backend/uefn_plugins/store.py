@@ -1361,7 +1361,9 @@ def _import_plugin_from_bytes(
 
         for pack in replacing[1]:
             shutil.rmtree(appdata_skill_packs_dir() / pack, ignore_errors=True)
-        invalidate_plugin_skill_caches()
+    # The skill check above memoized the tree without this folder; until the async
+    # refresh ran, its skills read as unowned for the fingerprint TTL.
+    invalidate_plugin_skill_caches()
 
     was_installed = existing is not None
     try:  # an uninstall refused this plugin's search records; installed again, it may write them
