@@ -1264,8 +1264,8 @@ def _create_control(pane: _Pane) -> None:
 
 
 def open_pane(pane_id: str, url: str = "", wid: str = "") -> dict[str, Any]:
-    if sys.platform != "win32" and not sys.platform.startswith("linux"):
-        return {"ok": False, "error": "browser panes are Windows and Linux only"}
+    if sys.platform not in ("win32", "darwin") and not sys.platform.startswith("linux"):
+        return {"ok": False, "error": "browser panes are Windows, macOS and Linux only"}
     pid = (pane_id or "").strip()
     if not pid:
         return {"ok": False, "error": "pane_id required"}
@@ -1622,3 +1622,5 @@ def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
 
 if sys.platform.startswith("linux"):  # gtk_panes.install() rebinds the WebView2-only helpers above
     from frontend.native_host import gtk_panes  # noqa: F401
+elif sys.platform == "darwin":  # cocoa_panes.install() does the same with WKWebViews
+    from frontend.native_host import cocoa_panes  # noqa: F401

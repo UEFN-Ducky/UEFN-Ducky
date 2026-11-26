@@ -283,7 +283,7 @@ def _user_sid() -> str:
 
 
 def hello_available() -> bool:
-    if _is_linux():
+    if _is_linux() or sys.platform == "darwin":
         return True
     try:
         _Hello()._provider()
@@ -295,6 +295,10 @@ def hello_available() -> bool:
 def unlock(hwnd: int = 0, hello: _Hello | None = None) -> str:
     """Put the cookie key back for this run (Windows Hello asks); '' or why the saved logins
     stay locked. The first time it only creates the Hello key: there is nothing locked yet."""
+    if sys.platform == "darwin":
+        # ponytail: WebKit keeps the saved store's cookies itself (no Chromium key to seal);
+        # add a Touch ID ask (LocalAuthentication) here if macOS wants Hello's prompt.
+        return ""
     if browser_running(profile_dir("saved")):
         return ""  # this Ducky (or one before it) already unlocked it
     profile = profile_dir("saved")
