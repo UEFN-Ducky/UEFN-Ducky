@@ -3,7 +3,7 @@
 The viewer offers, ``remote_direct.rtc_connect`` hands the offer to the "page" (an
 aiortc answerer standing in for the WebView), the page answers through
 ``resolve_answer``, and a message crosses the ``rpc`` DataChannel both ways. Runs the
-same on Windows and Linux (aiortc ships manylinux and win_amd64 wheels).
+same on Windows, Linux and macOS (aiortc ships manylinux, macosx and win_amd64 wheels).
 """
 
 from __future__ import annotations
@@ -88,7 +88,9 @@ def test_viewer_and_page_connect_over_loopback_signaling(monkeypatch) -> None:
     assert asyncio.run(run()) == '{"id":1,"method":"pong"}'
 
 
-def test_remote_window_keeps_native_frame_off_windows(monkeypatch) -> None:
+@pytest.mark.parametrize("platform, frameless", [("linux", False), ("darwin", False), ("win32", True)])
+def test_remote_window_keeps_native_frame_off_windows(monkeypatch, platform, frameless) -> None:
+    """Cocoa (WKWebView) and GTK keep their native frame: win_frameless is Windows-only."""
     import frontend.ui_web.remote_ducky_window as rdw
 
     made: dict = {}
@@ -107,9 +109,9 @@ def test_remote_window_keeps_native_frame_off_windows(monkeypatch) -> None:
 
     monkeypatch.setitem(sys.modules, "webview", types.SimpleNamespace(create_window=create_window))
     monkeypatch.setattr("frontend.ui_web.panel_httpd.panel_ui_http_url", lambda: "http://127.0.0.1:1")
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", platform)
     monkeypatch.setattr(rdw, "_open", {})
     rdw.open_remote_ducky("k1", "Desktop-PC")
     assert made["title"] == "Desktop-PC · UEFN Ducky"
-    assert made["frameless"] is False
+    assert made["frameless"] is frameless
     assert made["url"].startswith("http://127.0.0.1:1/")

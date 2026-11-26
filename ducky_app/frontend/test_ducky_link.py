@@ -128,7 +128,12 @@ def two_duckies(monkeypatch: pytest.MonkeyPatch) -> _Site:
     return site
 
 
-def test_one_ducky_runs_a_call_on_another_and_reads_the_sealed_answer(two_duckies: _Site) -> None:
+@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
+def test_one_ducky_runs_a_call_on_another_and_reads_the_sealed_answer(
+    two_duckies: _Site, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    """The link has no OS branch: a Mac reaches the PC's UEFN Ducky the same way."""
+    monkeypatch.setattr("sys.platform", platform)
     _paired()
     out = ducky_link.call("k2", "list_all_conversations", {"all_projects": True}, timeout=2)
     assert out == {"ok": True, "result": [{"id": "c1", "title": "Build the lobby"}]}
