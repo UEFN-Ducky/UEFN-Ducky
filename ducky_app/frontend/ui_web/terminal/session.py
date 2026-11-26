@@ -7,6 +7,7 @@ import os
 import re
 import signal
 import shlex
+import sys
 import threading
 import time
 import uuid
@@ -160,8 +161,25 @@ def _proc_stat(pid: int | str) -> tuple[str, str, int] | None:
     return head.partition("(")[2].lower(), fields[0], int(fields[1])
 
 
+def _psutil_snapshot() -> tuple[dict[int, list[int]], dict[int, str]]:
+    """macOS has no /proc: the same snapshot from psutil (sysctl underneath)."""
+    import psutil
+
+    children: dict[int, list[int]] = {}
+    names: dict[int, str] = {}
+    for proc in psutil.process_iter(["pid", "ppid", "name", "status"]):
+        info = proc.info
+        if info.get("status") == psutil.STATUS_ZOMBIE or info.get("ppid") is None:
+            continue
+        children.setdefault(int(info["ppid"]), []).append(int(info["pid"]))
+        names[int(info["pid"])] = str(info.get("name") or "").lower()
+    return children, names
+
+
 def _posix_snapshot() -> tuple[dict[int, list[int]], dict[int, str]]:
     """Every process in /proc → ({parent pid: [child pids]}, {pid: name}); zombies left out."""
+    if sys.platform == "darwin":
+        return _psutil_snapshot()
     children: dict[int, list[int]] = {}
     names: dict[int, str] = {}
     try:
@@ -330,6 +348,13 @@ _POSIX_KILL_GRACE_S = 3.0
 
 
 def _posix_alive(pid: int) -> bool:
+    if sys.platform == "darwin":
+        import psutil
+
+        try:
+            return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+        except psutil.Error:
+            return False
     stat = _proc_stat(pid)
     return stat is not None and stat[1] != "Z"
 

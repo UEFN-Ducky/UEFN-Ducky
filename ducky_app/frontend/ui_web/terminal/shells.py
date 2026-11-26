@@ -1,4 +1,4 @@
-"""Resolve bash / PowerShell executables on Windows; bash, zsh, fish and pwsh on Linux."""
+"""Resolve bash / PowerShell executables on Windows; bash, zsh, fish and pwsh on Linux and macOS."""
 
 from __future__ import annotations
 
@@ -34,15 +34,18 @@ def _posix_exe(label: str) -> str:
     if label == "powershell":
         return shutil.which("pwsh") or shutil.which("powershell") or ""
     found = shutil.which(label) or ""
-    if not found and label == "bash" and Path("/bin/bash").is_file():
-        found = "/bin/bash"
+    if not found and label in ("bash", "zsh") and Path(f"/bin/{label}").is_file():
+        found = f"/bin/{label}"
     return found
 
 
 def default_posix_shell() -> str:
-    """The person's login shell ($SHELL) when it is one we drive, else bash."""
+    """The person's login shell ($SHELL) when it is one we drive, else zsh on macOS (its
+    default since Catalina), else bash."""
     name = Path(os.environ.get("SHELL", "") or "").name.lower()
-    return name if name in _POSIX_SHELLS and _posix_exe(name) else "bash"
+    if name in _POSIX_SHELLS and _posix_exe(name):
+        return name
+    return "zsh" if sys.platform == "darwin" and _posix_exe("zsh") else "bash"
 
 
 def available_shells() -> list[str]:

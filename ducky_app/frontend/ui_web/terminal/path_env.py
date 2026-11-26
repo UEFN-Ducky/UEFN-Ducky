@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
-# Linux: the login shell's PATH, read once (None = not read yet).
+# Linux/macOS: the login shell's PATH, read once (None = not read yet).
+# macOS: Homebrew's folders (Apple Silicon, Intel); a GUI app starts with a bare PATH.
+_MAC_EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin")
 _login_path: str | None = None
 _PATH_MARK = "__DUCKY_PATH__"
 
@@ -36,10 +39,18 @@ def posix_login_path(shell: str = "bash") -> str:
     return _login_path
 
 
+def _login_shell() -> str:
+    """The shell whose rc files set PATH: bash on Linux; $SHELL or zsh on macOS."""
+    if sys.platform != "darwin":
+        return "bash"
+    return os.environ.get("SHELL") or "/bin/zsh"
+
+
 def _posix_merged_path() -> str:
-    """The login shell's PATH first, then this process's entries it lacks."""
+    """The login shell's PATH first, then this process's entries it lacks (macOS: then Homebrew's)."""
     parts: list[str] = []
-    for chunk in (posix_login_path(), os.environ.get("PATH", "")):
+    extra = os.pathsep.join(_MAC_EXTRA_PATH) if sys.platform == "darwin" else ""
+    for chunk in (posix_login_path(_login_shell()), os.environ.get("PATH", ""), extra):
         for part in chunk.split(os.pathsep):
             if part and part not in parts:
                 parts.append(part)
