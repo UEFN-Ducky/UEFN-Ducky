@@ -154,6 +154,52 @@ def test_linux_heartbeat_counts_webkit_children(monkeypatch) -> None:
     assert boot_report._memory_sample(None)["webview_gb"] == 0.0
 
 
+def test_mac_heartbeat_counts_webkit_helpers(monkeypatch) -> None:
+    from backend.util import proc_table
+
+    mb = 1024**2
+    me = os.getpid()
+
+    def proc(pid, ppid, name, private):
+        return proc_table.Proc(pid, ppid, name, 0, private, 1, 0, 0.0, 1.0)
+
+    procs = {
+        me: proc(me, 1, "Python", 300 * mb),
+        900020: proc(900020, me, "com.apple.WebKit.WebContent", 300 * mb),
+        900021: proc(900021, me, "com.apple.WebKit.GPU", 60 * mb),
+        900022: proc(900022, me, "com.apple.WebKit", 50 * mb),  # Networking, comm cut at 16
+        900023: proc(900023, me, "claude", 200 * mb),
+        900024: proc(900024, 1, "com.apple.WebKit.WebContent", 900 * mb),  # Safari's
+    }
+    monkeypatch.setattr(proc_table, "table", lambda: procs)
+    monkeypatch.delenv("UEFN_DUCKY_NATIVE_CHILD", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    beat = boot_report._memory_sample(None)
+    assert beat["webview_mb"] == 410.0
+    assert beat["agents_n"] == 1 and beat["agents_mb"] == 200
+    monkeypatch.setattr(sys, "platform", "linux")  # WebKitGTK names only
+    assert not boot_report._is_webview("com.apple.WebKit.GPU")
+
+
+def test_a_mac_report_never_names_the_user(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    out = boot_report._scrub("File \"/Users/pat/Library/x\", '/Users/sam.lee/a.py'")
+    assert out == "File \"~/Library/x\", '~/a.py'"
+    assert "pat" not in out and "sam" not in out
+
+
+def test_a_mac_reboot_counts_as_a_restart(monkeypatch) -> None:
+    import subprocess as sp
+    import time
+
+    out = "{ sec = %d, usec = 0 } Wed Nov 26 09:00:00 2026\n" % int(time.time() - 120)
+    monkeypatch.setattr(sp, "run", lambda *a, **k: sp.CompletedProcess(a, 0, stdout=out))
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert boot_report._mac_boot_time() > 0
+    assert boot_report._pc_restarted_since(time.time() - 600)
+    assert not boot_report._pc_restarted_since(time.time())
+
+
 
 def test_a_ducky_stopped_by_pid_on_purpose_is_not_a_crash(crash, tmp_path: Path) -> None:
     # Oct 25 2026: the speed test ended each sandboxed 1.2.430 by PID between scenarios and

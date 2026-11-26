@@ -81,7 +81,7 @@ _page: dict[str, Any] = {"started": False, "watching": False, "errors": [], "web
 
 
 def _dir() -> Path:
-    if sys.platform.startswith("linux"):
+    if sys.platform != "win32":
         # app_paths is stdlib-only, and native_crash writes child reports through it: one rule
         # for both, or a reader and its writer disagree (the test hook, a future override).
         from frontend.app_paths import local_app_data_base
@@ -125,14 +125,19 @@ def mark_stopped(pid: int, local_appdata: Path | str | None = None) -> bool:
     return True
 
 
+# A macOS home folder, whoever's it is (a path the app's own home check misses still names a person).
+_MAC_HOME = re.compile(r"(?<![\w:])/Users/[^/\s'\"]+")
+
+
 def _scrub(text: str) -> str:
     try:
         from backend.util.privacy import scrub
 
-        return scrub(text)
+        text = scrub(text)
     except Exception:
         home = str(Path.home())
-        return text.replace(home, "~").replace(home.replace("\\", "/"), "~") if home else text
+        text = text.replace(home, "~").replace(home.replace("\\", "/"), "~") if home else text
+    return _MAC_HOME.sub("~", text) if sys.platform == "darwin" else text
 
 
 def _replace_json(path: Path, data: Any) -> None:
@@ -308,6 +313,8 @@ def _pc_restarted_since(when: float) -> bool:
     """True when Windows started after *when*: a launch the PC's restart ended is no crash."""
     if sys.platform.startswith("linux") and when > 0:
         return _linux_boot_time() > when
+    if sys.platform == "darwin" and when > 0:
+        return _mac_boot_time() > when
     if os.name != "nt" or when <= 0:
         return False
     try:
@@ -338,6 +345,18 @@ def _proc_values(path: str) -> dict[str, int]:
 
 def _linux_boot_time() -> float:
     return float(_proc_values("/proc/stat").get("btime", 0))
+
+
+def _mac_boot_time() -> float:
+    """``sysctl -n kern.boottime``: ``{ sec = 1764000000, usec = 0 } Thu Nov ...``; 0 when unread."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=3).stdout
+    except Exception:
+        return 0.0
+    hit = re.search(r"sec\s*=\s*(\d+)", out or "")
+    return float(hit.group(1)) if hit else 0.0
 
 
 def _linux_memory() -> dict[str, Any]:
@@ -379,7 +398,7 @@ def _webview_dumps_dir() -> Path:
 
 def _dump_folders() -> list[tuple[Path, str, bool]]:
     """(folder, pattern, is the app's own dump)."""
-    if sys.platform.startswith("linux"):
+    if sys.platform != "win32":
         # native_crash.write_signal_report: a child process a crash signal ended.
         return [(_dir(), "ducky-*.sigcrash", False)]
     return [(_webview_dumps_dir(), "*.dmp", False), (_dir(), "ducky-*.dmp", True)]
@@ -1031,13 +1050,17 @@ def _memory_sample(agents: Callable[[], int] | None) -> dict[str, Any]:
 WEBVIEW_EXE = "msedgewebview2.exe"
 # Linux (WebKitGTK): the page, network and GPU helpers. Prefixes, so a comm cut at 15 chars still matches.
 _WEBKIT_PREFIXES = ("webkitwebproc", "webkitnetworkp", "webkitgpuproc")
+# macOS (WKWebView): com.apple.WebKit.WebContent / .GPU / .Networking. A prefix: comm stops at 16.
+_MAC_WEBKIT_PREFIX = "com.apple.webkit"
 
 
 def _is_webview(name: str) -> bool:
-    """A WebView helper process: ``msedgewebview2.exe``; on Linux also WebKitGTK's helpers."""
+    """A WebView helper process: ``msedgewebview2.exe``; on Linux WebKitGTK's, on macOS WebKit's."""
     name = name.lower()
     if name == WEBVIEW_EXE:
         return True
+    if sys.platform == "darwin":
+        return name.startswith(_MAC_WEBKIT_PREFIX)
     return sys.platform.startswith("linux") and name.startswith(_WEBKIT_PREFIXES)
 
 TOP_OTHER_N = 3
