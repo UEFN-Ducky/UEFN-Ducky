@@ -14,6 +14,7 @@ import hashlib
 import http.client
 import io
 import json
+import os
 import re
 import secrets as secrets_mod
 import threading
@@ -52,8 +53,7 @@ def normalize_base_url(raw: str | None) -> str:
     text = (raw or "").strip().rstrip("/")
     if not text:
         return DEFAULT_BASE_URL
-    if "://" not in text:
-        text = "https://" + text
+    text = text if "://" in text else "https://" + text
     parsed = urlparse(text)
     if parsed.scheme.lower() != "https":
         raise DuckyOSAccountError("Account URL must use https://", code="invalid_url")
@@ -63,6 +63,8 @@ def normalize_base_url(raw: str | None) -> str:
 
 
 def resolve_base_url(override: str | None = None) -> str:
+    # Explicit override, then DUCKYOS_BASE_URL (CI points telemetry at staging), then the setting.
+    override = override if override is not None and str(override).strip() else os.environ.get("DUCKYOS_BASE_URL")
     if override is not None and str(override).strip():
         return normalize_base_url(str(override))
     try:
@@ -72,9 +74,7 @@ def resolve_base_url(override: str | None = None) -> str:
         if stored:
             base = normalize_base_url(stored)
             # Legacy platform subdomain — always use the primary product host.
-            if (urlparse(base).hostname or "").lower() == "uefn-ducky.duckyos.org":
-                return DEFAULT_BASE_URL
-            return base
+            return DEFAULT_BASE_URL if (urlparse(base).hostname or "").lower() == "uefn-ducky.duckyos.org" else base
     except Exception:
         pass
     return DEFAULT_BASE_URL
