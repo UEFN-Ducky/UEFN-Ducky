@@ -56,7 +56,8 @@ def github_slug(url: str) -> str | None:
 
 
 def _out(cmd: list[str], cwd: Path | None = None) -> str:
-    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace").stdout.strip()
 
 
 def windows_arm64_build(plugin: Path, hold: Path) -> Path | None:
