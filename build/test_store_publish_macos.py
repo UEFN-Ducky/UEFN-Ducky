@@ -69,6 +69,7 @@ def test_look_modes_and_only_telemetry_sends():
     assert upload["if"] == "${{ always() }}" and upload["with"]["name"] == "macos-look-${{ inputs.arch }}"
 
 
-@pytest.mark.parametrize("name", ["macos-look.yml", "macos-app.yml", "macos-install-check.yml", "macos-tests.yml"])
+@pytest.mark.parametrize("name", ["macos-look.yml", "macos-app.yml", "macos-install-check.yml", "macos-tests.yml",
+                                  "macos-plugins-smoke.yml"])
 def test_mac_ci_is_a_test_copy(name):
     assert _load(name)["env"]["DUCKY_SANDBOX"] == "1"

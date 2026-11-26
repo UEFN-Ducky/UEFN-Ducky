@@ -1,0 +1,62 @@
+# Pure-Python Store plugins on a Mac: each installs from the public Store into a throwaway
+# profile (build/plugin_smoke.py) and its register() runs, on Apple Silicon and Intel.
+#   gh workflow run macos-plugins-smoke.yml
+#   gh run watch && gh run download -n macos-plugins-smoke-arm64
+name: macos-plugins-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugins:
+        description: "Space-separated plugin ids (blank = every pure-Python plugin)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+  # A runner is never a user: usage_stats skips sending in a test copy.
+  DUCKY_SANDBOX: "1"
+  PLUGINS: >-
+    vim kanban ducktactoe tripo meshy elevenlabs higgsfield translation typesafe light
+    galaxycraft warcraft studio3d artstudio agent-skills roguelike-design-platform
+    googledrive browser hacker ducky-auto store-test
+
+jobs:
+  smoke:
+    name: plugins (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install
+        run: |
+          brew install portaudio
+          python -m pip install -r requirements.txt
+      - name: Smoke-install every plugin
+        env:
+          ONLY: ${{ inputs.plugins }}
+        run: |
+          # shellcheck disable=SC2086 — ids are words
+          python build/plugin_smoke.py ${ONLY:-$PLUGINS} --out "plugins-${{ matrix.arch }}.json"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: macos-plugins-smoke-${{ matrix.arch }}
+          path: plugins-${{ matrix.arch }}.json
+          if-no-files-found: warn
+          retention-days: 14
