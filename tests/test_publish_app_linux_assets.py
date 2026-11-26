@@ -139,6 +139,22 @@ def test_the_windows_arm64_setup_rides_beside_x64_and_never_replaces_it(tmp_path
     assert assets[1]["sha256"] == hashlib.sha256(b"arm64 setup").hexdigest()
 
 
+def test_packing_arm64_puts_the_x64_engine_back(tmp_path):
+    pub = _load()
+    pub.ROOT = tmp_path
+    (tmp_path / "dist" / "arm").mkdir(parents=True)
+    pub.arm64_app_dir = lambda version: tmp_path / "dist" / "arm"
+    engine = tmp_path / "dist" / "Setup-engine.exe"
+    engine.write_bytes(b"x64 engine")
+    pub._signing_on = lambda: False
+    pub.sign_exes = lambda *a, **k: None
+    pub.arm64_setup_path = lambda version: tmp_path / "dist" / "arm.exe"
+    pub.package_setup = lambda setup, **k: (engine.write_bytes(b"arm64 engine"), setup.write_bytes(b"s"))
+    pub.build_arm64_setup(VERSION, require_sign=False)
+    # the installer panel check after it unpacks this engine and runs its UEFN-Ducky.exe
+    assert engine.read_bytes() == b"x64 engine"
+
+
 def test_arm64_app_dir_needs_the_frozen_exe(tmp_path):
     pub = _load()
     assert pub.arm64_app_dir(VERSION, tmp_path) is None

@@ -512,8 +512,18 @@ def build_arm64_setup(version: str, *, require_sign: bool) -> Path:
         build_uninstaller(arm)
     sign_exes(sorted(arm.glob("*.exe")), require_sign=require_sign, what="arm64 payload")
     setup = arm64_setup_path(version)
-    package_setup(setup, require_sign=require_sign,
-                  ps1_args=["-Arch", "arm64", "-AppDir", str(arm), "-Out", str(setup)])
+    # Packing reuses dist/Setup-engine.exe; the steps after it (the installer panel check,
+    # the upload) read the x64 engine there, so it goes back once the arm64 Setup is made.
+    engine = ROOT / "dist" / "Setup-engine.exe"
+    keep = engine.with_name("Setup-engine.x64.exe")
+    if engine.is_file():
+        shutil.copy2(engine, keep)
+    try:
+        package_setup(setup, require_sign=require_sign,
+                      ps1_args=["-Arch", "arm64", "-AppDir", str(arm), "-Out", str(setup)])
+    finally:
+        if keep.is_file():
+            os.replace(keep, engine)
     return setup
 
 
