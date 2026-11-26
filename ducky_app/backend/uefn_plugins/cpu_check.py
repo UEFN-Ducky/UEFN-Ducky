@@ -38,6 +38,19 @@ _SHF_EXECINSTR = 0x4
 _SHT_NOBITS = 8
 
 
+PE_ARM64 = 0xAA64
+
+
+def pe_machine(image: bytes) -> int | None:
+    """COFF ``Machine`` of a PE image (a Windows .pyd), None when it is not one."""
+    if len(image) < 0x40 or image[:2] != b"MZ":
+        return None
+    pe = struct.unpack_from("<I", image, 0x3C)[0]
+    if len(image) < pe + 6 or image[pe:pe + 4] != b"PE\0\0":
+        return None
+    return struct.unpack_from("<H", image, pe + 4)[0]
+
+
 def elf_machine(image: bytes) -> int | None:
     """``e_machine`` of a 64-bit little-endian ELF image, None when it is not one."""
     if len(image) < 0x40 or image[:4] != ELF_MAGIC or image[4] != 2 or image[5] != 1:

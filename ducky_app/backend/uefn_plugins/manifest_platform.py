@@ -1,7 +1,8 @@
 """Which OS and CPU a compiled plugin build is for, read from its plugin.json.
 
-A compiled build names its target in ``python_abi``: ``cp313-win_amd64`` (Windows, the only
-target before Linux builds), ``cpython-313-x86_64-linux-gnu`` or ``cpython-313-aarch64-linux-gnu``.
+A compiled build names its target in ``python_abi``: ``cp313-win_amd64`` (Windows x64, the only
+target before Linux builds), ``cp313-win_arm64``, ``cpython-313-x86_64-linux-gnu`` or
+``cpython-313-aarch64-linux-gnu``.
 A compiled build with no ``python_abi`` is an old Windows build. Source plugins run anywhere.
 """
 
@@ -41,7 +42,7 @@ def python_abi(os_name: str, arch: str, mm: tuple[int, int] | None = None) -> st
     major, minor = mm or sys.version_info[:2]
     arch = norm_arch(arch)
     if os_name == WINDOWS:
-        return f"cp{major}{minor}-win_amd64"
+        return f"cp{major}{minor}-win_arm64" if arch == AARCH64 else f"cp{major}{minor}-win_amd64"
     if os_name == LINUX and arch in (X86_64, AARCH64):
         return f"cpython-{major}{minor}-{arch}-linux-gnu"
     raise ValueError(f"no compiled plugin builds for {os_name} {arch}")
@@ -56,6 +57,8 @@ def abi_target(abi: str) -> tuple[str, str] | None:
     abi = str(abi or "").strip().lower()
     if abi.endswith("-win_amd64"):
         return WINDOWS, X86_64
+    if abi.endswith("-win_arm64"):
+        return WINDOWS, AARCH64
     for arch in (X86_64, AARCH64):
         if abi.endswith(f"-{arch}-linux-gnu"):
             return LINUX, arch
@@ -85,7 +88,7 @@ def platform_label(manifest: dict[str, Any]) -> str:
     if target is None:
         return ""
     os_name, arch = target
-    if os_name == WINDOWS:
+    if os_name == WINDOWS and arch == X86_64:
         return "Windows only"
     return f"{_OS_LABELS.get(os_name, os_name or 'Unknown')} {arch} only".strip()
 

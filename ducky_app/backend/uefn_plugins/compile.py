@@ -63,6 +63,13 @@ if IS_LINUX:
     LINUX_ARCH = _mp.host_arch()
     PY_ABI = _mp.python_abi(_mp.LINUX, LINUX_ARCH)
     MODULE_SUFFIX = ".so"
+# Windows arm64 builds natively on an arm64 PC (CI: windows-11-arm), like Linux arm64.
+WIN_ARM64 = False
+if sys.platform == "win32":
+    from backend.uefn_plugins import manifest_platform as _mp
+
+    WIN_ARM64 = _mp.host_arch() == _mp.AARCH64
+    PY_ABI = _mp.python_abi(_mp.WINDOWS, _mp.host_arch())
 
 # Build kit — official, no-admin, pinned sources. Bump KIT_VERSION to force a rebuild.
 KIT_VERSION = "1"
@@ -72,6 +79,12 @@ NUGET_PYTHON_URL = (
     f"{NUGET_PYTHON_VERSION}/python.{NUGET_PYTHON_VERSION}.nupkg"
 )
 NUGET_PYTHON_SHA256 = "95fad176338f1d6a799e45946488063f4aa61764e6cff2f132ddeffbf7a04c34"
+if WIN_ARM64:
+    NUGET_PYTHON_URL = (
+        "https://api.nuget.org/v3-flatcontainer/pythonarm64/"
+        f"{NUGET_PYTHON_VERSION}/pythonarm64.{NUGET_PYTHON_VERSION}.nupkg"
+    )
+    NUGET_PYTHON_SHA256 = "bfd77aa5b0edff4a7936a3220e8b79e7c78f864ce13e8fa2c835d9946e11694a"
 NUITKA_SPEC = "nuitka==4.2.2"
 ZIGLANG_SPEC = "ziglang==0.16.0"
 ESBUILD_VERSION = "0.28.2"
@@ -80,6 +93,9 @@ ESBUILD_URL = (
     f"win32-x64-{ESBUILD_VERSION}.tgz"
 )
 ESBUILD_SHA256 = "7286c3611b6f1f4c4d9ec90adcbc478407ff0d28ead96567f361d53e67613e19"
+if WIN_ARM64:
+    ESBUILD_URL = f"https://registry.npmjs.org/@esbuild/win32-arm64/-/win32-arm64-{ESBUILD_VERSION}.tgz"
+    ESBUILD_SHA256 = "b3cffeaa165134f7da679c8619266953afd5f41641a254615a57e757f67c7336"
 # Linux kit: python-build-standalone (Astral's relocatable CPython, headers included) and the
 # system C compiler (gcc / cc), per CPU.
 PBS_TAG = "20261110"
@@ -110,6 +126,8 @@ def esbuild_linux_url(arch: str) -> str:
 # out with AVX-512 and BMI2 from the build PC, and Ducky crashed with an illegal
 # instruction (0xC000001D) on every CPU without them. Both steps get the baseline.
 BASELINE_CPU_FLAGS = "-mcpu=x86_64"
+if WIN_ARM64:
+    BASELINE_CPU_FLAGS = "-mcpu=baseline"  # zig: plain armv8-a, every arm64 Windows PC
 # The Store refuses a bigger plugin zip (plugin-uefn-ducky-store MAX_ZIP_BYTES).
 STORE_MAX_ZIP_BYTES = 32 * 1024 * 1024
 
@@ -179,6 +197,7 @@ def _kit_marker_value() -> str:
         return "|".join([KIT_VERSION, "linux", LINUX_ARCH, PBS_TAG, PBS_PYTHON_VERSION, NUITKA_SPEC, ESBUILD_VERSION])
     return "|".join(
         [KIT_VERSION, NUGET_PYTHON_VERSION, NUITKA_SPEC, ZIGLANG_SPEC, ESBUILD_VERSION]
+        + (["arm64"] if WIN_ARM64 else [])
     )
 
 
@@ -589,10 +608,10 @@ def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tu
 
 def _assert_runs_on_every_cpu(pyd: Path) -> None:
     """Refuse a build with instructions some PCs lack: loading it would close Ducky there."""
-    from backend.uefn_plugins.cpu_check import ELF_AARCH64, elf_machine, problems
+    from backend.uefn_plugins.cpu_check import ELF_AARCH64, PE_ARM64, elf_machine, pe_machine, problems
 
     image = pyd.read_bytes()
-    if elf_machine(image) == ELF_AARCH64:
+    if elf_machine(image) == ELF_AARCH64 or pe_machine(image) == PE_ARM64:
         # ponytail: no arm64 disassembler here; arm64 builds rely on gcc's armv8-a baseline.
         return
     found = problems(image)

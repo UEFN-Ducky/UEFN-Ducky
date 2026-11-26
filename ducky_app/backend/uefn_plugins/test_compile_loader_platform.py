@@ -81,3 +81,41 @@ def test_catalog_rows_say_windows_only_before_install(monkeypatch) -> None:
     assert lp.catalog_badge({"platforms": ["windows-x86_64", "linux-x86_64"]}, "linux", "aarch64") == "No Linux aarch64 build"
     monkeypatch.setattr(manifest_platform, "host_os", lambda: "windows")
     assert lp.store_badge("win", only_win) == "" and lp.store_badge("all", three) == ""
+
+
+ARM_PYD = "uefn_plugin_demo.v1.cp313-win_arm64.pyd"
+WINDOWS_ARM_BUILD = {"compiled": True, "python_abi": "cp313-win_arm64", "backend": {"compiled": ARM_PYD}}
+
+
+def test_windows_arm64_loads_only_its_own_build(tmp_path: Path) -> None:
+    from backend.uefn_plugins import manifest_platform as mp
+
+    assert mp.python_abi("windows", "ARM64", (3, 13)) == "cp313-win_arm64"
+    assert mp.python_abi("windows", "AMD64", (3, 13)) == "cp313-win_amd64"
+    assert mp.abi_target("cp313-win_arm64") == ("windows", "aarch64")
+    (tmp_path / ARM_PYD).write_bytes(b"")
+    lp.check_loadable(WINDOWS_ARM_BUILD, "windows", "ARM64")
+    assert lp.find_compiled(tmp_path, WINDOWS_ARM_BUILD, "uefn_plugin_demo", "windows").name == ARM_PYD
+    # an x64 app (also an emulated one on an arm PC) never imports the arm64 module, nor the reverse
+    with pytest.raises(lp.PlatformError, match="no Windows aarch64 build yet"):
+        lp.check_loadable(WINDOWS_BUILD, "windows", "ARM64")
+    with pytest.raises(lp.PlatformError, match="no Windows x86_64 build yet"):
+        lp.check_loadable(WINDOWS_ARM_BUILD, "windows", "AMD64")
+    assert lp.catalog_badge({"platforms": ["windows-x86_64"]}, "windows", "ARM64") == "No Windows aarch64 build"
+    assert lp.catalog_badge({"platforms": ["windows-x86_64", "windows-aarch64"]}, "windows", "ARM64") == ""
+
+
+def test_pe_machine_reads_the_cpu_of_a_windows_module() -> None:
+    from backend.uefn_plugins.cpu_check import PE_ARM64, pe_machine
+
+    def pe(machine: int) -> bytes:
+        head = bytearray(0x80)
+        head[:2] = b"MZ"
+        head[0x3C:0x40] = (0x40).to_bytes(4, "little")
+        head[0x40:0x44] = b"PE\0\0"
+        head[0x44:0x46] = machine.to_bytes(2, "little")
+        return bytes(head)
+
+    assert pe_machine(pe(0xAA64)) == PE_ARM64
+    assert pe_machine(pe(0x8664)) == 0x8664
+    assert pe_machine(b"\x7fELF" + b"\0" * 60) is None
