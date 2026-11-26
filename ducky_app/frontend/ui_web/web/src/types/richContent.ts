@@ -29,6 +29,8 @@ export type RichBlock =
   | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "key_value"; pairs: { key: string; value: string }[] }
   | { type: "file_link"; path: string; label?: string }
+  /** Opens another of the account's Duckies (e.g. the PC that runs UEFN) in its own window. */
+  | { type: "ducky_link"; key_id: string; name: string }
   | { type: "callout"; tone: RichCalloutTone; text: string; title?: string }
   | { type: "header"; title: string; command?: string }
   | {

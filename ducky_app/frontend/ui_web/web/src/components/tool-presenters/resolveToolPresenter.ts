@@ -155,6 +155,17 @@ const verseErrorsPresenter: ToolPresenter = ({ resultText, onOpenFile }) => {
   if (Array.isArray(data)) errors = data as Record<string, unknown>[];
   else if (data && typeof data === "object") {
     const obj = data as Record<string, unknown>;
+    if (obj.lsp === "remote") {
+      // macOS: no verse-lsp here, so Verse is checked on the account's PC. An empty list is
+      // "not checked", never "no errors".
+      blocks.push({ type: "callout", tone: "info", text: String(obj.note || "Verse diagnostics run on your PC.") });
+      for (const pc of Array.isArray(obj.open_remote) ? (obj.open_remote as Record<string, unknown>[]) : []) {
+        if (pc && typeof pc.key_id === "string" && pc.key_id) {
+          blocks.push({ type: "ducky_link", key_id: pc.key_id, name: String(pc.name || "your PC") });
+        }
+      }
+      return blocks;
+    }
     if (Array.isArray(obj.files)) {
       // Raw tool shape: { files: [{ path, errors, warnings, items: [{line, column, message, severity}] }] }.
       // Flatten per-file items into rows; the old errors/diagnostics lookup missed

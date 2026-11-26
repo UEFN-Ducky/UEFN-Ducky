@@ -84,6 +84,30 @@ describe("resolveToolPresenterBlocks", () => {
     expect(blocks?.some((b) => b.type === "table")).toBe(true);
   });
 
+  it("on a Mac shows where Verse is checked, with a button per PC, never 'no errors'", () => {
+    const raw = JSON.stringify({
+      ok: true,
+      lsp: "remote",
+      files: [],
+      complete: false,
+      open_remote: [{ key_id: "pc1", name: "Tas's PC" }, { key_id: "pc2", name: "Studio PC" }],
+      note: "Verse diagnostics run on your PC: open its Ducky (Duckies → your PC) and check or build Verse there.",
+    });
+    const blocks = resolveToolPresenterBlocks({
+      toolName: "workspace_list_verse_errors",
+      arguments: {},
+      resultText: raw,
+      isSuccess: true,
+    });
+    expect(blocks?.[0]).toMatchObject({ type: "callout", tone: "info" });
+    expect((blocks?.[0] as { text: string }).text).toContain("Verse diagnostics run on your PC");
+    expect(blocks?.filter((b) => b.type === "ducky_link")).toEqual([
+      { type: "ducky_link", key_id: "pc1", name: "Tas's PC" },
+      { type: "ducky_link", key_id: "pc2", name: "Studio PC" },
+    ]);
+    expect(JSON.stringify(blocks)).not.toContain("No Verse errors");
+  });
+
   it("keeps the success callout when all scanned files are clean", () => {
     const raw = JSON.stringify({
       ok: true,

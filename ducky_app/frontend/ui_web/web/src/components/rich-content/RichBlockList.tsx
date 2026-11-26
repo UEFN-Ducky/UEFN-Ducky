@@ -1,3 +1,4 @@
+import { getApi } from "../../hooks/usePanelApi";
 import type { RichBlock, OpenFileHandler } from "../../types/richContent";
 import { RichAccordion } from "./RichAccordion";
 import { RichCallout } from "./RichCallout";
@@ -65,6 +66,16 @@ export function RichBlockView({ block, onOpenFile, collapsePath }: RichBlockView
       return <RichKeyValue pairs={block.pairs} />;
     case "file_link":
       return <RichFileLink path={block.path} label={block.label} onOpenFile={onOpenFile} />;
+    case "ducky_link":
+      return (
+        <button
+          type="button"
+          className="rich-file-link"
+          onClick={() => void getApi()?.ducky_link_open?.(block.key_id, block.name)}
+        >
+          <span className="rich-file-link-label">Open {block.name}</span>
+        </button>
+      );
     case "callout":
       return <RichCallout tone={block.tone} text={block.text} title={block.title} onOpenFile={onOpenFile} />;
     case "header":
