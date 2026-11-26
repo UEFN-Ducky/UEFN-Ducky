@@ -629,6 +629,58 @@ jobs:
           if [ -n "${NOTES}" ]; then extra+=(--notes "${NOTES}"); fi
           .venv/Scripts/python -u release/publish_app.py --phase upload --notes-from-git "${extra[@]}"
 
+  # The Homebrew tap (UEFN-Ducky/homebrew-tap) after a stable release, as linux-bumps does the AUR:
+  # build/macos/cask_bump.py writes the version and both DMG sha256s, brew audits the cask, and
+  # it is pushed with HOMEBREW_TAP_TOKEN. A dry run prints the diff and pushes nothing; a release
+  # without the token warns and skips before any work.
+  macos-bumps:
+    name: Homebrew tap bump
+    needs: [publish]
+    if: ${{ !cancelled() && inputs.channel == 'stable' && (inputs.mode == 'linux-bumps' || (inputs.mode == 'release' && needs.publish.result == 'success')) }}
+    runs-on: macos-26
+    env:
+      DRY_RUN: ${{ inputs.dry_run }}
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Token
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "::warning::no HOMEBREW_TAP_TOKEN secret: Homebrew tap not bumped"
+            echo "SKIP=1" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/checkout@v5
+        if: env.SKIP != '1'
+      - uses: actions/download-artifact@v4
+        if: env.SKIP != '1'
+        with:
+          pattern: macos-dist-*
+          path: dist/macos
+          merge-multiple: true
+          run-id: ${{ inputs.linux_run || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Bump, audit and push the cask
+        if: env.SKIP != '1'
+        run: |
+          arm="$(ls dist/macos/UEFN-Ducky-*-macos-arm64.dmg)"
+          VERSION="$(basename "$arm" | sed -E 's/^UEFN-Ducky-(.+)-macos-arm64\.dmg$/\1/')"
+          x64="dist/macos/UEFN-Ducky-$VERSION-macos-x64.dmg"
+          python3 build/macos/cask_bump.py "$VERSION" "$(shasum -a 256 "$arm" | cut -d' ' -f1)" "$(shasum -a 256 "$x64" | cut -d' ' -f1)"
+          tap="$(brew --repository)/Library/Taps/uefn-ducky/homebrew-tap"
+          if [ "$DRY_RUN" = "true" ]; then
+            mkdir -p "$tap/Casks"
+          else
+            git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/UEFN-Ducky/homebrew-tap.git" "$tap"
+            mkdir -p "$tap/Casks"
+          fi
+          cp build/macos/cask/uefn-ducky.rb "$tap/Casks/uefn-ducky.rb"
+          # --online fetches the DMG url, which only a live release serves.
+          if [ "$DRY_RUN" = "true" ]; then brew audit --cask uefn-ducky/tap/uefn-ducky; echo "dry run: tap not pushed"; exit 0; fi
+          brew audit --cask --online uefn-ducky/tap/uefn-ducky
+          cd "$tap"
+          git add Casks/uefn-ducky.rb
+          git -c user.name="UEFN Ducky" -c user.email="noreply@uefnducky.org" commit -m "uefn-ducky $VERSION" || exit 0
+          git push origin HEAD
+
   # After a stable release is live (beta skips it): the AUR package and the Flathub manifest point at the new
   # AppImages (uefnducky.org/downloads/linux/…) with their sha256. A dry run prints both
   # diffs and pushes nothing; a release without AUR_SSH_PRIVATE_KEY / FLATHUB_TOKEN skips that

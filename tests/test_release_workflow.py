@@ -45,6 +45,20 @@ def test_green_without_apple_secrets():
     assert "always()" in cleanup["if"]
 
 
+def test_macos_bumps_tap_and_skips_without_token():
+    jobs = _doc()["jobs"]
+    job = jobs["macos-bumps"]
+    assert job["if"] == jobs["linux-bumps"]["if"] and job["needs"] == ["publish"]
+    assert job["runs-on"] == "macos-26"
+    token, *rest = job["steps"]
+    assert '-z "$HOMEBREW_TAP_TOKEN"' in token["run"] and "::warning::" in token["run"] and "SKIP=1" in token["run"]
+    assert "exit 1" not in token["run"]
+    assert all(s.get("if") == "env.SKIP != '1'" for s in rest)
+    run = rest[-1]["run"]
+    assert "build/macos/cask_bump.py" in run and "brew audit --cask --online" in run
+    assert "UEFN-Ducky/homebrew-tap" in run and 'commit -m "uefn-ducky $VERSION"' in run
+
+
 def test_upload_download_and_modes():
     doc = _doc()
     job = doc["jobs"]["macos-build"]
