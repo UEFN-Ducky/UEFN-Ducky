@@ -42,8 +42,14 @@ fn app_data_base() -> Option<PathBuf> {
     non_empty_env("LOCALAPPDATA").or_else(|| non_empty_env("APPDATA")).map(PathBuf::from)
 }
 
+/// `~/Library/Application Support`, as `frontend/app_paths.py::local_app_data_base`.
+#[cfg(target_os = "macos")]
+fn app_data_base() -> Option<PathBuf> {
+    non_empty_env("HOME").map(|h| Path::new(&h).join("Library").join("Application Support"))
+}
+
 /// `$XDG_DATA_HOME`, else `~/.local/share` (the XDG default).
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn app_data_base() -> Option<PathBuf> {
     xdg_data_home(non_empty_env("XDG_DATA_HOME"), non_empty_env("HOME"))
 }
