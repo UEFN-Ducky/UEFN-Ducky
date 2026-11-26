@@ -1,5 +1,5 @@
-"""A plugin release builds Windows x64, Linux x86_64 and Linux arm64 zips and publishes them
-in ONE uds_release; a failed Linux build uploads nothing."""
+"""A plugin release builds Windows x64/arm64, Linux x86_64/arm64 and macOS arm64/x64 zips and
+publishes them in ONE uds_release; a failed build uploads nothing."""
 
 from __future__ import annotations
 
@@ -8,7 +8,11 @@ import textwrap
 
 import pytest
 
+from pathlib import Path
+
 from backend.uefn_plugins import release_platforms as rp
+
+_real_macos_builds = rp.macos_builds  # the fixture fakes rp.macos_builds; these tests run the real one
 
 ABI = {"": "cp313-win_amd64", "linux-x86_64": "cpython-313-x86_64-linux-gnu",
        "linux-arm64": "cpython-313-aarch64-linux-gnu"}
@@ -54,6 +58,7 @@ def plugin(tmp_path, monkeypatch):
     # No GitHub here: the arm64 build is faked where a test needs it.
     monkeypatch.setattr(rp, "windows_arm64_build", lambda p, hold: None)
     monkeypatch.setattr(rp, "linux_arm64_build", lambda p, hold: None)
+    monkeypatch.setattr(rp, "macos_builds", lambda p, hold: [])
     return root
 
 
@@ -217,6 +222,79 @@ def test_a_failed_github_build_fails_the_release(plugin):
         rp.build(plugin, run=run, linux_arm64=broken)
 
 
+def fake_gh(monkeypatch, fail_watch=False):
+    """Stands in for git + gh: a pushed plugin, a plugin-macos.yml run, and its two artifacts."""
+    import zipfile
+
+    seen: dict = {"dispatch": [], "download": []}
+
+    def out(cmd, cwd=None):
+        if cmd[:2] == ["git", "remote"]:
+            return "https://github.com/UEFN-Ducky/uefn-plugin-fake.git"
+        if cmd[:2] == ["git", "rev-parse"]:
+            return "a" * 40
+        if cmd[:3] == ["gh", "workflow", "run"]:
+            seen["dispatch"].append(cmd[3])
+            seen["request"] = next(a.split("=", 1)[1] for a in cmd if a.startswith("request="))
+            return ""
+        if cmd[:3] == ["gh", "run", "list"]:
+            return json.dumps([{"databaseId": 7, "displayTitle": f"plugin macos {seen['request']}"}])
+        if cmd[:3] == ["gh", "run", "download"]:
+            artifact, dest = cmd[cmd.index("-n") + 1], Path(cmd[cmd.index("-D") + 1])
+            seen["download"].append(artifact)
+            arch = artifact.rsplit("-", 1)[1]
+            abi = {"arm64": "cpython-313-darwin-arm64", "x64": "cpython-313-darwin-x86_64"}[arch]
+            with zipfile.ZipFile(dest / f"fake-1.2.3-macos-{arch}-compiled.ducky-plugin.zip", "w") as zf:
+                zf.writestr("plugin.json", json.dumps({"id": "fake", "version": "1.2.3", "compiled": True,
+                                                       "python_abi": abi}))
+            return ""
+        raise AssertionError(cmd)
+
+    monkeypatch.setattr(rp, "_out", out)
+    monkeypatch.setattr(rp.time, "sleep", lambda s: None)
+    monkeypatch.setattr(rp.subprocess, "run", lambda cmd, **kw: type("R", (), {"returncode": int(fail_watch)})())
+    return seen
+
+
+def test_one_release_is_six_zips_both_macs_from_one_run(plugin, monkeypatch):
+    seen = fake_gh(monkeypatch)
+    run, _ = fake_docker(plugin)
+    zips = rp.build(plugin, run=run, arm64=fake_arm64, macos=_real_macos_builds)
+    assert [z.name for z in zips] == [
+        "fake-1.2.3-windows-x64-compiled.ducky-plugin.zip", "fake-1.2.3-linux-x86_64-compiled.ducky-plugin.zip",
+        "fake-1.2.3-linux-arm64-compiled.ducky-plugin.zip", "fake-1.2.3-windows-arm64-compiled.ducky-plugin.zip",
+        "fake-1.2.3-macos-arm64-compiled.ducky-plugin.zip", "fake-1.2.3-macos-x64-compiled.ducky-plugin.zip"]
+    assert seen["dispatch"] == ["plugin-macos.yml"]  # one run builds both chips
+    assert seen["download"] == ["plugin-macos-arm64", "plugin-macos-x64"]
+    store = rp._script(plugin, "release")
+    monkeypatch.setattr(rp, "_script", lambda p, name: store if name == "release" else None)
+    rp.publish(plugin, zips, category="plugins", changelog="macOS")
+    [args] = [a for n, a in store.CALLS if n == "uds_release"]
+    assert {(a["os"], a["arch"]) for a in args["artifacts"]} == {
+        ("windows", "x86_64"), ("windows", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64"),
+        ("macos", "aarch64"), ("macos", "x86_64")}
+    assert args["uploadId"] == next(a["uploadId"] for a in args["artifacts"] if a["os"] == "windows" and a["arch"] == "x86_64")
+
+
+def test_two_builds_for_one_mac_chip_are_refused(plugin, monkeypatch):
+    fake_gh(monkeypatch)
+    run, _ = fake_docker(plugin)
+    zips = rp.build(plugin, run=run, macos=_real_macos_builds)
+    twin = zips[-1].with_name("fake-1.2.3-macos-x64-again-compiled.ducky-plugin.zip")
+    twin.write_bytes(zips[-1].read_bytes())
+    store = rp._script(plugin, "release")
+    monkeypatch.setattr(rp, "_script", lambda p, name: store if name == "release" else None)
+    with pytest.raises(SystemExit, match="two builds for one platform"):
+        rp.publish(plugin, [*zips, twin], category="plugins", changelog="x")
+    assert not [n for n, _ in store.CALLS if n == "uds_release"]
+
+
+def test_a_failed_mac_run_fails_the_release(plugin, monkeypatch):
+    fake_gh(monkeypatch, fail_watch=True)
+    with pytest.raises(SystemExit, match="macos build failed"):
+        _real_macos_builds(plugin, plugin)
+
+
 def test_github_slug_reads_https_and_ssh_remotes():
     assert rp.github_slug("https://github.com/UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
     assert rp.github_slug("git@github.com:UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
@@ -227,6 +305,7 @@ def test_github_slug_reads_https_and_ssh_remotes():
 def test_a_plugin_without_a_github_remote_builds_no_arm64(tmp_path):
     assert rp.windows_arm64_build(tmp_path, tmp_path) is None
     assert rp.linux_arm64_build(tmp_path, tmp_path) is None
+    assert _real_macos_builds(tmp_path, tmp_path) == []
 
 
 def test_linux_build_cmd_mounts_the_kit_read_only(tmp_path):

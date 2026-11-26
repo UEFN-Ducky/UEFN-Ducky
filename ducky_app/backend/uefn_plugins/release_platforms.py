@@ -1,5 +1,5 @@
-"""Release one compiled desktop Store plugin for Windows x64, Windows arm64, Linux x86_64 and
-Linux arm64.
+"""Release one compiled desktop Store plugin for Windows x64, Windows arm64, Linux x86_64,
+Linux arm64, macOS arm64 and macOS x64: six zips.
 
 The "Release a desktop Store plugin" workflow runs this in the plugin's fresh worktree:
 
@@ -12,7 +12,9 @@ The "Release a desktop Store plugin" workflow runs this in the plugin's fresh wo
    back to the QEMU container.
 4. Windows arm64: the plugin-windows-arm64.yml workflow of UEFN-Ducky on GitHub's arm64
    runner, at the plugin's pushed commit (Windows can't emulate an arm64 build here).
-5. Every zip uploads with the plugin's ``scripts/release.upload_with_ticket``, then ONE
+5. macOS arm64 + x64: ONE plugin-macos.yml run (macos-26 and macos-15-intel), both zips
+   downloaded from it (only GitHub has Macs; Nuitka can't cross-compile).
+6. Every zip uploads with the plugin's ``scripts/release.upload_with_ticket``, then ONE
    ``uds_release`` names the Windows upload (what old apps install) and lists every build in
    ``artifacts`` (store/plugin_artifacts.py's shape plus its ``uploadId``).
 
@@ -50,6 +52,8 @@ ARM64_WORKFLOW = "plugin-windows-arm64.yml"
 ARM64_ARTIFACT = "plugin-windows-arm64"
 LINUX_ARM64_WORKFLOW = "plugin-linux-arm64.yml"
 LINUX_ARM64_ARTIFACT = "plugin-linux-arm64"
+MACOS_WORKFLOW = "plugin-macos.yml"
+MACOS_ARTIFACTS = {"plugin-macos-arm64": "macos-arm64", "plugin-macos-x64": "macos-x64"}
 # Where that workflow lives (public: its arm64 runner is free).
 DUCKY_GH = os.environ.get("DUCKY_GH_REPO") or "UEFN-Ducky/UEFN-Ducky"
 
@@ -74,11 +78,26 @@ def linux_arm64_build(plugin: Path, hold: Path) -> Path | None:
                         "plugin linux arm64", "linux-arm64")
 
 
+def macos_builds(plugin: Path, hold: Path) -> list[Path]:
+    """Both Mac zips from one plugin-macos.yml run; [] for a plugin with no GitHub remote."""
+    run_id = github_run(plugin, MACOS_WORKFLOW, "plugin macos", "macos")
+    if run_id is None:
+        return []
+    return [github_download(run_id, artifact, target, hold) for artifact, target in MACOS_ARTIFACTS.items()]
+
+
 def github_build(plugin: Path, hold: Path, workflow: str, artifact: str, title: str,
                  target: str) -> Path | None:
     """Dispatch ``workflow`` for the plugin's HEAD (it must be pushed), wait for it, and
     download its ``*-<target>-compiled`` zip into ``hold``. None for a plugin with no GitHub
     remote (a draft)."""
+    run_id = github_run(plugin, workflow, title, target)
+    return None if run_id is None else github_download(run_id, artifact, target, hold)
+
+
+def github_run(plugin: Path, workflow: str, title: str, target: str) -> str | None:
+    """Dispatch ``workflow`` for the plugin's pushed HEAD and wait for it to pass: its run id,
+    None for a plugin with no GitHub remote."""
     try:
         slug = github_slug(_out(["git", "remote", "get-url", "origin"], plugin))
         sha = _out(["git", "rev-parse", "HEAD"], plugin)
@@ -104,6 +123,11 @@ def github_build(plugin: Path, hold: Path, workflow: str, artifact: str, title: 
     if subprocess.run(["gh", "run", "watch", run_id, "-R", DUCKY_GH, "--exit-status", "--interval", "30"]).returncode:
         raise SystemExit(f"{target} build failed: https://github.com/{DUCKY_GH}/actions/runs/{run_id} "
                          "(is the commit pushed? a private repo needs the PLUGIN_REPO_TOKEN secret)")
+    return run_id
+
+
+def github_download(run_id: str, artifact: str, target: str, hold: Path) -> Path:
+    """The one ``*-<target>-compiled`` zip of ``artifact`` from run ``run_id``, moved into ``hold``."""
     got = Path(tempfile.mkdtemp(prefix=f"ducky-{target}-"))
     _out(["gh", "run", "download", run_id, "-R", DUCKY_GH, "-n", artifact, "-D", str(got)])
     found = sorted(got.glob(f"*-{target}-compiled.ducky-plugin.zip"))
@@ -157,12 +181,13 @@ def linux_build_cmd(plugin: Path, target: str) -> list[str]:
             "-w", "/plugin", IMAGE, "python", "-c", call]
 
 
-def build(plugin: Path, run=None, arm64=None, linux_arm64=None) -> list[Path]:
-    """Windows x64, linux-x86_64, linux-arm64, then Windows arm64 zips, each moved out of
-    ``plugin/deploy`` into a temp folder as soon as it is built."""
+def build(plugin: Path, run=None, arm64=None, linux_arm64=None, macos=None) -> list[Path]:
+    """Windows x64, linux-x86_64, linux-arm64, Windows arm64, then macOS arm64 + x64 zips, each
+    moved out of ``plugin/deploy`` into a temp folder as soon as it is built."""
     run = run or subprocess.run
     arm64 = arm64 or windows_arm64_build
     linux_arm64 = linux_arm64 or linux_arm64_build
+    macos = macos or macos_builds
     bz = _script(plugin, "build_zip")
     # This kit, as the containers get it: a plugin looking only next to its own checkout
     # (forge's build_zip) found no UEFN-Ducky from a sandbox worktree.
@@ -170,10 +195,11 @@ def build(plugin: Path, run=None, arm64=None, linux_arm64=None) -> list[Path]:
     # Each finished zip waits outside deploy/: a plugin's own build may prune every zip there
     # (forge's Linux build deleted the Windows one before the upload).
     hold = Path(tempfile.mkdtemp(prefix=f"ducky-release-{plugin.name}-"))
-    # Both GitHub builds run while this PC builds its own: one after another, a big plugin
+    # The GitHub builds run while this PC builds its own: one after another, a big plugin
     # (road-network) took over an hour for four builds.
     gh_linux = _background(linux_arm64, plugin, hold)
     gh_win = _background(arm64, plugin, hold)
+    gh_mac = _background(macos, plugin, hold)
     win = Path(bz.build_compiled_zip(release=True))
     tagged = hold / win.name.replace("-compiled.ducky-plugin.zip", "-windows-x64-compiled.ducky-plugin.zip")
     shutil.move(str(win), str(tagged))
@@ -194,6 +220,7 @@ def build(plugin: Path, run=None, arm64=None, linux_arm64=None) -> list[Path]:
     arm = gh_win()
     if arm is not None:
         zips.append(arm)
+    zips += gh_mac()
     return zips
 
 
