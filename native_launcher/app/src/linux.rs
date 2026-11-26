@@ -1,4 +1,4 @@
-//! Linux launch: one launcher per user, through a Unix socket in `$XDG_RUNTIME_DIR`. A second
+//! Linux and macOS launch: one launcher per user, through a Unix socket in `$XDG_RUNTIME_DIR`. A second
 //! launch sends `focus` and its argv there and exits; the first starts the Python app the way
 //! `fallback()` does (`repoint::Spawn::python`) and stays to answer later launches until the
 //! app exits. A later launch's argv goes on to the living panel over the same loopback
@@ -37,8 +37,11 @@ pub fn socket_path(runtime_dir: Option<&OsStr>, uid: u32) -> PathBuf {
 }
 
 fn uid() -> u32 {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(0)
+    // ponytail: libc's getuid without the crate; uid_t is u32 on Linux and macOS.
+    extern "C" {
+        fn getuid() -> u32;
+    }
+    unsafe { getuid() }
 }
 
 /// The one line a second launch sends.
@@ -140,7 +143,7 @@ fn forward(args: &[OsString]) {
     }
 }
 
-/// A Linux launch. Exit codes as on Windows ([`exit`]).
+/// A Linux or macOS launch. Exit codes as on Windows ([`exit`]).
 pub fn run(args: Vec<OsString>) -> u8 {
     let path = socket_path(std::env::var_os("XDG_RUNTIME_DIR").as_deref(), uid());
     let listener = match claim(&path, &args) {
@@ -168,10 +171,15 @@ pub fn run(args: Vec<OsString>) -> u8 {
     };
     let app_data = ducky_instance::Config::from_env().map(|c| c.app_data).unwrap_or_default();
     let ready = crate::start::ready_path(&app_data, me);
-    let mut exited = || matches!(child.try_wait(), Ok(Some(_)));
-    splash::linux::show_until(splash::Splash::from_env(), || ready.exists() || exited(), SPLASH_CAP);
+    // ponytail: no splash on macOS; the Python window paints its own. Native one in l-native if slow.
+    #[cfg(target_os = "linux")]
+    {
+        let mut exited = || matches!(child.try_wait(), Ok(Some(_)));
+        splash::linux::show_until(splash::Splash::from_env(), || ready.exists() || exited(), SPLASH_CAP);
+    }
+    let waited = child.wait();
     let _ = std::fs::remove_file(&ready);
-    match child.wait() {
+    match waited {
         Ok(_) => exit::OK,
         Err(_) => exit::START_ERROR,
     }

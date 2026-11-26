@@ -41,7 +41,12 @@ pub fn pid_alive(pid: u32) -> bool {
     }
     #[cfg(not(windows))]
     {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
+        // kill(pid, 0): no /proc on macOS. EPERM (1) = alive, another user's.
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        let Ok(pid) = i32::try_from(pid) else { return false };
+        (unsafe { kill(pid, 0) }) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(1)
     }
 }
 

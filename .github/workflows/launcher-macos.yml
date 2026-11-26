@@ -1,0 +1,34 @@
+# The native launcher on macOS: cargo tests, then a release build, on native runners for both arches.
+name: launcher-macos
+on:
+  push:
+    branches: [main]
+    paths: ["native_launcher/**", ".github/workflows/launcher-macos.yml"]
+  pull_request:
+    paths: ["native_launcher/**"]
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: native_launcher
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: native_launcher }
+      - run: cargo test --workspace --target ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }} -p ducky-launcher
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ducky-Launcher-${{ matrix.target }}
+          path: native_launcher/target/${{ matrix.target }}/release/Ducky-Launcher
