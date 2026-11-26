@@ -81,7 +81,7 @@ def get_install_info() -> dict[str, Any]:
         "uninstall_command": None,
         "quiet_uninstall_command": None,
     }
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
         kind = install_kind()
         info.update(install_kind=kind, install_label=install_label(kind))
     if sys.platform != "win32":
@@ -115,6 +115,7 @@ LINUX_PACKAGE = "uefn-ducky"
 KIND_LABELS = {
     "appimage": "AppImage", "deb": "Debian package", "rpm": "RPM package", "flatpak": "Flatpak",
     "aur": "AUR package", "source": "Source checkout", "installer": "Installed", "portable": "Portable",
+    "app": "App",
 }
 # Package manager that owns a file -> install kind, asked in this order.
 _OWNER_QUERIES = (("deb", ("dpkg", "-S")), ("rpm", ("rpm", "-qf")), ("aur", ("pacman", "-Qo")))
@@ -138,7 +139,13 @@ def _running_file() -> Path:
 def install_kind(*, env: dict[str, str] | None = None, root: str = "/", exe: Path | None = None,
                  run: Any = None) -> str:
     """How this copy was installed. Linux: 'flatpak', 'appimage', 'deb', 'rpm', 'aur' or
-    'source'; Windows: 'installer' or 'portable'. *env*, *root*, *exe*, *run* are test seams."""
+    'source'; macOS: 'app' (inside a ``*.app/Contents/MacOS`` bundle) or 'source'; Windows:
+    'installer' or 'portable'. *env*, *root*, *exe*, *run* are test seams."""
+    if sys.platform == "darwin":
+        parts = Path(exe or _running_file()).parts
+        in_bundle = any(parts[i].endswith(".app") and parts[i + 1:i + 3] == ("Contents", "MacOS")
+                        for i in range(len(parts) - 2))
+        return "app" if in_bundle else "source"
     if not sys.platform.startswith("linux"):
         return "installer" if is_installed() else "portable"
     env = os.environ if env is None else env
