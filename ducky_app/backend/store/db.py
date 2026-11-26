@@ -125,6 +125,9 @@ def installed_app_dir() -> Path:
     LOCALAPPDATA / XDG_DATA_HOME, so the guards below must not follow them)."""
     if sys.platform.startswith("linux"):
         return Path.home() / ".local" / "share" / "UEFN-Ducky"
+    if sys.platform == "darwin":
+        # ponytail: spelled out, not app_paths: app_paths follows the test redirect this guard must ignore.
+        return Path.home() / "Library" / "Application Support" / "UEFN-Ducky"
     return Path.home() / "AppData" / "Local" / "UEFN-Ducky"
 
 
