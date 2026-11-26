@@ -43,8 +43,12 @@ _busy = threading.Lock()
 
 
 def _dir() -> Path:
-    from frontend.app_paths import resolve_app_data_dir
+    """Crash files: ``<app data>/UEFN-Ducky/crash``; on macOS ``~/Library/Logs/UEFN-Ducky``
+    (where Console.app and the person look)."""
+    from frontend.app_paths import logs_dir, resolve_app_data_dir
 
+    if sys.platform == "darwin":
+        return logs_dir()
     return resolve_app_data_dir() / "crash"
 
 
@@ -100,7 +104,10 @@ def _on_crash(exception_pointers: int) -> int:
 
 
 def install(folder: Path | None = None) -> bool:
-    """Set the filter (Windows only). Call after pythonnet loaded. True when it is set."""
+    """Set the filter (Windows only). Call after pythonnet loaded. True when it is set.
+    macOS: no minidumps; faulthandler writes native crashes to ``crash-<date>.txt`` instead."""
+    if sys.platform == "darwin":
+        return install_mac(folder) is not None
     if _FILTER is None:
         return False
     try:
@@ -159,6 +166,32 @@ def start_watch(every_s: float = WATCH_S) -> None:
     thread = threading.Thread(target=loop, daemon=True, name="native-crash-watch")
     _installed["watch"] = thread
     thread.start()
+
+
+# --- macOS ---------------------------------------------------------------------------
+
+
+def install_mac(folder: Path | None = None) -> Path | None:
+    """faulthandler into ``<folder>/crash-<YYYYMMDD>.txt`` (append; one file a day). Earlier
+    days' files with nothing in them are removed. The path, or None when it can't be opened."""
+    import faulthandler
+
+    folder = Path(folder or _installed["folder"] or _dir())
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"crash-{time.strftime('%Y%m%d')}.txt"
+        for old in folder.glob("crash-*.txt"):
+            if old != path and old.stat().st_size == 0:
+                old.unlink()
+        handle = open(path, "a", encoding="utf-8")  # noqa: SIM115 — must stay open for faulthandler
+    except OSError:
+        return None
+    previous = _installed.get("mac_file")
+    faulthandler.enable(handle, all_threads=True)
+    _installed["mac_file"], _installed["folder"] = handle, str(folder)
+    if previous is not None:
+        previous.close()  # type: ignore[attr-defined]
+    return path
 
 
 # --- Linux ---------------------------------------------------------------------------
