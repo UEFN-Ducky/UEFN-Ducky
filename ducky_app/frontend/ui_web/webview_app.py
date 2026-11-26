@@ -49,6 +49,16 @@ def webview_icon_path() -> Path | None:
     return resolve_app_icon_path()
 
 
+def webview_gui() -> dict[str, str]:
+    """pywebview backend: GTK (WebKitGTK, never its Qt fallback) on Linux, Cocoa (WKWebView)
+    on macOS, its default (WebView2) on Windows."""
+    if platform_info.IS_LINUX:
+        return {"gui": "gtk"}
+    if sys.platform == "darwin":
+        return {"gui": "cocoa"}
+    return {}
+
+
 def _since_boot_ms() -> float:
     raw = os.environ.get("UEFN_DUCKY_BOOT_T0")
     try:
@@ -984,18 +994,17 @@ def _run_panel(api_holder: dict[str, object]) -> None:
     # re-compiled each time. One stable profile beside the rest of our AppData
     # fixes both.
     storage_path = webview_profile_dir()
-    from frontend.webview2_repair import ensure as _ensure_webview2_dlls
+    if platform_info.IS_WINDOWS:
+        from frontend.webview2_repair import ensure as _ensure_webview2_dlls
 
-    _ensure_webview2_dlls()  # an interrupted Setup can leave webview/lib without its DLLs
-    from frontend import webview2_runtime
+        _ensure_webview2_dlls()  # an interrupted Setup can leave webview/lib without its DLLs
+        from frontend import webview2_runtime
 
-    # No WebView2 runtime: say so, instead of a window on the IE engine stuck on "loading".
-    webview2_runtime.require()
-    # Linux: pywebview's GTK backend (WebKitGTK), never its Qt fallback.
-    gui = {"gui": "gtk"} if platform_info.IS_LINUX else {}
+        # No WebView2 runtime: say so, instead of a window on the IE engine stuck on "loading".
+        webview2_runtime.require()
     webview.start(
         _after_gui_start,
-        **gui,
+        **webview_gui(),
         debug=is_dev_panel(),
         icon=str(icon_path) if icon_path else None,
         storage_path=storage_path,

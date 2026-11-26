@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 import time
 from typing import Any, Callable
@@ -374,6 +375,12 @@ def page_start_watch(started: Callable[[], bool], reload: Callable[[], None],
 
 def reload_main_page(window: Any) -> None:
     """Reload the window's own page (its first WebView2), on the UI thread."""
+    if sys.platform != "win32":
+        # WKWebView / WebKitGTK: no WinForms form; the page reloads itself.
+        run = getattr(window, "run_js", None) or getattr(window, "evaluate_js", None)
+        if run is not None:
+            run("location.reload()")
+        return
     form = getattr(window, "native", None)
     if form is None or form.IsDisposed:
         return
@@ -622,6 +629,8 @@ def nudge_webview_visible(window: Any) -> None:
     Occlusion can drop the compositor; a black DefaultBackgroundColor pane is
     left until Visible/Refresh. Does not Reload (that remounts React).
     """
+    if sys.platform != "win32":
+        return  # WinForms only; WKWebView repaints on show
     native = getattr(window, "native", None)
     ctrl = getattr(native, "webview", None) if native is not None else None
     if ctrl is None:
