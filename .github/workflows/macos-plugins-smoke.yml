@@ -22,7 +22,7 @@ env:
   DUCKY_SANDBOX: "1"
   PLUGINS: >-
     vim kanban ducktactoe tripo meshy elevenlabs higgsfield translation typesafe light
-    galaxycraft warcraft studio3d artstudio agent-skills roguelike-design-platform
+    galaxycraft warcraft studio3d artstudio agent-skills
     googledrive browser hacker ducky-auto store-test
 
 jobs:

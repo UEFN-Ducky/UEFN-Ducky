@@ -6,8 +6,10 @@
 
 Each id installs from the public Store with the app's own installer
 (duckyos_account.store_download_and_install), then the plugin host's loader imports it and
-calls register() with the real host api. Prints {"<id>": "ok" | "<Error>: <message>"} and
-exits 1 on any failure. The profile lives in a temp folder (under $RUNNER_TEMP on CI) and
+calls register() with the real host api. A plugin whose Store record lists builds but none
+for this OS and arch is skipped, not installed. Prints
+{"<id>": "ok" | "skipped: no macOS build" | "<Error>: <message>"}, then a
+"N ok · M skipped (no macOS build) · K failed" line, and exits 1 only when K > 0. The profile lives in a temp folder (under $RUNNER_TEMP on CI) and
 is a test copy (DUCKY_SANDBOX), so nothing is counted or sent.
 """
 
@@ -17,6 +19,7 @@ import argparse
 import io
 import json
 import os
+import platform
 import sys
 import tempfile
 import threading
@@ -37,6 +40,50 @@ def _isolate(profile: Path) -> None:
     if sys.platform != "win32":
         os.environ["HOME"] = str(profile)
     sys.path.insert(0, str(ROOT / "ducky_app"))
+
+
+_OS_LABELS = {"macos": "macOS", "windows": "Windows", "linux": "Linux"}
+
+
+def host_platform() -> tuple[str, str]:
+    """("macos", "aarch64") style, the Store's own `platforms` spelling."""
+    os_name = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
+    arch = platform.machine().lower()
+    arch = {"arm64": "aarch64", "amd64": "x86_64", "x64": "x86_64"}.get(arch, arch)
+    return os_name, arch
+
+
+def skip_reason(item: dict | None, os_name: str, arch: str) -> str | None:
+    """Why this Store record can't install here, or None to install it.
+
+    ``platforms`` None (or no record) is a source plugin that runs anywhere."""
+    plats = (item or {}).get("platforms")
+    if plats is None:
+        return None
+    label = _OS_LABELS.get(os_name, os_name)
+    if not any(str(p).startswith(f"{os_name}-") for p in plats):
+        return f"skipped: no {label} build"
+    if f"{os_name}-{arch}" not in plats:
+        return f"skipped: no {label} {arch} build"
+    return None
+
+
+def summary(results: dict[str, str]) -> tuple[str, int]:
+    """The one-line tally and the failed count (skips never fail the run)."""
+    ok = sum(v == "ok" for v in results.values())
+    skipped = sum(v.startswith("skipped:") for v in results.values())
+    failed = len(results) - ok - skipped
+    label = _OS_LABELS.get(host_platform()[0], "this OS")
+    return f"{ok} ok · {skipped} skipped (no {label} build) · {failed} failed", failed
+
+
+def store_records() -> dict[str, dict]:
+    from frontend.duckyos_account import store_catalog
+
+    cat = store_catalog()
+    if not cat.get("ok"):
+        raise RuntimeError(f"Store catalog: {cat.get('error')}")
+    return {str(i.get("slug")): i for i in cat.get("items") or []}
 
 
 def _error(exc: BaseException) -> str:
@@ -68,13 +115,23 @@ def _register(pid: str) -> None:
         raise failure[0]
 
 
-def smoke(ids: list[str], install) -> dict[str, str]:
-    """``install(pid)`` puts the plugin in the profile; then its register() runs."""
+def smoke(ids: list[str], install, records: dict[str, dict] | None = None,
+          register=None, where: tuple[str, str] | None = None) -> dict[str, str]:
+    """``install(pid)`` puts the plugin in the profile; then its register() runs.
+
+    ``records`` (slug -> Store item) skips plugins with no build for ``where``."""
+    register = register or _register
+    os_name, arch = where or host_platform()
     results: dict[str, str] = {}
     for pid in ids:
+        reason = skip_reason((records or {}).get(pid), os_name, arch)
+        if reason:
+            results[pid] = reason
+            print(f"{pid}: {reason}", file=sys.stderr, flush=True)
+            continue
         try:
             install(pid)
-            _register(pid)
+            register(pid)
             results[pid] = "ok"
         except BaseException as exc:  # noqa: BLE001 — one plugin's failure never stops the rest
             if isinstance(exc, KeyboardInterrupt):
@@ -143,12 +200,14 @@ def main(argv: list[str] | None = None) -> int:
         _isolate(Path(tmp) / "profile")
         if args.self_test:
             return self_test()
-        results = smoke(args.ids, install_from_store)
+        results = smoke(args.ids, install_from_store, store_records())
     text = json.dumps(results, indent=1)
     print(text)
+    line, failed = summary(results)
+    print(line)
     if args.out:
         args.out.write_text(text + "\n", encoding="utf-8")
-    return 0 if all(v == "ok" for v in results.values()) else 1
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
