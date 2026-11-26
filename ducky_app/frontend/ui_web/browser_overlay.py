@@ -1620,7 +1620,5 @@ def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
         "errors": errors,
     }
 
-if sys.platform.startswith("linux"):  # gtk_panes.install() rebinds the WebView2-only helpers above
-    from frontend.native_host import gtk_panes  # noqa: F401
-elif sys.platform == "darwin":  # cocoa_panes.install() does the same with WKWebViews
-    from frontend.native_host import cocoa_panes  # noqa: F401
+if sys.platform.startswith("linux") or sys.platform == "darwin":  # gtk_panes / cocoa_panes (WKWebView) .install()
+    __import__("frontend.native_host." + ("cocoa_panes" if sys.platform == "darwin" else "gtk_panes"))  # rebinds the WebView2 helpers

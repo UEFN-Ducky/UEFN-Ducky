@@ -332,6 +332,11 @@ class TrayIconController:
 _mac_target: dict[str, object] = {}  # the ObjC class is registered once per process
 
 
+def mac_menu_target_class():
+    """Public name for other packages (``_mac_menu_target_class`` stays the patchable seam)."""
+    return _mac_menu_target_class()
+
+
 def _mac_menu_target_class():
     """NSObject subclass whose ``open:`` / ``exit:`` run the item's callbacks."""
     if "cls" not in _mac_target:

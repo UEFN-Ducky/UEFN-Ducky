@@ -298,7 +298,8 @@ def test_a_test_run_never_reaches_the_store(monkeypatch) -> None:
     assert us._test_copy() is True  # this very process runs pytest
     us.track("feature.open", tab="chat")
     assert us.flush() is False and us.queued() == 1 and calls == []  # kept here, never sent
-    for name in ("PYTEST_CURRENT_TEST", "PYTEST_VERSION"):
+    # DUCKY_SANDBOX too: CI jobs set it for the whole run (store-publish.yml), so a runner never counts.
+    for name in ("PYTEST_CURRENT_TEST", "PYTEST_VERSION", "DUCKY_SANDBOX"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delitem(sys.modules, "pytest")
     assert us._test_copy() is False  # a real install: no mark of a test run or a sandbox

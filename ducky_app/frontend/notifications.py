@@ -104,6 +104,11 @@ def _app_in_front() -> bool:
         return False
 
 
+def idle_seconds() -> float | None:
+    """Public reader for other packages (``_idle_seconds`` stays the patchable seam)."""
+    return _idle_seconds()
+
+
 def _idle_seconds() -> float | None:
     """Seconds since the last keyboard or mouse input on this PC (None: unknown)."""
     if sys.platform == "darwin":

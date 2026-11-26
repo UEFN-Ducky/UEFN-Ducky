@@ -92,13 +92,14 @@ def test_snip_needs_no_window(monkeypatch):
     assert _Api().snip_screen("c1") == {"ok": False, "reason": "cancelled"}
 
 
-def test_snip_reaches_the_linux_snipper_and_stays_off_elsewhere(monkeypatch):
+def test_snip_reaches_the_linux_and_mac_snippers_and_stays_off_elsewhere(monkeypatch):
     from frontend.ui_web import snip_overlay
 
     monkeypatch.setattr(snip_overlay, "snip_screen_interactive", lambda root: {"ok": False, "reason": "cancelled"})
-    monkeypatch.setattr(panel_api_window._pa.sys, "platform", "linux")
-    assert _Api().snip_screen("c1") == {"ok": False, "reason": "cancelled"}
-    monkeypatch.setattr(panel_api_window._pa.sys, "platform", "darwin")
+    for plat in ("linux", "darwin"):  # darwin: macOS screencapture -i
+        monkeypatch.setattr(panel_api_window._pa.sys, "platform", plat)
+        assert _Api().snip_screen("c1") == {"ok": False, "reason": "cancelled"}
+    monkeypatch.setattr(panel_api_window._pa.sys, "platform", "freebsd14")
     assert _Api().snip_screen("c1") == {"ok": False, "reason": "unsupported"}
 
 

@@ -8,6 +8,10 @@ import sys
 import threading
 from ctypes import wintypes
 
+from frontend.ui_web.win_frameless_structs import (  # noqa: F401 -- also read as win_frameless._RECT etc.
+    _MINMAXINFO, _MONITORINFO, _NCCALCSIZE_PARAMS, _POINT, _RECT, _WINDOWPLACEMENT,
+)
+
 _log = logging.getLogger(__name__)
 
 if sys.platform == "win32":
@@ -212,20 +216,6 @@ _RESIZE_EDGE_HT: dict[str, int] = {
 }
 
 
-class _POINT(ctypes.Structure):
-    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-
-class _MINMAXINFO(ctypes.Structure):
-    _fields_ = [
-        ("ptReserved", _POINT),
-        ("ptMaxSize", _POINT),
-        ("ptMaxPosition", _POINT),
-        ("ptMinTrackSize", _POINT),
-        ("ptMaxTrackSize", _POINT),
-    ]
-
-
 def _hwnd_scale(hwnd: int) -> float:
     try:
         get_dpi = getattr(user32, "GetDpiForWindow", None)
@@ -234,31 +224,6 @@ def _hwnd_scale(hwnd: int) -> float:
     except Exception:
         pass
     return 1.0
-
-
-class _RECT(ctypes.Structure):
-    _fields_ = [
-        ("left", ctypes.c_long),
-        ("top", ctypes.c_long),
-        ("right", ctypes.c_long),
-        ("bottom", ctypes.c_long),
-    ]
-
-
-class _NCCALCSIZE_PARAMS(ctypes.Structure):
-    _fields_ = [
-        ("rgrc", _RECT * 3),
-        ("lppos", ctypes.c_void_p),
-    ]
-
-
-class _MONITORINFO(ctypes.Structure):
-    _fields_ = [
-        ("cbSize", ctypes.c_ulong),
-        ("rcMonitor", _RECT),
-        ("rcWork", _RECT),
-        ("dwFlags", ctypes.c_ulong),
-    ]
 
 
 _window_min_track: dict[int, tuple[int, int]] = {}
@@ -1141,17 +1106,6 @@ def _make_chrome_browser_form():
                     _sync_window_chrome_state(self.pywebview_window)
 
     return ChromeBrowserForm
-
-
-class _WINDOWPLACEMENT(ctypes.Structure):
-    _fields_ = [
-        ("length", ctypes.c_uint),
-        ("flags", ctypes.c_uint),
-        ("showCmd", ctypes.c_uint),
-        ("ptMinPosition", _POINT),
-        ("ptMaxPosition", _POINT),
-        ("rcNormalPosition", _RECT),
-    ]
 
 
 def _normal_size(hwnd: int) -> tuple[int, int] | None:

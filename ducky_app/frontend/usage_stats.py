@@ -631,7 +631,7 @@ def _rosetta() -> bool:
         import subprocess
 
         out = subprocess.run(["sysctl", "-in", "sysctl.proc_translated"], capture_output=True,
-                             text=True, timeout=2).stdout
+                             text=True, encoding="utf-8", errors="replace", timeout=2).stdout
         return out.strip() == "1"
     except Exception:
         return False

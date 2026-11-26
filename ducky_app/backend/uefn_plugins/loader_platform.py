@@ -62,6 +62,16 @@ def store_badge(plugin_id: str, item: dict[str, Any] | None = None) -> str:
         return ""
 
 
+def stamp_store_items(items: list[dict[str, Any]], installed: Any) -> None:
+    """Each Store row's ``platform_badge`` ('Windows only': an installed build this OS can't load, or
+    a catalog one without its build) and ``host_platform`` (StoreActions greys out Install when the
+    item's ``platforms`` lacks it)."""
+    host = f"{mp.host_os()}-{mp.host_arch()}"
+    for it in items:
+        it["platform_badge"] = store_badge(it["slug"], None if it["slug"] in installed else it)
+        it["host_platform"] = host
+
+
 def find_compiled(root: Path, manifest: dict[str, Any], mod_name: str, os_name: str | None = None) -> Path | None:
     """The compiled module at the plugin root: ``backend.compiled`` when present, else the
     newest ``<mod_name>*<suffix>`` for this OS."""

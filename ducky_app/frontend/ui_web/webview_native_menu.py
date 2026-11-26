@@ -46,7 +46,7 @@ def mac_complete_menus(on_quit: Any) -> bool:
     window's closing handler, which only hides the window to the menu bar. Idempotent."""
     import AppKit  # type: ignore[import-not-found]
 
-    from frontend.tray_icon import _mac_menu_target_class
+    from frontend.tray_icon import mac_menu_target_class
 
     app = AppKit.NSApplication.sharedApplication()
     bar = app.mainMenu()
@@ -71,7 +71,7 @@ def mac_complete_menus(on_quit: Any) -> bool:
     app_menu = subs[0] if subs else None
     quit_item = next((i for i in _menu_items(app_menu) if str(i.keyEquivalent() or "") == "q"), None) if app_menu else None
     if quit_item is not None:
-        target = _mac_menu_target_class().alloc().init()
+        target = mac_menu_target_class().alloc().init()
         target.owner = _QuitOwner(on_quit)
         _mac_quit["target"] = target  # an NSMenuItem holds its target weakly
         quit_item.setTarget_(target)

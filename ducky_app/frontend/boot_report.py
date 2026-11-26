@@ -352,7 +352,8 @@ def _mac_boot_time() -> float:
     import subprocess
 
     try:
-        out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, timeout=3).stdout
+        out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=3).stdout
     except Exception:
         return 0.0
     hit = re.search(r"sec\s*=\s*(\d+)", out or "")
