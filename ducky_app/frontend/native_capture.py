@@ -9,12 +9,16 @@ monitors (BitBlt waits on the compositor: ~20 ms for 1080p, under 50 fps).
 Linux: X11 grabs with ``mss`` (window bounds from ``python-xlib``'s EWMH client list);
 Wayland has no screen reading for clients, so it goes through xdg-desktop-portal ScreenCast
 and a PipeWire stream, with a ``persist_mode=2`` restore token so the person consents once.
+
+macOS: ScreenCaptureKit stills (macOS 15.2+), else ``mss`` (CoreGraphics); both need the
+Screen Recording permission, which :func:`offer_screen_recording_settings` points to.
 """
 
 from __future__ import annotations
 
 import ctypes
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -107,10 +111,10 @@ def even_rect(left: int, top: int, right: int, bottom: int) -> tuple[int, int, i
 
 def grab(left: int, top: int, w: int, h: int) -> bytes:
     """BGRA, top-down, w*h*4 bytes of the virtual desktop at (left, top)."""
-    if sys.platform.startswith("linux"):
-        if is_wayland():
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
+        if sys.platform != "darwin" and is_wayland():
             return shared_portal().grab(left, top, w, h)
-        g = MssGrabber()
+        g = MacGrabber() if sys.platform == "darwin" else MssGrabber()
         try:
             return g.grab(left, top, w, h)
         finally:
@@ -374,7 +378,107 @@ def linux_grabber() -> Any:
     return shared_portal() if is_wayland() else MssGrabber()
 
 
-if sys.platform != "win32":
+# --- macOS -------------------------------------------------------------------------------
+
+SCREEN_RECORDING_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+SCREEN_RECORDING_NOTE = ("UEFN Ducky needs the Screen Recording permission to capture your screen. "
+                         "Turn it on in System Settings > Privacy & Security > Screen Recording, then try again.")
+
+
+def mac_screen_access() -> bool:
+    """True when this app may read the screen. The first time macOS shows its own prompt."""
+    try:
+        import Quartz  # type: ignore[import-not-found]
+    except ImportError:
+        return True  # no pyobjc: mss reports the failure itself
+    if Quartz.CGPreflightScreenCaptureAccess():
+        return True
+    Quartz.CGRequestScreenCaptureAccess()
+    return False
+
+
+def offer_screen_recording_settings() -> bool:
+    """The permission note with a button to System Settings' Screen Recording pane; True when opened."""
+    from frontend.mac_alert import ask
+
+    if ask("Screen Recording is off", SCREEN_RECORDING_NOTE, ("Open System Settings", "Not now")) != 0:
+        return False
+    subprocess.run(["open", SCREEN_RECORDING_SETTINGS], check=False, timeout=10)
+    return True
+
+
+def _sck_image(left: int, top: int, w: int, h: int) -> Any:
+    """A CGImage of the rect (points, top-left origin) from ScreenCaptureKit; None before 15.2."""
+    try:
+        import Quartz  # type: ignore[import-not-found]
+        import ScreenCaptureKit  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    mgr = getattr(ScreenCaptureKit, "SCScreenshotManager", None)
+    if mgr is None or not hasattr(mgr, "captureImageInRect_completionHandler_"):
+        return None
+    box: dict[str, Any] = {}
+    done = threading.Event()
+
+    def got(image: Any, _error: Any) -> None:
+        box["image"] = image
+        done.set()
+
+    mgr.captureImageInRect_completionHandler_(Quartz.CGRectMake(left, top, w, h), got)
+    return box.get("image") if done.wait(5.0) else None
+
+
+def _sized_bgra(raw: bytes, size: tuple[int, int], stride: int, w: int, h: int) -> bytes:
+    """w*h*4 BGRA from a frame of *size* with *stride* bytes a row: a Retina frame (2 px a
+    point) is scaled to the point size the caller asked for."""
+    if size == (w, h) and stride == w * 4:
+        return bytes(raw)
+    from PIL import Image
+
+    img = Image.frombuffer("RGBA", size, bytes(raw), "raw", "BGRA", stride, 1)
+    if size != (w, h):
+        img = img.resize((w, h), Image.Resampling.BOX)  # area average: no ringing at edges
+    return img.tobytes("raw", "BGRA")
+
+
+class MacGrabber:
+    """macOS: ScreenCaptureKit when it's there, else one ``mss`` handle kept between grabs."""
+
+    # ponytail: an SCK still per frame (~30 ms); an SCStream is the upgrade if the phone
+    # stream needs 60 fps on macOS.
+
+    def __init__(self) -> None:
+        if not mac_screen_access():
+            raise PermissionError(SCREEN_RECORDING_NOTE)
+        self._mss: Any = None
+
+    def grab(self, left: int, top: int, w: int, h: int) -> bytes:
+        image = _sck_image(left, top, w, h)
+        if image is not None:
+            import Quartz  # type: ignore[import-not-found]
+
+            data = Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(image))
+            size = (int(Quartz.CGImageGetWidth(image)), int(Quartz.CGImageGetHeight(image)))
+            return _sized_bgra(bytes(data), size, int(Quartz.CGImageGetBytesPerRow(image)), w, h)
+        if self._mss is None:
+            import mss
+
+            self._mss = mss.mss()
+        shot = self._mss.grab({"left": left, "top": top, "width": w, "height": h})
+        return _sized_bgra(shot.raw, tuple(shot.size), int(shot.size[0]) * 4, w, h)
+
+    def grab_into(self, left: int, top: int, w: int, h: int, dst: int) -> bool:
+        _memmove_into(dst, self.grab(left, top, w, h))
+        return True
+
+    def close(self) -> None:
+        if self._mss is not None:
+            self._mss.close()
+
+
+if sys.platform == "darwin":
+    _BestGrabber = MacGrabber  # type: ignore[misc,assignment]  # noqa: F811
+elif sys.platform != "win32":
     # Off Windows the best grabber is the Linux one. One name for every caller (and every
     # test that patches _BestGrabber), so Capturer looks it up the same way on both.
     _BestGrabber = linux_grabber  # type: ignore[misc,assignment]  # noqa: F811

@@ -7,6 +7,8 @@ clipboard, which we then pull into the composer.
 Linux: X11 grabs the screen with ``mss`` and lets the user drag a box on a
 full-screen override-redirect overlay showing that frozen grab. Wayland asks
 xdg-desktop-portal's Screenshot with ``interactive=true`` (the desktop's own picker).
+
+macOS: the system's own region picker (``screencapture -i``), after the Screen Recording check.
 """
 
 from __future__ import annotations
@@ -83,6 +85,13 @@ def snip_screen_interactive(tk_root: Any = None) -> dict[str, Any]:
             return {"ok": False, "reason": "busy"}
         try:
             return _snip_linux()
+        finally:
+            _session_lock.release()
+    if sys.platform == "darwin":
+        if not _session_lock.acquire(blocking=False):
+            return {"ok": False, "reason": "busy"}
+        try:
+            return _snip_mac()
         finally:
             _session_lock.release()
     if sys.platform != "win32":
@@ -208,6 +217,40 @@ def _run_win_shift_s() -> dict[str, Any]:
 # --- Linux ---------------------------------------------------------------
 
 _CANCELLED = {"ok": False, "reason": "cancelled"}
+
+
+def _snip_mac(timeout_s: float = _WAIT_TIMEOUT_S) -> dict[str, Any]:
+    """macOS: Screen Recording checked (a note with an Open System Settings button when it's
+    off), then the system's region picker writes the PNG; Esc leaves the file empty."""
+    import tempfile
+
+    from PIL import Image
+
+    from frontend import native_capture as nc
+
+    if not nc.mac_screen_access():
+        nc.offer_screen_recording_settings()
+        return {"ok": False, "reason": "permission", "error": nc.SCREEN_RECORDING_NOTE,
+                "settings_url": nc.SCREEN_RECORDING_SETTINGS}
+    fd, path = tempfile.mkstemp(suffix=".png", prefix="ducky-snip-")
+    os.close(fd)
+    try:
+        # ponytail: the system picker, not our own borderless NSWindow overlay: same drag box,
+        # window mode (Space) and Esc, and no frozen-frame copy of every display to draw.
+        try:
+            subprocess.run(["/usr/sbin/screencapture", "-i", "-x", path], timeout=timeout_s, check=False)
+        except subprocess.TimeoutExpired:
+            return dict(_CANCELLED)
+        if not os.path.getsize(path):
+            return dict(_CANCELLED)
+        with Image.open(path) as img:
+            img.load()
+            return _png_result(img)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def _snip_linux() -> dict[str, Any]:
