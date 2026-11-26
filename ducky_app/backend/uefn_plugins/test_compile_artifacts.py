@@ -41,6 +41,22 @@ def test_source_plugin_installs_everywhere() -> None:
     assert pa.pick_artifact(rec, "windows", "x86_64")["file"] == "vim.zip"
 
 
+def test_windows_arm64_is_its_own_build(monkeypatch) -> None:
+    from backend.uefn_plugins import manifest_platform as mp
+
+    rec = pa.put_artifact(_record(), pa.artifact_for_build("blender", {"compiled": True, "python_abi": "cp313-win_arm64"}, "r" * 64, 9))
+    assert pa.pick_artifact(rec, "windows", "ARM64")["sha256"] == "r" * 64
+    assert rec["sha256"] == "w" * 64, "old (x64) apps keep the x64 file on top"
+    assert pa.pick_artifact(_record(), "windows", "ARM64") is None
+    # Windows x64 asks the Store as it always has; Windows arm64 names its CPU
+    monkeypatch.setattr(mp, "host_os", lambda: "windows")
+    monkeypatch.setattr(mp, "host_arch", lambda: "x86_64")
+    body: dict = {}
+    assert pa.ask_for_this_platform(body) is False and body == {}
+    monkeypatch.setattr(mp, "host_arch", lambda: "aarch64")
+    assert pa.ask_for_this_platform(body) is True and body == {"os": "windows", "arch": "aarch64"}
+
+
 def test_old_client_sees_windows_only() -> None:
     old = pa.legacy_view(_record())
     assert "artifacts" not in old

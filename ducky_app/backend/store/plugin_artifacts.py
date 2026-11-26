@@ -77,8 +77,9 @@ def download_problem(payload: dict[str, Any], os_name: str | None = None, arch: 
 
 
 def ask_for_this_platform(body: dict[str, Any]) -> bool:
-    """Off Windows, name this OS/CPU in a Store download request; Windows asks as it always has."""
-    if mp.host_os() == mp.WINDOWS:
+    """Off Windows x64, name this OS/CPU in a Store download request; Windows x64 asks as it
+    always has (the Store's top-level file is its build)."""
+    if mp.host_os() == mp.WINDOWS and mp.host_arch() == mp.X86_64:
         return False
     body.update(os=mp.host_os(), arch=mp.host_arch())
     return True
@@ -93,13 +94,13 @@ def refuse_other_build(payload: dict[str, Any], other_os: bool, error: type[Exce
 
 
 def put_artifact(record: dict[str, Any], artifact: dict[str, Any]) -> dict[str, Any]:
-    """The record with ``artifact`` added, replacing the one for its platform. Windows (or a
+    """The record with ``artifact`` added, replacing the one for its platform. Windows x64 (or a
     source build) also fills the top-level fields old apps read."""
     out = dict(record)
     key = (artifact["os"], mp.norm_arch(artifact["arch"]))
     out["artifacts"] = [a for a in record_artifacts(record) if (a.get("os"), mp.norm_arch(a.get("arch", ""))) != key
                         and a.get(_FILE_FIELDS[1])] + [artifact]
-    if artifact["os"] in (mp.WINDOWS, ANY):
+    if key == (mp.WINDOWS, mp.X86_64) or artifact["os"] == ANY:
         out.update({k: artifact[k] for k in _FILE_FIELDS if k in artifact})
     return out
 
