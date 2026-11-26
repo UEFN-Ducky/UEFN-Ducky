@@ -4,7 +4,7 @@ The Store's update feed names a pack (the whole app folder as one zip) and a sig
 manifest (each file's hash and byte range in the pack). A file this PC already has with
 the same hash is copied from a version on disk; every other file is read from the pack
 with an HTTP range request, inflated and checked. The new folder only becomes a version
-(``versions/app-<v>`` with ``.ready``) once every file, the manifest's signature and the
+(``versions/app.next`` with ``.ready``) once every file, the manifest's signature and the
 EXEs' Authenticode signature check out. ``frontend.app_versions`` starts it from then on.
 """
 
@@ -29,15 +29,26 @@ from urllib.parse import urljoin, urlparse
 
 from frontend import __version__
 from frontend.app_versions import (
+    NEXT_DIR_NAME,
     PARTIAL_SUFFIX,
+    PREVIOUS_DIR_NAME,
     READY_MARKER,
+    STABLE_DIR_NAME,
+    discard,
+    folder_version,
+    in_use,
+    is_bad,
     is_ready,
+    next_dir,
     parse_version,
     ready_versions,
     stable_exe,
     version_dir,
     versions_dir,
 )
+
+# Inside app.next.partial: the version that download is for (another one starts over).
+PARTIAL_FOR = ".for"
 
 APP_UPDATE_SLUG = "uefn-ducky-app"
 MANIFEST_ENTRY = "manifest.json"
@@ -318,11 +329,12 @@ def authenticode_ok(exe: Path) -> bool:
 
 
 def stage(update: dict[str, Any], *, base_url: str, progress: Progress | None = None) -> Path:
-    """Make ``versions/app-<v>`` ready from the feed's ``update``; returns the folder."""
+    """Make ``versions/app.next`` ready from the feed's ``update``; returns the folder."""
     version = str(update["version"])
-    final = version_dir(version)
-    if is_ready(final):
-        return final
+    have = version_dir(version)
+    if is_ready(have) and folder_version(have) == version:
+        return have
+    final = next_dir()
     if not signature_ok(update, base_url=base_url):
         raise StageError("the update's signature did not check out")
     manifest_url = urljoin(base_url.rstrip("/") + "/", str(update["manifestUrl"]).lstrip("/"))
@@ -333,7 +345,13 @@ def stage(update: dict[str, Any], *, base_url: str, progress: Progress | None = 
     manifest = read_manifest(raw, version=version)
 
     partial = final.with_name(final.name + PARTIAL_SUFFIX)
+    try:
+        if partial.exists() and (partial / PARTIAL_FOR).read_text(encoding="utf-8") != version:
+            discard(partial)
+    except OSError:
+        discard(partial)
     partial.mkdir(parents=True, exist_ok=True)
+    (partial / PARTIAL_FOR).write_text(version, encoding="utf-8")
     sources = local_sources()
     todo: list[dict[str, Any]] = []
     for entry in manifest["files"]:
@@ -366,7 +384,7 @@ def stage(update: dict[str, Any], *, base_url: str, progress: Progress | None = 
     wanted = {entry["path"] for entry in manifest["files"]}
     for leftover in [p for p in partial.rglob("*") if p.is_file()]:
         rel = leftover.relative_to(partial).as_posix()
-        if rel not in wanted and rel != READY_MARKER:
+        if rel not in wanted and rel not in (READY_MARKER, PARTIAL_FOR):
             leftover.unlink(missing_ok=True)
     if not is_loopback(base_url):
         for exe in sorted(partial.glob("*.exe")):
@@ -376,46 +394,64 @@ def stage(update: dict[str, Any], *, base_url: str, progress: Progress | None = 
         partial / READY_MARKER,
         json.dumps({"version": version, "files": len(wanted), "downloaded": total, "at": time.time()}).encode("utf-8"),
     )
+    (partial / PARTIAL_FOR).unlink(missing_ok=True)
     if final.exists():
-        shutil.rmtree(final, ignore_errors=True)
+        # An update downloaded before this one and never switched to.
+        if in_use(final):
+            raise StageError("the update before this one is still starting")
+        discard(final)
+        if final.exists():
+            raise StageError("the update before this one could not be removed")
     os.replace(partial, final)
     return final
 
 
 def prune(running: str = __version__) -> list[str]:
-    """Drop downloaded versions nobody needs: keep the running one, the newest ready one
-    and the newest one older than the running one (the fallback). A folder still in use
-    (a bridge of that version running) can't be renamed and is left for later."""
+    """Keep app, app.next while it is newer than the running version, its download, and
+    app.previous while it is older (the rollback); drop everything else under versions\\
+    (``app-<v>`` folders of 1.2.529 and older, a swap's leftovers). A folder a Ducky
+    program still runs from is left for later."""
     root = versions_dir()
-    keep: set[str] = {running}
-    ready = ready_versions()
     mine = parse_version(running) or (0, 0, 0)
-    if ready and (parse_version(ready[0][0]) or (0, 0, 0)) > mine:
-        keep.add(ready[0][0])
-    older = [v for v, _ in ready if (parse_version(v) or (0, 0, 0)) < mine]
-    if older:
-        keep.add(older[0])
+
+    def key(version: str) -> tuple[int, int, int]:
+        return parse_version(version) or (0, 0, 0)
+
     removed: list[str] = []
     try:
         entries = list(root.iterdir())
     except OSError:
         return removed
     for entry in entries:
-        if not entry.is_dir() or not entry.name.startswith("app-"):
+        name = entry.name
+        if not entry.is_dir() or not name.startswith(STABLE_DIR_NAME) or name == STABLE_DIR_NAME:
             continue
-        name = entry.name[len("app-") :]
-        if name.endswith(PARTIAL_SUFFIX):
-            # A partial download older than the running version is never finished.
-            base = name[: -len(PARTIAL_SUFFIX)]
-            if (parse_version(base) or (0, 0, 0)) > mine:
+        if name == NEXT_DIR_NAME:
+            version = folder_version(entry)
+            if key(version) > mine and not is_bad(version):
                 continue
-        elif name in keep:
+        elif name == NEXT_DIR_NAME + PARTIAL_SUFFIX:
+            try:
+                if key((entry / PARTIAL_FOR).read_text(encoding="utf-8").strip()) > mine:
+                    continue
+            except OSError:
+                pass
+        elif name.startswith(f"{STABLE_DIR_NAME}-") and not name.endswith(PARTIAL_SUFFIX):
+            # 1.2.529 and older downloaded here: a newer one is still the update to move in.
+            if key(folder_version(entry)) > mine and is_ready(entry) and not is_bad(folder_version(entry)):
+                continue
+        elif name == PREVIOUS_DIR_NAME:
+            if (0, 0, 0) < key(folder_version(entry)) < mine:
+                continue
+        elif name.startswith(f"{STABLE_DIR_NAME}.new-"):
+            try:
+                if time.time() - entry.stat().st_mtime < 600:
+                    continue  # another process may be swapping right now
+            except OSError:
+                continue
+        if in_use(entry):
             continue
-        doomed = entry.with_name(f"{entry.name}.remove-{os.getpid()}")
-        try:
-            os.replace(entry, doomed)
-        except OSError:
-            continue
-        shutil.rmtree(doomed, ignore_errors=True)
-        removed.append(entry.name)
+        discard(entry)
+        if not entry.exists():
+            removed.append(name)
     return removed

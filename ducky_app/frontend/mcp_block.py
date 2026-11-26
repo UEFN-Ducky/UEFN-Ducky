@@ -111,10 +111,16 @@ def resolve_bridge_command(own_run: bool = False) -> str:
     started EXE's Bridge only hands off to it, two processes for every turn's tool server.
     """
     if is_packaged_runtime():
-        from frontend.app_versions import stable_exe
+        from frontend.app_versions import stable_dir, stable_exe
 
-        if own_run:
-            here = Path(sys.executable).resolve()
+        here = Path(sys.executable).resolve()
+        try:
+            in_app_folder = here.parent == stable_dir().resolve()
+        except OSError:
+            in_app_folder = False
+        # versions\app keeps its path across updates (like VS Code's install folder), and
+        # the installed EXE's own bridge may be a version too old to find it.
+        if own_run or in_app_folder:
             bridge = bridge_exe_for(here)
             if bridge is not None:
                 return str(bridge)

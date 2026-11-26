@@ -40,8 +40,10 @@ pub const DEFAULT_NATIVE_LAUNCHER: &str = "auto";
 /// `app_versions.VERSIONS_DIR_NAME` / `CURRENT_FILE`.
 pub const VERSIONS_DIR: &str = "versions";
 pub const CURRENT_FILE: &str = "current.json";
-/// `app_versions.STABLE_DIR_NAME`: the one folder a downloaded version runs from.
+/// `app_versions.STABLE_DIR_NAME` / `NEXT_DIR_NAME` / `PREVIOUS_DIR_NAME`: the folder a
+/// downloaded version runs from, the update waiting to move in, and the rollback.
 pub const STABLE_DIR: &str = "app";
+pub const SLOT_DIRS: [&str; 3] = [STABLE_DIR, "app.next", "app.previous"];
 
 /// What a launch started from `exe` does first.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +108,7 @@ fn in_version_folder(exe: &Path) -> bool {
 
 fn is_version_dir(dir: &Path) -> bool {
     let named = |p: &Path, f: &dyn Fn(&str) -> bool| p.file_name().and_then(|n| n.to_str()).is_some_and(f);
-    named(dir, &|n| n.starts_with("app-") || n.eq_ignore_ascii_case(STABLE_DIR))
+    named(dir, &|n| n.starts_with("app-") || SLOT_DIRS.iter().any(|s| n.eq_ignore_ascii_case(s)))
         && dir.parent().is_some_and(|v| named(v, &|n| n.eq_ignore_ascii_case(VERSIONS_DIR)))
 }
 

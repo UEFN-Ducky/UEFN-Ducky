@@ -167,22 +167,21 @@ def test_manifest_paths_must_stay_inside_the_app_folder() -> None:
     assert app_stage.safe_relative("_internal/web/index.html")
 
 
-def test_prune_keeps_running_newest_and_one_fallback() -> None:
+def test_prune_drops_the_old_per_version_folders(monkeypatch) -> None:
+    """1.2.529 and older kept app-<v> per version; only a newer one (an update still to move
+    into versions/app) and one a program runs from stay."""
     for version in ("1.2.405", "1.2.408", "1.2.410", "1.2.412"):
-        folder = app_versions.version_dir(version)
+        folder = app_versions.versions_dir() / f"app-{version}"
         folder.mkdir(parents=True)
         (folder / "UEFN-Ducky.exe").write_bytes(b"MZ")
         (folder / app_versions.READY_MARKER).write_text("{}", encoding="utf-8")
-    app_versions.version_dir("1.2.409").with_name("app-1.2.409.partial").mkdir()
-    app_versions.version_dir("1.2.413").with_name("app-1.2.413.partial").mkdir()
+    (app_versions.versions_dir() / "app-1.2.409.partial").mkdir()
+    (app_versions.versions_dir() / "app-1.2.413.partial").mkdir()
+    monkeypatch.setattr(app_stage, "in_use", lambda f: f.name == "app-1.2.410")
     removed = app_stage.prune(running="1.2.410")
     left = sorted(p.name for p in app_versions.versions_dir().iterdir())
-    assert left == ["app-1.2.408", "app-1.2.410", "app-1.2.412", "app-1.2.413.partial"]
-    assert sorted(removed) == ["app-1.2.405", "app-1.2.409.partial"]
-
-    # Setup put a newer version in place by hand: older downloads and partials go, one fallback stays.
-    app_stage.prune(running="1.2.420")
-    assert sorted(p.name for p in app_versions.versions_dir().iterdir()) == ["app-1.2.412"]
+    assert left == ["app-1.2.410", "app-1.2.412"]
+    assert sorted(removed) == ["app-1.2.405", "app-1.2.408", "app-1.2.409.partial", "app-1.2.413.partial"]
 
 
 def test_spans_merge_neighbours_and_split_far_ones() -> None:

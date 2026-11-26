@@ -136,20 +136,22 @@ pub fn web_dist(backend_exe: &Path) -> Option<PathBuf> {
         .find(|d| d.join("index.html").is_file())
 }
 
-/// A downloaded version's folder under app data: `versions/app` when its `.ready` names
-/// that version (`app_versions.promote`), else `versions/app-<v>`.
+/// A downloaded version's folder under app data: the one of `versions/app`, `app.next`
+/// and `app.previous` whose `.ready` names that version (`app_versions.version_dir`), else
+/// `versions/app-<v>` (1.2.529 and older).
 fn version_folder(app_data: &Path, version: &str) -> PathBuf {
     let versions = app_data.join(crate::repoint::VERSIONS_DIR);
-    let stable = versions.join(crate::repoint::STABLE_DIR);
-    let holds = std::fs::read_to_string(stable.join(".ready"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .and_then(|j| j.get("version")?.as_str().map(str::to_owned));
-    if holds.as_deref() == Some(version.trim()) {
-        stable
-    } else {
-        versions.join(format!("app-{}", version.trim()))
-    }
+    let holds = |dir: &Path| {
+        std::fs::read_to_string(dir.join(".ready"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|j| j.get("version")?.as_str().map(str::to_owned))
+    };
+    crate::repoint::SLOT_DIRS
+        .iter()
+        .map(|s| versions.join(s))
+        .find(|dir| holds(dir).as_deref() == Some(version.trim()))
+        .unwrap_or_else(|| versions.join(format!("app-{}", version.trim())))
 }
 
 /// The UI to serve before hello. The root stub hands off to the version in

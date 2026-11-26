@@ -1,10 +1,11 @@
 """Versions Ducky downloads and switches to by itself: no Setup, no Windows prompt.
 
     %LOCALAPPDATA%\\UEFN-Ducky\\versions\\
-        app\\                    the version that runs, always this one path (see promote)
-        app-1.2.411\\            a complete app folder (UEFN-Ducky.exe, -Bridge.exe, _internal\\)
+        app\\                    the version that runs: always this one path (promote)
             .ready              written last, once every file checked out ({"version": ...})
-        app-1.2.412.partial\\    a download in progress
+        app.next\\               the downloaded update (UEFN-Ducky.exe, -Bridge.exe, _internal\\)
+        app.next.partial\\       that download in progress
+        app.previous\\           the version before, the rollback
         boot.json               starts per version that never reached ready, and bad versions
         handover.json           window state left by the version that switched to a newer one
         current.json            the folder a start lands on, for Ducky-Launcher.exe (no Python)
@@ -33,10 +34,12 @@ from frontend.app_paths import APP_DATA_DIR_NAME, local_app_data_base
 VERSIONS_DIR_NAME = "versions"
 READY_MARKER = ".ready"
 PARTIAL_SUFFIX = ".partial"
-# The one folder a downloaded version runs from (promote). Windows keeps its allows by path
+# One app folder, as VS Code has one install folder. Windows keeps its allows by path
 # (Controlled folder access, the firewall): a new app-<v> folder per update asked again
-# after every update, where Claude Code and Cursor ask once.
-STABLE_DIR_NAME = "app"
+# after every update.
+STABLE_DIR_NAME = "app"  # the version that runs
+NEXT_DIR_NAME = "app.next"  # the downloaded update, until the switch moves it into app
+PREVIOUS_DIR_NAME = "app.previous"  # the version before, the rollback
 BOOT_FILE = "boot.json"
 HANDOVER_FILE = "handover.json"
 # {"version", "dir", "written", "installed"}: "dir" is relative to versions_dir().parent
@@ -61,6 +64,10 @@ START_HIDDEN_ENV = "UEFN_DUCKY_START_HIDDEN"
 BACKGROUND_ARG = "--background"
 # launcher.py's ``--after-update <pid>``: wait for that process to end first.
 AFTER_UPDATE_ARG = "--after-update"
+# The programs an app folder runs; a running one keeps the folder from being swapped.
+EXE_NAMES = (APP_EXE, "UEFN-Ducky-Bridge.exe", NATIVE_LAUNCHER_EXE)
+# Set by wait_for_exit: this start follows a version that closed for an update or rollback.
+_after_update = False
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 _DIR_RE = re.compile(r"^app-(\d+\.\d+\.\d+)$")
@@ -84,8 +91,20 @@ def stable_dir() -> Path:
     return versions_dir() / STABLE_DIR_NAME
 
 
+def next_dir() -> Path:
+    return versions_dir() / NEXT_DIR_NAME
+
+
+def previous_dir() -> Path:
+    return versions_dir() / PREVIOUS_DIR_NAME
+
+
 def folder_version(folder: Path) -> str:
-    """The version a ready folder holds, from its ``.ready`` marker; "" when unknown."""
+    """The version a folder holds: from an older ``app-<v>`` name, else its ``.ready``
+    marker; "" when unknown."""
+    m = _DIR_RE.match(folder.name)
+    if m:
+        return m.group(1)
     try:
         version = str(json.loads((folder / READY_MARKER).read_text(encoding="utf-8")).get("version") or "")
     except (OSError, ValueError, AttributeError):
@@ -94,20 +113,21 @@ def folder_version(folder: Path) -> str:
 
 
 def version_dir(version: str) -> Path:
-    """Where ``version`` is: the stable folder when it holds it, else ``app-<version>``."""
-    stable = stable_dir()
-    if version and folder_version(stable) == version:
-        return stable
+    """The folder holding ``version``: app, app.next or app.previous (or an older
+    ``app-<version>``, the name it would have had)."""
+    for folder in (stable_dir(), next_dir(), previous_dir()):
+        if version and folder_version(folder) == version:
+            return folder
     return versions_dir() / f"app-{version}"
 
 
-def stable_in_use() -> bool:
-    """A program runs from ``versions/app``: Windows refuses to open a running EXE for
-    writing (renaming its folder would still work, and then that program's next read by
-    path would load another version's code)."""
-    for name in (APP_EXE, "UEFN-Ducky-Bridge.exe", NATIVE_LAUNCHER_EXE):
+def in_use(folder: Path) -> bool:
+    """A Ducky program runs from ``folder``: Windows refuses to open a running EXE for
+    writing. (Renaming its folder would still work, and that program's next read by path
+    would then load another version's code.)"""
+    for name in EXE_NAMES:
         try:
-            with open(stable_dir() / name, "r+b"):
+            with open(folder / name, "r+b"):
                 pass
         except FileNotFoundError:
             continue
@@ -116,48 +136,148 @@ def stable_in_use() -> bool:
     return False
 
 
+def _image_path(pid: int) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+    handle = kernel32.OpenProcess(0x1000, False, int(pid))  # QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(32768)
+        size = wintypes.DWORD(len(buf))
+        if kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(handle), 0, buf, ctypes.byref(size)):
+            return buf.value
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+    return ""
+
+
+def processes_in(folder: Path) -> list[int]:
+    """Pids of Ducky programs (not this one) running from ``folder``."""
+    if sys.platform != "win32":
+        return []
+    import csv
+
+    try:
+        root = os.path.normcase(str(folder.resolve())) + os.sep
+    except OSError:
+        return []
+    found: list[int] = []
+    for name in EXE_NAMES:
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", f"IMAGENAME eq {name}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, errors="replace", timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        for row in csv.reader((out or "").splitlines()):
+            if len(row) > 1 and row[0].lower() == name.lower() and row[1].isdigit() and int(row[1]) != os.getpid():
+                try:
+                    if os.path.normcase(_image_path(int(row[1]))).startswith(root):
+                        found.append(int(row[1]))
+                except (OSError, AttributeError, ValueError):
+                    continue
+    return found
+
+
+def close_processes_in(folder: Path, grace_s: float = 5.0) -> None:
+    """What VS Code's updater does before it swaps: give Ducky programs still running from
+    ``folder`` (an IDE's bridge, an agent host, the old window) a moment to close, then
+    stop them. An IDE starts its bridge again on its next tool call."""
+    deadline = time.monotonic() + grace_s
+    while in_use(folder) and time.monotonic() < deadline:
+        time.sleep(0.25)
+    for pid in processes_in(folder) if in_use(folder) else []:
+        try:
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    deadline = time.monotonic() + 5.0
+    while in_use(folder) and time.monotonic() < deadline:
+        time.sleep(0.25)
+
+
 def _link_or_copy(src: str, dst: str) -> None:
     try:
-        os.link(src, dst)  # same disk as app-<v>: no extra space, works on running files
+        os.link(src, dst)  # same disk: no extra space, and works on a running program's files
     except OSError:
         shutil.copy2(src, dst)
 
 
-def promote(version: str) -> bool:
-    """Put ``version`` in ``versions/app``, the folder every start runs from, so a Windows
-    allow given once (Controlled folder access, the firewall) holds after every update.
-    ``app-<version>`` stays as it is (the folder is a hard-linked twin), so a program
-    running from it is never touched and older versions still find it there. Only while
-    nothing runs from ``versions/app``; else False and the next start tries again.
-    Callers start from :func:`version_dir` afterwards. Never raises."""
-    stable = stable_dir()
-    if folder_version(stable) == version:
+def discard(folder: Path) -> None:
+    """Delete ``folder``, renamed aside first so a half-deleted copy never keeps its name."""
+    if not folder.exists():
+        return
+    doomed = folder.with_name(f"{STABLE_DIR_NAME}.remove-{os.getpid()}-{time.monotonic_ns()}")
+    try:
+        os.replace(folder, doomed)
+    except OSError:
+        return
+    shutil.rmtree(doomed, ignore_errors=True)
+
+
+def promote(version: str, *, close_others: bool = False) -> bool:
+    """Put ``version`` in ``versions/app``, the one folder Ducky runs from, so a Windows
+    allow given once (Controlled folder access, the firewall) holds after every update,
+    as with VS Code. The version there becomes ``app.previous`` (the rollback). Only when
+    nothing runs from ``app``, unless ``close_others`` (an update the person started: the
+    old version has closed and its leftovers are stopped). A source a program runs from
+    is copied as hard links, never moved. True when ``app`` holds ``version``; never raises."""
+    stable, previous = stable_dir(), previous_dir()
+    if folder_version(stable) == version and is_ready(stable):
         return True
-    src = versions_dir() / f"app-{version}"
-    if not is_ready(src) or stable_in_use():
+    src = next((f for v, f in ready_versions() if v == version and f != stable), None)
+    if src is None:
         return False
-    new = stable.with_name(f"{STABLE_DIR_NAME}.new-{os.getpid()}")
-    old = stable.with_name(f"{STABLE_DIR_NAME}.old-{os.getpid()}")
+    if in_use(stable):
+        if not close_others:
+            return False
+        close_processes_in(stable)
+        if in_use(stable):
+            _log.warning("versions/app is still in use: %s runs from %s", version, src)
+            return False
+    new = versions_dir() / f"{STABLE_DIR_NAME}.new-{os.getpid()}"
+    displaced = folder_version(stable) if is_ready(stable) else ""
+    # The running version stays as the rollback, unless it is the one that failed or the
+    # rollback itself is what moves in.
+    aside = previous if displaced and src != previous and not is_bad(displaced) else None
     try:
         shutil.rmtree(new, ignore_errors=True)
-        shutil.copytree(src, new, copy_function=_link_or_copy)
-        marker = new / READY_MARKER
-        if folder_version(new) != version:  # an older marker without the version in it
-            marker.unlink()  # a hard link: app-<version>'s own stays as it was
-            marker.write_text(json.dumps({"version": version}), encoding="utf-8")
+        if in_use(src):
+            shutil.copytree(src, new, copy_function=_link_or_copy)
+        else:
+            os.replace(src, new)
+        if folder_version(new) != version:  # an app-<v> folder's marker had no version
+            (new / READY_MARKER).unlink(missing_ok=True)  # a hard link: the source's stays
+            (new / READY_MARKER).write_text(json.dumps({"version": version}), encoding="utf-8")
+        if aside is not None and aside.exists():
+            discard(aside)
+            if aside.exists():
+                aside = None  # a rollback copy still running: the displaced one is dropped
+        moved = aside or versions_dir() / f"{STABLE_DIR_NAME}.remove-{os.getpid()}"
         if stable.exists():
-            os.replace(stable, old)
+            os.replace(stable, moved)
         try:
             os.replace(new, stable)
         except OSError:
-            if old.exists():
-                os.replace(old, stable)
+            if moved.exists() and not stable.exists():
+                os.replace(moved, stable)
             raise
     except OSError:
         _log.warning("versions/app could not take %s", version, exc_info=True)
+        if new.exists() and not src.exists():
+            os.replace(new, src)  # moved, not copied: put it back
         shutil.rmtree(new, ignore_errors=True)
         return False
-    shutil.rmtree(old, ignore_errors=True)
+    if aside is None:
+        shutil.rmtree(moved, ignore_errors=True)
     return True
 
 
@@ -165,25 +285,30 @@ def is_ready(folder: Path) -> bool:
     return (folder / READY_MARKER).is_file() and (folder / "UEFN-Ducky.exe").is_file()
 
 
+_SLOT_RANK = {STABLE_DIR_NAME: 0, NEXT_DIR_NAME: 1, PREVIOUS_DIR_NAME: 2}
+
+
 def ready_versions() -> list[tuple[str, Path]]:
-    """Ready version folders, newest first."""
+    """Ready version folders, newest first; one per version (app, then app.next, then
+    app.previous, then an older ``app-<v>`` folder)."""
     root = versions_dir()
-    found: list[tuple[tuple[int, int, int], str, Path]] = []
     try:
         entries = list(root.iterdir())
     except OSError:
         return []
-    stable = folder_version(root / STABLE_DIR_NAME)
+    found: dict[str, tuple[int, tuple[int, int, int], Path]] = {}
     for entry in entries:
-        m = _DIR_RE.match(entry.name)
-        version = m.group(1) if m else (stable if entry.name == STABLE_DIR_NAME else "")
-        if not version or (m and version == stable) or not entry.is_dir() or not is_ready(entry):
-            continue  # a second copy of the stable folder's version: that folder wins
+        if entry.name not in _SLOT_RANK and not _DIR_RE.match(entry.name):
+            continue
+        version = folder_version(entry)
         key = parse_version(version)
-        if key is not None:
-            found.append((key, version, entry))
-    found.sort(reverse=True)
-    return [(version, folder) for _, version, folder in found]
+        if key is None or not entry.is_dir() or not is_ready(entry):
+            continue
+        rank = _SLOT_RANK.get(entry.name, 3)
+        if version not in found or rank < found[version][0]:
+            found[version] = (rank, key, entry)
+    ordered = sorted(found.items(), key=lambda item: item[1][1], reverse=True)
+    return [(version, folder) for version, (_, _, folder) in ordered]
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
@@ -685,13 +810,11 @@ def hand_off(current: str, *, bridge: bool) -> None:
         if not bridge and not record_start(version):
             continue  # failed to start before: try the next one down
         if bridge:
-            # An IDE's bridge runs for hours: from app-<v>, so it never holds versions/app
-            # against the next update's swap.
-            twin = versions_dir() / f"app-{version}" / Path(sys.executable).name
-            exe = twin if twin.is_file() else folder / Path(sys.executable).name
+            # Runs from app like everything else; an update closes it, and the IDE starts
+            # it again on its next tool call.
             write_current(version, installed)
-            raise SystemExit(run_attached(exe, sys.argv[1:]))
-        promote(version)
+            raise SystemExit(run_attached(folder / Path(sys.executable).name, sys.argv[1:]))
+        promote(version)  # only when nothing runs from app: a start never stops a running Ducky
         exe = version_dir(version) / Path(sys.executable).name
         write_current(version, installed)
         if backend_mode():
@@ -705,18 +828,18 @@ def hand_off(current: str, *, bridge: bool) -> None:
 
 
 def _restart_from_stable(current: str) -> bool:
-    """A window start in ``versions/app-<current>`` (a version switch starts the new
-    version there, while the old one still ran from ``versions/app``): once the old one has
-    closed (``--after-update`` waited for it), put this version in ``versions/app`` and start
-    it from there. True when that start is on its way and this process should leave."""
+    """A window start outside ``versions/app`` (an update starts the new version in
+    app.next, a rollback starts app.previous, 1.2.529 and older switch to app-<v>): put
+    this version in ``versions/app`` and start it from there. After an update or rollback
+    (``--after-update`` waited for the old one) whatever still runs from app is closed
+    first, as VS Code's updater does. True when that start is on its way and this process
+    should leave."""
     here = Path(sys.executable)
-    if here.parent.name != f"app-{current}" or not running_from_versions():
+    if not running_from_versions() or here.parent.name == STABLE_DIR_NAME:
         return False
-    for _ in range(20):  # the old version's window (Ducky-Launcher.exe) closes right after it
-        if not stable_in_use():
-            break
-        time.sleep(0.25)
-    if not promote(current):
+    if folder_version(here.parent) != current:
+        return False
+    if not promote(current, close_others=_after_update):
         return False
     return start_detached(stable_dir() / here.name, _detached_args(sys.argv[1:]))
 
@@ -741,8 +864,9 @@ def failed_while_starting(version: str) -> bool:
 
 
 def fall_back_after_failed_start(current: str, reason: str) -> bool:
-    """A downloaded version crashed while starting: mark it bad and start the EXE that was
-    launched, which hands off to the next version down. True when the fallback started.
+    """A downloaded version crashed while starting: mark it bad and start the version
+    before it (app.previous, which moves back into app), else the EXE that was launched,
+    which hands off to the next version down. True when the fallback started.
 
     A rollback never starts Ducky-Launcher.exe. As its backend, this only marks the
     version bad: the launcher then exits with an error and the UEFN-Ducky.exe that
@@ -753,13 +877,26 @@ def fall_back_after_failed_start(current: str, reason: str) -> bool:
     repoint_to_installed_pick()
     if backend_mode():
         return False
-    exe = launcher_exe()
-    if not exe.is_file():
-        return False
     # --after-update: the EXE waits for this process to end before it starts (every version
     # reads it). Started at once, it saw this pid alive in boot.json and turned its own crash
     # record off for the whole session.
-    return start_detached(exe, _detached_args([AFTER_UPDATE_ARG, str(os.getpid())]))
+    wait_for_me = _detached_args([AFTER_UPDATE_ARG, str(os.getpid())])
+    previous = previous_dir()
+    before = folder_version(previous)
+    if (
+        before
+        and before != current
+        and is_ready(previous)
+        and not is_bad(before)
+        and Path(sys.executable).parent != previous
+        and record_start(before)
+        and start_detached(previous / APP_EXE, wait_for_me)
+    ):
+        return True
+    exe = launcher_exe()
+    if not exe.is_file():
+        return False
+    return start_detached(exe, wait_for_me)
 
 
 def write_handover(state: dict[str, Any]) -> None:
@@ -784,6 +921,8 @@ def take_handover(max_age_s: float = 120.0) -> dict[str, Any]:
 
 def wait_for_exit(pid: int, timeout_s: float = 60.0) -> None:
     """Wait for the version that switched to this one to finish closing."""
+    global _after_update
+    _after_update = True
     if pid <= 0 or sys.platform != "win32":
         return
     import ctypes

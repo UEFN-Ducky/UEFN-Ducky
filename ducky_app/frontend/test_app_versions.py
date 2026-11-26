@@ -247,9 +247,10 @@ def test_panel_hands_off_to_the_newest_and_leaves(monkeypatch) -> None:
         av.hand_off("1.2.410", bridge=False)
     except Left:
         pass
-    # Started from versions/app, the one path Windows' allows name; app-1.2.412 stays.
+    # Started from versions/app, the one path Windows' allows name: nothing ran from
+    # app-1.2.412, so it moved there.
     assert started == [(av.stable_dir() / "UEFN-Ducky.exe", ["uefn-ducky://store/x"])]
-    assert (folder / "UEFN-Ducky.exe").is_file()
+    assert not folder.exists() and av.folder_version(av.stable_dir()) == "1.2.412"
     assert av.read_boot()["1.2.412"]["starts"] == 1
 
 
@@ -285,9 +286,7 @@ def test_bridge_runs_the_newest_on_its_own_stdio(monkeypatch) -> None:
         av.hand_off("1.2.410", bridge=True)
     except SystemExit as exc:
         assert exc.code == 7
-    # Never from versions/app: a bridge runs for hours and would hold it against updates.
     assert ran == [(folder / "UEFN-Ducky-Bridge.exe", ["bridge", "--port", "4200"])]
-    assert not av.stable_dir().exists()
     # Bridges start all the time: they never count against a version.
     assert "1.2.412" not in av.read_boot()
 
@@ -307,53 +306,96 @@ def test_a_crashed_download_falls_back_but_the_installed_copy_does_not(monkeypat
     assert av.is_bad("1.2.412")
 
 
+def _slot(folder: Path, version: str) -> Path:
+    """A ready app folder at ``folder`` (app, app.next, app.previous) holding ``version``."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("UEFN-Ducky.exe", "UEFN-Ducky-Bridge.exe"):
+        (folder / name).write_bytes(b"MZ " + version.encode())
+    (folder / av.READY_MARKER).write_text(json.dumps({"version": version}), encoding="utf-8")
+    return folder
+
+
+def _names() -> list[str]:
+    return sorted(p.name for p in av.versions_dir().iterdir() if p.is_dir())
+
+
 def test_every_update_runs_from_the_same_folder() -> None:
-    """Windows keeps Controlled folder access allows by path: a new app-<v> folder per
-    update asked the person again after every update."""
-    old, new = _version("1.2.410"), _version("1.2.411")
-    assert av.promote("1.2.410") is True
-    assert av.version_dir("1.2.410") == av.stable_dir() and av.folder_version(av.stable_dir()) == "1.2.410"
+    """Windows keeps Controlled folder access allows by path: like VS Code, one app folder,
+    the update beside it until it moves in, the version before kept as the rollback."""
+    _slot(av.stable_dir(), "1.2.410")
+    _slot(av.next_dir(), "1.2.411")
+    assert av.version_dir("1.2.411") == av.next_dir()
     assert av.promote("1.2.411") is True
-    assert av.version_dir("1.2.411") == av.stable_dir()
-    # Both downloads stay where they were: the rollback, and the folder older versions know.
-    assert old.is_dir() and new.is_dir() and av.version_dir("1.2.410") == old
-    assert [(v, f.name) for v, f in av.ready_versions()] == [("1.2.411", "app"), ("1.2.410", "app-1.2.410")]
-    assert sorted(p.name for p in av.versions_dir().iterdir() if p.is_dir()) == ["app", "app-1.2.410", "app-1.2.411"]
+    assert (av.folder_version(av.stable_dir()), av.folder_version(av.previous_dir())) == ("1.2.411", "1.2.410")
+    assert _names() == ["app", "app.previous"]
+    _slot(av.next_dir(), "1.2.412")
+    assert av.promote("1.2.412") is True
+    assert (av.folder_version(av.stable_dir()), av.folder_version(av.previous_dir())) == ("1.2.412", "1.2.411")
+    assert _names() == ["app", "app.previous"]
+    assert [(v, f.name) for v, f in av.ready_versions()] == [("1.2.412", "app"), ("1.2.411", "app.previous")]
 
 
-def test_a_running_stable_folder_is_never_swapped(monkeypatch) -> None:
-    _version("1.2.410")
-    _version("1.2.411")
-    assert av.promote("1.2.410")
-    monkeypatch.setattr(av, "stable_in_use", lambda: True)
-    assert av.promote("1.2.411") is False
+def test_a_running_app_folder_is_only_swapped_for_an_update(monkeypatch) -> None:
+    _slot(av.stable_dir(), "1.2.410")
+    _slot(av.next_dir(), "1.2.411")
+    busy = {"app": True}
+    monkeypatch.setattr(av, "in_use", lambda f: f.name == "app" and busy["app"])
+    closed: list[Path] = []
+    monkeypatch.setattr(av, "close_processes_in", lambda f: closed.append(f) or busy.update(app=False))
+    # A plain start (a link clicked while Ducky runs) never stops the running Ducky.
+    assert av.promote("1.2.411") is False and closed == []
     assert av.folder_version(av.stable_dir()) == "1.2.410"
-    assert av.version_dir("1.2.411").name == "app-1.2.411"
+    # An update: what still runs from app is closed first, then the swap.
+    assert av.promote("1.2.411", close_others=True) is True
+    assert closed == [av.stable_dir()] and av.folder_version(av.stable_dir()) == "1.2.411"
 
 
-def test_a_failed_swap_puts_the_running_folder_back(monkeypatch) -> None:
-    _version("1.2.410")
-    _version("1.2.411")
-    assert av.promote("1.2.410")
+def test_a_folder_a_program_runs_from_is_copied_never_moved(monkeypatch) -> None:
+    _slot(av.next_dir(), "1.2.411")
+    monkeypatch.setattr(av, "in_use", lambda f: f.name == "app.next")
+    assert av.promote("1.2.411") is True
+    assert av.folder_version(av.next_dir()) == "1.2.411" and av.folder_version(av.stable_dir()) == "1.2.411"
+
+
+def test_a_failed_swap_puts_everything_back(monkeypatch) -> None:
+    _slot(av.stable_dir(), "1.2.410")
+    _slot(av.next_dir(), "1.2.411")
     real = os.replace
 
     def refuse_new(src, dst):
-        if Path(src).name.startswith("app.new-"):
+        if Path(src).name.startswith("app.new-") and Path(dst).name == "app":
             raise PermissionError("in use")
         return real(src, dst)
 
     monkeypatch.setattr(av.os, "replace", refuse_new)
     assert av.promote("1.2.411") is False
     assert av.folder_version(av.stable_dir()) == "1.2.410"
-    assert sorted(p.name for p in av.versions_dir().iterdir() if p.is_dir()) == ["app", "app-1.2.410", "app-1.2.411"]
+    assert av.folder_version(av.next_dir()) == "1.2.411"
+    assert _names() == ["app", "app.next"]
 
 
-def test_a_switched_to_version_moves_into_the_stable_folder_and_starts_there(monkeypatch) -> None:
-    """switch starts the new version in app-<v> while the old one still runs from
-    versions/app; once that closed, the new one takes versions/app and starts there."""
-    _version("1.2.410")
-    new = _version("1.2.411")
-    assert av.promote("1.2.410")
+def test_a_rollback_drops_the_bad_version() -> None:
+    _slot(av.stable_dir(), "1.2.411")
+    _slot(av.previous_dir(), "1.2.410")
+    av.mark_bad("1.2.411", "crashed")
+    assert av.promote("1.2.410") is True
+    assert av.folder_version(av.stable_dir()) == "1.2.410"
+    assert _names() == ["app"]
+
+
+def test_an_app_folder_of_1_2_529_moves_in_too() -> None:
+    _version("1.2.411")  # versions/app-1.2.411, a marker without the version in it
+    assert av.promote("1.2.411") is True
+    assert av.folder_version(av.stable_dir()) == "1.2.411"
+    assert _names() == ["app"]
+
+
+def test_an_update_moves_into_the_app_folder_and_starts_there(monkeypatch) -> None:
+    """switch starts the new version in app.next while the old one still runs from app;
+    once that closed (--after-update), the new one takes app and starts from there."""
+    _slot(av.stable_dir(), "1.2.410")
+    new = _slot(av.next_dir(), "1.2.411")
+    monkeypatch.setattr(av, "_after_update", False)  # put back after wait_for_exit sets it
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.delenv(av.NO_HOP_ENV, raising=False)
     monkeypatch.delenv(av.START_HIDDEN_ENV, raising=False)
@@ -363,9 +405,39 @@ def test_a_switched_to_version_moves_into_the_stable_folder_and_starts_there(mon
     monkeypatch.setattr(av, "start_detached", lambda exe, args, **k: started.append(exe) or True)
     left: list = []
     monkeypatch.setattr(av.os, "_exit", lambda code: left.append(code))
+    closes: list[bool] = []
+    real = av.promote
+    monkeypatch.setattr(av, "promote", lambda v, close_others=False: closes.append(close_others) or real(v))
+    av.wait_for_exit(0)
     av.hand_off("1.2.411", bridge=False)
     assert started[0] == av.stable_dir() / "UEFN-Ducky.exe" and left[0] == 0
-    assert av.folder_version(av.stable_dir()) == "1.2.411"
+    assert closes[0] is True and av.folder_version(av.stable_dir()) == "1.2.411"
+
+
+def test_a_crashed_update_rolls_back_to_app_previous(monkeypatch, tmp_path) -> None:
+    app = _slot(av.stable_dir(), "1.2.411")
+    previous = _slot(av.previous_dir(), "1.2.410")
+    started: list[Path] = []
+    monkeypatch.setattr(av, "start_detached", lambda exe, args, **k: started.append(exe) or True)
+    monkeypatch.setattr(sys, "executable", str(app / "UEFN-Ducky.exe"))
+    monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe"])
+    assert av.fall_back_after_failed_start("1.2.411", "boom") is True
+    assert started == [previous / "UEFN-Ducky.exe"] and av.is_bad("1.2.411")
+
+
+def test_prune_keeps_app_the_update_and_the_rollback_only() -> None:
+    from frontend import app_stage
+
+    _slot(av.stable_dir(), "1.2.411")
+    _slot(av.previous_dir(), "1.2.410")
+    _slot(av.next_dir(), "1.2.412")
+    _version("1.2.409")
+    (av.versions_dir() / "app.remove-1-2").mkdir()
+    app_stage.prune("1.2.411")
+    assert _names() == ["app", "app.next", "app.previous"]
+    # Switched to 1.2.412 by an old copy that left app.next behind: it goes.
+    app_stage.prune("1.2.412")
+    assert _names() == ["app", "app.previous"]
 
 
 def test_a_started_ducky_never_works_inside_a_version_folder() -> None:
