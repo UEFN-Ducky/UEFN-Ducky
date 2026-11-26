@@ -21,6 +21,21 @@ def test_windows_dictation_and_tts_pass_their_arguments(monkeypatch):
     assert seen == [("poll", "", 3, 100), ("start", ""), ("tts", "hi", "")]
 
 
+def test_mac_reads_aloud_with_mac_tts_and_dictates_with_the_posix_backend(monkeypatch):
+    from backend.voice import linux_speech, mac_tts
+
+    seen: list[tuple] = []
+    monkeypatch.setattr("sys.platform", "darwin")
+    monkeypatch.setattr(mac_tts, "start", lambda text, voice: seen.append(("tts", text, voice)) or {})
+    monkeypatch.setattr(mac_tts, "voices_start", lambda: seen.append(("voices",)) or {})
+    monkeypatch.setattr(linux_speech, "start_session", lambda lang: seen.append(("start", lang)) or {})
+    api = PanelApiChatsMixin()
+    api.voice_win_tts_start("hi", "Samantha")
+    api.voice_win_tts_voices_start()
+    api.voice_win_stt_start()
+    assert seen == [("tts", "hi", "Samantha"), ("voices",), ("start", "")]
+
+
 def test_a_reply_summary_uses_the_given_model(monkeypatch):
     from backend.voice import summary
 

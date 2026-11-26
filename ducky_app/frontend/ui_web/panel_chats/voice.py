@@ -8,7 +8,11 @@ from typing import Any
 
 
 def _tts():
-    """Offline read-aloud backend for this OS (same API on Windows and Linux)."""
+    """Offline read-aloud backend for this OS (same API on Windows, Linux and macOS)."""
+    if sys.platform == "darwin":
+        from backend.voice import mac_tts
+
+        return mac_tts
     if sys.platform.startswith("linux"):
         from backend.voice import linux_tts
 
@@ -19,8 +23,9 @@ def _tts():
 
 
 def _stt():
-    """Desktop dictation backend for this OS (same API and events on Windows and Linux)."""
-    if sys.platform.startswith("linux"):
+    """Desktop dictation backend for this OS (same API and events on Windows and Linux;
+    macOS shares the POSIX one)."""
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
         from backend.voice import linux_speech
 
         return linux_speech
