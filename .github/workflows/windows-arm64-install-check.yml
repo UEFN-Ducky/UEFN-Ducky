@@ -1,0 +1,61 @@
+# The live Windows Setups on a real Windows on Arm PC (GitHub's arm64 runner): the x64
+# Setup installs, the arm64 Setup upgrades it in place (same folder, one uninstall entry,
+# now a native ARM64 exe), and the installed app passes its packaged runtime smoke.
+name: windows arm64 install check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    env:
+      SITE: https://uefnducky.org
+    steps:
+      - name: Download the live x64 and arm64 Setups
+        shell: pwsh
+        run: |
+          $page = (Invoke-WebRequest "$env:SITE/" -UseBasicParsing).Content
+          $m = [regex]::Match($page, 'data-uds-win-pkg="arm64"\s*>\s*<a href="([^"]+)"')
+          if (-not $m.Success) { throw "the download page lists no Windows on Arm Setup" }
+          Invoke-WebRequest "$env:SITE/api/v1/files/app-release/latest" -OutFile x64.exe -UseBasicParsing
+          Invoke-WebRequest ($env:SITE + $m.Groups[1].Value) -OutFile arm64.exe -UseBasicParsing
+          Get-Item x64.exe, arm64.exe | Format-Table Name, Length
+
+      - name: x64 installs, arm64 upgrades it in place
+        shell: pwsh
+        run: |
+          $key = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{EAD694ED-E221-40B0-909B-AFFD7F683C9E}_is1'
+          function Machine($exe) {
+            $b = [IO.File]::ReadAllBytes($exe); $pe = [BitConverter]::ToInt32($b, 0x3C)
+            '0x{0:X4}' -f [BitConverter]::ToUInt16($b, $pe + 4)
+          }
+          function Install($setup) {
+            $p = Start-Process ".\$setup" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER','/NOLAUNCH' -Wait -PassThru
+            if ($p.ExitCode -ne 0) { throw "$setup exited $($p.ExitCode)" }
+            Stop-Process -Name UEFN-Ducky, UEFN-Ducky-Bridge, Ducky-Launcher -Force -ErrorAction SilentlyContinue
+            $dir = (Get-ItemProperty "HKCU:\$key").InstallLocation.TrimEnd('\')
+            [pscustomobject]@{ Dir = $dir; Machine = Machine "$dir\UEFN-Ducky.exe"; Version = (Get-ItemProperty "HKCU:\$key").DisplayVersion }
+          }
+          $x64 = Install x64.exe;   $x64 | Format-List
+          if ($x64.Machine -ne '0x8664') { throw "x64 Setup installed $($x64.Machine)" }
+          $arm = Install arm64.exe; $arm | Format-List
+          if ($arm.Machine -ne '0xAA64') { throw "after the arm64 Setup UEFN-Ducky.exe is $($arm.Machine), not ARM64" }
+          if ($arm.Dir -ne $x64.Dir) { throw "arm64 installed to $($arm.Dir), not over $($x64.Dir)" }
+          $entries = @('HKCU:', 'HKLM:') | ForEach-Object {
+            Get-ChildItem "$_\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
+              Where-Object { (Get-ItemProperty $_.PSPath).DisplayName -eq 'UEFN Ducky' } }
+          if (@($entries).Count -ne 1) { throw "$(@($entries).Count) UEFN Ducky uninstall entries, expected 1" }
+          "INSTALL_DIR=$($arm.Dir)" >> $env:GITHUB_ENV
+
+      - name: The installed arm64 app passes its runtime smoke
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\smoke.json"
+          $p = Start-Process "$env:INSTALL_DIR\UEFN-Ducky.exe" -ArgumentList '--runtime-smoke', $out -Wait -PassThru
+          Get-Content $out
+          if ($p.ExitCode -ne 0 -or -not (Get-Content $out | ConvertFrom-Json).ok) { throw "runtime smoke failed ($($p.ExitCode))" }
