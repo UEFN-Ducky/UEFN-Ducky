@@ -1,9 +1,11 @@
-"""Linux dictation: a fake mic stream goes through to the Whisper transcriber."""
+"""Linux/macOS dictation: a fake mic stream goes through to the Whisper transcriber."""
 import base64
 import io
 import sys
 import types
 import wave
+
+import pytest
 
 from backend.voice import linux_speech as stt
 from backend.voice import transcription
@@ -24,7 +26,12 @@ class _FakeStream:
         self.closed = True
 
 
-def _fake_mic(monkeypatch, fail=False):
+@pytest.fixture(params=["linux", "darwin"])
+def platform(request):
+    return request.param
+
+
+def _fake_mic(monkeypatch, fail=False, platform="linux"):
     streams = []
 
     def make(**kwargs):
@@ -34,7 +41,7 @@ def _fake_mic(monkeypatch, fail=False):
         return streams[-1]
 
     monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(RawInputStream=make))
-    monkeypatch.setattr(stt.sys, "platform", "linux")
+    monkeypatch.setattr(stt.sys, "platform", platform)
     return streams
 
 
@@ -48,8 +55,8 @@ def _drain(sid, cursor):
             return events
 
 
-def test_mic_take_is_transcribed_as_a_final(monkeypatch):
-    streams = _fake_mic(monkeypatch)
+def test_mic_take_is_transcribed_as_a_final(monkeypatch, platform):
+    streams = _fake_mic(monkeypatch, platform=platform)
     heard = []
 
     def transcribe(b64, mime):
@@ -69,8 +76,8 @@ def test_mic_take_is_transcribed_as_a_final(monkeypatch):
     assert streams[0].closed
 
 
-def test_transcriber_error_reaches_the_poll(monkeypatch):
-    _fake_mic(monkeypatch)
+def test_transcriber_error_reaches_the_poll(monkeypatch, platform):
+    _fake_mic(monkeypatch, platform=platform)
     monkeypatch.setattr(transcription, "transcribe_audio", lambda b64, mime: {"ok": False, "error": "no key"})
     started = stt.start_session()
     stt.stop_session(started["session"])
@@ -78,16 +85,16 @@ def test_transcriber_error_reaches_the_poll(monkeypatch):
     assert {"t": "error", "sid": started["session"], "code": "failed", "message": "no key"} in events
 
 
-def test_cancel_skips_transcription_and_no_mic_is_explicit(monkeypatch):
-    _fake_mic(monkeypatch)
+def test_cancel_skips_transcription_and_no_mic_is_explicit(monkeypatch, platform):
+    _fake_mic(monkeypatch, platform=platform)
     monkeypatch.setattr(transcription, "transcribe_audio", lambda *a: (_ for _ in ()).throw(AssertionError("called")))
     started = stt.start_session()
     stt.cancel_session(started["session"])
     assert [e["t"] for e in _drain(started["session"], started["cursor"])][-1] == "ended"
-    _fake_mic(monkeypatch, fail=True)
+    _fake_mic(monkeypatch, fail=True, platform=platform)
     assert stt.start_session()["code"] == "no_mic"
 
 
-def test_off_linux_is_unsupported(monkeypatch):
+def test_off_linux_and_macos_is_unsupported(monkeypatch):
     monkeypatch.setattr(stt.sys, "platform", "win32")
     assert stt.start_session()["code"] == "unsupported"

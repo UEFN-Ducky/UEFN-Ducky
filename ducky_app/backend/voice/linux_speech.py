@@ -1,8 +1,11 @@
-"""Linux dictation for the desktop panel: same API and events as ``windows_speech``.
+"""Linux and macOS dictation for the desktop panel: same API and events as ``windows_speech``.
 
-Linux has no built-in dictation engine, so the mic is captured through
-PortAudio (``sounddevice``, which reaches PipeWire / PulseAudio) and the take is
-sent to the app's existing Whisper path (``transcription.transcribe_audio``).
+Neither has a dictation engine we can drive, so the mic is captured through
+PortAudio (``sounddevice``, which reaches PipeWire / PulseAudio, or CoreAudio from
+the macOS wheel's bundled PortAudio) and the take is sent to the app's existing
+Whisper path (``transcription.transcribe_audio``). On macOS the first take raises
+the system mic prompt (the .app's ``NSMicrophoneUsageDescription``); a denied mic
+records silence, which transcribes to no final.
 
 Events (polled like Windows): started, speech_started, speech_stopped, final,
 error, ended.
@@ -26,7 +29,7 @@ _ENDED_EVENTS = frozenset({"ended"})
 
 
 def linux_speech_supported() -> bool:
-    return sys.platform.startswith("linux")
+    return sys.platform.startswith("linux") or sys.platform == "darwin"
 
 
 _cond = threading.Condition()
@@ -98,7 +101,7 @@ def _close(sid: str) -> dict[str, Any] | None:
 
 
 def _unsupported() -> dict[str, Any]:
-    return {"ok": False, "code": "unsupported", "error": "Linux speech is only available on Linux."}
+    return {"ok": False, "code": "unsupported", "error": "Desktop dictation here is only available on Linux and macOS."}
 
 
 def prewarm() -> dict[str, Any]:
@@ -107,7 +110,8 @@ def prewarm() -> dict[str, Any]:
     try:
         import sounddevice  # noqa: F401, PLC0415
     except Exception as exc:  # noqa: BLE001 — OSError when libportaudio2 is missing
-        return {"ok": False, "code": "failed", "error": f"Microphone support is missing ({exc}). Install libportaudio2."}
+        hint = "Reinstall UEFN Ducky." if sys.platform == "darwin" else "Install libportaudio2."
+        return {"ok": False, "code": "failed", "error": f"Microphone support is missing ({exc}). {hint}"}
     return {"ok": True}
 
 
