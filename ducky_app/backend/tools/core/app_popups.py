@@ -32,6 +32,9 @@ from typing import Any
 _LINUX = sys.platform.startswith("linux")
 WAYLAND_REASON = ("Wayland does not let one app see or click another app's windows, so app popups "
                   "can't be listed or pressed here. Log in to an X11 (Xorg) session to use them.")
+# ponytail: no macOS popup reader (Accessibility API); add one when a Mac app needs pressing.
+MAC_REASON = ("App popups are read and pressed on Windows and Linux (X11) only. For UEFN, open your "
+              "PC’s Ducky (Duckies → your PC) and run it there.")
 
 # name -> exe names (lower case). Any other exe works too: app="foo.exe".
 APPS: dict[str, tuple[str, ...]] = {
@@ -85,6 +88,8 @@ def unsupported_reason() -> str:
         from frontend.native_capture import is_wayland
 
         return WAYLAND_REASON if is_wayland() else ""
+    if sys.platform == "darwin":
+        return MAC_REASON
     return ""
 
 

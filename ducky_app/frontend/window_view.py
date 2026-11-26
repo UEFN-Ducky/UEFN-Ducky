@@ -301,14 +301,38 @@ def _start_uefn(exe: object, project: object | None = None, extra: object = None
     )
 
 
+UEFN_ON_PC = "UEFN runs on Windows. Open your PC’s Ducky (Duckies → {pc}) and run it there."
+
+
+def uefn_on_pc() -> dict[str, Any] | None:
+    """None where UEFN can run here. On macOS: the answer that sends the job to the account's
+    PC. ``open_remote`` lists its online Duckies for ``open_remote_ducky(key_id, name, chat_id)``."""
+    if sys.platform != "darwin":
+        return None
+    pcs: list[dict[str, str]] = []
+    try:
+        from frontend.ducky_link import list_duckies
+
+        pcs = [{"key_id": d["keyId"], "name": d["name"]} for d in list_duckies().get("devices") or []
+               if d.get("live") and not d.get("mine") and d.get("keyId")]
+    except Exception:
+        pass  # signed out or offline: the message still says where to go
+    pc = pcs[0]["name"] if len(pcs) == 1 else "your PC"
+    return {"ok": False, "error": UEFN_ON_PC.format(pc=pc), "open_remote": pcs}
+
+
 def launch_uefn() -> dict[str, Any]:
     """Editor hub only — no island argv."""
+    if (away := uefn_on_pc()) is not None:
+        return away
     exe, extra = uefn_editor_launch()
     _start_uefn(exe, None, extra)
     return {"ok": True, "exe": exe, "path": ""}
 
 
 def launch_uefn_project(root: str | os.PathLike[str] | None = None) -> dict[str, Any]:
+    if (away := uefn_on_pc()) is not None:
+        return away
     exe, extra = uefn_editor_launch()
     path = uefnproject_path(root) if root else uefnproject_path()
     _start_uefn(exe, path, extra)
@@ -388,6 +412,8 @@ def close_uefn(*, timeout: float = _CLOSE_WAIT_S) -> dict[str, Any]:
     Graceful path is WM_CLOSE plus the existing save-modal press. ``taskkill /F``
     runs only when the process is still up after ``timeout`` seconds.
     """
+    if (away := uefn_on_pc()) is not None:
+        return away
     if _request_uefn_close() and _wait_uefn_exit(timeout):
         return {"ok": True, "graceful": True, "killed": False}
     return {"ok": True, "graceful": False, "killed": _kill_uefn_editor()}
@@ -400,6 +426,9 @@ def wait_uefn_ready(
 ) -> dict[str, Any]:
     """Poll listener health until it is online and the open island matches."""
     import time
+
+    if (away := uefn_on_pc()) is not None:
+        return {**away, "seconds": 0.0, "project_name": "", "project_match": False}
 
     from backend.bridge.client import listener_get_health
     from backend.bridge.status import _project_from_health
@@ -471,6 +500,8 @@ def restart_uefn_project(
     wait: bool = False,
     timeout: float = 180.0,
 ) -> dict[str, Any]:
+    if (away := uefn_on_pc()) is not None:
+        return away
     closed = close_uefn()
     out = launch_uefn_project(root)
     out["killed"] = bool(closed.get("killed"))

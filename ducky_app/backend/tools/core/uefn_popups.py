@@ -362,6 +362,10 @@ def _save_capture(img: Any, buttons: list[dict[str, Any]]) -> str:
 
 def press_button(hwnd: int, n: int) -> dict[str, Any]:
     """Press button ``n`` (1-based, left to right) of a UEFN popup, then report whether it closed."""
+    from frontend.window_view import uefn_on_pc
+
+    if (away := uefn_on_pc()) is not None:
+        return away
     popup = _popup(hwnd)
     if popup is None:
         return {"ok": False, "error": f"no UEFN popup {hwnd} on screen (uefn_popups lists them)"}
@@ -520,6 +524,10 @@ def find_conflict_dialog() -> dict[str, Any] | None:
 
 def blocked_call_hint() -> str:
     """What a hung or timed-out editor call tells the agent: look at UEFN and act."""
+    if sys.platform == "darwin":
+        from frontend.window_view import UEFN_ON_PC
+
+        return UEFN_ON_PC.format(pc="your PC")
     try:
         titles = [p["title"] for p in holding_popups()]
     except Exception:

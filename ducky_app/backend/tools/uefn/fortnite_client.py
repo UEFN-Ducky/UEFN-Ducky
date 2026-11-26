@@ -142,7 +142,16 @@ def _shot(u: Any, hwnd: int, label: str) -> dict[str, Any]:
     return {"kind": "image", "path": path, "name": label}
 
 
+def _on_pc() -> dict[str, Any] | None:
+    """macOS: the Fortnite client runs on the account's PC (see window_view.uefn_on_pc)."""
+    from frontend.window_view import uefn_on_pc
+
+    return uefn_on_pc()
+
+
 def client_status() -> dict[str, Any]:
+    if (away := _on_pc()) is not None:
+        return away
     try:
         u, hwnd, title = _client()
     except NoClientWindow:
@@ -164,6 +173,8 @@ def client_status() -> dict[str, Any]:
 
 
 def client_wait(timeout: float = 120.0) -> dict[str, Any]:
+    if (away := _on_pc()) is not None:
+        return away
     duration = min(max(float(timeout), 1.0), 120.0)
     deadline = time.monotonic() + duration
     last: dict[str, Any] = {}
@@ -181,6 +192,8 @@ def client_wait(timeout: float = 120.0) -> dict[str, Any]:
 
 
 def client_capture() -> dict[str, Any]:
+    if (away := _on_pc()) is not None:
+        return away
     try:
         u, hwnd, title = _client()
         _require_gameplay()
@@ -230,6 +243,8 @@ def client_move(key: str = "W", seconds: float = 1.5) -> dict[str, Any]:
     duration = float(seconds)
     if not 0.1 <= duration <= 3.0:
         return {"ok": False, "error": "Hold time must be between 0.1 and 3 seconds"}
+    if (away := _on_pc()) is not None:
+        return away
     try:
         u, hwnd, _title = _client()
         _require_gameplay()

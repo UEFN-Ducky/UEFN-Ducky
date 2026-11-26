@@ -986,3 +986,57 @@ def test_gtk_main_window_opens_reports_ready_and_closes() -> None:
     assert proc.returncode == 0 and lines, proc.stdout + proc.stderr
     result = json.loads(lines[-1][len("RESULT "):])
     assert result == {"chrome_first": True, "api": "pong", "native_drag": True}
+
+
+# --------------------------------------------------------------------------- macOS: UEFN is on the PC
+
+
+@pytest.fixture
+def mac(monkeypatch):
+    import subprocess
+
+    from frontend import ducky_link
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(ducky_link, "list_duckies", lambda: {"ok": True, "devices": [
+        {"keyId": "k_me", "name": "Tas's Mac", "live": True, "mine": True},
+        {"keyId": "k_pc", "name": "Tas's PC", "live": True, "mine": False},
+        {"keyId": "k_old", "name": "Old laptop", "live": False, "mine": False},
+    ]})
+
+    def no_process(*_a, **_kw):
+        raise AssertionError("a Mac must never start or kill UEFN")
+
+    monkeypatch.setattr(subprocess, "Popen", no_process)
+    monkeypatch.setattr(subprocess, "run", no_process)
+
+
+@pytest.mark.parametrize("call", [launch_uefn, launch_uefn_project, close_uefn, restart_uefn_project])
+def test_on_a_mac_uefn_calls_point_to_the_pcs_ducky(mac, call) -> None:
+    out = call()
+    assert out["ok"] is False
+    assert out["error"] == "UEFN runs on Windows. Open your PC’s Ducky (Duckies → Tas's PC) and run it there."
+    assert out["open_remote"] == [{"key_id": "k_pc", "name": "Tas's PC"}]
+
+
+def test_on_a_mac_signed_out_still_says_where_uefn_runs(monkeypatch) -> None:
+    from frontend import ducky_link
+    from frontend.window_view import uefn_on_pc, wait_uefn_ready
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def signed_out():
+        raise ducky_link.LinkError("Sign in to your Ducky account on this UEFN Ducky first.")
+
+    monkeypatch.setattr(ducky_link, "list_duckies", signed_out)
+    assert uefn_on_pc() == {"ok": False, "open_remote": [],
+                            "error": "UEFN runs on Windows. Open your PC’s Ducky (Duckies → your PC) and run it there."}
+    assert wait_uefn_ready(timeout=60)["ok"] is False  # answers at once, no 60 s poll
+
+
+def test_uefn_on_pc_is_none_off_macos(monkeypatch) -> None:
+    from frontend.window_view import uefn_on_pc
+
+    for platform in ("win32", "linux"):
+        monkeypatch.setattr(sys, "platform", platform)
+        assert uefn_on_pc() is None

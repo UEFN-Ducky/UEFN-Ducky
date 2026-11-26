@@ -1,4 +1,5 @@
 """Launch, close and restart UEFN: ``frontend.window_view`` on Windows, Proton on Linux.
+On macOS window_view answers "run it on your PC" (``uefn_on_pc``); proton is never imported.
 
 Looked up on every call, so a test that patches either module still sees its fake.
 """

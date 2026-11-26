@@ -143,7 +143,9 @@ def dismiss_uefn_save_modal(
         except Exception as exc:
             return {"ok": False, "error": str(exc), "clicked": False}
     if sys.platform != "win32":
-        return {"ok": False, "error": "Windows only", "clicked": False}
+        from frontend.window_view import uefn_on_pc
+
+        return {**(uefn_on_pc() or {"ok": False, "error": "Windows only"}), "clicked": False}
     try:
         return _dismiss_win32(allow_bare_enter=allow_bare_enter, skip=skip)
     except Exception as exc:
