@@ -123,13 +123,14 @@ jobs:
             *) printf '%s' "$SCRIPT" > "$out/look-script.js"; export DUCKY_LOOK_SCRIPT="$out/look-script.js" ;;
           esac
           # run_app <tag>: start the app, screenshot every 10 s for SECONDS_TO_RUN, stop it.
+          APP_EXITED=0
           run_app() {
             "$bin" "${args[@]}" > "$out/stdout-$1.log" 2>&1 &
             local pid=$! t total="${SECONDS_TO_RUN:-40}"
             for ((t = 10; t <= total; t += 10)); do
               sleep 10
               screencapture -x "$out/$1-$ARCH-$(printf '%03d' "$t")s.png" || echo "screencapture failed at ${t}s"
-              kill -0 "$pid" 2>/dev/null || { echo "app exited after ~${t}s"; break; }
+              kill -0 "$pid" 2>/dev/null || { echo "app exited after ~${t}s"; APP_EXITED=1; break; }
             done
             kill "$pid" 2>/dev/null || true
             sleep 3
@@ -141,6 +142,11 @@ jobs:
               [ -n "$STAGING_URL" ] || { echo "telemetry needs the DUCKYOS_STAGING_URL secret (never production)"; exit 1; }
               unset DUCKY_SANDBOX
               export DUCKYOS_BASE_URL="$STAGING_URL"
+              # Guard: the URL this profile resolves (account + usage) must be staging, never production.
+              "$bin" --base-url-probe "$out/base-url.txt" || { echo "--base-url-probe failed"; exit 1; }
+              want="$(python3 -c 'import sys, urllib.parse as u; t = sys.argv[1].strip().rstrip("/"); t = t if "://" in t else "https://" + t; print("https://" + u.urlparse(t).netloc)' "$STAGING_URL")"
+              got="$(tr -d '\n' < "$out/base-url.txt")"
+              [ "$got" = "$want" ] || { echo "::error::the app resolves its Store to a URL that isn't DUCKYOS_STAGING_URL: telemetry not run"; exit 1; }
               run_app telemetry
               grep -rhi "usage" "$out"/stdout-telemetry.log ~/Library/Logs/UEFN-Ducky 2>/dev/null | tail -n 20 || true
               ;;
@@ -157,19 +163,65 @@ jobs:
               fi
               ;;
             tcc)
+              # tcc_set <auth_value>: 0 denied, 2 allowed, for mic, Screen Recording and Automation
+              # (System Events), so neither run waits on a prompt nobody can click.
+              tcc_set() {
+                local now svc row
+                now="$(date +%s)"
+                for svc in kTCCServiceMicrophone kTCCServiceScreenCapture kTCCServiceAppleEvents; do
+                  if [ "$svc" = kTCCServiceAppleEvents ]; then
+                    row="'$svc','online.uefnducky.Ducky',0,$1,4,1,NULL,NULL,0,'com.apple.systemevents',NULL,0,$now,NULL,NULL,'UNUSED',0"
+                  else
+                    row="'$svc','online.uefnducky.Ducky',0,$1,4,1,NULL,NULL,0,'UNUSED',NULL,0,$now,NULL,NULL,'UNUSED',0"
+                  fi
+                  sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES($row);" \
+                    || echo "::warning::user TCC.db insert for $svc failed"
+                  sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES($row);" \
+                    || echo "::warning::system TCC.db insert for $svc failed"
+                done
+                sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
+                  "SELECT service, client, auth_value FROM access WHERE client='online.uefnducky.Ducky';" | tee "$out/tcc-$2.txt"
+              }
+              # tcc_probe <denied|granted>: launched by LaunchServices so macOS asks about the .app
+              # itself (a child of this shell would be judged as the runner), then checked.
+              tcc_probe() {
+                rm -f "$out/tcc-$1.json"
+                open -W -n --env DUCKY_SANDBOX=1 "dist/UEFN Ducky.app" --args --tcc-probe "$out/tcc-$1.json" \
+                  || echo "::warning::open -W exited non-zero"
+                [ -s "$out/tcc-$1.json" ] || { echo "::error::--tcc-probe wrote no report ($1): the app died"; exit 1; }
+                cat "$out/tcc-$1.json"
+                python3 - "$out/tcc-$1.json" "$1" <<'EOF'
+          import json, sys
+          report, run = json.load(open(sys.argv[1])), sys.argv[2]
+          bad = []
+          for name in ("mic", "snip", "osascript"):
+              got = report.get(name) or {}
+              message = "Privacy & Security" in str(got.get("message", ""))
+              if run == "denied" and not message:
+                  bad.append(f"{name}: no System Settings > Privacy & Security message ({got})")
+              elif run == "granted" and message:
+                  bad.append(f"{name}: still refused after the grant ({got['message']})")
+              elif run == "granted" and not got.get("ok"):
+                  print(f"::warning::{name}: {got.get('error')}")
+          if run == "denied":
+              print(f"denied: {3 - len(bad)} friendly messages")
+          else:
+              print("granted: mic {} s, snip {}, osascript {}".format(
+                  report.get("mic", {}).get("seconds", "-"), report.get("snip", {}).get("size", "-"),
+                  "ok" if report.get("osascript", {}).get("ok") else "-"))
+          for line in bad:
+              print(f"::error::{line}")
+          sys.exit(1 if bad else 0)
+          EOF
+              }
+              tcc_set 0 denied
+              tcc_probe denied | tee "$out/tcc-denied-summary.txt"
+              [ "${PIPESTATUS[0]}" = 0 ] || exit 1
               run_app tcc-denied
-              grep -rhi "System Settings" "$out"/stdout-tcc-denied.log ~/Library/Logs/UEFN-Ducky 2>/dev/null \
-                | tee "$out/tcc-denied-messages.txt" || echo "::warning::no 'allow in System Settings' message seen"
-              now="$(date +%s)"
-              for svc in kTCCServiceMicrophone kTCCServiceScreenCapture kTCCServiceAppleEvents; do
-                row="'$svc','online.uefnducky.Ducky',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$now,NULL,NULL,'UNUSED',0"
-                sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES($row);" \
-                  || echo "::warning::user TCC.db insert for $svc failed"
-                sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES($row);" \
-                  || echo "::warning::system TCC.db insert for $svc failed"
-              done
-              sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
-                "SELECT service, client, auth_value FROM access WHERE client='online.uefnducky.Ducky';" | tee "$out/tcc-granted.txt"
+              [ "$APP_EXITED" = 0 ] || { echo "::error::the app stopped during the denied run"; exit 1; }
+              tcc_set 2 granted
+              tcc_probe granted | tee "$out/tcc-granted-summary.txt"
+              [ "${PIPESTATUS[0]}" = 0 ] || exit 1
               run_app tcc-granted
               ;;
             *)
