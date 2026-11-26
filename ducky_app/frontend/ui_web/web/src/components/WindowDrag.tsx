@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { getApi, isRemote } from "../hooks/usePanelApi";
-import { isNativeWindowChrome, markNativeWindowChromeBody } from "../utils/nativeWindowChrome";
+import { isMacWindow, isNativeWindowChrome, markNativeWindowChromeBody } from "../utils/nativeWindowChrome";
 import { beginNativeWindowMove, isHeaderDragTarget, isWindowDragTarget, showNativeWindowMenu } from "../utils/windowDrag";
 
 /** Frameless captions enter the native move loop on Windows, with a JS fallback elsewhere. */
@@ -56,7 +56,8 @@ export function WindowDrag() {
 
       // The header uses DOM input consistently. Other native caption surfaces
       // keep their existing fallback for events that WebView2 forwards to JS.
-      if (isNativeWindowChrome()) {
+      // macOS: Cocoa's own drag loop (mac_frameless.begin_move) moves the window.
+      if (isNativeWindowChrome() || isMacWindow()) {
         if (isHeaderDragTarget(e.target)) {
           // Let stationary clicks finish in the DOM so double-click works.
           // Once the pointer moves, Win32 owns the drag, restore and Aero Snap.

@@ -516,7 +516,12 @@ def _pin_webview_once(window: object) -> None:
 
 
 def refresh_window_chrome(window: object, *, pin: bool = False) -> bool:
-    """Apply Win32 chrome styles. Optional one-shot WebView pin after first paint."""
+    """Apply Win32 chrome styles. Optional one-shot WebView pin after first paint.
+    macOS: the transparent title bar with its traffic lights (mac_frameless)."""
+    if sys.platform == "darwin":
+        from frontend.ui_web import mac_frameless
+
+        return mac_frameless.apply(window)
     if sys.platform != "win32":
         return False
     hwnd = _hwnd_from_pywebview(window)
@@ -631,6 +636,10 @@ def begin_native_window_move(
     """Hand off caption drag to the OS, outside WebView2's message callback."""
     if sys.platform.startswith("linux"):
         return _gtk_begin_drag(window, None, screen_x, screen_y)
+    if sys.platform == "darwin":
+        from frontend.ui_web import mac_frameless
+
+        return mac_frameless.begin_move(window)
     if sys.platform != "win32":
         return False
     hwnd = _hwnd_from_pywebview(window)
@@ -1437,7 +1446,8 @@ def _bridge_call(window: object, func_name: str, func, param: object, value_id: 
 def install_sync_drag_bridge() -> None:
     """Route chrome input directly from WebView2 to its owning window's UI thread."""
     linux = sys.platform.startswith("linux")
-    if sys.platform != "win32" and not linux:
+    mac = sys.platform == "darwin"
+    if sys.platform != "win32" and not linux and not mac:
         return
     try:
         import webview.util as webview_util
@@ -1490,6 +1500,13 @@ def install_sync_drag_bridge() -> None:
             edgechromium.js_bridge_call = patched
         if linux and "webview.platforms.gtk" in sys.modules:  # gtk.py imports it by value too
             sys.modules["webview.platforms.gtk"].js_bridge_call = patched
+        if mac:  # cocoa.py imports it by value too; it loads at webview.start, so load it now
+            try:
+                import webview.platforms.cocoa as cocoa  # type: ignore[import-not-found]
+
+                cocoa.js_bridge_call = patched
+            except Exception:
+                pass
         install_sync_drag_bridge._installed = True  # type: ignore[attr-defined]
     except Exception:
         pass

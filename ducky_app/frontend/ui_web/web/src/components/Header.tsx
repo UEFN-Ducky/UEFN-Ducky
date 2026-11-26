@@ -20,7 +20,7 @@ import { QuickOpenBar } from "./quick-open/QuickOpenBar";
 import { useQuickOpenBridge } from "../contexts/QuickOpenBridge";
 import type { ChatLayoutMode, ListenerStatus, ProjectInfo } from "../types/panel";
 import { getApi, isRemote } from "../hooks/usePanelApi";
-import { isNativeWindowChrome } from "../utils/nativeWindowChrome";
+import { isMacWindow, isNativeWindowChrome } from "../utils/nativeWindowChrome";
 import { requestOpenSettings } from "../navigation/openSettingsTab";
 import { requestOpenChangesTab } from "../navigation/openChangesTab";
 import { requestOpenWorkflowsTab } from "../navigation/openWorkflowsTab";
@@ -587,10 +587,13 @@ export function Header({
     route: "changes",
   });
 
+  // macOS keeps its traffic lights in the header's left corner instead of our buttons.
+  const mac = isMacWindow();
   return (
     <header
       ref={headerTargetRef}
-      className={`glass-panel app-header${isFocus ? " app-header--focus" : ""} drag-region app-drag-surface${compactHeader ? " app-header--compact" : ""}${isRemote() ? " app-header--remote" : ""}${streaming ? " app-header--streaming" : ""}`}
+      data-platform={mac ? "mac" : undefined}
+      className={`glass-panel app-header${isFocus ? " app-header--focus" : ""} drag-region app-drag-surface${compactHeader ? " app-header--compact" : ""}${isRemote() ? " app-header--remote" : ""}${streaming ? " app-header--streaming" : ""}${mac ? " app-header--mac" : ""}`}
     >
       <div id="ducky-skin-header" className="ducky-skin-slot ducky-skin-slot--header" aria-hidden="true" />
       <div className="app-header-left">
@@ -789,7 +792,7 @@ export function Header({
           ) : null}
         </Suspense>
 
-        {isRemote() ? null : (
+        {isRemote() || mac ? null : (
         <div className="window-controls">
           <button type="button" onClick={handleMinimize} className="window-control-btn no-drag" title="Minimize">
             <Icons.Minimize />

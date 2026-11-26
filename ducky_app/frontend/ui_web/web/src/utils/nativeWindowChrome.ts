@@ -19,8 +19,17 @@ export function isNativeWindowChrome(): boolean {
   return pw?.platform === "edgechromium";
 }
 
+/** macOS (pywebview Cocoa / WKWebView): the window keeps its traffic lights. */
+export function isMacWindow(): boolean {
+  const pw = (window as unknown as { pywebview?: PyWebViewBridge }).pywebview;
+  return pw?.platform === "cocoa";
+}
+
 export function markNativeWindowChromeBody(): void {
   if (isNativeWindowChrome()) {
     document.body.classList.add("native-window-chrome");
+  }
+  if (isMacWindow()) {
+    document.documentElement.dataset.platform = "mac";
   }
 }

@@ -756,6 +756,9 @@ body.native-caption-input-ready .app-header .drag-region {
 :root {
   --app-header-height: 34px;
 }
+/* macOS: the native traffic lights sit in the header's left corner; Cocoa resizes the window. */
+.app-header.app-header--mac { padding-left: 78px; }
+[data-platform="mac"] .window-resize-grip { display: none; }
 .app-header {
   height: var(--app-header-height);
   display: flex;
