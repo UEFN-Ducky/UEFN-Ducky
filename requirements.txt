@@ -28,23 +28,34 @@ openai>=1.40.0
 google-genai>=1.0
 # Windows terminal backend; no wheels on macOS/Linux (pip-audit CI runs on ubuntu).
 pywinpty>=2.0.13; platform_system == "Windows"
-# Linux only (the markers keep Windows installs as they were): the terminal's pty, the
-# secrets master key in the desktop keyring, the microphone (PortAudio), X11 windows and
-# capture, and D-Bus portals (Wayland capture, notifications). PyGObject comes from the
-# distro (python3-gi), never pip.
-ptyprocess>=0.7.0; sys_platform == "linux"
-keyring>=25.0; sys_platform == "linux"
-sounddevice>=0.5.0; sys_platform == "linux"
+# Linux and macOS (the markers keep Windows installs as they were): the terminal's pty, the
+# secrets master key in the desktop keyring / Keychain, the microphone (PortAudio) and
+# screen capture.
+ptyprocess>=0.7.0; sys_platform != "win32"
+keyring>=25.0; sys_platform != "win32"
+sounddevice>=0.5.0; sys_platform != "win32"
+mss>=9.0; sys_platform != "win32"
+# Linux only: X11 windows and capture, and D-Bus portals (Wayland capture, notifications).
+# PyGObject comes from the distro (python3-gi), never pip.
 python-xlib>=0.33; sys_platform == "linux"
 jeepney>=0.9.0; sys_platform == "linux"
-mss>=9.0; sys_platform == "linux"
+# macOS only: the native window and WebKit view, screen capture, microphone, notifications.
+# One PyObjC release for all of them (universal2 wheels: arm64 and x86_64).
+pyobjc-core==13.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==13.1; sys_platform == "darwin"
+pyobjc-framework-WebKit==13.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==13.1; sys_platform == "darwin"
+pyobjc-framework-ScreenCaptureKit==13.1; sys_platform == "darwin"
+pyobjc-framework-AVFoundation==13.1; sys_platform == "darwin"
+pyobjc-framework-UserNotifications==13.1; sys_platform == "darwin"
 # Token-efficient tool results for embedded agent (TOON encoding at LLM boundary).
 # PyPI toon-format 0.1.0 is a stub; official encoder lives on GitHub.
 toon_format @ git+https://github.com/toon-format/toon-python.git@536a508d486847cb01ec1869cf21d1f7556b0db0
 # Custom code workflow nodes run their JavaScript in V8 (ships mini_racer.dll + icudtl.dat).
 mini-racer==0.14.1
 # Compiled plugins: disassemble an x86 build to prove every PC's CPU runs it (cpu_check.py).
-# No win_arm64 wheel; an arm64 PC never builds x86 plugins.
+# No win_arm64 wheel; an arm64 PC never builds x86 plugins. macOS has a universal2 wheel
+# (a Mac reports platform_machine "arm64", lower case, so the marker keeps it).
 iced-x86==1.22.0; platform_machine != "ARM64"
 # Skill and tool search (backend/search): the meaning model's matrix math and its tokenizer.
 # The model files come from build/fetch_search_model.py (pinned, SHA-256 checked).
