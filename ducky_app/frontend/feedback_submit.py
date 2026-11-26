@@ -20,8 +20,12 @@ def build_payload(
     error_log: str = "",
     app_log: str = "",
     app_version: str = "",
+    platform: str = "",
 ) -> dict[str, str]:
-    """Public collect body. Extra keys are dropped by the form allowlist."""
+    """Public collect body. Extra keys are dropped by the form allowlist, so *platform*
+    (usage_stats.platform_label) leads the error log: feedback reads as Windows or Linux."""
+    if platform:
+        error_log = f"Platform: {platform}\n{error_log or ''}".strip()
     body = {
         "formId": FORM_ID,
         "message": message.strip(),
@@ -62,6 +66,7 @@ def submit_feedback(
         error_log=error_log,
         app_log=app_log,
         app_version=str(__version__),
+        platform=_platform(),
     )
     headers = {
         "Origin": ORIGIN,
@@ -72,6 +77,15 @@ def submit_feedback(
     except HttpError as exc:
         return {"ok": False, "error": _user_error(exc)}
     return {"ok": True}
+
+
+def _platform() -> str:
+    try:
+        from frontend.usage_stats import platform_label
+
+        return platform_label()
+    except Exception:
+        return ""
 
 
 def _current_error_log() -> str:

@@ -46,7 +46,10 @@ def test_submit_sends_origin_and_form_id() -> None:
         captured["timeout"] = timeout
         return {"ok": True, "payload": {"stored": True}}
 
-    with patch("frontend.feedback_submit.http_json", fake_http_json):
+    with (
+        patch("frontend.feedback_submit.http_json", fake_http_json),
+        patch("frontend.feedback_submit._platform", return_value=""),
+    ):
         out = submit_feedback(message="ship faster", email="a@b.co", include_errors=False)
     assert out == {"ok": True}
     assert captured["method"] == "POST"
@@ -68,10 +71,16 @@ def test_submit_attaches_errors_when_asked() -> None:
     with (
         patch("frontend.feedback_submit.http_json", fake_http_json),
         patch("frontend.feedback_submit._current_error_log", return_value="[boom] (panel) failed"),
+        patch("frontend.feedback_submit._platform", return_value="linux-arm64"),
     ):
         out = submit_feedback(message="broken", include_errors=True)
     assert out["ok"] is True
-    assert captured["json_body"]["error_log"] == "[boom] (panel) failed"
+    assert captured["json_body"]["error_log"] == "Platform: linux-arm64\n[boom] (panel) failed"
+
+
+def test_feedback_says_its_platform_even_without_a_log() -> None:
+    body = build_payload(message="hi", platform="windows-x64")
+    assert body["error_log"] == "Platform: windows-x64"
 
 
 def test_submit_skips_empty_error_log() -> None:
@@ -84,6 +93,7 @@ def test_submit_skips_empty_error_log() -> None:
     with (
         patch("frontend.feedback_submit.http_json", fake_http_json),
         patch("frontend.feedback_submit._current_error_log", return_value="  "),
+        patch("frontend.feedback_submit._platform", return_value=""),
     ):
         submit_feedback(message="hi", include_errors=True)
     assert "error_log" not in captured["json_body"]
@@ -121,6 +131,7 @@ def test_submit_feedback_sends_the_logs_that_were_asked_for() -> None:
         patch("frontend.feedback_submit.http_json", side_effect=fake_post),
         patch("frontend.feedback_submit._current_error_log", return_value="[t] (agent) boom"),
         patch("frontend.feedback_submit._current_app_log", return_value="[t] (panel) started"),
+        patch("frontend.feedback_submit._platform", return_value=""),
     ):
         assert submit_feedback(message="hi", include_log=True)["ok"] is True
     assert sent.get("app_log") == "[t] (panel) started" and "error_log" not in sent
