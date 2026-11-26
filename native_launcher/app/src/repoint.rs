@@ -40,6 +40,8 @@ pub const DEFAULT_NATIVE_LAUNCHER: &str = "auto";
 /// `app_versions.VERSIONS_DIR_NAME` / `CURRENT_FILE`.
 pub const VERSIONS_DIR: &str = "versions";
 pub const CURRENT_FILE: &str = "current.json";
+/// `app_versions.STABLE_DIR_NAME`: the one folder a downloaded version runs from.
+pub const STABLE_DIR: &str = "app";
 
 /// What a launch started from `exe` does first.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,11 +99,15 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// `…/versions/app-<v>/Ducky-Launcher.exe`: a version's own launcher.
+/// `…/versions/app-<v>/Ducky-Launcher.exe` or `…/versions/app/…`: a version's own launcher.
 fn in_version_folder(exe: &Path) -> bool {
-    let Some(dir) = exe.parent() else { return false };
+    exe.parent().is_some_and(is_version_dir)
+}
+
+fn is_version_dir(dir: &Path) -> bool {
     let named = |p: &Path, f: &dyn Fn(&str) -> bool| p.file_name().and_then(|n| n.to_str()).is_some_and(f);
-    named(dir, &|n| n.starts_with("app-")) && dir.parent().is_some_and(|v| named(v, &|n| n.eq_ignore_ascii_case(VERSIONS_DIR)))
+    named(dir, &|n| n.starts_with("app-") || n.eq_ignore_ascii_case(STABLE_DIR))
+        && dir.parent().is_some_and(|v| named(v, &|n| n.eq_ignore_ascii_case(VERSIONS_DIR)))
 }
 
 /// The root can run `version` itself: it is this launcher's own version and the root holds a
@@ -207,7 +213,10 @@ impl Spawn {
             cmd.env(k, v);
         }
         if let Some(dir) = self.exe.parent() {
-            cmd.current_dir(dir);
+            // Never inside a version folder: Windows then refuses to rename it, and
+            // `app_versions.promote` swaps `versions/app` on an update.
+            let outside = if is_version_dir(dir) { dir.parent().and_then(Path::parent) } else { None };
+            cmd.current_dir(outside.unwrap_or(dir));
         }
         cmd
     }
@@ -427,6 +436,22 @@ mod tests {
         // The hopped launcher (HOP=1) runs where it is, even at a root with a pointer.
         assert_eq!(l.decide(true), Root::RunHere);
         assert!(l.start(&args(), true, false, "on").is_none());
+        l.drop_all();
+    }
+
+    #[test]
+    fn the_stable_folder_is_a_version_folder_and_never_a_working_folder() {
+        let l = Layout::new("stable");
+        let stable = l.app_data.join(VERSIONS_DIR).join(STABLE_DIR).join(LAUNCHER_EXE);
+        touch(&stable);
+        touch(&stable.with_file_name(STUB_EXE));
+        assert_eq!(root_decision(&stable, false, &l.app_data, OWN), Root::RunHere);
+        l.pointer(r#"{"version":"1.2.472","dir":"versions/app"}"#);
+        assert_eq!(l.decide(false), Root::Exec(stable.clone()));
+        let cmd = Spawn::hop(stable.clone(), &args()).command();
+        assert_eq!(cmd.get_current_dir(), Some(l.app_data.as_path()));
+        let other = Spawn::hop(l.exe.clone(), &args()).command();
+        assert_eq!(other.get_current_dir(), Some(l.root.as_path()));
         l.drop_all();
     }
 

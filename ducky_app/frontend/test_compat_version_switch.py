@@ -105,7 +105,8 @@ def test_newest_usable_and_mark_ready(trees) -> None:
 def test_old_stub_hands_old_argv_to_the_new_version_unchanged(trees, starts, monkeypatch, argv) -> None:
     monkeypatch.setattr(sys, "argv", list(sys.argv))
     _hand_off(argv)
-    assert starts == [(trees[NEW] / "UEFN-Ducky.exe", argv)]
+    assert av.version_dir(NEW) == av.stable_dir()
+    assert starts == [(av.version_dir(NEW) / "UEFN-Ducky.exe", argv)]
     assert av.read_boot()[NEW]["starts"] == 1
 
 
@@ -125,7 +126,7 @@ def test_a_backend_hands_off_attached_so_the_launcher_keeps_its_pipes(trees, sta
     with pytest.raises(SystemExit) as exc:
         _hand_off([av.BACKEND_ARG, "--background"])
     assert exc.value.code == 0
-    assert ran == [(trees[NEW] / "UEFN-Ducky.exe", [av.BACKEND_ARG, "--background"])]
+    assert ran == [(av.version_dir(NEW) / "UEFN-Ducky.exe", [av.BACKEND_ARG, "--background"])]
     assert starts == []
     assert av.read_boot()[NEW]["starts"] == 1  # a backend start counts like a panel start
 
@@ -158,7 +159,8 @@ def test_a_failed_new_start_rolls_back_to_the_old_version(trees, starts, monkeyp
     starts.clear()
     monkeypatch.setattr(sys, "executable", str(install_exe))
     _hand_off([])
-    assert starts == [(trees[OLD] / "UEFN-Ducky.exe", [])]
+    # From versions/app (app_versions.promote), the path Windows' allows keep naming.
+    assert starts == [(av.stable_dir() / "UEFN-Ducky.exe", [])] and av.version_dir(OLD) == av.stable_dir()
 
 
 def test_a_rollback_ignores_the_launcher(trees, starts, monkeypatch) -> None:
@@ -196,7 +198,7 @@ def test_a_hidden_start_stays_hidden_through_the_hand_off(trees, starts, monkeyp
     monkeypatch.setenv(av.START_HIDDEN_ENV, "1")
     _hand_off(argv)
     want = argv if av.BACKGROUND_ARG in argv else [*argv, av.BACKGROUND_ARG]
-    assert starts == [(trees[NEW] / "UEFN-Ducky.exe", want)]
+    assert starts == [(av.version_dir(NEW) / "UEFN-Ducky.exe", want)]
     starts.clear()
     monkeypatch.delenv(av.START_HIDDEN_ENV)
     monkeypatch.setattr(sys, "executable", str(trees[NEW] / "UEFN-Ducky.exe"))

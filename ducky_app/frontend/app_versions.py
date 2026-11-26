@@ -1,8 +1,9 @@
 """Versions Ducky downloads and switches to by itself: no Setup, no Windows prompt.
 
     %LOCALAPPDATA%\\UEFN-Ducky\\versions\\
+        app\\                    the version that runs, always this one path (see promote)
         app-1.2.411\\            a complete app folder (UEFN-Ducky.exe, -Bridge.exe, _internal\\)
-            .ready              written last, once every file checked out
+            .ready              written last, once every file checked out ({"version": ...})
         app-1.2.412.partial\\    a download in progress
         boot.json               starts per version that never reached ready, and bad versions
         handover.json           window state left by the version that switched to a newer one
@@ -32,6 +33,10 @@ from frontend.app_paths import APP_DATA_DIR_NAME, local_app_data_base
 VERSIONS_DIR_NAME = "versions"
 READY_MARKER = ".ready"
 PARTIAL_SUFFIX = ".partial"
+# The one folder a downloaded version runs from (promote). Windows keeps its allows by path
+# (Controlled folder access, the firewall): a new app-<v> folder per update asked again
+# after every update, where Claude Code and Cursor ask once.
+STABLE_DIR_NAME = "app"
 BOOT_FILE = "boot.json"
 HANDOVER_FILE = "handover.json"
 # {"version", "dir", "written", "installed"}: "dir" is relative to versions_dir().parent
@@ -75,8 +80,85 @@ def versions_dir() -> Path:
     return local_app_data_base() / APP_DATA_DIR_NAME / VERSIONS_DIR_NAME
 
 
+def stable_dir() -> Path:
+    return versions_dir() / STABLE_DIR_NAME
+
+
+def folder_version(folder: Path) -> str:
+    """The version a ready folder holds, from its ``.ready`` marker; "" when unknown."""
+    try:
+        version = str(json.loads((folder / READY_MARKER).read_text(encoding="utf-8")).get("version") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return version if parse_version(version) else ""
+
+
 def version_dir(version: str) -> Path:
+    """Where ``version`` is: the stable folder when it holds it, else ``app-<version>``."""
+    stable = stable_dir()
+    if version and folder_version(stable) == version:
+        return stable
     return versions_dir() / f"app-{version}"
+
+
+def stable_in_use() -> bool:
+    """A program runs from ``versions/app``: Windows refuses to open a running EXE for
+    writing (renaming its folder would still work, and then that program's next read by
+    path would load another version's code)."""
+    for name in (APP_EXE, "UEFN-Ducky-Bridge.exe", NATIVE_LAUNCHER_EXE):
+        try:
+            with open(stable_dir() / name, "r+b"):
+                pass
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+    return False
+
+
+def _link_or_copy(src: str, dst: str) -> None:
+    try:
+        os.link(src, dst)  # same disk as app-<v>: no extra space, works on running files
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def promote(version: str) -> bool:
+    """Put ``version`` in ``versions/app``, the folder every start runs from, so a Windows
+    allow given once (Controlled folder access, the firewall) holds after every update.
+    ``app-<version>`` stays as it is (the folder is a hard-linked twin), so a program
+    running from it is never touched and older versions still find it there. Only while
+    nothing runs from ``versions/app``; else False and the next start tries again.
+    Callers start from :func:`version_dir` afterwards. Never raises."""
+    stable = stable_dir()
+    if folder_version(stable) == version:
+        return True
+    src = versions_dir() / f"app-{version}"
+    if not is_ready(src) or stable_in_use():
+        return False
+    new = stable.with_name(f"{STABLE_DIR_NAME}.new-{os.getpid()}")
+    old = stable.with_name(f"{STABLE_DIR_NAME}.old-{os.getpid()}")
+    try:
+        shutil.rmtree(new, ignore_errors=True)
+        shutil.copytree(src, new, copy_function=_link_or_copy)
+        marker = new / READY_MARKER
+        if folder_version(new) != version:  # an older marker without the version in it
+            marker.unlink()  # a hard link: app-<version>'s own stays as it was
+            marker.write_text(json.dumps({"version": version}), encoding="utf-8")
+        if stable.exists():
+            os.replace(stable, old)
+        try:
+            os.replace(new, stable)
+        except OSError:
+            if old.exists():
+                os.replace(old, stable)
+            raise
+    except OSError:
+        _log.warning("versions/app could not take %s", version, exc_info=True)
+        shutil.rmtree(new, ignore_errors=True)
+        return False
+    shutil.rmtree(old, ignore_errors=True)
+    return True
 
 
 def is_ready(folder: Path) -> bool:
@@ -91,13 +173,15 @@ def ready_versions() -> list[tuple[str, Path]]:
         entries = list(root.iterdir())
     except OSError:
         return []
+    stable = folder_version(root / STABLE_DIR_NAME)
     for entry in entries:
         m = _DIR_RE.match(entry.name)
-        if not m or not entry.is_dir() or not is_ready(entry):
-            continue
-        key = parse_version(m.group(1))
+        version = m.group(1) if m else (stable if entry.name == STABLE_DIR_NAME else "")
+        if not version or (m and version == stable) or not entry.is_dir() or not is_ready(entry):
+            continue  # a second copy of the stable folder's version: that folder wins
+        key = parse_version(version)
         if key is not None:
-            found.append((key, m.group(1), entry))
+            found.append((key, version, entry))
     found.sort(reverse=True)
     return [(version, folder) for _, version, folder in found]
 
@@ -549,6 +633,17 @@ def run_attached(exe: Path, args: list[str]) -> int:
         return 1
 
 
+def start_dir(exe: Path) -> Path:
+    """The working folder for a started Ducky: never inside a version folder, which
+    Windows then refuses to rename (:func:`promote`)."""
+    try:
+        if exe.resolve().is_relative_to(versions_dir().resolve()):
+            return versions_dir().parent
+    except (OSError, ValueError):
+        pass
+    return exe.parent
+
+
 def start_detached(exe: Path, args: list[str], *, env: dict[str, str] | None = None) -> bool:
     """Start ``exe`` on its own, outliving this process (and any job this one is in)."""
     flags = 0
@@ -559,7 +654,7 @@ def start_detached(exe: Path, args: list[str], *, env: dict[str, str] | None = N
             subprocess.Popen(
                 [str(exe), *args],
                 env=env or own_start_env(),
-                cwd=str(exe.parent),
+                cwd=str(start_dir(exe)),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -578,19 +673,26 @@ def hand_off(current: str, *, bridge: bool) -> None:
     if not getattr(sys, "frozen", False) or os.environ.get(NO_HOP_ENV):
         return
     installed = "" if running_from_versions() else current
+    if not bridge and not backend_mode() and _restart_from_stable(current):
+        os._exit(0)
     for _ in range(4):
         target = newest_usable(current)
         if target is None:
             break
         version, folder = target
-        exe = folder / Path(sys.executable).name
-        if not exe.is_file():
+        if not (folder / Path(sys.executable).name).is_file():
             break
+        if not bridge and not record_start(version):
+            continue  # failed to start before: try the next one down
         if bridge:
+            # An IDE's bridge runs for hours: from app-<v>, so it never holds versions/app
+            # against the next update's swap.
+            twin = versions_dir() / f"app-{version}" / Path(sys.executable).name
+            exe = twin if twin.is_file() else folder / Path(sys.executable).name
             write_current(version, installed)
             raise SystemExit(run_attached(exe, sys.argv[1:]))
-        if not record_start(version):
-            continue  # failed to start before: try the next one down
+        promote(version)
+        exe = version_dir(version) / Path(sys.executable).name
         write_current(version, installed)
         if backend_mode():
             # Ducky-Launcher.exe talks to us over stdin/stdout: the newer version must
@@ -600,6 +702,23 @@ def hand_off(current: str, *, bridge: bool) -> None:
             os._exit(0)
         break
     write_current(current, installed)  # this EXE runs
+
+
+def _restart_from_stable(current: str) -> bool:
+    """A window start in ``versions/app-<current>`` (a version switch starts the new
+    version there, while the old one still ran from ``versions/app``): once the old one has
+    closed (``--after-update`` waited for it), put this version in ``versions/app`` and start
+    it from there. True when that start is on its way and this process should leave."""
+    here = Path(sys.executable)
+    if here.parent.name != f"app-{current}" or not running_from_versions():
+        return False
+    for _ in range(20):  # the old version's window (Ducky-Launcher.exe) closes right after it
+        if not stable_in_use():
+            break
+        time.sleep(0.25)
+    if not promote(current):
+        return False
+    return start_detached(stable_dir() / here.name, _detached_args(sys.argv[1:]))
 
 
 def _detached_args(args: list[str]) -> list[str]:

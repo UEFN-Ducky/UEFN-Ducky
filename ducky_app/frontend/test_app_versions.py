@@ -247,7 +247,9 @@ def test_panel_hands_off_to_the_newest_and_leaves(monkeypatch) -> None:
         av.hand_off("1.2.410", bridge=False)
     except Left:
         pass
-    assert started == [(folder / "UEFN-Ducky.exe", ["uefn-ducky://store/x"])]
+    # Started from versions/app, the one path Windows' allows name; app-1.2.412 stays.
+    assert started == [(av.stable_dir() / "UEFN-Ducky.exe", ["uefn-ducky://store/x"])]
+    assert (folder / "UEFN-Ducky.exe").is_file()
     assert av.read_boot()["1.2.412"]["starts"] == 1
 
 
@@ -283,7 +285,9 @@ def test_bridge_runs_the_newest_on_its_own_stdio(monkeypatch) -> None:
         av.hand_off("1.2.410", bridge=True)
     except SystemExit as exc:
         assert exc.code == 7
+    # Never from versions/app: a bridge runs for hours and would hold it against updates.
     assert ran == [(folder / "UEFN-Ducky-Bridge.exe", ["bridge", "--port", "4200"])]
+    assert not av.stable_dir().exists()
     # Bridges start all the time: they never count against a version.
     assert "1.2.412" not in av.read_boot()
 
@@ -301,6 +305,73 @@ def test_a_crashed_download_falls_back_but_the_installed_copy_does_not(monkeypat
     assert av.fall_back_after_failed_start("1.2.412", "boom") is True
     assert started == [launcher]
     assert av.is_bad("1.2.412")
+
+
+def test_every_update_runs_from_the_same_folder() -> None:
+    """Windows keeps Controlled folder access allows by path: a new app-<v> folder per
+    update asked the person again after every update."""
+    old, new = _version("1.2.410"), _version("1.2.411")
+    assert av.promote("1.2.410") is True
+    assert av.version_dir("1.2.410") == av.stable_dir() and av.folder_version(av.stable_dir()) == "1.2.410"
+    assert av.promote("1.2.411") is True
+    assert av.version_dir("1.2.411") == av.stable_dir()
+    # Both downloads stay where they were: the rollback, and the folder older versions know.
+    assert old.is_dir() and new.is_dir() and av.version_dir("1.2.410") == old
+    assert [(v, f.name) for v, f in av.ready_versions()] == [("1.2.411", "app"), ("1.2.410", "app-1.2.410")]
+    assert sorted(p.name for p in av.versions_dir().iterdir() if p.is_dir()) == ["app", "app-1.2.410", "app-1.2.411"]
+
+
+def test_a_running_stable_folder_is_never_swapped(monkeypatch) -> None:
+    _version("1.2.410")
+    _version("1.2.411")
+    assert av.promote("1.2.410")
+    monkeypatch.setattr(av, "stable_in_use", lambda: True)
+    assert av.promote("1.2.411") is False
+    assert av.folder_version(av.stable_dir()) == "1.2.410"
+    assert av.version_dir("1.2.411").name == "app-1.2.411"
+
+
+def test_a_failed_swap_puts_the_running_folder_back(monkeypatch) -> None:
+    _version("1.2.410")
+    _version("1.2.411")
+    assert av.promote("1.2.410")
+    real = os.replace
+
+    def refuse_new(src, dst):
+        if Path(src).name.startswith("app.new-"):
+            raise PermissionError("in use")
+        return real(src, dst)
+
+    monkeypatch.setattr(av.os, "replace", refuse_new)
+    assert av.promote("1.2.411") is False
+    assert av.folder_version(av.stable_dir()) == "1.2.410"
+    assert sorted(p.name for p in av.versions_dir().iterdir() if p.is_dir()) == ["app", "app-1.2.410", "app-1.2.411"]
+
+
+def test_a_switched_to_version_moves_into_the_stable_folder_and_starts_there(monkeypatch) -> None:
+    """switch starts the new version in app-<v> while the old one still runs from
+    versions/app; once that closed, the new one takes versions/app and starts there."""
+    _version("1.2.410")
+    new = _version("1.2.411")
+    assert av.promote("1.2.410")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.delenv(av.NO_HOP_ENV, raising=False)
+    monkeypatch.delenv(av.START_HIDDEN_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(new / "UEFN-Ducky.exe"))
+    monkeypatch.setattr(sys, "argv", ["UEFN-Ducky.exe"])
+    started: list[Path] = []
+    monkeypatch.setattr(av, "start_detached", lambda exe, args, **k: started.append(exe) or True)
+    left: list = []
+    monkeypatch.setattr(av.os, "_exit", lambda code: left.append(code))
+    av.hand_off("1.2.411", bridge=False)
+    assert started[0] == av.stable_dir() / "UEFN-Ducky.exe" and left[0] == 0
+    assert av.folder_version(av.stable_dir()) == "1.2.411"
+
+
+def test_a_started_ducky_never_works_inside_a_version_folder() -> None:
+    folder = _version("1.2.410")
+    assert av.start_dir(folder / "UEFN-Ducky.exe") == av.versions_dir().parent
+    assert av.start_dir(Path("C:/Programs/UEFN Ducky/UEFN-Ducky.exe")) == Path("C:/Programs/UEFN Ducky")
 
 
 def test_tests_never_see_the_pcs_own_install() -> None:

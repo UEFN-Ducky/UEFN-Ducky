@@ -136,9 +136,20 @@ pub fn web_dist(backend_exe: &Path) -> Option<PathBuf> {
         .find(|d| d.join("index.html").is_file())
 }
 
-/// `versions/app-<v>` under app data: a downloaded version's folder.
+/// A downloaded version's folder under app data: `versions/app` when its `.ready` names
+/// that version (`app_versions.promote`), else `versions/app-<v>`.
 fn version_folder(app_data: &Path, version: &str) -> PathBuf {
-    app_data.join(crate::repoint::VERSIONS_DIR).join(format!("app-{}", version.trim()))
+    let versions = app_data.join(crate::repoint::VERSIONS_DIR);
+    let stable = versions.join(crate::repoint::STABLE_DIR);
+    let holds = std::fs::read_to_string(stable.join(".ready"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|j| j.get("version")?.as_str().map(str::to_owned));
+    if holds.as_deref() == Some(version.trim()) {
+        stable
+    } else {
+        versions.join(format!("app-{}", version.trim()))
+    }
 }
 
 /// The UI to serve before hello. The root stub hands off to the version in

@@ -36,8 +36,8 @@ def _current() -> dict:
 
 def _expected(installed: str, stub: Path) -> tuple[str, str]:
     target = av.newest_usable(installed)
-    if target:
-        return target[0], f"versions/{target[1].name}"
+    if target:  # the hand-off puts it in versions/app first (app_versions.promote)
+        return target[0], f"versions/{av.STABLE_DIR_NAME}"
     return installed, str(stub.parent)
 
 
