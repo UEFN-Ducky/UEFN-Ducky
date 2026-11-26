@@ -65,6 +65,18 @@ def test_linux_table_reads_proc_without_psutil(tmp_path, monkeypatch):
     assert proc_table.tree(table, 42) == [42, 43]
 
 
+def test_mac_shaped_memory_info_gives_rss_as_private_never_vms(monkeypatch):
+    from types import SimpleNamespace
+
+    mem = SimpleNamespace(rss=412 * 2**20, vms=398 * 2**30, pfaults=1, pageins=0)  # macOS: no private/shared
+    times = SimpleNamespace(user=1.0, system=0.5)
+    proc = SimpleNamespace(pid=7, info={"ppid": 1, "name": "UEFN-Ducky", "memory_info": mem, "num_threads": 3,
+                                        "cpu_times": times, "create_time": 10.0})
+    monkeypatch.setattr(psutil, "process_iter", lambda *a, **k: [proc])
+    row = proc_table._psutil_table()[7]
+    assert row.rss == row.private == 412 * 2**20
+
+
 def test_ancestor_finds_the_launcher_above_a_hand_off_stub():
     def p(pid, ppid, name, started):
         return proc_table.Proc(pid, ppid, name, 0, 0, 1, 1, 0.0, started)

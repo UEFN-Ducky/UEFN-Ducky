@@ -180,11 +180,12 @@ def _psutil_table() -> dict[int, Proc]:
         mem = info.get("memory_info")
         times = info.get("cpu_times")
         rss = int(getattr(mem, "rss", 0) or 0)
-        # Linux has no private bytes; rss - shared is the closest, vms (the old fallback) is GBs of reservations.
+        # Linux has no private bytes; rss - shared is the closest. macOS has neither: rss. Never vms
+        # (GBs of reservations on Linux, hundreds of GB per process on macOS).
         private = getattr(mem, "private", 0) or (rss - int(mem.shared) if hasattr(mem, "shared") else 0)
         out[p.pid] = Proc(
             p.pid, int(info.get("ppid") or 0), str(info.get("name") or ""),
-            rss, int(private or getattr(mem, "vms", 0) or 0),
+            rss, int(private or rss),
             int(info.get("num_threads") or 0), 0,
             float(getattr(times, "user", 0.0) or 0.0) + float(getattr(times, "system", 0.0) or 0.0),
             float(info.get("create_time") or 0.0),
