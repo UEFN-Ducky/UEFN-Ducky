@@ -32,11 +32,12 @@ on:
         required: false
         default: "40"
         type: string
-      telemetry:
-        description: "Send usage to staging (DUCKYOS_STAGING_URL secret) instead of the test-copy default"
+      mode:
+        description: "look = start + screenshots; remote-uefn = signed in (DUCKY_TEST_ACCOUNT_TOKEN), script drives the linked PC; tcc = denied run, then TCC grants and a granted run; telemetry = usage to staging (DUCKYOS_STAGING_URL)"
         required: false
-        default: false
-        type: boolean
+        default: look
+        type: choice
+        options: [look, remote-uefn, tcc, telemetry]
 
 permissions:
   contents: read
@@ -49,7 +50,7 @@ env:
 
 jobs:
   look:
-    name: look (${{ inputs.arch }})
+    name: ${{ inputs.mode }} (${{ inputs.arch }})
     runs-on: ${{ inputs.arch == 'x64' && 'macos-15-intel' || 'macos-26' }}
     timeout-minutes: 60
     steps:
@@ -106,34 +107,75 @@ jobs:
         env:
           SCRIPT: ${{ inputs.script }}
           SECONDS_TO_RUN: ${{ inputs.seconds }}
-          TELEMETRY: ${{ inputs.telemetry }}
+          MODE: ${{ inputs.mode }}
+          ARCH: ${{ inputs.arch }}
           STAGING_URL: ${{ secrets.DUCKYOS_STAGING_URL }}
+          DUCKY_TEST_ACCOUNT_TOKEN: ${{ secrets.DUCKY_TEST_ACCOUNT_TOKEN }}
         run: |
           out="$PWD/look"
           mkdir -p "$out"
-          if [ "$TELEMETRY" = "true" ]; then
-            [ -n "$STAGING_URL" ] || { echo "telemetry needs the DUCKYOS_STAGING_URL secret (never production)"; exit 1; }
-            unset DUCKY_SANDBOX
-            export DUCKYOS_BASE_URL="$STAGING_URL"
-          fi
+          bin="dist/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky"
+          xattr -cr "dist/UEFN Ducky.app" || true
           args=()
           case "$SCRIPT" in
             --*) read -r -a args <<< "$SCRIPT" ;;
             "") ;;
             *) printf '%s' "$SCRIPT" > "$out/look-script.js"; export DUCKY_LOOK_SCRIPT="$out/look-script.js" ;;
           esac
-          xattr -cr "dist/UEFN Ducky.app" || true
-          "dist/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky" "${args[@]}" > "$out/stdout.log" 2>&1 &
-          pid=$!
-          total="${SECONDS_TO_RUN:-40}"
-          for ((t = 10; t <= total; t += 10)); do
-            sleep 10
-            screencapture -x "$out/look-${{ inputs.arch }}-$(printf '%03d' "$t")s.png" || echo "screencapture failed at ${t}s"
-            kill -0 "$pid" 2>/dev/null || { echo "app exited after ~${t}s"; break; }
-          done
-          kill "$pid" 2>/dev/null || true
-          sleep 3
-          kill -9 "$pid" 2>/dev/null || true
+          # run_app <tag>: start the app, screenshot every 10 s for SECONDS_TO_RUN, stop it.
+          run_app() {
+            "$bin" "${args[@]}" > "$out/stdout-$1.log" 2>&1 &
+            local pid=$! t total="${SECONDS_TO_RUN:-40}"
+            for ((t = 10; t <= total; t += 10)); do
+              sleep 10
+              screencapture -x "$out/$1-$ARCH-$(printf '%03d' "$t")s.png" || echo "screencapture failed at ${t}s"
+              kill -0 "$pid" 2>/dev/null || { echo "app exited after ~${t}s"; break; }
+            done
+            kill "$pid" 2>/dev/null || true
+            sleep 3
+            kill -9 "$pid" 2>/dev/null || true
+          }
+          case "$MODE" in
+            telemetry)
+              # The only mode that sends usage, and only to the staging Store.
+              [ -n "$STAGING_URL" ] || { echo "telemetry needs the DUCKYOS_STAGING_URL secret (never production)"; exit 1; }
+              unset DUCKY_SANDBOX
+              export DUCKYOS_BASE_URL="$STAGING_URL"
+              run_app telemetry
+              grep -rhi "usage" "$out"/stdout-telemetry.log ~/Library/Logs/UEFN-Ducky 2>/dev/null | tail -n 20 || true
+              ;;
+            remote-uefn)
+              if [ -z "$DUCKY_TEST_ACCOUNT_TOKEN" ]; then
+                echo "::notice::no DUCKY_TEST_ACCOUNT_TOKEN secret: remote-uefn skipped"
+                run_app look
+              else
+                # The token signs the test account in; `script` drives the panel to the linked
+                # PC's remote Ducky window (ping, a Verse build, take_high_res_screenshot).
+                run_app remote-uefn
+                grep -rq "Open " "$out"/stdout-remote-uefn.log ~/Library/Logs/UEFN-Ducky 2>/dev/null \
+                  || { echo "no 'Open <PC>' hand-off in the logs"; exit 1; }
+              fi
+              ;;
+            tcc)
+              run_app tcc-denied
+              grep -rhi "System Settings" "$out"/stdout-tcc-denied.log ~/Library/Logs/UEFN-Ducky 2>/dev/null \
+                | tee "$out/tcc-denied-messages.txt" || echo "::warning::no 'allow in System Settings' message seen"
+              now="$(date +%s)"
+              for svc in kTCCServiceMicrophone kTCCServiceScreenCapture kTCCServiceAppleEvents; do
+                row="'$svc','online.uefnducky.Ducky',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$now,NULL,NULL,'UNUSED',0"
+                sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES($row);" \
+                  || echo "::warning::user TCC.db insert for $svc failed"
+                sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access VALUES($row);" \
+                  || echo "::warning::system TCC.db insert for $svc failed"
+              done
+              sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
+                "SELECT service, client, auth_value FROM access WHERE client='online.uefnducky.Ducky';" | tee "$out/tcc-granted.txt"
+              run_app tcc-granted
+              ;;
+            *)
+              run_app look
+              ;;
+          esac
           ls -la "$out"
           ls "$out"/*.png >/dev/null 2>&1 || { echo "no screenshot taken"; exit 1; }
 

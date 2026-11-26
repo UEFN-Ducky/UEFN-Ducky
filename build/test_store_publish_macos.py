@@ -56,6 +56,19 @@ def test_install_check_jobs_on_both_chips():
     assert inputs["channel"]["options"] == ["stable", "beta"]
 
 
+def test_look_modes_and_only_telemetry_sends():
+    doc = _load("macos-look.yml")
+    inputs = doc.get("on", doc.get(True))["workflow_dispatch"]["inputs"]
+    assert inputs["mode"]["options"] == ["look", "remote-uefn", "tcc", "telemetry"]
+    run = next(s for s in doc["jobs"]["look"]["steps"] if s.get("name") == "Start, wait and screenshot")["run"]
+    branches = run.split('case "$MODE" in', 1)[1].split("\n            esac", 1)[0]
+    unsets = [b.split(")", 1)[0].strip() for b in branches.split(";;") if "unset DUCKY_SANDBOX" in b]
+    assert unsets == ["telemetry"]
+    assert run.count("unset DUCKY_SANDBOX") == 1 and "kTCCServiceMicrophone" in run and "DUCKY_TEST_ACCOUNT_TOKEN" in run
+    upload = next(s for s in doc["jobs"]["look"]["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))
+    assert upload["if"] == "${{ always() }}" and upload["with"]["name"] == "macos-look-${{ inputs.arch }}"
+
+
 @pytest.mark.parametrize("name", ["macos-look.yml", "macos-app.yml", "macos-install-check.yml", "macos-tests.yml"])
 def test_mac_ci_is_a_test_copy(name):
     assert _load(name)["env"]["DUCKY_SANDBOX"] == "1"
