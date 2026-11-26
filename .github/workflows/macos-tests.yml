@@ -56,8 +56,21 @@ jobs:
           python -m pip install -r requirements-dev.txt
           npm ci --prefix ducky_app/frontend/ui_web/web
 
+      # A stuck test fails at 120 s with every thread's stack (faulthandler at 110 s) instead of
+      # hanging the job; a crashed worker is replaced and xdist names the test it was running.
       - name: pytest
-        run: python -m pytest ducky_app -q -rfEs -n auto -p no:cacheprovider
+        run: >-
+          python -m pytest ducky_app -q -rfEs -n auto -p no:cacheprovider
+          --timeout=120 --timeout-method=thread -o faulthandler_timeout=110
+          --max-worker-restart=50 --junitxml=junit-${{ matrix.arch }}.xml
+
+      - name: Upload junit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-tests-junit-${{ matrix.arch }}
+          path: junit-${{ matrix.arch }}.xml
+          if-no-files-found: warn
 
       # CI has no UEFN: the Verse editor's grammar imports get empty stand-ins (as in linux-tests).
       - name: Verse language stand-ins
