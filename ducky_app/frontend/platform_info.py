@@ -1,14 +1,18 @@
-"""One place for OS / display-session checks. New Linux code asks here, not ``sys.platform``."""
+"""One place for OS / display-session checks. New Linux/macOS code asks here, not ``sys.platform``."""
 
 import os
 import sys
 
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+IS_MAC = sys.platform == "darwin"
+IS_UNIX = not IS_WINDOWS
 
 
 def session_type() -> str:
-    """'wayland', 'x11', or '' (no graphical session / not Linux)."""
+    """'quartz' on macOS, 'wayland' / 'x11' on Linux, '' when there is no graphical session."""
+    if sys.platform == "darwin":
+        return "quartz"
     kind = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
     if kind in ("wayland", "x11"):
         return kind
