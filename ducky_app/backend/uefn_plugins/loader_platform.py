@@ -45,7 +45,7 @@ def catalog_badge(item: dict[str, Any], os_name: str | None = None, arch: str | 
         return "Windows only"
     label = mp._OS_LABELS.get(want_os, want_os)
     if any(str(p).startswith(want_os + "-") for p in platforms):
-        return f"No {label} {want_arch} build"
+        return f"No {label} {mp.arch_label(want_os, want_arch)} build"
     return f"No {label} build"
 
 

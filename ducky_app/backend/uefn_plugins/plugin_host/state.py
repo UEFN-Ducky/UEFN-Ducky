@@ -166,7 +166,7 @@ _ACTIVE_UEFN_AGENT_IDS: ContextVar[tuple[str, ...] | None] = ContextVar(
 
 # ABI of this interpreter. A compiled plugin built for another ABI is not imported.
 PY_ABI = f"cp{sys.version_info.major}{sys.version_info.minor}-win_amd64"
-if sys.platform == "win32" or sys.platform.startswith("linux"):
+if sys.platform in ("win32", "darwin") or sys.platform.startswith("linux"):
     from backend.uefn_plugins import manifest_platform as _mp
 
     PY_ABI = _mp.python_abi(_mp.host_os(), _mp.host_arch())  # same tag compile.PY_ABI builds

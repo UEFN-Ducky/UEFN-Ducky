@@ -68,11 +68,12 @@ def download_problem(payload: dict[str, Any], os_name: str | None = None, arch: 
     art = pick_artifact(rec, os_name, arch)
     want_os, want_arch = os_name or mp.host_os(), mp.norm_arch(arch or mp.host_arch())
     label = mp._OS_LABELS.get(want_os, want_os)
+    cpu = mp.arch_label(want_os, want_arch)
     if art is None:
         same_os = any(a.get("os") == want_os for a in record_artifacts(rec))
-        return f"This plugin has no {label} {want_arch} build yet" if same_os else f"This plugin has no {label} build yet"
+        return f"This plugin has no {label} {cpu} build yet" if same_os else f"This plugin has no {label} build yet"
     if str(art.get("sha256") or "").lower() != str(payload.get("sha256") or "").lower():
-        return f"The Store sent a build for another platform, not {label} {want_arch}. Try again later."
+        return f"The Store sent a build for another platform, not {label} {cpu}. Try again later."
     return ""
 
 

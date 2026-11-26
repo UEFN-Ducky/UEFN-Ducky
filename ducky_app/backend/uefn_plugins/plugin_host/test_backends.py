@@ -90,6 +90,49 @@ def test_a_windows_only_build_on_linux_says_so(tmp_path, as_linux) -> None:
     assert backends._compiled_backend_pyd(tmp_path, {}, "uefn_plugin_w") is None
 
 
+@pytest.fixture
+def as_mac_arm(monkeypatch):
+    from backend.uefn_plugins import manifest_platform as mp
+
+    monkeypatch.setattr(mp, "host_os", lambda: "macos")
+    monkeypatch.setattr(mp, "host_arch", lambda: "aarch64")
+    monkeypatch.setattr(backends, "_WINDOWS", False)
+    monkeypatch.setattr(backends, "_COMPILED_SUFFIXES", (".pyd", ".so"))
+    monkeypatch.setattr(backends, "PY_ABI", mp.python_abi("macos", "arm64"))
+    monkeypatch.setattr(backends, "_restore_compiled_from_quarantine", lambda pid, root: None)
+
+
+def test_a_mac_build_loads_on_its_own_chip(tmp_path, monkeypatch, as_mac_arm) -> None:
+    import importlib.machinery
+
+    from backend.uefn_plugins import manifest_platform as mp
+
+    name = "uefn_plugin_mac_probe_v1"
+    so = tmp_path / f"{name}.cpython-313-darwin.so"  # CPython's suffix: no arch in the file name
+    so.write_text("def register():\n    return 'mac'\n", encoding="utf-8")
+    monkeypatch.setattr(importlib.machinery, "ExtensionFileLoader", importlib.machinery.SourceFileLoader)
+    manifest = {"compiled": True, "python_abi": mp.python_abi("macos", "arm64"), "backend": {"module": name}}
+    assert backends._compiled_backend_pyd(tmp_path, manifest, "uefn_plugin_mac_probe") == so
+    try:
+        assert backends._import_compiled_backend("mac-probe", tmp_path, manifest).register() == "mac"
+    finally:
+        for key in (name, "uefn_plugin_mac_probe"):
+            sys.modules.pop(key, None)
+            state._COMPILED_LOADED.pop(key, None)
+
+
+def test_an_intel_mac_build_on_apple_silicon_says_so(tmp_path, as_mac_arm) -> None:
+    from backend.uefn_plugins import loader_platform
+
+    (tmp_path / "uefn_plugin_i.cpython-313-darwin.so").write_bytes(b"")
+    intel = {"compiled": True, "python_abi": "cpython-313-darwin-x86_64"}
+    with pytest.raises(RuntimeError, match="This plugin has no macOS arm64 build yet"):
+        backends._import_compiled_backend("i", tmp_path, intel)
+    assert loader_platform.catalog_badge({"platforms": ["macos-x86_64", "linux-x86_64"]}) == "No macOS arm64 build"
+    assert loader_platform.catalog_badge({"platforms": ["macos-aarch64"]}) == ""
+    assert loader_platform.catalog_badge({"platforms": ["linux-x86_64"]}) == "No macOS build"
+
+
 def test_quarantine_sweep_takes_so_files(tmp_path, monkeypatch, as_linux) -> None:
     monkeypatch.setattr(backends, "_compiled_quarantine_dir", lambda: tmp_path)
     (tmp_path / "p").mkdir()

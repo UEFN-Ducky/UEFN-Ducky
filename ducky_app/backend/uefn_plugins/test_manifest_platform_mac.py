@@ -23,7 +23,7 @@ def test_mac_tags_parse_back() -> None:
 
 def test_mac_label_and_problem() -> None:
     arm = {"compiled": True, "python_abi": "cpython-313-darwin-arm64"}
-    assert mp.platform_label(arm) == "macOS aarch64 only"
+    assert mp.platform_label(arm) == "macOS arm64 only"
     assert mp.platform_problem(arm, "macos", "arm64") == ""
     assert mp.platform_problem(arm, "macos", "x86_64") == "This plugin has no macOS x86_64 build yet"
     assert mp.platform_problem(arm, "linux", "aarch64") == "This plugin has no Linux build yet"

@@ -57,6 +57,25 @@ def test_windows_arm64_is_its_own_build(monkeypatch) -> None:
     assert pa.ask_for_this_platform(body) is True and body == {"os": "windows", "arch": "aarch64"}
 
 
+def test_each_mac_chip_installs_its_own_file(monkeypatch) -> None:
+    from backend.uefn_plugins import manifest_platform as mp
+
+    rec = _record()
+    for abi, sha in (("cpython-313-darwin-arm64", "m" * 64), ("cpython-313-darwin-x86_64", "i" * 64)):
+        rec = pa.put_artifact(rec, pa.artifact_for_build("blender", {"compiled": True, "python_abi": abi}, sha, 8))
+    assert len(rec["artifacts"]) == 5 and rec["sha256"] == "w" * 64
+    assert pa.pick_artifact(rec, "macos", "arm64")["file"] == "blender-macos-aarch64.zip"
+    assert pa.pick_artifact(rec, "macos", "x86_64")["sha256"] == "i" * 64
+    assert pa.pick_artifact(_record(), "macos", "arm64") is None
+    only_intel = pa.put_artifact({"id": "b", "compiled": True},
+                                 pa.artifact_for_build("b", {"compiled": True, "python_abi": "cpython-313-darwin-x86_64"}, "i" * 64, 1))
+    assert pa.download_problem({**only_intel, "sha256": "i" * 64}, "macos", "aarch64") == "This plugin has no macOS arm64 build yet"
+    monkeypatch.setattr(mp, "host_os", lambda: "macos")
+    monkeypatch.setattr(mp, "host_arch", lambda: "aarch64")
+    body: dict = {}
+    assert pa.ask_for_this_platform(body) is True and body == {"os": "macos", "arch": "aarch64"}
+
+
 def test_old_client_sees_windows_only() -> None:
     old = pa.legacy_view(_record())
     assert "artifacts" not in old

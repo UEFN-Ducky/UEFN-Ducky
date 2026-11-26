@@ -30,6 +30,12 @@ def norm_arch(raw: str) -> str:
     return _ARCH_ALIASES.get(str(raw or "").strip().lower(), str(raw or "").strip().lower())
 
 
+def arch_label(os_name: str, arch: str) -> str:
+    """The CPU as people on that OS call it: 'arm64' on a Mac, else the normalized arch."""
+    arch = norm_arch(arch)
+    return _MAC_ARCH.get(arch, arch) if os_name == MACOS else arch
+
+
 def host_os() -> str:
     if sys.platform == "win32":
         return WINDOWS
@@ -108,7 +114,7 @@ def platform_label(manifest: dict[str, Any]) -> str:
     os_name, arch = target
     if os_name == WINDOWS and arch == X86_64:
         return "Windows only"
-    return f"{_OS_LABELS.get(os_name, os_name or 'Unknown')} {arch} only".strip()
+    return f"{_OS_LABELS.get(os_name, os_name or 'Unknown')} {arch_label(os_name, arch)} only".strip()
 
 
 def platform_problem(manifest: dict[str, Any], os_name: str | None = None, arch: str | None = None) -> str:
@@ -121,5 +127,5 @@ def platform_problem(manifest: dict[str, Any], os_name: str | None = None, arch:
         return ""
     label = _OS_LABELS.get(want[0], want[0])
     if target[0] == want[0]:
-        return f"This plugin has no {label} {want[1]} build yet"
+        return f"This plugin has no {label} {arch_label(*want)} build yet"
     return f"This plugin has no {label} build yet"
