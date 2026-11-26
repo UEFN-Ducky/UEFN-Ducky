@@ -1,6 +1,6 @@
-"""Import files dropped from Windows Explorer onto the Content tree.
+"""Import files dropped from Windows Explorer (or the macOS Finder) onto the Content tree.
 
-pywebview (WebView2) is the only layer that sees a dropped file's real path
+pywebview (WebView2; on macOS its WKWebView host's ``performDragOperation_``) is the only layer that sees a dropped file's real path
 (`pywebviewFullPath`); it exposes it solely to a Python DOM ``drop`` handler, never
 to page JS (browsers hide the path for security). So the copy is driven here: the
 React sidebar reports which folder the drag is over via ``set_import_drop_target``,

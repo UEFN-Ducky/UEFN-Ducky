@@ -45,3 +45,37 @@ def test_the_drop_handler_reads_paths_from_the_compact_event(monkeypatch):
     ], "types": ["Files"]}}
     file_drop_import._on_drop(object(), api, event)
     assert seen == [["C:\\x\\shot.png"]]
+
+
+def test_a_finder_drop_of_two_files_imports_both(monkeypatch, tmp_path):
+    """macOS: pywebview's WKWebView host (performDragOperation_) queues (name, path) pairs from
+    the drag pasteboard; its bridge matches them to the page's files by name, as for WebView2."""
+    import threading
+
+    from webview import util
+    from webview.dom import _dnd_state
+
+    a, b = tmp_path / "a.png", tmp_path / "notes.txt"
+    imported: list[tuple[str, list[str]]] = []
+    done = threading.Event()
+
+    def fake_import(dest, paths):
+        imported.append((dest, list(paths)))
+        done.set()
+        return {"paths": paths, "errors": []}
+
+    import frontend.ui_web.project_files as project_files
+
+    monkeypatch.setattr(project_files, "import_external_entries", fake_import)
+    monkeypatch.setattr(file_drop_import, "_notify_ui", lambda window, result: None)
+    monkeypatch.setitem(_dnd_state, "paths", [("a.png", str(a)), ("notes.txt", str(b))])  # what Cocoa queued
+    target = {"dest": "Content/Imports"}
+    api = SimpleNamespace(read_import_drop_target=lambda: target["dest"],
+                          set_import_drop_target=lambda dest: target.update(dest=dest))
+    window = SimpleNamespace(dom=SimpleNamespace(_elements={"doc": SimpleNamespace(
+        _event_handlers={"drop": [lambda e: file_drop_import._on_drop(window, api, e)]})}))
+    event = {"type": "drop", "dataTransfer": {"files": [{"name": "a.png"}, {"name": "notes.txt"}], "types": ["Files"]}}
+    util.js_bridge_call(window, "pywebviewEventHandler", {"event": event, "nodeId": "doc"}, "v1")
+    assert done.wait(5)
+    assert imported == [("Content/Imports", [str(a), str(b)])]
+    assert target["dest"] == "" and _dnd_state["paths"] == []  # both consumed, target cleared
