@@ -68,3 +68,24 @@ def test_upload_download_and_modes():
     assert {"pattern": "macos-dist-*", "path": "dist/macos", "merge-multiple": True} in downs
     assert "macos-packages" in _on(doc)["workflow_dispatch"]["inputs"]["mode"]["options"]
     assert doc["env"]["DUCKY_SANDBOX"] == "1"
+
+
+def test_iced_x86_pin_per_platform():
+    """1.22.0's macOS wheel is arm64-only, so an Intel Mac stays on 1.21.0; nothing else changes."""
+    from packaging.requirements import Requirement
+
+    reqs = WF.parents[2] / "requirements.txt"
+    pins = [Requirement(line.split("#")[0]) for line in reqs.read_text(encoding="utf-8").splitlines()
+            if line.lower().startswith("iced-x86")]
+
+    def pin(sys_platform, machine):
+        env = {"sys_platform": sys_platform, "platform_machine": machine}
+        return [str(r.specifier) for r in pins if r.marker.evaluate(env)]
+
+    assert pin("darwin", "x86_64") == ["==1.21.0"]
+    assert pin("darwin", "arm64") == ["==1.22.0"]
+    assert pin("win32", "AMD64") == ["==1.22.0"]
+    assert pin("linux", "x86_64") == pin("linux", "aarch64") == ["==1.22.0"]
+    assert pin("win32", "ARM64") == []  # no win_arm64 wheel, as before
+    for wf in ("plugin-macos.yml", "plugin-linux-arm64.yml"):
+        assert "-r \"$RUNNER_TEMP/iced.txt\"" in (WF.parent / wf).read_text(encoding="utf-8")

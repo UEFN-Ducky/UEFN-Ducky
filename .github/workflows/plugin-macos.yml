@@ -64,7 +64,10 @@ jobs:
         with:
           python-version: "3.13"
       - name: Build engine deps (iced-x86 for the CPU check)
-        run: python -m pip install -q --disable-pip-version-check "$(grep -i '^iced-x86' ducky/requirements.txt | cut -d'#' -f1)"
+        # -r so pip applies the markers (an Intel Mac gets its own iced-x86 pin)
+        run: |
+          grep -i '^iced-x86' ducky/requirements.txt > "$RUNNER_TEMP/iced.txt"
+          python -m pip install -q --disable-pip-version-check -r "$RUNNER_TEMP/iced.txt"
       # The keychain password is random and never printed; the keychain goes in the always() step.
       - name: Developer ID keychain (only with the Apple secrets)
         if: env.MACOS_CERT_P12_B64 != '' && env.MACOS_CERT_PASSWORD != '' && env.APPLE_TEAM_ID != ''
