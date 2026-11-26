@@ -62,3 +62,29 @@ jobs:
           print(exe, hex(machine))
           assert machine == 0xAA64, "not an ARM64 EXE"
           EOF
+      # A compiled Store plugin built natively here: cp313-win_arm64, an ARM64 module that imports.
+      - uses: actions/checkout@v5
+        with:
+          repository: UEFN-Ducky/uefn-plugin-ducktactoe
+          path: plugin
+      - name: Compiled plugin for arm64
+        shell: bash
+        env:
+          DUCKY_REPO: ${{ github.workspace }}
+        run: |
+          .venv/Scripts/python - <<'EOF'
+          import json, sys, zipfile, pathlib, importlib.util
+          sys.path[:0] = ["plugin/scripts", "ducky_app"]
+          import build_zip
+          from backend.uefn_plugins.cpu_check import PE_ARM64, pe_machine
+          z = pathlib.Path(build_zip.build_compiled_zip(release=False))
+          out = pathlib.Path("arm64-plugin"); zipfile.ZipFile(z).extractall(out)
+          manifest = json.loads((out / "plugin.json").read_text(encoding="utf-8"))
+          pyd = next(out.glob("*.pyd"))
+          print(z.name, manifest.get("python_abi"), pyd.name, hex(pe_machine(pyd.read_bytes()) or 0))
+          assert manifest["python_abi"] == "cp313-win_arm64" and pyd.name.endswith(".cp313-win_arm64.pyd")
+          assert pe_machine(pyd.read_bytes()) == PE_ARM64
+          spec = importlib.util.spec_from_file_location(pyd.name.split(".")[0], pyd)
+          spec.loader.exec_module(importlib.util.module_from_spec(spec))
+          print("imported", pyd.name)
+          EOF
