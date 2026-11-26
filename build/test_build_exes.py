@@ -20,6 +20,27 @@ def _app(tmp_path: Path, tools: list[str], top: list[str]) -> Path:
     return tmp_path
 
 
+def test_panel_npm_build_gets_a_bigger_node_heap(tmp_path: Path, monkeypatch) -> None:
+    web = tmp_path / "ducky_app" / "frontend" / "ui_web" / "web"
+    web.mkdir(parents=True)
+    (web / "package.json").write_text("{}")
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(kw)
+        raise RuntimeError("stop after the first npm call")
+
+    monkeypatch.setattr(be.shutil, "which", lambda name: "npm")
+    monkeypatch.setattr(be.subprocess, "run", fake_run)
+    monkeypatch.setenv("NODE_OPTIONS", "--trace-warnings")
+    with pytest.raises(RuntimeError):
+        be._build_react_panel(tmp_path)
+    assert calls[0]["env"]["NODE_OPTIONS"] == "--trace-warnings --max-old-space-size=4096"
+    assert be.npm_env({})["NODE_OPTIONS"] == "--max-old-space-size=4096"
+    # A size someone set on purpose stays theirs.
+    assert be.npm_env({"NODE_OPTIONS": "--max-old-space-size=8192"})["NODE_OPTIONS"] == "--max-old-space-size=8192"
+
+
 def test_npm_install_is_skipped_only_when_node_modules_matches_the_lock(tmp_path: Path) -> None:
     import os
 

@@ -118,6 +118,18 @@ def pip_fresh(stamp: Path, now: float | None = None) -> bool:
     return stamp.is_file() and (now or time.time()) - stamp.stat().st_mtime < PIP_STAMP_MAX_AGE_S
 
 
+NODE_HEAP_FLAG = "--max-old-space-size=4096"
+
+
+def npm_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Env for npm: Node's default heap runs out building the panel on the Mac runners."""
+    env = dict(os.environ if base is None else base)
+    opts = env.get("NODE_OPTIONS", "")
+    if "--max-old-space-size" not in opts:
+        env["NODE_OPTIONS"] = f"{opts} {NODE_HEAP_FLAG}".strip()
+    return env
+
+
 def _build_react_panel(root: Path) -> None:
     """Build ducky_app/frontend/ui_web/web/dist for PyInstaller embed."""
     web_dir = root / "ducky_app" / "frontend" / "ui_web" / "web"
@@ -137,9 +149,10 @@ def _build_react_panel(root: Path) -> None:
         cmds.insert(0, [npm, "install"])
     else:
         print("node_modules matches package-lock.json (npm ci already ran): no npm install")
+    env = npm_env()
     for cmd in cmds:
         print(">", " ".join(cmd), f"(cwd={web_dir})")
-        subprocess.run(cmd, check=True, cwd=str(web_dir))
+        subprocess.run(cmd, check=True, cwd=str(web_dir), env=env)
     if not (dist / "index.html").is_file():
         print(f"ERROR: React build did not produce {dist / 'index.html'}", file=sys.stderr)
         raise SystemExit(1)
