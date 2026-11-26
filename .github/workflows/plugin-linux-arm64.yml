@@ -50,7 +50,7 @@ jobs:
         working-directory: plugin
         run: |
           pip install -q --disable-pip-version-check --root-user-action=ignore \
-            $(grep -i '^iced-x86' ../ducky/requirements.txt | cut -d'#' -f1)
+            "$(grep -i '^iced-x86' ../ducky/requirements.txt | cut -d'#' -f1)"
           python - <<'EOF'
           import json, pathlib, sys, zipfile
           sys.path[:0] = ["scripts"]
