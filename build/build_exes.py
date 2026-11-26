@@ -318,14 +318,24 @@ LAUNCHER_EXE = "Ducky-Launcher.exe"
 LAUNCHER_DLL = "WebView2Loader.dll"
 
 
-def find_loader_dll(target_dir: Path) -> Path | None:
-    """The x64 WebView2Loader.dll webview2-com-sys's build script put under ``target_dir``."""
+def win_arch(machine: str | None = None) -> str:
+    """``arm64`` on an arm64 Windows build machine, else ``x64`` (PyInstaller and cargo
+    build for the machine they run on)."""
+    import platform
+
+    raw = (platform.machine() if machine is None else machine).lower()
+    return "arm64" if raw in ("arm64", "aarch64") else "x64"
+
+
+def find_loader_dll(target_dir: Path, arch: str | None = None) -> Path | None:
+    """The WebView2Loader.dll (this machine's CPU) webview2-com-sys's build script put under ``target_dir``."""
+    arch = arch or win_arch()
     # Older cargo writes build/webview2-com-sys-<hash>/out, newer build-dir layouts
     # build/webview2-com-sys/<hash>/out: take either.
     found = [
         p
         for p in target_dir.rglob(LAUNCHER_DLL)
-        if p.parent.name == "x64" and p.parent.parent.name == "out"
+        if p.parent.name == arch and p.parent.parent.name == "out"
         and any(part.startswith("webview2-com-sys") for part in p.relative_to(target_dir).parts)
     ]
     # ponytail: newest wins when old build-script dirs linger in the shared target dir.
@@ -415,7 +425,7 @@ def build_launcher(
         raise launcher_missing(f"cargo build --release failed (rc={getattr(proc, 'returncode', '?')})")
     dll = find_loader_dll(target_dir)
     if dll is None:
-        raise launcher_missing(f"cargo built no x64 {LAUNCHER_DLL} (webview2-com-sys-*/out/x64)")
+        raise launcher_missing(f"cargo built no {win_arch()} {LAUNCHER_DLL} (webview2-com-sys-*/out/{win_arch()})")
     cached.parent.mkdir(parents=True, exist_ok=True)
     # The dll first: the EXE landing is what makes the entry a hit.
     for source, dest in ((dll, cached.parent / LAUNCHER_DLL), (built, cached)):

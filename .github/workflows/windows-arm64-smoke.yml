@@ -1,0 +1,64 @@
+# Windows arm64: freeze the app natively on GitHub's arm64 runner and boot it (--runtime-smoke).
+# PyInstaller and Nuitka can't cross-build, so arm64 Windows only builds here.
+# cryptography ships no win_arm64 wheel after 46.0.3 (which has open advisories), so the pinned
+# version builds from source against vcpkg's static OpenSSL.
+name: windows arm64 smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  freeze:
+    runs-on: windows-11-arm
+    timeout-minutes: 120
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: arm64
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Machine
+        shell: bash
+        run: |
+          python -c "import platform, sys; print(platform.machine(), sys.version)"
+          rustc -vV
+      - name: OpenSSL for cryptography (vcpkg, static)
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install openssl:arm64-windows-static-md
+          "OPENSSL_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\arm64-windows-static-md" >> $env:GITHUB_ENV
+          "OPENSSL_STATIC=1" >> $env:GITHUB_ENV
+      - name: Python packages
+        shell: bash
+        run: |
+          python -m venv .venv
+          .venv/Scripts/python -m pip install --upgrade pip
+          crypto="$(grep -E '^cryptography==' requirements.txt)"
+          .venv/Scripts/python -m pip wheel --no-binary cryptography --no-deps -w wheels "$crypto"
+          .venv/Scripts/python -m pip install --find-links wheels -r requirements.txt pyinstaller
+          (cd ducky_app/frontend/ui_web/web && npm ci --no-audit --no-fund)
+      - name: Verse language assets
+        shell: bash
+        run: bash build/ci_verse_lang.sh true
+      - name: Freeze + runtime smoke
+        shell: bash
+        run: .venv/Scripts/python -u build/build_exes.py --no-bump
+      - name: Built for arm64
+        shell: bash
+        run: |
+          ls dist
+          .venv/Scripts/python - <<'EOF'
+          import pathlib, struct
+          exe = next(pathlib.Path("dist").glob("UEFN-Ducky-*/UEFN-Ducky.exe"))
+          data = exe.read_bytes()
+          pe = struct.unpack_from("<I", data, 0x3C)[0]
+          machine = struct.unpack_from("<H", data, pe + 4)[0]
+          print(exe, hex(machine))
+          assert machine == 0xAA64, "not an ARM64 EXE"
+          EOF

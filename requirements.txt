@@ -43,8 +43,9 @@ mss>=9.0; sys_platform == "linux"
 toon_format @ git+https://github.com/toon-format/toon-python.git@536a508d486847cb01ec1869cf21d1f7556b0db0
 # Custom code workflow nodes run their JavaScript in V8 (ships mini_racer.dll + icudtl.dat).
 mini-racer==0.14.1
-# Compiled plugins: disassemble a build to prove every PC's CPU runs it (cpu_check.py).
-iced-x86==1.22.0
+# Compiled plugins: disassemble an x86 build to prove every PC's CPU runs it (cpu_check.py).
+# No win_arm64 wheel; an arm64 PC never builds x86 plugins.
+iced-x86==1.22.0; platform_machine != "ARM64"
 # Skill and tool search (backend/search): the meaning model's matrix math and its tokenizer.
 # The model files come from build/fetch_search_model.py (pinned, SHA-256 checked).
 numpy==2.5.4
