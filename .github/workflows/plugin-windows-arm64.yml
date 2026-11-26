@@ -1,0 +1,74 @@
+# One compiled desktop Store plugin for Windows on Arm (cp313-win_arm64). Nuitka can't
+# cross-compile, so release_platforms (backend/uefn_plugins/release_platforms.py) dispatches
+# this on GitHub's arm64 runner for the plugin's pushed commit, waits, and downloads the zip
+# as its fourth build. `request` names the run so the caller finds it.
+name: plugin windows arm64
+run-name: plugin arm64 ${{ inputs.request }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "the plugin repo (owner/name)"
+        required: true
+        type: string
+      sha:
+        description: "the pushed commit to build"
+        required: true
+        type: string
+      request:
+        description: "caller's id for this build (the run's name)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: "1"
+      DUCKY_REPO: ${{ github.workspace }}/ducky
+      DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: ducky
+      # Private plugin repos need PLUGIN_REPO_TOKEN (contents:read on them); public ones don't.
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.sha }}
+          path: plugin
+          token: ${{ secrets.PLUGIN_REPO_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: arm64
+      - name: Compile (release)
+        shell: bash
+        working-directory: plugin
+        run: |
+          python - <<'EOF'
+          import json, pathlib, sys, zipfile
+          sys.path[:0] = ["scripts", "../ducky/ducky_app"]
+          import build_zip
+          from backend.uefn_plugins.cpu_check import PE_ARM64, pe_machine
+          z = pathlib.Path(build_zip.build_compiled_zip(release=True))
+          with zipfile.ZipFile(z) as zf:
+              abi = json.loads(zf.read("plugin.json"))["python_abi"]
+              pyds = [n for n in zf.namelist() if n.endswith(".pyd")]
+              assert abi == "cp313-win_arm64", abi
+              assert pyds and all(pe_machine(zf.read(n)) == PE_ARM64 for n in pyds), pyds
+          out = pathlib.Path("../arm64-out"); out.mkdir()
+          z.rename(out / z.name.replace("-compiled.ducky-plugin.zip", "-windows-arm64-compiled.ducky-plugin.zip"))
+          print(abi, pyds)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-windows-arm64
+          path: arm64-out/*.ducky-plugin.zip
+          if-no-files-found: error
+          retention-days: 3

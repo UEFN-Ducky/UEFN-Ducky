@@ -51,6 +51,8 @@ def plugin(tmp_path, monkeypatch):
     (root / "scripts" / "build_zip.py").write_text(BUILD_ZIP)
     (root / "scripts" / "release.py").write_text(RELEASE)
     monkeypatch.setenv("DUCKYOS_API_KEY", "k")
+    # No GitHub here: the arm64 build is faked where a test needs it.
+    monkeypatch.setattr(rp, "windows_arm64_build", lambda p, hold: None)
     return root
 
 
@@ -146,6 +148,43 @@ def _no_commit(real):
             pass
 
     return lambda plugin, name: _Commit if name == "commit_before_store" else real(plugin, name)
+
+
+def fake_arm64(plugin_root, hold):
+    """Stands in for the plugin-windows-arm64.yml run: its downloaded zip."""
+    m = json.loads((plugin_root / "plugin.json").read_text())
+    dest = hold / f"{m['id']}-{m['version']}-windows-arm64-compiled.ducky-plugin.zip"
+    import zipfile
+
+    with zipfile.ZipFile(dest, "w") as zf:
+        zf.writestr("plugin.json", json.dumps({**m, "compiled": True, "python_abi": "cp313-win_arm64"}))
+    return dest
+
+
+def test_windows_arm64_is_the_fourth_build_and_never_the_legacy_upload(plugin, monkeypatch):
+    run, _ = fake_docker(plugin)
+    zips = rp.build(plugin, run=run, arm64=fake_arm64)
+    assert [z.name for z in zips][-1] == "fake-1.2.3-windows-arm64-compiled.ducky-plugin.zip"
+    store = rp._script(plugin, "release")
+    monkeypatch.setattr(rp, "_script", lambda p, name: store if name == "release" else None)
+    rp.publish(plugin, zips, category="plugins", changelog="arm64")
+    [args] = [a for n, a in store.CALLS if n == "uds_release"]
+    plats = {(a["os"], a["arch"]) for a in args["artifacts"]}
+    assert plats == {("windows", "x86_64"), ("windows", "aarch64"), ("linux", "x86_64"), ("linux", "aarch64")}
+    x64 = next(a for a in args["artifacts"] if (a["os"], a["arch"]) == ("windows", "x86_64"))
+    assert args["uploadId"] == x64["uploadId"]
+    assert "fake-windows-aarch64.zip" in {a["file"] for a in args["artifacts"]}
+
+
+def test_github_slug_reads_https_and_ssh_remotes():
+    assert rp.github_slug("https://github.com/UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
+    assert rp.github_slug("git@github.com:UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
+    assert rp.github_slug("https://x-access-token:t@github.com/o/r") == "o/r"
+    assert rp.github_slug("https://gitlab.com/o/r.git") is None
+
+
+def test_a_plugin_without_a_github_remote_builds_no_arm64(tmp_path):
+    assert rp.windows_arm64_build(tmp_path, tmp_path) is None
 
 
 def test_linux_build_cmd_mounts_the_kit_read_only(tmp_path):
