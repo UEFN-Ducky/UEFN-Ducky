@@ -62,6 +62,17 @@ def test_portal_cancel_or_no_portal_is_none(portal, monkeypatch):
     assert fa.portal_pick() is None
 
 
+def test_macos_asks_no_defender_and_no_portal(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(fa.subprocess, "run", lambda *a, **k: pytest.fail("ran a Windows tool"))
+    monkeypatch.setattr(open_files, "gdbus_monitor", lambda *a, **k: pytest.fail("D-Bus on macOS"))
+    assert fa._blocks(120_000) == []
+    assert fa.refusal_hint("/Users/pat/Documents/Fortnite Projects/x.verse") == ""
+    assert fa.portal_pick("Add project") is None  # the normal pywebview dialog picks instead
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Linux/macOS: no Defender to ask")
 def test_no_windows_calls_off_windows(monkeypatch):
     monkeypatch.setattr(fa.subprocess, "run", lambda *a, **k: pytest.fail("ran a Windows tool"))

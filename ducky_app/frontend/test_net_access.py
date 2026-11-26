@@ -249,6 +249,18 @@ def test_the_network_test_checks_the_host_the_download_comes_from(monkeypatch):
     assert "download" not in na.diagnose("https://uefnducky.org/")  # asked for the site only
 
 
+def test_macos_has_no_winhttp_and_takes_the_system_proxy(monkeypatch):
+    import sys
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    # On a Mac getproxies() is System Settings' proxy (_scproxy) as well as the environment's.
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {"https": "http://mac-proxy:8080"})
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
+    h = na.PacProxyHandler(resolve=lambda *_: pytest.fail("WinHTTP on macOS"))
+    assert h.config() == {}
+    assert h.proxy_for("https://uefnducky.org/") == "http://mac-proxy:8080"
+
+
 def test_no_auto_config_uses_the_fixed_proxy(monkeypatch):
     monkeypatch.setattr(urllib.request, "getproxies", lambda: {"https": "http://corp:3128"})
     monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)

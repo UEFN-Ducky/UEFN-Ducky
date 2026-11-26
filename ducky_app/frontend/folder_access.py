@@ -14,6 +14,7 @@ import html
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,7 +30,7 @@ REFUSAL_WINDOW_S = 120
 
 def _dos_path(path: str) -> str:
     r"""``\Device\HarddiskVolume3\x`` as ``C:\x`` (Defender writes either form)."""
-    if not path.lower().startswith("\\device\\") or os.name != "nt":
+    if not path.lower().startswith("\\device\\") or sys.platform != "win32":
         return path
     import ctypes
     import string
@@ -57,7 +58,7 @@ def parse_blocked(xml: str) -> list[tuple[str, str, str]]:
 
 
 def _blocks(window_ms: int) -> list[tuple[str, str, str]]:
-    if os.name != "nt":
+    if sys.platform != "win32":  # Linux and macOS: no Defender to ask
         return []
     query = f"*[System[(EventID={BLOCKED_EVENT}) and TimeCreated[timediff(@SystemTime) <= {window_ms}]]]"
     try:
@@ -73,7 +74,7 @@ def refusal_hint(path: str | Path, *, blocks: Callable[[int], list[tuple[str, st
     """What to say about a refused write into ``path`` (a file or its folder): REFUSED_HINT when
     Windows' Controlled folder access refused a write in that folder within the last two minutes,
     else "" (folder permissions: not ours to explain)."""
-    if os.name != "nt":
+    if sys.platform != "win32":
         return ""
     target = Path(path)
     folders = {os.path.normcase(str(target)), os.path.normcase(str(target.parent))}
@@ -93,7 +94,9 @@ _RESPONSE = re.compile(r"^(\S+): org\.freedesktop\.portal\.Request\.Response \(u
 def portal_pick(title: str = "Add project", *, directory: bool = True) -> str | None:
     """The desktop's own file or folder picker (GNOME, KDE, Flatpak, Wayland) through
     ``org.freedesktop.portal.FileChooser.OpenFile``. The chosen path, None when cancelled
-    or there is no portal."""
+    or there is no portal. None on macOS: its picker is pywebview's own (NSOpenPanel)."""
+    if sys.platform == "darwin":
+        return None
     from urllib.parse import unquote, urlparse
 
     from frontend.open_files import gdbus_call, gdbus_monitor, gv_str

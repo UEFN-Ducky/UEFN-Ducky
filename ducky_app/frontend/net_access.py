@@ -14,6 +14,8 @@ every urllib call in the process:
 Off Windows there is no WinHTTP: the config is empty, so every URL takes the environment's
 proxy (``https_proxy`` / ``http_proxy`` / ``no_proxy``, what curl and most Linux apps use) or
 goes direct. PAC/WPAD needs a JavaScript engine, so Linux has no equivalent of it here.
+macOS: no WinHTTP and no Defender either; ``urllib.request.getproxies()`` there also reads the
+System Settings proxies (``_scproxy``), so a Mac's manual proxy is followed with no code here.
 """
 from __future__ import annotations
 
