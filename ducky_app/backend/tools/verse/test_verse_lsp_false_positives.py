@@ -65,3 +65,31 @@ def test_a_newer_clean_build_outranks_lsp(tmp_path: Path) -> None:
         verse_diagnostics._defer_to_clean_build(root, payload)
         assert payload == {"files": [flagged]}
     verse_diagnostics._LAST_COMPILE.pop(root)
+
+
+def test_on_a_mac_diagnostics_point_to_the_pc_instead_of_failing(tmp_path: Path, monkeypatch) -> None:
+    import json
+    import sys
+
+    from frontend import ducky_link
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(ducky_link, "list_duckies", lambda: {"ok": True, "devices": [
+        {"keyId": "k_pc", "name": "Tas's PC", "live": True, "mine": False}]})
+    monkeypatch.setattr(verse_diagnostics, "verse_editor_enabled", lambda: True)
+    monkeypatch.setattr(verse_diagnostics, "_project_root", lambda: str(tmp_path))
+    monkeypatch.setattr("frontend.project_kind.is_folder_project", lambda _root: False)
+
+    def no_scan(*_a, **_kw):
+        raise AssertionError("no verse-lsp scan on a Mac")
+
+    monkeypatch.setattr(verse_diagnostics, "_scan_within_limit", no_scan)
+    out = json.loads(verse_diagnostics.workspace_list_verse_errors())
+    assert out["ok"] is True and out["lsp"] == "remote" and out["complete"] is False
+    assert out["note"].startswith("Verse diagnostics run on Tas's PC")
+    assert out["open_remote"] == [{"key_id": "k_pc", "name": "Tas's PC"}]
+    for tool in (verse_diagnostics.workspace_compile_verse, verse_diagnostics.workspace_push_verse_changes):
+        built = json.loads(tool())
+        assert built["ok"] is False and built["error"].startswith("UEFN runs on Windows"), tool
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert verse_diagnostics.diagnostics_on_pc() is None

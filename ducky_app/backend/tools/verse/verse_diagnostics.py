@@ -95,6 +95,22 @@ def _defer_to_clean_build(root: str, payload: dict[str, Any]) -> None:
     )
 
 
+def diagnostics_on_pc() -> dict[str, Any] | None:
+    """macOS: no verse-lsp (it ships with UEFN on Windows), so Verse is checked on the account's
+    PC. A status, not an error: the editor here still highlights Verse. None elsewhere."""
+    if sys.platform != "darwin":
+        return None
+    from frontend.window_view import uefn_on_pc
+
+    pcs = (uefn_on_pc() or {}).get("open_remote") or []
+    pc = pcs[0]["name"] if len(pcs) == 1 else "your PC"
+    return {
+        "ok": True, "lsp": "remote", "files": [], "complete": False, "open_remote": pcs,
+        "note": (f"Verse diagnostics run on {pc}: open its Ducky (Duckies → {pc}) and check or build "
+                 "Verse there. This Mac has no verse-lsp; never report Verse here as clean."),
+    }
+
+
 def _project_root() -> str:
     """The calling agent's project: the one its write tools write into. Oct 17 2026: a chat
     working in Roguelike wrote its .verse there while this checked the project open in
@@ -175,6 +191,8 @@ def workspace_list_verse_errors(pretty: bool = False, full: bool = False, rescan
             {"ok": True, "folder_project": True, "files": [], "note": "Folder project: no Verse to check."},
             pretty=pretty,
         )
+    if (remote := diagnostics_on_pc()) is not None:
+        return tool_json(remote, pretty=pretty)
     if not root:
         raise ValueError("No UEFN project root configured in panel settings")
     from frontend.ui_web.verse_editor.lsp.diagnostics_cache import load_for_ui, stale_keys
@@ -296,7 +314,10 @@ def workspace_compile_verse(pretty: bool = False) -> str:
     """
     from frontend import uefn_events
     from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
+    from frontend.window_view import uefn_on_pc
 
+    if (away := uefn_on_pc()) is not None:
+        return tool_json(away, pretty=pretty)
     client = get_workflow_client()
     begun = time.monotonic()
     if not client.connected:
@@ -418,7 +439,10 @@ def workspace_compile_verse(pretty: bool = False) -> str:
 def workspace_push_verse_changes(verse_only: bool = True, pretty: bool = False) -> str:
     """Push Verse changes to the running UEFN session (hot reload)."""
     from frontend.ui_web.verse_editor.workflow.client import get_workflow_client
+    from frontend.window_view import uefn_on_pc
 
+    if (away := uefn_on_pc()) is not None:
+        return tool_json(away, pretty=pretty)
     client = get_workflow_client()
     if not client.connected:
         try:
