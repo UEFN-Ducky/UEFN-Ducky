@@ -128,7 +128,28 @@ def _check_tk(environ=None) -> float:
     return tkinter.TkVersion
 
 
-def _start_real_window(timeout: float = 60.0, webview_mod=None) -> float:
+def webkit_version(bundle_version: str) -> str:
+    """WebKit.framework's CFBundleVersion (``20620.1.16.11.8``: OS prefix + WebKit build) to
+    the WebKit version Safari reports (``620.1``)."""
+    parts = bundle_version.split(".")
+    return ".".join([parts[0][-3:], *parts[1:2]])
+
+
+def _check_cocoa_window(webview_mod=None, cocoa_mod=None, foundation=None) -> dict:
+    """macOS: the window is pywebview's Cocoa backend (WKWebView through PyObjC). Load it, read
+    the system WebKit's version and start the real window until its page loads."""
+    if cocoa_mod is None:
+        import webview.platforms.cocoa as cocoa_mod  # noqa: F401  (what webview.start(gui="cocoa") loads)
+    if foundation is None:
+        import Foundation as foundation
+    bundle = foundation.NSBundle.bundleWithIdentifier_("com.apple.WebKit")
+    if bundle is None:
+        raise RuntimeError("WebKit.framework is not loaded")
+    raw = str(bundle.objectForInfoDictionaryKey_("CFBundleVersion") or "")
+    return {"webkit": webkit_version(raw), "page_started_seconds": _start_real_window(webview_mod=webview_mod, gui="cocoa")}
+
+
+def _start_real_window(timeout: float = 60.0, webview_mod=None, gui: str = "gtk") -> float:
     """The real start: ``webview.start(gui="gtk", icon=<the app's icon>)`` until the page
     loads. A .ico icon made GTK create no window, which an unshown WebView never sees.
     Clean containers load in ~0.2 s; CI runners without a session bus wait out one 25 s
@@ -148,7 +169,7 @@ def _start_real_window(timeout: float = 60.0, webview_mod=None) -> float:
         loaded.wait(timeout)
         window.destroy()
 
-    webview_mod.start(watch, gui="gtk", icon=str(webview_icon_path()))
+    webview_mod.start(watch, gui=gui, icon=str(webview_icon_path()))
     if not loaded.is_set():
         raise RuntimeError(f"window page did not start within {timeout:.0f}s")
     return round(time.perf_counter() - started, 2)
@@ -244,6 +265,10 @@ def _run(output: str, report: dict) -> int:
     if platform_info.IS_LINUX:
         report["window"] = _check_gtk_window()
         print("runtime smoke: gi {gi}, Gtk {gtk}, WebKit2 {webkit2} ok".format(**report["window"]))
+    elif platform_info.IS_MAC:
+        cocoa = _check_cocoa_window()
+        report.update(window=True, webkit=cocoa["webkit"], page_started_seconds=cocoa["page_started_seconds"])
+        print(f"runtime smoke: Cocoa window, WebKit {cocoa['webkit']} ok")
     workers = DiffWorkers()
     before = "".join(f"Value_{n}:int = {n}\n" for n in range(10000))
     pairs = [(before, before.replace(f"Value_{n}:int = {n}", f"Value_{n}:int = 99999")) for n in range(4)]

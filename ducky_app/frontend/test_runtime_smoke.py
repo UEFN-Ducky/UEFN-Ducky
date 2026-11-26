@@ -40,7 +40,7 @@ class _FakeWebview:
         return self.window
 
     def start(self, func, gui, icon) -> None:
-        self.icon = icon
+        self.icon, self.gui = icon, gui
         if self.loads:
             for fn in self.window.events.loaded:
                 fn()
@@ -68,6 +68,44 @@ def test_smoke_fails_when_the_page_never_starts() -> None:
     with pytest.raises(RuntimeError, match="did not start"):
         runtime_smoke._start_real_window(timeout=0.05, webview_mod=fake)
     assert fake.destroyed
+
+
+class _FakeFoundation:
+    """Foundation stand-in: NSBundle answers for WebKit.framework (``None`` = not loaded)."""
+
+    def __init__(self, version: str | None) -> None:
+        bundle = None
+        if version is not None:
+            bundle = type("B", (), {"objectForInfoDictionaryKey_": lambda self, key: version})()
+        self.NSBundle = type("NSBundle", (), {"bundleWithIdentifier_": staticmethod(lambda ident: bundle)})
+
+
+def test_darwin_cocoa_window_reports_webkit_and_starts_the_page() -> None:
+    fake = _FakeWebview(loads=True)
+    got = runtime_smoke._check_cocoa_window(webview_mod=fake, cocoa_mod=object(),
+                                            foundation=_FakeFoundation("20620.1.16.11.8"))
+    assert got["webkit"] == "620.1" and got["page_started_seconds"] >= 0
+    assert fake.gui == "cocoa" and fake.destroyed
+
+
+def test_darwin_smoke_fails_without_webkit_or_a_page() -> None:
+    import pytest
+
+    with pytest.raises(RuntimeError, match="WebKit"):
+        runtime_smoke._check_cocoa_window(webview_mod=_FakeWebview(True), cocoa_mod=object(), foundation=_FakeFoundation(None))
+    assert runtime_smoke.webkit_version("19618.1.15.11.14") == "618.1"
+
+
+def test_darwin_run_writes_window_and_webkit(tmp_path, monkeypatch) -> None:
+    from frontend import platform_info
+
+    monkeypatch.setattr(platform_info, "IS_LINUX", False)
+    monkeypatch.setattr(platform_info, "IS_MAC", True)
+    monkeypatch.setattr(runtime_smoke, "_check_cocoa_window", lambda: {"webkit": "620.1", "page_started_seconds": 0.4})
+    out = tmp_path / "smoke.json"
+    assert runtime_smoke.run(str(out)) == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["ok"] is True and report["window"] is True and report["webkit"] == "620.1"
 
 
 def test_smoke_passes_with_the_real_icon_when_the_page_starts() -> None:
