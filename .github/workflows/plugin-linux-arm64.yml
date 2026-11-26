@@ -1,0 +1,72 @@
+# One compiled desktop Store plugin for Linux arm64 (cpython-313-aarch64-linux-gnu), built
+# natively on GitHub's arm64 runner: under Docker's QEMU on an x64 PC a big plugin's Nuitka
+# build ran past 4 hours (road-network). release_platforms dispatches this like
+# plugin-windows-arm64.yml and downloads the zip. Same bookworm image as the local Linux
+# builds, so the zip needs the same glibc.
+name: plugin linux arm64
+run-name: plugin linux arm64 ${{ inputs.request }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "the plugin repo (owner/name)"
+        required: true
+        type: string
+      sha:
+        description: "the pushed commit to build"
+        required: true
+        type: string
+      request:
+        description: "caller's id for this build (the run's name)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container: python:3.13-bookworm
+    timeout-minutes: 150
+    env:
+      PYTHONUTF8: "1"
+      DUCKY_REPO: ${{ github.workspace }}/ducky
+      DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: ducky
+      # Private plugin repos need PLUGIN_REPO_TOKEN (contents:read on them); public ones don't.
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.sha }}
+          path: plugin
+          token: ${{ secrets.PLUGIN_REPO_TOKEN || github.token }}
+      - name: Compile (release)
+        shell: bash
+        working-directory: plugin
+        run: |
+          pip install -q --disable-pip-version-check --root-user-action=ignore \
+            $(grep -i '^iced-x86' ../ducky/requirements.txt | cut -d'#' -f1)
+          python - <<'EOF'
+          import json, pathlib, sys, zipfile
+          sys.path[:0] = ["scripts"]
+          import build_zip
+          z = pathlib.Path(build_zip.build_compiled_zip(release=True, target="linux-arm64"))
+          with zipfile.ZipFile(z) as zf:
+              abi = json.loads(zf.read("plugin.json"))["python_abi"]
+              assert "aarch64" in abi, abi
+          assert z.name.endswith("-linux-arm64-compiled.ducky-plugin.zip"), z.name
+          out = pathlib.Path("../arm64-out"); out.mkdir()
+          z.rename(out / z.name)
+          print(abi, z.name)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-linux-arm64
+          path: arm64-out/*.ducky-plugin.zip
+          if-no-files-found: error
+          retention-days: 3

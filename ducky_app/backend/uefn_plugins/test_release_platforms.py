@@ -53,6 +53,7 @@ def plugin(tmp_path, monkeypatch):
     monkeypatch.setenv("DUCKYOS_API_KEY", "k")
     # No GitHub here: the arm64 build is faked where a test needs it.
     monkeypatch.setattr(rp, "windows_arm64_build", lambda p, hold: None)
+    monkeypatch.setattr(rp, "linux_arm64_build", lambda p, hold: None)
     return root
 
 
@@ -176,6 +177,23 @@ def test_windows_arm64_is_the_fourth_build_and_never_the_legacy_upload(plugin, m
     assert "fake-windows-aarch64.zip" in {a["file"] for a in args["artifacts"]}
 
 
+def test_linux_arm64_from_github_skips_the_qemu_build(plugin):
+    """road-network's Nuitka build under QEMU ran past 4 hours; GitHub's arm64 runner builds it."""
+    run, calls = fake_docker(plugin)
+
+    def native(plugin_root, hold):
+        dest = hold / "fake-1.2.3-linux-arm64-compiled.ducky-plugin.zip"
+        dest.write_bytes(b"zip")
+        return dest
+
+    zips = rp.build(plugin, run=run, linux_arm64=native)
+    assert [z.name for z in zips] == ["fake-1.2.3-windows-x64-compiled.ducky-plugin.zip",
+                                      "fake-1.2.3-linux-x86_64-compiled.ducky-plugin.zip",
+                                      "fake-1.2.3-linux-arm64-compiled.ducky-plugin.zip"]
+    assert rp.QEMU_SETUP not in calls
+    assert [c[c.index("--platform") + 1] for c in calls] == ["linux/amd64"]
+
+
 def test_github_slug_reads_https_and_ssh_remotes():
     assert rp.github_slug("https://github.com/UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
     assert rp.github_slug("git@github.com:UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
@@ -185,6 +203,7 @@ def test_github_slug_reads_https_and_ssh_remotes():
 
 def test_a_plugin_without_a_github_remote_builds_no_arm64(tmp_path):
     assert rp.windows_arm64_build(tmp_path, tmp_path) is None
+    assert rp.linux_arm64_build(tmp_path, tmp_path) is None
 
 
 def test_linux_build_cmd_mounts_the_kit_read_only(tmp_path):

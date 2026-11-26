@@ -6,11 +6,13 @@ The "Release a desktop Store plugin" workflow runs this in the plugin's fresh wo
     cd <UEFN-Ducky>/ducky_app && python -m backend.uefn_plugins.release_platforms <plugin> --publish --changelog TEXT
 
 1. Windows: the plugin's own ``scripts/build_zip.build_compiled_zip(release=True)`` on this PC.
-2. Linux x86_64 and arm64: the same call with ``target=`` in a ``python:3.13-bookworm``
-   container (``--platform linux/arm64`` runs under Docker's QEMU; Nuitka can't cross-compile).
-3. Windows arm64: the plugin-windows-arm64.yml workflow of UEFN-Ducky on GitHub's arm64
+2. Linux x86_64: the same call with ``target=`` in a ``python:3.13-bookworm`` container.
+3. Linux arm64: plugin-linux-arm64.yml on GitHub's arm64 runner (same image, native; under
+   Docker's QEMU a big plugin ran past 4 hours). Only a draft with no GitHub remote falls
+   back to the QEMU container.
+4. Windows arm64: the plugin-windows-arm64.yml workflow of UEFN-Ducky on GitHub's arm64
    runner, at the plugin's pushed commit (Windows can't emulate an arm64 build here).
-4. Every zip uploads with the plugin's ``scripts/release.upload_with_ticket``, then ONE
+5. Every zip uploads with the plugin's ``scripts/release.upload_with_ticket``, then ONE
    ``uds_release`` names the Windows upload (what old apps install) and lists every build in
    ``artifacts`` (store/plugin_artifacts.py's shape plus its ``uploadId``).
 
@@ -45,6 +47,8 @@ LINUX_TARGETS = {"linux-x86_64": "linux/amd64", "linux-arm64": "linux/arm64"}
 QEMU_SETUP = ["docker", "run", "--privileged", "--rm", "tonistiigi/binfmt", "--install", "arm64"]
 ARM64_WORKFLOW = "plugin-windows-arm64.yml"
 ARM64_ARTIFACT = "plugin-windows-arm64"
+LINUX_ARM64_WORKFLOW = "plugin-linux-arm64.yml"
+LINUX_ARM64_ARTIFACT = "plugin-linux-arm64"
 # Where that workflow lives (public: its arm64 runner is free).
 DUCKY_GH = os.environ.get("DUCKY_GH_REPO") or "UEFN-Ducky/UEFN-Ducky"
 
@@ -61,39 +65,49 @@ def _out(cmd: list[str], cwd: Path | None = None) -> str:
 
 
 def windows_arm64_build(plugin: Path, hold: Path) -> Path | None:
-    """Dispatch plugin-windows-arm64.yml for the plugin's HEAD (it must be pushed), wait for it,
-    and download its zip into ``hold``. None for a plugin with no GitHub remote (a draft)."""
+    return github_build(plugin, hold, ARM64_WORKFLOW, ARM64_ARTIFACT, "plugin arm64", "windows-arm64")
+
+
+def linux_arm64_build(plugin: Path, hold: Path) -> Path | None:
+    return github_build(plugin, hold, LINUX_ARM64_WORKFLOW, LINUX_ARM64_ARTIFACT,
+                        "plugin linux arm64", "linux-arm64")
+
+
+def github_build(plugin: Path, hold: Path, workflow: str, artifact: str, title: str,
+                 target: str) -> Path | None:
+    """Dispatch ``workflow`` for the plugin's HEAD (it must be pushed), wait for it, and
+    download its ``*-<target>-compiled`` zip into ``hold``. None for a plugin with no GitHub
+    remote (a draft)."""
     try:
         slug = github_slug(_out(["git", "remote", "get-url", "origin"], plugin))
         sha = _out(["git", "rev-parse", "HEAD"], plugin)
     except (subprocess.CalledProcessError, FileNotFoundError):
         slug = None
     if not slug:
-        print(f"WARNING: {plugin.name} has no GitHub remote: no Windows arm64 build "
-              "(Windows on Arm installs only builds it can load)")
+        print(f"WARNING: {plugin.name} has no GitHub remote: no {target} build on GitHub")
         return None
     request = f"{plugin.name}-{sha[:12]}-{uuid.uuid4().hex[:8]}"
-    print(f"building windows-arm64 on GitHub ({DUCKY_GH} {ARM64_WORKFLOW}, {slug}@{sha[:12]})")
-    _out(["gh", "workflow", "run", ARM64_WORKFLOW, "-R", DUCKY_GH,
+    print(f"building {target} on GitHub ({DUCKY_GH} {workflow}, {slug}@{sha[:12]})")
+    _out(["gh", "workflow", "run", workflow, "-R", DUCKY_GH,
           "-f", f"repo={slug}", "-f", f"sha={sha}", "-f", f"request={request}"])
     run_id = ""
     for _ in range(60):  # a dispatched run takes a few seconds to be listed
         time.sleep(5)
-        runs = json.loads(_out(["gh", "run", "list", "-R", DUCKY_GH, "-w", ARM64_WORKFLOW, "-L", "30",
+        runs = json.loads(_out(["gh", "run", "list", "-R", DUCKY_GH, "-w", workflow, "-L", "30",
                                 "--json", "databaseId,displayTitle"]) or "[]")
-        run_id = next((str(r["databaseId"]) for r in runs if r.get("displayTitle") == f"plugin arm64 {request}"), "")
+        run_id = next((str(r["databaseId"]) for r in runs if r.get("displayTitle") == f"{title} {request}"), "")
         if run_id:
             break
     if not run_id:
-        raise SystemExit(f"windows-arm64: the {ARM64_WORKFLOW} run for {request} never showed up")
+        raise SystemExit(f"{target}: the {workflow} run for {request} never showed up")
     if subprocess.run(["gh", "run", "watch", run_id, "-R", DUCKY_GH, "--exit-status", "--interval", "30"]).returncode:
-        raise SystemExit(f"windows-arm64 build failed: https://github.com/{DUCKY_GH}/actions/runs/{run_id} "
+        raise SystemExit(f"{target} build failed: https://github.com/{DUCKY_GH}/actions/runs/{run_id} "
                          "(is the commit pushed? a private repo needs the PLUGIN_REPO_TOKEN secret)")
-    got = Path(tempfile.mkdtemp(prefix="ducky-arm64-"))
-    _out(["gh", "run", "download", run_id, "-R", DUCKY_GH, "-n", ARM64_ARTIFACT, "-D", str(got)])
-    found = sorted(got.glob("*-windows-arm64-compiled.ducky-plugin.zip"))
+    got = Path(tempfile.mkdtemp(prefix=f"ducky-{target}-"))
+    _out(["gh", "run", "download", run_id, "-R", DUCKY_GH, "-n", artifact, "-D", str(got)])
+    found = sorted(got.glob(f"*-{target}-compiled.ducky-plugin.zip"))
     if len(found) != 1:
-        raise SystemExit(f"windows-arm64: expected one zip from run {run_id}, got {[p.name for p in found]}")
+        raise SystemExit(f"{target}: expected one zip from run {run_id}, got {[p.name for p in found]}")
     return Path(shutil.move(str(found[0]), str(hold / found[0].name)))
 
 
@@ -142,11 +156,12 @@ def linux_build_cmd(plugin: Path, target: str) -> list[str]:
             "-w", "/plugin", IMAGE, "python", "-c", call]
 
 
-def build(plugin: Path, run=None, arm64=None) -> list[Path]:
+def build(plugin: Path, run=None, arm64=None, linux_arm64=None) -> list[Path]:
     """Windows x64, linux-x86_64, linux-arm64, then Windows arm64 zips, each moved out of
     ``plugin/deploy`` into a temp folder as soon as it is built."""
     run = run or subprocess.run
     arm64 = arm64 or windows_arm64_build
+    linux_arm64 = linux_arm64 or linux_arm64_build
     bz = _script(plugin, "build_zip")
     # This kit, as the containers get it: a plugin looking only next to its own checkout
     # (forge's build_zip) found no UEFN-Ducky from a sandbox worktree.
@@ -160,6 +175,10 @@ def build(plugin: Path, run=None, arm64=None) -> list[Path]:
     zips = [tagged]
     for target, platform in LINUX_TARGETS.items():
         if platform == "linux/arm64":
+            native = linux_arm64(plugin, hold)
+            if native is not None:
+                zips.append(native)
+                continue
             run(QEMU_SETUP, check=True)
         print(f"building {target} in {IMAGE}")
         run(linux_build_cmd(plugin, target), check=True)
