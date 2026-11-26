@@ -1,0 +1,220 @@
+# A clean Mac for every install check: a fresh GitHub runner (Apple Silicon macos-26, Intel
+# macos-15-intel) installs the released DMG like a user, updates N-1 -> N in place and rolls
+# back from a broken update. Nobody has a Mac; run it from Windows:
+#   gh workflow run macos-install-check.yml -f job=all -f from_version=2.31.0
+#   gh run watch && gh run download -n macos-install-arm64
+name: macos-install-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Store feed to install from"
+        required: false
+        default: stable
+        type: choice
+        options: [stable, beta]
+      job:
+        description: "Which check"
+        required: false
+        default: all
+        type: choice
+        options: [install, update, rollback, all]
+      from_version:
+        description: "update/rollback: the N-1 version to start from (its DMG on uefnducky.org/downloads/macos)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+  # A runner is never a user: usage_stats skips sending in a test copy.
+  DUCKY_SANDBOX: "1"
+  CHANNEL: ${{ inputs.channel }}
+  FROM_VERSION: ${{ inputs.from_version }}
+  DOWNLOADS: https://uefnducky.org/downloads/macos
+
+jobs:
+  install:
+    name: install (${{ matrix.arch }})
+    if: inputs.job == 'install' || inputs.job == 'all'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v5
+      # The row updater.pick_asset takes on this Mac: os=macos, arch=<chip>, package=dmg.
+      - name: Fetch the DMG from the Store release feed
+        run: |
+          python3 - <<'EOF'
+          import hashlib, json, os, urllib.request
+          base = "https://uefnducky.org"
+          url = f"{base}/api/v1/plugins/uefn-ducky-store/collect/app-version"
+          if os.environ["CHANNEL"] == "beta":
+              url += "?channel=beta"  # ponytail: beta records have no client feed yet
+          req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"})
+          doc = json.load(urllib.request.urlopen(req, timeout=30))
+          payload = doc.get("payload", doc)
+          want = ("macos", os.environ["ARCH"], "dmg")
+          row = next((r for r in payload.get("assets") or [] if (r.get("os"), r.get("arch"), r.get("package")) == want), None)
+          assert row, f"no {want} row in the feed (version {payload.get('currentVersion')})"
+          link = row["url"] if row["url"].startswith("https://") else base + row["url"]
+          data = urllib.request.urlopen(link, timeout=900).read()
+          got = hashlib.sha256(data).hexdigest()
+          assert got == str(row["sha256"]).lower(), f"sha256 {got} != {row['sha256']}"
+          open("ducky.dmg", "wb").write(data)
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"VERSION={payload.get('currentVersion')}\n")
+          print("fetched", link, len(data), "bytes, sha256 ok")
+          EOF
+      - name: Install like a browser download (quarantine, Gatekeeper)
+        run: |
+          xattr -w com.apple.quarantine "0081;$(date +%s);Safari;" ducky.dmg
+          hdiutil attach -nobrowse -mountpoint /Volumes/ducky ducky.dmg
+          cp -R "/Volumes/ducky/UEFN Ducky.app" /Applications/
+          hdiutil detach /Volumes/ducky
+          app="/Applications/UEFN Ducky.app"
+          xattr -w com.apple.quarantine "0081;$(date +%s);Safari;" "$app"
+          if codesign -dv "$app" 2>&1 | grep -q "Signature=adhoc"; then
+            # Gatekeeper must refuse an ad-hoc app; "Open Anyway" lifts the quarantine.
+            if spctl -a -t exec -vv "$app"; then echo "Gatekeeper accepted an ad-hoc app"; exit 1; fi
+            xattr -dr com.apple.quarantine "$app"
+            echo "MODE=adhoc, open-anyway" >> "$GITHUB_ENV"
+          else
+            spctl -a -t exec -vv "$app" 2>&1 | tee spctl.txt
+            grep -q "source=Notarized Developer ID" spctl.txt
+            echo "MODE=notarized" >> "$GITHUB_ENV"
+          fi
+      - name: Start (runtime smoke + screenshot)
+        run: |
+          mkdir -p out
+          bin="/Applications/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky"
+          "$bin" --runtime-smoke "$PWD/out/smoke.json"
+          python3 -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['window'], r" out/smoke.json
+          "$bin" > out/stdout.log 2>&1 &
+          sleep 25
+          screencapture -x "out/install-${ARCH}.png" || true
+          kill $! 2>/dev/null || true
+          echo "install ok ($MODE) $VERSION"
+      - name: Logs
+        if: ${{ always() }}
+        run: |
+          mkdir -p out/logs
+          cp -R ~/Library/Logs/UEFN-Ducky/. out/logs/ 2>/dev/null || true
+          find ~/Library/Logs/DiagnosticReports -iname '*UEFN*' -exec cp {} out/logs/ \; 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: macos-install-${{ matrix.arch }}
+          path: out/
+          retention-days: 7
+
+  update:
+    name: update (${{ matrix.arch }})
+    if: inputs.job == 'update' || inputs.job == 'all'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Install N-1 into ~/Applications
+        run: |
+          [ -n "$FROM_VERSION" ] || { echo "update needs from_version (N-1)"; exit 1; }
+          curl -fsSL -o old.dmg "$DOWNLOADS/UEFN-Ducky-$FROM_VERSION-macos-$ARCH.dmg"
+          hdiutil attach -nobrowse -mountpoint /Volumes/ducky old.dmg
+          mkdir -p ~/Applications && cp -R "/Volumes/ducky/UEFN Ducky.app" ~/Applications/
+          hdiutil detach /Volumes/ducky
+          xattr -dr com.apple.quarantine ~/Applications/"UEFN Ducky.app" || true
+      - name: Update to N in place
+        run: |
+          app=~/Applications/"UEFN Ducky.app"
+          "$app/Contents/MacOS/UEFN-Ducky" --check-update --apply | tee check.json
+          for i in $(seq 1 60); do
+            v="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)"
+            [ "$v" != "$FROM_VERSION" ] && break
+            sleep 5
+          done
+          v="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)"
+          cli="$("$app/Contents/MacOS/UEFN-Ducky" --version)"
+          [ "$v" != "$FROM_VERSION" ] || { echo "still on $FROM_VERSION"; exit 1; }
+          case "$cli" in *"$v"*) ;; *) echo "--version says $cli, bundle says $v"; exit 1 ;; esac
+          echo "update $FROM_VERSION -> $v ok"
+
+  rollback:
+    name: rollback (${{ matrix.arch }})
+    if: inputs.job == 'rollback' || inputs.job == 'all'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - name: Install N-1 into ~/Applications
+        run: |
+          [ -n "$FROM_VERSION" ] || { echo "rollback needs from_version (N-1)"; exit 1; }
+          curl -fsSL -o old.dmg "$DOWNLOADS/UEFN-Ducky-$FROM_VERSION-macos-$ARCH.dmg"
+          hdiutil attach -nobrowse -mountpoint /Volumes/ducky old.dmg
+          mkdir -p ~/Applications && cp -R "/Volumes/ducky/UEFN Ducky.app" ~/Applications/
+          hdiutil detach /Volumes/ducky
+          xattr -dr com.apple.quarantine ~/Applications/"UEFN Ducky.app" || true
+      # A broken N (sha matches, the app exits 1) on a loopback feed, as zip and DMG.
+      - name: Broken update feed, update, rollback
+        run: |
+          mkdir -p feed
+          cp -R ~/Applications/"UEFN Ducky.app" "feed/UEFN Ducky.app"
+          bin="feed/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky"
+          printf '#!/bin/sh\nexit 1\n' > "$bin" && chmod +x "$bin"
+          plutil -replace CFBundleShortVersionString -string 99.0.0 "feed/UEFN Ducky.app/Contents/Info.plist"
+          codesign --force --deep -s - "feed/UEFN Ducky.app"
+          ditto -c -k --keepParent "feed/UEFN Ducky.app" "feed/UEFN-Ducky-99.0.0-macos-$ARCH.app.zip"
+          hdiutil create -volname "UEFN Ducky" -srcfolder "feed/UEFN Ducky.app" -ov -format UDZO "feed/UEFN-Ducky-99.0.0-macos-$ARCH.dmg"
+          python3 - <<'EOF' &
+          import hashlib, json, os
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+          arch, base = os.environ["ARCH"], "http://127.0.0.1:8765"
+          files = {f"/{n}": open(f"feed/{n}", "rb").read() for n in os.listdir("feed") if n.startswith("UEFN-Ducky-99")}
+          rows = [{"os": "macos", "arch": arch, "package": "app-zip" if p.endswith(".app.zip") else "dmg",
+                   "url": base + p, "sha256": hashlib.sha256(d).hexdigest(), "sig_url": ""} for p, d in files.items()]
+          body = json.dumps({"handled": True, "payload": {"currentVersion": "99.0.0", "assets": rows}}).encode()
+          class H(BaseHTTPRequestHandler):
+              def _reply(self):
+                  data = body if self.path.startswith("/api/") else files.get(self.path, b"")
+                  self.send_response(200 if data else 404)
+                  self.send_header("Content-Length", str(len(data)))
+                  self.end_headers()
+                  self.wfile.write(data)
+              do_GET = do_POST = _reply
+          ThreadingHTTPServer(("127.0.0.1", 8765), H).serve_forever()
+          EOF
+          sleep 2
+          # Same step: the feed server lives as long as this shell. Update fails, N-1 comes back.
+          export DUCKY_UPDATE_BASE_URL=http://127.0.0.1:8765
+          app=~/Applications/"UEFN Ducky.app"
+          "$app/Contents/MacOS/UEFN-Ducky" --check-update --apply || true
+          sleep 90
+          v="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)"
+          [ "$v" = "$FROM_VERSION" ] || { echo "after the broken update the bundle is $v, not $FROM_VERSION"; exit 1; }
+          "$app/Contents/MacOS/UEFN-Ducky" --check-update | tee status.json
+          grep -q '"last_failure": *{' status.json || { echo "no last_failure written"; exit 1; }
+          echo "rollback restored $v"

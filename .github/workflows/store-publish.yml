@@ -572,6 +572,13 @@ jobs:
           if [ -n "${SET_VERSION}" ]; then extra+=(--set-version "${SET_VERSION}"); fi
           .venv/Scripts/python -u release/publish_app.py --phase build "${extra[@]}"
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-dist-*
+          path: dist/macos
+          merge-multiple: true
+
+      # A Mac file of another version would put Mac users on the wrong update.
       - name: Windows and Linux are the same version
         shell: bash
         env:
@@ -582,6 +589,15 @@ jobs:
             echo "Windows built $built but Linux built $LINUX_VERSION (the Store moved?): re-run the release."
             exit 1
           fi
+          VERSION="$built"
+          shopt -s nullglob
+          for glob in '*-macos-arm64.*' '*-macos-x64.*'; do
+            files=(dist/macos/$glob)
+            [ ${#files[@]} -gt 0 ] || { echo "no dist/macos/$glob: macos-build shipped nothing"; exit 1; }
+            for f in "${files[@]}"; do
+              case "$(basename "$f")" in UEFN-Ducky-"$VERSION"-macos-*) ;; *) echo "$f is not $VERSION"; exit 1 ;; esac
+            done
+          done
 
       # publish_app's upload step registers dist/linux and publishes dist/linux-repo.
       - uses: actions/download-artifact@v4
@@ -593,11 +609,6 @@ jobs:
         with:
           name: linux-repo
           path: dist/linux-repo
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: macos-dist-*
-          path: dist/macos
-          merge-multiple: true
 
       - name: Dry run (uploads nothing)
         if: inputs.dry_run
