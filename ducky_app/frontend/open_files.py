@@ -203,7 +203,7 @@ def try_handoff_to_running(
     Keep retries/timeout short: a stale panel.pid after a force-kill/update otherwise
     burns ~20s of connect timeouts before cold start can proceed.
     """
-    if sys.platform != "win32" and not sys.platform.startswith("linux"):
+    if sys.platform not in ("win32", "darwin") and not sys.platform.startswith("linux"):
         return False
     from frontend.ui_web.panel_httpd import panel_ui_http_url
 
@@ -421,6 +421,16 @@ def xdg_open(target: str) -> bool:
         return False
 
 
+def mac_open(*args: str) -> bool:
+    """macOS ``open`` (LaunchServices): a file, folder or URL; ``-R`` reveals in Finder."""
+    try:
+        subprocess.Popen(["open", *args], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+        return True
+    except OSError:
+        return False
+
+
 def open_path(path: str | Path) -> bool:
     """Open a file or folder in its default program."""
     if sys.platform == "win32":
@@ -429,6 +439,8 @@ def open_path(path: str | Path) -> bool:
             return True
         except OSError:
             return False
+    if sys.platform == "darwin":
+        return mac_open(str(path))
     return xdg_open(str(path))
 
 
@@ -438,6 +450,8 @@ def open_url(url: str) -> bool:
         import webbrowser
 
         return bool(webbrowser.open(url))
+    if sys.platform == "darwin":
+        return mac_open(url)
     return xdg_open(url)
 
 
@@ -451,6 +465,8 @@ def show_in_folder(path: str | Path) -> bool:
             return True
         except OSError:
             return False
+    if sys.platform == "darwin":
+        return mac_open("-R", str(target)) if target.exists() else mac_open(str(target.parent))
     if target.exists():
         uri = target.resolve().as_uri()
         if gdbus_call("org.freedesktop.FileManager1", "/org/freedesktop/FileManager1",
