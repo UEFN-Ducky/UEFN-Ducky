@@ -21,8 +21,9 @@ def test_abi_per_target() -> None:
     assert mp.python_abi("linux", "x86_64", (3, 12)) == "cpython-312-x86_64-linux-gnu"
     assert mp.python_abi("linux", "arm64", (3, 12)) == "cpython-312-aarch64-linux-gnu"
     assert mp.module_suffix("linux") == ".so" and mp.module_suffix("windows") == ".pyd"
+    assert mp.python_abi("macos", "arm64", (3, 13)) == "cpython-313-darwin-arm64"
     with pytest.raises(ValueError):
-        mp.python_abi("darwin", "arm64")
+        mp.python_abi("darwin", "arm64")  # the OS is 'macos', never sys.platform's 'darwin'
 
 
 def test_windows_abi_is_unchanged_on_windows() -> None:

@@ -2,7 +2,9 @@
 
 A compiled build names its target in ``python_abi``: ``cp313-win_amd64`` (Windows x64, the only
 target before Linux builds), ``cp313-win_arm64``, ``cpython-313-x86_64-linux-gnu`` or
-``cpython-313-aarch64-linux-gnu``.
+``cpython-313-aarch64-linux-gnu``, ``cpython-313-darwin-arm64`` or ``cpython-313-darwin-x86_64``.
+CPython names a macOS extension ``*.cpython-313-darwin.so`` on both chips, so only the manifest tag
+carries the Mac arch; ``module_abi`` gives the tag that goes in the file name.
 A compiled build with no ``python_abi`` is an old Windows build. Source plugins run anywhere.
 """
 
@@ -14,11 +16,14 @@ from typing import Any
 
 WINDOWS = "windows"
 LINUX = "linux"
+MACOS = "macos"
 X86_64 = "x86_64"
 AARCH64 = "aarch64"
 
 _ARCH_ALIASES = {"amd64": X86_64, "x86_64": X86_64, "x64": X86_64, "arm64": AARCH64, "aarch64": AARCH64}
-_OS_LABELS = {WINDOWS: "Windows", LINUX: "Linux"}
+_OS_LABELS = {WINDOWS: "Windows", LINUX: "Linux", MACOS: "macOS"}
+# manifest tags say arm64 for Apple Silicon (the platform's own name), aarch64 elsewhere
+_MAC_ARCH = {X86_64: "x86_64", AARCH64: "arm64"}
 
 
 def norm_arch(raw: str) -> str:
@@ -30,6 +35,8 @@ def host_os() -> str:
         return WINDOWS
     if sys.platform.startswith("linux"):
         return LINUX
+    if sys.platform == "darwin":
+        return MACOS
     return sys.platform
 
 
@@ -45,7 +52,15 @@ def python_abi(os_name: str, arch: str, mm: tuple[int, int] | None = None) -> st
         return f"cp{major}{minor}-win_arm64" if arch == AARCH64 else f"cp{major}{minor}-win_amd64"
     if os_name == LINUX and arch in (X86_64, AARCH64):
         return f"cpython-{major}{minor}-{arch}-linux-gnu"
+    if os_name == MACOS and arch in _MAC_ARCH:
+        return f"cpython-{major}{minor}-darwin-{_MAC_ARCH[arch]}"
     raise ValueError(f"no compiled plugin builds for {os_name} {arch}")
+
+
+def module_abi(os_name: str, arch: str, mm: tuple[int, int] | None = None) -> str:
+    """The ABI tag in the compiled module's file name (macOS drops the arch: CPython's own suffix)."""
+    abi = python_abi(os_name, arch, mm)
+    return abi.rsplit("-", 1)[0] if os_name == MACOS else abi
 
 
 def module_suffix(os_name: str) -> str:
@@ -62,6 +77,9 @@ def abi_target(abi: str) -> tuple[str, str] | None:
     for arch in (X86_64, AARCH64):
         if abi.endswith(f"-{arch}-linux-gnu"):
             return LINUX, arch
+    for arch, tag in _MAC_ARCH.items():
+        if abi.endswith(f"-darwin-{tag}"):
+            return MACOS, arch
     return None
 
 
