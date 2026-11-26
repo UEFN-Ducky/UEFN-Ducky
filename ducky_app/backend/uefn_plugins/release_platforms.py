@@ -32,6 +32,7 @@ import subprocess
 import sys
 import re
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -169,13 +170,17 @@ def build(plugin: Path, run=None, arm64=None, linux_arm64=None) -> list[Path]:
     # Each finished zip waits outside deploy/: a plugin's own build may prune every zip there
     # (forge's Linux build deleted the Windows one before the upload).
     hold = Path(tempfile.mkdtemp(prefix=f"ducky-release-{plugin.name}-"))
+    # Both GitHub builds run while this PC builds its own: one after another, a big plugin
+    # (road-network) took over an hour for four builds.
+    gh_linux = _background(linux_arm64, plugin, hold)
+    gh_win = _background(arm64, plugin, hold)
     win = Path(bz.build_compiled_zip(release=True))
     tagged = hold / win.name.replace("-compiled.ducky-plugin.zip", "-windows-x64-compiled.ducky-plugin.zip")
     shutil.move(str(win), str(tagged))
     zips = [tagged]
     for target, platform in LINUX_TARGETS.items():
         if platform == "linux/arm64":
-            native = linux_arm64(plugin, hold)
+            native = gh_linux()
             if native is not None:
                 zips.append(native)
                 continue
@@ -186,10 +191,33 @@ def build(plugin: Path, run=None, arm64=None, linux_arm64=None) -> list[Path]:
         if not found:
             raise SystemExit(f"{target}: the build wrote no *-{target}-compiled.ducky-plugin.zip")
         zips.append(Path(shutil.move(str(found[-1]), str(hold / found[-1].name))))
-    arm = arm64(plugin, hold)
+    arm = gh_win()
     if arm is not None:
         zips.append(arm)
     return zips
+
+
+def _background(fn, *args):
+    """Start ``fn(*args)`` on a daemon thread (a failed local build exits without waiting on
+    GitHub); the returned call waits and gives its result or raises its error."""
+    box: dict = {}
+
+    def work():
+        try:
+            box["result"] = fn(*args)
+        except BaseException as exc:  # SystemExit too: a failed GitHub build
+            box["error"] = exc
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+
+    def wait():
+        t.join()
+        if "error" in box:
+            raise box["error"]
+        return box["result"]
+
+    return wait
 
 
 def publish(plugin: Path, zips: list[Path], *, category: str, changelog: str) -> dict:

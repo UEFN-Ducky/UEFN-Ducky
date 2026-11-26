@@ -194,6 +194,29 @@ def test_linux_arm64_from_github_skips_the_qemu_build(plugin):
     assert [c[c.index("--platform") + 1] for c in calls] == ["linux/amd64"]
 
 
+def test_github_builds_start_before_the_local_ones(plugin):
+    """Run one after another, road-network's four builds took over an hour."""
+    run, _ = fake_docker(plugin)
+    started = []
+
+    def gh(plugin_root, hold):
+        started.append((plugin_root / "deploy").exists())  # deploy/ appears with the Windows build
+        return None
+
+    rp.build(plugin, run=run, arm64=gh, linux_arm64=gh)
+    assert started == [False, False]
+
+
+def test_a_failed_github_build_fails_the_release(plugin):
+    run, _ = fake_docker(plugin)
+
+    def broken(plugin_root, hold):
+        raise SystemExit("linux-arm64 build failed")
+
+    with pytest.raises(SystemExit, match="linux-arm64"):
+        rp.build(plugin, run=run, linux_arm64=broken)
+
+
 def test_github_slug_reads_https_and_ssh_remotes():
     assert rp.github_slug("https://github.com/UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
     assert rp.github_slug("git@github.com:UEFN-Ducky/uefn-plugin-vim.git") == "UEFN-Ducky/uefn-plugin-vim"
