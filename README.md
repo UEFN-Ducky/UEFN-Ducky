@@ -13,7 +13,9 @@ toolset you want.
 > "Fortnite" are trademarks of Epic Games, Inc. See [LICENSE](LICENSE) and
 > [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-> **Platform:** Windows. macOS is not bundled yet.
+> **Platforms:** Windows 10/11 (x64, arm64), Linux (x86_64, aarch64) and macOS 13+ (Apple Silicon and Intel).
+> UEFN itself runs on Windows; a Mac or Linux Ducky reaches it through your account's Windows Ducky.
+> Unsigned macOS builds need a one-time **System Settings → Privacy & Security → Open Anyway**.
 
 ---
 
