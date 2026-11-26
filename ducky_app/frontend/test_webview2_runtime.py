@@ -43,6 +43,7 @@ def test_require_raises_only_when_the_window_cannot_start(monkeypatch) -> None:
         wv2.require()
 
 
+@pytest.mark.windows_only("webview_app checks WebView2 only on Windows; macOS shows mac_alert")
 def test_the_start_error_is_the_plain_message_with_its_own_code_and_an_offer_to_open_the_page(monkeypatch) -> None:
     import tkinter.messagebox as messagebox
     import webbrowser

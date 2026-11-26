@@ -546,6 +546,7 @@ def test_a_page_that_started_is_never_reloaded():
 
 def test_reload_main_page_reloads_the_first_webview(monkeypatch):
     reloaded: list[str] = []
+    monkeypatch.setattr(wr.sys, "platform", "win32")  # the WinForms path, on any OS
     monkeypatch.setitem(__import__("sys").modules, "System", SimpleNamespace(Action=lambda fn: fn))
     form = SimpleNamespace(IsDisposed=False, BeginInvoke=lambda fn: fn(), Controls=[
         SimpleNamespace(),  # a non-browser control first

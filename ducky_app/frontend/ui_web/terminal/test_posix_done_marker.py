@@ -16,6 +16,7 @@ def test_fish_quoting_keeps_backslashes_and_quotes():
     line = _fish_wrap("false", "abc12345", background=False)
     assert line.endswith("printf '__DUCKY_DONE_%s__%s__\\n' abc12345 $status\n")
     assert "__DUCKY_DONE_abc12345__" not in line  # the shell's echo of the line never matches
+    assert _fish_wrap("sleep 1", "abc12345", background=True).endswith(" </dev/null &\n")  # never reads the tty
 
 
 @pytest.fixture(params=_SHELLS or [pytest.param("none", marks=pytest.mark.skip("no POSIX shell"))])

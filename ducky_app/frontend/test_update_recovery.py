@@ -242,6 +242,7 @@ def test_startup_failure_records_original_error_before_generic_popup(monkeypatch
                         lambda source, detail: recorded.append((source, detail)))
     monkeypatch.setattr(shutdown, "hard_exit", lambda **kwargs: None)
     monkeypatch.setitem(sys.modules, "tkinter", None)
+    monkeypatch.setattr("frontend.mac_alert.ask", lambda *a, **k: -1)  # macOS: no real alert
     error = FileNotFoundError("Panel build incomplete: assets/missing.js")
     shutdown.fatal_error_and_exit(error)
     assert recorded[0][0] == "startup"

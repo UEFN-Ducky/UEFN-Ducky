@@ -19,6 +19,7 @@ KEY = bytes(range(32))
 def profile(tmp_path, monkeypatch):
     monkeypatch.setattr(sec, "_is_linux", lambda: True)
     monkeypatch.setattr(vault, "_is_linux", lambda: True)
+    monkeypatch.setattr(vault, "sys", types.SimpleNamespace(platform="linux"))  # a Mac run takes Linux's path too
     monkeypatch.setattr(sec, "master_key_path", lambda: tmp_path / "master.key")
     monkeypatch.setattr(sec, "_master_key", None)
     monkeypatch.setitem(sys.modules, "keyring", types.ModuleType("keyring"))  # key file fallback

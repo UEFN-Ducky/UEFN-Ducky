@@ -719,7 +719,7 @@ def _ask_to_send(body: dict[str, str]) -> bool:
     """The crash pop-up (a plain native window: Ducky's own UI may be what crashes).
     True only when the user presses Send report."""
     if sys.platform == "darwin":
-        return _mac_ask(body, reload=None) == 0
+        return _mac_ask(body, reload=None, wait_s=ASK_WAIT_S) == 0  # unanswered: closes itself, like Tk's after()
     try:
         import tkinter as tk
 
@@ -773,7 +773,7 @@ def show_now(tk_root: Any, body: dict[str, str], reload: Callable[[], None] | No
         pass
 
 
-def _mac_ask(body: dict[str, str], reload: Callable[[], None] | None) -> int:
+def _mac_ask(body: dict[str, str], reload: Callable[[], None] | None, wait_s: float = 600.0) -> int:
     """macOS crash pop-up (NSAlert, no Tk): 0 Send report, 1 Don't send, 2 Reload, -1 none."""
     from frontend import mac_alert
 
@@ -781,7 +781,7 @@ def _mac_ask(body: dict[str, str], reload: Callable[[], None] | None) -> int:
     heading = STUCK_HEADING if stuck else "UEFN Ducky closed unexpectedly"
     buttons = ["Send report", "Don't send"] + (["Reload"] if stuck and reload is not None else [])
     text = f"{why_summary(body)}\n\nSend the crash report so we can fix it. {PRIVACY_NOTE}"
-    return mac_alert.ask(heading, text, buttons)
+    return mac_alert.ask(heading, text, buttons, wait_s=wait_s)
 
 
 def _fill_popup(root: Any, body: dict[str, str], done: Callable[[bool], None],

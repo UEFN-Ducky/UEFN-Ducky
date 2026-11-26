@@ -19,7 +19,7 @@ def _running(events: list[dict], jid: str) -> list[int]:
 
 
 def _wait_state(events: list[dict], jid: str, state: str) -> None:
-    deadline = time.monotonic() + 3.0
+    deadline = time.monotonic() + 10.0  # a loaded runner
     while time.monotonic() < deadline:
         if any(e["job_id"] == jid and e["state"] == state for e in events):
             return
@@ -49,12 +49,12 @@ def test_hundred_updates_in_a_second_push_at_most_two(monkeypatch) -> None:
     release = threading.Event()
 
     def work() -> dict:
-        started = time.monotonic()
+        # No wall-clock check here: on a loaded runner the loop outlasts the second and the
+        # job failed; the bound below is counted in a fixed 0.95 s whatever the loop's pace.
         for pct in range(100):
             bj.job_progress(pct)
             time.sleep(0.009)
-        assert time.monotonic() - started < 1.0
-        release.wait(2.0)
+        release.wait(10.0)
         return {"ok": True}
 
     jid = bj.job_start(work)["job_id"]

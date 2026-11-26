@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from types import SimpleNamespace
 
@@ -39,8 +40,9 @@ def test_fifty_flips_in_a_second_push_at_most_two() -> None:
     for n in range(50):
         session.set_busy(n % 2 == 0)
         time.sleep(0.016)
-    assert time.monotonic() - started < 1.0
-    assert len(_busy(events)) <= 2
+    # 2 a second: a loaded runner whose 50 short sleeps take 3.7 s may push 2 per second it took.
+    took = time.monotonic() - started
+    assert len(_busy(events)) <= 2 * max(1, math.ceil(took))
     time.sleep(0.6)
     assert _busy(events)[-1] is False  # the last value always arrives
 

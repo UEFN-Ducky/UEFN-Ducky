@@ -44,6 +44,9 @@ def test_window_title_names_the_ports(monkeypatch) -> None:
 
     shown: list[str] = []
     monkeypatch.setattr(messagebox, "showerror", lambda title, message, parent=None: shown.append(title))
+    from frontend import mac_alert
+
+    monkeypatch.setattr(mac_alert, "ask", lambda title, message, *a, **k: shown.append(title) or 0)  # macOS
     monkeypatch.setattr(shutdown, "hard_exit", lambda api=None: None)
     from frontend import boot_report, error_log
 

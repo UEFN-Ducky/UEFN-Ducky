@@ -1,44 +1,34 @@
-"""macOS message boxes: an NSAlert on the main thread (Tk can't share it with Cocoa)."""
+"""macOS message boxes without Tk (Cocoa owns the main thread): ``osascript display alert``.
+
+An in-process NSAlert ``runModal`` never returns on its own, so an unattended start waited
+on it forever; ``giving up after`` closes the alert by itself. Any thread can call it."""
 
 from __future__ import annotations
 
-import threading
+import subprocess
 from collections.abc import Sequence
+
+# Text and buttons travel as argv, never spliced into the script (quotes, backslashes).
+_SCRIPT = (
+    "on run argv\n"
+    "set r to display alert (item 1 of argv) message (item 2 of argv) as critical "
+    "buttons (items 4 thru -1 of argv) default button 1 giving up after ((item 3 of argv) as integer)\n"
+    "if gave up of r then return \"\"\n"
+    "return button returned of r\n"
+    "end run"
+)
 
 
 def ask(title: str, message: str, buttons: Sequence[str] = ("OK",), *, wait_s: float = 600.0) -> int:
-    """Show a modal alert; the index of the button pressed, or -1 (no AppKit, no answer).
-
-    Safe from any thread: off the main thread it runs through ``AppHelper.callAfter`` and
-    waits for the answer. Before the Cocoa loop runs, call it from the main thread."""
+    """Show an alert; the index of the button pressed, or -1 (closed itself after *wait_s*,
+    or no osascript). At most 3 buttons (macOS's limit)."""
+    labels = [str(b) for b in buttons][:3] or ["OK"]
+    wait = max(1, int(wait_s))
     try:
-        from AppKit import NSAlert, NSAlertFirstButtonReturn, NSApplication  # type: ignore[import-not-found]
-        from Foundation import NSThread  # type: ignore[import-not-found]
-        from PyObjCTools import AppHelper  # type: ignore[import-not-found]
-    except ImportError:
+        out = subprocess.run(
+            ["osascript", "-e", _SCRIPT, title, message, str(wait), *labels],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=wait + 10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
         return -1
-    out = {"i": -1}
-    done = threading.Event()
-
-    def run() -> None:
-        try:
-            app = NSApplication.sharedApplication()
-            alert = NSAlert.alloc().init()
-            alert.setMessageText_(title)
-            alert.setInformativeText_(message)
-            alert.setAlertStyle_(2)  # NSAlertStyleCritical
-            for label in buttons:
-                alert.addButtonWithTitle_(label)
-            app.activateIgnoringOtherApps_(True)
-            out["i"] = int(alert.runModal()) - int(NSAlertFirstButtonReturn)
-        except Exception:
-            out["i"] = -1
-        finally:
-            done.set()
-
-    if NSThread.isMainThread():
-        run()
-    else:
-        AppHelper.callAfter(run)
-        done.wait(wait_s)
-    return out["i"]
+    return labels.index(out) if out in labels else -1

@@ -9,6 +9,7 @@ _ALL = {"bash": "/usr/bin/bash", "zsh": "/usr/bin/zsh", "fish": "/usr/bin/fish",
 
 def _linux(monkeypatch, installed, login_shell=""):
     monkeypatch.setattr(shells, "_posix", lambda: True)
+    monkeypatch.setattr(shells.sys, "platform", "linux")  # macOS falls back to zsh, not bash
     monkeypatch.setattr(shells.shutil, "which", lambda name: _ALL[name] if name in installed else None)
     monkeypatch.setenv("SHELL", login_shell)
 

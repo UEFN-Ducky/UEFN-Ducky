@@ -434,8 +434,18 @@ def test_an_unanswered_pop_up_closes_itself_and_the_start_goes_on(monkeypatch) -
     root = Root()
     monkeypatch.setattr(tkinter, "Tk", lambda: root)
     monkeypatch.setattr(boot_report, "_fill_popup", lambda *a, **k: None)
+    monkeypatch.setattr(boot_report.sys, "platform", "win32")
     assert boot_report._ask_to_send({}) is False  # not sent: the report stays kept
     assert root.ms == boot_report.ASK_WAIT_S * 1000 and root.gone
+
+    # macOS: the alert gives up after the same wait (osascript 'giving up after').
+    from frontend import mac_alert
+
+    waits: list[float] = []
+    monkeypatch.setattr(mac_alert, "ask", lambda *a, wait_s=0, **k: waits.append(wait_s) or -1)
+    monkeypatch.setattr(boot_report.sys, "platform", "darwin")
+    assert boot_report._ask_to_send({}) is False
+    assert waits == [boot_report.ASK_WAIT_S]
 
 
 def test_the_launchers_backend_asks_after_hello_not_before(crash) -> None:
@@ -693,6 +703,7 @@ def test_answering_the_stuck_popup_while_open_means_the_next_launch_does_not_ask
 
     monkeypatch.setattr(tkinter, "Toplevel", lambda root: object())
     monkeypatch.setattr(boot_report, "_fill_popup", lambda root, body, done, reload=None: done(True))
+    monkeypatch.setattr(boot_report, "_mac_ask", lambda body, reload, wait_s=0: 0)  # macOS: Send report
     boot_report.begin("1.2.394")
     boot_report.mark("ok")
     boot_report.page_error("Could not load http://127.0.0.1:4198/assets/index-x.js")

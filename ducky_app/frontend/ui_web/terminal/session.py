@@ -93,8 +93,10 @@ def _fish_wrap(cmd: str, tag: str, background: bool) -> str:
     like bash's rather than a fish_postexec hook: the marker carries this run's tag and the
     person's own commands print none."""
     if background:
-        # fish can't put eval in the background; a child fish runs it there.
-        return f"env {_BASH_AGENT_ENV} fish -c {_fish_literal(cmd)} &\n"
+        # fish can't put eval in the background; a child fish runs it there. Its stdin is
+        # /dev/null: fish 4 reads the tty for its terminal-query replies, and a background job
+        # that reads the tty is stopped (SIGTTIN), so it never printed.
+        return f"env {_BASH_AGENT_ENV} fish -c {_fish_literal(cmd)} </dev/null &\n"
     agent_env = " ".join(f"set -lx {k} {v};" for k, v in _AGENT_ENV)
     # $status after `end` is the eval's; the block keeps the variables to this command only.
     return (

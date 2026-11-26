@@ -187,12 +187,13 @@ def test_a_60fps_stream_keeps_each_ui_thread_turn_under_2ms(monkeypatch):
     ui = _FakeUi()
     try:
         # Count frames, not seconds: under -n auto a fixed 1.5 s gave 20 frames (needed > 40).
-        core, v, _ = _stream(monkeypatch, ui, 0.0,
-                             until=lambda c, view: len(_frames(c)) > 40 and view.cap.fps == 60)
+        # Asked for 60 fps; the capturer may adapt down on a slow runner (macOS CI: 10 fps,
+        # its 16 MB memset alone eats the period). The point is the UI thread's cost per frame.
+        core, v, _ = _stream(monkeypatch, ui, 0.0, until=lambda c, view: len(_frames(c)) > 40)
     finally:
         ui.close()
     frames = _frames(core)
-    assert len(frames) > 40 and v.cap.fps == 60
+    assert len(frames) > 40 and v.cap.max_fps == 60
     costs = sorted(ui.costs)
     assert costs[int(len(costs) * 0.95)] < 0.002  # the UI thread only posts a tiny message
     assert ui.max_queued <= 2  # one frame post (+ at most a buffer close) ever waits

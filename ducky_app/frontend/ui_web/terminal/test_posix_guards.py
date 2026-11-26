@@ -18,6 +18,10 @@ def fresh_path(monkeypatch):
     monkeypatch.setattr(path_env, "_login_path", None)
 
 
+# macOS gives no per-process memory cap: it ignores RLIMIT_DATA (and RLIMIT_AS).
+_no_rlimit_on_mac = pytest.mark.skipif(sys.platform == "darwin", reason="macOS doesn't enforce RLIMIT_DATA")
+
+
 def _fake_login_shell(tmp_path, nvm_bin):
     calls = tmp_path / "calls"
     shell = tmp_path / "fakebash"
@@ -48,7 +52,8 @@ def test_path_comes_from_the_login_shell_once(tmp_path, fresh_path):
 
 
 def test_merged_path_puts_the_login_shell_first_without_repeats(monkeypatch):
-    monkeypatch.setattr(path_env, "posix_login_path", lambda: "/home/me/.nvm/bin:/usr/bin")
+    monkeypatch.setattr(path_env.sys, "platform", "linux")  # macOS also adds Homebrew's folders
+    monkeypatch.setattr(path_env, "posix_login_path", lambda shell="bash": "/home/me/.nvm/bin:/usr/bin")
     monkeypatch.setenv("PATH", "/usr/bin:/snap/bin")
     assert path_env.windows_merged_path() == "/home/me/.nvm/bin:/usr/bin:/snap/bin"
     assert path_env.env_with_fresh_path({})["PATH"].startswith("/home/me/.nvm/bin:/usr/bin:/snap/bin")
@@ -56,10 +61,12 @@ def test_merged_path_puts_the_login_shell_first_without_repeats(monkeypatch):
 
 def test_a_broken_login_shell_keeps_the_process_path(monkeypatch, fresh_path):
     assert path_env.posix_login_path("/nonexistent/shell") == ""
+    monkeypatch.setattr(path_env.sys, "platform", "linux")
     monkeypatch.setenv("PATH", "/usr/bin")
     assert path_env.windows_merged_path() == "/usr/bin"
 
 
+@_no_rlimit_on_mac
 def test_an_agent_terminals_children_get_a_memory_cap_and_lower_priority():
     probe = "import os, resource; print(resource.getrlimit(resource.RLIMIT_DATA)[0], os.nice(0))"
     out = subprocess.run([sys.executable, "-c", probe], preexec_fn=resource_guard.posix_child_limits(512),
@@ -68,6 +75,7 @@ def test_an_agent_terminals_children_get_a_memory_cap_and_lower_priority():
     assert int(out[1]) >= os.nice(0) + 10 or int(out[1]) == 19
 
 
+@_no_rlimit_on_mac
 def test_an_agent_terminal_shell_is_capped(tmp_path, monkeypatch):
     pytest.importorskip("ptyprocess")
     from frontend.ui_web.terminal.session import TerminalSession

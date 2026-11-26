@@ -9,6 +9,8 @@ import sys
 import threading
 from pathlib import Path
 
+import pytest
+
 
 def test_schedule_tk_call_runs_on_pump() -> None:
     from frontend.ui_web import shutdown as sh
@@ -28,12 +30,16 @@ def test_schedule_tk_call_runs_on_pump() -> None:
         ran.set()
 
     sh.schedule_tk_call(job)
+    if sys.platform == "darwin":  # no Tk pump on macOS: the job gets a thread of its own
+        assert ran.wait(1.0) and holder == ["tk-call"]
+        return
     fn = sh._tk_call_queue.get(timeout=1.0)
     fn()
     assert ran.wait(1.0)
     assert holder == [threading.current_thread().name]
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="Tk off the main thread hangs on macOS; the app makes no Tk root there")
 def test_pump_owns_its_root_and_serves_other_threads() -> None:
     # The old pump update()d a root the blocked main thread made: 'main thread is not in main
     # loop' a second in, so queued work never ran. The pump thread now makes and loops the root.
