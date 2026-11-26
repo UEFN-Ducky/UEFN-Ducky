@@ -15,6 +15,9 @@
 # starts once both pass, so a Linux failure stops the release before anything uploads;
 # its upload step then registers Windows and Linux in one uds_app_release call.
 # linux-bumps updates the AUR package and opens the Flathub PR after the release.
+# macOS ships in it too: macos-build (macos-26 arm64 + macos-15-intel x64) freezes the .app,
+# Developer ID signs + notarizes it when the Apple secrets exist (else ad-hoc, still shipped),
+# and packs the DMG + .app.zip. Only GitHub has Macs, so linux-packages builds them as well.
 # dry_run=true builds everything and uploads nothing (bumps print their diffs).
 # The app's "UEFN Ducky Release" workflow builds Windows on the PC and dispatches
 # mode=linux-packages (set_version = its version) for the Linux side, then
@@ -46,11 +49,11 @@ on:
         type: choice
         options: [beta, stable]
       mode:
-        description: "release = everything; linux-packages = only the Linux artifacts; linux-bumps = only AUR/Flathub"
+        description: "release = everything; linux-packages = the Linux + macOS artifacts; macos-packages = only macOS; linux-bumps = only AUR/Flathub"
         required: false
         default: release
         type: choice
-        options: [release, linux-packages, linux-bumps]
+        options: [release, linux-packages, macos-packages, linux-bumps]
       linux_run:
         description: "linux-bumps: the run whose linux-dist-* artifacts to use"
         required: false
@@ -65,6 +68,10 @@ permissions:
   contents: write
   id-token: write
   actions: read
+
+env:
+  # Build smokes start the real app: a runner never sends usage (usage_stats._test_copy).
+  DUCKY_SANDBOX: "1"
 
 jobs:
   linux-version:
@@ -91,6 +98,7 @@ jobs:
   linux-build:
     name: linux build (${{ matrix.arch }})
     needs: linux-version
+    if: inputs.mode != 'macos-packages'
     strategy:
       fail-fast: true
       matrix:
@@ -276,7 +284,7 @@ jobs:
     name: windows build (arm64)
     needs: linux-version
     # linux-packages too: the app's release builds x64 on the PC and fetches this build.
-    if: inputs.mode != 'linux-bumps'
+    if: inputs.mode != 'linux-bumps' && inputs.mode != 'macos-packages'
     runs-on: windows-11-arm
     timeout-minutes: 120
     env:
@@ -342,9 +350,111 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # macOS: only GitHub has Macs, so every mode but linux-bumps builds it here. Without the
+  # Apple secrets (MACOS_CERT_P12_B64, MACOS_CERT_PASSWORD, APPLE_TEAM_ID, ASC_KEY_ID,
+  # ASC_ISSUER_ID, ASC_KEY_P8_B64) it is ad-hoc signed and still ships; with them
+  # release/sign_macos.py Developer ID signs and notarizes, no change here.
+  macos-build:
+    name: macos build (${{ matrix.arch }})
+    needs: linux-version
+    if: inputs.mode != 'linux-bumps'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64, lipo: arm64 }
+          - { runner: macos-15-intel, arch: x64, lipo: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      PYTHONUTF8: "1"
+      VERSION: ${{ needs.linux-version.outputs.version }}
+      VERSE_LANG_ASSETS: ${{ secrets.VERSE_LANG_ASSETS }}
+      MACOS_CERT_P12_B64: ${{ secrets.MACOS_CERT_P12_B64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_B64: ${{ secrets.ASC_KEY_P8_B64 }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ducky_app/frontend/ui_web/web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Dependencies
+        run: |
+          brew install portaudio ripgrep
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix ducky_app/frontend/ui_web/web
+      # Same as linux-build: build_exes.py bumps patch, so it starts one below the release.
+      - name: Set the release version
+        run: |
+          python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; a, b, c = sys.argv[1].split('.'); p.write_version(f'{a}.{b}.{int(c) - 1}')" "$VERSION"
+      - name: Verse language assets
+        run: bash build/ci_verse_lang.sh "${{ inputs.dry_run }}"
+      - name: Freeze (PyInstaller) + runtime smoke
+        run: |
+          python build/build_exes.py
+          built="$(python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; print(p.read_version())")"
+          [ "$built" = "$VERSION" ] || { echo "built $built, expected $VERSION"; exit 1; }
+          archs="$(lipo -archs "dist/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky")"
+          [ "$archs" = "${{ matrix.lipo }}" ] || { echo "expected ${{ matrix.lipo }} only, got $archs"; exit 1; }
+      # The keychain password is random and never printed; the keychain goes in the always() step.
+      - name: Sign (Developer ID with the Apple secrets, else ad-hoc)
+        run: |
+          app="dist/UEFN Ducky.app"
+          if [ -n "$MACOS_CERT_P12_B64" ] && [ -n "$MACOS_CERT_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            kc="$RUNNER_TEMP/ducky-sign.keychain-db"
+            pw="$(openssl rand -hex 16)"
+            echo "MACOS_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+            security create-keychain -p "$pw" "$kc"
+            security set-keychain-settings -lut 3600 "$kc"
+            security unlock-keychain -p "$pw" "$kc"
+            printf '%s' "$MACOS_CERT_P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
+            rm -f "$RUNNER_TEMP/cert.p12"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$kc" >/dev/null
+            security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+            python release/sign_macos.py sign "$app"
+            codesign --verify --deep --strict --verbose=2 "$app"
+            echo "MACOS_SIGNED=1" >> "$GITHUB_ENV"
+          else
+            codesign --force --deep -s - "$app"
+            codesign --verify --deep --strict "$app"
+            echo "::notice::unsigned macOS build (no Apple secrets)"
+          fi
+      - name: Notarize
+        if: env.MACOS_SIGNED == '1'
+        run: python release/sign_macos.py notarize "dist/UEFN Ducky.app"
+      - name: DMG + .app.zip
+        run: |
+          mkdir -p dist/macos "$RUNNER_TEMP/dmg"
+          base="dist/macos/UEFN-Ducky-$VERSION-macos-${{ matrix.arch }}"
+          ditto "dist/UEFN Ducky.app" "$RUNNER_TEMP/dmg/UEFN Ducky.app"
+          ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
+          hdiutil create -volname "UEFN Ducky" -srcfolder "$RUNNER_TEMP/dmg" -ov -format UDZO "$base.dmg"
+          ditto -c -k --keepParent "dist/UEFN Ducky.app" "$base.app.zip"
+          ls -la dist/macos
+      - name: Delete the signing keychain
+        if: ${{ always() }}
+        run: |
+          if [ -n "${MACOS_KEYCHAIN:-}" ]; then security delete-keychain "$MACOS_KEYCHAIN" || true; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dist-${{ matrix.arch }}
+          path: dist/macos/
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: build, sign and publish Setup
-    needs: [linux-version, linux-build, linux-flatpak, linux-repo, windows-arm64]
+    needs: [linux-version, linux-build, linux-flatpak, linux-repo, windows-arm64, macos-build]
     if: inputs.mode == 'release'
     runs-on: windows-latest
     timeout-minutes: 120
@@ -483,14 +593,19 @@ jobs:
         with:
           name: linux-repo
           path: dist/linux-repo
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-dist-*
+          path: dist/macos
+          merge-multiple: true
 
       - name: Dry run (uploads nothing)
         if: inputs.dry_run
         shell: bash
         run: |
-          ls -la dist/*.exe dist/linux
+          ls -la dist/*.exe dist/linux dist/macos
           find dist/linux-repo -type f | sort
-          .venv/Scripts/python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; v = p.read_version(); print([(a['os'], a['arch'], a['package'], a['path'].name, a['sig'] and a['sig'].name) for a in p.linux_artifacts(v)]); print(sorted(p.linux_repo_files()))"
+          .venv/Scripts/python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; v = p.read_version(); print([(a['os'], a['arch'], a['package'], a['path'].name, a['sig'] and a['sig'].name) for a in p.linux_artifacts(v)]); print(sorted(p.linux_repo_files())); print([(a['os'], a['arch'], a['package'], a['path'].name) for a in p.macos_artifacts(v)])"
 
       - name: Upload to the Store
         if: ${{ !inputs.dry_run }}

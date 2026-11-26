@@ -1,0 +1,159 @@
+# See the Mac app from Windows: nobody has a Mac, so this run starts "UEFN Ducky.app" in the
+# runner's logged-in GUI session, screenshots it every 10 s and collects its logs, boot.json
+# and crash reports as artifact macos-look-<arch>.
+#   gh workflow run macos-look.yml -f arch=arm64
+#   gh run watch
+#   gh run download -n macos-look-arm64      (then view the PNGs)
+# ref blank = the latest green macos-app artifact; ref set = a fresh build of that ref.
+# TCC prompts (mic, Screen Recording) can't be clicked here; the screenshots show their text.
+name: macos-look
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch/tag/sha to build; blank = latest uefn-ducky-macos-<arch> artifact from macos-app"
+        required: false
+        default: ""
+        type: string
+      arch:
+        description: "Apple Silicon (arm64) or Intel (x64)"
+        required: false
+        default: arm64
+        type: choice
+        options: [arm64, x64]
+      script:
+        description: "Optional: app arguments (starting with --, e.g. --runtime-smoke smoke.json) or JS for the panel (saved as look-script.js, path in DUCKY_LOOK_SCRIPT)"
+        required: false
+        default: ""
+        type: string
+      seconds:
+        description: "How long the app runs before it is stopped"
+        required: false
+        default: "40"
+        type: string
+      telemetry:
+        description: "Send usage to staging (DUCKYOS_STAGING_URL secret) instead of the test-copy default"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PYTHONUTF8: "1"
+  # A runner is never a user: usage_stats skips sending. Only the telemetry input lifts it (staging).
+  DUCKY_SANDBOX: "1"
+
+jobs:
+  look:
+    name: look (${{ inputs.arch }})
+    runs-on: ${{ inputs.arch == 'x64' && 'macos-15-intel' || 'macos-26' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Latest macos-app artifact
+        if: inputs.ref == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run="$(gh run list -R "$GITHUB_REPOSITORY" --workflow macos-app.yml --branch main --status success -L 1 --json databaseId -q '.[0].databaseId')"
+          [ -n "$run" ] || { echo "no green macos-app run: dispatch with ref=main to build"; exit 1; }
+          echo "macos-app run $run"
+          gh run download "$run" -R "$GITHUB_REPOSITORY" -n "uefn-ducky-macos-${{ inputs.arch }}" -D dist
+          tar -C dist -xf dist/uefn-ducky-macos.tar
+
+      - uses: actions/setup-python@v5
+        if: inputs.ref != ''
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        if: inputs.ref != ''
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.ref != ''
+      - name: Build ${{ inputs.ref }}
+        if: inputs.ref != ''
+        run: |
+          brew install portaudio ripgrep
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix ducky_app/frontend/ui_web/web
+          python - <<'EOF'
+          import json
+          from pathlib import Path
+          stand_ins = {
+              "verse.tmGrammar.json": {"scopeName": "source.verse", "patterns": [], "repository": {}},
+              "language-configuration.json": {},
+              "verse-snippets.json": {},
+              "verse-dark.tmTheme.json": {"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []},
+          }
+          lang = Path("ducky_app/frontend/ui_web/web/src/verse-editor/lang")
+          lang.mkdir(parents=True, exist_ok=True)
+          for name, doc in stand_ins.items():
+              if not (lang / name).is_file():
+                  (lang / name).write_text(json.dumps(doc), encoding="utf-8")
+          EOF
+          python build/build_exes.py --no-bump
+          codesign --force --deep -s - "dist/UEFN Ducky.app"
+
+      - name: Start, wait and screenshot
+        env:
+          SCRIPT: ${{ inputs.script }}
+          SECONDS_TO_RUN: ${{ inputs.seconds }}
+          TELEMETRY: ${{ inputs.telemetry }}
+          STAGING_URL: ${{ secrets.DUCKYOS_STAGING_URL }}
+        run: |
+          out="$PWD/look"
+          mkdir -p "$out"
+          if [ "$TELEMETRY" = "true" ]; then
+            [ -n "$STAGING_URL" ] || { echo "telemetry needs the DUCKYOS_STAGING_URL secret (never production)"; exit 1; }
+            unset DUCKY_SANDBOX
+            export DUCKYOS_BASE_URL="$STAGING_URL"
+          fi
+          args=()
+          case "$SCRIPT" in
+            --*) read -r -a args <<< "$SCRIPT" ;;
+            "") ;;
+            *) printf '%s' "$SCRIPT" > "$out/look-script.js"; export DUCKY_LOOK_SCRIPT="$out/look-script.js" ;;
+          esac
+          xattr -cr "dist/UEFN Ducky.app" || true
+          "dist/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky" "${args[@]}" > "$out/stdout.log" 2>&1 &
+          pid=$!
+          total="${SECONDS_TO_RUN:-40}"
+          for ((t = 10; t <= total; t += 10)); do
+            sleep 10
+            screencapture -x "$out/look-${{ inputs.arch }}-$(printf '%03d' "$t")s.png" || echo "screencapture failed at ${t}s"
+            kill -0 "$pid" 2>/dev/null || { echo "app exited after ~${t}s"; break; }
+          done
+          kill "$pid" 2>/dev/null || true
+          sleep 3
+          kill -9 "$pid" 2>/dev/null || true
+          ls -la "$out"
+          ls "$out"/*.png >/dev/null 2>&1 || { echo "no screenshot taken"; exit 1; }
+
+      - name: Collect logs, boot.json and crash reports
+        if: ${{ always() }}
+        run: |
+          out="$PWD/look"
+          mkdir -p "$out/logs" "$out/crash" "$out/boot"
+          cp -R ~/Library/Logs/UEFN-Ducky/. "$out/logs/" 2>/dev/null || echo "no ~/Library/Logs/UEFN-Ducky"
+          find ~/Library/Logs ~/Library/Application\ Support -name boot.json -path '*UEFN*' 2>/dev/null | while read -r f; do
+            cp "$f" "$out/boot/$(echo "$f" | tr '/ ' '__')"
+          done
+          find ~/Library/Logs/DiagnosticReports -newer "$GITHUB_EVENT_PATH" \( -iname '*UEFN*' -o -iname '*python*' \) 2>/dev/null \
+            -exec cp {} "$out/crash/" \;
+          find "$out" -type f | sort
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: macos-look-${{ inputs.arch }}
+          path: look/
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,102 @@
+# The macOS build: PyInstaller freeze of "UEFN Ducky.app" on Apple Silicon (macos-26) and
+# Intel (macos-15-intel), its runtime smoke, an ad-hoc signature (arm64 won't launch
+# without one) and a per-arch lipo check.
+# Output (used by macos-look and macos-install-check):
+#   artifact uefn-ducky-macos-<arch>: uefn-ducky-macos.tar (the .app; tar keeps its symlinks)
+name: macos-app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "build/unified.spec"
+      - "build/build_exes.py"
+      - "build/macos/**"
+      - "release/sign_macos.py"
+      - "native_launcher/**"
+      - "requirements.txt"
+      - ".github/workflows/macos-app.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: macos-app-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+  # A runner is never a user: the smoke start sends no usage.
+  DUCKY_SANDBOX: "1"
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64, lipo: arm64 }
+          - { runner: macos-15-intel, arch: x64, lipo: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ducky_app/frontend/ui_web/web/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: native_launcher }
+      - name: System packages
+        # ripgrep: the panel's prebuild (scripts/check-shipped-ui.mjs) greps with rg.
+        run: brew install portaudio ripgrep
+      - name: Dependencies
+        run: |
+          python -m pip install -r requirements-dev.txt
+          npm ci --prefix ducky_app/frontend/ui_web/web
+      # CI has no UEFN: the Verse editor's grammar imports get empty stand-ins (as in linux-appimage).
+      - name: Verse language stand-ins
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          stand_ins = {
+              "verse.tmGrammar.json": {"scopeName": "source.verse", "patterns": [], "repository": {}},
+              "language-configuration.json": {},
+              "verse-snippets.json": {},
+              "verse-dark.tmTheme.json": {"name": "Verse Dark", "type": "dark", "colors": {}, "tokenColors": []},
+          }
+          lang = Path("ducky_app/frontend/ui_web/web/src/verse-editor/lang")
+          lang.mkdir(parents=True, exist_ok=True)
+          for name, doc in stand_ins.items():
+              if not (lang / name).is_file():
+                  (lang / name).write_text(json.dumps(doc), encoding="utf-8")
+      - name: Freeze (PyInstaller) + runtime smoke
+        run: python build/build_exes.py --no-bump
+      - name: Ad-hoc sign
+        run: codesign --force --deep -s - "dist/UEFN Ducky.app" && codesign --verify --deep --strict "dist/UEFN Ducky.app"
+      - name: Built for ${{ matrix.lipo }} only
+        run: |
+          archs="$(lipo -archs "dist/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky")"
+          echo "UEFN-Ducky: $archs"
+          [ "$archs" = "${{ matrix.lipo }}" ] || { echo "expected ${{ matrix.lipo }} only, got $archs"; exit 1; }
+      - name: Starts (runtime smoke)
+        run: |
+          "dist/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky" --runtime-smoke "$RUNNER_TEMP/smoke.json"
+          python -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['panel']['all_assets_verified'] and r['window'], r; print(r['window'])" "$RUNNER_TEMP/smoke.json"
+      - name: Pack the .app
+        run: tar -C dist -cf dist/uefn-ducky-macos.tar "UEFN Ducky.app"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uefn-ducky-macos-${{ matrix.arch }}
+          path: dist/uefn-ducky-macos.tar
+          if-no-files-found: error
+          retention-days: 7
