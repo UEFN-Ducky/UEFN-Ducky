@@ -67,3 +67,13 @@ def test_a_garbled_reply_falls_through() -> None:
 def test_windows_has_no_idle_reader_here(monkeypatch) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     assert hw.idle_seconds(run=_bus({"org.gnome.Mutter.IdleMonitor": (0, "(uint64 1,)")})) is None
+
+
+def test_mac_idle_reads_quartz_never_dbus(monkeypatch):
+    from frontend import notifications
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(notifications, "_idle_seconds", lambda: 725.0)
+    never = lambda *a: pytest.fail("D-Bus/X11 on macOS")  # noqa: E731
+    assert hw.idle_seconds(run=never, x11=never) == 725.0
+    assert hw.user_away(run=never, x11=never) is True

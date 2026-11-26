@@ -42,6 +42,8 @@ def _key(passphrase: str, salt: bytes, n: int = _N, r: int = _R, p: int = _P) ->
 
 
 def _os_name() -> str:
+    if sys.platform == "darwin":
+        return "macos"
     return "windows" if sys.platform == "win32" else "linux" if sys.platform.startswith("linux") else sys.platform
 
 

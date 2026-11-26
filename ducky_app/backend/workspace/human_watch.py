@@ -440,6 +440,10 @@ def _x11_idle_ms() -> int | None:
 def idle_seconds(run: Any = None, x11: Any = None) -> float | None:
     """Seconds since the person last used the keyboard or mouse; None when unknown (and on
     Windows, which has no idle reader here). *run* / *x11* are test seams."""
+    if sys.platform == "darwin":
+        from frontend.notifications import _idle_seconds  # Quartz, the same reader phone pushes use
+
+        return _idle_seconds()
     if not sys.platform.startswith("linux"):
         return None
     run = run or _gdbus

@@ -130,3 +130,9 @@ def test_existing_chat_and_key_are_skipped(tmp_path, monkeypatch):
     assert chats.conv_get("c1")["title"] == "Mine"
     secrets.clear_memory_cache()
     assert secrets.load_keys(use_cache=False) == {"anthropic": "sk-linux"}
+
+
+@pytest.mark.parametrize(("plat", "word"), [("darwin", "macos"), ("win32", "windows"), ("linux", "linux")])
+def test_export_names_the_os_in_plain_words(monkeypatch, plat, word):
+    monkeypatch.setattr(mx.sys, "platform", plat)
+    assert mx._os_name() == word
