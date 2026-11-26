@@ -1,4 +1,5 @@
-"""System tray + shared app icon (pystray + Pillow: Win32 on Windows, AppIndicator on Linux)."""
+"""System tray + shared app icon (pystray + Pillow: Win32 on Windows, AppIndicator on Linux;
+an NSStatusItem in the menu bar on macOS)."""
 
 from __future__ import annotations
 
@@ -72,6 +73,12 @@ def tray_supported() -> bool:
     """System tray on Windows when pystray + Pillow are installed; on Linux also a tray host."""
     if sys.platform == "win32":
         return _imports_ok()
+    if sys.platform == "darwin":
+        try:
+            import AppKit  # noqa: F401
+        except ImportError:
+            return False
+        return True
     if not sys.platform.startswith("linux"):
         return False
     # AppIndicator draws through the StatusNotifier host; the XEmbed fallback is gone on Wayland.
@@ -320,3 +327,130 @@ class TrayIconController:
             self._icon.stop()
         except Exception:
             pass
+
+
+_mac_target: dict[str, object] = {}  # the ObjC class is registered once per process
+
+
+def _mac_menu_target_class():
+    """NSObject subclass whose ``open:`` / ``exit:`` run the item's callbacks."""
+    if "cls" not in _mac_target:
+        from Foundation import NSObject  # type: ignore[import-not-found]
+
+        class DuckyStatusTarget(NSObject):  # type: ignore[misc]
+            def open_(self, _sender):
+                self.owner._dispatch(self.owner._on_show)
+
+            def exit_(self, _sender):
+                self.owner._dispatch(self.owner._on_exit)
+
+        _mac_target["cls"] = DuckyStatusTarget
+    return _mac_target["cls"]
+
+
+class MacStatusItem:
+    """The menu bar icon on macOS, the same calls as :class:`TrayIconController`.
+
+    pystray's darwin backend runs its own NSApplication loop on the main thread, which
+    pywebview's Cocoa loop already owns, so the NSStatusItem is built inside that loop
+    (``AppHelper.callAfter``). A Dock click on the hidden window opens it again."""
+
+    def __init__(self, root: object = None, *, on_show: Callable[[], None], on_exit: Callable[[], None],
+                 tooltip: str, status: str = "idle") -> None:
+        self._on_show = on_show
+        self._on_exit = on_exit
+        self._tooltip = tooltip
+        self._mode = _normalize_mode(status)
+        self._item: object | None = None
+        self._target: object | None = None
+
+    def run_daemon(self) -> None:
+        from PyObjCTools import AppHelper  # type: ignore[import-not-found]
+
+        AppHelper.callAfter(self._build)
+
+    def _build(self) -> None:
+        import AppKit  # type: ignore[import-not-found]
+
+        item = AppKit.NSStatusBar.systemStatusBar().statusItemWithLength_(AppKit.NSVariableStatusItemLength)
+        item.button().setToolTip_(self._tooltip)
+        self._item = item
+        self._apply_image()
+        target = _mac_menu_target_class().alloc().init()
+        target.owner = self
+        self._target = target
+        menu = AppKit.NSMenu.alloc().init()
+        for title, action in (("Open UEFN Ducky", "open:"), ("Exit all", "exit:")):
+            entry = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, "")
+            entry.setTarget_(target)
+            menu.addItem_(entry)
+        item.setMenu_(menu)
+        self._install_dock_reopen(AppKit.NSApplication.sharedApplication())
+
+    def _install_dock_reopen(self, app: object) -> bool:
+        """Add ``applicationShouldHandleReopen:hasVisibleWindows:`` to pywebview's app delegate."""
+        import objc  # type: ignore[import-not-found]
+
+        delegate = app.delegate()
+        if delegate is None:
+            return False
+        owner = self
+
+        def reopen(_self, _app, _has_visible):
+            owner._dispatch(owner._on_show)
+            return True
+
+        objc.classAddMethods(delegate.class__(), [objc.selector(
+            reopen, selector=b"applicationShouldHandleReopen:hasVisibleWindows:", signature=b"Z@:@Z")])
+        return True
+
+    def _apply_image(self) -> None:
+        import AppKit  # type: ignore[import-not-found]
+
+        png = resolve_status_png_path(self._mode)
+        if self._item is None or png is None:
+            return
+        image = AppKit.NSImage.alloc().initWithContentsOfFile_(str(png))
+        if image is None:
+            return
+        image.setSize_((18, 18))
+        self._item.button().setImage_(image)
+
+    def toast(self, title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
+        return False  # ponytail: no menu bar balloons; notifications.py owns mac toasts
+
+    def set_connection_mode(self, mode: str | ConnectionIcon) -> None:
+        mode = _normalize_mode(mode)
+        if mode == self._mode:
+            return
+        self._mode = mode
+        try:
+            from PyObjCTools import AppHelper  # type: ignore[import-not-found]
+
+            AppHelper.callAfter(self._apply_image)
+        except Exception:
+            pass
+
+    def set_status(self, status: str) -> None:
+        self.set_connection_mode(status)
+
+    def _dispatch(self, fn: Callable[[], None]) -> None:
+        threading.Thread(target=fn, name="tray-cb", daemon=True).start()
+
+    def stop(self) -> None:
+        item = self._item
+        if item is None:
+            return
+        self._item = None
+        try:
+            import AppKit  # type: ignore[import-not-found]
+            from PyObjCTools import AppHelper  # type: ignore[import-not-found]
+
+            AppHelper.callAfter(AppKit.NSStatusBar.systemStatusBar().removeStatusItem_, item)
+        except Exception:
+            pass
+
+
+def tray_class() -> type:
+    """The tray for this OS: the menu bar item on macOS, pystray elsewhere."""
+    return MacStatusItem if sys.platform == "darwin" else TrayIconController

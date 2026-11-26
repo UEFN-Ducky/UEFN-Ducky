@@ -16,7 +16,7 @@ from frontend.frozen_process import (
     reclaim_stale_panel_process,
 )
 from frontend.settings import PANEL_LISTENER_PORT
-from frontend.tray_icon import TrayIconController, tray_supported
+from frontend.tray_icon import tray_class, tray_supported
 from frontend.ui_web.shutdown import request_app_exit, start_tk_pump
 
 
@@ -957,7 +957,7 @@ def _run_panel(api_holder: dict[str, object]) -> None:
             api.bind_tk_root(tk_root)
             if tray_supported():
                 try:
-                    api._tray = TrayIconController(  # type: ignore[attr-defined]
+                    api._tray = tray_class()(  # type: ignore[attr-defined]
                         tk_root,
                         on_show=restore,
                         on_exit=on_exit,
