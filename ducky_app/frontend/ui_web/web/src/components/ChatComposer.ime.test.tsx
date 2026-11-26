@@ -38,6 +38,29 @@ describe("Linux shortcut map has no Super binding", () => {
     expect(composerHistoryKey(key("y", { metaKey: true }))).toBe("redo");
   });
 
+  it("macOS: every Ctrl shortcut is Cmd too", () => {
+    setPlatform("MacIntel");
+    expect(primaryMod({ ctrlKey: false, metaKey: true })).toBe(true);
+    expect(composerHistoryKey(key("z", { metaKey: true }))).toBe("undo");
+    expect(composerHistoryKey(key("z", { metaKey: true, shiftKey: true }))).toBe("redo");
+    expect(composerHistoryKey(key("y", { metaKey: true }))).toBe("redo");
+    expect(composerHistoryKey(key("p", { metaKey: true }))).toBeNull();
+  });
+
+  it("macOS tree undo takes Cmd+Z", () => {
+    setPlatform("MacIntel");
+    const host = document.createElement("div");
+    host.setAttribute("data-undo-scope", "content");
+    host.tabIndex = 0;
+    document.body.appendChild(host);
+    host.focus();
+    const undo = vi.fn();
+    renderHook(() => useUndoShortcuts(undo, () => {}));
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true }));
+    expect(undo).toHaveBeenCalledWith("content");
+    host.remove();
+  });
+
   it("tree undo ignores Super+Z on Linux", () => {
     setPlatform("Linux x86_64");
     const host = document.createElement("div");

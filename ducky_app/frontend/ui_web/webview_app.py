@@ -949,6 +949,15 @@ def _run_panel(api_holder: dict[str, object]) -> None:
         # pywebview runs this on its own thread once the GUI loop runs, so WebView2 starts
         # ~0.15 s sooner: the Tk pump, tray, notifications and update switch used to run first.
         # Everything that reads the Tk root goes through tk_root_holder / api, which allow None.
+        if sys.platform == "darwin":
+            try:
+                from PyObjCTools import AppHelper
+
+                from frontend.ui_web.webview_native_menu import mac_complete_menus
+
+                AppHelper.callAfter(mac_complete_menus, on_exit)
+            except Exception:
+                logging.getLogger(__name__).warning("mac menus not completed", exc_info=True)
         try:
             # The pump thread owns the hidden Tk root the tray and pop-ups use.
             tk_root = start_tk_pump(hidden_tk_root)

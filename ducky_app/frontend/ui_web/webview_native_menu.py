@@ -29,6 +29,70 @@ _lock = threading.Lock()
 _pending: dict[str, tuple[Any, Any, Any, threading.Timer, str]] = {}
 
 
+def _menu_items(menu: Any) -> list[Any]:
+    return [menu.itemAtIndex_(i) for i in range(int(menu.numberOfItems()))]
+
+
+def _keys(menu: Any) -> set[str]:
+    return {str(item.keyEquivalent() or "") for item in _menu_items(menu)}
+
+
+def mac_complete_menus(on_quit: Any) -> bool:
+    """macOS, main thread, after pywebview set its menu bar (App, Edit, View).
+
+    WKWebView only gets Cmd+Z / Shift+Cmd+Z through Edit menu items, and pywebview's Edit menu
+    stops at Cut/Copy/Paste/Select All, so Undo and Redo go on top. A standard Window menu
+    (Minimize, Zoom, Close) is added. Quit (Cmd+Q) runs Ducky's own exit: pywebview's asks the
+    window's closing handler, which only hides the window to the menu bar. Idempotent."""
+    import AppKit  # type: ignore[import-not-found]
+
+    from frontend.tray_icon import _mac_menu_target_class
+
+    app = AppKit.NSApplication.sharedApplication()
+    bar = app.mainMenu()
+    if bar is None:
+        return False
+    item_cls = AppKit.NSMenuItem
+    subs = [s for s in (item.submenu() for item in _menu_items(bar)) if s is not None]
+    edit = next((s for s in subs if {"c", "v"} <= _keys(s)), None)
+    if edit is not None and "z" not in _keys(edit):
+        edit.insertItem_atIndex_(item_cls.alloc().initWithTitle_action_keyEquivalent_("Undo", "undo:", "z"), 0)
+        edit.insertItem_atIndex_(item_cls.alloc().initWithTitle_action_keyEquivalent_("Redo", "redo:", "Z"), 1)
+        edit.insertItem_atIndex_(item_cls.separatorItem(), 2)
+    if app.windowsMenu() is None:
+        window_menu = AppKit.NSMenu.alloc().initWithTitle_("Window")
+        for title, action, key in (("Minimize", "performMiniaturize:", "m"), ("Zoom", "performZoom:", ""),
+                                   ("Close Window", "performClose:", "w")):
+            window_menu.addItem_(item_cls.alloc().initWithTitle_action_keyEquivalent_(title, action, key))
+        holder = item_cls.alloc().initWithTitle_action_keyEquivalent_("Window", None, "")
+        holder.setSubmenu_(window_menu)
+        bar.addItem_(holder)
+        app.setWindowsMenu_(window_menu)
+    app_menu = subs[0] if subs else None
+    quit_item = next((i for i in _menu_items(app_menu) if str(i.keyEquivalent() or "") == "q"), None) if app_menu else None
+    if quit_item is not None:
+        target = _mac_menu_target_class().alloc().init()
+        target.owner = _QuitOwner(on_quit)
+        _mac_quit["target"] = target  # an NSMenuItem holds its target weakly
+        quit_item.setTarget_(target)
+        quit_item.setAction_("exit:")
+    return True
+
+
+_mac_quit: dict[str, Any] = {}
+
+
+class _QuitOwner:
+    """What the shared menu target calls: Quit runs ``on_quit`` off the main thread."""
+
+    def __init__(self, on_quit: Any) -> None:
+        self._on_exit = on_quit
+        self._on_show = lambda: None
+
+    def _dispatch(self, fn: Any) -> None:
+        threading.Thread(target=fn, name="mac-quit", daemon=True).start()
+
+
 def _kind(item: Any) -> str:
     return str(getattr(item, "Kind", "")).rsplit(".", 1)[-1]
 
