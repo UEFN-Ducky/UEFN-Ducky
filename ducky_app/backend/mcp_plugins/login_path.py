@@ -1,8 +1,8 @@
-"""Linux: find CLIs (claude, codex, gemini, npx, uvx) the way a login shell would.
+"""Linux and macOS: find CLIs (claude, codex, gemini, npx, uvx) the way a login shell would.
 
-A desktop-launched app on Linux gets a bare PATH: no nvm, no ~/.local/bin, no
-~/.npm-global/bin. These helpers add those folders and resolve names with
-``shutil.which``. Windows never calls them (callers gate on ``IS_LINUX``).
+A desktop-launched app (Linux desktop, macOS Finder/Dock) gets a bare PATH: no nvm, no
+~/.local/bin, no ~/.npm-global/bin, on macOS no Homebrew. These helpers add those folders
+and resolve names with ``shutil.which``. Windows never calls them (callers gate on ``IS_POSIX``).
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 IS_LINUX = sys.platform.startswith("linux")
+IS_POSIX = sys.platform != "win32"
 
 
 def _nvm_bins(home: Path) -> list[str]:
@@ -36,8 +37,19 @@ def login_dirs(home: str | Path | None = None) -> list[str]:
 
 
 def login_path(path: str | None = None, home: str | Path | None = None) -> str:
-    """``path`` (default: this process's PATH) with :func:`login_dirs` appended once."""
-    parts = [p for p in (os.environ.get("PATH", "") if path is None else path).split(os.pathsep) if p]
+    """``path`` (default: this process's PATH) with :func:`login_dirs` appended once.
+    macOS: the login shell's PATH first, then ``path``, then Homebrew's folders (as the terminal)."""
+    base = os.environ.get("PATH", "") if path is None else path
+    chunks = [base]
+    if sys.platform == "darwin":
+        from frontend.ui_web.terminal import path_env
+
+        chunks = [path_env.posix_login_path(path_env._login_shell()), base, *path_env._MAC_EXTRA_PATH]
+    parts: list[str] = []
+    for chunk in chunks:
+        for p in chunk.split(os.pathsep):
+            if p and p not in parts:
+                parts.append(p)
     for d in login_dirs(home):
         if d not in parts:
             parts.append(d)

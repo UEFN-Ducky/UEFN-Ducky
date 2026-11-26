@@ -777,7 +777,7 @@ _CLI_NAMES = {"claude_code": "claude", "claude": "claude", "codex": "codex",
 
 
 def linux_cli(agent_id: str, cli_path: str, env: dict[str, str]) -> str:
-    """Linux only: put the login PATH (nvm, ~/.local/bin, ~/.npm-global) in ``env`` and
+    """Linux and macOS: put the login PATH (nvm, ~/.local/bin, ~/.npm-global, Homebrew) in ``env`` and
     resolve the agent's CLI on it, so a desktop-launched app finds ``claude``/``codex``/``gemini``."""
     from backend.mcp_plugins.login_path import login_path, which
 
@@ -1103,9 +1103,9 @@ def _run_coding_agent_message(
                **_account_env(agent_id, conv.id)},
         identity=run_ctx,
     )
-    from backend.mcp_plugins.login_path import IS_LINUX
+    from backend.mcp_plugins.login_path import IS_POSIX
 
-    if IS_LINUX:
+    if IS_POSIX:
         cli_path = linux_cli(agent_id, cli_path, env)
     # The CLI is next: from here a quiet stream is the model or a tool, never a stuck setup.
     stall.set_step("")

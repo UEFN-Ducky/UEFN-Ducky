@@ -446,9 +446,9 @@ class PluginClientPool:
                             sse_client(block["url"], **_http_transport_kwargs(block))
                         )
                     else:
-                        from backend.mcp_plugins.login_path import IS_LINUX, posix_stdio_block
+                        from backend.mcp_plugins.login_path import IS_POSIX, posix_stdio_block
 
-                        sb = posix_stdio_block(block) if IS_LINUX else block
+                        sb = posix_stdio_block(block) if IS_POSIX else block
                         params = StdioServerParameters(
                             command=sb["command"], args=sb["args"], env=sb.get("env") or None,
                         )
