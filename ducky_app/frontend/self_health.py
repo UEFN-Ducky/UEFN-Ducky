@@ -173,8 +173,17 @@ _SPINNING_SHARE = 0.5  # a finding of its own from here
 
 
 def _thread_times() -> dict[int, float]:
+    import sys
+
     import psutil
 
+    if sys.platform == "darwin":
+        from backend.util import proc_table
+
+        try:
+            return proc_table.mac_thread_times()
+        except (OSError, AttributeError, ValueError):
+            return {}
     try:
         return {t.id: t.user_time + t.system_time for t in psutil.Process().threads()}
     except (psutil.Error, OSError):

@@ -715,6 +715,7 @@ def test_uefn_editor_launch_shipping_beats_legacy(tmp_path, monkeypatch) -> None
     assert uefn_editor_exe() == str(shipping)
 
 
+@pytest.mark.pc_only("UEFN launches on the PC")
 def test_launch_uefn_project_uses_editor(tmp_path, monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -736,6 +737,7 @@ def test_launch_uefn_project_uses_editor(tmp_path, monkeypatch) -> None:
     assert started == [(exe, str(island), extra)]
 
 
+@pytest.mark.pc_only("UEFN launches on the PC")
 def test_launch_uefn_hub_skips_project(monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -752,6 +754,7 @@ def test_launch_uefn_hub_skips_project(monkeypatch) -> None:
     assert started == [(exe, None, extra)]
 
 
+@pytest.mark.pc_only("UEFN runs on the PC")
 def test_close_uefn_kills_when_no_window(monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -765,6 +768,7 @@ def test_close_uefn_kills_when_no_window(monkeypatch) -> None:
     assert close_uefn() == {"ok": True, "graceful": False, "killed": True}
 
 
+@pytest.mark.pc_only("UEFN runs on the PC")
 def test_close_uefn_graceful_skips_kill(monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -778,6 +782,7 @@ def test_close_uefn_graceful_skips_kill(monkeypatch) -> None:
     assert close_uefn() == {"ok": True, "graceful": True, "killed": False}
 
 
+@pytest.mark.pc_only("UEFN runs on the PC")
 def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None:
     import frontend.window_view as wv
 
@@ -799,6 +804,7 @@ def test_restart_uefn_project_kills_then_launches(tmp_path, monkeypatch) -> None
     assert order == ["kill", f"start:{exe}:{island}"]
 
 
+@pytest.mark.pc_only("UEFN runs on the PC")
 def test_wait_uefn_ready_times_out(monkeypatch) -> None:
     import frontend.window_view as wv
 

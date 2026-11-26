@@ -696,11 +696,12 @@ def test_a_slow_walk_returns_at_the_time_limit_with_what_it_found(project, monke
     # The whole walk takes 200 x 0.05 = 10 s; stopping at the 0.5 s limit is far below 3 s even
     # on a loaded Windows runner (40 folders made the whole walk 2 s, too close to tell apart).
     _slow_folders(root, monkeypatch, count=200)
-    monkeypatch.setattr(wc, "_SEARCH_SECONDS", 0.5)
+    # 1 s: macOS's /usr/bin/git is an xcrun shim whose first git call can take most of 0.5 s
+    monkeypatch.setattr(wc, "_SEARCH_SECONDS", 1.0)
     started = time.monotonic()
     out = _call(wc.workspace_search, "Store", glob="*.zz", format="json")
     assert time.monotonic() - started < 3.0
-    assert out["truncated"] is True and out["reason"] == "time limit 0 s" and out["complete"] is False
+    assert out["truncated"] is True and out["reason"] == "time limit 1 s" and out["complete"] is False
     started = time.monotonic()
     hits = _call(wc.workspace_search, "Store", format="json")
     assert time.monotonic() - started < 3.0

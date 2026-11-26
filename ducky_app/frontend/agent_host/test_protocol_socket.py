@@ -43,6 +43,17 @@ def test_socket_lives_in_runtime_dir_and_stays_short(monkeypatch):
 
 
 @posix
+def test_a_long_folder_like_the_macos_tmpdir_falls_back_to_tmp(monkeypatch):
+    run = tempfile.mkdtemp(prefix="ud" + "d" * 120)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", run)
+    try:
+        name = protocol.pipe_name("modes", 42)
+    finally:
+        os.rmdir(run)
+    assert os.path.dirname(name) == f"/tmp/ducky-{os.getuid()}" and len(os.fsencode(name)) <= protocol._MAX_SUN_PATH
+
+
+@posix
 def test_socket_is_0600_in_a_0700_folder_and_removed_on_close(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     name = protocol.pipe_name("modes", 42)

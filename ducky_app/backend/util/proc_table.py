@@ -36,6 +36,11 @@ def table() -> dict[int, Proc]:
             pass
     elif sys.platform.startswith("linux") and os.path.isdir("/proc/self"):
         return _linux_table()
+    elif sys.platform == "darwin":
+        try:
+            return _mac_table()
+        except Exception:  # noqa: BLE001 — no ps: psutil's per-process walk
+            pass
     return _psutil_table()
 
 
@@ -168,6 +173,76 @@ def _linux_table(proc_root: str = "/proc") -> dict[int, Proc]:
             int(entry), int(f[1]), name, resident, max(0, resident - shared), int(f[17]), 0,
             (int(f[11]) + int(f[12])) / tick, boot + int(f[19]) / tick if boot else 0.0,
         )
+    return out
+
+
+def _clock_s(text: str) -> float:
+    """ps's ``[[dd-]hh:]mm:ss[.cc]`` as seconds."""
+    days, _, rest = text.rpartition("-")
+    total = 0.0
+    for part in rest.split(":"):
+        total = total * 60 + float(part)
+    return total + (int(days) * 86400 if days else 0)
+
+
+def _mac_table(text: str | None = None) -> dict[int, Proc]:
+    """macOS: every process from one ``ps`` call (psutil asks each process on its own).
+    No private bytes on macOS: rss. Threads only for this process (ps has no count)."""
+    if text is None:
+        import subprocess
+
+        text = subprocess.run(["ps", "-axo", "pid=,ppid=,rss=,time=,lstart=,comm="], capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=10, check=True,
+                              env={**os.environ, "LC_ALL": "C"}).stdout
+    out: dict[int, Proc] = {}
+    for line in text.splitlines():
+        f = line.split(None, 9)  # lstart is 5 words ("Thu Nov 26 22:36:26 2026"); comm may hold spaces
+        if len(f) < 10 or not f[0].isdigit():
+            continue
+        try:
+            started = time.mktime(time.strptime(" ".join(f[4:9]), "%a %b %d %H:%M:%S %Y"))
+        except ValueError:
+            started = 0.0
+        rss = int(f[2]) * 1024
+        out[int(f[0])] = Proc(int(f[0]), int(f[1]), os.path.basename(f[9].strip()), rss, rss, 0, 0,
+                              _clock_s(f[3]), started)
+    me = out.get(os.getpid())
+    if me is not None:
+        try:
+            import psutil
+
+            out[me.pid] = me._replace(threads=psutil.Process().num_threads())
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def mac_thread_times() -> dict[int, float]:
+    """macOS: CPU seconds of each thread of this process, keyed like ``threading.get_native_id()``
+    (psutil's macOS thread ids are 1-based indexes no Thread matches). Mach task_threads + thread_info."""
+    import ctypes
+    from ctypes import POINTER, byref, c_int, c_size_t, c_uint, c_uint64, c_void_p
+
+    lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+    lib.task_threads.argtypes = [c_uint, POINTER(POINTER(c_uint)), POINTER(c_uint)]
+    lib.thread_info.argtypes = [c_uint, c_int, c_void_p, POINTER(c_uint)]
+    lib.mach_port_deallocate.argtypes = [c_uint, c_uint]
+    lib.vm_deallocate.argtypes = [c_uint, c_size_t, c_size_t]
+    task = c_uint.in_dll(lib, "mach_task_self_").value
+    threads, count = POINTER(c_uint)(), c_uint()
+    if lib.task_threads(task, byref(threads), byref(count)) != 0:
+        return {}
+    out: dict[int, float] = {}
+    try:
+        for i in range(count.value):
+            port = threads[i]
+            basic, n = (c_int * 10)(), c_uint(10)  # THREAD_BASIC_INFO: user and system time_value_t first
+            ident, m = (c_uint64 * 3)(), c_uint(6)  # THREAD_IDENTIFIER_INFO: thread_id first
+            if lib.thread_info(port, 3, basic, byref(n)) == 0 and lib.thread_info(port, 4, ident, byref(m)) == 0:
+                out[int(ident[0])] = basic[0] + basic[1] / 1e6 + basic[2] + basic[3] / 1e6
+            lib.mach_port_deallocate(task, port)
+    finally:
+        lib.vm_deallocate(task, ctypes.cast(threads, c_void_p).value or 0, count.value * ctypes.sizeof(c_uint))
     return out
 
 

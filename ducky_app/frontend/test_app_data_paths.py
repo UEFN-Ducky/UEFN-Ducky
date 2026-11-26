@@ -1,5 +1,6 @@
 """Every module that keeps a file in the app data folder finds the same folder."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -73,7 +74,12 @@ def test_the_named_modules_agree_on_the_app_data_folder(monkeypatch, tmp_path, l
 
     want = resolve_app_data_dir()
     assert want.is_relative_to(tmp_path)
-    assert _folders() == {name: want for name in _folders()}
+    folders = _folders()
+    if sys.platform == "darwin":  # crash files go to ~/Library/Logs/UEFN-Ducky, where Console.app looks
+        from frontend.app_paths import logs_dir
+
+        assert folders.pop("native_crash") == logs_dir().parent
+    assert folders == {name: want for name in folders}
 
     # The two lock writers and backend.util.file_lock share one locks folder.
     with process_file_lock(str(tmp_path / "f.txt")), held_file_lock("probe", 0):

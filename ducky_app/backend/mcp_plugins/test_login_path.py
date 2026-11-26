@@ -31,6 +31,11 @@ def home(tmp_path, monkeypatch):
     _fake(tmp_path / ".local/bin", "uvx")
     _fake(tmp_path / ".local/bin", "codex")
     monkeypatch.setattr(lp.Path, "home", lambda: tmp_path)
+    from frontend.ui_web.terminal import path_env
+
+    # macOS puts the runner's own login shell and Homebrew first (test_login_path_mac.py); keep these fakes alone
+    monkeypatch.setattr(path_env, "posix_login_path", lambda shell: "")
+    monkeypatch.setattr(path_env, "_MAC_EXTRA_PATH", ())
     return tmp_path
 
 

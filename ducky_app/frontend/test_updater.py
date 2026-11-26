@@ -204,7 +204,7 @@ def _fake_status_everywhere(monkeypatch, status: dict) -> None:
     the feed's installer fields), so the check runs on both CI jobs."""
     linux = {**status, "install_kind": "appimage", "download_url": "https://example.test/download",
              "asset": {"url": status["installer_url"], "sha256": status["installer_sha256"]}}
-    monkeypatch.setattr(updater, "linux_update_status", lambda: linux)
+    monkeypatch.setattr(updater, "linux_update_status", lambda **_kw: linux)  # macOS asks with kind="app"
 
 
 def test_apply_update_dev_sets_check_error(monkeypatch) -> None:

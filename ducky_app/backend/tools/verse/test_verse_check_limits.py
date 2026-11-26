@@ -8,6 +8,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 from backend.tools.verse import verse_diagnostics as vd
 
 
@@ -36,6 +38,7 @@ def test_the_error_stats_name_only_files_an_error_line_points_at() -> None:
     assert sorted(Path(f.replace("\\\\", "/")).name for f in files) == ["progression_hud.verse", "score.verse"]
 
 
+@pytest.mark.pc_only("verse-lsp ships with UEFN on the PC")
 def test_a_stuck_scan_is_stopped_and_reported(monkeypatch, tmp_path: Path) -> None:
     from frontend.ui_web.verse_editor.lsp import diagnostics_cache, diagnostics_scan
 
@@ -61,6 +64,7 @@ def test_a_stuck_scan_is_stopped_and_reported(monkeypatch, tmp_path: Path) -> No
     assert "never report such a file as clean" in out["note"]
 
 
+@pytest.mark.pc_only("Verse builds in UEFN on the PC")
 def test_a_build_that_never_answers_names_the_popup(monkeypatch) -> None:
     import pytest
 
@@ -100,6 +104,7 @@ def _short_build_limits(monkeypatch, client) -> None:
     monkeypatch.setattr("frontend.ui_web.verse_editor.workflow.client.get_workflow_client", lambda: client)
 
 
+@pytest.mark.pc_only("Verse builds in UEFN on the PC")
 def test_a_build_that_runs_past_its_limit_says_still_building(monkeypatch) -> None:
     client = _HangingClient()
     _short_build_limits(monkeypatch, client)
@@ -114,6 +119,7 @@ def test_a_build_that_runs_past_its_limit_says_still_building(monkeypatch) -> No
     client.release.set()
 
 
+@pytest.mark.pc_only("Verse builds in UEFN on the PC")
 def test_a_build_behind_a_popup_names_it_at_the_first_look(monkeypatch) -> None:
     client = _HangingClient()
     _short_build_limits(monkeypatch, client)

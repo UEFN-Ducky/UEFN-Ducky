@@ -11,6 +11,7 @@ import dataclasses
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -345,5 +346,6 @@ def test_begin_ignores_odd_launcher_values(boot_dir: Path, launcher: Any) -> Non
 
 def test_plain_old_boot_json_begins_as_before(boot_dir: Path) -> None:
     now = _begin(boot_dir, _record(state="closed"))
-    assert set(now) == {"version", "started", "pid", "os", "python", "state", "stages"}
+    mac = {"permissions"} if sys.platform == "darwin" else set()  # macOS adds its privacy permissions
+    assert set(now) == {"version", "started", "pid", "os", "python", "state", "stages"} | mac
     assert now["stages"] == [["launch", 0.0]] and now["version"] == "1.2.472"

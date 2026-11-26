@@ -123,10 +123,13 @@ def test_child_dies_with_parent_not_with_spawning_thread(tmp_path):
 
 
 def test_memory_cap_sets_rlimit_as():
+    import resource
+
     proc = jobs.posix_popen([sys.executable, "-c", "import resource; print(resource.getrlimit(resource.RLIMIT_AS)[0])"],
                             memory_mb=2048, stdout=subprocess.PIPE, text=True)
     out, _ = proc.communicate(timeout=10)
-    assert int(out) == 2048 * 1024 * 1024
+    # macOS refuses an RLIMIT_AS cap (setrlimit fails, the program still runs uncapped)
+    assert int(out) == (resource.RLIM_INFINITY if sys.platform == "darwin" else 2048 * 1024 * 1024)
 
 
 def test_group_reads_pgrp_from_proc_stat(tmp_path):

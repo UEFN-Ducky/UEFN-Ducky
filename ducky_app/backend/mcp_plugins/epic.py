@@ -16,6 +16,8 @@ from __future__ import annotations
 import os
 import re
 import socket
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -189,6 +191,17 @@ def _listening_process(port: int) -> tuple[str, int, float]:
                 return proc.name(), conn.pid, proc.create_time()
     except Exception:
         pass
+    if sys.platform == "darwin":  # net_connections needs root on macOS; lsof sees this user's sockets
+        try:
+            import psutil
+
+            out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True,
+                                 text=True, encoding="utf-8", errors="replace", timeout=5).stdout.split()
+            if out:
+                proc = psutil.Process(int(out[0]))
+                return proc.name(), proc.pid, proc.create_time()
+        except Exception:
+            pass
     return "", 0, 0.0
 
 

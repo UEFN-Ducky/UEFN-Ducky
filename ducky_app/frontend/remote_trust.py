@@ -67,7 +67,7 @@ def key_protection() -> str:
 
     from backend.agent import secrets
 
-    if not secrets._is_linux():
+    if not secrets._uses_keyring_seal():  # Linux and macOS seal under a keyring master key
         return "dpapi" if sys.platform == "win32" else "memory"
     try:
         if secrets.master_key_path().is_file():

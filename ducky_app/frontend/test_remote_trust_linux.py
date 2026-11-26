@@ -16,6 +16,7 @@ from frontend import remote_trust as rt
 @pytest.fixture
 def linux(monkeypatch, tmp_path):
     monkeypatch.setattr(sec, "_is_linux", lambda: True)
+    monkeypatch.setattr(sys, "platform", "linux")  # on a Mac the same seal is labelled "keychain"
     monkeypatch.setattr(sec, "master_key_path", lambda: tmp_path / "master.key")
     monkeypatch.setattr(sec, "credentials_path", lambda: tmp_path / "credentials.dat")
     monkeypatch.setattr(sec, "_use_db", lambda: False)  # the file store, so the test can read the bytes

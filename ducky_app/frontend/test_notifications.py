@@ -21,6 +21,7 @@ def hub(monkeypatch):
         clicks.append(on_click)
         return True
 
+    monkeypatch.setattr(notifications, "mac_toast", toast)  # macOS binds Notification Center over any toast
     monkeypatch.setattr(notifications, "_app_in_front", lambda: state["front"])
     monkeypatch.setattr(notifications, "_idle_seconds", lambda: state["idle"])
     monkeypatch.setattr(duckyos_account, "send_account_alerts", lambda items: batches.append(items) or True)

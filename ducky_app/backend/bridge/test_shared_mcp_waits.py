@@ -122,7 +122,7 @@ def test_a_quick_read_stuck_past_its_deadline_returns_an_error(daemon, monkeypat
 def test_ask_user_sends_progress_through_a_long_wait_and_still_gets_the_answer(daemon, monkeypatch) -> None:
     """35 progress intervals (one simulated minute each) of the person thinking: a notice
     arrives every interval and the answer still comes back to the same call."""
-    every = 0.05
+    every = 0.1  # 0.05: macOS timer coalescing stretched each wait to ~0.1 s (18 notices in 35)
     monkeypatch.setattr(shared_mcp, "PROGRESS_EVERY_S", every)
     sock = _hello("asker")
     try:

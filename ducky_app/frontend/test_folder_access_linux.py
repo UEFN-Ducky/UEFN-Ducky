@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import os
+import sys
 
 import pytest
 
@@ -41,6 +42,7 @@ def _response(code: int, uris: str, handle: str = HANDLE) -> str:
     return f"{handle}: org.freedesktop.portal.Request.Response (uint32 {code}, {{'uris': <[{uris}]>, 'choices': <@a(ss) []>}})"
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="the XDG desktop portal is Linux's; a Mac picks with NSOpenPanel")
 def test_portal_folder_pick_gives_a_real_path(portal):
     portal["lines"] = [
         _response(0, "'file:///home/pat/Other'", handle="/org/freedesktop/portal/desktop/request/1_42/zz"),

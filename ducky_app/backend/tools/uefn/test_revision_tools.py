@@ -200,6 +200,7 @@ def test_push_retries_once_when_nothing_was_saved(root) -> None:
     assert out["ok"] is False and out["error"] == "remote said no"
 
 
+@pytest.mark.pc_only("UEFN popups are on the PC")
 def test_a_check_in_that_times_out_names_the_popup(root) -> None:
     from backend.tools.core import uefn_popups
 

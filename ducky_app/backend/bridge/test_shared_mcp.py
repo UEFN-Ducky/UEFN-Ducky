@@ -88,8 +88,8 @@ def serve(mcp: FakeMcp, monkeypatch, tmp_path: Path) -> threading.Thread:
     return t
 
 
-def _hello(run_id: str, *, key=None):
-    state = shared_mcp.wait_ready(8.0)
+def _hello(run_id: str, *, key=None, ready_s: float = 8.0):
+    state = shared_mcp.wait_ready(ready_s)
     sock = shared_mcp.connect_and_hello(
         token=str(state["token"]),
         key=key or state["key"],
@@ -570,8 +570,9 @@ def test_reconnects_keep_one_idle_timer(monkeypatch, tmp_path) -> None:
 
 
 def _probe() -> None:
-    """What the agent host's readiness gate does every turn: hello, then bye."""
-    sock = _hello("readiness")
+    """What the agent host's readiness gate does every turn: hello, then bye. Once the daemon
+    has stopped, waiting 8 s for its state would add 8 s to the time it took to stop (macOS)."""
+    sock = _hello("readiness", ready_s=0.5)
     shared_mcp.write_frame(sock, {"op": "bye"})
     shared_mcp.read_frame(sock)
     shared_mcp.close_handle(sock)

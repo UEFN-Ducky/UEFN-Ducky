@@ -11,6 +11,7 @@ from frontend import project_kind as pk
 from frontend import window_view
 
 GUID = "86ef2167-1111-2222-3333-444444444444"
+pytestmark = pytest.mark.pc_only("UEFN runs on the PC; a Mac answers at once (test_window_view.py)")
 
 
 @pytest.fixture(autouse=True)

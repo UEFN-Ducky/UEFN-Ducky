@@ -24,8 +24,28 @@ def test_the_table_matches_psutil_for_this_process():
     assert len(table) > 10
 
 
-@pytest.mark.skipif(sys.platform != "win32" and not sys.platform.startswith("linux"),
-                    reason="one NtQuerySystemInformation call / one /proc read")
+def test_mac_table_reads_one_ps_listing(monkeypatch):
+    monkeypatch.setattr(psutil, "process_iter", lambda *a, **k: pytest.fail("psutil per-process scan"))
+    text = ("    1     0  12000   1:02.50 Thu Nov 26 09:01:02 2026     /sbin/launchd\n"
+            "  501     1   2048 1-02:00:01 Wed Nov  4 10:00:00 2026     /Applications/UEFN Ducky.app/Contents/MacOS/UEFN Ducky\n"
+            "garbage\n")
+    table = proc_table._mac_table(text)
+    assert set(table) == {1, 501}
+    app = table[501]
+    assert (app.ppid, app.name, app.rss, app.private) == (1, "UEFN Ducky", 2048 * 1024, 2048 * 1024)
+    assert app.cpu_s == 86400 + 7201 and table[1].cpu_s == 62.5
+    assert app.started == time.mktime((2026, 11, 4, 10, 0, 0, 0, 0, -1))
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach thread ports")
+def test_mac_thread_times_are_keyed_by_the_native_thread_id():
+    import threading
+
+    assert threading.get_native_id() in proc_table.mac_thread_times()
+
+
+@pytest.mark.skipif(sys.platform not in ("win32", "darwin") and not sys.platform.startswith("linux"),
+                    reason="one NtQuerySystemInformation call / one /proc read / one ps")
 def test_one_table_is_fast():
     # Best of five: a busy test machine can stall any single call; the per-process psutil
     # scan this replaces took minutes on a busy PC, the table takes well under a second.

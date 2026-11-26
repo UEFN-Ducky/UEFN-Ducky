@@ -61,6 +61,7 @@ def client(monkeypatch):
     return u, keys
 
 
+@pytest.mark.pc_only("the Fortnite client runs on the PC")
 def test_nothing_touches_a_loading_client(client, monkeypatch) -> None:
     u, keys = client
     monkeypatch.setattr(fc, "gameplay_loaded_for", lambda path=None: None)
@@ -71,6 +72,7 @@ def test_nothing_touches_a_loading_client(client, monkeypatch) -> None:
     assert u.calls == [] and keys == []
 
 
+@pytest.mark.pc_only("the Fortnite client runs on the PC")
 def test_a_loaded_client_is_focused_without_being_resized(client, monkeypatch) -> None:
     u, _ = client
     monkeypatch.setattr(fc, "gameplay_loaded_for", lambda path=None: 60.0)
@@ -82,6 +84,7 @@ def test_a_loaded_client_is_focused_without_being_resized(client, monkeypatch) -
     assert ("ShowWindow", 9) in u.calls
 
 
+@pytest.mark.pc_only("the Fortnite client runs on the PC")
 def test_move_holds_one_key_and_always_releases_it(client, monkeypatch) -> None:
     _u, keys = client
     monkeypatch.setattr(fc, "gameplay_loaded_for", lambda path=None: 60.0)
@@ -93,6 +96,7 @@ def test_move_holds_one_key_and_always_releases_it(client, monkeypatch) -> None:
     assert keys == [("W", False), ("W", True)]
 
 
+@pytest.mark.pc_only("the Fortnite client runs on the PC")
 def test_losing_focus_mid_move_releases_the_key_and_fails(monkeypatch) -> None:
     u = FakeUser32(foreground=111, lose_focus_after=2)
     keys: list[tuple[str, bool]] = []
@@ -124,6 +128,7 @@ def test_the_uefn_plugin_registers_three_client_nodes(monkeypatch) -> None:
     assert registered["uefn.client.move"]({"config": {"key": "A", "seconds": "0.5"}}) == {"ok": True, "key": "A", "seconds": 0.5}
 
 
+@pytest.mark.pc_only("the Fortnite client runs on the PC")
 def test_status_with_no_client_open_is_an_answer_not_an_error(monkeypatch) -> None:
     def none_open():
         raise fc.NoClientWindow("Expected exactly one visible Fortnite client window; found 0")

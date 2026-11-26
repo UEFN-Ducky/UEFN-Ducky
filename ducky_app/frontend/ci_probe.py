@@ -31,7 +31,7 @@ def osascript_result(code: int, out: str, err: str) -> dict[str, Any]:
 
 def _osascript() -> dict[str, Any]:
     try:
-        run = subprocess.run(["osascript", "-e", _APPLE_EVENT], capture_output=True, text=True, timeout=20)
+        run = subprocess.run(["osascript", "-e", _APPLE_EVENT], capture_output=True, text=True, errors="replace", timeout=20)
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "osascript waited 20 s (an unanswered Automation prompt)"}
     return osascript_result(run.returncode, run.stdout, run.stderr)

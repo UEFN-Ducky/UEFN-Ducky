@@ -1179,6 +1179,13 @@ def _own_private_bytes() -> int:
     """This process's private bytes from one GetProcessMemoryInfo call (no process snapshot)."""
     if sys.platform.startswith("linux"):
         return _proc_values("/proc/self/status").get("RssAnon", 0) * 1024  # private, resident
+    if sys.platform == "darwin":  # no private bytes on macOS: this process's rss, as proc_table
+        try:
+            import psutil
+
+            return int(psutil.Process().memory_info().rss)
+        except Exception:
+            return 0
     try:
         import ctypes
         from ctypes import wintypes

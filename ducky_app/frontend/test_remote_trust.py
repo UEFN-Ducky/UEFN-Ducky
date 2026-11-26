@@ -119,7 +119,7 @@ def test_only_this_pcs_window_approves_lists_or_removes_devices() -> None:
     vid = rt.pub_id(pub)
     listed = api.remote_devices_list(None)
     assert listed["pending"][0]["id"] == vid and listed["devices"] == []
-    assert listed["protection"] in ("dpapi", "keyring", "file")
+    assert listed["protection"] in ("dpapi", "keyring", "keychain", "file")
     assert api.remote_pair_decide(None, vid, True) == {"ok": True}
     assert api.remote_pair_decide(None, vid, True)["ok"] is False  # already answered
     assert [d["id"] for d in api.remote_devices_list(None)["devices"]] == [vid]
