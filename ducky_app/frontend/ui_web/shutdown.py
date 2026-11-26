@@ -28,7 +28,11 @@ _tk_call_queue: queue.Queue[Callable[[], None]] = queue.Queue()
 
 
 def schedule_tk_call(fn: Callable[[], None]) -> None:
-    """Run ``fn`` on the Tk pump thread (safe from JS-bridge workers)."""
+    """Run ``fn`` on the Tk pump thread (safe from JS-bridge workers). macOS has no Tk
+    pump (Cocoa owns the main thread): ``fn`` runs on a thread of its own."""
+    if sys.platform == "darwin":
+        threading.Thread(target=fn, name="tk-call", daemon=True).start()
+        return
     _tk_call_queue.put(fn)
 
 
@@ -265,6 +269,13 @@ def fatal_error_and_exit(
     except Exception:
         pass
     message = _format_fatal_message(exc) if not isinstance(exc, str) else exc
+    if sys.platform == "darwin":
+        from frontend import mac_alert
+
+        title = PORTS_BLOCKED_TITLE if _ports_blocked(exc) else "UEFN Ducky"
+        mac_alert.ask(title, message)
+        hard_exit(api=api)
+        return
     try:
         import tkinter as tk
         from tkinter import messagebox

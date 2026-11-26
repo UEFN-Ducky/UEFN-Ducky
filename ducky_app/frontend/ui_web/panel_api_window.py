@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 import frontend.ui_web.panel_api as _pa
@@ -876,6 +877,8 @@ class PanelApiWindowMixin:
         return None
 
     def _pick_project_path_standalone(self) -> str | None:
+        if sys.platform == "darwin":
+            return None  # no Tk beside Cocoa; the window's dialog is the picker
         try:
             import tkinter as tk
 

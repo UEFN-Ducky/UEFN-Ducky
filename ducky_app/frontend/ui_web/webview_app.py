@@ -204,7 +204,10 @@ def hidden_tk_root():
     """The withdrawn Tk root the tray and pop-ups use, or None when there is no X display.
 
     Tk speaks X11 only: on a pure Wayland session (no Xwayland, no DISPLAY) it can't start,
-    so Linux skips Tk without importing it and the Tk users get None, which they allow."""
+    so Linux skips Tk without importing it and the Tk users get None, which they allow.
+    macOS never starts Tk: it and Cocoa both need the main thread."""
+    if sys.platform == "darwin":
+        return None
     if platform_info.IS_LINUX and not os.environ.get("DISPLAY"):
         return None
     import tkinter as tk

@@ -32,6 +32,10 @@ def _pick_with_webview(win: Any) -> str | None:
 
 def _pick_with_tk() -> str | None:
     """Raises when no dialog can be opened."""
+    import sys
+
+    if sys.platform == "darwin":
+        raise RuntimeError("no Tk on macOS; the window's own dialog is the only one")
     import tkinter as tk
     from tkinter import filedialog
 

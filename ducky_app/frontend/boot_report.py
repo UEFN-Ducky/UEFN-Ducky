@@ -680,6 +680,8 @@ def _send(body: dict[str, str], version: str) -> bool:
 def _ask_to_send(body: dict[str, str]) -> bool:
     """The crash pop-up (a plain native window: Ducky's own UI may be what crashes).
     True only when the user presses Send report."""
+    if sys.platform == "darwin":
+        return _mac_ask(body, reload=None) == 0
     try:
         import tkinter as tk
 
@@ -703,7 +705,6 @@ def show_now(tk_root: Any, body: dict[str, str], reload: Callable[[], None] | No
     if _test_copy():
         _save(body, "kept")
         return
-    import tkinter as tk
 
     def done(send: bool) -> None:
         _state["reported"] = True
@@ -715,10 +716,34 @@ def show_now(tk_root: Any, body: dict[str, str], reload: Callable[[], None] | No
             name="crash-report-send",
         ).start()
 
+    if sys.platform == "darwin":
+        choice = _mac_ask(body, reload)
+        if choice == 2 and reload is not None:
+            done(False)
+            try:
+                reload()
+            except Exception:
+                pass
+        elif choice >= 0:
+            done(choice == 0)
+        return
+    import tkinter as tk
+
     try:
         _fill_popup(tk.Toplevel(tk_root), body, done, reload)
     except Exception:
         pass
+
+
+def _mac_ask(body: dict[str, str], reload: Callable[[], None] | None) -> int:
+    """macOS crash pop-up (NSAlert, no Tk): 0 Send report, 1 Don't send, 2 Reload, -1 none."""
+    from frontend import mac_alert
+
+    stuck = "got stuck" in str(body.get("message") or "")
+    heading = STUCK_HEADING if stuck else "UEFN Ducky closed unexpectedly"
+    buttons = ["Send report", "Don't send"] + (["Reload"] if stuck and reload is not None else [])
+    text = f"{why_summary(body)}\n\nSend the crash report so we can fix it. {PRIVACY_NOTE}"
+    return mac_alert.ask(heading, text, buttons)
 
 
 def _fill_popup(root: Any, body: dict[str, str], done: Callable[[bool], None],
