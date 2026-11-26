@@ -50,7 +50,7 @@ def test_the_real_duck_is_drawn_on_the_arrow() -> None:
     assert tc.load_duck() is not None
 
 
-def test_nudge_starts_one_animation_and_only_on_windows(monkeypatch) -> None:
+def test_nudge_starts_one_animation_on_windows_and_macos(monkeypatch) -> None:
     started: list[object] = []
 
     class FakeThread:
@@ -64,13 +64,82 @@ def test_nudge_starts_one_animation_and_only_on_windows(monkeypatch) -> None:
     monkeypatch.setattr(tc, "_running", False)
     monkeypatch.setattr(tc, "_failed", False)
     monkeypatch.setattr(tc.platform_info, "IS_LINUX", False)
-    monkeypatch.setattr(tc.sys, "platform", "darwin")
+    monkeypatch.setattr(tc.sys, "platform", "freebsd")
     tc.nudge()
     assert started == []
     monkeypatch.setattr(tc.sys, "platform", "win32")
     tc.nudge()
     tc.nudge()
     assert started == [1]
+    monkeypatch.setattr(tc, "_running", False)
+    monkeypatch.setattr(tc.sys, "platform", "darwin")
+    tc.nudge()
+    tc.nudge()
+    assert started == [1, 1]
+
+
+def _fake_cocoa(monkeypatch, later: list):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    class Obj:
+        """Any Cocoa object: alloc/init chains return itself and every setter is recorded."""
+
+        def __init__(self) -> None:
+            self.calls: list = []
+
+        @classmethod
+        def alloc(cls):
+            return cls()
+
+        def __getattr__(self, name):
+            def call(*args):
+                self.calls.append((name, args))
+                return self
+            return call
+
+    screen = SimpleNamespace(frame=lambda: SimpleNamespace(size=SimpleNamespace(height=900.0)),
+                             backingScaleFactor=lambda: 2.0)
+    appkit = ModuleType("AppKit")
+    appkit.NSWindow, appkit.NSImageView, appkit.NSImage = type("W", (Obj,), {}), type("V", (Obj,), {}), type("I", (Obj,), {})
+    appkit.NSColor = SimpleNamespace(clearColor=lambda: "clear")
+    appkit.NSData = SimpleNamespace(dataWithBytes_length_=lambda b, n: b)
+    appkit.NSScreen = SimpleNamespace(screens=lambda: [screen], mainScreen=lambda: screen)
+    appkit.NSScreenSaverWindowLevel = 1000
+    appkit.NSEvent = SimpleNamespace(mouseLocation=lambda: SimpleNamespace(x=100.0, y=600.0))
+    helper = ModuleType("PyObjCTools")
+    helper.AppHelper = SimpleNamespace(callAfter=lambda fn: later.append(("now", fn)),
+                                       callLater=lambda s, fn: later.append((s, fn)))
+    monkeypatch.setitem(sys.modules, "AppKit", appkit)
+    monkeypatch.setitem(sys.modules, "PyObjCTools", helper)
+
+
+def test_macos_pointer_is_a_click_through_window_at_the_cursor_tip(monkeypatch) -> None:
+    later: list = []
+    _fake_cocoa(monkeypatch, later)
+    monkeypatch.setattr(tc.sys, "platform", "darwin")
+    monkeypatch.setattr(tc, "_pointer", None)
+    monkeypatch.setattr(tc, "_failed", False)
+    monkeypatch.setattr(tc, "_running", True)
+    monkeypatch.setattr(tc, "_last_move", tc.time.monotonic())
+    monkeypatch.setattr(tc, "load_duck", lambda: None)
+    assert tc._cursor_pos() == (200, 600)  # points (100, 900 - 600) at 2x, top-left
+    tc._start()
+    when, begin = later.pop()
+    assert when == "now"
+    begin()
+    pointer = tc._pointer
+    assert pointer is not None and not tc._failed
+    ns = pointer.window.ns
+    names = [n for n, _ in ns.calls]
+    assert ("setIgnoresMouseEvents_", (True,)) in ns.calls and ("setOpaque_", (False,)) in ns.calls
+    assert "orderFrontRegardless" in names
+    (x, y), (w, h) = next(a[0] for n, a in reversed(ns.calls) if n == "setFrame_display_")
+    margin_pt = pointer.margin / 2.0
+    assert (x, round(900 - y - h, 3)) == (100 - margin_pt, round(300 - margin_pt, 3))  # tip on the cursor
+    assert later and later[-1][0] == tc.FRAME_MS / 1000.0  # the next tick is on the Cocoa loop
+    pointer.window.destroy()
+    assert ns.calls[-1][0] == "close"
 
 
 def test_nudge_on_linux_x11_draws_and_wayland_says_no(monkeypatch) -> None:

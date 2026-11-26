@@ -11,6 +11,9 @@ mixed-scale setup looks wrong.
 Linux X11: the same click-through window, an override-redirect Tk window shaped with XShape
 (``window_spotlight_paint.LayeredWindow``). Wayland lets no app draw over other apps or read
 the pointer, so there the system cursor is all the user sees (logged once).
+
+macOS: a borderless, transparent NSWindow that ignores the mouse (:class:`_MacLayer`), ticked
+by the Cocoa run loop instead of Tk (which can't share the main thread with Cocoa).
 """
 
 from __future__ import annotations
@@ -144,7 +147,81 @@ def load_duck() -> Image.Image | None:
         return None
 
 
+def _mac_scale() -> float:
+    import AppKit  # type: ignore[import-not-found]
+
+    screen = AppKit.NSScreen.mainScreen()
+    return float(screen.backingScaleFactor()) if screen is not None else 1.0
+
+
+class _MacLoop:
+    """Tk's ``after`` on the Cocoa run loop: _Pointer ticks the same way on both."""
+
+    def after(self, ms: int, fn: Any) -> None:
+        from PyObjCTools import AppHelper  # type: ignore[import-not-found]
+
+        AppHelper.callLater(ms / 1000.0, fn)
+
+
+class _MacLayer:
+    """LayeredWindow's calls as a borderless, clear, click-through NSWindow above every app.
+    Takes pixels, top-left (like _cursor_pos); Cocoa wants points, bottom-left."""
+
+    def __init__(self, scale: float) -> None:
+        import AppKit  # type: ignore[import-not-found]
+
+        self._ak, self.scale, self.hwnd = AppKit, scale, 0
+        ns = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            ((0, 0), (1, 1)), 0, 2, False)  # Borderless, NSBackingStoreBuffered
+        ns.setOpaque_(False)
+        ns.setBackgroundColor_(AppKit.NSColor.clearColor())
+        ns.setHasShadow_(False)
+        ns.setIgnoresMouseEvents_(True)
+        ns.setLevel_(AppKit.NSScreenSaverWindowLevel)
+        ns.setCollectionBehavior_(1 | 16 | 256)  # all Spaces, stationary, over full-screen apps
+        self.view = AppKit.NSImageView.alloc().initWithFrame_(((0, 0), (1, 1)))
+        ns.setContentView_(self.view)
+        self.ns, self.size = ns, (1.0, 1.0)
+
+    def frame(self, left: int, top: int) -> tuple[tuple[float, float], tuple[float, float]]:
+        w, h = self.size
+        screen_h = float(self._ak.NSScreen.screens()[0].frame().size.height)
+        return (left / self.scale, screen_h - top / self.scale - h), (w, h)
+
+    def paint(self, image: Image.Image, left: int, top: int) -> None:
+        import io
+
+        buf = io.BytesIO()
+        image.save(buf, "PNG")
+        data = buf.getvalue()
+        ns_image = self._ak.NSImage.alloc().initWithData_(self._ak.NSData.dataWithBytes_length_(data, len(data)))
+        self.size = (image.width / self.scale, image.height / self.scale)
+        ns_image.setSize_(self.size)  # sharp on Retina: the pixels are already scale x points
+        self.view.setImage_(ns_image)
+        self.move(left, top)
+
+    def move(self, left: int, top: int) -> None:
+        self.view.setFrame_(((0, 0), self.size))
+        self.ns.setFrame_display_(self.frame(left, top), True)
+
+    def show(self, on: bool) -> None:
+        self.ns.orderFrontRegardless() if on else self.ns.orderOut_(None)
+
+    def raise_(self) -> None:
+        self.ns.orderFrontRegardless()
+
+    def destroy(self) -> None:
+        self.ns.orderOut_(None)
+        self.ns.close()
+
+
 def _cursor_pos() -> tuple[int, int]:
+    if sys.platform == "darwin":
+        from frontend.ui_web.mac_frameless import cursor_point
+
+        x, y = cursor_point() or (0, 0)
+        scale = _mac_scale()
+        return int(x * scale), int(y * scale)  # pixels, like the frames
     if platform_info.IS_LINUX:
         from frontend.ui_web.window_spotlight import _cursor
 
@@ -160,11 +237,16 @@ def _cursor_pos() -> tuple[int, int]:
 
 class _Pointer:
     def __init__(self, root: Any) -> None:
-        from frontend.ui_web.window_spotlight_paint import LayeredWindow, dpi_scale
-
         self.root = root
-        self.window = LayeredWindow(root, click_through=True)
-        full, self.margin = render_pointer(int(BASE_HEIGHT * dpi_scale(self.window.hwnd)), load_duck())
+        if sys.platform == "darwin":
+            scale = _mac_scale()
+            self.window: Any = _MacLayer(scale)
+        else:
+            from frontend.ui_web.window_spotlight_paint import LayeredWindow, dpi_scale
+
+            self.window = LayeredWindow(root, click_through=True)
+            scale = dpi_scale(self.window.hwnd)
+        full, self.margin = render_pointer(int(BASE_HEIGHT * scale), load_duck())
         self.frames = render_frames(full, self.margin)
         self.window.show(False)
         self.level = 0.0
@@ -231,6 +313,15 @@ def _begin(root: Any) -> None:
 
 
 def _start() -> None:
+    if sys.platform == "darwin":
+        try:
+            from PyObjCTools import AppHelper  # type: ignore[import-not-found]
+
+            root = _MacLoop()
+            AppHelper.callAfter(lambda: _begin(root))
+        except Exception:
+            _give_up("no Cocoa loop")
+        return
     try:
         from frontend.ui_web.window_spotlight import _spotlight_root
 
@@ -258,7 +349,7 @@ def nudge() -> None:
     if platform_info.IS_LINUX:
         if not _linux_ok():
             return
-    elif sys.platform != "win32":
+    elif sys.platform not in ("win32", "darwin"):
         return
     _last_move = time.monotonic()
     with _lock:
