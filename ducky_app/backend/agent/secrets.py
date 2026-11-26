@@ -1,5 +1,6 @@
-"""Encrypted API key storage: DPAPI on Windows, AES-GCM under a Secret Service master key on
-Linux (see :func:`_linux_seal`). Other OS keep secrets in memory only."""
+"""Encrypted API key storage: DPAPI on Windows, AES-GCM under a keyring master key on
+Linux (Secret Service) and macOS (Keychain), see :func:`_linux_seal`. Other OS keep secrets
+in memory only."""
 
 from __future__ import annotations
 
@@ -29,9 +30,14 @@ def _is_linux() -> bool:
     return sys.platform.startswith("linux")
 
 
+def _uses_keyring_seal() -> bool:
+    """Linux and macOS seal with AES-GCM under a keyring master key (macOS keyring = Keychain)."""
+    return _is_linux() or sys.platform == "darwin"
+
+
 def _dpapi_available() -> bool:
-    """Secrets can be sealed and persisted here (DPAPI on Windows, the Linux seal on Linux)."""
-    return sys.platform == "win32" or _is_linux()
+    """Secrets can be sealed and persisted here (DPAPI on Windows, the keyring seal on Linux/macOS)."""
+    return sys.platform == "win32" or _uses_keyring_seal()
 
 
 # --- Linux seal: AES-GCM with a 32-byte master key kept in Secret Service --------------
@@ -94,7 +100,7 @@ def _linux_master_key() -> bytes:
     path = master_key_path()
     key = _file_master_key(path) if path.is_file() else _keyring_master_key()
     if key is None:
-        _log.warning("No keyring (Secret Service) available: secrets sealed with key file %s", path)
+        _log.warning("No keyring (Secret Service / Keychain) available: secrets sealed with key file %s", path)
         key = _file_master_key(path)
     _master_key = key
     return key
@@ -133,7 +139,7 @@ def _dpapi(data: bytes, entropy: bytes | None, *, protect: bool) -> bytes:
     """One CryptProtectData / CryptUnprotectData call. Windows hands the result back in a
     LocalAlloc buffer the caller must LocalFree: kept, every sealed chat save and read
     leaked its whole ciphertext or plaintext into the process heap (GBs an hour)."""
-    if _is_linux():
+    if _uses_keyring_seal():
         return _linux_seal(data, entropy, protect=protect)
     if not _dpapi_available():
         raise OSError("Credential persist requires Windows DPAPI")
