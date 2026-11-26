@@ -19,6 +19,18 @@ def _is_linux() -> bool:
     return sys.platform.startswith("linux")
 
 
+def _is_mac() -> bool:
+    return sys.platform == "darwin"
+
+
+def _test_isolated_base() -> Path | None:
+    # ponytail: under the test conftest (which sets DUCKY_TESTS_ISOLATED_APPDATA) a test that
+    # repoints only LOCALAPPDATA is followed, as on Windows; a real Linux/macOS install never has it.
+    if os.environ.get("DUCKY_TESTS_ISOLATED_APPDATA") and os.path.isabs(os.environ.get("LOCALAPPDATA") or ""):
+        return Path(os.environ["LOCALAPPDATA"])
+    return None
+
+
 def _xdg(var: str, default: str) -> Path:
     # XDG spec: relative values are invalid and must be ignored.
     value = os.environ.get(var) or ""
@@ -26,12 +38,14 @@ def _xdg(var: str, default: str) -> Path:
 
 
 def local_app_data_base() -> Path:
-    """Base folder for app data: ``%LOCALAPPDATA%`` on Windows, ``$XDG_DATA_HOME`` on Linux."""
-    if _is_linux():
-        # ponytail: under the test conftest (which sets DUCKY_TESTS_ISOLATED_APPDATA) a test that
-        # repoints only LOCALAPPDATA is followed, as on Windows; a real Linux install never has it.
-        if os.environ.get("DUCKY_TESTS_ISOLATED_APPDATA") and os.path.isabs(os.environ.get("LOCALAPPDATA") or ""):
-            return Path(os.environ["LOCALAPPDATA"])
+    """Base folder for app data: ``%LOCALAPPDATA%`` on Windows, ``$XDG_DATA_HOME`` on Linux,
+    ``~/Library/Application Support`` on macOS."""
+    if _is_linux() or _is_mac():
+        isolated = _test_isolated_base()
+        if isolated is not None:
+            return isolated
+        if _is_mac():
+            return Path.home() / "Library" / "Application Support"
         return _xdg("XDG_DATA_HOME", ".local/share")
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if base:
@@ -40,17 +54,31 @@ def local_app_data_base() -> Path:
 
 
 def cache_base() -> Path:
-    """Base folder for caches (``$XDG_CACHE_HOME`` on Linux; same as data on Windows)."""
+    """Base folder for caches (``$XDG_CACHE_HOME`` on Linux, ``~/Library/Caches`` on macOS;
+    same as data on Windows)."""
+    if _is_mac():
+        isolated = _test_isolated_base()
+        return isolated if isolated is not None else Path.home() / "Library" / "Caches"
     if _is_linux():
         return _xdg("XDG_CACHE_HOME", ".cache")
     return local_app_data_base()
 
 
 def config_base() -> Path:
-    """Base folder for config (``$XDG_CONFIG_HOME`` on Linux; same as data on Windows)."""
+    """Base folder for config (``$XDG_CONFIG_HOME`` on Linux; same as data on Windows and macOS)."""
     if _is_linux():
         return _xdg("XDG_CONFIG_HOME", ".config")
     return local_app_data_base()
+
+
+def logs_dir() -> Path:
+    """Folder for log and crash files: ``~/Library/Logs/UEFN-Ducky`` on macOS,
+    ``<app data>/UEFN-Ducky/logs`` elsewhere."""
+    if _is_mac():
+        isolated = _test_isolated_base()
+        if isolated is None:
+            return Path.home() / "Library" / "Logs" / APP_DATA_DIR_NAME
+    return resolve_app_data_dir() / "logs"
 
 
 def windows_known_folder(folder_id: str) -> str:
