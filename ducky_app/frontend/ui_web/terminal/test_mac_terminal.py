@@ -17,6 +17,8 @@ def test_default_shell_is_login_shell_then_zsh_on_mac(monkeypatch):
     monkeypatch.setenv("SHELL", "")
     assert shells.shell_label("") == "zsh"
     assert shells.resolve_shell("zsh") == ("/bin/zsh", ["/bin/zsh"])
+    assert shells.agent_shell("zsh") == "zsh" and shells.agent_shell("bash") == "bash"
+    assert shells.resolve_shell("zsh", agent=True)[1] == ["/bin/zsh", "-f"]
     monkeypatch.setenv("SHELL", "/bin/bash")
     assert shells.shell_label("") == "bash"
 

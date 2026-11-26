@@ -107,6 +107,8 @@ def agent_shell(shell: str) -> str:
     asked for and installed."""
     label = shell_label(shell)
     if _posix():
+        if label == "zsh" and sys.platform == "darwin" and _posix_exe("zsh"):
+            return "zsh"  # macOS prompts tell agents the shell is zsh
         return "powershell" if label == "powershell" and _posix_exe("powershell") else "bash"
     if label == "bash" and not _git_bash():
         return "powershell"

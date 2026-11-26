@@ -21,6 +21,27 @@ def test_linux_hard_rules_say_bash_and_python3():
     assert len(text) > 0.9 * len(AGENT_HARD_RULES)
 
 
+def test_mac_hard_rules_say_macos_zsh_open_and_cmd():
+    text = for_platform(AGENT_HARD_RULES, mac=True)
+    low = text.lower()
+    assert "py -3" not in text and "powershell" not in low and "%localappdata%" not in low
+    assert "Select-Object" not in text
+    assert "You are on macOS; the shell is zsh" in text and "`open -R`" in text and "Cmd" in text
+    assert "~/Library/Application Support/UEFN-Ducky/" in text and "~/.local/share" not in text
+    assert len(text) > 0.9 * len(AGENT_HARD_RULES)
+    assert for_platform("Run: py -3 -m pytest in PowerShell", mac=True) == "Run: python3 -m pytest in zsh"
+
+
+def test_the_os_flag_picks_mac(monkeypatch):
+    from backend.agent.prompts import platform_text
+
+    monkeypatch.setattr(platform_text, "IS_LINUX", False)
+    monkeypatch.setattr(platform_text, "IS_MAC", True)
+    assert "macOS" in for_platform("Windows shell: `py -3`.")
+    monkeypatch.setattr(platform_text, "IS_MAC", False)
+    assert for_platform("Windows shell: `py -3`.") == "Windows shell: `py -3`."
+
+
 def test_linux_sample_command():
     assert for_platform("Run: py -3 -m pytest in PowerShell", linux=True) == "Run: python3 -m pytest in bash"
 
@@ -38,6 +59,7 @@ def test_every_prompt_an_agent_gets_goes_through_the_switch(monkeypatch):
     from backend.agent.prompt import assemble_system_prompt
     from backend.agent.prompts import platform_text
 
+    monkeypatch.setattr(platform_text, "IS_MAC", False)
     monkeypatch.setattr(platform_text, "IS_LINUX", False)
     windows = mcp_inject.bootstrap_system_prompt(project_root="", conv_id="c1")
     monkeypatch.setattr(platform_text, "IS_LINUX", True)
