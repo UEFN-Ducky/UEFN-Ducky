@@ -984,6 +984,33 @@ _PACKAGE_FOR_KIND = {
     "flatpak": "flatpak", "aur": "aur",
 }
 _ARCH_NAMES = {"x86_64": "x64", "amd64": "x64", "x64": "x64", "aarch64": "arm64", "arm64": "arm64"}
+_IMAGE_FILE_MACHINE = {0xAA64: "ARM64", 0x8664: "AMD64"}
+
+
+def native_machine() -> str:
+    """The PC's own CPU on Windows, even from an x64 build running emulated on an arm64 PC
+    (where ``platform.machine()`` says AMD64). Anything else: ``platform.machine()``."""
+    import platform
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            process, native = wintypes.USHORT(), wintypes.USHORT()
+            if k32.IsWow64Process2(k32.GetCurrentProcess(), ctypes.byref(process), ctypes.byref(native)):
+                return _IMAGE_FILE_MACHINE.get(native.value, platform.machine())
+        except (AttributeError, OSError):  # Windows 10 before 1709 has no IsWow64Process2
+            pass
+    return platform.machine()
+
+
+def windows_setup(payload: dict[str, Any], machine: str | None = None) -> dict[str, Any] | None:
+    """The Setup this Windows PC installs: its own CPU's (an x64 copy on an arm64 PC moves to
+    arm64), else the x64 one (it runs everywhere, emulated on arm64)."""
+    return (pick_asset(payload, plat="win32", machine=machine or native_machine(), kind="installer")
+            or pick_asset(payload, plat="win32", machine="AMD64", kind="installer"))
 # What the update button does per install kind (the web banner reads ``update_action``).
 UPDATE_ACTIONS = {
     "appimage": "restart", "deb": "install", "rpm": "install", "flatpak": "install",

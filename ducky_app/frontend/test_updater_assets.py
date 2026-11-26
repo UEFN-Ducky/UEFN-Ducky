@@ -77,3 +77,46 @@ def test_linux_status_offers_the_picked_asset(monkeypatch) -> None:
     assert deb["update_action"] == "install" and deb["channel"] == "installed"
     src = updater.linux_update_status(payload=FEED, kind="source")
     assert not src["update_available"] and src["update_action"] == "none"
+
+
+ARM_FEED = {**FEED, "assets": [*FEED["assets"], _row("windows", "arm64", "setup")]}
+
+
+def test_an_arm64_pc_takes_the_arm64_setup_even_from_an_emulated_x64_copy() -> None:
+    assert updater.windows_setup(ARM_FEED, machine="ARM64")["url"].endswith("windows-arm64-setup")
+    assert updater.windows_setup(ARM_FEED, machine="AMD64")["url"].endswith("windows-x64-setup")
+    # a release without an arm64 Setup: the x64 one, which runs emulated on arm64
+    assert updater.windows_setup(FEED, machine="ARM64")["url"].endswith("windows-x64-setup")
+    old = {k: v for k, v in FEED.items() if k != "assets"}
+    assert updater.windows_setup(old, machine="ARM64")["url"] == "https://example.org/Setup-old.exe"
+
+
+def test_native_machine_is_a_cpu_name() -> None:
+    assert updater.native_machine().upper() in ("AMD64", "X86_64", "ARM64", "AARCH64")
+
+
+def test_the_x64_update_pack_never_reaches_an_arm64_pc(monkeypatch) -> None:
+    import platform
+    import sys
+
+    import frontend.install_info as install_info
+    import frontend.patch_notes_cache as notes
+    import frontend.version_check as vc
+
+    feed = {**ARM_FEED, "update": {"version": "9.9.9", "packUrl": "p", "manifestUrl": "m", "manifestSha256": "s"}}
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(install_info, "get_install_info",
+                        lambda: {"installed": True, "install_location": "C:/x", "install_scope": "user"})
+    monkeypatch.setattr(vc, "update_channel", lambda installed: "installed")
+    monkeypatch.setattr(vc, "is_packaged_runtime", lambda: True)
+    monkeypatch.setattr(vc, "fetch_remote_payload", lambda *a, **k: (feed, None))
+    monkeypatch.setattr(vc, "update_base_url", lambda: "https://store.example")
+    monkeypatch.setattr(vc, "_background_update_stuck", lambda: False)
+    monkeypatch.setattr(notes, "put", lambda *a, **k: None)
+    for machine, native, pack, setup in (("AMD64", "AMD64", True, "x64"), ("AMD64", "ARM64", False, "arm64"),
+                                         ("ARM64", "ARM64", False, "arm64")):
+        monkeypatch.setattr(platform, "machine", lambda m=machine: m)
+        monkeypatch.setattr(updater, "native_machine", lambda n=native: n)
+        status = vc._app_update_status()
+        assert status["update_available"], status
+        assert status["update_pack"] is pack and status["installer_url"].endswith(f"windows-{setup}-setup")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import http.client
+import platform
 import ssl
 import sys
 import time
@@ -411,14 +412,17 @@ def _app_update_status() -> dict[str, Any]:
 
         result["feed_status"] = "update_available"
         result["update_available"] = True
-        result["update_pack"] = feed_update(payload) is not None and not _background_update_stuck()
-        result["installer_url"] = absolute_installer_url(
-            _extract_str(payload, "installerUrl") or _extract_str(payload, "installer_url"),
-            base_url=update_base_url(),
+        from frontend.updater import windows_setup
+
+        setup = windows_setup(payload) or {}
+        # ponytail: the feed's update pack is the x64 app folder; an arm64 copy (or an x64 one
+        # moving to arm64) takes the full Setup until the release publishes an arm64 pack.
+        x64_only = sys.platform != "win32" or (
+            setup.get("arch", "x64") == "x64" and platform.machine().lower() in ("amd64", "x86_64")
         )
-        result["installer_sha256"] = _extract_str(payload, "installerSha256") or _extract_str(
-            payload, "sha256"
-        )
+        result["update_pack"] = x64_only and feed_update(payload) is not None and not _background_update_stuck()
+        result["installer_url"] = absolute_installer_url(setup.get("url"), base_url=update_base_url())
+        result["installer_sha256"] = setup.get("sha256")
     else:
         result["feed_status"] = "up_to_date"
     return result
