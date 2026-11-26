@@ -210,32 +210,12 @@ def test_a_switch_under_the_launcher_starts_the_next_ducky_on_its_own(monkeypatc
     monkeypatch.setattr(app_versions, "write_current", lambda *a, **k: None)
     monkeypatch.setattr("frontend.ui_web.shutdown.hard_exit", lambda api=None, keep_others=False: None)
     monkeypatch.setattr("frontend.usage_stats.app_closing", lambda: None)
-    assert us.restart() == {"ok": True}
+    assert us._relaunch(Path(sys.executable), None) == {"ok": True}
     env = started[0]
     assert not {"UEFN_DUCKY_NATIVE_CHILD", "UEFN_DUCKY_BACKEND_EXE", "UEFN_DUCKY_BACKEND_UI_PORT"} & set(env)
     assert env[app_versions.LAUNCHER_ENV]  # the EXE that was started still travels
     # A backend handing its pipes to a newer backend (run_attached) stays a launcher's child.
     assert app_versions.hand_off_env()["UEFN_DUCKY_NATIVE_CHILD"] == "1"
-
-
-def test_restart_starts_this_exe_again_with_the_window_and_chats(monkeypatch) -> None:
-    """folder_access: Windows lets a newly allowed app write only from its next start."""
-    import sys
-
-    monkeypatch.setattr(us, "_holders", {"api": SimpleNamespace(_maximized=False), "window_holder": {"hidden": False}})
-    monkeypatch.setattr(us, "_stop_chats", lambda: [{"conv_id": "c1"}])
-    started, exits, current = [], [], []
-    monkeypatch.setattr(app_versions, "start_detached", lambda exe, args, env=None: started.append((exe, args, env)) or True)
-    monkeypatch.setattr(app_versions, "write_current", lambda *a, **k: current.append(a))
-    monkeypatch.setattr("frontend.ui_web.shutdown.hard_exit", lambda api=None, keep_others=False: exits.append(keep_others))
-    monkeypatch.setattr("frontend.usage_stats.app_closing", lambda: None)
-    assert us.restart() == {"ok": True}
-    exe, args, env = started[0]
-    assert exe == Path(sys.executable) and args[0] == "--after-update"
-    assert len(args) == 2  # the window was showing: the next one shows too
-    assert us.SWITCHED_FROM_ENV not in env  # not an update: no "updated to" notice
-    assert current == [] and exits == [True]
-    assert app_versions.take_handover()["chats"] == [{"conv_id": "c1"}]
 
 
 def test_switch_marks_the_run_closed_before_it_exits(monkeypatch) -> None:

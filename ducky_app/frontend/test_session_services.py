@@ -28,7 +28,7 @@ def test_both_start_paths_call_start_session_services() -> None:
     assert _calls(backend, "_start_session_services") == 1
     # no hand-kept copy of the list on the launcher path
     text = backend.read_text(encoding="utf-8")
-    for name in ("update_swap", "uninstaller_link", "native_crash", "mark_ready", "folder_access", "app_opened"):
+    for name in ("update_swap", "uninstaller_link", "native_crash", "mark_ready", "app_opened"):
         assert name not in text, name
 
 

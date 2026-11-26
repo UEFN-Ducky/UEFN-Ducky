@@ -328,12 +328,6 @@ def switch(version: str) -> dict[str, Any]:
     return _relaunch(exe, version)
 
 
-def restart() -> dict[str, Any]:
-    """Close this Ducky and start it again where the window was, running chats carried over
-    (folder_access: Windows lets a newly allowed app write only from its next start)."""
-    return _relaunch(Path(sys.executable), None)
-
-
 def _relaunch(exe: Path, version: str | None) -> dict[str, Any]:
     """Start ``exe`` (``version``, or this one again when None) and close this process."""
     from frontend import app_versions

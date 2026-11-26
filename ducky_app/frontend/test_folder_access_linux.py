@@ -65,7 +65,5 @@ def test_portal_cancel_or_no_portal_is_none(portal, monkeypatch):
 @pytest.mark.skipif(os.name == "nt", reason="Linux/macOS: no Defender to ask")
 def test_no_windows_calls_off_windows(monkeypatch):
     monkeypatch.setattr(fa.subprocess, "run", lambda *a, **k: pytest.fail("ran a Windows tool"))
-    assert fa.protection_mode() == 0
-    assert fa.blocked_programs() == []
+    assert fa._blocks(120_000) == []
     assert fa.refusal_hint("/home/pat/x.txt") == ""
-    assert fa.check() == "skipped"

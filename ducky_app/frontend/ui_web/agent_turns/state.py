@@ -405,12 +405,6 @@ def _alert_after_run(conv_id: str, run_id: str, reason: str, detail: str = "", e
         usage_stats.run_end(run_id, reason, detail, error_class=error_class)
     except Exception:
         pass
-    try:
-        from frontend import folder_access
-
-        folder_access.after_turn()  # Windows Controlled folder access may have blocked the agent
-    except Exception:
-        pass
     if quiet:
         return
     if reason in ("error", "timeout"):

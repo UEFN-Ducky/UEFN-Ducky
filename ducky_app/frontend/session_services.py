@@ -48,12 +48,6 @@ def _update_swap(ctx: dict[str, Any]) -> None:
     update_swap.continue_chats((ctx["handover"] or {}).get("chats"))  # the chats the switch stopped
 
 
-def _folder_access(ctx: dict[str, Any]) -> None:
-    from frontend import folder_access
-
-    folder_access.check_soon()  # Windows Controlled folder access blocking Documents
-
-
 def _usage_stats(ctx: dict[str, Any]) -> None:
     from frontend import usage_stats
 
@@ -95,7 +89,6 @@ def _heartbeat(ctx: dict[str, Any]) -> None:
 SERVICES: tuple[tuple[str, Callable[[dict[str, Any]], None]], ...] = (
     ("mark ready", _mark_ready),
     ("auto-update", _update_swap),
-    ("folder access check", _folder_access),
     ("usage stats", _usage_stats),
     ("UEFN watch", _uefn_watch),
     ("uninstaller link", _uninstaller_link),
