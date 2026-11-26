@@ -67,16 +67,26 @@ _site_timer: threading.Timer | None = None
 def bind_desktop(toast: ToastFn | None, open_target: OpenFn | None) -> None:
     """The app's tray shows notifications; ``open_target(kind, id)`` brings the window up on
     that chat or workflow (``kind`` "" just brings it up). Set once by the panel process.
-    Linux without a tray still notifies: over D-Bus (:func:`linux_toast`)."""
+    Linux without a tray still notifies: over D-Bus (:func:`linux_toast`). macOS always uses
+    Notification Center (:func:`mac_toast`): the menu-bar icon has no notifications."""
     global _toast_fn, _open_fn
     if toast is None and sys.platform.startswith("linux"):
         toast = linux_toast
+    if sys.platform == "darwin":
+        toast = mac_toast
     _toast_fn = toast
     _open_fn = open_target
 
 
 def _app_in_front() -> bool:
     """A window of this process (the app or a floating chat) is the foreground window."""
+    if sys.platform == "darwin":
+        try:
+            from AppKit import NSApplication
+
+            return bool(NSApplication.sharedApplication().isActive())
+        except Exception:
+            return False
     if sys.platform != "win32":
         return False
     try:
@@ -96,6 +106,14 @@ def _app_in_front() -> bool:
 
 def _idle_seconds() -> float | None:
     """Seconds since the last keyboard or mouse input on this PC (None: unknown)."""
+    if sys.platform == "darwin":
+        try:
+            import Quartz
+
+            return float(Quartz.CGEventSourceSecondsSinceLastEventType(
+                Quartz.kCGEventSourceStateCombinedSessionState, Quartz.kCGAnyInputEventType))
+        except Exception:
+            return None
     if sys.platform != "win32":
         return None
     try:
@@ -357,6 +375,74 @@ def _watch_linux_actions() -> None:
     threading.Thread(target=run, name="notify-actions", daemon=True).start()
 
 
+# --- macOS notifications (UNUserNotificationCenter, osascript fallback) ----------
+
+_mac_auth: dict[str, bool] = {}  # "asked" once per process; "denied" once the person said no
+
+
+def _mac_center() -> Any:
+    """The app's notification center, or None outside a bundled app (source run, dev): the
+    center refuses a process with no bundle identifier."""
+    from Foundation import NSBundle
+
+    if not NSBundle.mainBundle().bundleIdentifier():
+        return None
+    from UserNotifications import UNUserNotificationCenter
+
+    return UNUserNotificationCenter.currentNotificationCenter()
+
+
+def _osascript_toast(title: str, message: str) -> bool:
+    """``display notification`` through osascript; title and text go in as argv, never as
+    AppleScript source, so no quoting can break out."""
+    import subprocess
+
+    script = ["-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run"]
+    try:
+        subprocess.Popen(["osascript", *script, (title or "UEFN Ducky")[:120], message or ""],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        return True
+    except OSError:
+        return False
+
+
+def mac_toast(title: str, message: str, on_click: Callable[[], None] | None = None) -> bool:
+    """A Notification Center banner. An unsigned / dev app (no bundle id, or permission
+    refused) falls back to osascript."""
+    # ponytail: a click activates the app (macOS default) but does not open the chat;
+    # add a UNUserNotificationCenterDelegate when click-to-chat matters on Mac.
+    try:
+        center = _mac_center()
+    except Exception:
+        center = None
+    if center is not None and not _mac_auth.get("denied"):
+        try:
+            import uuid
+
+            import UserNotifications as UN
+
+            if not _mac_auth.get("asked"):
+                _mac_auth["asked"] = True
+
+                def answered(granted: bool, _error: Any) -> None:
+                    if not granted:
+                        _mac_auth["denied"] = True
+
+                center.requestAuthorizationWithOptions_completionHandler_(
+                    UN.UNAuthorizationOptionAlert | UN.UNAuthorizationOptionSound, answered)
+            content = UN.UNMutableNotificationContent.alloc().init()
+            content.setTitle_((title or "UEFN Ducky")[:120])
+            content.setBody_(message or "")
+            request = UN.UNNotificationRequest.requestWithIdentifier_content_trigger_(
+                uuid.uuid4().hex, content, None)
+            center.addNotificationRequest_withCompletionHandler_(request, None)
+            return True
+        except Exception:
+            _log.debug("UNUserNotificationCenter failed; using osascript", exc_info=True)
+    return _osascript_toast(title, message)
+
+
 # --- The account (uefnducky.org) -------------------------------------------------
 
 
@@ -414,3 +500,4 @@ def reset_for_tests() -> None:
         _recent.clear()
         _linux_clicks.clear()
         _linux_tokens.clear()
+        _mac_auth.clear()
