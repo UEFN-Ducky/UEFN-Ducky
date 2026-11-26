@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- unified.spec replaces @VERSION@ and hands the result to BUNDLE(info_plist=...). -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>online.uefnducky.Ducky</string>
+	<key>CFBundleName</key>
+	<string>UEFN Ducky</string>
+	<key>CFBundleDisplayName</key>
+	<string>UEFN Ducky</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.developer-tools</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>UEFN Ducky uses the microphone for voice chat with your agents.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>UEFN Ducky drives Adobe apps and Blender for you when you ask it to.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>UEFN Ducky captures app windows to show your agents what is on screen.</string>
+</dict>
+</plist>

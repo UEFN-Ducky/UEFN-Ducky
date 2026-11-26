@@ -505,10 +505,56 @@ def test_spec_linux_branch_bundles_sounddevice_and_portaudio() -> None:
 
 
 def test_spec_windows_parts_stay_on_for_windows() -> None:
-    # Windows still requires its ffmpeg zip and winpty; only LINUX skips them.
-    assert 'if not LINUX and not (_ffmpeg_bundle / "ffmpeg.exe").is_file():' in SPEC_TEXT
-    assert "if not LINUX and not _pty_bins and not _pty_datas:" in SPEC_TEXT
+    # Windows still requires its ffmpeg zip and winpty; only LINUX / MAC skip them.
+    assert 'if not LINUX and not (_ffmpeg_bundle / ("ffmpeg" if MAC else "ffmpeg.exe")).is_file():' in SPEC_TEXT
+    assert "if not LINUX and not MAC and not _pty_bins and not _pty_datas:" in SPEC_TEXT
     assert 'LINUX = sys.platform.startswith("linux")' in SPEC_TEXT
+    assert '"webview.platforms.edgechromium"' in SPEC_TEXT and '"pystray._win32"' in SPEC_TEXT
+
+
+def test_spec_mac_branch_bundles_a_cocoa_app() -> None:
+    assert 'MAC = sys.platform == "darwin"' in SPEC_TEXT
+    for name in ('"webview.platforms.cocoa"', '"objc"', '"WebKit"', '"AppKit"', '"PyObjCTools.AppHelper"',
+                 '"pystray._darwin"', "+ _mac_hidden", '_exe_kwargs["target_arch"] = platform.machine()',
+                 'name="UEFN Ducky.app"', 'MAC_DIR / "Info.plist.in"', "UEFN_DUCKY_BUILD_ICNS"):
+        assert name in SPEC_TEXT, name
+    assert "argv_emulation=False" in SPEC_TEXT
+    assert SPEC_TEXT.index("app = BUNDLE(") > SPEC_TEXT.index("coll = COLLECT(")
+
+
+def test_mac_names_keep_the_bridge_stem() -> None:
+    assert be.mac_names(dev_build=False) == ("UEFN-Ducky", "UEFN-Ducky-Bridge")
+    assert be.mac_names(dev_build=True) == ("UEFN-Ducky-Dev", "UEFN-Ducky-Dev-Bridge")
+
+
+def test_macos_app_check(tmp_path: Path) -> None:
+    app = tmp_path / be.MAC_APP
+    assert "Contents/MacOS/UEFN-Ducky" in be.missing_macos_files(app)
+    names = ["Contents/MacOS/UEFN-Ducky", "Contents/MacOS/UEFN-Ducky-Bridge", "Contents/Info.plist",
+             "Contents/Frameworks/tools/ffmpeg/ffmpeg", "Contents/Frameworks/tools/ffmpeg/ffprobe",
+             *(f"Contents/Frameworks/models/search/{n}" for n in be.SEARCH_MODEL_FILES)]
+    for name in names:
+        (app / name).parent.mkdir(parents=True, exist_ok=True)
+        (app / name).write_bytes(b"x")
+    # No PyObjC: the Cocoa window cannot open.
+    assert be.missing_macos_files(app) == ["Contents/Frameworks/objc/_objc*.so"]
+    (app / "Contents/Frameworks/objc").mkdir(parents=True)
+    (app / "Contents/Frameworks/objc/_objc.cpython-312-darwin.so").write_bytes(b"x")
+    assert be.missing_macos_files(app) == []
+    (app / "Contents/Frameworks/tools/ffmpeg/ffprobe").unlink()
+    assert be.missing_macos_files(app) == ["Contents/Frameworks/tools/ffmpeg/ffprobe"]
+
+
+def test_main_sends_macos_to_its_own_build() -> None:
+    text = Path(be.__file__).read_text(encoding="utf-8")
+    main = text[text.index("def main() -> int:"):]
+    assert 'if sys.platform == "darwin":\n        return main_macos(args)' in main[: main.index("dev_build")]
+    mac = text[text.index("def main_macos("): text.index("def main() -> int:")]
+    for name in ("ensure_macos_bundle()", "ensure_search_model()", "_build_react_panel(root)", "make_icns(",
+                 "pyinstaller==6.22.3", "UEFN_DUCKY_APP_VERSION", "missing_macos_files(", "plutil", "_run_runtime_smoke("):
+        assert name in mac, name
+    assert mac.index("_bump_package_version") < mac.index('"PyInstaller"')
+    assert "build_launcher(" not in mac  # the Rust launcher is phase 2 on Mac
 
 
 def test_portaudio_hook_finds_the_bundled_library(tmp_path: Path, monkeypatch) -> None:

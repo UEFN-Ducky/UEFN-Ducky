@@ -110,6 +110,42 @@ def test_a_504_waits_and_the_next_try_builds_the_bundle(monkeypatch, tmp_path, w
     assert waits == [ff.DOWNLOAD_WAIT_S, ff.DOWNLOAD_WAIT_S * 2]
 
 
+def test_macos_pins_cover_both_archs():
+    assert set(ff.MACOS_PINS) == {"arm64", "x64"}
+    for arch, pins in ff.MACOS_PINS.items():
+        assert set(pins) == {"ffmpeg", "ffprobe", "LICENSE.txt"}
+        for name, (url, sha) in pins.items():
+            assert url.startswith("https://") and len(sha) == 64 and int(sha, 16) >= 0
+        assert pins["ffmpeg"][0].endswith(f"ffmpeg-darwin-{arch}")
+        assert pins["ffprobe"][0].endswith(f"ffprobe-darwin-{arch}")
+    assert ff.MACOS_PINS["arm64"]["ffmpeg"][1] != ff.MACOS_PINS["x64"]["ffmpeg"][1]
+    assert ff.mac_arch("arm64") == "arm64" and ff.mac_arch("x86_64") == "x64"
+
+
+@pytest.mark.parametrize("arch", ["arm64", "x64"])
+def test_ensure_macos_bundle_downloads_each_pin(monkeypatch, tmp_path, arch):
+    blobs = {name: name.encode() for name in ff.MACOS_PINS[arch]}
+    pins = {n: (f"https://x/{n}-{arch}", hashlib.sha256(b).hexdigest()) for n, b in blobs.items()}
+    monkeypatch.setitem(ff.MACOS_PINS, arch, pins)
+    calls = []
+    monkeypatch.setattr(
+        fi, "_urlopen", lambda req, timeout=0: (calls.append(req.full_url), _Resp(blobs[req.full_url.split("/")[-1].rsplit("-", 1)[0]]))[1]
+    )
+    dest = ff.ensure_macos_bundle(tmp_path / "b", arch)
+    assert sorted(p.name for p in dest.iterdir()) == [".installed", "LICENSE.txt", "ffmpeg", "ffprobe"]
+    assert (dest / ".installed").read_text(encoding="utf-8") == f"{ff.MACOS_FFMPEG_VERSION}-{arch}"
+    ff.ensure_macos_bundle(tmp_path / "b", arch)
+    assert len(calls) == 3  # second call reused the marker
+
+
+def test_ensure_macos_bundle_bad_sha_leaves_nothing(monkeypatch, tmp_path):
+    monkeypatch.setitem(ff.MACOS_PINS, "arm64", {"ffmpeg": ("https://x/ffmpeg", "0" * 64)})
+    monkeypatch.setattr(fi, "_urlopen", lambda req, timeout=0: _Resp(b"evil"))
+    with pytest.raises(fi.FfmpegInstallError):
+        ff.ensure_macos_bundle(tmp_path / "b", "arm64")
+    assert not (tmp_path / "b").exists() and not (tmp_path / "b.tmp").exists()
+
+
 def test_a_download_that_keeps_failing_stops_with_a_clear_error(monkeypatch, tmp_path, waits):
     def down(_req, timeout=0):
         raise urllib.error.HTTPError(fi.FFMPEG_URL, 504, "Gateway Timeout", {}, None)

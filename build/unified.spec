@@ -28,6 +28,10 @@ _runtime_versions = validate_runtime_versions(ROOT / "requirements.txt")
 # Linux freezes on ubuntu-22.04 (glibc 2.35) into dist/uefn-ducky/ (build_exes.main_linux).
 # Windows keeps every line below exactly as before; Linux-only parts sit behind LINUX.
 LINUX = sys.platform.startswith("linux")
+# macOS freezes on the macos-26 (arm64) and macos-15-intel (x86_64) runners into
+# dist/UEFN Ducky.app (build_exes.main_macos). Mac-only parts sit behind MAC.
+MAC = sys.platform == "darwin"
+MAC_DIR = ROOT / "build" / "macos"
 LINUX_DIR = ROOT / "build" / "linux" / "appimage"
 # PortAudio for sounddevice (backend/voice/linux_speech.py): the AppImage has no package
 # manager to pull it in. Bundled next to the Python libs; pyi_rth_portaudio.py points
@@ -153,8 +157,9 @@ if _listener.is_dir():
         _datas.append((str(path), _dest_dir))
 # ffmpeg (LGPL, pinned) ships under tools/ffmpeg; build/fetch_ffmpeg.py populates the folder.
 _ffmpeg_bundle = ROOT / "build" / "ffmpeg-bundle"
-# ponytail: Linux uses the distro's ffmpeg (fetch_ffmpeg.py pins the Windows zip only).
-if not LINUX and not (_ffmpeg_bundle / "ffmpeg.exe").is_file():
+# ponytail: Linux uses the distro's ffmpeg (fetch_ffmpeg.py pins Windows and macOS only).
+# macOS: static ffmpeg/ffprobe per arch; the .app keeps them in Contents/Resources/tools/ffmpeg.
+if not LINUX and not (_ffmpeg_bundle / ("ffmpeg" if MAC else "ffmpeg.exe")).is_file():
     raise RuntimeError("unified.spec: ffmpeg bundle missing - run build/fetch_ffmpeg.py")
 for path in [] if LINUX else sorted(_ffmpeg_bundle.iterdir()):
     if path.is_file() and path.name != ".installed":
@@ -299,11 +304,11 @@ try:
     # collect_all("pywinpty") silently collects NOTHING, which drops conpty.dll /
     # OpenConsole.exe / winpty.dll / winpty-agent.exe from the frozen exe — shells
     # then die instantly with STATUS_CONTROL_C_EXIT (shown as exit 130).
-    if not LINUX:
+    if not LINUX and not MAC:
         _pty_datas, _pty_bins, _pty_hidden = collect_all("winpty")
 except Exception:
     pass
-if not LINUX and not _pty_bins and not _pty_datas:
+if not LINUX and not MAC and not _pty_bins and not _pty_datas:
     raise RuntimeError(
         "unified.spec: collect_all('winpty') found no binaries — terminal shells "
         "would break in the frozen exe. Is pywinpty installed in the build env?"
@@ -355,6 +360,23 @@ if LINUX:
         )
     _linux_hidden += ["gi", "cairo"] + [f"gi.repository.{m}" for m in LINUX_GI_MODULES]
 
+# macOS only: pywebview's Cocoa backend (WKWebView through PyObjC), the pty, Keychain, the mic.
+_mac_hidden = []
+if MAC:
+    import importlib.util
+
+    if importlib.util.find_spec("objc") is None or importlib.util.find_spec("WebKit") is None:
+        raise RuntimeError("unified.spec: PyObjC (objc, WebKit) is not installed: the macOS window would not open.")
+    _mac_hidden = [
+        "webview.platforms.cocoa", "objc", "Foundation", "AppKit", "WebKit", "Quartz", "Security",
+        "UniformTypeIdentifiers", "PyObjCTools", "PyObjCTools.AppHelper", "pystray._darwin",
+        "ptyprocess", "sounddevice", "_sounddevice", "keyring",
+    ]
+    if importlib.util.find_spec("_sounddevice_data") is not None:
+        _mac_hidden.append("_sounddevice_data")
+    for _pkg in ("keyring.backends", "ptyprocess"):
+        _mac_hidden += collect_submodules(_pkg)
+
 a = Analysis(
     [str(FRONTEND / "launcher.py")],
     pathex=[str(ROOT), str(DUCKY_APP)],
@@ -371,6 +393,7 @@ a = Analysis(
     # HTTPS verified by Windows (frontend/ssl_boot.py); runtime smoke fails without it.
     + collect_submodules("truststore")
     + _linux_hidden
+    + _mac_hidden
     + [
         "frontend",
         "frontend.launcher",
@@ -586,6 +609,12 @@ _exe_kwargs = dict(
     entitlements_file=None,
     icon=str(_app_icon),
 )
+if MAC:
+    import platform
+
+    # Each Mac runner freezes its own arch (arm64 on macos-26, x86_64 on macos-15-intel).
+    # Signing happens after the freeze (release/sign_macos.py), so PyInstaller never signs.
+    _exe_kwargs["target_arch"] = platform.machine()
 
 exe = EXE(
     pyz,
@@ -617,3 +646,24 @@ coll = COLLECT(
     upx=False,
     name=_exe_basename,
 )
+
+if MAC:
+    import plistlib
+
+    # build_exes.main_macos stages both: the version it bumped and the .icns (build/macos/make_icns.py).
+    _app_version = os.environ.get("UEFN_DUCKY_APP_VERSION", "").strip()
+    _icns = os.environ.get("UEFN_DUCKY_BUILD_ICNS", "").strip()
+    if not _app_version or not _icns or not Path(_icns).is_file():
+        raise RuntimeError("unified.spec: UEFN_DUCKY_APP_VERSION / UEFN_DUCKY_BUILD_ICNS missing; run build_exes.py")
+    _info_plist = plistlib.loads(
+        (MAC_DIR / "Info.plist.in").read_text(encoding="utf-8").replace("@VERSION@", _app_version).encode("utf-8")
+    )
+    # Contents/MacOS gets both executables: the app and UEFN-Ducky-Bridge (IDE MCP stdio).
+    app = BUNDLE(
+        coll,
+        name="UEFN Ducky.app",
+        icon=_icns,
+        bundle_identifier=_info_plist["CFBundleIdentifier"],
+        version=_app_version,
+        info_plist=_info_plist,
+    )

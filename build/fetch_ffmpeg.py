@@ -9,6 +9,7 @@ archive (its SHA-256 is still checked) to skip the network.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import sys
 import time
@@ -25,12 +26,36 @@ DEFAULT_DEST = Path(__file__).resolve().parent / "ffmpeg-bundle"
 DOWNLOAD_TRIES = 5
 DOWNLOAD_WAIT_S = 20
 
+# macOS: static single-file builds (no dylibs), one per arch, pinned by SHA-256.
+# ponytail: eugeneware/ffmpeg-static b6.1.1 (FFmpeg 6.1.1, GPL build); swap for an LGPL
+# macOS build when one is published with the same per-arch pinning.
+MACOS_FFMPEG_VERSION = "6.1.1-static"
+_MACOS_BASE = "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1"
+MACOS_PINS = {
+    "arm64": {
+        "ffmpeg": (f"{_MACOS_BASE}/ffmpeg-darwin-arm64", "a90e3db6a3fd35f6074b013f948b1aa45b31c6375489d39e572bea3f18336584"),
+        "ffprobe": (f"{_MACOS_BASE}/ffprobe-darwin-arm64", "bb2db6f5d8cef919da12fbf592119a987202a8c060a886f3cab091f9cab90b64"),
+        "LICENSE.txt": (f"{_MACOS_BASE}/darwin-arm64.LICENSE", "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2"),
+    },
+    "x64": {
+        "ffmpeg": (f"{_MACOS_BASE}/ffmpeg-darwin-x64", "ebdddc936f61e14049a2d4b549a412b8a40deeff6540e58a9f2a2da9e6b18894"),
+        "ffprobe": (f"{_MACOS_BASE}/ffprobe-darwin-x64", "fa3add0ce901f7241abe0dfc0155d958fc834aca3f8ce61f87cc712ae669c1e0"),
+        "LICENSE.txt": (f"{_MACOS_BASE}/darwin-arm64.LICENSE", "cb48bf09a11f5fb576cddb0431c8f5ed0a60157a9ec942adffc13907cbe083f2"),
+    },
+}
 
-def _download_with_retries(part: Path) -> None:
+
+def mac_arch(machine: str | None = None) -> str:
+    m = (machine or platform.machine()).lower()
+    return "arm64" if m in ("arm64", "aarch64") else "x64"
+
+
+def _download_with_retries(part: Path, url: str = "", sha256: str = "") -> None:
     """One GitHub 504 must not end a release build. Every try checks the SHA-256 again."""
+    url, sha256 = url or fi.FFMPEG_URL, sha256 or fi.FFMPEG_SHA256
     for attempt in range(1, DOWNLOAD_TRIES + 1):
         try:
-            fi.download_verified(fi.FFMPEG_URL, fi.FFMPEG_SHA256, part)
+            fi.download_verified(url, sha256, part)
             return
         except (fi.FfmpegInstallError, OSError) as exc:
             if attempt == DOWNLOAD_TRIES:
@@ -80,9 +105,35 @@ def ensure_bundle(dest: Path = DEFAULT_DEST) -> Path:
     return dest
 
 
+def ensure_macos_bundle(dest: Path = DEFAULT_DEST, arch: str | None = None) -> Path:
+    """``dest`` with the pinned static ``ffmpeg`` + ``ffprobe`` for ``arch`` (arm64 / x64)."""
+    dest, arch = Path(dest), arch or mac_arch()
+    stamp = f"{MACOS_FFMPEG_VERSION}-{arch}"
+    marker = dest / fi._MARKER
+    if marker.is_file() and marker.read_text(encoding="utf-8").strip() == stamp and (
+        all((dest / n).is_file() for n in MACOS_PINS[arch])
+    ):
+        return dest
+    staging = dest.with_name(dest.name + ".tmp")
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    try:
+        for name, (url, sha) in MACOS_PINS[arch].items():
+            print(f"Downloading {url}")
+            _download_with_retries(staging / name, url, sha)
+            if name != "LICENSE.txt":
+                (staging / name).chmod(0o755)
+        (staging / fi._MARKER).write_text(stamp, encoding="utf-8")
+        shutil.rmtree(dest, ignore_errors=True)
+        os.replace(staging, dest)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return dest
+
+
 def main() -> int:
     try:
-        dest = ensure_bundle()
+        dest = ensure_macos_bundle() if sys.platform == "darwin" else ensure_bundle()
     except fi.FfmpegInstallError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

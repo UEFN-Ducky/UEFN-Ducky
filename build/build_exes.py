@@ -650,10 +650,135 @@ def main_linux(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- macOS (macos-26 = arm64, macos-15-intel = x86_64: each runner freezes its own arch) ---
+# dist/UEFN Ducky.app: Contents/MacOS/{UEFN-Ducky, UEFN-Ducky-Bridge}. PyInstaller 6 puts
+# binaries in Contents/Frameworks (= sys._MEIPASS) and data in Contents/Resources, linked
+# into each other, so every bundled path is checked under Frameworks.
+# ponytail: no Rust launcher on Mac yet (phase 2); the app opens its own Cocoa window.
+MAC_APP = "UEFN Ducky.app"
+
+
+def mac_names(*, dev_build: bool) -> tuple[str, str]:
+    """(app, bridge) executable names; launcher.is_bridge_exe() matches the ``-Bridge`` stem."""
+    app = "UEFN-Ducky-Dev" if dev_build else "UEFN-Ducky"
+    return app, f"{app}-Bridge"
+
+
+def missing_macos_files(app: Path, exe: str = "UEFN-Ducky", bridge: str = "UEFN-Ducky-Bridge") -> list[str]:
+    """What the .app must hold to start: both executables, Info.plist, PyObjC (the Cocoa
+    window), ffmpeg and the search model."""
+    need = [f"Contents/MacOS/{exe}", f"Contents/MacOS/{bridge}", "Contents/Info.plist",
+            "Contents/Frameworks/tools/ffmpeg/ffmpeg", "Contents/Frameworks/tools/ffmpeg/ffprobe",
+            *(f"Contents/Frameworks/models/search/{n}" for n in SEARCH_MODEL_FILES)]
+    missing = [name for name in need if not (app / name).is_file()]
+    # webview/platforms/cocoa.py lives in the PYZ; its compiled half is PyObjC's extension.
+    if not any((app / "Contents" / "Frameworks" / "objc").glob("_objc*.so")):
+        missing.append("Contents/Frameworks/objc/_objc*.so")
+    return missing
+
+
+def main_macos(args: argparse.Namespace, run=subprocess.run) -> int:
+    """macOS freeze into ``dist/UEFN Ducky.app``. Same version bump, panel and spec as Windows."""
+    app_name, bridge_name = mac_names(dev_build=bool(args.dev))
+    here = Path(__file__).resolve().parent
+    root = here.parent
+    req, spec = root / "requirements.txt", here / "unified.spec"
+    init_py = root / "ducky_app" / "frontend" / "__init__.py"
+    work = Path(tempfile.gettempdir()) / "uefn-ducky-pyi-work"
+    for p in (req, spec, init_py):
+        if not p.is_file():
+            print(f"Missing {p}", file=sys.stderr)
+            return 1
+    _validate_listener_source(root / "ducky_app" / "uefn_listener")
+    for p in (here, here / "macos", root, root / "ducky_app"):
+        if str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+    from fetch_ffmpeg import ensure_macos_bundle
+    from fetch_search_model import ensure_model as ensure_search_model
+
+    ensure_macos_bundle()
+    ensure_search_model()
+    _build_react_panel(root)
+    panel_stage = tempfile.TemporaryDirectory(prefix="uefn-ducky-panel-build-")
+    panel_snap = Path(panel_stage.name) / "dist"
+    shutil.copytree(root / "ducky_app" / "frontend" / "ui_web" / "web" / "dist", panel_snap)
+    from frontend.ui_web.panel_assets import create_panel_archive, verify_bundled_panel
+
+    panel_archive = Path(panel_stage.name) / "panel-dist.zip"
+    create_panel_archive(panel_snap, panel_archive)
+    os.environ["UEFN_DUCKY_PANEL_ARCHIVE"] = str(panel_archive)
+    os.environ["UEFN_DUCKY_PANEL_DIST"] = str(panel_snap)
+
+    app_version = _read_package_version(init_py) if args.no_bump else _bump_package_version(init_py)
+
+    pip = [sys.executable, "-m", "pip", "install", "--upgrade", "pyinstaller==6.22.3", "-r", str(req)]
+    stamp = pip_stamp([req, here / "build_exes.py"])
+    if pip_fresh(stamp):
+        print(f"pip: same requirements installed under a day ago ({stamp.name}): skipped")
+    else:
+        print(">", " ".join(pip))
+        run(pip, check=True, cwd=str(root))
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(time.strftime("%Y-%m-%d %H:%M:%S"), encoding="utf-8")
+
+    from frontend.tray_icon import resolve_status_png_path, write_ico
+    from make_icns import make_icns
+
+    ico_path = here / "app_icon.ico"
+    write_ico(ico_path)  # the spec ships it under frontend/ (tray, window icon)
+    icns = make_icns(resolve_status_png_path("online"), work / "UEFN-Ducky.icns")
+    os.environ.update(
+        UEFN_DUCKY_BUILD_ICON=str(ico_path), UEFN_DUCKY_BUILD_ICNS=str(icns), UEFN_DUCKY_APP_VERSION=app_version,
+        UEFN_DUCKY_EXE_BASENAME=app_name, UEFN_DUCKY_BRIDGE_BASENAME=bridge_name,
+    )
+    # The spec insists on VERSIONINFO files; PyInstaller ignores them off Windows.
+    for key, stem, desc in (
+        ("UEFN_DUCKY_BUILD_VERSION_FILE", app_name, APP_DESCRIPTION),
+        ("UEFN_DUCKY_BRIDGE_VERSION_FILE", bridge_name, BRIDGE_DESCRIPTION),
+    ):
+        vf = Path(tempfile.gettempdir()) / f"{stem}_version_info.txt"
+        vf.write_text(_version_info_text(app_version, stem, desc), encoding="utf-8")
+        os.environ[key] = str(vf)
+
+    dist_stage = here / "pyinstaller-dist"
+    (work / "unified").mkdir(parents=True, exist_ok=True)
+    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(dist_stage),
+           "--workpath", str(work), str(spec)]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(
+        p for p in (str(root / "ducky_app"), str(root), os.environ.get("PYTHONPATH", "")) if p)}
+    print(">", " ".join(cmd))
+    run(cmd, check=True, cwd=str(root), env=env)
+
+    out = root / "dist" / MAC_APP
+    if out.exists():
+        shutil.rmtree(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(dist_stage / MAC_APP), str(out))  # a move keeps the bundle's symlinks
+    shutil.rmtree(dist_stage, ignore_errors=True)
+
+    missing = missing_macos_files(out, app_name, bridge_name)
+    if missing:
+        print(f"ERROR: {out} is missing {', '.join(missing)}", file=sys.stderr)
+        return 1
+    run(["plutil", "-lint", str(out / "Contents" / "Info.plist")], check=True)
+    packaged_panel = out / "Contents" / "Frameworks" / "frontend" / "ui_web" / "web" / "dist"
+    try:
+        verify_bundled_panel(packaged_panel, packaged_panel.parent.parent / "panel-dist.zip")
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: packaged panel is incomplete: {exc}", file=sys.stderr)
+        return 1
+    if _run_runtime_smoke(out / "Contents" / "MacOS" / app_name) != 0:
+        return 1
+    print(f"\nDone. Fresh macOS build: v{app_version}\n  {out}\n  IDEs get: {out / 'Contents' / 'MacOS' / bridge_name}")
+    return 0
+
+
 def main() -> int:
     args = _parse_args()
     if sys.platform.startswith("linux"):
         return main_linux(args)
+    if sys.platform == "darwin":
+        return main_macos(args)
     dev_build = bool(args.dev)
     exe_stem = "UEFN-Ducky-Dev" if dev_build else "UEFN-Ducky"
     here = Path(__file__).resolve().parent
