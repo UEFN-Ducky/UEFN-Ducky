@@ -495,17 +495,26 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     pack, _, manifest = build_update_pack(ROOT / "dist" / f"UEFN-Ducky-{version}", version, ROOT / "dist")
     print(f"  {pack.name}: {len(manifest['files'])} files, {manifest['pack']['size']} bytes")
     package_setup(ROOT / "dist" / f"UEFN-Ducky-Setup-{version}.exe", require_sign=require_sign)
-    arm = arm64_app_dir(version)
-    if arm is not None:
-        print(f"=== Windows arm64 ({arm.relative_to(ROOT)}) ===")
-        if _signing_on():
-            from build_web_setup import build_uninstaller
-
-            build_uninstaller(arm)
-        sign_exes(sorted(arm.glob("*.exe")), require_sign=require_sign, what="arm64 payload")
-        package_setup(arm64_setup_path(version), require_sign=require_sign,
-                      ps1_args=["-Arch", "arm64", "-AppDir", str(arm), "-Out", str(arm64_setup_path(version))])
+    if arm64_app_dir(version) is not None:
+        build_arm64_setup(version, require_sign=require_sign)
     return version
+
+
+def build_arm64_setup(version: str, *, require_sign: bool) -> Path:
+    """Sign the arm64 one-dir build in dist/arm64 and pack UEFN-Ducky-Setup-<v>-arm64.exe."""
+    arm = arm64_app_dir(version)
+    if arm is None:
+        raise SystemExit(f"No arm64 build at {ARM64_DIST / f'UEFN-Ducky-{version}'}")
+    print(f"=== Windows arm64 ({arm.relative_to(ROOT)}) ===")
+    if _signing_on():
+        from build_web_setup import build_uninstaller
+
+        build_uninstaller(arm)
+    sign_exes(sorted(arm.glob("*.exe")), require_sign=require_sign, what="arm64 payload")
+    setup = arm64_setup_path(version)
+    package_setup(setup, require_sign=require_sign,
+                  ps1_args=["-Arch", "arm64", "-AppDir", str(arm), "-Out", str(setup)])
+    return setup
 
 
 # The arm64 job (windows-11-arm: PyInstaller can't cross-build) freezes the app there; the
@@ -1503,6 +1512,12 @@ def main() -> None:
         help="Bump/build Setup.exe and stop (CI Azure sign, then --no-bump --exe)",
     )
     parser.add_argument(
+        "--arm64-setup",
+        action="store_true",
+        help="After --phase build: sign and pack the arm64 build downloaded to dist/arm64 "
+        "(the release's windows-arm64 job) as UEFN-Ducky-Setup-<v>-arm64.exe; upload sends it",
+    )
+    parser.add_argument(
         "--phase",
         choices=("test", "build", "upload"),
         default="",
@@ -1526,6 +1541,10 @@ def main() -> None:
         return
     if args.fetch_signing_key:
         preflight_store_signing_key()
+        return
+    if args.arm64_setup:
+        preflight_signing(require=args.require_sign)
+        print(f"BUILT={build_arm64_setup(read_version(), require_sign=args.require_sign)}")
         return
 
     if args.phase != "upload":

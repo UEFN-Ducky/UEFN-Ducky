@@ -516,7 +516,9 @@ def test_github_release_runs_the_same_publish_app_steps_as_a_local_release():
         if m and not line.lstrip().startswith("#"):
             args = [a for a in shlex.split(m.group(1)) if a != "${extra[@]}"]
             calls.append(" ".join(args))
-    assert calls == list(pub.RELEASE_STEPS)
+    # The windows-arm64 job only fetches the Store's signing key before its freeze.
+    assert calls.count("--fetch-signing-key") == 1
+    assert [c for c in calls if c != "--fetch-signing-key"] == list(pub.RELEASE_STEPS)
     # Optional inputs only ride on the step that owns them.
     assert re.search(r'publish_app\.py --phase build "\$\{extra\[@\]\}"', yml)
     assert 'extra+=(--set-version "${SET_VERSION}")' in yml and 'extra+=(--notes "${NOTES}")' in yml

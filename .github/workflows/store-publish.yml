@@ -268,9 +268,83 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Windows on Arm: PyInstaller and Nuitka can't cross-build, so the arm64 app freezes on
+  # GitHub's arm64 runner at the release version, and the publish job signs it and packs
+  # its own Setup (UEFN-Ducky-Setup-<v>-arm64.exe). cryptography has no win_arm64 wheel
+  # past 46.0.3 (open advisories), so the pinned one builds from source on vcpkg's OpenSSL.
+  windows-arm64:
+    name: windows build (arm64)
+    needs: linux-version
+    # linux-packages too: the app's release builds x64 on the PC and fetches this build.
+    if: inputs.mode != 'linux-bumps'
+    runs-on: windows-11-arm
+    timeout-minutes: 120
+    env:
+      PYTHONUTF8: "1"
+      VERSION: ${{ needs.linux-version.outputs.version }}
+      DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+      VERSE_LANG_ASSETS: ${{ secrets.VERSE_LANG_ASSETS }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          architecture: arm64
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: OpenSSL for cryptography (vcpkg, static)
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" install openssl:arm64-windows-static-md
+          "OPENSSL_DIR=$env:VCPKG_INSTALLATION_ROOT\installed\arm64-windows-static-md" >> $env:GITHUB_ENV
+          "OPENSSL_STATIC=1" >> $env:GITHUB_ENV
+      - name: Python packages
+        shell: bash
+        run: |
+          python -m venv .venv
+          .venv/Scripts/python -m pip install --upgrade pip
+          crypto="$(grep -E '^cryptography==' requirements.txt)"
+          .venv/Scripts/python -m pip wheel --no-binary cryptography --no-deps -w wheels "$crypto"
+          .venv/Scripts/python -m pip install --find-links wheels -r requirements.txt pyinstaller
+          (cd ducky_app/frontend/ui_web/web && npm ci --no-audit --no-fund)
+      # Same as linux-build: build_exes.py bumps patch, so it starts one below the release.
+      - name: Set the release version and the Store's signing key
+        shell: bash
+        run: |
+          .venv/Scripts/python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; a, b, c = sys.argv[1].split('.'); p.write_version(f'{a}.{b}.{int(c) - 1}')" "$VERSION"
+          .venv/Scripts/python -u release/publish_app.py --fetch-signing-key
+      - name: Verse language assets
+        shell: bash
+        run: bash build/ci_verse_lang.sh "${{ inputs.dry_run }}"
+      - name: Freeze (PyInstaller) + runtime smoke
+        shell: bash
+        run: |
+          .venv/Scripts/python -u build/build_exes.py
+          built="$(.venv/Scripts/python -c "import sys; sys.path.insert(0, 'release'); import publish_app as p; print(p.read_version())")"
+          [ "$built" = "$VERSION" ] || { echo "built $built, expected $VERSION"; exit 1; }
+      - name: Built for arm64
+        shell: bash
+        run: |
+          .venv/Scripts/python - <<'EOF'
+          import os, pathlib, sys
+          sys.path.insert(0, "ducky_app")
+          from backend.uefn_plugins.cpu_check import PE_ARM64, pe_machine
+          for exe in pathlib.Path("dist", f"UEFN-Ducky-{os.environ['VERSION']}").glob("*.exe"):
+              print(exe.name, hex(pe_machine(exe.read_bytes()) or 0))
+              assert pe_machine(exe.read_bytes()) == PE_ARM64, f"{exe} is not ARM64"
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-onedir
+          path: dist/UEFN-Ducky-${{ needs.linux-version.outputs.version }}/
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
     name: build, sign and publish Setup
-    needs: [linux-version, linux-build, linux-flatpak, linux-repo]
+    needs: [linux-version, linux-build, linux-flatpak, linux-repo, windows-arm64]
     if: inputs.mode == 'release'
     runs-on: windows-latest
     timeout-minutes: 120
@@ -367,6 +441,12 @@ jobs:
       - name: Verse language assets
         shell: bash
         run: bash build/ci_verse_lang.sh "${{ inputs.dry_run }}"
+
+      # publish_app's build step signs and packs it as UEFN-Ducky-Setup-<v>-arm64.exe.
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-arm64-onedir
+          path: dist/arm64/UEFN-Ducky-${{ needs.linux-version.outputs.version }}
 
       # The same three steps a local release runs (publish_app.RELEASE_STEPS).
       - name: Test
