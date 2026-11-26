@@ -359,6 +359,40 @@ def _mac_boot_time() -> float:
     return float(hit.group(1)) if hit else 0.0
 
 
+_PERMISSION_WORDS = ("granted", "denied", "unknown")
+
+
+def mac_permissions() -> dict[str, str]:
+    """macOS privacy state for the report, so a dead mic or snip says whether access was refused:
+    {mic, screen, automation} -> granted | denied | unknown. Only these words; {} off macOS.
+    Neither call prompts; automation has no API that asks without prompting, so it stays unknown."""
+    if sys.platform != "darwin":
+        return {}
+    out = {"mic": "unknown", "screen": "unknown", "automation": "unknown"}
+    try:
+        import AVFoundation
+
+        status = int(AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(AVFoundation.AVMediaTypeAudio))
+        # AVAuthorizationStatus: 0 not asked yet, 1 restricted, 2 denied, 3 authorized.
+        out["mic"] = {3: "granted", 2: "denied", 1: "denied"}.get(status, "unknown")
+    except Exception:
+        pass
+    try:
+        import Quartz
+
+        out["screen"] = "granted" if Quartz.CGPreflightScreenCaptureAccess() else "denied"
+    except Exception:
+        pass
+    return out
+
+
+def _permissions_line(perms: Any) -> str:
+    if not isinstance(perms, dict):
+        return ""
+    words = [f"{k} {perms[k]}" for k in ("mic", "screen", "automation") if perms.get(k) in _PERMISSION_WORDS]
+    return "Permissions: " + ", ".join(words) if words else ""
+
+
 def _linux_memory() -> dict[str, Any]:
     """The heartbeat's PC memory fields from /proc/meminfo (kB)."""
     info = _proc_values("/proc/meminfo")
@@ -597,6 +631,9 @@ def build_report(
     launcher = _launcher_line(previous.get("launcher"))
     if launcher:
         lines.append(launcher)
+    perms = _permissions_line(previous.get("permissions"))
+    if perms:
+        lines.append(perms)
     try:
         pid = int(previous.get("pid") or 0)
     except (TypeError, ValueError):
@@ -992,6 +1029,9 @@ def begin(version: str, *, ask: bool = True) -> None:
     if launcher:
         _state["launcher"] = launcher
         _state[LAUNCHER_CARRIED_KEY] = launcher.get("started")
+    perms = mac_permissions()
+    if perms:
+        _state["permissions"] = perms
     _write_state()
     try:
         import faulthandler

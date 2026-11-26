@@ -188,6 +188,44 @@ def test_a_mac_report_never_names_the_user(monkeypatch) -> None:
     assert "pat" not in out and "sam" not in out
 
 
+def _fake_pyobjc(monkeypatch, mic: int, screen: bool) -> None:
+    import types
+
+    av = types.ModuleType("AVFoundation")
+    av.AVMediaTypeAudio = "soun"
+    av.AVCaptureDevice = type("AVCaptureDevice", (), {
+        "authorizationStatusForMediaType_": staticmethod(lambda kind: mic if kind == "soun" else 0)})
+    quartz = types.ModuleType("Quartz")
+    quartz.CGPreflightScreenCaptureAccess = lambda: screen
+    monkeypatch.setitem(sys.modules, "AVFoundation", av)
+    monkeypatch.setitem(sys.modules, "Quartz", quartz)
+
+
+def test_a_mac_report_says_which_permissions_were_refused(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "platform", "darwin")
+    _fake_pyobjc(monkeypatch, mic=2, screen=True)
+    perms = boot_report.mac_permissions()
+    assert perms == {"mic": "denied", "screen": "granted", "automation": "unknown"}
+    _fake_pyobjc(monkeypatch, mic=3, screen=False)
+    assert boot_report.mac_permissions() == {"mic": "granted", "screen": "denied", "automation": "unknown"}
+    _fake_pyobjc(monkeypatch, mic=0, screen=True)  # never asked yet
+    assert boot_report.mac_permissions()["mic"] == "unknown"
+    monkeypatch.delitem(sys.modules, "AVFoundation")
+    monkeypatch.delitem(sys.modules, "Quartz")
+    monkeypatch.setattr(sys, "meta_path", [])  # no pyobjc at all
+    assert set(boot_report.mac_permissions().values()) == {"unknown"}
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert boot_report.mac_permissions() == {}
+
+
+def test_the_permissions_line_carries_only_the_three_words() -> None:
+    body = boot_report.build_report(
+        {"state": "ok", "version": "1.2.500", "permissions": {"mic": "denied", "screen": "/Users/pat", "x": "granted"}},
+        "boom")
+    assert "Permissions: mic denied" in body["error_log"]
+    assert "pat" not in body["error_log"] and "x granted" not in body["error_log"]
+
+
 def test_a_mac_reboot_counts_as_a_restart(monkeypatch) -> None:
     import subprocess as sp
     import time
