@@ -19,6 +19,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
+import platform
 import re
 import secrets
 import sys
@@ -541,7 +542,8 @@ def flush() -> bool:
         return True
     groups = _coalesce(rows, ids)
     batch = groups[:BATCH_MAX]
-    body = {"installId": install_id(), "appVersion": __version__, "events": [g[0] for g in batch]}
+    body = {"installId": install_id(), "appVersion": __version__, "platform": platform_label(),
+            "events": [g[0] for g in batch]}
     global _refused_in_a_row
     sent, _, reason = _send(body).partition(":")
     if sent == "refused" and reason in _TOO_LARGE and len(batch) > 1:
@@ -612,11 +614,27 @@ def stop() -> None:
 
 def _os_label() -> str:
     try:
+        if sys.platform.startswith("linux"):
+            return "linux"
         if sys.platform != "win32":
             return "other"
         return "win11" if sys.getwindowsversion().build >= 22000 else "win10"
     except Exception:
         return "other"
+
+
+def platform_label(plat: str | None = None, machine: str | None = None) -> str:
+    """One of usage_events.PLATFORMS for this PC: the Store splits every batch's counts by it,
+    so a failure reads as Windows or Linux (and which CPU)."""
+    plat = sys.platform if plat is None else plat
+    try:
+        m = (platform.machine() if machine is None else machine).lower()
+    except Exception:
+        m = ""
+    os_name = "windows" if plat == "win32" else "linux" if plat.startswith("linux") else ""
+    arch = "arm64" if m in ("arm64", "aarch64") else "x64" if m in ("amd64", "x86_64", "x64") else ""
+    label = f"{os_name}-{arch}"
+    return label if label in ev.PLATFORMS else "other"
 
 
 def _note_alive() -> None:
