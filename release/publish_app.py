@@ -494,7 +494,47 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     print("=== Update pack (installed copies update from it without Setup) ===")
     pack, _, manifest = build_update_pack(ROOT / "dist" / f"UEFN-Ducky-{version}", version, ROOT / "dist")
     print(f"  {pack.name}: {len(manifest['files'])} files, {manifest['pack']['size']} bytes")
-    print("=== Inno Setup engine ===")
+    package_setup(ROOT / "dist" / f"UEFN-Ducky-Setup-{version}.exe", require_sign=require_sign)
+    arm = arm64_app_dir(version)
+    if arm is not None:
+        print(f"=== Windows arm64 ({arm.relative_to(ROOT)}) ===")
+        if _signing_on():
+            from build_web_setup import build_uninstaller
+
+            build_uninstaller(arm)
+        sign_exes(sorted(arm.glob("*.exe")), require_sign=require_sign, what="arm64 payload")
+        package_setup(arm64_setup_path(version), require_sign=require_sign,
+                      ps1_args=["-Arch", "arm64", "-AppDir", str(arm), "-Out", str(arm64_setup_path(version))])
+    return version
+
+
+# The arm64 job (windows-11-arm: PyInstaller can't cross-build) freezes the app there; the
+# release job downloads that one-dir build here and signs and packs it beside the x64 one.
+ARM64_DIST = ROOT / "dist" / "arm64"
+
+
+def arm64_app_dir(version: str, folder: Path = ARM64_DIST) -> Path | None:
+    app = folder / f"UEFN-Ducky-{version}"
+    return app if (app / "UEFN-Ducky.exe").is_file() else None
+
+
+def arm64_setup_path(version: str) -> Path:
+    return ROOT / "dist" / f"UEFN-Ducky-Setup-{version}-arm64.exe"
+
+
+def sign_exes(paths: list[Path], *, require_sign: bool, what: str) -> None:
+    cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
+    if require_sign:
+        cmd.append("--require")
+    cmd.extend(str(p) for p in paths)
+    print(f"=== Authenticode sign ({what}) ===")
+    subprocess.run(cmd, check=True, cwd=str(ROOT))
+
+
+def package_setup(setup: Path, *, require_sign: bool, ps1_args: list[str] | None = None) -> None:
+    """Inno engine → sign → Ducky Setup host (signed builds) or the engine itself → sign."""
+    ps1_args = ps1_args or []
+    print(f"=== Inno Setup engine ({setup.name}) ===")
     ps1 = ROOT / "release" / "installer" / "make_release_installer.ps1"
     # With signing on, ISCC also signs the uninstaller it packs (unins000.exe)
     # by running sign_windows.py with this same Python.
@@ -504,27 +544,21 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
         env["DUCKY_SIGN_PYTHON"] = sys.executable
     with timed("Inno engine"):
         subprocess.run(
-            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-EngineOnly"],
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-EngineOnly", *ps1_args],
             check=True,
             cwd=str(ROOT),
             env=env,
         )
     engine = ROOT / "dist" / "Setup-engine.exe"
     if engine.is_file():
-        cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
-        if require_sign:
-            cmd.append("--require")
-        cmd.append(str(engine))
-        print("=== Authenticode sign (engine) ===")
-        subprocess.run(cmd, check=True, cwd=str(ROOT))
-    setup = ROOT / "dist" / f"UEFN-Ducky-Setup-{version}.exe"
+        sign_exes([engine], require_sign=require_sign, what="engine")
     # Unsigned custom host = extract embedded EXE + Load DLLs from memory.
     # Defender flags that as Trojan:Win32/Wacatac (dropper). Ship the Inno stub
     # until signing is configured (DUCKY_SIGN_PROVIDER / DUCKY_WINDOWS_PFX).
     if _signing_on():
         print("=== Ducky Setup host ===")
         subprocess.run(
-            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-HostOnly"],
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-HostOnly", *ps1_args],
             check=True,
             cwd=str(ROOT),
         )
@@ -536,13 +570,7 @@ def build_setup(*, require_sign: bool = False, bump: bool = True) -> str:
     if not setup.is_file():
         raise SystemExit(f"Installer did not produce {setup.name}")
     # Sign the outer Setup.exe — this is what Chrome downloads.
-    cmd = [sys.executable, str(ROOT / "release" / "sign_windows.py")]
-    if require_sign:
-        cmd.append("--require")
-    cmd.append(str(setup))
-    print("=== Authenticode sign (Setup) ===")
-    subprocess.run(cmd, check=True, cwd=str(ROOT))
-    return version
+    sign_exes([setup], require_sign=require_sign, what="Setup")
 
 
 def payload_exes(version: str) -> list[Path]:
@@ -690,13 +718,21 @@ def _upload_linux_file(base: str, api_key: str, version: str, path: Path) -> str
 def release_assets(base: str, api_key: str, version: str, installer_url: str, sha256: str,
                    folder: Path = LINUX_DIST) -> list[dict]:
     """The ``assets`` of uds_app_release: the Windows Setup plus every Linux package and
-    signature, uploaded here. ``[]`` without Linux builds (a Windows-only release sends
-    what it always did). Any failed upload raises before anything is registered."""
+    signature, and the Windows arm64 Setup when there is one, uploaded here. ``[]`` without
+    either (an x64-only release sends what it always did). Any failed upload raises before
+    anything is registered."""
     linux = linux_artifacts(version, folder)
-    if not linux:
+    arm = arm64_setup_path(version)
+    if not linux and not arm.is_file():
         return []
     assets = [{"os": "windows", "arch": "x64", "package": "setup",
                "url": installer_url, "sha256": sha256, "sig_url": ""}]
+    if arm.is_file():
+        digest = sha256_file(arm)
+        print(f"  uploading {arm.name} ({arm.stat().st_size} bytes)")
+        assets.append({"os": "windows", "arch": "arm64", "package": "setup",
+                       "url": _uploaded_url(upload_app_release(base, api_key, arm), arm, digest),
+                       "sha256": digest, "sig_url": ""})
     for art in linux:
         path, sig = art["path"], art["sig"]
         digest = sha256_file(path)

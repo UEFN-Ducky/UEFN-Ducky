@@ -79,11 +79,14 @@ fn embed_resources(version: &str) {
     let icon = icon.canonicalize().unwrap_or(icon);
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let rc = out.join("launcher.rc");
-    let obj = out.join("launcher_res.o");
+    // windres's COFF object is always x64 (LNK1112 on arm64); MSVC's link.exe takes a .res
+    // for any machine, so arm64 links that instead.
+    let arm64 = std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64");
+    let (format, obj) = if arm64 { ("res", out.join("launcher.res")) } else { ("coff", out.join("launcher_res.o")) };
     std::fs::write(&rc, resource_script(&icon, version)).expect("write launcher.rc");
     let windres = std::env::var("WINDRES").unwrap_or_else(|_| "windres".to_string());
     let built = Command::new(&windres)
-        .args(["-O", "coff", "-i"])
+        .args(["-O", format, "-i"])
         .arg(&rc)
         .arg("-o")
         .arg(&obj)

@@ -10,12 +10,17 @@
 # downloads the Store's latest full Setup at install time (release/build_web_setup.py
 # runs this and signs it). The same build named "Uninstall UEFN Ducky.exe" (-Out <exe>)
 # is the app's uninstaller.
+#
+# -Arch arm64 -AppDir <one-dir> -Out <exe> packs the native arm64 build (frozen on an
+# arm64 runner) into its own Setup; the host stays x64 and runs emulated there.
 param(
     [switch]$EngineOnly,
     [switch]$HostOnly,
     [switch]$Web,
     [string]$PublicDir = "",
-    [string]$Out = ""
+    [string]$Out = "",
+    [string]$Arch = "",
+    [string]$AppDir = ""
 )
 if ($Web) {
     $EngineOnly = $false
@@ -48,15 +53,18 @@ $EngineExe = Join-Path $Dist "Setup-engine.exe"
 $SetupExe = Join-Path $Dist "UEFN-Ducky-Setup-$Version.exe"
 if ($Web) {
     $SetupExe = if ($Out) { $Out } else { Join-Path $Dist "UEFN-Ducky-WebSetup.exe" }
+} elseif ($Out) {
+    $SetupExe = $Out
 }
 
 if ($DoEngine) {
     # build_exes.py bumps __version__ and writes the one-dir folder
     # dist\UEFN-Ducky-<version>\ (UEFN-Ducky.exe + UEFN-Ducky-Bridge.exe + payload).
     # The .iss installs the whole folder into {app}.
-    $AppDir = Join-Path $Dist "UEFN-Ducky-$Version"
+    if (-not $AppDir) { $AppDir = Join-Path $Dist "UEFN-Ducky-$Version" }
 
     if (-not (Test-Path (Join-Path $AppDir "UEFN-Ducky.exe"))) {
+        if ($Arch) { Write-Error "No UEFN-Ducky.exe in $AppDir" }
         $alt = Get-ChildItem $Dist -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -match '^UEFN-Ducky-\d+\.\d+\.\d+$' -and (Test-Path (Join-Path $_.FullName "UEFN-Ducky.exe")) } |
             Sort-Object LastWriteTime -Descending |
@@ -98,6 +106,8 @@ if ($DoEngine) {
     $Iscc = $IsccCandidates[0]
 
     $IsccArgs = @("/DMyAppVersion=$Version", "/DMyAppDir=$AppDir")
+    if ($Arch -eq "arm64") { $IsccArgs += "/DMyArch=arm64" }
+    elseif ($Arch) { Write-Error "-Arch takes arm64 (x64 is the default)" }
     # Signing on (publish_app.py passes its Python only then): ISCC signs the
     # uninstaller it packs and Setup-engine.exe through sign_windows.py. $q and
     # $f are ISCC's quote and file-name placeholders, so they stay single-quoted.

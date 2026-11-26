@@ -124,3 +124,24 @@ def test_store_names_pass_the_identity_rule_and_stay_unique():
     a = pub.store_upload_name(VERSION, "apt/pool/main/" + "x" * 200 + "_amd64.deb")
     b = pub.store_upload_name(VERSION, "apt/pool/main/" + "x" * 200 + "_arm64.deb")
     assert len(a) == 120 and a != b and re.fullmatch(r"[A-Za-z0-9 .'-]+", a)
+
+
+def test_the_windows_arm64_setup_rides_beside_x64_and_never_replaces_it(tmp_path):
+    pub, store = _load(), FakeStore()
+    arm = tmp_path / f"UEFN-Ducky-Setup-{VERSION}-arm64.exe"
+    arm.write_bytes(b"arm64 setup")
+    pub.arm64_setup_path = lambda version: arm
+    _publish(pub, store, tmp_path / "no-linux")
+    assert store.uploaded == [arm.name]
+    assets = store.calls[0][1]["assets"]
+    assert [(a["os"], a["arch"], a["package"]) for a in assets] == [("windows", "x64", "setup"), ("windows", "arm64", "setup")]
+    assert assets[0]["url"] == "/api/v1/files/win/content"
+    assert assets[1]["sha256"] == hashlib.sha256(b"arm64 setup").hexdigest()
+
+
+def test_arm64_app_dir_needs_the_frozen_exe(tmp_path):
+    pub = _load()
+    assert pub.arm64_app_dir(VERSION, tmp_path) is None
+    (tmp_path / f"UEFN-Ducky-{VERSION}").mkdir()
+    (tmp_path / f"UEFN-Ducky-{VERSION}" / "UEFN-Ducky.exe").write_bytes(b"MZ")
+    assert pub.arm64_app_dir(VERSION, tmp_path) == tmp_path / f"UEFN-Ducky-{VERSION}"

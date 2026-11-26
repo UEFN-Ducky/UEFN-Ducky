@@ -58,8 +58,13 @@ UsePreviousAppDir=yes
 ; relaunch is handled explicitly in [Run] below, so the app never starts twice.
 CloseApplications=yes
 RestartApplications=no
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+; /DMyArch=arm64 packs the native arm64 build (Windows on Arm only); the default x64
+; build also installs on Arm, emulated. Same AppId: either upgrades the other in place.
+#ifndef MyArch
+  #define MyArch "x64compatible"
+#endif
+ArchitecturesAllowed={#MyArch}
+ArchitecturesInstallIn64BitMode={#MyArch}
 OutputDir=..\..\dist
 ; Inner engine only — the published artifact is the Ducky Setup host wrapping
 ; this file. Must NOT start with UEFN-Ducky: the panel's process sweep kills
