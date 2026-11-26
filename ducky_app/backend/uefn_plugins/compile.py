@@ -631,10 +631,10 @@ def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tu
 
 def _assert_runs_on_every_cpu(pyd: Path) -> None:
     """Refuse a build with instructions some PCs lack: loading it would close Ducky there."""
-    from backend.uefn_plugins.cpu_check import ELF_AARCH64, PE_ARM64, elf_machine, pe_machine, problems
+    from backend.uefn_plugins.cpu_check import ELF_AARCH64, PE_ARM64, elf_machine, macho_arch, pe_machine, problems
 
     image = pyd.read_bytes()
-    if elf_machine(image) == ELF_AARCH64 or pe_machine(image) == PE_ARM64:
+    if elf_machine(image) == ELF_AARCH64 or pe_machine(image) == PE_ARM64 or macho_arch(image) == "arm64":
         # ponytail: no arm64 disassembler here; arm64 builds rely on gcc's armv8-a baseline.
         return
     found = problems(image)

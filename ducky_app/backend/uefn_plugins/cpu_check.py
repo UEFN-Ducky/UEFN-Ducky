@@ -5,7 +5,8 @@ with an illegal instruction (0xC000001D) on every CPU without it. The build engi
 baseline x86-64 (compile.BASELINE_CPU_FLAGS); this proves the result: every instruction
 in a Windows module's code must be one that any CPU running 64-bit Windows has. The
 UEFN Ducky Store runs the same check (same disassembler, same list) on each upload.
-A Linux x86_64 build (an ELF ``.so``) is held to the same list.
+A Linux x86_64 build (an ELF ``.so``) and a macOS x86_64 build (a Mach-O ``.so``, thin or the
+x86_64 slice of a fat one) are held to the same list.
 """
 
 from __future__ import annotations
@@ -39,6 +40,64 @@ _SHT_NOBITS = 8
 
 
 PE_ARM64 = 0xAA64
+
+_MH_MAGIC_64 = b"\xcf\xfa\xed\xfe"  # 0xFEEDFACF, little-endian
+_FAT_MAGIC = 0xCAFEBABE
+_FAT_MAGIC_64 = 0xCAFEBABF
+_MACHO_CPU = {0x0100000C: "arm64", 0x01000007: "x86_64"}
+_LC_SEGMENT_64 = 0x19
+_S_ATTR_INSTRUCTIONS = 0x80000000 | 0x00000400  # PURE_INSTRUCTIONS | SOME_INSTRUCTIONS
+
+
+def macho_slices(image: bytes) -> list[tuple[str, bytes]]:
+    """(arch, 64-bit Mach-O image) per slice: one for a thin file, one per arch for a fat one;
+    [] when it is not Mach-O. Unknown CPUs are named by their hex cputype."""
+    if image[:4] == _MH_MAGIC_64 and len(image) >= 32:
+        cpu = struct.unpack_from("<i", image, 4)[0] & 0xFFFFFFFF
+        return [(_MACHO_CPU.get(cpu, f"0x{cpu:08x}"), image)]
+    if len(image) < 8:
+        return []
+    magic, count = struct.unpack_from(">II", image, 0)
+    if magic not in (_FAT_MAGIC, _FAT_MAGIC_64) or not 0 < count < 32:
+        return []
+    out: list[tuple[str, bytes]] = []
+    for i in range(count):
+        if magic == _FAT_MAGIC:
+            cpu, _sub, offset, size, _align = struct.unpack_from(">IIIII", image, 8 + 20 * i)
+        else:
+            cpu, _sub, offset, size, _align, _res = struct.unpack_from(">IIQQII", image, 8 + 32 * i)
+        out.append((_MACHO_CPU.get(cpu, f"0x{cpu:08x}"), image[offset:offset + size]))
+    return out
+
+
+def macho_arch(image: bytes) -> str | None:
+    """'arm64' / 'x86_64' for a thin Mach-O, 'arm64+x86_64' for a fat one, None when not Mach-O."""
+    arches = sorted(arch for arch, _ in macho_slices(image))
+    return "+".join(arches) if arches else None
+
+
+def _macho_code_sections(image: bytes) -> list[tuple[str, int, bytes]]:
+    """The instruction sections of the x86_64 Mach-O slice (a macOS .so): (name, address, bytes)."""
+    slices = dict(macho_slices(image))
+    if "x86_64" not in slices:
+        raise ValueError(f"not a 64-bit x86 module (Mach-O {macho_arch(image)})")
+    mo = slices["x86_64"]
+    ncmds = struct.unpack_from("<I", mo, 16)[0]
+    at, out = 32, []
+    for _ in range(ncmds):
+        cmd, cmdsize = struct.unpack_from("<II", mo, at)
+        if cmd == _LC_SEGMENT_64:
+            nsects = struct.unpack_from("<I", mo, at + 64)[0]
+            for s in range(nsects):
+                sec = at + 72 + 80 * s
+                name = mo[sec:sec + 16].rstrip(b"\0").decode("ascii", "replace")
+                seg = mo[sec + 16:sec + 32].rstrip(b"\0").decode("ascii", "replace")
+                addr, size, offset = struct.unpack_from("<QQI", mo, sec + 32)
+                flags = struct.unpack_from("<I", mo, sec + 64)[0]
+                if flags & _S_ATTR_INSTRUCTIONS and offset:
+                    out.append((f"{seg},{name}", addr, mo[offset:offset + size]))
+        at += cmdsize
+    return out
 
 
 def pe_machine(image: bytes) -> int | None:
@@ -80,6 +139,8 @@ def code_sections(image: bytes) -> list[tuple[str, int, bytes]]:
     """The executable sections of a PE image (a .pyd/.dll) or x86_64 ELF (.so): (name, rva, bytes)."""
     if image[:4] == ELF_MAGIC:
         return _elf_code_sections(image)
+    if macho_slices(image):
+        return _macho_code_sections(image)
     if len(image) < 0x40 or image[:2] != b"MZ":
         raise ValueError("not a Windows module (no MZ header)")
     pe = struct.unpack_from("<I", image, 0x3C)[0]
