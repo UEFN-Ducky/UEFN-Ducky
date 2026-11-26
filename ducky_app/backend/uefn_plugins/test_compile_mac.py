@@ -54,6 +54,17 @@ def test_mac_nuitka_uses_xcode_clang_and_signs(monkeypatch, tmp_path: Path, as_m
     assert calls[-1][0] == ["codesign", "--force", "--sign", "-", str(out)]
 
 
+def test_developer_id_signs_when_the_runner_has_it(monkeypatch, tmp_path: Path) -> None:
+    seen: list[list[str]] = []
+    monkeypatch.setattr(build_engine.subprocess, "run",
+                        lambda cmd, **kw: seen.append(list(cmd)) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    monkeypatch.setenv("DUCKY_CODESIGN_IDENTITY", "Developer ID Application")
+    monkeypatch.setenv("DUCKY_CODESIGN_KEYCHAIN", "/tmp/k.keychain-db")
+    build_engine.codesign_module(tmp_path / "m.so")
+    assert seen == [["codesign", "--force", "--sign", "Developer ID Application", "--timestamp",
+                     "--keychain", "/tmp/k.keychain-db", str(tmp_path / "m.so")]]
+
+
 def test_mac_without_xcode_says_how_to_get_it(monkeypatch, as_mac) -> None:
     monkeypatch.setattr(build_engine.subprocess, "run",
                         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 2, "", "no developer tools"))

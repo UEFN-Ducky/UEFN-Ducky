@@ -669,14 +669,21 @@ def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tu
     if not built:
         raise CompileError(f"Nuitka produced no .so for {mod_name}")
     if IS_MACOS:
-        codesign_adhoc(built[0])
+        codesign_module(built[0])
     return built[0], warnings
 
 
-def codesign_adhoc(so: Path) -> None:
-    """Ad-hoc sign a macOS module (arm64 refuses to map unsigned code). A release build is
-    re-signed with the Developer ID on the Mac runner (plugin-macos.yml)."""
-    res = subprocess.run(["codesign", "--force", "--sign", "-", str(so)], capture_output=True, text=True, errors="replace")
+def codesign_module(so: Path) -> None:
+    """Sign a macOS module before it is zipped (arm64 refuses to map unsigned code): ad-hoc,
+    or with ``DUCKY_CODESIGN_IDENTITY`` (the Developer ID plugin-macos.yml imports into
+    ``DUCKY_CODESIGN_KEYCHAIN``) when set."""
+    identity = os.environ.get("DUCKY_CODESIGN_IDENTITY", "").strip() or "-"
+    cmd = ["codesign", "--force", "--sign", identity]
+    if identity != "-":
+        cmd.append("--timestamp")
+        if os.environ.get("DUCKY_CODESIGN_KEYCHAIN"):
+            cmd += ["--keychain", os.environ["DUCKY_CODESIGN_KEYCHAIN"]]
+    res = subprocess.run(cmd + [str(so)], capture_output=True, text=True, errors="replace")
     if res.returncode != 0:
         raise CompileError(f"codesign failed on {so.name}:\n{res.stderr}")
 

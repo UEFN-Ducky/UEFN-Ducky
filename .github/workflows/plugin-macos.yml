@@ -1,0 +1,126 @@
+# One compiled desktop Store plugin for macOS, both chips: Apple Silicon (cpython-313-darwin-arm64)
+# on macos-26 and Intel (cpython-313-darwin-x86_64) on macos-15-intel. Nuitka can't cross-compile
+# and only GitHub has Macs, so release_platforms (backend/uefn_plugins/release_platforms.py)
+# dispatches this once for the plugin's pushed commit, waits, and downloads both zips.
+# `request` names the run so the caller finds it.
+# Signing: the .so is ad-hoc signed by the build engine; with the Apple secrets (MACOS_CERT_P12_B64,
+# MACOS_CERT_PASSWORD, APPLE_TEAM_ID) it is Developer ID signed instead, no change here.
+name: plugin macos
+run-name: plugin macos ${{ inputs.request }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "the plugin repo (owner/name)"
+        required: true
+        type: string
+      sha:
+        description: "the pushed commit to build"
+        required: true
+        type: string
+      request:
+        description: "caller's id for this build (the run's name)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: plugin macos (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+            macho: arm64
+          - runner: macos-15-intel
+            arch: x64
+            macho: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: "1"
+      DUCKY_REPO: ${{ github.workspace }}/ducky
+      DUCKYOS_BASE_URL: ${{ secrets.DUCKYOS_BASE_URL }}
+      MACOS_CERT_P12_B64: ${{ secrets.MACOS_CERT_P12_B64 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: ducky
+      # Private plugin repos need PLUGIN_REPO_TOKEN (contents:read on them); public ones don't.
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.sha }}
+          path: plugin
+          token: ${{ secrets.PLUGIN_REPO_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build engine deps (iced-x86 for the CPU check)
+        run: python -m pip install -q --disable-pip-version-check "$(grep -i '^iced-x86' ducky/requirements.txt | cut -d'#' -f1)"
+      # The keychain password is random and never printed; the keychain goes in the always() step.
+      - name: Developer ID keychain (only with the Apple secrets)
+        if: env.MACOS_CERT_P12_B64 != '' && env.MACOS_CERT_PASSWORD != '' && env.APPLE_TEAM_ID != ''
+        run: |
+          kc="$RUNNER_TEMP/ducky-plugin-sign.keychain-db"
+          pw="$(openssl rand -hex 16)"
+          echo "MACOS_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          printf '%s' "$MACOS_CERT_P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          echo "DUCKY_CODESIGN_IDENTITY=Developer ID Application" >> "$GITHUB_ENV"
+          echo "DUCKY_CODESIGN_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+          echo "DUCKY_CODESIGN_TEAM=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+      - name: Compile (release)
+        working-directory: plugin
+        env:
+          TARGET: macos-${{ matrix.arch }}
+          MACHO: ${{ matrix.macho }}
+        run: |
+          xcode-select -p
+          python - <<'EOF'
+          import json, os, pathlib, subprocess, sys, tempfile, zipfile
+          sys.path[:0] = ["scripts", "../ducky/ducky_app"]
+          import build_zip
+          from backend.uefn_plugins.cpu_check import macho_arch
+          target, macho = os.environ["TARGET"], os.environ["MACHO"]
+          z = pathlib.Path(build_zip.build_compiled_zip(release=True, target=target))
+          with zipfile.ZipFile(z) as zf:
+              abi = json.loads(zf.read("plugin.json"))["python_abi"]
+              sos = [n for n in zf.namelist() if n.endswith(".cpython-313-darwin.so")]
+              assert abi == f"cpython-313-darwin-{macho}", abi
+              assert sos and all(macho_arch(zf.read(n)) == macho for n in sos), [(n, macho_arch(zf.read(n))) for n in sos]
+              with tempfile.TemporaryDirectory() as tmp:
+                  for n in sos:
+                      zf.extract(n, tmp)
+                      subprocess.run(["codesign", "--verify", "--strict", "--verbose=2", os.path.join(tmp, n)], check=True)
+                      if os.environ.get("DUCKY_CODESIGN_TEAM"):
+                          info = subprocess.run(["codesign", "-dvv", os.path.join(tmp, n)], capture_output=True, text=True).stderr
+                          assert f"TeamIdentifier={os.environ['DUCKY_CODESIGN_TEAM']}" in info, info
+          name = z.name if f"-{target}-" in z.name else z.name.replace("-compiled.ducky-plugin.zip", f"-{target}-compiled.ducky-plugin.zip")
+          out = pathlib.Path("../macos-out"); out.mkdir()
+          z.rename(out / name)
+          print(name, abi, sos)
+          EOF
+      - name: Delete the signing keychain
+        if: ${{ always() }}
+        run: |
+          if [ -n "${MACOS_KEYCHAIN:-}" ]; then security delete-keychain "$MACOS_KEYCHAIN" || true; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-macos-${{ matrix.arch }}
+          path: macos-out/*.ducky-plugin.zip
+          if-no-files-found: error
+          retention-days: 3
