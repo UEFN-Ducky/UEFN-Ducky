@@ -119,8 +119,8 @@ TABS = ("chat", "editor", "terminal", "plan", "usage", "settings", "discord", "p
         "ducky-profile", "changes", "workflows", "store", "browser", "forge")
 
 # Every batch's platform (usage_stats.platform_label): the Store splits PCs, errors, tool calls
-# and turns by it, so a break reads as Windows or Linux.
-PLATFORMS = ("windows-x64", "windows-arm64", "linux-x64", "linux-arm64", "other")
+# and turns by it, so a break reads as Windows, Linux or macOS.
+PLATFORMS = ("windows-x64", "windows-arm64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64", "other")
 
 # Which of the site's two storage hosts a download used: its usual one, or the second.
 STORAGE_HOSTS = ("main", "alt")
@@ -129,7 +129,7 @@ STORAGE_HOSTS = ("main", "alt")
 EVENTS: dict[str, dict[str, Any]] = {
     "app.open": {
         "version": ("version",),
-        "os": ("win10", "win11", "linux", "other"),
+        "os": ("win10", "win11", "linux", "macos", "other"),
         "install_age": ("bucket", INSTALL_AGE_S, "install_age_s"),
     },
     "app.heartbeat": {"uefn_up": YES_NO},

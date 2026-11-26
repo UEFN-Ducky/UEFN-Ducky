@@ -616,11 +616,25 @@ def _os_label() -> str:
     try:
         if sys.platform.startswith("linux"):
             return "linux"
+        if sys.platform == "darwin":
+            return "macos"
         if sys.platform != "win32":
             return "other"
         return "win11" if sys.getwindowsversion().build >= 22000 else "win10"
     except Exception:
         return "other"
+
+
+def _rosetta() -> bool:
+    """True when this process is an x86_64 build translated by Rosetta on Apple Silicon."""
+    try:
+        import subprocess
+
+        out = subprocess.run(["sysctl", "-in", "sysctl.proc_translated"], capture_output=True,
+                             text=True, timeout=2).stdout
+        return out.strip() == "1"
+    except Exception:
+        return False
 
 
 def platform_label(plat: str | None = None, machine: str | None = None) -> str:
@@ -631,8 +645,12 @@ def platform_label(plat: str | None = None, machine: str | None = None) -> str:
         m = (platform.machine() if machine is None else machine).lower()
     except Exception:
         m = ""
-    os_name = "windows" if plat == "win32" else "linux" if plat.startswith("linux") else ""
+    os_name = ("windows" if plat == "win32" else "linux" if plat.startswith("linux")
+               else "macos" if plat == "darwin" else "")
     arch = "arm64" if m in ("arm64", "aarch64") else "x64" if m in ("amd64", "x86_64", "x64") else ""
+    # An Intel build under Rosetta says x86_64: name the real chip.
+    if os_name == "macos" and arch == "x64" and machine is None and _rosetta():
+        arch = "arm64"
     label = f"{os_name}-{arch}"
     return label if label in ev.PLATFORMS else "other"
 

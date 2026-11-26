@@ -221,14 +221,24 @@ def test_track_queues_and_flush_sends_one_batch_then_drops_rows() -> None:
     assert us.queued() == 0
 
 
-def test_platform_label_names_windows_and_linux_and_their_cpu() -> None:
+def test_platform_label_names_windows_linux_and_macos_and_their_cpu(monkeypatch) -> None:
     assert us.platform_label("win32", "AMD64") == "windows-x64"
     assert us.platform_label("win32", "ARM64") == "windows-arm64"
     assert us.platform_label("linux", "x86_64") == "linux-x64"
     assert us.platform_label("linux", "aarch64") == "linux-arm64"
-    assert us.platform_label("darwin", "arm64") == "other"
+    assert us.platform_label("darwin", "arm64") == "macos-arm64"
+    assert us.platform_label("darwin", "x86_64") == "macos-x64"
     assert us.platform_label("linux", "riscv64") == "other"
     assert ev.validate("app.open", {"os": "linux"}) == {"os": "linux"}
+    assert ev.validate("app.open", {"os": "macos"}) == {"os": "macos"}
+    # An Intel build under Rosetta on an M-chip Mac reports the real chip.
+    monkeypatch.setattr(us.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(us, "_rosetta", lambda: True)
+    assert us.platform_label("darwin") == "macos-arm64"
+    monkeypatch.setattr(us, "_rosetta", lambda: False)
+    assert us.platform_label("darwin") == "macos-x64"
+    monkeypatch.setattr(us.sys, "platform", "darwin")
+    assert us._os_label() == "macos"
 
 
 def test_a_batch_holds_at_most_batch_max_distinct_rows_and_the_rest_waits(monkeypatch) -> None:
