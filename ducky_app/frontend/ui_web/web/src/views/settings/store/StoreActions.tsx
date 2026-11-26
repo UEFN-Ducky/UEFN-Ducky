@@ -22,11 +22,26 @@ type Props = {
   size: "card" | "detail";
 };
 
+const ARCH: Record<string, string> = { arm64: "aarch64", x64: "x86_64", amd64: "x86_64" };
+const normKey = (key: string) => {
+  const [os, arch = ""] = key.trim().toLowerCase().split("-");
+  return `${os}-${ARCH[arch] || arch}`;
+};
+
+/** False when the Store lists builds (`platforms`) and none is for this machine; no list = a source plugin. */
+export function installableHere(item: DuckyOSStoreItemDto): boolean {
+  const platforms = item.platforms || [];
+  const host = item.host_platform || "";
+  if (!platforms.length || !host) return true;
+  return platforms.some((p) => normKey(p) === normKey(host));
+}
+
 /** State-driven action buttons shared by cards and the detail pane. */
 export function StoreActions({ item, handlers, busy, size }: Props) {
   const state = item.state || "available";
   const isPlugin = itemKind(item) === "plugin";
   const canAct = state === "available" || state === "update";
+  const here = installableHere(item);
   const installed = state === "installed" || state === "update";
   const stop = (e: MouseEvent) => e.stopPropagation();
   const cls = (variant: string) => `ds-btn ds-btn--${variant} ds-btn--${size}`;
@@ -57,10 +72,11 @@ export function StoreActions({ item, handlers, busy, size }: Props) {
         <button
           type="button"
           className={cls("install")}
-          disabled={busy}
+          disabled={busy || !here}
+          title={here ? undefined : item.platform_badge || undefined}
           onClick={() => handlers.onInstall(item)}
         >
-          {busy ? "Working…" : state === "update" ? "Update" : "Install"}
+          {!here ? "Not available on this system" : busy ? "Working…" : state === "update" ? "Update" : "Install"}
         </button>
       ) : null}
       {/* Also while an update waits: a plugin whose update keeps failing must stay removable. */}

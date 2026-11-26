@@ -2242,9 +2242,12 @@ def store_catalog() -> dict[str, Any]:
                 **_local_plugin_icon_fields(plug),
             }
         )
+    from backend.uefn_plugins import manifest_platform as _mp
     from backend.uefn_plugins.loader_platform import store_badge
+    host = f"{_mp.host_os()}-{_mp.host_arch()}"
     for it in items_out:  # 'Windows only': an installed build this OS can't load, or a catalog one without its build
         it["platform_badge"] = store_badge(it["slug"], None if it["slug"] in installed_plugins else it)
+        it["host_platform"] = host  # StoreActions greys out Install when ``platforms`` lacks it
     # Private audiences are optional: only when the spaces provider says so does the
     # library show its Shared category.
     try:

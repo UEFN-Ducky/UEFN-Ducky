@@ -72,6 +72,9 @@ export function StoreDetailView({ item, pendingSlug, catalogReady, jobs, actionB
           </div>
           <h2 className="ds-detail-name">{item.name || slug}</h2>
           <p className="ds-detail-author">{authorLabelFor(item)}</p>
+          {item.platform_badge?.trim() ? (
+            <span className="ds-audience-chip ds-platform-chip">{item.platform_badge.trim()}</span>
+          ) : null}
           <div ref={targetRef("settings.store.detail.actions", { route: "settings.store", label: "Install, update, turn on or off" })} className="ds-detail-side-actions">
             <StoreActions item={item} handlers={handlers} busy={busy} size="detail" />
             {item.repo_url ? (

@@ -1786,6 +1786,10 @@ export interface DuckyOSStoreItemDto {
   audience_label?: string;
   /** "Windows only" when this machine can't load the plugin's build (loader_platform.card_badge). */
   platform_badge?: string;
+  /** The `os-arch` builds the Store has (`windows-x86_64`, `macos-arm64`…); none = a source plugin. */
+  platforms?: string[];
+  /** This machine's `os-arch` key (`macos-aarch64`), same spelling as `platforms`. */
+  host_platform?: string;
   /** Shared with the signed-in account (Shared category). */
   mine?: boolean;
   /** Content summary when a plugin bundles skills/themes/etc. */
