@@ -10,6 +10,9 @@ any other EXE never writes or removes it, so it can never point at a throwaway c
 
 Linux: ``~/.config/autostart/uefn-ducky.desktop`` (XDG autostart), Exec = ``$APPIMAGE`` or the
 installed binary with ``--background``; the same rules keep a source run or test copy out.
+
+macOS: ``~/Library/LaunchAgents/online.uefnducky.Ducky.plist`` (RunAtLoad), ProgramArguments =
+the app bundle's ``Contents/MacOS`` executable with ``--background``; only a bundled app writes it.
 """
 from __future__ import annotations
 
@@ -54,6 +57,8 @@ def start_exe(stub: Path) -> Path:
 
 def managed_exe() -> Path | None:
     """The EXE the entry may name, or None when this process must leave the entry alone."""
+    if sys.platform == "darwin":
+        return mac_app_exe()
     if sys.platform.startswith("linux"):
         from frontend.open_files import linux_app_exe
 
@@ -111,7 +116,58 @@ def _apply_linux(exe: Path, enabled: bool) -> bool:
         return False
 
 
+MAC_LABEL = "online.uefnducky.Ducky"
+
+
+def mac_app_exe(exe: Path | str | None = None) -> Path | None:
+    """The app's own executable when it runs from a ``*.app/Contents/MacOS`` bundle (never a
+    source run or test copy)."""
+    if os.environ.get("DUCKY_SANDBOX"):
+        return None
+    path = Path(exe or sys.executable)
+    parts = path.parts
+    if len(parts) >= 4 and parts[-2] == "MacOS" and parts[-3] == "Contents" and parts[-4].endswith(".app"):
+        return path
+    return None
+
+
+def mac_agent_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{MAC_LABEL}.plist"
+
+
+def mac_agent_bytes(exe: Path | str) -> bytes:
+    import plistlib
+
+    return plistlib.dumps({"Label": MAC_LABEL, "ProgramArguments": [str(exe), BACKGROUND_FLAG],
+                           "RunAtLoad": True, "ProcessType": "Interactive"})
+
+
+def _apply_mac(exe: Path, enabled: bool) -> bool:
+    # ponytail: a file in LaunchAgents is read at the next login, no launchctl load needed;
+    # SMAppService (macOS 13+) when the app wants to show in Login Items as itself.
+    agent = mac_agent_path()
+    try:
+        if not enabled:
+            agent.unlink(missing_ok=True)
+            return True
+        data = mac_agent_bytes(exe)
+        if not agent.is_file() or agent.read_bytes() != data:
+            agent.parent.mkdir(parents=True, exist_ok=True)
+            agent.write_bytes(data)
+        return True
+    except OSError:
+        return False
+
+
 def registered_command() -> str | None:
+    if sys.platform == "darwin":
+        import plistlib
+
+        try:
+            args = plistlib.loads(mac_agent_path().read_bytes()).get("ProgramArguments") or []
+        except (OSError, ValueError):
+            return None
+        return command_for(args[0]) if args else None
     if sys.platform.startswith("linux"):
         try:
             lines = linux_entry_path().read_text(encoding="utf-8").splitlines()
@@ -134,6 +190,8 @@ def apply(enabled: bool) -> bool:
     exe = managed_exe()
     if exe is None:
         return False
+    if sys.platform == "darwin":
+        return _apply_mac(exe, enabled)
     if sys.platform.startswith("linux"):
         return _apply_linux(exe, enabled)
     reg = _winreg()
