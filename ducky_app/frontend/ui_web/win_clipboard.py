@@ -1,6 +1,7 @@
 """Windows Unicode clipboard write — WebView2 navigator.clipboard often no-ops.
 
-On Linux the same calls go through wl-copy/wl-paste (Wayland) or xclip (X11), plus PNG."""
+On Linux the same calls go through wl-copy/wl-paste (Wayland) or xclip (X11), plus PNG;
+on macOS through NSPasteboard, plus PNG."""
 
 from __future__ import annotations
 
@@ -12,6 +13,41 @@ import sys
 import time
 
 IS_LINUX = sys.platform.startswith("linux")
+IS_MAC = sys.platform == "darwin"
+
+
+def _mac_pasteboard():
+    """(AppKit, the general NSPasteboard), or (None, None) without pyobjc."""
+    try:
+        import AppKit  # type: ignore[import-not-found]
+    except ImportError:
+        return None, None
+    return AppKit, AppKit.NSPasteboard.generalPasteboard()
+
+
+def _mac_write(text: str | None = None, png: bytes = b"") -> bool:
+    AppKit, pb = _mac_pasteboard()
+    if pb is None:
+        return False
+    pb.clearContents()
+    if text is not None:
+        return bool(pb.setString_forType_(text, AppKit.NSPasteboardTypeString))
+    from Foundation import NSData  # type: ignore[import-not-found]
+
+    return bool(pb.setData_forType_(NSData.dataWithBytes_length_(png, len(png)), AppKit.NSPasteboardTypePNG))
+
+
+def _mac_png() -> bytes:
+    """The pasteboard's picture as PNG: macOS screenshots and most apps copy TIFF, converted here."""
+    AppKit, pb = _mac_pasteboard()
+    if pb is None:
+        return b""
+    data = pb.dataForType_(AppKit.NSPasteboardTypePNG)
+    if data is None:
+        tiff = pb.dataForType_(AppKit.NSPasteboardTypeTIFF)
+        rep = AppKit.NSBitmapImageRep.imageRepWithData_(tiff) if tiff is not None else None
+        data = rep.representationUsingType_properties_(AppKit.NSBitmapImageFileTypePNG, {}) if rep is not None else None
+    return bytes(data) if data is not None else b""
 
 
 def _linux_cmd(write: bool, mime: str) -> list[str] | None:
@@ -50,15 +86,17 @@ def _linux_read(mime: str) -> bytes:
 
 
 def set_clipboard_png(png: bytes) -> bool:
-    """Put a PNG on the clipboard (Linux only; Windows images go through WebView2)."""
+    """Put a PNG on the clipboard (Linux and macOS; Windows images go through WebView2)."""
+    if IS_MAC:
+        return bool(png) and _mac_write(png=png)
     return bool(IS_LINUX and png) and _linux_write(png, "image/png")
 
 
 def get_clipboard_png() -> bytes:
-    """The clipboard's PNG, or b'' when it holds none (Linux only)."""
-    if not IS_LINUX:
+    """The clipboard's PNG, or b'' when it holds none (Linux and macOS)."""
+    if not IS_LINUX and not IS_MAC:
         return b""
-    data = _linux_read("image/png")
+    data = _mac_png() if IS_MAC else _linux_read("image/png")
     return data if data.startswith(b"\x89PNG") else b""
 
 CF_UNICODETEXT = 13
@@ -80,6 +118,8 @@ def _win() -> tuple[ctypes.WinDLL, ctypes.WinDLL]:
 
 
 def set_clipboard_text(text: str) -> bool:
+    if IS_MAC:
+        return _mac_write(text=str(text or ""))
     if IS_LINUX:
         return _linux_write(str(text or "").encode("utf-8"), "text/plain;charset=utf-8")
     if sys.platform != "win32":
@@ -114,7 +154,10 @@ def set_clipboard_text(text: str) -> bool:
 
 
 def get_clipboard_text() -> str:
-    """Read Unicode text from the clipboard. Empty when none or not Windows/Linux."""
+    """Read Unicode text from the clipboard. Empty when none or not Windows/Linux/macOS."""
+    if IS_MAC:
+        AppKit, pb = _mac_pasteboard()
+        return str((pb.stringForType_(AppKit.NSPasteboardTypeString) if pb is not None else None) or "")
     if IS_LINUX:
         return _linux_read("text/plain;charset=utf-8").decode("utf-8", "replace")
     if sys.platform != "win32":
