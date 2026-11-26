@@ -222,7 +222,7 @@ def check_at_launch(ask: Callable[[float, str], str] | None = None,
     ``ask(free_gb, names)`` answers 'cancel' / 'try' / 'continue' / 'timeout'; the default box
     times out every AUTO_EVERY_S for the first AUTO_FOR_S, and each timeout or Try Again rechecks."""
     # Off Windows there is no message box to ask with, so only a caller's own ``ask`` runs the check.
-    if (os.name != "nt" and ask is None) or os.environ.get("DUCKY_SKIP_LOW_MEMORY_CHECK"):
+    if (sys.platform != "win32" and ask is None) or os.environ.get("DUCKY_SKIP_LOW_MEMORY_CHECK"):
         return True
     from frontend.ui_web.admission import free_memory_gb
 

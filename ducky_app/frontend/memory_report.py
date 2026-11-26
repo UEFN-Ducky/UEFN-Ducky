@@ -103,6 +103,21 @@ def _process() -> dict[str, Any]:
             out.update(rss_mb=_mb(status.get("VmRSS", 0)), private_mb=_mb(status.get("RssAnon", 0)),
                        peak_wset_mb=_mb(status.get("VmHWM", 0)))
             out.setdefault("threads", threading.active_count())
+    elif sys.platform == "darwin":
+        # macOS has no private bytes either: USS (pages only this process holds) and the
+        # rusage peak RSS (bytes on macOS, KB on Linux) stand in.
+        try:
+            import psutil
+
+            out["private_mb"] = _mb(psutil.Process().memory_full_info().uss)
+        except Exception as exc:  # noqa: BLE001
+            out.setdefault("error", f"psutil: {exc}")
+        try:
+            import resource
+
+            out["peak_wset_mb"] = _mb(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        except Exception:  # noqa: BLE001 — the peak is a nice-to-have
+            pass
     names = collections.Counter(re.sub(r"[-_ ]?\d+$", "", t.name) or "?" for t in threading.enumerate())
     out["python_threads"] = len(threading.enumerate())
     out["python_threads_by_name"] = dict(names.most_common(15))

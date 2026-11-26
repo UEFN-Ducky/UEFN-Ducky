@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -160,7 +161,7 @@ def _kernel32() -> Any:
 def raise_window_priority() -> int:
     """Above Normal for the window's processes still at Normal; how many were raised. WebView2
     puts a hidden page's process at Idle on purpose: those are left alone."""
-    if os.name != "nt":
+    if sys.platform != "win32":
         return 0
     from backend.util import proc_table
     from frontend.app_versions import backend_mode
