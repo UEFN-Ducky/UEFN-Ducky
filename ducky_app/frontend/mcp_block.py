@@ -38,6 +38,8 @@ def _base_os_env() -> dict[str, str]:
             out[key] = val
     return out
 
+IS_MAC = sys.platform == "darwin"
+
 VERSIONED_EXE_RE = re.compile(
     r"^UEFN-Ducky-(\d+)\.(\d+)\.(\d+)\.exe$",
     re.IGNORECASE,
@@ -114,6 +116,10 @@ def resolve_bridge_command(own_run: bool = False) -> str:
         from frontend.app_versions import stable_dir, stable_exe
 
         here = Path(sys.executable).resolve()
+        # UEFN Ducky.app: IDEs get Contents/MacOS/UEFN-Ducky-Bridge by absolute path. The
+        # updater swaps the whole .app in place, so that path holds across updates.
+        if IS_MAC and here.parent.name == "MacOS":
+            return str(bridge_exe_for(here) or here)
         try:
             in_app_folder = here.parent == stable_dir().resolve()
         except OSError:

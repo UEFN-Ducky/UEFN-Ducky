@@ -26,6 +26,27 @@ def test_stamp_mcp_identity_uniques_argv_and_inner_bridge() -> None:
     assert uefn["env"]["DUCKY_CONV_ID"] == "chat-a"
 
 
+def test_mac_app_writes_the_bridge_inside_the_bundle(tmp_path: Path, monkeypatch) -> None:
+    from frontend import mcp_block
+
+    macos = tmp_path / "Applications" / "UEFN Ducky.app" / "Contents" / "MacOS"
+    macos.mkdir(parents=True)
+    (macos / "UEFN-Ducky").write_bytes(b"\xcf\xfa\xed\xfe")
+    (macos / "UEFN-Ducky-Bridge").write_bytes(b"\xcf\xfa\xed\xfe")
+    monkeypatch.setattr(mcp_block, "is_packaged_runtime", lambda: True)
+    monkeypatch.setattr(mcp_block.sys, "executable", str(macos / "UEFN-Ducky"))
+    monkeypatch.setattr(mcp_block, "IS_MAC", True)
+    monkeypatch.setattr(mcp_inject.shutil, "which", lambda *_: None)  # no Windows node wrapper (a Mac has none)
+    uefn = mcp_inject.build_uefn_mcp_servers(settings=mcp_block.PanelSettings())["uefn"]
+    assert uefn["command"] == str((macos / "UEFN-Ducky-Bridge").resolve())
+    assert Path(uefn["command"]).is_absolute() and uefn["args"][0] == "bridge"
+    # Settings → Apply (Cursor / Claude) uses the same block.
+    assert mcp_block.build_uefn_server_block(mcp_block.PanelSettings())["command"] == uefn["command"]
+    # No bridge beside it: the app itself, never a missing path.
+    (macos / "UEFN-Ducky-Bridge").unlink()
+    assert mcp_block.resolve_bridge_command() == str((macos / "UEFN-Ducky").resolve())
+
+
 def test_two_runs_get_different_argv() -> None:
     a = stamp_mcp_identity({"args": ["bridge"], "env": {}}, RunContext(run_id="1"))
     b = stamp_mcp_identity({"args": ["bridge"], "env": {}}, RunContext(run_id="2"))
