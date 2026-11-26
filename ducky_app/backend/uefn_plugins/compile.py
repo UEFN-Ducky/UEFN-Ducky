@@ -531,19 +531,42 @@ def _inject_license(
     init_py.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
+def arm64_msvc(vswhere: Path | None = None) -> bool:
+    """Visual Studio with its ARM64 C++ tools on this PC (GitHub's windows-11-arm has them)."""
+    vswhere = vswhere or Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    if not vswhere.is_file():
+        return False
+    res = subprocess.run([str(vswhere), "-latest", "-products", "*", "-requires",
+                          "Microsoft.VisualStudio.Component.VC.Tools.ARM64", "-property", "installationPath"],
+                         capture_output=True, text=True, errors="replace", creationflags=_NO_WINDOW)
+    return res.returncode == 0 and bool(res.stdout.strip())
+
+
+def _windows_compiler() -> tuple[str, dict[str, str]]:
+    """Nuitka's compiler switch and the env flags it gets.
+
+    x64: zig, always: on a PC with Visual Studio, Nuitka picked MSVC, which ignores
+    BASELINE_CPU_FLAGS ("D9002: unknown option -mcpu=x86_64") and links its CPU probe (XSAVE
+    xgetbv), so _assert_runs_on_every_cpu refused the build.
+    arm64: MSVC when installed. zig 0.16's own cc crashes there (0xC0000005 on Nuitka's
+    __constants.c), and MSVC's arm64 code is plain armv8, so there is no CPU baseline to pin.
+    """
+    if WIN_ARM64 and arm64_msvc():
+        return "--msvc=latest", {}
+    return "--zig", {"CFLAGS": BASELINE_CPU_FLAGS, "LDFLAGS": BASELINE_CPU_FLAGS}
+
+
 def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     """Compile ``work/<mod_name>`` to one extension module. Returns (pyd, warnings)."""
     out_dir = work / "out"
     if IS_LINUX:
         return _run_nuitka_linux(kpy, work, mod_name, out_dir)
+    compiler, flags = _windows_compiler()
     cmd = [
         str(kpy), "-m", "nuitka",
         "--module", mod_name,
         f"--include-package={mod_name}",
-        # zig, always: on a PC with Visual Studio, Nuitka picked MSVC, which ignores
-        # BASELINE_CPU_FLAGS ("D9002: unknown option -mcpu=x86_64") and links its CPU
-        # probe (XSAVE xgetbv), so _assert_runs_on_every_cpu refused the build.
-        "--zig",
+        compiler,
         f"--output-dir={out_dir}",
         "--remove-output",
         "--assume-yes-for-downloads",
@@ -555,7 +578,7 @@ def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     jobs = os.environ.get("DUCKY_NUITKA_JOBS", "").strip()
     if jobs.isdigit() and int(jobs) > 0:
         cmd += [f"--jobs={int(jobs)}", "--low-memory"]
-    env = dict(os.environ, CFLAGS=BASELINE_CPU_FLAGS, LDFLAGS=BASELINE_CPU_FLAGS)
+    env = dict(os.environ, **flags)
     # --zig finds zig on PATH; without the kit's own (ZIGLANG_SPEC) there, Nuitka downloaded
     # a newer one of its own.
     zig_dir = kpy.parent / "Lib" / "site-packages" / "ziglang"
