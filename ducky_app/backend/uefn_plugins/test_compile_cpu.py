@@ -15,6 +15,7 @@ from backend.uefn_plugins import compile as build_engine
 def _windows_kit(monkeypatch) -> None:
     # These pin the Windows (zig) build; the Linux build is covered by test_compile_linux.py.
     monkeypatch.setattr(build_engine, "IS_LINUX", False)
+    monkeypatch.setattr(build_engine, "IS_MACOS", False)
 
 
 def test_nuitka_compiles_and_links_for_baseline_x86_64(monkeypatch, tmp_path: Path) -> None:

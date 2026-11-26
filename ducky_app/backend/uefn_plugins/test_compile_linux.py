@@ -50,6 +50,7 @@ def test_linux_nuitka_uses_baseline_flags(monkeypatch, tmp_path: Path) -> None:
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(build_engine, "IS_LINUX", True)
+    monkeypatch.setattr(build_engine, "IS_MACOS", False)
     monkeypatch.setattr(build_engine, "LINUX_ARCH", "x86_64", raising=False)
     monkeypatch.setenv("CC", "gcc")
     monkeypatch.setattr(build_engine.subprocess, "run", fake_run)

@@ -63,6 +63,18 @@ if IS_LINUX:
     LINUX_ARCH = _mp.host_arch()
     PY_ABI = _mp.python_abi(_mp.LINUX, LINUX_ARCH)
     MODULE_SUFFIX = ".so"
+# macOS builds natively per chip too (CI: macos-26 arm64, macos-15-intel x64) with Xcode's clang
+# and python-build-standalone, the Linux kit's recipe. The manifest tag names the chip
+# (cpython-313-darwin-arm64); the file keeps CPython's own suffix (.cpython-313-darwin.so).
+IS_MACOS = sys.platform == "darwin"
+if IS_MACOS:
+    from backend.uefn_plugins import manifest_platform as _mp
+
+    LINUX_ARCH = _mp.host_arch()  # ponytail: the POSIX kit's arch, named for Linux which came first
+    PY_ABI = _mp.python_abi(_mp.MACOS, LINUX_ARCH)
+    MODULE_SUFFIX = ".so"
+# The ABI tag in the module's file name: PY_ABI everywhere but macOS.
+MODULE_ABI = PY_ABI.rsplit("-", 1)[0] if IS_MACOS else PY_ABI
 # Windows arm64 builds natively on an arm64 PC (CI: windows-11-arm), like Linux arm64.
 WIN_ARM64 = False
 if sys.platform == "win32":
@@ -109,17 +121,29 @@ ESBUILD_LINUX = {  # npm package name, sha256
     "aarch64": ("linux-arm64", "a96dbfa41d3ef5dbd1ef22b1c10d5187be9267e86093a870f06402a7ec931596"),
 }
 LINUX_BASELINE_CPU_FLAGS = {"x86_64": "-march=x86-64 -mtune=generic", "aarch64": "-march=armv8-a"}
+PBS_SHA256_MACOS = {
+    "x86_64": "a46bcdeecd28ba253522b321dcb3806da1b0ff581479fc1d27e9613e3ac44764",
+    "aarch64": "1afd3983237c2a10277345f235be730e9cb49a123e0574ed252dbf3a841a24e4",
+}
+ESBUILD_MACOS = {  # npm package name, sha256
+    "x86_64": ("darwin-x64", "abb6a7a895aaf2cc0df36fecc3bf0042479ffec51a643a056d54e9109f27db55"),
+    "aarch64": ("darwin-arm64", "1980cde09749094452b20d36ff267585ccb3f72749c7bc97291cd9996ccf5a2a"),
+}
+# Every Intel Mac macOS 13 runs is x86-64 (SSE2+) at least; arm64 is clang's Apple default.
+MACOS_BASELINE_CPU_FLAGS = {"x86_64": "-arch x86_64 -march=x86-64", "aarch64": "-arch arm64"}
+MACOS_DEPLOYMENT_TARGET = "13.0"
 
 
-def pbs_python_url(arch: str) -> str:
+def pbs_python_url(arch: str, macos: bool = False) -> str:
+    triple = "apple-darwin" if macos else "unknown-linux-gnu"
     return (
         "https://github.com/astral-sh/python-build-standalone/releases/download/"
-        f"{PBS_TAG}/cpython-{PBS_PYTHON_VERSION}+{PBS_TAG}-{arch}-unknown-linux-gnu-install_only.tar.gz"
+        f"{PBS_TAG}/cpython-{PBS_PYTHON_VERSION}+{PBS_TAG}-{arch}-{triple}-install_only.tar.gz"
     )
 
 
-def esbuild_linux_url(arch: str) -> str:
-    pkg = ESBUILD_LINUX[arch][0]
+def esbuild_linux_url(arch: str, macos: bool = False) -> str:
+    pkg = (ESBUILD_MACOS if macos else ESBUILD_LINUX)[arch][0]
     return f"https://registry.npmjs.org/@esbuild/{pkg}/-/{pkg}-{ESBUILD_VERSION}.tgz"
 # zig builds for the CPU of the machine it runs on. Nuitka pins the compile step to
 # baseline x86-64 but not the link, so zig's own C runtime (memcpy and friends) came
@@ -181,20 +205,20 @@ def build_kit_dir() -> Path:
 
 
 def _kit_python(kit: Path) -> Path:
-    if IS_LINUX:
+    if IS_LINUX or IS_MACOS:
         return kit / "python" / "bin" / "python3"
     return kit / "python" / "python.exe"
 
 
 def _kit_esbuild(kit: Path) -> Path:
-    if IS_LINUX:
+    if IS_LINUX or IS_MACOS:
         return kit / "esbuild" / "esbuild"
     return kit / "esbuild" / "esbuild.exe"
 
 
 def _kit_marker_value() -> str:
-    if IS_LINUX:
-        return "|".join([KIT_VERSION, "linux", LINUX_ARCH, PBS_TAG, PBS_PYTHON_VERSION, NUITKA_SPEC, ESBUILD_VERSION])
+    if IS_LINUX or IS_MACOS:
+        return "|".join([KIT_VERSION, "macos" if IS_MACOS else "linux", LINUX_ARCH, PBS_TAG, PBS_PYTHON_VERSION, NUITKA_SPEC, ESBUILD_VERSION])
     return "|".join(
         [KIT_VERSION, NUGET_PYTHON_VERSION, NUITKA_SPEC, ZIGLANG_SPEC, ESBUILD_VERSION]
         + (["arm64"] if WIN_ARM64 else [])
@@ -274,9 +298,21 @@ def _linux_c_compiler() -> str:
     return cc
 
 
+def _xcode_clang() -> str:
+    """Xcode's (or the Command Line Tools') clang; Nuitka on macOS builds with nothing else."""
+    res = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, errors="replace") if shutil.which("xcode-select") else None
+    if res is None or res.returncode != 0 or not res.stdout.strip():
+        raise CompileError("No Xcode command line tools: run  xcode-select --install  and build again.")
+    return os.environ.get("CC", "").strip() or "clang"
+
+
 def _ensure_linux_kit(staging: Path, progress: ProgressFn | None) -> None:
+    """The POSIX kit (Linux and macOS): python-build-standalone, Nuitka, esbuild."""
+    if IS_MACOS:
+        _xcode_clang()  # fail before a 25 MB download, not after
     _progress(progress, 0.05, "Downloading Python build toolchain…")
-    tgz = _download_verified(pbs_python_url(LINUX_ARCH), PBS_SHA256[LINUX_ARCH], "Python toolchain")
+    pbs_sha = (PBS_SHA256_MACOS if IS_MACOS else PBS_SHA256)[LINUX_ARCH]
+    tgz = _download_verified(pbs_python_url(LINUX_ARCH, IS_MACOS), pbs_sha, "Python toolchain")
     _extract_pbs_python(tgz, staging)
     kpy = _kit_python(staging)
     _progress(progress, 0.45, "Installing Nuitka…")
@@ -287,7 +323,8 @@ def _ensure_linux_kit(staging: Path, progress: ProgressFn | None) -> None:
     if res.returncode != 0:
         raise CompileError(f"Build kit pip install failed:\n{res.stdout}\n{res.stderr}")
     _progress(progress, 0.8, "Downloading esbuild…")
-    tgz = _download_verified(esbuild_linux_url(LINUX_ARCH), ESBUILD_LINUX[LINUX_ARCH][1], "esbuild")
+    es_sha = (ESBUILD_MACOS if IS_MACOS else ESBUILD_LINUX)[LINUX_ARCH][1]
+    tgz = _download_verified(esbuild_linux_url(LINUX_ARCH, IS_MACOS), es_sha, "esbuild")
     _extract_esbuild(tgz, staging / "esbuild", "esbuild")
 
 
@@ -314,7 +351,7 @@ def ensure_build_kit(progress: ProgressFn | None = None) -> Path:
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True, exist_ok=True)
     try:
-        if IS_LINUX:
+        if IS_LINUX or IS_MACOS:
             _ensure_linux_kit(staging, progress)
             (staging / ".kit-version").write_text(_kit_marker_value(), encoding="utf-8")
             shutil.rmtree(kit, ignore_errors=True)
@@ -559,7 +596,7 @@ def _windows_compiler() -> tuple[str, dict[str, str]]:
 def _run_nuitka(kpy: Path, work: Path, mod_name: str) -> tuple[Path, list[str]]:
     """Compile ``work/<mod_name>`` to one extension module. Returns (pyd, warnings)."""
     out_dir = work / "out"
-    if IS_LINUX:
+    if IS_LINUX or IS_MACOS:
         return _run_nuitka_linux(kpy, work, mod_name, out_dir)
     compiler, flags = _windows_compiler()
     cmd = [
@@ -612,8 +649,13 @@ def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tu
     jobs = os.environ.get("DUCKY_NUITKA_JOBS", "").strip()
     if jobs.isdigit() and int(jobs) > 0:
         cmd += [f"--jobs={int(jobs)}", "--low-memory"]
-    flags = LINUX_BASELINE_CPU_FLAGS.get(LINUX_ARCH, "")
-    env = dict(os.environ, CC=_linux_c_compiler(), CFLAGS=flags, LDFLAGS=flags)
+    if IS_MACOS:
+        flags = MACOS_BASELINE_CPU_FLAGS.get(LINUX_ARCH, "")
+        env = dict(os.environ, CC=_xcode_clang(), CFLAGS=flags, LDFLAGS=flags,
+                   MACOSX_DEPLOYMENT_TARGET=MACOS_DEPLOYMENT_TARGET)
+    else:
+        flags = LINUX_BASELINE_CPU_FLAGS.get(LINUX_ARCH, "")
+        env = dict(os.environ, CC=_linux_c_compiler(), CFLAGS=flags, LDFLAGS=flags)
     res = subprocess.run(cmd, cwd=str(work), capture_output=True, text=True, errors="replace", env=env)
     warnings = [
         line.strip()
@@ -626,7 +668,17 @@ def _run_nuitka_linux(kpy: Path, work: Path, mod_name: str, out_dir: Path) -> tu
     built = sorted(out_dir.glob(f"{mod_name}*.so"))
     if not built:
         raise CompileError(f"Nuitka produced no .so for {mod_name}")
+    if IS_MACOS:
+        codesign_adhoc(built[0])
     return built[0], warnings
+
+
+def codesign_adhoc(so: Path) -> None:
+    """Ad-hoc sign a macOS module (arm64 refuses to map unsigned code). A release build is
+    re-signed with the Developer ID on the Mac runner (plugin-macos.yml)."""
+    res = subprocess.run(["codesign", "--force", "--sign", "-", str(so)], capture_output=True, text=True, errors="replace")
+    if res.returncode != 0:
+        raise CompileError(f"codesign failed on {so.name}:\n{res.stderr}")
 
 
 def _assert_runs_on_every_cpu(pyd: Path) -> None:
@@ -817,7 +869,7 @@ def build_plugin(
     _check_kit_abi(kpy)
     esbuild = _kit_esbuild(kit)
 
-    final_pyd_name = f"{mod_name}.{PY_ABI}{MODULE_SUFFIX}"
+    final_pyd_name = f"{mod_name}.{MODULE_ABI}{MODULE_SUFFIX}"
     warnings: list[str] = ([personal_path_message(personal)] if personal else []) + store_errors + store_warnings
     try:
         from backend.uefn_plugins.plugin_lint import check_findability
