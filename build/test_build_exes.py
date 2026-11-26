@@ -299,7 +299,9 @@ def test_launcher_without_its_dll_fails_the_build(tmp_path: Path) -> None:
     assert list(app.iterdir()) == []
 
 
-def test_cache_holds_the_x64_dll_next_to_the_exe(tmp_path: Path) -> None:
+def test_cache_holds_the_x64_dll_next_to_the_exe(tmp_path: Path, monkeypatch) -> None:
+    # win_arch() follows the host CPU; an arm64 CI host would rightly take the arm64 dll.
+    monkeypatch.setattr("platform.machine", lambda: "AMD64")
     src = _launcher_src(tmp_path)
     exe = be.build_launcher(src, cache_root=tmp_path / "cache", cargo="cargo", run=_FakeCargo())
     assert (exe.parent / "WebView2Loader.dll").read_bytes() == b"MZ loader x64"
