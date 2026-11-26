@@ -697,6 +697,31 @@ def linux_artifacts(version: str, folder: Path = LINUX_DIST) -> list[dict]:
     return found
 
 
+# The macos-build job's output (store-publish.yml): UEFN-Ducky-<v>-macos-<arm64|x64>.dmg and
+# .app.zip, signed inside (Developer ID or ad-hoc), so no detached signature.
+MACOS_DIST = ROOT / "dist" / "macos"
+MACOS_PACKAGES = ((".app.zip", "app-zip"), (".dmg", "dmg"))
+
+
+def macos_artifacts(version: str, folder: Path = MACOS_DIST) -> list[dict]:
+    """The macOS packages of ``version`` in ``folder``: ``{path, sig, os, arch, package}``."""
+    found: list[dict] = []
+    if not folder.is_dir():
+        return found
+    for path in sorted(folder.iterdir()):
+        low = path.name.lower()
+        package = next((p for suffix, p in MACOS_PACKAGES if low.endswith(suffix)), None)
+        if not package or not path.is_file() or version not in path.name:
+            continue
+        arch = re.search(r"-macos-(arm64|x64)\.", low)
+        if not arch:
+            raise SystemExit(f"{path.name}: the name must end -macos-arm64 or -macos-x64")
+        if any(a["arch"] == arch[1] and a["package"] == package for a in found):
+            raise SystemExit(f"{path.name}: a second macos-{arch[1]}-{package} for {version}")
+        found.append({"path": path, "sig": None, "os": "macos", "arch": arch[1], "package": package})
+    return found
+
+
 def _uploaded_url(uploaded: dict, path: Path, digest: str) -> str:
     file_id = str(uploaded.get("fileId") or "")
     remote_sha = str(uploaded.get("sha256") or "").lower()
@@ -735,14 +760,15 @@ def _upload_linux_file(base: str, api_key: str, version: str, path: Path) -> str
 
 
 def release_assets(base: str, api_key: str, version: str, installer_url: str, sha256: str,
-                   folder: Path = LINUX_DIST) -> list[dict]:
+                   folder: Path = LINUX_DIST, mac_folder: Path = MACOS_DIST) -> list[dict]:
     """The ``assets`` of uds_app_release: the Windows Setup plus every Linux package and
-    signature, and the Windows arm64 Setup when there is one, uploaded here. ``[]`` without
-    either (an x64-only release sends what it always did). Any failed upload raises before
-    anything is registered."""
+    signature, every macOS DMG / .app.zip, and the Windows arm64 Setup when there is one,
+    uploaded here. ``[]`` without any of them (an x64-only release sends what it always did).
+    Any failed upload raises before anything is registered."""
     linux = linux_artifacts(version, folder)
+    mac = macos_artifacts(version, mac_folder)
     arm = arm64_setup_path(version)
-    if not linux and not arm.is_file():
+    if not linux and not mac and not arm.is_file():
         return []
     assets = [{"os": "windows", "arch": "x64", "package": "setup",
                "url": installer_url, "sha256": sha256, "sig_url": ""}]
@@ -764,6 +790,18 @@ def release_assets(base: str, api_key: str, version: str, installer_url: str, sh
             print(f"  WARNING: {path.name} has no .sig beside it")
         assets.append({"os": "linux", "arch": art["arch"], "package": art["package"],
                        "url": url, "sha256": digest, "sig_url": sig_url})
+    for art in mac:
+        path = art["path"]
+        digest = sha256_file(path)
+        print(f"  uploading {path.name} ({path.stat().st_size} bytes)")
+        # ponytail: the Store takes .zip by name; a .dmg rides the linux-repo-* name like an .rpm
+        # until uds_app_release takes .dmg itself.
+        if art["package"] == "app-zip":
+            url = _uploaded_url(upload_app_release(base, api_key, path), path, digest)
+        else:
+            url = _upload_linux_file(base, api_key, version, path)
+        assets.append({"os": "macos", "arch": art["arch"], "package": art["package"],
+                       "url": url, "sha256": digest, "sig_url": ""})
     return assets
 
 

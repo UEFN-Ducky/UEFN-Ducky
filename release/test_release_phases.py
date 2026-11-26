@@ -254,3 +254,31 @@ def test_main_upload_phase_refuses_without_a_build(pa, phases, monkeypatch) -> N
     with pytest.raises(SystemExit) as exc:
         pa.main()
     assert "--phase build" in str(exc.value)
+
+
+def test_macos_artifacts_and_assets(pa, tmp_path, monkeypatch) -> None:
+    mac = tmp_path / "macos"
+    mac.mkdir()
+    for name in ("UEFN-Ducky-2.31.0-macos-arm64.dmg", "UEFN-Ducky-2.31.0-macos-arm64.app.zip",
+                 "UEFN-Ducky-2.31.0-macos-x64.dmg", "UEFN-Ducky-2.31.0-macos-x64.app.zip",
+                 "UEFN-Ducky-2.30.9-macos-x64.dmg", "notes.txt"):
+        (mac / name).write_bytes(name.encode())
+    rows = pa.macos_artifacts("2.31.0", mac)
+    assert sorted((r["os"], r["arch"], r["package"]) for r in rows) == [
+        ("macos", "arm64", "app-zip"), ("macos", "arm64", "dmg"), ("macos", "x64", "app-zip"), ("macos", "x64", "dmg")]
+
+    sent: list[str] = []
+    monkeypatch.setattr(pa, "upload_app_release", lambda base, key, p: sent.append(p.name) or {"fileId": p.name})
+    monkeypatch.setattr(pa, "arm64_setup_path", lambda v: tmp_path / "none.exe")
+    assets = pa.release_assets("https://x", "k", "2.31.0", "/setup", "abc", tmp_path / "no-linux", mac)
+    assert [(a["os"], a["arch"], a["package"]) for a in assets][0] == ("windows", "x64", "setup")
+    macs = [a for a in assets if a["os"] == "macos"]
+    assert len(macs) == 4 and all(a["sha256"] and a["url"].startswith("/api/v1/files/") for a in macs)
+    assert "UEFN-Ducky-2.31.0-macos-arm64.app.zip" in sent  # a .zip goes by its own name
+    assert all(n.startswith("linux-repo-2.31.0-") for n in sent if n.endswith(".dmg"))  # a .dmg goes as linux-repo-*
+
+
+def test_macos_artifact_without_arch_is_refused(pa, tmp_path) -> None:
+    (tmp_path / "UEFN-Ducky-2.31.0-macos.dmg").write_bytes(b"x")
+    with pytest.raises(SystemExit, match="-macos-arm64 or -macos-x64"):
+        pa.macos_artifacts("2.31.0", tmp_path)
