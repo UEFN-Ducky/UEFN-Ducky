@@ -166,7 +166,7 @@ def _raise_linux(window: Any, token: str) -> bool:
 
 
 def _force_foreground(window: Any) -> None:
-    """Best-effort raise above other applications (Windows, Linux)."""
+    """Best-effort raise above other applications (Windows, Linux, macOS)."""
     import sys
 
     if sys.platform.startswith("linux"):
@@ -175,7 +175,7 @@ def _force_foreground(window: Any) -> None:
         except Exception:
             pass
         return
-    if sys.platform != "win32":
+    if sys.platform not in ("win32", "darwin"):
         return
     try:
         from frontend.ui_web.win_frameless import force_window_foreground
@@ -522,6 +522,10 @@ def _cursor_screen_point() -> tuple[int, int] | None:
     """
     import sys
 
+    if sys.platform == "darwin":
+        from frontend.ui_web import mac_frameless
+
+        return mac_frameless.cursor_point()
     if sys.platform != "win32":
         return None
     try:

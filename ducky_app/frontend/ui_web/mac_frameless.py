@@ -39,6 +39,48 @@ def apply(window: Any) -> bool:
     return True
 
 
+def bring_to_front(window: Any) -> bool:
+    """Any thread: make the app active and this window key, above other apps' windows."""
+    native = getattr(window, "native", None)
+    if native is None:
+        return False
+    try:
+        import AppKit  # type: ignore[import-not-found]
+        from PyObjCTools import AppHelper  # type: ignore[import-not-found]
+    except ImportError:
+        return False
+
+    def op() -> None:
+        AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        native.makeKeyAndOrderFront_(None)
+
+    AppHelper.callAfter(op)
+    return True
+
+
+def cursor_point() -> tuple[int, int] | None:
+    """The mouse in pywebview's window coordinates: points, top-left of the main screen,
+    y down (Cocoa's own origin is bottom-left, y up)."""
+    try:
+        import AppKit  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    screens = AppKit.NSScreen.screens()
+    if not screens:
+        return None
+    p = AppKit.NSEvent.mouseLocation()
+    return int(p.x), int(screens[0].frame().size.height - p.y)
+
+
+def set_bounds(window: Any, x: int, y: int, width: int, height: int) -> bool:
+    """Move and size through pywebview, which takes top-left points on Cocoa too."""
+    if getattr(window, "native", None) is None:
+        return False
+    window.resize(int(width), int(height))
+    window.move(int(x), int(y))
+    return True
+
+
 def begin_move(window: Any) -> bool:
     """Main thread (the JS bridge's script-message callback): move the window with the mouse
     until the left button is up. The page's mouse-up may already be gone, so the button state

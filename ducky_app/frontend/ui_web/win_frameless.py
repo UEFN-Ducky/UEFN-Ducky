@@ -111,6 +111,10 @@ def get_window_scale(window: object) -> float:
 
 def set_window_bounds_hwnd(window: object, x: int, y: int, width: int, height: int) -> bool:
     """Apply position + size in one SetWindowPos call (fixes left/top resize)."""
+    if sys.platform == "darwin":
+        from frontend.ui_web import mac_frameless
+
+        return mac_frameless.set_bounds(window, x, y, width, height)
     if sys.platform != "win32":
         return False
     hwnd = _hwnd_from_pywebview(window)
@@ -133,6 +137,10 @@ def set_window_bounds_hwnd(window: object, x: int, y: int, width: int, height: i
 
 def force_window_foreground(window: object) -> bool:
     """Raise a pywebview window above other applications."""
+    if sys.platform == "darwin":
+        from frontend.ui_web import mac_frameless
+
+        return mac_frameless.bring_to_front(window)
     if sys.platform != "win32":
         return False
     hwnd = _hwnd_from_pywebview(window)
