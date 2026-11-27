@@ -535,6 +535,24 @@ def test_spec_windows_parts_stay_on_for_windows() -> None:
     assert '"webview.platforms.edgechromium"' in SPEC_TEXT and '"pystray._win32"' in SPEC_TEXT
 
 
+def test_browser_panes_are_bundled_on_mac_and_linux() -> None:
+    """1.2.530 died at start on macOS: browser_overlay loaded cocoa_panes by a string name,
+    so PyInstaller never bundled it. Plain imports plus the spec naming both."""
+    import ast
+
+    overlay = Path(__file__).resolve().parents[1] / "ducky_app" / "frontend" / "ui_web" / "browser_overlay.py"
+    tree = ast.parse(overlay.read_text(encoding="utf-8"))
+    imported = {
+        f"{n.module}.{a.name}" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module for a in n.names
+    }
+    assert {"frontend.native_host.cocoa_panes", "frontend.native_host.gtk_panes"} <= imported
+    assert "__import__(" not in overlay.read_text(encoding="utf-8")
+    mac = SPEC_TEXT[SPEC_TEXT.index("_mac_hidden = ["): SPEC_TEXT.index("a = Analysis(")]
+    linux = SPEC_TEXT[SPEC_TEXT.index("_linux_hidden = [\"ptyprocess\""): SPEC_TEXT.index("_mac_hidden = []")]
+    assert '"frontend.native_host.cocoa_panes"' in mac
+    assert '"frontend.native_host.gtk_panes"' in linux
+
+
 def test_spec_mac_branch_bundles_a_cocoa_app() -> None:
     assert 'MAC = sys.platform == "darwin"' in SPEC_TEXT
     for name in ('"webview.platforms.cocoa"', '"objc"', '"WebKit"', '"AppKit"', '"PyObjCTools.AppHelper"',

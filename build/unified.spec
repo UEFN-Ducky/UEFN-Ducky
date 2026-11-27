@@ -359,6 +359,7 @@ if LINUX:
             "build_exes.py installs build/linux/appimage/requirements-gi.txt."
         )
     _linux_hidden += ["gi", "cairo"] + [f"gi.repository.{m}" for m in LINUX_GI_MODULES]
+    _linux_hidden.append("frontend.native_host.gtk_panes")  # browser_overlay's browser panes
 
 # macOS only: pywebview's Cocoa backend (WKWebView through PyObjC), the pty, Keychain, the mic.
 _mac_hidden = []
@@ -371,6 +372,8 @@ if MAC:
         "webview.platforms.cocoa", "objc", "Foundation", "AppKit", "WebKit", "Quartz", "Security",
         "UniformTypeIdentifiers", "PyObjCTools", "PyObjCTools.AppHelper", "pystray._darwin",
         "ptyprocess", "sounddevice", "_sounddevice", "keyring",
+        # browser_overlay's browser panes: 1.2.530 started without it and died at import.
+        "frontend.native_host.cocoa_panes",
     ]
     if importlib.util.find_spec("_sounddevice_data") is not None:
         _mac_hidden.append("_sounddevice_data")
