@@ -1334,7 +1334,7 @@ def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_age
     monkeypatch.setattr(shared_mcp, "_shared_serving", True)
     mcp = Mcp()
 
-    async def four_calls() -> tuple[list[str], float, float]:
+    async def four_calls() -> tuple[list[str], float, list[float]]:
         loop = asyncio.get_running_loop()
         who.set("chat-1")
         gaps: list[float] = []
@@ -1353,16 +1353,19 @@ def test_a_sync_tool_called_through_ducky_call_tool_leaves_the_loop_to_other_age
         took = loop.time() - began
         over.set()
         await beat
-        return sorted(results), took, max(gaps)
+        return sorted(results), took, [g for g in gaps if g >= 0.35]
 
-    results, took, worst_gap = asyncio.run(four_calls())
+    results, took, stalls = asyncio.run(four_calls())
     assert results == ["city_a", "city_b", "core_d", "other_c"]
-    assert worst_gap < 0.35, worst_gap  # the loop kept running; it stood still 0.5 s per call before
+    # The loop kept running; it stood still 0.5 s per call before. One stall is a preempted runner
+    # (an Intel Mac read 0.92 s); no call ran on the loop's thread is the exact check below.
+    assert len(stalls) <= 1, stalls
     # One plugin's calls still run one after another (1.0 s for the two); the rest run beside them.
     assert 0.9 <= took < 1.8, took
     thread_of = {name: thread for name, _who, thread in seen}
     assert thread_of["city_a"] == thread_of["city_b"] != thread_of["other_c"]
     assert len(set(thread_of.values())) == 3
+    assert threading.current_thread().name not in thread_of.values()
     assert {agent for _name, agent, _thread in seen} == {"chat-1"}  # each call still runs as its agent
 
     # A process that serves one agent keeps calling the tool where it always did.

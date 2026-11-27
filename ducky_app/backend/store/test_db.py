@@ -549,7 +549,9 @@ def test_500_new_threads_connect_at_once_as_fast_as_sqlite_opens() -> None:
     # and the store looked 10x slower than SQLite (CI, Nov 23 2026); Windows' open is the slow part.
     raw = _burst(lambda: sqlite3.connect(path, check_same_thread=False).execute("PRAGMA journal_mode").fetchone())
     took = _burst(lambda: db.connect().execute("SELECT 1").fetchone())
-    assert took < raw * 1.5 + 0.25, f"500 threads took {took:.2f} s to connect (plain opens {raw:.2f} s)"
+    # 2x: the two bursts run apart, and a loaded Mac runner read 1.72 s against 0.97 s. The scan it
+    # guards against held 74 threads for seconds.
+    assert took < raw * 2 + 0.25, f"500 threads took {took:.2f} s to connect (plain opens {raw:.2f} s)"
 
 
 def test_a_pooled_thread_opens_no_new_connection(tmp_path: Path, monkeypatch) -> None:
