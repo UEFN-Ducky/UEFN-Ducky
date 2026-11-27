@@ -1620,8 +1620,4 @@ def clear_browsing_data(kinds: str = "all") -> dict[str, Any]:
         "errors": errors,
     }
 
-# Plain imports, so PyInstaller bundles them. Importing rebinds the WebView2 helpers (.install()).
-if sys.platform == "darwin":
-    from frontend.native_host import cocoa_panes  # noqa: E402,F401
-elif sys.platform.startswith("linux"):
-    from frontend.native_host import gtk_panes  # noqa: E402,F401
+from frontend.native_host import platform_panes  # noqa: E402,F401  Cocoa / GTK panes (Windows: none)

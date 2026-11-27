@@ -45,8 +45,13 @@ def workflow():
 
 def test_stop_reaches_another_process(local_runs):
     wid = workflow()
+    # The child's result line is the check. It leaves by os._exit: an Intel Mac runner's child
+    # died with SIGSEGV (-11, nothing on stderr) after it was stopped; teardown with daemon threads
+    # is not what this test checks. A crash before the result line still fails, and faulthandler
+    # prints its stack.
     script = """
-import json, sys
+import faulthandler, json, os, sys
+faulthandler.enable()
 from pathlib import Path
 from backend.automations import live_runs, runner, store
 root = Path(sys.argv[1])
@@ -55,6 +60,8 @@ store.use_db = lambda *_: False
 store._files_dir = lambda: root / "graphs"
 runner._alert_run = lambda *_a, **_k: None
 print(json.dumps(runner.run_workflow(sys.argv[2])), flush=True)
+sys.stderr.flush()
+os._exit(0)
 """
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[2]))
     child = subprocess.Popen([sys.executable, "-c", script, str(local_runs), wid],

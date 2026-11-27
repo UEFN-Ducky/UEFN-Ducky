@@ -92,8 +92,10 @@ def test_capturer_starts_at_30_and_rises_to_60_only_while_under_budget(monkeypat
     while cap.fps != 60 and time.monotonic() < deadline:
         time.sleep(0.05)
     assert cap.fps == 60
-    # The consumer runs late (a busy UI thread): back down.
-    for _ in range(4):
+    # The consumer runs late (a busy UI thread): back down. It steps down a window at a time,
+    # and a slow Intel runner gets fewer windows into a fixed 0.28 s (37 fps), so wait for it.
+    deadline = time.monotonic() + 2.0
+    while cap.fps > 30 and time.monotonic() < deadline:
         cap.report_lag(0.5)
         time.sleep(0.07)
     cap.stop()

@@ -540,13 +540,17 @@ def test_browser_panes_are_bundled_on_mac_and_linux() -> None:
     so PyInstaller never bundled it. Plain imports plus the spec naming both."""
     import ast
 
-    overlay = Path(__file__).resolve().parents[1] / "ducky_app" / "frontend" / "ui_web" / "browser_overlay.py"
-    tree = ast.parse(overlay.read_text(encoding="utf-8"))
-    imported = {
-        f"{n.module}.{a.name}" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module for a in n.names
-    }
-    assert {"frontend.native_host.cocoa_panes", "frontend.native_host.gtk_panes"} <= imported
-    assert "__import__(" not in overlay.read_text(encoding="utf-8")
+    frontend = Path(__file__).resolve().parents[1] / "ducky_app" / "frontend"
+
+    def imported(path: Path) -> set[str]:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        return {f"{n.module}.{a.name}" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module
+                for a in n.names}
+
+    overlay, panes = frontend / "ui_web" / "browser_overlay.py", frontend / "native_host" / "platform_panes.py"
+    assert "frontend.native_host.platform_panes" in imported(overlay)
+    assert {"frontend.native_host.cocoa_panes", "frontend.native_host.gtk_panes"} <= imported(panes)
+    assert all("__import__(" not in p.read_text(encoding="utf-8") for p in (overlay, panes))
     mac = SPEC_TEXT[SPEC_TEXT.index("_mac_hidden = ["): SPEC_TEXT.index("a = Analysis(")]
     linux = SPEC_TEXT[SPEC_TEXT.index("_linux_hidden = [\"ptyprocess\""): SPEC_TEXT.index("_mac_hidden = []")]
     assert '"frontend.native_host.cocoa_panes"' in mac
