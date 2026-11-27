@@ -239,7 +239,8 @@ def test_full_path_on_a_long_chat_stays_cheap() -> None:
     took = time.perf_counter() - started
     print(f"full save on 5,001 msgs: {took * 1000:.1f} ms")
     assert out["path"] == "full" and out["inserted"] == 1 and len(out["hashes"]) == 5001
-    assert took < 0.25, f"full save took {took * 1000:.1f} ms"  # ~40 ms idle; slack for a busy PC
+    # ~40 ms idle; a loaded Intel Mac runner read 279 ms. The counts above guard the one-row insert.
+    assert took < 0.6, f"full save took {took * 1000:.1f} ms"
 
 
 def test_saves_keep_at_most_eight_chats_and_memory_stays_bounded(monkeypatch) -> None:
