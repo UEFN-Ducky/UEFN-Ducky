@@ -23,7 +23,7 @@ def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
     class Session:
         async def call_tool(self, name, step):
             calls.append(step)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.4)
             return SimpleNamespace(content=[TextContent(type="text", text="ok")], isError=False)
 
     async def forever():
@@ -45,7 +45,9 @@ def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
     monkeypatch.setattr(epic, "probe_epic_mcp", lambda: {"epic_mcp_editor": "uefn"})
     monkeypatch.setattr(epic, "epic_tool_heavy", lambda name, args: False)
     monkeypatch.setattr(epic_array_set, "expand_epic_call", lambda name, args: [{"n": 1}, {"n": 2}, {"n": 3}])
-    monkeypatch.setattr(call_limits, "epic_call_limit", lambda heavy: 0.3)
+    # 0.4 s steps under one 0.6 s deadline: step 2 is sent at 0.4 s and is late at 0.6 s, 0.2 s each way
+    # (0.2 s steps and 0.3 s left 0.1 s: a loaded arm64 runner hit the deadline before step 2 was sent).
+    monkeypatch.setattr(call_limits, "epic_call_limit", lambda heavy: 0.6)
     monkeypatch.setattr(call_limits, "stall_reason", lambda op, limit: {"ok": False, "reason": "no_answer",
                                                                        "message": "UEFN has not answered."})
     monkeypatch.setattr(uefn_modal, "save_modal_watchdog", lambda label: nullcontext([]))
@@ -57,9 +59,9 @@ def test_a_three_step_sequence_ends_at_one_deadline(monkeypatch) -> None:
     began = time.monotonic()
     with pytest.raises(RuntimeError) as late:
         asyncio.run(pool.call_tool("unreal__call_tool", {}))
-    # A deadline per step would let all three 0.2 s steps finish (no raise, calls == 3), so
+    # A deadline per step would let all three 0.4 s steps finish (no raise, calls == 3), so
     # the asserts below prove one deadline; the clock only catches a hang (CI boxes stall).
-    assert time.monotonic() - began < 2.0, "one 0.3 s deadline, not one per step"
+    assert time.monotonic() - began < 2.5, "one 0.6 s deadline, not one per step"
     why = json.loads(str(late.value))
     assert why["steps_finished"] == "1 of 3" and "1 of 3 steps finished." in why["message"]
     assert calls == [{"n": 1}, {"n": 2}]  # the late step keeps running; the third is never sent

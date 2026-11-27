@@ -28,11 +28,9 @@ const pending = (request_id: string, conv_id: string, command = "npm test", extr
   ...extra,
 });
 
-async function flush() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  });
-}
+// The bus hands events to subscribers once per frame: wait for what a test needs, never a fixed time
+// (a slow Windows runner had r1 shown and r2-r4 still queued after 30 ms; they leaked into the next test).
+const shown = (id: string) => document.querySelector(`[data-approval-request="${id}"]`) as HTMLElement | null;
 
 beforeEach(() => {
   api.terminal_pending_commands.mockResolvedValue([]);
@@ -56,7 +54,7 @@ describe("terminal command card in the chat that asked", () => {
       </>,
     );
     act(() => pushLocalAgentEvent(pending("r1", "c1")));
-    await flush();
+    await waitFor(() => expect(shown("r1")).toBeTruthy());
     const c1 = screen.getByLabelText("chat c1");
     expect(c1.textContent).toContain("Allow this terminal command?");
     expect(c1.textContent).toContain("npm test");
@@ -77,7 +75,7 @@ describe("terminal command card in the chat that asked", () => {
       </>,
     );
     act(() => pushLocalAgentEvent(pending("r9", "member", "npm test", { lead_conv_id: "lead", asked_by: "Verse Coder" })));
-    await flush();
+    await waitFor(() => expect(document.querySelectorAll('[data-approval-request="r9"]')).toHaveLength(2));
     expect(screen.getByLabelText("member").textContent).toContain("Allow this terminal command?");
     const lead = screen.getByLabelText("lead");
     expect(lead.textContent).toContain("Verse Coder wants to run a terminal command");
@@ -97,8 +95,8 @@ describe("terminal command card in the chat that asked", () => {
       pushLocalAgentEvent(pending("r3", "c1", "git status"));
       pushLocalAgentEvent(pending("r4", "c1", "dir"));
     });
-    await flush();
-    const card = (id: string) => document.querySelector(`[data-approval-request="${id}"]`) as HTMLElement | null;
+    await waitFor(() => expect(document.querySelectorAll("[data-approval-request]")).toHaveLength(4));
+    const card = shown;
     const pick = (id: string, label: string) =>
       [...card(id)!.querySelectorAll("button")].find((b) => b.textContent?.startsWith(label))!;
     fireEvent.click(pick("r1", "Always allow npm test in this chat"));
@@ -119,22 +117,23 @@ describe("terminal command card in the chat that asked", () => {
   it("closes when answered in another window and never opens again for a replayed request", async () => {
     render(<ChatTerminalApprovals convId="c1" />);
     act(() => pushLocalAgentEvent(pending("r1", "c1")));
-    await flush();
-    expect(screen.getByText("npm test")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("npm test")).toBeTruthy());
     act(() => pushLocalAgentEvent({ type: "terminal_command_decided", request_id: "r1", conv_id: "c1" }));
-    await flush();
+    await waitFor(() => expect(screen.queryByText("npm test")).toBeNull());
+    // The replay, then a marker in another chat: once the marker is in, the replay was handled.
+    act(() => {
+      pushLocalAgentEvent(pending("r1", "c1"));
+      pushLocalAgentEvent(pending("marker", "c9"));
+    });
+    await waitFor(() => expect(listTerminalApprovals().map((item) => item.request_id)).toEqual(["marker"]));
     expect(screen.queryByText("npm test")).toBeNull();
-    act(() => pushLocalAgentEvent(pending("r1", "c1")));
-    await flush();
-    expect(screen.queryByText("npm test")).toBeNull();
-    expect(listTerminalApprovals()).toEqual([]);
     expect(api.terminal_approve_command).not.toHaveBeenCalled();
   });
 
   it("offers no Always for a command it never remembers, and a push in any plugin can still allow everything", async () => {
     render(<ChatTerminalApprovals convId="c1" />);
     act(() => pushLocalAgentEvent(pending("r1", "c1", "git -C uefn-plugin-openai push", { rule_label: "" })));
-    await flush();
+    await waitFor(() => expect(shown("r1")).toBeTruthy());
     const labels = [...document.querySelectorAll(".ask-user-option-label")].map((el) => el.textContent);
     expect(labels).toEqual(["Allow once", "Allow everything in this chat", "Deny"]);
     expect(screen.queryByRole("note")).toBeNull();
@@ -144,7 +143,7 @@ describe("terminal command card in the chat that asked", () => {
     api.terminal_approve_command.mockResolvedValue(undefined);
     render(<ChatTerminalApprovals convId="c1" />);
     act(() => pushLocalAgentEvent(pending("r1", "c1")));
-    await flush();
+    await waitFor(() => expect(shown("r1")).toBeTruthy());
     fireEvent.click(screen.getByText("Allow once"));
     expect((await screen.findByRole("alert")).textContent).toContain("Could not reach Ducky");
     expect(document.querySelector('[data-approval-request="r1"]')).toBeTruthy();
@@ -156,7 +155,6 @@ describe("terminal command card in the chat that asked", () => {
       { request_id: "late", session_id: "s1", command: "npm ci", conv_id: "c1", rule_label: "npm ci", created_at: 1 },
     ]);
     render(<ChatTerminalApprovals convId="c1" />);
-    await flush();
-    expect(screen.getByText("npm ci")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("npm ci")).toBeTruthy());
   });
 });
