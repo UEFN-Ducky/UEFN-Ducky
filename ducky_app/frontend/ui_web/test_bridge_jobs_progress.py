@@ -45,7 +45,14 @@ def test_progress_0_50_100_pushes_three_events(monkeypatch) -> None:
 
 
 def test_hundred_updates_in_a_second_push_at_most_two(monkeypatch) -> None:
-    events = _events(monkeypatch)
+    events: list[dict] = []
+    sent_at: list[tuple[float, str]] = []
+
+    def emit(event: dict) -> None:
+        sent_at.append((time.monotonic(), event["job_id"]))
+        events.append(event)
+
+    monkeypatch.setattr(bj, "_emit", emit)
     release = threading.Event()
 
     def work() -> dict:
@@ -57,9 +64,11 @@ def test_hundred_updates_in_a_second_push_at_most_two(monkeypatch) -> None:
         release.wait(10.0)
         return {"ok": True}
 
+    started = time.monotonic()
     jid = bj.job_start(work)["job_id"]
     time.sleep(0.95)
-    assert len([e for e in events if e["job_id"] == jid]) <= 2
+    # Counted by when each push was sent: a loaded arm64 runner woke this thread late and saw the 1.0 s one.
+    assert len([t for t, job in sent_at if job == jid and t - started < 0.95]) <= 2
     release.set()
     _wait_state(events, jid, "done")
     assert events[-1]["percent"] == 100  # the last value always arrives
