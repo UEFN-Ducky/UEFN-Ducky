@@ -342,7 +342,8 @@ def test_a_reload_of_a_long_chat_opens_no_row(monkeypatch) -> None:
     took = time.perf_counter() - started
     print(f"warm reload of 5,000 msgs: {took * 1000:.1f} ms")
     assert again == messages and rev == _rev("reload") and opens[0] == 5000
-    assert took < 0.1, f"warm reload took {took * 1000:.1f} ms"
+    # opens[0] above proves no row was opened; this only catches a slow path (a loaded Mac: 110 ms).
+    assert took < 0.3, f"warm reload took {took * 1000:.1f} ms"
     # A saved row is remembered too: no open for what this process just wrote.
     messages[10] = _msg("assistant", "rewritten here")
     repo.conv_save(PROJECT, _doc("reload"), messages=messages)

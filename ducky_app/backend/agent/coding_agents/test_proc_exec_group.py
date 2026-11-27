@@ -44,7 +44,10 @@ def test_get_process_is_the_live_popen_during_the_run_and_none_after():
         seen.append(proc_exec.get_process("live-proc"))
 
     result = proc_exec.run_streaming_process(
-        argv=[sys.executable, "-c", "print('hi', flush=True)"], cwd=".", env_extra={}, conv_id="live-proc",
+        # The child stays up after its line: one that exited at once could be reaped before the
+        # reader thread ran on_line, so get_process rightly said None (a Mac runner).
+        argv=[sys.executable, "-c", "import time; print('hi', flush=True); time.sleep(1)"], cwd=".", env_extra={},
+        conv_id="live-proc",
         on_line=on_line, timeout_s=20, new_process_group=True)
     assert result.returncode == 0
     assert isinstance(seen[0], subprocess.Popen)

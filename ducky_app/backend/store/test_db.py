@@ -173,8 +173,10 @@ def test_a_waiting_writer_wakes_the_moment_the_holder_commits() -> None:
     for t in threads:
         t.join(timeout=30)
     assert len(waits) == 20
-    p95 = sorted(waits)[18]
-    assert p95 < 0.005, f"waiter woke {p95 * 1000:.1f} ms after the commit"
+    # The median shows the lock hand-off; p95 allows a preempted wake on a loaded Mac runner (7.4 ms),
+    # still under a busy-handler sleep step (20-25 ms by then).
+    p50, p95 = sorted(waits)[10], sorted(waits)[18]
+    assert p50 < 0.005 and p95 < 0.02, f"waiter woke {p50 * 1000:.1f} ms (p50), {p95 * 1000:.1f} ms (p95) after the commit"
 
 
 def test_write_txn_nests_on_one_thread() -> None:

@@ -46,7 +46,7 @@ tick_gate.check_tick = lambda cid, node: None
 root, chat, sid, at = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])
 time.sleep(max(0.0, at - time.time()))
 plans.update_node(chat, sid, status="completed", body_markdown=sid + " done", project_root=root)
-plans.drain_after_save()
+plans.drain_after_save(60)  # 8 processes at once on a slow Mac runner took past the 10 s default
 """
 
 

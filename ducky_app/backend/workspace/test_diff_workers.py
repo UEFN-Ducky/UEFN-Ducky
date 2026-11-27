@@ -53,8 +53,17 @@ def test_idle_pool_closes_and_a_later_diff_reopens_it(monkeypatch):
             child.join(30)
         # A pid reaped by another waitpid makes is_alive() stay True for ever (ECHILD): on Linux
         # the kernel's own view decides, and the message names each worker's state for the next CI.
+        # macOS has no /proc: psutil asks the kernel the same (a reaped pid kept is_alive() True there).
         def state(child):
             status = f"/proc/{child.pid}/status"
+            if sys.platform == "darwin":
+                import psutil
+
+                try:
+                    zombie = psutil.Process(child.pid).status() == psutil.STATUS_ZOMBIE
+                except psutil.NoSuchProcess:
+                    return "gone"
+                return "State:\tZ (zombie)" if zombie else "alive"
             if not os.path.exists(status):
                 return "gone" if sys.platform.startswith("linux") else ("alive" if child.is_alive() else "gone")
             with open(status) as f:

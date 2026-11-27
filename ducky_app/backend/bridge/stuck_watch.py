@@ -53,6 +53,7 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
         inner = effective_tool_name(name, arguments if isinstance(arguments, dict) else {})
     limit = call_limits.call_limit(name, inner)
     first = _first_check(inner, limit, arguments)
+    began = time.monotonic()
     try:
         done, _ = await asyncio.wait({work}, timeout=first)
         if not done:
@@ -60,7 +61,6 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
             # an Epic call not there yet waits for the editor lease.
             where = str((waits or {}).get("where") or ("lease" if inner.startswith("unreal__") else ""))
             counted = _report_stuck(name, first, work, thread, ident, waits, arguments)
-            seen = time.monotonic()
             try:
                 if limit is not None and limit > first:
                     done, _ = await asyncio.wait({work}, timeout=limit - first)
@@ -76,8 +76,10 @@ async def _watched(work: asyncio.Future[Any], name: str, thread: dict[str, Any],
                     try:
                         from frontend import usage_stats
 
+                        # The whole run from its start. first + (end - after the report) left out a
+                        # late first check and the stack capture: a 1 s call read 0.57 s on a Mac.
                         usage_stats.stuck(str(getattr(ident, "coding_agent", "") or ""),
-                                          first + time.monotonic() - seen, tool=inner, where=where)
+                                          time.monotonic() - began, tool=inner, where=where)
                     except Exception:  # noqa: BLE001 — a count never breaks the call
                         pass
     except asyncio.CancelledError:

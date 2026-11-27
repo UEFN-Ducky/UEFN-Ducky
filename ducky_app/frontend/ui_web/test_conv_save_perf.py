@@ -63,9 +63,14 @@ def test_append_save_on_a_5000_message_chat_stays_cheap(tmp_path) -> None:
     # The counters no longer rescan the chat: rows seen before cost a dict lookup.
     hashes = _db_hashes(conv.id)
     assert len(hashes) == len(conv.messages)
-    started = time.perf_counter()
-    chat_saves._stats_by_hash(conv.id, conv.messages, hashes)
-    assert (time.perf_counter() - started) * 1000 < 5.0
+    def stats_ms() -> float:
+        started = time.perf_counter()
+        chat_saves._stats_by_hash(conv.id, conv.messages, hashes)
+        return (time.perf_counter() - started) * 1000
+
+    # Best of 3: one preempted pass on a loaded Intel Mac runner read 7.5 ms. A rescan of the chat
+    # is far over this on every pass.
+    assert min(stats_ms() for _ in range(3)) < 5.0
     stored = repo.conv_get(conv.id, with_messages=False)
     expected = session_stats_from_messages(conv.messages)
     assert (stored["tool_call_count"], stored["file_count"]) == (expected["tool_call_count"], expected["file_count"])

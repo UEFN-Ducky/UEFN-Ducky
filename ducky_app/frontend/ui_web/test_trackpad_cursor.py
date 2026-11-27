@@ -122,6 +122,7 @@ def test_macos_pointer_is_a_click_through_window_at_the_cursor_tip(monkeypatch) 
     monkeypatch.setattr(tc, "_failed", False)
     monkeypatch.setattr(tc, "_running", True)
     monkeypatch.setattr(tc, "_last_move", tc.time.monotonic())
+    monkeypatch.setattr(tc, "HOLD_S", 60.0)  # a slow Intel runner let 0.18 s pass before the first tick
     monkeypatch.setattr(tc, "load_duck", lambda: None)
     assert tc._cursor_pos() == (200, 600)  # points (100, 900 - 600) at 2x, top-left
     tc._start()
