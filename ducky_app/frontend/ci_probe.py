@@ -227,6 +227,11 @@ def _drive(link: Any, out: Path, report: dict[str, Any]) -> list[str]:
     pc = pcs[0]
     report["pc"] = {"key_id": pc["keyId"], "name": pc["name"]}
     got = link.call(pc["keyId"], REMOTE_CHECK, {}, timeout=420.0)
+    if got.get("pair"):
+        # Each run starts with no pin: the first call pins the PC. Once the PC's window
+        # approved this runner's key (pc_key in the secret), the second call goes through.
+        report["pair"] = str(got.get("error") or "")
+        got = link.call(pc["keyId"], REMOTE_CHECK, {}, timeout=420.0)
     if not got.get("ok"):
         raise ProbeError(str(got.get("error") or "the PC did not answer"))
     res = got.get("result") or {}

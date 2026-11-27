@@ -8,9 +8,11 @@ import io
 import json
 import sys
 
+import urllib.request  # noqa: F401 — imported before the darwin patch (it would load _scproxy)
+
 import pytest
 
-from frontend import ci_probe
+from frontend import ci_probe, duckyos_account, window_view  # noqa: F401 — same reason
 
 TOKEN = "dky_v1_SECRET_test_token_value"
 PC = {"keyId": "k_pc", "name": "Tas's PC", "live": True, "mine": False}
@@ -99,6 +101,18 @@ def test_any_failure_exits_1_and_says_why(runner, capsys, answer, why) -> None:
     report = (runner / "remote.json").read_text(encoding="utf-8")
     assert json.loads(report)["ok"] is False and why in report
     _no_token_anywhere(runner, capsys)
+
+
+def test_the_first_call_pins_the_pc_then_the_check_runs(runner, capsys) -> None:
+    class _Pairs(_Link):
+        def call(self, to, method, args=None, *, timeout=30.0):
+            self.calls.append((to, method))
+            return {"ok": False, "pair": True, "error": "Approve this PC (code ABC123)"} if len(self.calls) == 1 else GOOD
+
+    link = _Pairs(None)
+    assert ci_probe.remote_uefn(str(runner), link=link) == 0
+    assert len(link.calls) == 2
+    assert "ABC123" in json.loads((runner / "remote.json").read_text(encoding="utf-8"))["pair"]
 
 
 def test_off_a_ci_runner_it_never_signs_in(runner, monkeypatch, capsys) -> None:
