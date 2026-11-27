@@ -1160,6 +1160,8 @@ RPC_ALLOWLIST = frozenset(
         "ducky_sync_duckies",
         "ducky_sync_chats",
         "ducky_sync_rows",
+        # A Mac CI run's fixed check of this PC's UEFN (ping, Verse build, screenshot): ci_probe.
+        "uefn_ci_check",
     }
 )
 
@@ -1494,6 +1496,10 @@ def dispatch_desktop_rpc(method: str, args: dict[str, Any] | None = None) -> dic
         from frontend import remote_trust
 
         return remote_trust.serve(name, raw)
+    if name == "uefn_ci_check":
+        from frontend.ci_probe import uefn_check
+
+        return {"ok": True, "result": uefn_check()}
     if name == "rtc_report":
         from frontend.remote_direct import note_report
 

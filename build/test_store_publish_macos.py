@@ -77,6 +77,10 @@ def test_look_modes_and_only_telemetry_sends():
     unsets = [b.split(")", 1)[0].strip() for b in branches.split(";;") if "unset DUCKY_SANDBOX" in b]
     assert unsets == ["telemetry"]
     assert run.count("unset DUCKY_SANDBOX") == 1 and "kTCCServiceMicrophone" in run and "DUCKY_TEST_ACCOUNT_TOKEN" in run
+    remote = branches.split("remote-uefn)", 1)[1].split(";;", 1)[0]
+    assert '"$bin" --remote-uefn-probe "$out"' in remote and "remote.json" in remote and "^Open " in remote
+    assert "::notice::no DUCKY_TEST_ACCOUNT_TOKEN secret: remote-uefn skipped" in remote
+    assert "echo \"$DUCKY_TEST_ACCOUNT_TOKEN" not in run  # the secret is never echoed
     upload = next(s for s in doc["jobs"]["look"]["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))
     assert upload["if"] == "${{ always() }}" and upload["with"]["name"] == "macos-look-${{ inputs.arch }}"
 

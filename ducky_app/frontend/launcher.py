@@ -471,6 +471,11 @@ def main() -> None:
         from frontend import ci_probe
 
         raise SystemExit((ci_probe.tcc if sys.argv[1] == "--tcc-probe" else ci_probe.base_url)(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] == "--remote-uefn-probe":
+        _ensure_repo_on_path()
+        from frontend import ci_probe
+
+        raise SystemExit(ci_probe.remote_uefn(sys.argv[2]))
     if python_style_call(sys.argv):
         # Code that took sys.executable for Python ("UEFN-Ducky.exe -m pytest") booted a whole
         # second Ducky: its logo splash, a hand-off to the open window exiting 0 (read as passed).

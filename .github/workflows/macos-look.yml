@@ -155,11 +155,16 @@ jobs:
                 echo "::notice::no DUCKY_TEST_ACCOUNT_TOKEN secret: remote-uefn skipped"
                 run_app look
               else
-                # The token signs the test account in; `script` drives the panel to the linked
-                # PC's remote Ducky window (ping, a Verse build, take_high_res_screenshot).
-                run_app remote-uefn
-                grep -rq "Open " "$out"/stdout-remote-uefn.log ~/Library/Logs/UEFN-Ducky 2>/dev/null \
-                  || { echo "no 'Open <PC>' hand-off in the logs"; exit 1; }
+                # The probe signs in from the secret (memory only, never on disk) and has the
+                # account's online PC run ping, a Verse build and a viewport screenshot through
+                # the Ducky link: remote.json + remote-screenshot.png in the artifact.
+                set +e
+                "$bin" --remote-uefn-probe "$out" > "$out/stdout-remote-uefn.log" 2>&1
+                rc=$?
+                set -e
+                cat "$out/stdout-remote-uefn.log" "$out/remote.json" || true
+                [ "$rc" = 0 ] || { echo "::error::remote-uefn probe failed (see remote.json)"; exit 1; }
+                grep -q "^Open " "$out/stdout-remote-uefn.log" || { echo "::error::no 'Open <PC>' hand-off"; exit 1; }
               fi
               ;;
             tcc)
