@@ -103,8 +103,9 @@ def test_darwin_run_writes_window_and_webkit(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(platform_info, "IS_MAC", True)
     monkeypatch.setattr(runtime_smoke, "_check_cocoa_window", lambda: {"webkit": "620.1", "page_started_seconds": 0.4})
     out = tmp_path / "smoke.json"
-    assert runtime_smoke.run(str(out)) == 0
+    code = runtime_smoke.run(str(out))
     report = json.loads(out.read_text(encoding="utf-8"))
+    assert code == 0, report.get("error")
     assert report["ok"] is True and report["window"] is True and report["webkit"] == "620.1"
 
 

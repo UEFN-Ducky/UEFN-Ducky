@@ -78,9 +78,11 @@ async def _check_mcp() -> dict:
         assert len(exited) == 6
         assert all(not scope._tasks for scope in scopes)
         assert not pool._owners
-        started, cpu = time.perf_counter(), time.process_time()
+        # The loop's own thread: a task left spinning runs here. process_time also counted every
+        # other thread of the process (a pytest worker's leftovers on a loaded Mac runner).
+        started, cpu = time.perf_counter(), time.thread_time()
         await asyncio.sleep(0.5)
-        wall, used = time.perf_counter() - started, time.process_time() - cpu
+        wall, used = time.perf_counter() - started, time.thread_time() - cpu
         assert used < 0.1, f"idle runtime used {used:.3f} CPU seconds during {wall:.3f}s"
         return {"contexts_closed": len(exited), "retained_scope_tasks": 0,
                 "idle_wall_seconds": round(wall, 4), "idle_cpu_seconds": round(used, 4)}
