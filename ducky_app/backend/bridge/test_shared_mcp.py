@@ -499,7 +499,8 @@ def test_tools_keep_their_arguments_over_the_shared_bridge() -> None:
 
 
 def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.4)
+    # 1.5 s: with 0.4 s a slow Intel Mac runner passed the whole window before run-2's hello (refused).
+    monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 1.5)
     thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         first = _hello("run-1")
@@ -507,7 +508,7 @@ def test_a_reconnect_inside_the_idle_window_keeps_the_server(monkeypatch, tmp_pa
         shared_mcp.close_handle(first)
         time.sleep(0.15)  # first client gone, idle timer running
         second = _hello("run-2")
-        time.sleep(0.8)  # the old timer fires while run-2 is connected
+        time.sleep(2.0)  # the old timer fires while run-2 is connected
         assert shared_mcp.serving()
         assert [t["name"] for t in _rpc(second, "tools/list")["tools"]] == ["ping", "workspace_write_file"]
         shared_mcp.write_frame(second, {"op": "bye"})
