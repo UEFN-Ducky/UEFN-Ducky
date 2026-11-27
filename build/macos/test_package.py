@@ -23,7 +23,7 @@ def _app(tmp_path: Path) -> Path:
 
 
 def test_names_per_arch() -> None:
-    assert pk.artifact_names("1.3.0", "x64") == ("UEFN-Ducky-1.3.0-macos-x64.dmg", "UEFN-Ducky-1.3.0-macos-x64.app.zip")
+    assert pk.artifact_names("1.3.0", "x64") == ("UEFN-Ducky-1.3.0-macos-x64.dmg", "uefn-ducky-update-1.3.0-macos-x64.zip")
     assert pk.mac_arch("arm64") == "arm64" and pk.mac_arch("x86_64") == "x64"
 
 
@@ -48,6 +48,6 @@ def test_cli_writes_both_names_and_fails_on_a_tool_error(tmp_path: Path) -> None
     app, run = _app(tmp_path), FakeRun()
     assert pk.main([str(app), "1.3.0", "--arch", "x64", "--out", str(tmp_path / "dist")], run) == 0
     outs = [c[-1] for c in run.calls if c[0] in ("hdiutil",) or c[:2] == ["ditto", "-c"]]
-    assert [Path(o).name for o in outs] == ["UEFN-Ducky-1.3.0-macos-x64.dmg", "UEFN-Ducky-1.3.0-macos-x64.app.zip"]
+    assert [Path(o).name for o in outs] == ["UEFN-Ducky-1.3.0-macos-x64.dmg", "uefn-ducky-update-1.3.0-macos-x64.zip"]
     assert pk.main([str(app), "1.3.0", "--out", str(tmp_path / "d")], FakeRun(rc=1)) == 1
     assert pk.main([str(tmp_path), "1.3.0"], FakeRun()) == 1

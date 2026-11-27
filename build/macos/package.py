@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package ``UEFN Ducky.app``: a DMG for download, an ``.app.zip`` for the in-app updater.
+"""Package ``UEFN Ducky.app``: a DMG for download, an update zip for the in-app updater.
 
 Both go through Apple's own tools (``ditto``, ``hdiutil``), which keep code signatures,
 symlinks and extended attributes; Python's zipfile drops them.
@@ -25,9 +25,11 @@ def mac_arch(machine: str | None = None) -> str:
 
 
 def artifact_names(version: str, arch: str) -> tuple[str, str]:
-    """(dmg, updater zip) file names, e.g. ``UEFN-Ducky-1.3.0-macos-x64.dmg``."""
-    stem = f"UEFN-Ducky-{version}-macos-{arch}"
-    return f"{stem}.dmg", f"{stem}.app.zip"
+    """(dmg, updater zip) file names, e.g. ``UEFN-Ducky-1.3.0-macos-x64.dmg`` and
+    ``uefn-ducky-update-1.3.0-macos-x64.zip``. The Store scans only ``uefn-ducky-update-*.zip``
+    as a release pack (zip structure); any other .zip gets the plugin-source text rules,
+    which refuse the form feeds in stock Tcl/Tk files."""
+    return f"UEFN-Ducky-{version}-macos-{arch}.dmg", f"uefn-ducky-update-{version}-macos-{arch}.zip"
 
 
 def _ok(run, cmd: list[str]) -> None:

@@ -698,9 +698,11 @@ def linux_artifacts(version: str, folder: Path = LINUX_DIST) -> list[dict]:
 
 
 # The macos-build job's output (store-publish.yml): UEFN-Ducky-<v>-macos-<arm64|x64>.dmg and
-# .app.zip, signed inside (Developer ID or ad-hoc), so no detached signature.
+# uefn-ducky-update-<v>-macos-<arm64|x64>.zip, signed inside (Developer ID or ad-hoc), so no
+# detached signature. The Store scans only uefn-ducky-update-*.zip as a release pack; any
+# other zip name gets the plugin-source text rules (1.2.531 was refused: hidden_characters).
 MACOS_DIST = ROOT / "dist" / "macos"
-MACOS_PACKAGES = ((".app.zip", "app-zip"), (".dmg", "dmg"))
+MACOS_UPDATE_PREFIX = "uefn-ducky-update-"
 
 
 def macos_artifacts(version: str, folder: Path = MACOS_DIST) -> list[dict]:
@@ -710,7 +712,10 @@ def macos_artifacts(version: str, folder: Path = MACOS_DIST) -> list[dict]:
         return found
     for path in sorted(folder.iterdir()):
         low = path.name.lower()
-        package = next((p for suffix, p in MACOS_PACKAGES if low.endswith(suffix)), None)
+        if low.endswith(".app.zip"):
+            raise SystemExit(f"{path.name}: the Store refuses a .app.zip; name it {MACOS_UPDATE_PREFIX}<v>-macos-<arch>.zip")
+        package = ("dmg" if low.endswith(".dmg")
+                   else "app-zip" if path.name.startswith(MACOS_UPDATE_PREFIX) and low.endswith(".zip") else None)
         if not package or not path.is_file() or version not in path.name:
             continue
         arch = re.search(r"-macos-(arm64|x64)\.", low)
@@ -762,7 +767,7 @@ def _upload_linux_file(base: str, api_key: str, version: str, path: Path) -> str
 def release_assets(base: str, api_key: str, version: str, installer_url: str, sha256: str,
                    folder: Path = LINUX_DIST, mac_folder: Path = MACOS_DIST) -> list[dict]:
     """The ``assets`` of uds_app_release: the Windows Setup plus every Linux package and
-    signature, every macOS DMG / .app.zip, and the Windows arm64 Setup when there is one,
+    signature, every macOS DMG / update zip, and the Windows arm64 Setup when there is one,
     uploaded here. ``[]`` without any of them (an x64-only release sends what it always did).
     Any failed upload raises before anything is registered."""
     linux = linux_artifacts(version, folder)

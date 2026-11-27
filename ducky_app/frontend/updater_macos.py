@@ -1,4 +1,4 @@
-"""macOS self-update: UEFN Ducky.app swaps itself for the feed's .app.zip (build/macos/package.py).
+"""macOS self-update: UEFN Ducky.app swaps itself for the feed's update zip, uefn-ducky-update-<v>-macos-<arch>.zip (build/macos/package.py).
 
 ``updater`` re-exports these names. Shared helpers (download, progress, watchdog start) are
 looked up on ``updater`` at call time, so a test that replaces one there replaces it here too.
@@ -106,7 +106,7 @@ def install_mac_app(app: Path, archive: Path, *, sha256: str, version: str, run:
 
 
 def apply_mac_update(*, status: dict[str, Any] | None = None, app: Path | None = None) -> dict[str, Any]:
-    """'Restart' on UEFN Ducky.app: download the .app.zip, verify, swap, restart under the
+    """'Restart' on UEFN Ducky.app: download the update zip, verify, swap, restart under the
     rollback watchdog. An app in a folder this user can't write (/Applications owned by an
     admin) gets the DMG instead (``action: manual``)."""
     result = _u._result

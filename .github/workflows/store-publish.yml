@@ -17,7 +17,7 @@
 # linux-bumps updates the AUR package and opens the Flathub PR after the release.
 # macOS ships in it too: macos-build (macos-26 arm64 + macos-15-intel x64) freezes the .app,
 # Developer ID signs + notarizes it when the Apple secrets exist (else ad-hoc, still shipped),
-# and packs the DMG + .app.zip. Only GitHub has Macs, so linux-packages builds them as well.
+# and packs the DMG + uefn-ducky-update-<v>-macos-<arch>.zip. Only GitHub has Macs, so linux-packages builds them as well.
 # dry_run=true builds everything and uploads nothing (bumps print their diffs).
 # The app's "UEFN Ducky Release" workflow builds Windows on the PC and dispatches
 # mode=linux-packages (set_version = its version) for the Linux side, then
@@ -432,14 +432,17 @@ jobs:
       - name: Notarize
         if: env.MACOS_SIGNED == '1'
         run: python release/sign_macos.py notarize "dist/UEFN Ducky.app"
-      - name: DMG + .app.zip
+      - name: DMG + update zip
         run: |
           mkdir -p dist/macos "$RUNNER_TEMP/dmg"
           base="dist/macos/UEFN-Ducky-$VERSION-macos-${{ matrix.arch }}"
+          # The Store scans only uefn-ducky-update-*.zip as a release pack; any other zip name
+          # gets the plugin-source text rules (1.2.531: hidden_characters in stock Tcl/Tk files).
+          pack="dist/macos/uefn-ducky-update-$VERSION-macos-${{ matrix.arch }}.zip"
           ditto "dist/UEFN Ducky.app" "$RUNNER_TEMP/dmg/UEFN Ducky.app"
           ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
           hdiutil create -volname "UEFN Ducky" -srcfolder "$RUNNER_TEMP/dmg" -ov -format UDZO "$base.dmg"
-          ditto -c -k --keepParent "dist/UEFN Ducky.app" "$base.app.zip"
+          ditto -c -k --keepParent "dist/UEFN Ducky.app" "$pack"
           ls -la dist/macos
       - name: Delete the signing keychain
         if: ${{ always() }}
@@ -595,7 +598,7 @@ jobs:
             files=(dist/macos/$glob)
             [ ${#files[@]} -gt 0 ] || { echo "no dist/macos/$glob: macos-build shipped nothing"; exit 1; }
             for f in "${files[@]}"; do
-              case "$(basename "$f")" in UEFN-Ducky-"$VERSION"-macos-*) ;; *) echo "$f is not $VERSION"; exit 1 ;; esac
+              case "$(basename "$f")" in UEFN-Ducky-"$VERSION"-macos-*|uefn-ducky-update-"$VERSION"-macos-*) ;; *) echo "$f is not $VERSION"; exit 1 ;; esac
             done
           done
 

@@ -187,14 +187,14 @@ jobs:
           printf '#!/bin/sh\nexit 1\n' > "$bin" && chmod +x "$bin"
           plutil -replace CFBundleShortVersionString -string 99.0.0 "feed/UEFN Ducky.app/Contents/Info.plist"
           codesign --force --deep -s - "feed/UEFN Ducky.app"
-          ditto -c -k --keepParent "feed/UEFN Ducky.app" "feed/UEFN-Ducky-99.0.0-macos-$ARCH.app.zip"
+          ditto -c -k --keepParent "feed/UEFN Ducky.app" "feed/uefn-ducky-update-99.0.0-macos-$ARCH.zip"
           hdiutil create -volname "UEFN Ducky" -srcfolder "feed/UEFN Ducky.app" -ov -format UDZO "feed/UEFN-Ducky-99.0.0-macos-$ARCH.dmg"
           python3 - <<'EOF' &
           import hashlib, json, os
           from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
           arch, base = os.environ["ARCH"], "http://127.0.0.1:8765"
-          files = {f"/{n}": open(f"feed/{n}", "rb").read() for n in os.listdir("feed") if n.startswith("UEFN-Ducky-99")}
-          rows = [{"os": "macos", "arch": arch, "package": "app-zip" if p.endswith(".app.zip") else "dmg",
+          files = {f"/{n}": open(f"feed/{n}", "rb").read() for n in os.listdir("feed") if "-99.0.0-macos-" in n}
+          rows = [{"os": "macos", "arch": arch, "package": "app-zip" if p.endswith(".zip") else "dmg",
                    "url": base + p, "sha256": hashlib.sha256(d).hexdigest(), "sig_url": ""} for p, d in files.items()]
           body = json.dumps({"handled": True, "payload": {"currentVersion": "99.0.0", "assets": rows}}).encode()
           class H(BaseHTTPRequestHandler):

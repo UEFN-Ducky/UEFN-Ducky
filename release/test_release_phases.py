@@ -259,8 +259,8 @@ def test_main_upload_phase_refuses_without_a_build(pa, phases, monkeypatch) -> N
 def test_macos_artifacts_and_assets(pa, tmp_path, monkeypatch) -> None:
     mac = tmp_path / "macos"
     mac.mkdir()
-    for name in ("UEFN-Ducky-2.31.0-macos-arm64.dmg", "UEFN-Ducky-2.31.0-macos-arm64.app.zip",
-                 "UEFN-Ducky-2.31.0-macos-x64.dmg", "UEFN-Ducky-2.31.0-macos-x64.app.zip",
+    for name in ("UEFN-Ducky-2.31.0-macos-arm64.dmg", "uefn-ducky-update-2.31.0-macos-arm64.zip",
+                 "UEFN-Ducky-2.31.0-macos-x64.dmg", "uefn-ducky-update-2.31.0-macos-x64.zip",
                  "UEFN-Ducky-2.30.9-macos-x64.dmg", "notes.txt"):
         (mac / name).write_bytes(name.encode())
     rows = pa.macos_artifacts("2.31.0", mac)
@@ -274,8 +274,16 @@ def test_macos_artifacts_and_assets(pa, tmp_path, monkeypatch) -> None:
     assert [(a["os"], a["arch"], a["package"]) for a in assets][0] == ("windows", "x64", "setup")
     macs = [a for a in assets if a["os"] == "macos"]
     assert len(macs) == 4 and all(a["sha256"] and a["url"].startswith("/api/v1/files/") for a in macs)
-    assert "UEFN-Ducky-2.31.0-macos-arm64.app.zip" in sent  # a .zip goes by its own name
+    # The update zip goes by its own name: the Store scans uefn-ducky-update-*.zip as a release pack.
+    assert "uefn-ducky-update-2.31.0-macos-arm64.zip" in sent
     assert all(n.startswith("linux-repo-2.31.0-") for n in sent if n.endswith(".dmg"))  # a .dmg goes as linux-repo-*
+
+
+def test_an_old_app_zip_name_is_refused(pa, tmp_path) -> None:
+    """1.2.531: the Store blocked UEFN-Ducky-<v>-macos-arm64.app.zip (hidden_characters)."""
+    (tmp_path / "UEFN-Ducky-2.31.0-macos-arm64.app.zip").write_bytes(b"x")
+    with pytest.raises(SystemExit, match="uefn-ducky-update-"):
+        pa.macos_artifacts("2.31.0", tmp_path)
 
 
 def test_macos_artifact_without_arch_is_refused(pa, tmp_path) -> None:

@@ -1,4 +1,4 @@
-"""UEFN Ducky.app self-update: pick the .app.zip, verify, swap, roll back."""
+"""UEFN Ducky.app self-update: pick the update zip, verify, swap, roll back."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import pytest
 from frontend import updater
 
 FEED = {"assets": [
-    {"os": "macos", "arch": "arm64", "package": "app-zip", "url": "https://x/UEFN-Ducky-2.31.1-macos-arm64.app.zip", "sha256": "a"},
-    {"os": "macos", "arch": "x64", "package": "app-zip", "url": "https://x/UEFN-Ducky-2.31.1-macos-x64.app.zip", "sha256": "b"},
+    {"os": "macos", "arch": "arm64", "package": "app-zip", "url": "https://x/uefn-ducky-update-2.31.1-macos-arm64.zip", "sha256": "a"},
+    {"os": "macos", "arch": "x64", "package": "app-zip", "url": "https://x/uefn-ducky-update-2.31.1-macos-x64.zip", "sha256": "b"},
     {"os": "macos", "arch": "arm64", "package": "dmg", "url": "https://x/UEFN-Ducky-2.31.1-macos-arm64.dmg", "sha256": "c"},
 ]}
 
@@ -52,6 +52,23 @@ def swaps(monkeypatch):
     made = []
     monkeypatch.setattr(app_versions, "begin_appimage_swap", lambda version, **kw: made.append((version, kw)))
     return made
+
+
+def test_windows_and_mac_each_pick_only_their_own_update() -> None:
+    """One release feed holds both: a Windows PC never gets a -macos- pack, a Mac its own arch's zip."""
+    feed = {"assets": [
+        {"os": "windows", "arch": "x64", "package": "setup", "url": "https://x/UEFN-Ducky-Setup-2.31.1.exe"},
+        {"os": "windows", "arch": "arm64", "package": "setup", "url": "https://x/UEFN-Ducky-Setup-2.31.1-arm64.exe"},
+        *FEED["assets"],
+    ]}
+    for machine in ("AMD64", "ARM64"):
+        for kind in updater._PACKAGE_FOR_KIND:
+            row = updater.pick_asset(feed, plat="win32", machine=machine, kind=kind)
+            assert row is None or (row["os"] == "windows" and "-macos-" not in row["url"]), (machine, kind, row)
+    assert updater.windows_setup(feed, machine="ARM64")["url"].endswith("-arm64.exe")
+    for machine, arch in (("arm64", "arm64"), ("x86_64", "x64")):
+        row = updater.pick_asset(feed, plat="darwin", machine=machine, kind="app")
+        assert row["url"].rsplit("/", 1)[1] == f"uefn-ducky-update-2.31.1-macos-{arch}.zip"
 
 
 def _app(tmp_path: Path) -> Path:
@@ -117,7 +134,7 @@ def test_a_bad_update_leaves_the_app_alone(tmp_path: Path, swaps, case: str) -> 
 
 def _status(**kw):
     return {"update_available": True, "remote_version": "2.31.1", "download_url": "https://uefnducky.org/download",
-            "asset": {"url": "https://x/UEFN-Ducky-2.31.1-macos-arm64.app.zip", "sha256": "a"}, **kw}
+            "asset": {"url": "https://x/uefn-ducky-update-2.31.1-macos-arm64.zip", "sha256": "a"}, **kw}
 
 
 def test_an_app_this_user_cannot_replace_gets_the_dmg(tmp_path: Path, monkeypatch) -> None:

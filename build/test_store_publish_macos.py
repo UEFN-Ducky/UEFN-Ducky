@@ -29,6 +29,10 @@ def test_parity_step_checks_both_mac_globs():
 @pytest.mark.skipif(not shutil.which("bash"), reason="needs bash")
 @pytest.mark.parametrize("names, ok", [
     (["UEFN-Ducky-2.31.0-macos-arm64.dmg", "UEFN-Ducky-2.31.0-macos-x64.dmg"], True),
+    (["UEFN-Ducky-2.31.0-macos-arm64.dmg", "uefn-ducky-update-2.31.0-macos-arm64.zip",
+      "UEFN-Ducky-2.31.0-macos-x64.dmg", "uefn-ducky-update-2.31.0-macos-x64.zip"], True),
+    (["UEFN-Ducky-2.31.0-macos-arm64.dmg", "UEFN-Ducky-2.31.0-macos-x64.dmg",
+      "uefn-ducky-update-2.30.9-macos-x64.zip"], False),
     (["UEFN-Ducky-2.31.0-macos-arm64.dmg", "UEFN-Ducky-2.30.9-macos-x64.dmg"], False),
     (["UEFN-Ducky-2.31.0-macos-arm64.dmg"], False),
 ])
@@ -43,6 +47,14 @@ def test_parity_step_runs(tmp_path, names, ok):
     # Script as bytes on stdin: Windows argv quoting eats single quotes, text mode adds \r.
     done = subprocess.run(["bash", "-s"], input=script.encode(), cwd=tmp_path, capture_output=True)
     assert (done.returncode == 0) is ok, done.stdout + done.stderr
+
+
+def test_mac_update_zip_has_the_store_release_pack_name():
+    """The Store scans only uefn-ducky-update-*.zip as a release pack (1.2.531's .app.zip was blocked)."""
+    for name in ("store-publish.yml", "macos-install-check.yml"):
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        assert ".app.zip" not in text, name
+        assert "uefn-ducky-update-" in text and "-macos-" in text, name
 
 
 def test_install_check_jobs_on_both_chips():
