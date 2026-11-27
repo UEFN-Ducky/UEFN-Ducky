@@ -21,15 +21,21 @@ def _appdata() -> Path:
     return root
 
 
+def _rows(ov: dict, table: str) -> int:
+    return next(t for t in ov["tables"] if t["name"] == table)["rows"]
+
+
 def test_overview_lists_every_table_with_counts_and_backends() -> None:
     _appdata()
-    kv.set_doc("cache_docs", "x", {"a": 1})
+    # Earlier tests on this xdist worker may have cached docs already (ubuntu-24.04 read 3): count the new one.
+    before = _rows(store_admin.overview(), "cache_docs")
+    kv.set_doc("cache_docs", "store-admin-overview", {"a": 1})
     ov = store_admin.overview()
     assert ov["error"] == ""
     assert ov["schema_version"] == ov["head_version"] == db.head_version()
     names = {t["name"] for t in ov["tables"]}
     assert names == set(store_admin.TABLES)
-    assert next(t for t in ov["tables"] if t["name"] == "cache_docs")["rows"] == 1
+    assert _rows(ov, "cache_docs") == before + 1
     assert ov["backends"]["settings"] == "rows"
     assert ov["journal_mode"] == "wal"
     assert ov["legacy"] is None and ov["snapshots"] == []
