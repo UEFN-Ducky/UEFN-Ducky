@@ -18,6 +18,9 @@ def mac(monkeypatch):
     from frontend import ducky_link
 
     monkeypatch.setattr(sys, "platform", "darwin")
+    for module in (app_popups, uefn_modal, uefn_popups):  # each read sys.platform once, at import
+        if hasattr(module, "_LINUX"):
+            monkeypatch.setattr(module, "_LINUX", False)
     monkeypatch.setattr(ducky_link, "list_duckies", lambda: {"ok": True, "devices": [
         {"keyId": "k_pc", "name": "Tas's PC", "live": True, "mine": False}]})
 

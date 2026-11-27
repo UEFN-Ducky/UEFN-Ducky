@@ -50,6 +50,7 @@ def test_low_memory_has_no_psi_and_no_launch_box(mac, monkeypatch):
     assert low_memory.check_at_launch() is True  # no message box off Windows
 
 
+@pytest.mark.skipif(sys.platform.startswith("linux"), reason="psutil's Linux backend reads /proc itself")
 def test_memory_report_uses_psutil(mac):
     psutil = pytest.importorskip("psutil")
     assert memory_report.mallinfo() is None

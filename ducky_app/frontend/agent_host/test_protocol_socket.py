@@ -104,8 +104,13 @@ def test_stale_socket_from_a_dead_app_is_replaced(tmp_path, monkeypatch):
 
 
 @posix
-def test_fallback_without_runtime_dir_uses_app_cache(tmp_path, monkeypatch):
+def test_fallback_without_runtime_dir_uses_app_cache(monkeypatch):
+    # a short folder: under xdist's tmp_path the socket path passes 107 bytes, and /tmp/ducky-<uid> rightly wins
+    cache = tempfile.mkdtemp(prefix="uc", dir="/tmp")
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    if sys.platform.startswith("linux"):
-        assert protocol.pipe_name(1, 2).startswith(str(tmp_path / "UEFN-Ducky" / "sock"))
+    monkeypatch.setenv("XDG_CACHE_HOME", cache)
+    try:
+        if sys.platform.startswith("linux"):
+            assert protocol.pipe_name(1, 2).startswith(os.path.join(cache, "UEFN-Ducky", "sock"))
+    finally:
+        os.rmdir(cache)
