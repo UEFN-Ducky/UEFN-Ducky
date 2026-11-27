@@ -190,21 +190,28 @@ jobs:
                   || echo "::warning::open -W exited non-zero"
                 [ -s "$out/tcc-$1.json" ] || { echo "::error::--tcc-probe wrote no report ($1): the app died"; exit 1; }
                 cat "$out/tcc-$1.json"
-                python3 - "$out/tcc-$1.json" "$1" <<'EOF'
+                python3 - "$out/tcc-$1.json" "$1" "$MIC_UNTESTABLE" <<'EOF'
           import json, sys
-          report, run = json.load(open(sys.argv[1])), sys.argv[2]
-          bad = []
-          for name in ("mic", "snip", "osascript"):
+          report, run, mic_why = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
+          bad, seen = [], []
+          for name in ("snip", "osascript", "mic"):
               got = report.get(name) or {}
               message = "Privacy & Security" in str(got.get("message", ""))
-              if run == "denied" and not message:
+              if run == "denied" and message:
+                  seen.append(f"{name} msg ✓")
+              elif run == "denied" and name == "mic" and mic_why:
+                  # The runner image lets every app use the mic (or has none): a denial can't show.
+                  seen.append(f"mic: {mic_why}, denial not testable (skipped)")
+              elif run == "denied":
                   bad.append(f"{name}: no System Settings > Privacy & Security message ({got})")
-              elif run == "granted" and message:
+              elif message:
                   bad.append(f"{name}: still refused after the grant ({got['message']})")
-              elif run == "granted" and not got.get("ok"):
+              elif name == "mic" and not (got.get("ok") and float(got.get("seconds") or 0) >= 0.9):
+                  bad.append(f"mic: no 1.0 s capture after the grant ({got})")
+              elif not got.get("ok"):
                   print(f"::warning::{name}: {got.get('error')}")
           if run == "denied":
-              print(f"denied: {3 - len(bad)} friendly messages")
+              print("denied: " + " ".join(seen))
           else:
               print("granted: mic {} s, snip {}, osascript {}".format(
                   report.get("mic", {}).get("seconds", "-"), report.get("snip", {}).get("size", "-"),
@@ -214,6 +221,18 @@ jobs:
           sys.exit(1 if bad else 0)
           EOF
               }
+              # Read before tcc_set writes anything: a mic the image already allows (for this app or
+              # any client) or no input device at all means the mic denial can't be seen here.
+              MIC_UNTESTABLE=""
+              pre="$( { sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
+                        "SELECT client FROM access WHERE service='kTCCServiceMicrophone' AND auth_value=2;"
+                      sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+                        "SELECT client FROM access WHERE service='kTCCServiceMicrophone' AND auth_value=2;"; } 2>/dev/null \
+                    | sort -u | tr '\n' ' ')"
+              [ -n "$pre" ] && MIC_UNTESTABLE="runner pre-granted" && echo "mic allowed on the image for: $pre"
+              system_profiler SPAudioDataType 2>/dev/null | grep -q "Input Channels" \
+                || MIC_UNTESTABLE="${MIC_UNTESTABLE:-runner has no audio input}"
+              [ -z "$MIC_UNTESTABLE" ] || echo "mic: $MIC_UNTESTABLE, denial not testable"
               tcc_set 0 denied
               tcc_probe denied | tee "$out/tcc-denied-summary.txt"
               [ "${PIPESTATUS[0]}" = 0 ] || exit 1
