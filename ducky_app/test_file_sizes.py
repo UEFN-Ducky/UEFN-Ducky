@@ -23,7 +23,7 @@ SPLITTING: dict[str, int] = {
     'backend/automations/runner.py': 2817,
     'backend/tools/panel/ducky_panel.py': 2815,
     'backend/workspace/journal.py': 1960,
-    'frontend/duckyos_account.py': 2752,
+    'frontend/duckyos_account.py': 2719,
     'frontend/ui_web/browser_overlay.py': 1624,
     'frontend/ui_web/group_orchestrator.py': 1895,
     'frontend/ui_web/panel_api_settings.py': 2029,

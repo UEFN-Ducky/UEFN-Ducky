@@ -13,6 +13,8 @@ def _touch(root: Path, rel: str) -> None:
 
 
 def test_live_panel_release_locks_and_bytecode_are_not_leaks(tmp_path):
+    # tmp_path also holds conftest's per-test .ducky-appdata (its database files): scan our own tree.
+    tmp_path = tmp_path / "tree"
     for rel in ("ai_plugins/.releases/kimi.json",
                 "uefn_plugins/ollama/backend/__pycache__/graph_nodes.cpython-313.pyc",
                 "ai_plugins/fixture/plugin.json",

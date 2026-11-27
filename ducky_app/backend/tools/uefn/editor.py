@@ -15,7 +15,8 @@ from backend.tools.support.plugin_gate import plugin_mcp_tool
 # Listener returns quickly (viewport buffer capture). PNG may land next frame —
 # wait here on the host, never inside the UE tick.
 _SCREENSHOT_FILE_WAIT_SEC = 8.0
-_SCREENSHOT_BRIDGE_TIMEOUT_SEC = 45.0
+SCREENSHOT_BRIDGE_TIMEOUT_SEC = 45.0
+_SCREENSHOT_BRIDGE_TIMEOUT_SEC = SCREENSHOT_BRIDGE_TIMEOUT_SEC
 
 
 def _drop_temp_capture(path: str) -> None:
@@ -50,7 +51,7 @@ def _png_bytes(result: dict[str, Any]) -> bytes:
     return raw
 
 
-def _wait_for_screenshot_file(result: dict[str, Any]) -> dict[str, Any]:
+def wait_for_screenshot_file(result: dict[str, Any]) -> dict[str, Any]:
     """Poll for the PNG on the host after a non-blocking viewport capture."""
     if not isinstance(result, dict):
         return result
@@ -89,6 +90,9 @@ def _wait_for_screenshot_file(result: dict[str, Any]) -> dict[str, Any]:
             "Retry once; if UEFN was frozen, reload the listener (viewport capture path)."
         ),
     }
+
+
+_wait_for_screenshot_file = wait_for_screenshot_file
 
 
 def _enrich_screenshot(result: dict[str, Any]) -> dict[str, Any]:

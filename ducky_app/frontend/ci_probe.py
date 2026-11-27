@@ -152,13 +152,13 @@ def _screenshot() -> dict[str, Any]:
     import base64
 
     from backend.bridge import send_command
-    from backend.tools.uefn.editor import _SCREENSHOT_BRIDGE_TIMEOUT_SEC, _wait_for_screenshot_file
+    from backend.tools.uefn.editor import SCREENSHOT_BRIDGE_TIMEOUT_SEC, wait_for_screenshot_file
 
     got = send_command("take_high_res_screenshot", {"width": 1280, "height": 720, "filename": ""},
-                       timeout=_SCREENSHOT_BRIDGE_TIMEOUT_SEC)
+                       timeout=SCREENSHOT_BRIDGE_TIMEOUT_SEC)
     if not isinstance(got, dict):
         return {"ok": False, "error": f"no screenshot: {str(got)[:200]}"}
-    got = _wait_for_screenshot_file(got)
+    got = wait_for_screenshot_file(got)
     raw = base64.b64decode(got["png_base64"]) if got.get("png_base64") else b""
     if not raw and got.get("path") and Path(str(got["path"])).is_file():
         raw = Path(str(got["path"])).read_bytes()
