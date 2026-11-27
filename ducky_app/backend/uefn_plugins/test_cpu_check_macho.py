@@ -53,6 +53,16 @@ def test_macho_x86_64_avx_is_refused() -> None:
     assert any(p.startswith("AVX") for p in cpu_check.problems(macho(X86_64, avx)))
 
 
+def test_xbegin_into_nowhere_is_data_but_a_real_one_is_refused() -> None:
+    pytest.importorskip("iced_x86")
+    ret = b"\xc3" * 16
+    # vim 1.0.14: data bytes C7 F8 rel32 read as xbegin to far outside the module
+    assert cpu_check.problems(macho(X86_64, b"\xc7\xf8" + struct.pack("<i", -0x4EFF000) + ret)) == []
+    # xbegin +0 (fallback right after it, inside __text): a real RTM transaction
+    real = cpu_check.problems(macho(X86_64, b"\xc7\xf8\0\0\0\0" + ret))
+    assert real and real[0].startswith("RTM: __TEXT,__text+0x0 xbegin")
+
+
 def test_arm64_macho_skips_the_x86_check(tmp_path: Path) -> None:
     so = tmp_path / "demo.cpython-313-darwin.so"
     so.write_bytes(macho(ARM64, b"\xff" * 8))

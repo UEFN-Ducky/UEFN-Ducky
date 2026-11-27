@@ -174,10 +174,18 @@ def problems(image: bytes) -> list[str]:
     allowed = {m for m, n in mnemonics.items() if n in baseline}
     found: dict[str, list[str]] = {}
     formatter = iced_x86.Formatter(iced_x86.FormatterSyntax.INTEL)
-    for section, rva, code in code_sections(image):
+    sections = code_sections(image)
+    spans = [(rva, rva + len(code)) for _, rva, code in sections]
+    for section, rva, code in sections:
         decoder = iced_x86.Decoder(64, code, ip=rva)
         for instr in decoder:
             if instr.code == iced_x86.Code.INVALID or instr.mnemonic in allowed:
+                continue
+            # Data in a code section (clang keeps some in macOS __text) can decode as a branch,
+            # e.g. vim's C7 F8 rel32 read as xbegin to 0xFFFFFFFFFB1006FD. A real one lands in
+            # this module's code; one that lands nowhere is data, not an instruction.
+            if instr.op0_kind == iced_x86.OpKind.NEAR_BRANCH64 and not any(
+                    lo <= instr.near_branch_target < hi for lo, hi in spans):
                 continue
             for feature in instr.cpuid_features():
                 name = names.get(feature, str(feature))
