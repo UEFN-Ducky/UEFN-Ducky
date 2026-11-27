@@ -39,4 +39,5 @@ def test_the_mac_pc_key_survives_a_restart_and_says_how_it_is_kept(mac, monkeypa
 def test_a_mac_without_a_vault_says_the_key_is_memory_only(monkeypatch) -> None:
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(sec, "_is_linux", lambda: False)
+    monkeypatch.setattr(sec, "_uses_keyring_seal", lambda: False)  # no Keychain answered
     assert rt.key_protection() == "memory"

@@ -49,16 +49,16 @@ def test_private_chat_opens_after_restart(linux_who: _Who, monkeypatch) -> None:
 
 
 def test_a_backup_made_after_sealing_never_looks_older_on_linux(monkeypatch) -> None:
-    """Linux stat has no birth time; a backdated mtime (utime, copy2) must not pass for it."""
+    """A backdated mtime (utime, copy2) must not pass for the birth: Linux has no birth time and
+    macOS moves its birth time back with the mtime, so both go by ctime."""
     from types import SimpleNamespace
 
     from backend.store import sealed_files
 
-    monkeypatch.setattr(sealed_files, "sys", SimpleNamespace(platform="linux"))
     monkeypatch.setattr(sealed_files, "os", SimpleNamespace(name="posix"))
-    backdated = SimpleNamespace(st_mtime=100.0, st_ctime=5000.0)  # no st_birthtime, as on Linux
-    assert sealed_files._made(backdated) == 5000.0
-    monkeypatch.setattr(sealed_files, "sys", SimpleNamespace(platform="darwin"))
+    assert sealed_files._made(SimpleNamespace(st_mtime=100.0, st_ctime=5000.0)) == 5000.0  # Linux
+    assert sealed_files._made(SimpleNamespace(st_mtime=100.0, st_ctime=5000.0, st_birthtime=42.0)) == 5000.0  # macOS
+    monkeypatch.setattr(sealed_files, "os", SimpleNamespace(name="nt"))
     assert sealed_files._made(SimpleNamespace(st_mtime=100.0, st_ctime=5000.0, st_birthtime=42.0)) == 42.0
 
 

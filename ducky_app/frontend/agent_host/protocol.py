@@ -23,6 +23,7 @@ import json
 import os
 import queue
 import socket
+import stat
 import sys
 import threading
 import time
@@ -98,6 +99,9 @@ def listen_at(name: str, authkey: bytes) -> Listener:
         return Listener(name, authkey=authkey)
     folder = os.path.dirname(name)
     os.makedirs(folder, mode=0o700, exist_ok=True)
+    st = os.lstat(folder)
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():  # /tmp/ducky-<uid>: anyone may make it first
+        raise PermissionError(f"{folder} is not this user's folder")
     os.chmod(folder, 0o700)
     _clear_stale(name)
     listener = Listener(name, family="AF_UNIX", authkey=authkey)

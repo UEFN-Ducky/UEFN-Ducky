@@ -54,4 +54,5 @@ def test_a_queued_event_is_sent_at_the_next_tick():
     while not sent and time.monotonic() < deadline:
         time.sleep(0.005)
     _stop(batcher, done, thread)
-    assert sent and sent[0] - fed <= 0.1  # far under the idle wait: the feed woke the loop
+    # Far under the 0.5 s idle wait: the feed woke the loop (a loaded arm64 Mac runner took 0.1002 s).
+    assert sent and sent[0] - fed <= 0.25

@@ -15,6 +15,8 @@ from PIL import Image
 from backend.tools.core import uefn_popups as popups
 
 _FIX = Path(__file__).resolve().parent / "testdata" / "popups"
+# Pressing UEFN's popups needs UEFN's PC: on a Mac these tools answer with the open-your-PC's-Ducky redirect.
+_PC = pytest.mark.pc_only("UEFN's popups are pressed on the PC")
 
 
 def _img(name: str) -> Image.Image:
@@ -112,6 +114,7 @@ def screen(monkeypatch, tmp_path):
     return state
 
 
+@_PC
 def test_the_verse_popups_on_project_open_are_answered_in_order(screen) -> None:
     for _ in range(3):
         popups.answer_known_popups()
@@ -120,6 +123,7 @@ def test_the_verse_popups_on_project_open_are_answered_in_order(screen) -> None:
     assert popups.verse_skip_active() is True
 
 
+@_PC
 def test_nothing_saves_the_level_after_a_skip(screen, monkeypatch) -> None:
     for _ in range(3):
         popups.answer_known_popups()
@@ -139,6 +143,7 @@ def test_nothing_saves_the_level_after_a_skip(screen, monkeypatch) -> None:
     assert sent == []  # no pre-save before the build
 
 
+@_PC
 def test_a_clean_build_reloads_the_level_and_saving_works_again(screen, monkeypatch) -> None:
     for _ in range(3):
         popups.answer_known_popups()
@@ -209,6 +214,7 @@ def test_a_popup_that_does_not_match_is_not_captured_again_every_pass(stuck) -> 
     assert stuck["grabs"] == [77, 77]
 
 
+@_PC
 def test_each_answered_popup_is_logged_once(screen) -> None:
     for _ in range(5):
         _guard_pass()
@@ -248,6 +254,7 @@ def test_unable_to_refresh_is_a_lone_ok_message_box() -> None:
     assert not popups.is_lone_button_popup(box, popups.find_buttons(_img("data_loss_warning")))  # a choice
 
 
+@_PC
 def test_uefns_own_message_box_is_pressed_though_the_editor_window_stays_enabled(monkeypatch) -> None:
     """Nov 13 2026: "Message: Must specify a valid skeletal mesh for the physics asset to
     target." [OK] held the editor for 7 minutes. A Slate dialog leaves the main window
@@ -270,6 +277,7 @@ def test_uefns_own_message_box_is_pressed_though_the_editor_window_stays_enabled
     assert clicks == [515]
 
 
+@_PC
 def test_a_dialog_holds_the_editor_only_while_a_command_sits_inside_a_window(monkeypatch) -> None:
     dialog = _box("Message", blocking=False, dialog=True)
     tool_window = _box("Message Log", hwnd=77, blocking=False, dialog=False)
@@ -318,6 +326,7 @@ def uefn_popup(monkeypatch):
     return state
 
 
+@_PC
 def test_the_lone_button_pass_presses_ok_and_keeps_the_capture(uefn_popup) -> None:
     uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")
     done = popups.press_lone_button_popups()
@@ -413,6 +422,7 @@ _GET_SESSION_STATUS = {
 }
 
 
+@_PC
 def test_a_hung_epic_call_gets_the_unable_to_refresh_popup_pressed(uefn_popup, monkeypatch) -> None:
     uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")
     pool = _epic_pool(monkeypatch, uefn_popup)
@@ -423,6 +433,7 @@ def test_a_hung_epic_call_gets_the_unable_to_refresh_popup_pressed(uefn_popup, m
     assert "uefn_popup_1.png" in out  # the agent can still read what UEFN said
 
 
+@_PC
 def test_a_hung_epic_call_leaves_the_persons_popup_alone(uefn_popup, monkeypatch) -> None:
     uefn_popup["show"]("Unable to Refresh", "unable_to_refresh")  # the person's own push said this
     pool = _epic_pool(monkeypatch, uefn_popup, look=0.1, ducky_left_it=False)
@@ -432,6 +443,7 @@ def test_a_hung_epic_call_leaves_the_persons_popup_alone(uefn_popup, monkeypatch
     assert "'Unable to Refresh'" in str(err.value)  # the agent is told, and may ask the person
 
 
+@_PC
 def test_a_popup_blocked_epic_call_tells_the_agent_to_look_and_press(uefn_popup, monkeypatch) -> None:
     uefn_popup["show"]("Unable to Launch", "data_loss_warning")  # two buttons: not pressed for it
     pool = _epic_pool(monkeypatch, uefn_popup, look=0.1)
@@ -447,6 +459,7 @@ def test_a_popup_blocked_epic_call_tells_the_agent_to_look_and_press(uefn_popup,
     assert popups.press_button(listed["hwnd"], 1)["closed"] is True
 
 
+@_PC
 def test_the_timeout_hint_without_a_popup_still_says_where_to_look(monkeypatch) -> None:
     monkeypatch.setattr(popups, "list_popups", lambda: [])
     hint = popups.blocked_call_hint()

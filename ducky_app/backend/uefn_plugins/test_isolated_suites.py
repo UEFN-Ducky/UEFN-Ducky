@@ -12,6 +12,12 @@ import pytest
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
 _CHILD_S = 300  # a whole suite; each of its tests stops itself at 100 s and prints every stack
+_RESULTS = ("PASSED", "FAILED", "SKIPPED", "ERROR", "XFAIL", "XPASS")
+
+
+def _unfinished(out: str) -> list[str]:
+    """The tests -v started and never gave a result for: the one a timeout stopped."""
+    return [line.split(" ")[0] for line in out.splitlines() if "::" in line and not any(r in line for r in _RESULTS)]
 
 
 def _text(out: object) -> str:
@@ -30,8 +36,11 @@ def test_suite_in_child_interpreter(name: str, tmp_path: Path) -> None:
         proc = subprocess.run(
             # --show-capture=no: the captured logs after a traceback pushed the traceback itself out
             # of the tail below, so a CI failure never said which line failed.
-            [sys.executable, "-m", "pytest", str(HERE / name), "-q", "-p", "no:cacheprovider", "--no-header",
-             "--tb=short", "--show-capture=no", "--timeout=100", "-o", "faulthandler_timeout=90"],
+            # -v names each test as it starts, so a stopped one is named; pytest-timeout prints
+            # every thread's stack, oldest frame first, so the tail shows the stuck line (a
+            # faulthandler dump after it, most recent first, pushed that line out of the message).
+            [sys.executable, "-m", "pytest", str(HERE / name), "-v", "-p", "no:cacheprovider", "--no-header",
+             "--tb=short", "--show-capture=no", "--timeout=100", "-o", "faulthandler_timeout=0"],
             cwd=str(REPO),
             env=env,
             capture_output=True,
@@ -40,6 +49,10 @@ def test_suite_in_child_interpreter(name: str, tmp_path: Path) -> None:
             timeout=_CHILD_S,
         )
     except subprocess.TimeoutExpired as exc:  # every test passed and the interpreter never exited, or worse
-        pytest.fail(f"{name} still running after {_CHILD_S} s:\n{_text(exc.stdout)[-4000:]}\n{_text(exc.stderr)[-4000:]}")
-    failures = proc.stdout[proc.stdout.find("= FAILURES ="):] if "= FAILURES =" in proc.stdout else proc.stdout
-    assert proc.returncode == 0, (failures[:6000] + proc.stderr[-2000:])
+        out = _text(exc.stdout)
+        pytest.fail(f"{name} still running after {_CHILD_S} s in {_unfinished(out)}:\n{out[-4000:]}\n"
+                    f"{_text(exc.stderr)[-4000:]}")
+    out = proc.stdout
+    failures = out[out.find("= FAILURES ="):] if "= FAILURES =" in out else out
+    stuck = _unfinished(out)
+    assert proc.returncode == 0, (f"stopped in {stuck}\n{out[-6000:]}" if stuck else failures[:6000]) + proc.stderr[-2000:]

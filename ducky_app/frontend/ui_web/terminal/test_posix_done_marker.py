@@ -51,6 +51,9 @@ def test_agent_env_is_for_the_command_only(shell):
 
 
 def test_a_background_run_returns_at_once_and_prints_later(shell):
+    # fish 4 first waits on its terminal queries (no xterm.js answers them here); a waited command
+    # returns once it reads input, so the background one is typed into a shell that reads it.
+    assert shell.run_command("true", timeout_s=30)["ok"]
     assert shell.run_command("sleep 0.3; echo BG_FINISHED", background=True)["status"] == "running"
     deadline = time.monotonic() + 10
     while "BG_FINISHED" not in shell.read_output_tail() and time.monotonic() < deadline:

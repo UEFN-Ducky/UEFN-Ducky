@@ -55,6 +55,7 @@ def test_wine_popups_are_the_uefn_pids_dialogs(wine) -> None:
     assert info["known"]["press"] == 1
 
 
+@pytest.mark.pc_only("pressing goes to UEFN's PC (Windows or Linux), never a Mac")
 def test_press_clicks_the_numbered_button_through_xtest(wine, monkeypatch) -> None:
     clicks: list = []
 
@@ -70,6 +71,7 @@ def test_press_clicks_the_numbered_button_through_xtest(wine, monkeypatch) -> No
     assert wine["skips"] == [1]  # Skip Rebuild & Continue path: no saving until Verse builds clean
 
 
+@pytest.mark.pc_only("pressing goes to UEFN's PC (Windows or Linux), never a Mac")
 def test_press_reports_a_missing_xdotool(wine, monkeypatch) -> None:
     def no_xdotool(*_a):
         raise OSError("xdotool is not installed")

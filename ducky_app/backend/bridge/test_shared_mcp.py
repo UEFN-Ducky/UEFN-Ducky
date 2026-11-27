@@ -582,6 +582,11 @@ def test_readiness_hellos_do_not_keep_an_idle_daemon_alive(monkeypatch, tmp_path
     """Nov 4 2026: a host's daemon with 0 agents stayed up for hours at ~700 MB because each
     turn's readiness hello restarted its idle window."""
     monkeypatch.setattr(shared_mcp, "_IDLE_EXIT_S", 0.6)
+    # When the idle timer itself stopped it: a probe or a join slowed by a loaded Mac runner
+    # (8.7 s of wall time) never counts against the daemon.
+    stops: list[float] = []
+    stop = shared_mcp.request_stop
+    monkeypatch.setattr(shared_mcp, "request_stop", lambda *a, **k: (stops.append(time.monotonic()), stop(*a, **k))[1])
     thread = serve(FakeMcp(), monkeypatch, tmp_path)
     try:
         started = time.monotonic()
@@ -591,9 +596,9 @@ def test_readiness_hellos_do_not_keep_an_idle_daemon_alive(monkeypatch, tmp_path
             except (OSError, RuntimeError, EOFError):
                 break  # it stopped between probes
             time.sleep(0.1)
-        thread.join(timeout=3)
+        thread.join(timeout=10)
         assert not thread.is_alive()
-        assert time.monotonic() - started < 2.0  # one idle window after start, not never
+        assert stops and stops[0] - started < 2.0  # one idle window after start, not never
     finally:
         shared_mcp.request_stop()
         thread.join(timeout=6)

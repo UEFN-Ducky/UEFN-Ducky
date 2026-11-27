@@ -54,6 +54,16 @@ def test_a_long_folder_like_the_macos_tmpdir_falls_back_to_tmp(monkeypatch):
 
 
 @posix
+def test_a_socket_folder_another_user_made_first_is_refused(tmp_path, monkeypatch):
+    folder = tmp_path / "theirs"
+    folder.mkdir()
+    owner = os.stat(folder).st_uid
+    monkeypatch.setattr(os, "getuid", lambda: owner + 1)
+    with pytest.raises(PermissionError):
+        protocol.listen_at(str(folder / "x.sock"), b"k" * 32)
+
+
+@posix
 def test_socket_is_0600_in_a_0700_folder_and_removed_on_close(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     name = protocol.pipe_name("modes", 42)
@@ -70,7 +80,7 @@ def test_socket_is_0600_in_a_0700_folder_and_removed_on_close(tmp_path, monkeypa
 def test_stale_socket_from_a_dead_app_is_replaced(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     name = protocol.pipe_name("stale", 42)
-    os.makedirs(os.path.dirname(name), mode=0o700)
+    os.makedirs(os.path.dirname(name), mode=0o700, exist_ok=True)  # macOS: the shared /tmp/ducky-<uid>
     dead = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     dead.bind(name)
     dead.close()  # the file stays, nobody listens: what a crashed app leaves

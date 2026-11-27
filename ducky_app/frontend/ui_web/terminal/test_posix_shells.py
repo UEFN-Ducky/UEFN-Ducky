@@ -11,6 +11,8 @@ def _linux(monkeypatch, installed, login_shell=""):
     monkeypatch.setattr(shells, "_posix", lambda: True)
     monkeypatch.setattr(shells.sys, "platform", "linux")  # macOS falls back to zsh, not bash
     monkeypatch.setattr(shells.shutil, "which", lambda name: _ALL[name] if name in installed else None)
+    is_file = shells.Path.is_file  # a Mac has /bin/zsh and /bin/bash: only `installed` counts
+    monkeypatch.setattr(shells.Path, "is_file", lambda self: not self.as_posix().startswith("/bin/") and is_file(self))
     monkeypatch.setenv("SHELL", login_shell)
 
 
