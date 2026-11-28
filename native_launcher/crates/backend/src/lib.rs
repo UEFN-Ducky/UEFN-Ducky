@@ -82,6 +82,9 @@ fn routes(api: Arc<api::Api>) -> Router {
         // The scrubber and the error words, on any text.
         let reports = |Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::reports::check(&what, body["text"].as_str().unwrap_or_default())) };
         routes = routes.merge(Router::new().route("/__rs/reports/{what}", post(reports)));
+        // An update check now, and the update status of a copy the test describes.
+        let update = |State(api): State<Arc<api::Api>>, Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::update::probe(&api, &what, &body).await) };
+        routes = routes.merge(Router::new().route("/__rs/update/{what}", post(update)).with_state(Arc::clone(&api)));
     }
     // A window's poll waits 20 s by design, and a sign-in waits for the person to approve
     // its code: each sets its own limit, and is no slow call.
@@ -122,6 +125,7 @@ pub async fn serve(listener: TcpListener, stop: impl Future<Output = ()> + Send 
     let api = api::Api::new(Arc::clone(&repos), api::methods());
     // ponytail: the Python backend sends the usage queue until its own sender goes (two
     // senders would send every row twice); the launcher names this one then.
+    std::sync::LazyLock::force(&api::update::STARTED);
     let usage = std::env::var("DUCKY_USAGE_SENDER").is_ok_and(|who| who == "rust").then(|| tokio::spawn(api::usage::run(Arc::clone(&api))));
     let served = axum::serve(listener, routes(api)).with_graceful_shutdown(stop).await;
     perf.abort();

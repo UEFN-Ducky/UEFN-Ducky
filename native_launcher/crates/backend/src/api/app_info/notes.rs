@@ -30,7 +30,7 @@ pub fn newer(local: &str, remote: &str) -> bool {
 }
 
 /// `_extract_str`: a value that is there and not blank, as text.
-fn said(payload: &Map<String, Value>, key: &str) -> Option<String> {
+pub fn said(payload: &Map<String, Value>, key: &str) -> Option<String> {
     let text = payload.get(key).filter(|value| !value.is_null()).map(pystr)?.trim().to_string();
     (!text.is_empty()).then_some(text)
 }
@@ -190,12 +190,23 @@ impl Failure {
         }
     }
 
+    /// `net_access.handshake_cut`: the other end closed the connection during the secure
+    /// start; nothing about a certificate.
+    pub fn cut(&self) -> bool {
+        matches!(self, Failure::Network(text) if self.stage() == "tls" && text.to_lowercase().contains("eof"))
+    }
+
+    /// `update_network.cert_failed`: the server's certificate was not accepted.
+    pub fn cert(&self) -> bool {
+        matches!(self, Failure::Network(text) if text.to_lowercase().contains("certificate"))
+    }
+
     /// `update_network.retryable`: a busy server, a timeout or a dropped connection.
     /// Never a certificate failure, and a name that does not resolve stays unresolved.
     pub fn retryable(&self) -> bool {
         match self {
             Failure::Status(status) => [408, 429, 500, 502, 503, 504].contains(status),
-            Failure::Network(_) => ["timeout", "connect"].contains(&self.stage()),
+            Failure::Network(_) => self.cut() || ["timeout", "connect"].contains(&self.stage()),
         }
     }
 
@@ -205,6 +216,8 @@ impl Failure {
             "dns" => format!("UEFN Ducky can't look up {host} (DNS). Check the internet connection, or a VPN/DNS filter blocking it."),
             "connect" => format!("UEFN Ducky can't connect to {host}. If it opens in your browser, a firewall or antivirus is blocking UEFN Ducky: allow it, or press Test network."),
             "timeout" => format!("UEFN Ducky timed out reaching {host}. If it opens in your browser, a firewall, antivirus, VPN or proxy is blocking UEFN Ducky: press Test network."),
+            // No certificate problem: the antivirus / clock hint would send the person the wrong way.
+            "tls" if self.cut() => format!("The connection to {host} was cut while it was being set up. A network filter, VPN or security program usually does that, and the browser on this PC may still get through."),
             "tls" => format!("UEFN Ducky reached {host} but the secure connection failed. Antivirus HTTPS scanning or a wrong PC clock usually causes this."),
             "proxy" => format!("The network's proxy refused UEFN Ducky's connection to {host}. Press Test network for details."),
             _ => format!("{host} answered with an error. Try again in a minute."),
@@ -291,5 +304,8 @@ mod tests {
         assert_eq!(stage("timed out"), "timeout");
         assert_eq!(stage("connection refused"), "connect");
         assert!(Failure::Network("timed out".into()).retryable() && !Failure::Network("invalid peer certificate".into()).retryable());
+        let cut = Failure::Network("tls handshake eof".into());
+        assert!(cut.cut() && cut.retryable() && !cut.cert() && cut.explain("example.org").starts_with("The connection to example.org was cut"));
+        assert!(Failure::Network("invalid peer certificate".into()).cert() && !Failure::Status(503).cert());
     }
 }

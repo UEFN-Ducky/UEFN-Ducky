@@ -8,14 +8,14 @@
 //! one (`net_access.FallbackHTTPSConnection`); that guards the update downloads' storage
 //! host and moves here with them.
 
-mod proxy;
+pub(super) mod proxy;
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::{Client, Url};
+use reqwest::{Client, ClientBuilder, Url};
 use serde_json::{Map, Value};
 
 use super::settings::{failed, load};
@@ -170,6 +170,31 @@ async fn auto_proxy(url: &Url) -> String {
     proxy
 }
 
+/// The route `url` takes: `direct` on this PC, a proxy its auto-config names, or empty
+/// for the client's default (Internet Options' fixed proxy, or the environment's).
+pub(super) async fn route_of(url: &Url) -> String {
+    let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']).to_lowercase();
+    if ["localhost", "127.0.0.1", "::1"].contains(&host.as_str()) || host.starts_with("127.") {
+        return "direct".to_string();
+    }
+    auto_proxy(url).await
+}
+
+/// A client of its own for one job (no redirects, one fixed address, no certificate
+/// check): `route`'s client with `tweak` applied. Never kept.
+pub(super) async fn special(route: String, tweak: impl FnOnce(ClientBuilder) -> ClientBuilder + Send + 'static) -> Result<Client, Refused> {
+    let build = move || {
+        let builder = tweak(Client::builder());
+        match route.as_str() {
+            "" => builder.build(),
+            "direct" => builder.no_proxy().build(),
+            proxy => builder.proxy(reqwest::Proxy::all(proxy)?).build(),
+        }
+    };
+    // Off the async workers: a new client reads the OS certificate store.
+    tokio::task::spawn_blocking(build).await.map_err(network)?.map_err(network)
+}
+
 /// The client for one route: `direct`, the default (empty) or a named proxy. Each keeps
 /// its connections open between calls.
 async fn client(route: String) -> Result<Client, Refused> {
@@ -177,19 +202,7 @@ async fn client(route: String) -> Result<Client, Refused> {
     if let Some(client) = CLIENTS.lock().unwrap_or_else(|e| e.into_inner()).get(&route) {
         return Ok(client.clone());
     }
-    let build = {
-        let route = route.clone();
-        move || {
-            let builder = Client::builder();
-            match route.as_str() {
-                "" => builder.build(),
-                "direct" => builder.no_proxy().build(),
-                proxy => builder.proxy(reqwest::Proxy::all(proxy)?).build(),
-            }
-        }
-    };
-    // Off the async workers: a new client reads the OS certificate store.
-    let client = tokio::task::spawn_blocking(build).await.map_err(network)?.map_err(network)?;
+    let client = special(route.clone(), |builder| builder).await?;
     Ok(CLIENTS.lock().unwrap_or_else(|e| e.into_inner()).entry(route).or_insert(client).clone())
 }
 
@@ -205,9 +218,12 @@ fn parsed(raw: &str) -> Option<Map<String, Value>> {
 /// Each wait has the limit, as a socket timeout does: a big answer on a slow link is
 /// fine while its bytes keep coming.
 pub async fn send(method: reqwest::Method, url: Url, headers: HeaderMap, body: Option<String>, timeout: Duration) -> Result<Answer, Refused> {
-    let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']).to_lowercase();
-    let route = if ["localhost", "127.0.0.1", "::1"].contains(&host.as_str()) || host.starts_with("127.") { "direct".to_string() } else { auto_proxy(&url).await };
-    let mut sending = client(route).await?.request(method, url).headers(headers);
+    send_on(client(route_of(&url).await).await?, method, url, headers, body, timeout).await
+}
+
+/// [`send`] through a client the caller made.
+pub(super) async fn send_on(client: Client, method: reqwest::Method, url: Url, headers: HeaderMap, body: Option<String>, timeout: Duration) -> Result<Answer, Refused> {
+    let mut sending = client.request(method, url).headers(headers);
     if let Some(body) = body {
         sending = sending.body(body);
     }

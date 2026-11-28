@@ -20,6 +20,7 @@ pub mod router;
 pub mod settings;
 pub mod shared;
 pub mod site;
+pub mod update;
 pub mod usage;
 
 use std::collections::HashMap;
@@ -89,6 +90,12 @@ pub fn methods() -> HashMap<&'static str, Method> {
         app_info::get_whats_new => Anyone,
         app_info::mark_whats_new_seen => Anyone,
         app_info::get_install_info => Anyone,
+        update::get_app_update_status => Anyone,
+        update::run_network_test => Anyone,
+        update::get_auto_update_status => Anyone,
+        update::report_update_ui => Window,
+        update::check_auto_update_now => Anyone,
+        update::get_update_progress => Anyone,
         account::duckyos_get_status => Anyone,
         account::duckyos_list_pcs => Anyone,
         account::duckyos_revoke_pc => Anyone,

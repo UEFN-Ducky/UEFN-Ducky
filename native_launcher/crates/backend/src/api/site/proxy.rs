@@ -20,6 +20,34 @@ pub fn pick(answer: &str, scheme: &str) -> String {
     String::new()
 }
 
+/// The environment's proxy for `scheme` (`https_proxy`, `HTTPS_PROXY`), as curl reads it.
+fn from_environment(scheme: &str) -> String {
+    let named = |name: String| std::env::var(name).ok().filter(|proxy| !proxy.trim().is_empty());
+    named(format!("{scheme}_proxy")).or_else(|| named(format!("{scheme}_PROXY"))).unwrap_or_default()
+}
+
+/// The fixed proxy `scheme` takes with no auto-config: the environment's, then Internet
+/// Options' (`urllib.request.getproxies`). Empty for none.
+/// ponytail: the hosts a fixed proxy is bypassed for are the client's to follow, not
+/// named here; and macOS's System Settings proxy is not read (the client follows it).
+pub fn fixed(scheme: &str) -> String {
+    let named = from_environment(scheme);
+    #[cfg(windows)]
+    if named.is_empty() {
+        return pick(&config().fixed, scheme);
+    }
+    named
+}
+
+/// `none`, `static` or `pac`: how this PC reaches the internet (`net_access.proxy_mode`).
+pub fn mode() -> &'static str {
+    #[cfg(windows)]
+    if config().script.is_some() {
+        return "pac";
+    }
+    if ["http", "https", "all"].iter().any(|scheme| !fixed(scheme).is_empty()) { "static" } else { "none" }
+}
+
 /// WinHTTP's proxies for `url` (`"host:port;..."`); empty when the PC has no auto-config,
 /// the lookup failed or the URL goes direct.
 #[cfg(not(windows))]
@@ -28,47 +56,56 @@ pub fn auto_config_answer(_url: &str) -> String {
     String::new()
 }
 
+/// Internet Options' proxy settings: detect an auto-config, its script's URL (NUL-ended),
+/// and the fixed proxy list.
+#[cfg(windows)]
+struct Config {
+    detect: bool,
+    script: Option<Vec<u16>>,
+    fixed: String,
+}
+
+/// A copy of a string WinHTTP allocated (with its NUL), which is then freed.
+#[cfg(windows)]
+unsafe fn take(text: *mut u16) -> Option<Vec<u16>> {
+    if text.is_null() {
+        return None;
+    }
+    let len = (0..).take_while(|&at| *text.add(at) != 0).count();
+    let copy = std::slice::from_raw_parts(text, len + 1).to_vec();
+    windows_sys::Win32::Foundation::GlobalFree(text.cast());
+    Some(copy)
+}
+
+/// Read once, as the Python backend does: a changed setting is seen at the next start.
+#[cfg(windows)]
+fn config() -> &'static Config {
+    use windows_sys::Win32::Networking::WinHttp::{WinHttpGetIEProxyConfigForCurrentUser, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG};
+
+    static CONFIG: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| unsafe {
+        let mut ie: WINHTTP_CURRENT_USER_IE_PROXY_CONFIG = std::mem::zeroed();
+        if WinHttpGetIEProxyConfigForCurrentUser(&mut ie) == 0 {
+            return Config { detect: false, script: None, fixed: String::new() };
+        }
+        let script = take(ie.lpszAutoConfigUrl).filter(|url| url.len() > 1);
+        let fixed = take(ie.lpszProxy).map(|proxy| String::from_utf16_lossy(&proxy[..proxy.len() - 1])).unwrap_or_default();
+        take(ie.lpszProxyBypass);
+        Config { detect: ie.fAutoDetect != 0, script, fixed }
+    })
+}
+
 #[cfg(windows)]
 pub fn auto_config_answer(url: &str) -> String {
     use std::ptr::null;
-    use std::sync::OnceLock;
 
-    use windows_sys::Win32::Foundation::GlobalFree;
     use windows_sys::Win32::Networking::WinHttp::{
-        WinHttpCloseHandle, WinHttpGetIEProxyConfigForCurrentUser, WinHttpGetProxyForUrl, WinHttpOpen, WINHTTP_ACCESS_TYPE_NAMED_PROXY,
-        WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL, WINHTTP_AUTOPROXY_OPTIONS,
-        WINHTTP_AUTO_DETECT_TYPE_DHCP, WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WINHTTP_PROXY_INFO,
+        WinHttpCloseHandle, WinHttpGetProxyForUrl, WinHttpOpen, WINHTTP_ACCESS_TYPE_NAMED_PROXY, WINHTTP_ACCESS_TYPE_NO_PROXY,
+        WINHTTP_AUTOPROXY_AUTO_DETECT, WINHTTP_AUTOPROXY_CONFIG_URL, WINHTTP_AUTOPROXY_OPTIONS, WINHTTP_AUTO_DETECT_TYPE_DHCP,
+        WINHTTP_AUTO_DETECT_TYPE_DNS_A, WINHTTP_PROXY_INFO,
     };
 
-    /// Internet Options' auto-config: detect it, or the script's URL (NUL-ended).
-    struct Config {
-        detect: bool,
-        script: Option<Vec<u16>>,
-    }
-
-    /// A copy of a string WinHTTP allocated (with its NUL), which is then freed.
-    unsafe fn take(text: *mut u16) -> Option<Vec<u16>> {
-        if text.is_null() {
-            return None;
-        }
-        let len = (0..).take_while(|&at| *text.add(at) != 0).count();
-        let copy = std::slice::from_raw_parts(text, len + 1).to_vec();
-        GlobalFree(text.cast());
-        Some(copy)
-    }
-
-    // Read once, as the Python backend does: a changed setting is seen at the next start.
-    static CONFIG: OnceLock<Config> = OnceLock::new();
-    let config = CONFIG.get_or_init(|| unsafe {
-        let mut ie: WINHTTP_CURRENT_USER_IE_PROXY_CONFIG = std::mem::zeroed();
-        if WinHttpGetIEProxyConfigForCurrentUser(&mut ie) == 0 {
-            return Config { detect: false, script: None };
-        }
-        let script = take(ie.lpszAutoConfigUrl).filter(|url| url.len() > 1);
-        take(ie.lpszProxy);
-        take(ie.lpszProxyBypass);
-        Config { detect: ie.fAutoDetect != 0, script }
-    });
+    let config = config();
     if !config.detect && config.script.is_none() {
         return String::new();
     }

@@ -1,14 +1,11 @@
 //! What a window asks about the app itself (`panel_api_window.py`): its version, its
 //! patch notes, the What's new window and whether this copy is installed.
 //!
-//! ponytail: `get_app_update_status` is still the Python backend's: it reads the
-//! background updater's state, which lives in that process until the updater moves.
-//! ponytail: the feed is asked the PC's usual way only. Python's extra tries for a PC whose
-//! DNS or certificates fail (its proxy opener, DNS over HTTPS, the wrong-clock hint) move
-//! here with the update check.
+//! ponytail: the feed has one extra try, DNS over HTTPS. Python's other one (its proxy
+//! opener with the Windows certificate store) is how every request here already goes.
 
 mod install;
-mod notes;
+pub(super) mod notes;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,8 +15,9 @@ use reqwest::{Method, Url};
 use serde_json::{json, Map, Value};
 
 use super::plugin_store::installed;
-use super::settings::load;
-use super::site::{app_version, resolve_base_url, send, USER_AGENT};
+use super::settings::{load, set_fields};
+use super::site::{app_version, resolve_base_url, send, Refused, USER_AGENT};
+use super::update::{net_fail, network};
 use super::Api;
 use crate::store::kv;
 use crate::store::pyjson::{py_eq, pystr, truthy};
@@ -37,16 +35,34 @@ pub async fn get_version(_api: Arc<Api>, _args: Fields) -> Result<Value, String>
     Ok(app_version().into())
 }
 
-/// `fetch_remote_payload`: the feed's app-version object, or why there is none (no
-/// reason for an empty one). A busy server, a timeout or a dropped connection is asked
-/// again, waiting a little longer each time.
-async fn feed(api: &Api, mut timeout: Duration, tries: u64) -> Result<Map<String, Value>, Option<String>> {
-    // `DUCKY_UPDATE_BASE_URL`: a local update rehearsal's feed.
+/// What asking the feed gave.
+pub(super) struct Fed {
+    /// The feed's app-version object, or why there is none (no reason for an empty one).
+    pub payload: Result<Fields, Option<String>>,
+    /// `doh` when the PC's own DNS could not find the site and a public resolver did.
+    pub fallback: &'static str,
+    /// Where a failed request died (`Failure::stage`); empty otherwise.
+    pub stage: &'static str,
+}
+
+/// `update_base_url`: the site the feed is on (`DUCKY_UPDATE_BASE_URL`: a local update
+/// rehearsal's).
+pub(super) async fn update_base(api: &Api) -> Result<String, Refused> {
     let rehearsal = std::env::var("DUCKY_UPDATE_BASE_URL").ok().map(|url| url.trim().trim_end_matches('/').to_string()).filter(|url| !url.is_empty());
-    let base = match rehearsal {
-        Some(base) => base,
-        None => resolve_base_url(api).await.map_err(|refused| Some(refused.message))?,
-    };
+    match rehearsal {
+        Some(base) => Ok(base),
+        None => resolve_base_url(api).await,
+    }
+}
+
+/// `fetch_remote_payload`. A busy server, a timeout or a dropped connection is asked
+/// again, waiting a little longer each time.
+pub(super) async fn feed(api: &Api, timeout: Duration, tries: u64) -> Fed {
+    asked(api, timeout, tries).await.unwrap_or_else(|error| Fed { payload: Err(error), fallback: "", stage: "" })
+}
+
+async fn asked(api: &Api, mut timeout: Duration, tries: u64) -> Result<Fed, Option<String>> {
+    let base = update_base(api).await.map_err(|refused| Some(refused.message))?;
     let unusable = |error: String| Some(format!("Can't reach the update server. {error}"));
     let url = Url::parse(&format!("{base}{FEED_PATH}")).map_err(|error| unusable(error.to_string()))?;
     let host = url.host_str().unwrap_or(&base).to_lowercase();
@@ -55,16 +71,33 @@ async fn feed(api: &Api, mut timeout: Duration, tries: u64) -> Result<Map<String
     for (name, value) in [("accept", "application/json"), ("content-type", "application/json"), ("origin", base.as_str()), ("user-agent", USER_AGENT.as_str())] {
         headers.insert(name, HeaderValue::from_str(value).map_err(|error| unusable(error.to_string()))?);
     }
+    let answered = |raw: &str, fallback| Ok(Fed { payload: notes::feed_payload(raw), fallback, stage: "" });
     for attempt in 1..=tries {
         let failure = match send(Method::POST, url.clone(), headers.clone(), Some("{}".to_string()), timeout).await {
-            Ok(answer) if (200..300).contains(&answer.status) => return notes::feed_payload(&answer.raw),
+            Ok(answer) if (200..300).contains(&answer.status) => return answered(&answer.raw, ""),
             Ok(answer) => notes::Failure::Status(answer.status),
             Err(refused) => notes::Failure::Network(refused.message),
         };
-        if attempt == tries || !failure.retryable() {
-            return Err(unusable(failure.explain(&host)));
+        let stage = failure.stage();
+        if stage == "dns" {
+            // The PC's DNS (and its proxy) can't find the site: look it up over HTTPS.
+            if let Some(address) = network::doh_resolve(&host).await {
+                let again = network::send_pinned(address, Method::POST, url.clone(), headers.clone(), Some("{}".to_string()), timeout).await;
+                if let Some(answer) = again.ok().filter(|answer| (200..300).contains(&answer.status)) {
+                    return answered(&answer.raw, "doh");
+                }
+            }
         }
-        if failure.stage() == "timeout" {
+        if let (true, notes::Failure::Network(text)) = (failure.cert(), &failure) {
+            let error = network::clock_skew_message(&base).await.unwrap_or_else(|| text.trim_start_matches("Network error: ").to_string());
+            return Ok(Fed { payload: Err(Some(error)), fallback: "", stage: "" });
+        }
+        if attempt == tries || !failure.retryable() {
+            let status = if let notes::Failure::Status(status) = failure { status } else { 0 };
+            net_fail(api, "update_check", stage, status).await;
+            return Ok(Fed { payload: Err(unusable(failure.explain(&host))), fallback: "", stage });
+        }
+        if stage == "timeout" {
             timeout = timeout.max(Duration::from_secs(15)); // a slow link: the next try waits longer
         }
         tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
@@ -72,26 +105,36 @@ async fn feed(api: &Api, mut timeout: Duration, tries: u64) -> Result<Map<String
     Err(None)
 }
 
+/// The patch notes kept here, when they are a list. The copy is a cache: a store that
+/// can't be read or written only means asking again.
+pub(super) async fn kept_notes(api: &Api) -> Option<Value> {
+    let store = api.repos.store().await.ok()?;
+    kv::get_doc(store, "cache_docs", NOTES_KEY.to_string()).await.ok().flatten().filter(|doc| doc["versions"].is_array())
+}
+
+/// Keep `versions` as the running build's notes (written only when they changed).
+pub(super) async fn keep_notes(api: &Api, versions: &[Value]) {
+    let doc = json!({"version": app_version(), "versions": versions});
+    let Ok(store) = api.repos.store().await else { return };
+    let kept = kv::get_doc(store, "cache_docs", NOTES_KEY.to_string()).await.ok().flatten();
+    if !kept.is_some_and(|kept| py_eq(&kept, &doc)) {
+        let _ = kv::set_doc(store, "cache_docs", NOTES_KEY.to_string(), doc).await;
+    }
+}
+
 /// `get_app_patch_notes`: the Store's notes for the running build, from the copy kept
 /// here. The site is asked only after a version bump; offline answers the old copy.
 async fn patch_notes(api: &Api) -> Value {
-    // The copy is a cache: a store that can't be read or written only means asking again.
-    let store = api.repos.store().await.ok();
-    let kept = match store {
-        Some(store) => kv::get_doc(store, "cache_docs", NOTES_KEY.to_string()).await.ok().flatten(),
-        None => None,
-    };
-    let cached = kept.as_ref().filter(|doc| doc["versions"].is_array());
+    let kept = kept_notes(api).await;
+    let cached = kept.as_ref();
     if let Some(doc) = cached.filter(|doc| notes::stripped(doc.get("version")) == app_version()) {
         return json!({"versions": doc["versions"], "cached": true, "error": null});
     }
-    match feed(api, Duration::from_secs(8), 5).await {
+    match feed(api, Duration::from_secs(8), 5).await.payload {
         Ok(payload) => {
-            let doc = json!({"version": app_version(), "versions": notes::release_versions(&payload)});
-            if let Some(store) = store.filter(|_| !kept.as_ref().is_some_and(|kept| py_eq(kept, &doc))) {
-                let _ = kv::set_doc(store, "cache_docs", NOTES_KEY.to_string(), doc.clone()).await;
-            }
-            json!({"versions": doc["versions"], "cached": false, "error": null})
+            let versions = notes::release_versions(&payload);
+            keep_notes(api, &versions).await;
+            json!({"versions": versions, "cached": false, "error": null})
         }
         Err(error) => match cached {
             Some(doc) => json!({"versions": doc["versions"], "cached": true, "error": error}),
@@ -107,18 +150,21 @@ pub async fn get_app_patch_notes(api: Arc<Api>, _args: Fields) -> Result<Value, 
 /// `starter_llm_onboard_pending`: true before a fresh install's first setup finished.
 /// A PC that already used Ducky (a finished walkthrough, a plugin beyond the starter
 /// gateways) is not fresh.
-/// ponytail: Python also saves that answer for a used PC (`starter_llm_gateways_seeded`);
-/// here it is worked out each time, and Python's setup saves it at its next start.
+/// A used PC's answer is saved (`starter_llm_gateways_seeded`), so it is worked out once.
 async fn fresh_install(api: &Api) -> bool {
     let Ok(settings) = load(api).await else { return false };
-    if truthy(settings.get("starter_llm_gateways_seeded")) || truthy(settings.get("walkthrough_completed")) {
+    if truthy(settings.get("starter_llm_gateways_seeded")) {
         return false;
     }
     let enabled = settings.get("enabled_uefn_plugins").as_array().map(Vec::as_slice).unwrap_or_default();
     let mut used: Vec<String> = enabled.iter().map(|id| pystr(id).trim().to_lowercase()).filter(|id| !id.is_empty()).collect();
     let root = api.repos.data_dir().join("uefn_plugins");
     used.extend(tokio::task::spawn_blocking(move || installed::on_disk(&root)).await.unwrap_or_default());
-    used.iter().all(|id| STARTER_GATEWAYS.contains(&id.as_str()))
+    let fresh = !truthy(settings.get("walkthrough_completed")) && used.iter().all(|id| STARTER_GATEWAYS.contains(&id.as_str()));
+    if !fresh {
+        let _ = set_fields(api, vec![("starter_llm_gateways_seeded", true.into())]).await;
+    }
+    fresh
 }
 
 /// The panel's start-up question: show the What's new window, and with which versions.
