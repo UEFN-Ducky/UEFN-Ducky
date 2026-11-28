@@ -11,6 +11,7 @@ pub mod conn;
 pub mod duckies;
 pub mod events;
 pub mod http;
+pub mod ledger;
 mod local_chats;
 pub mod messages;
 pub mod misc;

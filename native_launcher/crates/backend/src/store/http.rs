@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{account, blocking, duckies, events, misc, seal, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
+use super::{account, blocking, duckies, events, ledger, misc, seal, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -249,6 +249,36 @@ async fn events(s: &Store, repo: &str, function: &str, a: &Value) -> Result<Opti
     }))
 }
 
+/// The change journal's storage.
+async fn ledger(s: &Store, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (project, run_id, digest) = (text(a, "project_id"), text(a, "run_id"), text(a, "digest"));
+    let since = a["since"].as_f64().unwrap_or(0.0);
+    Ok(Some(match function {
+        "close_stale_runs" => {
+            let ids = a["run_ids"].is_array().then(|| texts(a, "run_ids"));
+            json!(ledger::close_stale_runs(s, a["now"].as_f64(), a["started_before"].as_f64(), ids).await?)
+        }
+        "run_get" => json!(ledger::run_get(s, project, run_id).await?),
+        "runs_with_status" => json!(ledger::runs_with_status(s, project, texts(a, "statuses")).await?),
+        "active_work" => json!(ledger::active_work(s, since, a["max_files"].as_u64().unwrap_or(8) as usize).await?),
+        "runs_docs" => json!(ledger::runs_docs(s, project).await?),
+        "runs_brief" => json!(ledger::runs_brief(s, project).await?),
+        "run_put" => json!(ledger::run_put(s, project, a["run"].clone()).await?),
+        "run_delete" => json!(ledger::run_delete(s, project, run_id).await?),
+        "catalog" => Value::Object(ledger::catalog(s, project).await?),
+        "latest_entry_for_path" => json!(ledger::latest_entry_for_path(s, project, texts(a, "paths"), since).await?),
+        "index_get" => Value::Object(ledger::index_get(s, project).await?),
+        "index_replace" => json!(ledger::index_replace(s, project, map(a, "index")).await?),
+        "blob_put" => json!(ledger::blob_put(s, text(a, "text"), a["digest"].as_str().map(str::to_string)).await?),
+        "blob_get" => json!(ledger::blob_get(s, digest).await?),
+        "blob_exists" => json!(ledger::blob_exists(s, digest).await?),
+        "sweep_blobs" => json!(ledger::sweep_blobs(s).await?),
+        "watch_get" => Value::Object(ledger::watch_get(s, project).await?),
+        "watch_replace" => json!(ledger::watch_replace(s, project, map(a, "seen")).await?),
+        _ => return Ok(None),
+    }))
+}
+
 /// Search tokens under a key the test hands over.
 fn tokens(function: &str, a: &Value) -> Result<Option<Value>> {
     let key = || tokens::Key::new(bytes(a, "key"));
@@ -292,6 +322,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "chats" => return chats(open, data_dir, function, a).await,
         "local_chats" => return local_chats(open, data_dir, function, a).await,
         "events" | "perf" => return events(&open.store, repo, function, a).await,
+        "ledger" => return ledger(&open.store, function, a).await,
         "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
         _ => {}
