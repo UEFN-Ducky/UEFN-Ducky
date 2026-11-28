@@ -5,10 +5,12 @@
 //! backend still owns the schema: nothing here creates or upgrades tables.
 
 pub mod account;
+pub mod chat_messages;
 pub mod chats;
 pub mod conn;
 pub mod duckies;
 pub mod http;
+pub mod messages;
 pub mod misc;
 pub mod pyjson;
 pub mod seal;

@@ -25,6 +25,8 @@ sha2 = "0.10"
 # Search tokens and payload names are keyed BLAKE2b; words are folded as Python folds
 # them (store/tokens.rs).
 blake2 = "0.10"
+# Large message fields are stored zlib-compressed (store/messages.rs).
+flate2 = "1"
 caseless = "0.2"
 unicode-normalization = "0.1"
 unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }

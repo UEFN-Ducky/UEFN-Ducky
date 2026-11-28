@@ -20,18 +20,19 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::{json, Map, Value};
 
 use super::duckies::Who;
+use super::messages::{self, opened, sealed};
 use super::pyjson::{float, pystr, truthy};
 use super::tokens::Key;
 use super::{now, seal, Error, Result, Store};
 
 /// Deleted chat and folder ids, kept in `workspace_state` so a late save from any
 /// process can't re-create them.
-const DELETED_CHAT: &str = "deleted_chat:";
+pub(super) const DELETED_CHAT: &str = "deleted_chat:";
 const DELETED_FOLDER: &str = "deleted_folder:";
 const DELETED_KEEP_S: f64 = 30.0 * 86400.0;
 
 /// `Conversation.to_dict()` keys that are real columns; everything else lives in `state`.
-const COLUMNS: [&str; 15] = [
+pub(super) const COLUMNS: [&str; 15] = [
     "folder_id",
     "title",
     "created",
@@ -50,31 +51,13 @@ const COLUMNS: [&str; 15] = [
 ];
 
 pub struct Chats {
-    store: Store,
+    pub(super) store: Store,
     /// Chat key by account: read (and unsealed) once per process.
     keys: Mutex<HashMap<String, Key>>,
 }
 
 async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
     tokio::task::spawn_blocking(work).await.unwrap_or_else(|_| Err(Error("the call panicked".into())))
-}
-
-/// Plaintext of a stored value: sealed ones are opened, rows from before pass as they are.
-fn opened(stored: &str, who: &Who) -> Result<String> {
-    if seal::is_sealed(stored) {
-        seal::open_text(stored, &who.entropy)
-    } else {
-        Ok(stored.to_string())
-    }
-}
-
-/// `text` sealed for the account; an empty value stays empty (nothing to hide).
-fn sealed(text: &str, who: &Who) -> Result<String> {
-    if text.is_empty() {
-        Ok(String::new())
-    } else {
-        seal::seal_text(text, &who.entropy)
-    }
 }
 
 /// A column as JSON, the way Python's sqlite3 hands it over.
@@ -87,7 +70,7 @@ fn cell(value: ValueRef) -> Value {
     }
 }
 
-fn text(r: &Row, name: &str) -> rusqlite::Result<String> {
+pub(super) fn text(r: &Row, name: &str) -> rusqlite::Result<String> {
     Ok(r.get::<_, Option<String>>(name)?.unwrap_or_default())
 }
 
@@ -101,7 +84,11 @@ fn folder(r: &Row, who: &Who) -> rusqlite::Result<Value> {
     Ok(Value::Object(out))
 }
 
-fn owned(conn: &Connection, conv_id: &str, account: &str) -> rusqlite::Result<bool> {
+pub(super) fn was_deleted(conn: &Connection, conv_id: &str) -> rusqlite::Result<bool> {
+    conn.prepare("SELECT 1 FROM workspace_state WHERE key=?1")?.exists([format!("{DELETED_CHAT}{conv_id}")])
+}
+
+pub(super) fn owned(conn: &Connection, conv_id: &str, account: &str) -> rusqlite::Result<bool> {
     conn.prepare("SELECT 1 FROM conversations WHERE id=?1 AND account_id=?2")?.exists([conv_id, account])
 }
 
@@ -126,11 +113,11 @@ fn after(prefix: &str) -> String {
     format!("{};", &prefix[..prefix.len() - 1])
 }
 
-fn row_count(conn: &Connection, conv_id: &str) -> rusqlite::Result<i64> {
+pub(super) fn row_count(conn: &Connection, conv_id: &str) -> rusqlite::Result<i64> {
     conn.query_row("SELECT coalesce(max(seq), -1) + 1 FROM messages WHERE conv_id=?1", [conv_id], |r| r.get(0))
 }
 
-fn msg_rev(conn: &Connection, conv_id: &str, account: &str) -> rusqlite::Result<Option<i64>> {
+pub(super) fn msg_rev(conn: &Connection, conv_id: &str, account: &str) -> rusqlite::Result<Option<i64>> {
     conn.query_row("SELECT msg_rev FROM conversations WHERE id=?1 AND account_id=?2", [conv_id, account], |r| r.get(0))
         .optional()
 }
@@ -144,8 +131,8 @@ fn snapshot_text(conn: &Connection, hash: &str) -> rusqlite::Result<String> {
     Ok(kept.unwrap_or_default())
 }
 
-/// One row as the document it was saved as, without its messages.
-fn doc(conn: &Connection, r: &Row, who: &Who) -> rusqlite::Result<Value> {
+/// One row as the document it was saved as.
+fn doc(conn: &Connection, r: &Row, who: &Who, with_messages: bool) -> rusqlite::Result<Value> {
     let state = text(r, "state")?;
     let state = if state.is_empty() { "{}".to_string() } else { opened(&state, who)? };
     let mut doc = match serde_json::from_str(&state) {
@@ -160,7 +147,8 @@ fn doc(conn: &Connection, r: &Row, who: &Who) -> rusqlite::Result<Value> {
     doc.insert("is_group".into(), json!(is_group));
     doc.insert("id".into(), cell(r.get_ref("id")?));
     doc.insert("skill_snapshot".into(), json!(snapshot_text(conn, &text(r, "skill_snapshot_hash")?)?));
-    doc.insert("messages".into(), json!([]));
+    let rows = if with_messages { messages::messages(conn, &text(r, "id")?, who, 0, None)? } else { Vec::new() };
+    doc.insert("messages".into(), rows.into_iter().map(|(_, _, message)| message).collect());
     Ok(Value::Object(doc))
 }
 
@@ -349,14 +337,14 @@ impl Chats {
 
     // ----------------------------------------------------------------------- conversations
 
-    pub async fn conv_get(&self, who: Who, conv_id: String, project_id: Option<String>) -> Result<Option<Value>> {
+    pub async fn conv_get(&self, who: Who, conv_id: String, project_id: Option<String>, with_messages: bool) -> Result<Option<Value>> {
         self.store
             .readers
             .read(move |conn| {
                 let mut stmt = conn
                     .prepare("SELECT * FROM conversations WHERE id=?1 AND account_id=?2 AND (?3 IS NULL OR project_id=?3)")?;
                 let mut rows = stmt.query(params![conv_id, who.id, project_id])?;
-                rows.next()?.map(|r| doc(conn, r, &who)).transpose()
+                rows.next()?.map(|r| doc(conn, r, &who, with_messages)).transpose()
             })
             .await
     }
@@ -379,24 +367,24 @@ impl Chats {
             .await
     }
 
-    pub async fn conv_list(&self, who: Who, project_id: String) -> Result<Vec<Value>> {
+    pub async fn conv_list(&self, who: Who, project_id: String, with_messages: bool) -> Result<Vec<Value>> {
         self.store
             .readers
             .read(move |conn| {
                 conn.prepare("SELECT * FROM conversations WHERE account_id=?1 AND project_id=?2 ORDER BY sort_order, updated DESC, id")?
-                    .query_map([&who.id, &project_id], |r| doc(conn, r, &who))?
+                    .query_map([&who.id, &project_id], |r| doc(conn, r, &who, with_messages))?
                     .collect()
             })
             .await
     }
 
     /// `[(project id, chat), ...]`.
-    pub async fn conv_list_all_projects(&self, who: Who) -> Result<Vec<(String, Value)>> {
+    pub async fn conv_list_all_projects(&self, who: Who, with_messages: bool) -> Result<Vec<(String, Value)>> {
         self.store
             .readers
             .read(move |conn| {
                 conn.prepare("SELECT * FROM conversations WHERE account_id=?1 ORDER BY project_id, id")?
-                    .query_map([&who.id], |r| Ok((text(r, "project_id")?, doc(conn, r, &who)?)))?
+                    .query_map([&who.id], |r| Ok((text(r, "project_id")?, doc(conn, r, &who, with_messages)?)))?
                     .collect()
             })
             .await
@@ -427,7 +415,7 @@ impl Chats {
                     }
                     _ => false,
                 };
-                if newer { doc(conn, r, &who).map(Some) } else { Ok(None) }
+                if newer { doc(conn, r, &who, false).map(Some) } else { Ok(None) }
             })
             .await
     }

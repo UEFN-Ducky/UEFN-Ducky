@@ -16,6 +16,7 @@ use serde_json::{json, Map, Value};
 use tokio::sync::OnceCell;
 
 use super::settings::Settings;
+use super::chat_messages::Save;
 use super::chats::Chats;
 use super::{account, duckies, misc, seal, secrets, tokens, Error, Result, Store};
 
@@ -109,6 +110,7 @@ async fn chats(open: &Open, data_dir: &std::path::Path, function: &str, a: &Valu
     let (s, c) = (&open.store, &open.chats);
     let (conv, project) = (text(a, "conv_id"), text(a, "project_id"));
     let int = |name: &str| a[name].as_i64().unwrap_or(0);
+    let flag = |name: &str| a[name].as_bool().unwrap_or(false);
     match function {
         "conv_account" => return Ok(Some(json!(c.conv_account(conv).await?))),
         "conv_count" => return Ok(Some(json!(c.conv_count(project).await?))),
@@ -141,9 +143,37 @@ async fn chats(open: &Open, data_dir: &std::path::Path, function: &str, a: &Valu
         "folders_replace" => {
             json!(c.folders_replace(who(s, data_dir).await?, project, a["folders"].as_array().cloned().unwrap_or_default()).await?)
         }
-        "conv_get" => json!(c.conv_get(who(s, data_dir).await?, conv, a["project_id"].as_str().map(str::to_string)).await?),
-        "conv_list" => json!(c.conv_list(who(s, data_dir).await?, project).await?),
-        "conv_list_all_projects" => json!(c.conv_list_all_projects(who(s, data_dir).await?).await?),
+        "conv_get" => {
+            let project = a["project_id"].as_str().map(str::to_string);
+            json!(c.conv_get(who(s, data_dir).await?, conv, project, flag("with_messages")).await?)
+        }
+        "conv_list" => json!(c.conv_list(who(s, data_dir).await?, project, flag("with_messages")).await?),
+        "conv_list_all_projects" => json!(c.conv_list_all_projects(who(s, data_dir).await?, flag("with_messages")).await?),
+        "conv_save" => {
+            let save = Save {
+                project_id: project,
+                doc: map(a, "doc"),
+                messages: a["messages"].as_array().cloned(),
+                dirty_from: a["dirty_from"].as_i64(),
+                expect_rev: a["expect_rev"].as_i64(),
+                base_hashes: a["base_hashes"].is_array().then(|| texts(a, "base_hashes")),
+                dirty_rows: serde_json::from_value(a["dirty_rows"].clone()).unwrap_or_default(),
+            };
+            Value::Object(c.conv_save(who(s, data_dir).await?, save).await?)
+        }
+        "upsert_run_message" => {
+            let (updated, stats) = (a["updated"].as_f64().unwrap_or(0.0), a["stats"].as_object().cloned());
+            c.upsert_run_message(who(s, data_dir).await?, conv, text(a, "run_id"), a["message"].clone(), updated, stats).await?
+        }
+        "messages_get" => json!(c.messages_get(who(s, data_dir).await?, conv).await?),
+        "messages_get_rev" => json!(c.messages_get_rev(who(s, data_dir).await?, conv).await?),
+        "messages_range" => json!(c.messages_range(who(s, data_dir).await?, conv, int("start"), a["stop"].as_i64()).await?),
+        "messages_since" => json!(c.messages_since(who(s, data_dir).await?, conv, int("seq")).await?),
+        "last_reply" => json!(c.last_reply(who(s, data_dir).await?, conv).await?),
+        "search_messages" => {
+            let limit = a["limit"].as_i64().unwrap_or(200);
+            json!(c.search_messages(who(s, data_dir).await?, project, text(a, "query"), limit).await?)
+        }
         "conv_if_settings_newer" => {
             json!(c.conv_if_settings_newer(who(s, data_dir).await?, conv, a["edited"].as_f64().unwrap_or(0.0)).await?)
         }

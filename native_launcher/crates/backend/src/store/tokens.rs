@@ -28,9 +28,19 @@ impl Key {
     }
 }
 
-/// Python's `str.split()` pieces (its whitespace has four control characters more).
-fn split(text: &str) -> impl Iterator<Item = &str> {
-    text.split(|c: char| c.is_whitespace() || ('\x1c'..='\x1f').contains(&c)).filter(|piece| !piece.is_empty())
+/// Python's whitespace: Unicode's, and four control characters more.
+fn is_space(ch: char) -> bool {
+    ch.is_whitespace() || ('\x1c'..='\x1f').contains(&ch)
+}
+
+/// Python's `str.split()` pieces.
+pub fn split(text: &str) -> impl Iterator<Item = &str> {
+    text.split(is_space).filter(|piece| !piece.is_empty())
+}
+
+/// Python's `str.strip()`.
+pub fn strip(text: &str) -> &str {
+    text.trim_matches(is_space)
 }
 
 /// The words search matches on: case and accents folded, `_` and punctuation split.
