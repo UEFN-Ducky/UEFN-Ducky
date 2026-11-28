@@ -466,11 +466,12 @@ def main() -> None:
         from frontend.runtime_smoke import run as run_runtime_smoke
 
         raise SystemExit(run_runtime_smoke(sys.argv[2]))
-    if len(sys.argv) == 3 and sys.argv[1] in ("--tcc-probe", "--base-url-probe"):
+    if len(sys.argv) == 3 and sys.argv[1] in ("--tcc-probe", "--base-url-probe", "--update-probe"):
         _ensure_repo_on_path()
         from frontend import ci_probe
 
-        raise SystemExit((ci_probe.tcc if sys.argv[1] == "--tcc-probe" else ci_probe.base_url)(sys.argv[2]))
+        probe = {"--tcc-probe": ci_probe.tcc, "--base-url-probe": ci_probe.base_url, "--update-probe": ci_probe.update}
+        raise SystemExit(probe[sys.argv[1]](sys.argv[2]))
     if len(sys.argv) == 3 and sys.argv[1] == "--remote-uefn-probe":
         _ensure_repo_on_path()
         from frontend import ci_probe

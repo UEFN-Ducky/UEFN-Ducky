@@ -159,6 +159,20 @@ def test_restart_downloads_swaps_and_starts_the_watchdog(tmp_path: Path, monkeyp
     assert path == app and kw["script"] is updater._MAC_WATCHDOG_SH and kw["previous"].name == "UEFN Ducky.app.prev"
 
 
+@pytest.mark.parametrize("plat,confirms", [("darwin", True), ("linux", True), ("win32", False)])
+def test_a_started_mac_app_confirms_its_swap(monkeypatch, plat: str, confirms: bool) -> None:
+    """The watchdog keeps a swapped-in .app only once it confirms; without it every Mac
+    update was rolled back after HEALTHY_WITHIN_S."""
+    from frontend import app_versions, session_services
+
+    confirmed = []
+    monkeypatch.setattr(app_versions, "mark_ready", lambda version: None)
+    monkeypatch.setattr(session_services, "_confirm_appimage_swap_at_page_started", confirmed.append)
+    monkeypatch.setattr(session_services.sys, "platform", plat)
+    session_services._mark_ready({})
+    assert bool(confirmed) is confirms
+
+
 def _posix_sh() -> str | None:
     """/bin/sh, or Git for Windows' bash (System32's bash.exe is WSL: other paths)."""
     if os.name != "nt":

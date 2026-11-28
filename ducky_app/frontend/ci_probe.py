@@ -92,6 +92,35 @@ def base_url(output: str) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- update
+# ``--update-probe out.json``: what the update row reads (this copy's version, the feed's,
+# last_failure). With DUCKY_UPDATE_APPLY=1 on a CI runner it also presses Restart
+# (updater.apply_update: download, verify, swap, watchdog). macos-install-check's update and
+# rollback jobs drive the app with it; DUCKY_UPDATE_BASE_URL points it at their test feed.
+
+UPDATE_APPLY_ENV = "DUCKY_UPDATE_APPLY"
+_UPDATE_KEYS = ("local_version", "remote_version", "update_available", "feed_status", "error", "last_failure")
+
+
+def update(output: str) -> int:
+    import os
+
+    from frontend import updater
+
+    status = updater.linux_update_status(kind="app")
+    report: dict[str, Any] = {k: status.get(k) for k in _UPDATE_KEYS}
+    if os.environ.get(UPDATE_APPLY_ENV) == "1":
+        if on_ci_runner():
+            report["apply"] = updater.apply_update()
+        else:
+            report["apply"] = {"ok": False, "error": f"{UPDATE_APPLY_ENV} works only on a CI runner (GITHUB_ACTIONS, DUCKY_SANDBOX=1)"}
+    Path(output).write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    applied = report.get("apply")
+    print(f"update-probe: {report['local_version']} -> {report['remote_version']}"
+          + (f", apply {'ok' if applied.get('ok') else 'FAILED: ' + str(applied.get('error'))}" if applied else ""))
+    return 0 if not applied or applied.get("ok") is True else 1
+
+
 # --------------------------------------------------------------------------- remote UEFN
 # ``--remote-uefn-probe <outdir>`` (a Mac runner): sign in from DUCKY_TEST_ACCOUNT_TOKEN, held
 # in memory only, and have the account's online PC run ``uefn_ci_check`` through the Ducky

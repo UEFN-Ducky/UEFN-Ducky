@@ -23,13 +23,15 @@ def _mark_ready(ctx: dict[str, Any]) -> None:
     from frontend import app_versions
 
     app_versions.mark_ready(str(__version__))
-    if sys.platform.startswith("linux"):
+    # UEFN Ducky.app swaps under the same watchdog as the AppImage (updater_macos): without
+    # this a Mac update that started fine was still rolled back after HEALTHY_WITHIN_S.
+    if sys.platform.startswith("linux") or sys.platform == "darwin":
         _confirm_appimage_swap_at_page_started(str(__version__))
 
 
 def _confirm_appimage_swap_at_page_started(version: str) -> None:
-    """A swapped-in AppImage counts as good only once its page ran (boot stage page_started),
-    not when the backend booted: a build whose window never opens is rolled back."""
+    """A swapped-in AppImage or .app counts as good only once its page ran (boot stage
+    page_started), not when the backend booted: a build whose window never opens is rolled back."""
     from frontend import app_versions, boot_report
 
     def on_stage(name: str, _ms: int) -> None:
