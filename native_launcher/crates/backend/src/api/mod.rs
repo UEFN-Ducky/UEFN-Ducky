@@ -54,6 +54,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         chats::delete_conversation => Anyone,
         chats::move_conversation => Anyone,
         chats::apply_sidebar_layout => Anyone,
+        chats::group_set_leader => Anyone,
+        chats::group_remove => Anyone,
         chats::list_local_chats => Anyone,
     }
 }

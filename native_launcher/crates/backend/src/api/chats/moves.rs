@@ -177,7 +177,7 @@ impl Sidebar<'_> {
 
     /// `chats.conversations.move_conversation`: file a chat in a folder. Into Archive or
     /// back out, the chats it started go with it; a group goes and comes back whole.
-    async fn place(&self, conv_id: &str, folder_id: &str) -> Result<(), String> {
+    pub(super) async fn place(&self, conv_id: &str, folder_id: &str) -> Result<(), String> {
         let Some(mut chat) = self.chat(conv_id).await? else { return Err(format!("Conversation not found: {}", repr(&json!(conv_id)))) };
         if !self.folder_known(folder_id).await? {
             return Err(format!("Unknown folder: {}", repr(&json!(folder_id))));

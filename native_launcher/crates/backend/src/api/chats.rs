@@ -18,9 +18,11 @@ use crate::store::duckies::Who;
 use crate::store::now;
 use crate::store::pyjson::{float, int, pystr, truthy};
 
+mod groups;
 mod layout;
 mod moves;
 mod teams;
+pub use groups::{group_remove, group_set_leader};
 pub use layout::apply_sidebar_layout;
 pub use moves::{delete_conversation, delete_folder, move_conversation};
 
