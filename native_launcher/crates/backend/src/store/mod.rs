@@ -10,6 +10,7 @@ pub mod chats;
 pub mod conn;
 pub mod duckies;
 pub mod http;
+mod local_chats;
 pub mod messages;
 pub mod misc;
 pub mod pyjson;

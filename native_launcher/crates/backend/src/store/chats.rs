@@ -92,7 +92,7 @@ pub(super) fn owned(conn: &Connection, conv_id: &str, account: &str) -> rusqlite
     conn.prepare("SELECT 1 FROM conversations WHERE id=?1 AND account_id=?2")?.exists([conv_id, account])
 }
 
-fn mark_deleted(conn: &Connection, prefix: &str, ids: &[String], now: f64) -> rusqlite::Result<()> {
+pub(super) fn mark_deleted(conn: &Connection, prefix: &str, ids: &[String], now: f64) -> rusqlite::Result<()> {
     let mut insert = conn.prepare(
         "INSERT INTO workspace_state(key, value, updated) VALUES (?1, ?2, ?3) \
          ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated=excluded.updated",

@@ -181,6 +181,19 @@ async fn chats(open: &Open, data_dir: &std::path::Path, function: &str, a: &Valu
     }))
 }
 
+/// Chats made signed out, as the account signed in now sees them.
+async fn local_chats(open: &Open, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (s, c) = (&open.store, &open.chats);
+    let account = account::current(s).await?.id;
+    let ids = a["conv_ids"].is_array().then(|| texts(a, "conv_ids"));
+    Ok(Some(match function {
+        "waiting" => json!(c.waiting(account).await?),
+        "adopt" => c.adopt(who(s, data_dir).await?, ids).await?,
+        "remove" => json!(c.remove(account, ids.unwrap_or_default()).await?),
+        _ => return Ok(None),
+    }))
+}
+
 /// Search tokens under a key the test hands over.
 fn tokens(function: &str, a: &Value) -> Result<Option<Value>> {
     let key = || tokens::Key::new(bytes(a, "key"));
@@ -222,6 +235,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
     match repo {
         "duckies" => return duckies(&open.store, data_dir, function, a).await,
         "chats" => return chats(open, data_dir, function, a).await,
+        "local_chats" => return local_chats(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
         _ => {}
     }
