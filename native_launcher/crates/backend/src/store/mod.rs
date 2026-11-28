@@ -8,6 +8,7 @@ pub mod conn;
 pub mod http;
 pub mod misc;
 pub mod pyjson;
+pub mod seal;
 pub mod settings;
 pub mod writer;
 

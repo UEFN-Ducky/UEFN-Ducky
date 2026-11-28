@@ -17,6 +17,12 @@ serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }
 # bundled: one SQLite on every PC, built with FTS5 and JSON (chat and memory search need them).
 rusqlite = { version = "0.37", features = ["bundled"] }
+# Sealed rows (store/seal.rs): the Linux/macOS cipher, and the text framing everywhere.
+aes-gcm = "0.10"
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
 
 [dev-dependencies]
 supervisor = { path = "../supervisor" }

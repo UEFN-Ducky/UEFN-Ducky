@@ -10,11 +10,13 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use serde_json::{json, Map, Value};
 use tokio::sync::OnceCell;
 
 use super::settings::Settings;
-use super::{misc, Error, Result, Store};
+use super::{misc, seal, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -56,6 +58,16 @@ fn text(args: &Value, name: &str) -> String {
 
 fn map(args: &Value, name: &str) -> Map<String, Value> {
     args[name].as_object().cloned().unwrap_or_default()
+}
+
+/// A bytes argument, sent as base64.
+fn bytes(args: &Value, name: &str) -> Vec<u8> {
+    BASE64.decode(args[name].as_str().unwrap_or_default()).unwrap_or_default()
+}
+
+/// Work that blocks (sealing is a system call), off the async workers.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(work).await.unwrap_or_else(|_| Err(Error("the call panicked".into())))
 }
 
 fn texts(args: &Value, name: &str) -> Vec<String> {
@@ -106,6 +118,22 @@ async fn dispatch(open: &Open, repo: &str, function: &str, a: &Value) -> Result<
         ("misc", "digest_search") => {
             let limit = a["limit"].as_i64().unwrap_or(2000);
             json!(misc::digest_search(s, text(a, "query"), texts(a, "paths"), limit).await?)
+        }
+        ("seal", "seal_text") => {
+            let (text, entropy) = (text(a, "text"), bytes(a, "entropy"));
+            json!(blocking(move || seal::seal_text(&text, &entropy)).await?)
+        }
+        ("seal", "open_text") => {
+            let (stored, entropy) = (text(a, "stored"), bytes(a, "entropy"));
+            json!(blocking(move || seal::open_text(&stored, &entropy)).await?)
+        }
+        ("seal", "seal_bytes") => {
+            let (data, entropy) = (bytes(a, "data"), bytes(a, "entropy"));
+            json!(BASE64.encode(blocking(move || seal::seal_bytes(&data, &entropy)).await?))
+        }
+        ("seal", "open_bytes") => {
+            let (raw, entropy) = (bytes(a, "raw"), bytes(a, "entropy"));
+            json!(BASE64.encode(blocking(move || seal::open_bytes(&raw, &entropy)).await?))
         }
         _ => return Ok(None),
     }))
