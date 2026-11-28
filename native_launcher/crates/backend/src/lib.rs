@@ -13,6 +13,7 @@
 pub mod api;
 pub mod guard;
 pub mod perf;
+pub mod proc;
 pub mod store;
 
 use std::future::Future;
@@ -75,6 +76,9 @@ fn routes(api: Arc<api::Api>) -> Router {
         // Any usage event and a batch sent now: the page may only report its own few events.
         let usage = |State(api): State<Arc<api::Api>>, Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::usage::probe(&api, &what, &body).await) };
         routes = routes.merge(Router::new().route("/__rs/usage/{what}", post(usage)).with_state(Arc::clone(&api)));
+        // The health report's rules, on the processes and command lines a test makes up.
+        let health = |Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::health::check(&what, &body)) };
+        routes = routes.merge(Router::new().route("/__rs/health/{what}", post(health)).with_state(Arc::clone(&api)));
     }
     // A window's poll waits 20 s by design, and a sign-in waits for the person to approve
     // its code: each sets its own limit, and is no slow call.

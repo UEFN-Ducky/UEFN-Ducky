@@ -8,6 +8,7 @@ pub mod account;
 pub mod app_info;
 pub mod chats;
 pub mod file_kinds;
+pub mod health;
 pub mod plugin_store;
 pub mod project_files;
 pub mod project_paths;
@@ -92,6 +93,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         account::duckyos_cancel_login => Anyone,
         account::duckyos_open_site => Anyone,
         usage::usage_track => Anyone,
+        health::ducky_health_snapshot => ThisPc,
+        health::ducky_self_care_run => ThisPc,
     }
 }
 

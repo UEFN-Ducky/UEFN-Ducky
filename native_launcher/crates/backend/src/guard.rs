@@ -6,6 +6,7 @@
 //! covers the upgrade request only.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::extract::Request;
@@ -22,6 +23,36 @@ pub const SLOW: Duration = Duration::from_secs(2);
 /// Requests that ran longer than [`SLOW`] since this process started (shown by `/__rs/health`).
 pub static SLOW_CALLS: AtomicU64 = AtomicU64::new(0);
 
+/// The requests being answered now: ticket, path, since when.
+static IN_FLIGHT: Mutex<Vec<(u64, String, Instant)>> = Mutex::new(Vec::new());
+static TICKETS: AtomicU64 = AtomicU64::new(0);
+
+/// One request in [`IN_FLIGHT`], until it is answered or its caller goes.
+struct Flight(u64);
+
+impl Flight {
+    fn start(path: &str) -> Self {
+        let ticket = TICKETS.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut live) = IN_FLIGHT.lock() {
+            live.push((ticket, path.to_owned(), Instant::now()));
+        }
+        Self(ticket)
+    }
+}
+
+impl Drop for Flight {
+    fn drop(&mut self) {
+        if let Ok(mut live) = IN_FLIGHT.lock() {
+            live.retain(|flight| flight.0 != self.0);
+        }
+    }
+}
+
+/// Every request in flight: its path and how long it has run (the health report's `inflight`).
+pub fn in_flight() -> Vec<(String, Duration)> {
+    IN_FLIGHT.lock().map(|live| live.iter().map(|(_, path, since)| (path.clone(), since.elapsed())).collect()).unwrap_or_default()
+}
+
 /// Put `router`'s routes under `limit`.
 pub fn wrap(router: Router, limit: Duration) -> Router {
     router.layer(middleware::from_fn(move |req: Request, next: Next| guarded(req, next, limit)))
@@ -29,6 +60,7 @@ pub fn wrap(router: Router, limit: Duration) -> Router {
 
 async fn guarded(req: Request, next: Next, limit: Duration) -> Response {
     let path = req.uri().path().to_owned();
+    let _flight = Flight::start(&path);
     let started = Instant::now();
     let answer = tokio::time::timeout(limit, next.run(req)).await;
     let took = started.elapsed();
