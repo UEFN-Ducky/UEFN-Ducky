@@ -1,9 +1,10 @@
 """The Verse editor's calls: its switch, the Problems list's cache, a file's history, the
-shadow ``.vproject``, its verse-lsp sessions, the project scan and UEFN's workflow server. The same answer, the same rows, the same
-events and the same files from both backends on a fixture island. The verse-lsp is a
-stand-in built with the backend (never Epic's, never one found on this PC), the workflow
-server is a stand-in in this file (never a running UEFN), and nothing reads the person's
-own islands."""
+shadow ``.vproject``, its verse-lsp sessions, the project scan, UEFN's workflow server
+and revision control. The same answer, the same rows, the same events and the same files
+from both backends on a fixture island. The verse-lsp, ``lore.exe`` and ``urc.exe`` are
+stand-ins built with the backend (never Epic's, never ones found on this PC), the
+workflow server is a stand-in in this file (never a running UEFN), and nothing reads the
+person's own islands."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import os
 import shutil
 import socket
 import struct
+import sys
 import threading
 import time
 from pathlib import Path
@@ -771,3 +773,271 @@ def test_no_workflow_server_is_an_error_in_the_status(workflow, editor):
     for status, reply in answers:
         assert status == 200 and reply["ok"] is True and reply["result"].pop("error"), reply  # in the OS's own words
     assert answers[0] == answers[1] and answers[0][1]["result"]["connected"] is False
+
+
+_NO_WINE = pytest.mark.skipif(
+    sys.platform.startswith("linux"),
+    reason="on Linux lore.exe runs inside UEFN's Wine prefix, which the Rust backend does not look up yet",
+)
+_PAD = chr(0x3164)  # the invisible filler Epic pads display names with
+_LORE = {
+    "status": (
+        "Repository r1\nOn branch main-p1 revision 12 -> a12\nRemote revision 12 -> a12\nLocal branch in sync with remote\n"
+        "Changes staged for commit:\nM Content/a.verse\nD Content/Gone.uasset\n"
+        "Untracked files:\nA Content/New/\nA Content/Developers/PC/\nA Content/a.verse~mine\n"
+    ),
+    "history|200|--revision|a12": (
+        f"Revision  : 12\nSignature : a12\nCreator   : Ann{_PAD}\n    [Autosave] 1 change\n\n"
+        "Revision  : 11\nSignature : a11\nMerge     : f46f\nCreator   : Lee\n    Sync 4\n"
+    ),
+    "--remote|history|200|--branch|main": (
+        f"Revision  : 15\nSignature : a15\nMerge     : 22f7\nBranch    : e726\nCreator   : Lee{_PAD}{_PAD}Roy\n    Sphere moved\n    more\n\n"
+        "Revision  : 11\nSignature : a11\n"
+    ),
+    "--remote|history|1|--branch|main": "Revision  : 15\nSignature : a15\n",
+    "revision|diff|a11|--target|a12": "M Content/b.verse\nA Content/New\n",
+    "revision|diff|a11|--target|a15": (
+        "M Content/a.verse\nA Content/Their\nA Content/Their/c.uasset\nD Content/Gone.uasset\nM Content/b.verse\n"
+        "M content/new/N.uasset\nA Content/Developers/PC/Collections\n"
+    ),
+    "lock|query|--branch|main": f"Locks found:\nContent/a.verse by Lee{_PAD}{_PAD}Roy on branch e726\nContent\\Mine.uasset by Ann{_PAD} on branch e726\n",
+    "auth|info": f"ID: 0197\nName: Ann{_PAD}\n",
+}
+
+
+@pytest.fixture
+def revisions(tmp_path, monkeypatch, request):
+    """Stand-ins for ``lore.exe`` and ``urc.exe`` as the ones both backends find first (so
+    neither looks for UEFN's on this PC), and an island with a ``.lore`` folder.
+    ``revisions.says(table)`` scripts their output by arguments; ``revisions.both(call)``
+    is one lore call on each backend: the same answer after the same lore calls. The Rust
+    backend starts here, once the environment names the stand-ins."""
+    from frontend.ui_web.verse_editor.api import VerseEditorApi
+    from frontend.ui_web.verse_editor.urc import lore_cli
+
+    exe = backend_exe()
+    if exe is None:
+        pytest.skip("Ducky-Backend is not built: run `cargo build -p backend` in native_launcher/")
+    fake = exe.parent / "examples" / f"fake_cli{exe.suffix}"
+    assert fake.is_file(), "the stand-in lore.exe is not built: run `cargo build -p backend --examples` in native_launcher/"
+    script = tmp_path / "tools" / "cli.json"
+    script.parent.mkdir()
+    for name, key in (("lore.exe", "LORE_CLI_LOCATION"), ("urc.exe", "URC_CLI_LOCATION")):
+        shutil.copy(fake, script.parent / name)
+        monkeypatch.setenv(key, str(script.parent / name))
+    monkeypatch.setenv("FAKE_CLI_SCRIPT", str(script))
+    monkeypatch.setattr(lore_cli, "_me_cache", {})
+
+    class Revisions:
+        rust, python = request.getfixturevalue("rust_store"), request.getfixturevalue("python")
+        island, tools = tmp_path / "work" / "Isle", script.parent
+        last: list[str] = []  # the lore calls of the newest ``both``
+
+    def says(table: dict[str, Any]) -> None:
+        rows = {key: {"out": row} if isinstance(row, str) else row for key, row in table.items()}
+        script.write_text(json.dumps(rows), encoding="utf-8")
+
+    def asked() -> list[str]:
+        log = Path(f"{script}.calls")
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        log.unlink(missing_ok=True)
+        return lines
+
+    def both(what: str, root: Path | None = None, **more: Any) -> Any:
+        at = str(root or Revisions.island)
+        theirs, calls = plain(getattr(lore_cli, what)(at, **more)), asked()
+        status, ours = Revisions.rust.request(f"/__rs/lore/{what}", {"root": at, **more})
+        assert (status, ours, asked()) == (200, theirs, calls), f"{what}:\n rust   {ours}\n python {theirs}"
+        Revisions.last = calls
+        return theirs
+
+    Revisions.python.api._verse_editor = VerseEditorApi()
+    Revisions.says, Revisions.asked, Revisions.both = staticmethod(says), staticmethod(asked), staticmethod(both)
+    _put(Revisions.island, {"Isle.uefnproject": "{}"})
+    (Revisions.island / ".lore").mkdir()  # empty: only its being there is read
+    says(_LORE)
+    return Revisions
+
+
+@_NO_WINE
+def test_lore_tells_an_islands_state_against_remote_main(revisions):
+    island, both = revisions.island, revisions.both
+    files = ("Content/a.verse", "Content/b.verse", "Content/New/n.uasset", "Content/New/sub/m.uasset", "Content/Developers/PC/x.collection", "Content/a.verse~mine")
+    _put(island, dict.fromkeys(files, "x"))
+    at = island.as_posix()
+
+    assert both("remote_head") == {"ok": True, "revision": 15, "signature": "a15", "error": ""} and len(revisions.last) == 1
+    head = both("local_head")
+    assert (head["revision"], head["signature"], head["changes"][1]) == (12, "a12", ["D", "Content/Gone.uasset"])
+    state = both("repo_state")
+    # An autosave main lacks, and a check-in from another PC: ahead and behind.
+    assert (state["ok"], state["branch"], state["merge_base"], state["behind"], state["ahead"], state["in_sync"]) == (True, "main-p1", "a11", True, True, False)
+    assert (state["local_revision"], state["remote_revision"], state["remote_signature"]) == (12, 15, "a15") and len(revisions.last) == 3
+    assert state["incoming"] == [{"revision": 15, "signature": "a15", "creator": "Lee Roy", "message": "Sphere moved", "own": False}]
+    assert state["staged"] == ["Content/a.verse", "Content/Gone.uasset"] and state["untracked"][0] == "Content/New/"
+
+    # What main lacks: the files on disk, an untracked folder's files, this PC's commits.
+    pending = both("pending_paths")
+    assert pending == {"ok": True, "error": "", "paths": [f"{at}/Content/a.verse", f"{at}/Content/New/n.uasset", f"{at}/Content/New/sub/m.uasset", f"{at}/Content/b.verse"]}
+    assert revisions.last[-1] == "revision|diff|a11|--target|a12"
+
+    coming = both("incoming_paths", state=state)
+    assert revisions.last == ["revision|diff|a11|--target|a15"] and both("incoming_paths") == coming
+    assert [(row["code"], row["rel"], row["deleted"]) for row in coming["files"]] == [
+        ("M", "Content/a.verse", False), ("A", "Content/Their/c.uasset", False), ("D", "Content/Gone.uasset", True),
+        ("M", "Content/b.verse", False), ("M", "content/new/N.uasset", False),
+    ]  # fmt: skip
+    assert coming["files"][0]["path"] == f"{at}/Content/a.verse"
+
+    # Changed here and there: the working tree, a commit, a file under an untracked folder.
+    clash = both("overlap", state=state)
+    assert revisions.last == ["revision|diff|a11|--target|a15", "revision|diff|a11|--target|a12"] and both("overlap") == clash
+    assert [(row["rel"], row["local"], row["remote"]) for row in clash["files"]] == [
+        ("Content/a.verse", "modified", "M"), ("Content/b.verse", "modified", "M"), ("content/new/N.uasset", "added", "M"),
+    ]  # fmt: skip
+    assert both("overlap", state={**state, "behind": False}) == {"ok": True, "files": [], "error": ""} and revisions.last == []
+
+    locks = both("locks")
+    assert locks == {"ok": True, "me": "Ann", "error": "", "locks": [
+        {"path": f"{at}/Content/a.verse", "rel": "Content/a.verse", "owner": "Lee Roy", "owner_raw": f"Lee{_PAD}{_PAD}Roy", "mine": False},
+        {"path": f"{at}/Content/Mine.uasset", "rel": "Content/Mine.uasset", "owner": "Ann", "owner_raw": f"Ann{_PAD}", "mine": True},
+    ]}  # fmt: skip
+    assert revisions.last == ["lock|query|--branch|main", "auth|info"]
+    # Who is signed in is asked once.
+    assert both("locks") == locks and revisions.last == ["lock|query|--branch|main"]
+    assert both("whoami") == {"id": "0197", "name": f"Ann{_PAD}"} and revisions.last == []
+
+
+@_NO_WINE
+def test_what_lore_refuses_is_an_answer_in_its_own_words(revisions, tmp_path):
+    from frontend.ui_web.verse_editor.urc import lore_cli
+
+    both, plain_folder = revisions.both, tmp_path / "work" / "Plain"
+    plain_folder.mkdir()
+    no_repo = "not a Lore repository (no .lore folder)"
+    assert both("repo_state", plain_folder) == {"ok": False, "available": True, "error": no_repo}
+    assert both("locks", plain_folder) == {"ok": False, "locks": [], "me": "", "error": no_repo}
+    assert both("pending_paths", plain_folder)["paths"] == [] and both("remote_head", plain_folder)["error"] == no_repo
+    assert both("incoming_paths", plain_folder)["error"] == no_repo and both("overlap", plain_folder) == {"ok": False, "files": [], "error": no_repo}
+    assert revisions.last == []
+
+    def error(status: Any, call: str = "repo_state", **more: Any) -> str:
+        revisions.says({**_LORE, **status})
+        return both(call, **more)["error"]
+
+    revisions.says({})
+    assert both("local_head")["error"] == "unexpected call status"
+    assert error({"status": "\n[Error] Repository not found\nmore\n"}) == "[Error] Repository not found"
+    assert error({"status": {"code": 3}}) == "lore status exited 3"
+    assert error({"status": {"code": 1, "out": "said\n", "err": "  refused é\nwhy\n"}}) == "refused é"
+    assert error({"status": {"sleep": 5}}, timeout=0.5) == "lore status timed out after 0.5s"
+    assert error({"status": "Repository r1\n"}) == "lore status shows no current revision"
+    assert error({"--remote|history|200|--branch|main": "none\n"}) == "remote branch main has no revisions"
+    assert error({"--remote|history|200|--branch|main": "Revision : 3\nSignature : ffff\n"}) == "no revision shared with remote main in the last 200"
+    assert error({"revision|diff|a11|--target|a12": {"code": 2, "err": "no diff"}}, "pending_paths") == "no diff"
+    assert error({"revision|diff|a11|--target|a15": {"code": 2, "err": "no diff"}}, "overlap") == "no diff"
+    # Nobody signed in: the locks are listed, none as this PC's, and the answer is not ok.
+    revisions.says({**_LORE, "auth|info": {"code": 1, "err": "signed out"}})
+    locks = both("locks")
+    assert (locks["ok"], [row["mine"] for row in locks["locks"]]) == (False, [False, False]) and "auth info" in locks["error"]
+    assert both("whoami") == {"id": "", "name": ""} and revisions.last == ["auth|info"]  # a failure is not remembered
+
+    merged = "using { /Verse.org/Simulation }\n<<<<<<< ours\n# one\n=======\n# other\n>>>>>>> theirs\n"
+    texts = {"merged.VERSE": merged, "clean.verse": "# <<<<<<< not at a line start\n>>>>>>> x\n", "half.json": "<<<<<<< ours\n{}\n", "A.uasset": merged}
+    _put(plain_folder, texts)
+    paths = [(plain_folder / name).as_posix() for name in (*texts, "gone.verse")]
+    marked = lore_cli.conflict_marked(paths)
+    assert revisions.rust.request("/__rs/lore/conflict_marked", {"paths": paths}) == (200, marked) and marked == paths[:1]
+
+
+def test_urc_lists_the_changes_and_asks_for_a_check_in(revisions):
+    from frontend.ui_web.verse_editor.urc import detect_urc
+
+    island, changes = str(revisions.island), {"stagedChanges": ["a.verse", {"relativePath": "b.verse"}, {"name": ""}], "unstaged": [{"file": "c.verse"}]}
+    found = {"urc": detect_urc.detect_urc_executable(), "lore": detect_urc.detect_lore_executable()}
+    assert revisions.rust.request("/__rs/lore/detect", {}) == (200, found)
+    assert found["urc"] == {"available": True, "path": str(revisions.tools / "urc.exe"), "source": "urc_cli_location", "error": ""}
+
+    def both(method: str, *args: Any) -> Any:
+        theirs, calls = plain(revisions.python.call(method, *args)), revisions.asked()
+        ours = plain(revisions.rust.call(method, *args))
+        assert (ours, revisions.asked()) == (theirs, calls), f"{method}{args}:\n rust   {ours}\n python {theirs}"
+        revisions.last = calls
+        return theirs[1].get("result", theirs[1])
+
+    def status(out: Any) -> Any:
+        revisions.says({"project|status|--json": out, "trigger|--command|CheckIn|--json": "{}\n"})
+        return both("get_urc_status", island)
+
+    told = status(json.dumps({"data": changes}) + "\n")
+    assert told == {
+        "available": True, "path": found["urc"]["path"], "project_root": island, "error": "", "staged_count": 2,
+        "unstaged_count": 1, "staged": ["a.verse", "b.verse"], "unstaged": ["c.verse"], "raw": changes,
+    }  # fmt: skip
+    assert revisions.last == ["project|status|--json"]
+    # The open island when none is named; an answer without ``data`` is the data.
+    settings.replace_all({"uefn_project_root": f"  {island} "}, {})
+    _forget()
+    revisions.says({"project|status|--json": json.dumps(changes), "trigger|--command|CheckIn|--json": "{}\n"})
+    assert both("get_urc_status") == told and status("[1]")["raw"] == {"data": [1]}
+    assert both("urc_commit", "moved the cube") == {"ok": True, "message": "moved the cube"} and revisions.last == ["trigger|--command|CheckIn|--json"]
+    assert both("urc_commit", "", island) == {"ok": True, "message": "CheckIn triggered"}
+    assert both("urc_push") == {"ok": False, "error": "Push not available via URC CLI v1 in this project"} and revisions.last == []
+    # What urc refuses, and what it prints that is no JSON, fail the call in the same words.
+    assert status({"code": 4, "out": "said", "err": " not signed in \n"})["error"] == "not signed in"
+    assert status({"code": 4})["error"] == "urc exited 4" and status("nope")["error"] == "Invalid URC JSON: nope"
+    revisions.says({})
+    assert both("urc_commit")["error"] == "unexpected call trigger|--command|CheckIn|--json"
+    # No island at all, and one that is not on the disk (in the OS's own words).
+    settings.replace_all({"uefn_project_root": ""}, {})
+    _forget()
+    assert both("get_urc_status")["error"] == "No project root" and both("urc_commit")["error"] == "No project root"
+    gone = [plain(backend.call("get_urc_status", island + "-gone"))[1]["result"] for backend in (revisions.python, revisions.rust)]
+    assert all(reply.pop("error") for reply in gone) and gone[0] == gone[1]
+    assert gone[0] == {"available": True, "path": found["urc"]["path"], "project_root": island + "-gone", "staged_count": 0, "unstaged_count": 0}
+
+
+def test_a_lore_changelist_drop_takes_pending_adds_only(revisions, monkeypatch):
+    from frontend.ui_web.verse_editor.urc import lore_host
+
+    island, plain_folder = revisions.island, revisions.island.parent / "Plain"
+    plain_folder.mkdir()
+    _put(island, {"Content/Kept.uasset": "x"})
+    listed = {"ok": True, "untracked": ["Content/New/A.uasset", "\\Content\\New\\A.uasset", "Content/Newer/B.uasset", "Content/Kept.uasset", "", 7]}
+
+    class Changelist:  # what Lore's library answers, made up
+        status = staticmethod(lambda root: listed)
+        drop = staticmethod(lambda root, paths: {"ok": True, "dropped": list(paths)})
+        revert_local = staticmethod(lambda root: {"ok": True, "reverted": True})
+
+    monkeypatch.setattr(lore_host, "_backend", Changelist)
+    calls = {
+        "content_rel": lambda root, asset_path: lore_host.content_rel_from_asset_path(asset_path),
+        "drop_paths": lore_host.drop_paths, "status": lore_host.lore_status, "pending_adds": lore_host.pending_adds,
+        "drop_pending_adds": lore_host.drop_pending_adds, "drop_missing_orphans": lore_host.drop_missing_orphans,
+        "revert_local_commit": lore_host.revert_local_commit, "after_asset_gone": lore_host.after_asset_gone,
+    }  # fmt: skip
+
+    def both(what: str, root: Path = island, **more: Any) -> Any:
+        theirs = plain(calls[what](str(root), **more))
+        answer = revisions.rust.request(f"/__rs/lore/host_{what}", {"root": str(root), "status": listed, **more})
+        assert answer == (200, theirs), f"{what}{more}:\n rust   {answer[1]}\n python {theirs}"
+        return theirs
+
+    # No ``.lore`` folder: Lore is never asked.
+    assert both("drop_pending_adds", plain_folder, prefixes=[]) == {"ok": True, "skipped": "no_lore", "dropped": []}
+    assert both("status", plain_folder)["untracked"] == [] and both("revert_local_commit", plain_folder) == {"ok": True, "skipped": "no_lore"}
+    assert both("drop_paths", plain_folder, paths=["a"])["skipped"] == "no_lore" and both("after_asset_gone", plain_folder, asset_path="/Isle/X")["note"] == "no_pending_add"
+    assert both("status") == listed and both("revert_local_commit") == {"ok": True, "reverted": True}
+    assert both("pending_adds", prefixes=[]) == ["Content/New/A.uasset", "Content/Newer/B.uasset", "Content/Kept.uasset", "7"]
+    assert both("pending_adds", prefixes=["\\Content\\New\\"]) == ["Content/New/A.uasset"]
+    assert both("drop_pending_adds", prefixes=["Content/Newer", "Content/Nowhere"]) == {"ok": True, "dropped": ["Content/Newer/B.uasset"]}
+    assert both("drop_pending_adds", prefixes=["Content/Nowhere"]) == {"ok": True, "dropped": []}
+    # A file that is still there keeps its place in the changelist.
+    assert both("drop_missing_orphans", prefixes=["Content"])["dropped"] == ["Content/New/A.uasset", "Content/Newer/B.uasset"]
+    assert both("drop_paths", paths=[" ", "\\Content\\X.uasset", "Content/Y.uasset"])["dropped"] == ["Content/X.uasset", "Content/Y.uasset"]
+    assert both("drop_paths", paths=["", "  "]) == {"ok": True, "dropped": []}
+    assert both("after_asset_gone", asset_path="/Isle/Newer/B") == {"ok": True, "dropped": ["Content/Newer/B.uasset"]}
+    assert both("after_asset_gone", asset_path="/Isle/Other/C") == {"ok": True, "dropped": [], "note": "no_pending_add"}
+    rels = [both("content_rel", asset_path=path) for path in ("/Isle/Characters/Foo", " Content\\Foo.uasset ", "content/Foo", "Foo.UASSET", "/Foo", "")]
+    assert rels == ["Content/Characters/Foo.uasset", "Content/Foo.uasset", "content/Foo.uasset", "Content/Foo.UASSET", "Content//Foo.uasset", "Content/.uasset"]
