@@ -59,6 +59,49 @@ def test_reentrant_register_does_not_deadlock_first_load() -> None:
                 state._REGISTERED.discard("reenter")
 
 
+def test_boot_trace_names_the_slowest_plugin() -> None:
+    """plugins_load took 2-8 s a start (46 s once) and only its total was on record."""
+    import time
+
+    from frontend import perf_trace
+
+    traced: list[dict] = []
+    ids = ["quickone", "slowone"]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_plugin(root, "quickone", "def register(api):\n    pass\n")
+        _write_plugin(root, "slowone", "def register(api):\n    import time\n    time.sleep(0.3)\n")
+        with (
+            patch.object(boot, "appdata_uefn_plugins_dir", lambda: root),
+            patch.object(boot, "get_enabled_plugin_ids", lambda: ids),
+            patch.object(lifecycle, "appdata_uefn_plugins_dir", lambda: root),
+            patch.object(lifecycle, "get_enabled_plugin_ids", lambda: ids),
+            patch.object(boot, "_LOADED", False),
+            patch.object(boot, "_UI_READY", False),
+            patch.object(boot, "_LOAD_DONE", threading.Event()),
+            patch.object(boot, "_LOAD_THREAD", None),
+            patch.object(loader, "_REGISTER_TIMEOUT_SEC", 5.0),
+            patch.dict(state._LOADED_SIGNATURE),
+            patch.dict(loader.REGISTER_MS, clear=True),
+            patch.dict(boot._PHASE_MS, clear=True),
+            patch.object(perf_trace, "ensure_started", lambda: None),
+            patch.object(perf_trace, "trace", lambda kind, name="", duration_ms=0.0, **meta: traced.append(
+                {"kind": kind, "name": name, "duration_ms": duration_ms, **meta})),
+        ):
+            try:
+                assert boot.ensure_plugins_loaded(timeout=20.0) is True
+                deadline = time.monotonic() + 5  # the trace is written just after the load is marked done
+                while not traced and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            finally:
+                state._REGISTERED.difference_update(ids)
+    row = next(t for t in traced if t["name"] == "plugins_load")
+    assert list(row["slowest"]) == ["slowone", "quickone"]
+    assert row["slowest"]["slowone"] >= 300 > row["slowest"]["quickone"]
+    assert row["register_ms"] >= 300 and row["import_ms"] >= 0
+    assert row["duration_ms"] >= row["register_ms"]
+
+
 def test_ensure_plugins_loaded_returns_immediately_inside_load_thread() -> None:
     seen: list[bool] = []
 

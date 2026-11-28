@@ -15,6 +15,8 @@ _UI_READY = False
 _LOAD_THREAD: threading.Thread | None = None
 # Single-flight "scan missing backends" coordinator — never runs register() under _LOCK.
 _REPAIR_THREAD: threading.Thread | None = None
+# The first load's phases in ms (import, register) for the boot trace.
+_PHASE_MS: dict[str, float] = {}
 
 
 def _notify_uefn_plugins_changed() -> None:
@@ -293,6 +295,10 @@ def _boot_trace_plugins_load(duration_ms: float) -> None:
                 payload["total_ms"] = round((_time.perf_counter() - float(raw)) * 1000.0, 1)
             except ValueError:
                 pass
+        payload.update({f"{phase}_ms": round(ms, 1) for phase, ms in _PHASE_MS.items()})
+        slowest = sorted(REGISTER_MS.items(), key=lambda kv: -kv[1])[:5]
+        if slowest:
+            payload["slowest"] = {pid: round(ms) for pid, ms in slowest}
         trace("boot", "plugins_load", duration_ms=duration_ms, **payload)
     except Exception:
         pass
@@ -354,10 +360,12 @@ def _run_first_plugin_load() -> None:
         workers = min(8, len(jobs))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="uefn-plugin-import") as pool:
             list(pool.map(lambda j: _warm_plugin_backend(j[0], j[1], j[2]), jobs))
-    _log.info("UEFN plugins: import phase %.0fms", (time.perf_counter() - t_import) * 1000.0)
+    _PHASE_MS["import"] = (time.perf_counter() - t_import) * 1000.0
+    _log.info("UEFN plugins: import phase %.0fms", _PHASE_MS["import"])
     # Phase 2 — register() backends (may be slow; UI already has contribs).
     t_register = time.perf_counter()
     slow = [pid for pid, child, manifest in jobs if not _register_plugin_guarded(pid, child, manifest)]
+    _PHASE_MS["register"] = (time.perf_counter() - t_register) * 1000.0
     with _LOCK:
         _UI_READY = True
         _LOADED = True
@@ -371,7 +379,7 @@ def _run_first_plugin_load() -> None:
     _start_files_watch()
     _log.info(
         "UEFN plugins ready: register phase %.0fms%s",
-        (time.perf_counter() - t_register) * 1000.0,
+        _PHASE_MS["register"],
         f" (still finishing: {', '.join(slow)})" if slow else "",
     )
 
@@ -477,6 +485,7 @@ from backend.uefn_plugins.plugin_host.lifecycle import (  # noqa: E402
     wait_plugin_toggles,
 )
 from backend.uefn_plugins.plugin_host.loader import (  # noqa: E402
+    REGISTER_MS,
     _load_enabled_plugin_locked,
     _load_one,
     _plugin_load_lock,

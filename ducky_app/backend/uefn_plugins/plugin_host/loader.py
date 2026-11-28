@@ -123,6 +123,9 @@ def _warm_plugin_backend(pid: str, root: Path, manifest: dict[str, Any]) -> None
 # Offenders block on the network: unity-mcp nested MCP sync (45s per server),
 # Discord gateway connect, Blender socket probe.
 _REGISTER_TIMEOUT_SEC = 20.0
+# plugin id -> ms its last guarded register() took (the timeout when it overran), for the
+# boot trace: the times only reached the log, so a slow start could not name its plugin.
+REGISTER_MS: dict[str, float] = {}
 
 
 def _register_plugin_guarded(pid: str, root: Path, manifest: dict[str, Any]) -> bool:
@@ -147,6 +150,7 @@ def _register_plugin_guarded(pid: str, root: Path, manifest: dict[str, Any]) -> 
         name=f"uefn-plugin-register-{pid}",
     ).start()
     if not done.wait(_REGISTER_TIMEOUT_SEC):
+        REGISTER_MS[pid] = _REGISTER_TIMEOUT_SEC * 1000.0
         _log.warning(
             "UEFN plugin %s register() still running after %.0fs — continuing without it",
             pid,
@@ -163,11 +167,8 @@ def _register_plugin_guarded(pid: str, root: Path, manifest: dict[str, Any]) -> 
             name=f"uefn-plugin-register-late-{pid}",
         ).start()
         return False
-    _log.info(
-        "UEFN plugin %s register() done in %.0fms",
-        pid,
-        (time.perf_counter() - t0) * 1000.0,
-    )
+    REGISTER_MS[pid] = (time.perf_counter() - t0) * 1000.0
+    _log.info("UEFN plugin %s register() done in %.0fms", pid, REGISTER_MS[pid])
     return True
 
 
