@@ -1,16 +1,19 @@
 """The Verse editor's calls: its switch, the Problems list's cache, a file's history, the
-shadow ``.vproject``, its verse-lsp sessions and the project scan. The same answer, the same rows, the same
+shadow ``.vproject``, its verse-lsp sessions, the project scan and UEFN's workflow server. The same answer, the same rows, the same
 events and the same files from both backends on a fixture island. The verse-lsp is a
-stand-in built with the backend (never Epic's, never one found on this PC), and nothing
-reads the person's own islands."""
+stand-in built with the backend (never Epic's, never one found on this PC), the workflow
+server is a stand-in in this file (never a running UEFN), and nothing reads the person's
+own islands."""
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
 import socket
 import struct
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -95,6 +98,8 @@ def editor(tmp_path, rust_store, python, monkeypatch):
                 status, reply = plain(backend.call(method, *args))
                 assert status == 200 and reply["ok"] is True, f"{method}{args}: {reply}"
                 return reply["result"]
+
+            call.raw = lambda method, *args, backend=backend: plain(backend.call(method, *args))  # a refusal too
 
             told = story(call)
             rows = plain(_sql("SELECT path, mtime_ns, size, errors, warnings, items FROM verse_diagnostics ORDER BY path"))
@@ -644,3 +649,125 @@ def test_a_stopped_scan_keeps_what_it_checked_and_a_file_that_gets_no_answer_kee
     again = [event for event in events if event.get("scan_id") == 2]
     assert [event["path"] for event in again if event["phase"] == "file"] == ["content/hang.verse", "content/sub/b.verse"]
     assert again[5]["phase"] == "file" and again[5]["file"] == known and again[-1]["total"] == 3
+
+
+class _WorkflowServer:
+    """A stand-in for UEFN's Verse workflow server on a loopback port. A build says how it
+    goes and then answers; a push answers with what it was asked, or refuses ``False``."""
+
+    def __init__(self) -> None:
+        self.listener = socket.create_server(("127.0.0.1", 0))
+        self.port = self.listener.getsockname()[1]
+        self.asked: list[tuple[str, Any]] = []
+        self.links: list[socket.socket] = []
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        with contextlib.suppress(OSError):
+            while True:
+                link = self.listener.accept()[0]
+                self.links.append(link)
+                threading.Thread(target=self._serve, args=(link,), daemon=True).start()
+
+    def _serve(self, link: socket.socket) -> None:
+        reader = link.makefile("rb")
+        with contextlib.suppress(OSError, ValueError, IndexError):
+            while head := reader.readline():
+                reader.readline()
+                ask = json.loads(reader.read(int(head.split(b":")[1])))
+                assert ask["type"] == 1, ask
+                self.asked.append((ask["command"], ask["params"]))
+                answer: dict[str, Any] = {"seq": ask["seq"], "type": 2}
+                said: list[dict] = []
+                if ask["command"] == "compileProject":
+                    notes = [("logMessage", {"message": "Building é"}), ("updateBuildState", 3), ("updateBuildState", 0), ("canPushVerseChanges", True)]
+                    said = [{"type": 0, "command": command, "params": params} for command, params in notes]
+                    answer["result"] = {"success": True, "errors": []}
+                elif ask["params"] is False:
+                    answer["error"] = {"code": 5, "message": "nope"}
+                else:
+                    answer["result"] = f"pushed {ask['params']}"
+                bodies = [json.dumps(message).encode() for message in [*said, answer]]
+                # All at once, with a header the client has no use for: it finds each message.
+                link.sendall(b"X-Server: stand-in\r\n\r\n" + b"".join(b"Content-Length: %d\r\n\r\n%b" % (len(body), body) for body in bodies))
+
+    def drop(self) -> None:
+        """Every connection ends, as when UEFN closes."""
+        while self.links:
+            with contextlib.suppress(OSError):
+                self.links.pop().shutdown(socket.SHUT_RDWR)
+
+    def close(self) -> None:
+        self.listener.close()
+        self.drop()
+
+
+@pytest.fixture
+def workflow(monkeypatch):
+    """The stand-in workflow server, as the one both backends connect to. Ask for it
+    before ``editor``: the Rust backend reads the port when it starts. Python's client
+    starts new, and never reaches for the UEFN listener or UEFN's windows."""
+    from frontend.ui_web.verse_editor.workflow import client
+
+    server = _WorkflowServer()
+    monkeypatch.setenv("DUCKY_VERSE_WORKFLOW_PORT", str(server.port))
+    monkeypatch.setattr(client.VerseWorkflowClient.start, "__defaults__", (server.port, "127.0.0.1", 5.0))
+    monkeypatch.setattr(client, "_workflow", None)
+    monkeypatch.setattr(client, "_presave_dirty_packages", lambda: None)
+    monkeypatch.setattr(client, "save_modal_watchdog", contextlib.nullcontext)
+    yield server
+    if client._workflow is not None:
+        client._workflow.set_state_listener(None)
+        client._workflow.stop()
+    server.close()
+
+
+def test_a_build_goes_through_the_workflow_server_restarts_verse_lsp_and_starts_a_scan(workflow, scans, monkeypatch):
+    from frontend.ui_web.verse_editor import api
+
+    monkeypatch.setattr(api, "_VERSE_EDITOR", scans.python.api._verse_editor)  # the one a build restarts
+    port_file = scans.island / _PORT_FILE
+
+    def story(call):
+        port_file.unlink(missing_ok=True)
+        told = [call("get_verse_workflow_status"), call.raw("compile_verse_project"), call.raw("push_verse_changes")]
+        told += [call("connect_verse_workflow"), call("connect_verse_workflow")]
+        call("start_verse_lsp", "", "w1")
+        editors = _started(port_file)
+        told.append(call("compile_verse_project"))
+        scans.ended(1)
+        # The editor's verse-lsp was stopped: its next start takes the build's digests in.
+        told += [_until(lambda: not _runs(editors)), call("get_verse_workflow_status")]
+        told += [call("push_verse_changes"), call.raw("push_verse_changes", False)]
+        # UEFN closes: the status says so, and the next connect makes a new connection.
+        workflow.drop()
+        told.append(_until(lambda: (now := call("get_verse_workflow_status")) and not now["connected"] and now))
+        told += [call.raw("compile_verse_project"), call("connect_verse_workflow"), call("push_verse_changes", "é")]
+        told += [call("disconnect_verse_workflow"), call("get_verse_workflow_status")]
+        return told
+
+    told, rows, events = scans.each(story)
+    idle = {"connected": False, "build_state": 4, "can_push_verse_changes": False, "last_log": ""}
+    built = {"connected": True, "build_state": 0, "can_push_verse_changes": True, "last_log": "Building é"}
+    assert told[0] == idle and "Not connected to Verse Workflow Server — open project in UEFN" in str(told[1])
+    assert told[2][1]["ok"] is False and "Not connected to Verse Workflow Server" in str(told[2])
+    assert told[3] == told[4] == {**idle, "connected": True}
+    assert told[5] == {"success": True, "errors": [], "diagnostics_scan": _PENDING} and told[6] is True and told[7] == built
+    assert told[8] == {"message": "pushed True", "status": built} and "{'code': 5, 'message': 'nope'}" in str(told[9])
+    assert told[10] == {**built, "connected": False} and told[11][1]["ok"] is False and told[12] == built
+    assert told[13]["message"] == "pushed é" and told[14] == told[15] == {**built, "connected": False}
+    states = [event for event in events if event["type"] == "verse_workflow_state"]
+    assert [(state["connected"], state["build_state"], state["can_push_verse_changes"]) for state in states] == [
+        (True, 4, False), (True, 3, False), (True, 0, False), (True, 0, True), (False, 0, True), (True, 0, True),
+    ]  # fmt: skip
+    assert events[:4] == states[:4] and _phases(events[4:])[0] == "started" and len(rows) == 2
+    asked = [("compileProject", {}), ("pushChanges", True), ("pushChanges", False), ("pushChanges", "é")]
+    assert workflow.asked == asked * 2
+
+
+def test_no_workflow_server_is_an_error_in_the_status(workflow, editor):
+    workflow.close()
+    answers = [plain(backend.call("connect_verse_workflow")) for backend in (editor.python, editor.rust)]
+    for status, reply in answers:
+        assert status == 200 and reply["ok"] is True and reply["result"].pop("error"), reply  # in the OS's own words
+    assert answers[0] == answers[1] and answers[0][1]["result"]["connected"] is False
