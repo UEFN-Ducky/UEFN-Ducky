@@ -164,7 +164,11 @@ class LspBridge:
             )
             if same_session:
                 self._error = ""
-                return self.get_status()
+        if same_session:
+            # Outside the lock: get_status takes it, and it is not re-entrant. Answering
+            # inside it hung this call for good, and with it every later start, stop and
+            # status of the window.
+            return self.get_status()
 
         # Process alive but the listener died (previous WebSocket client dropped): reattach a
         # fresh listener to the existing process instead of restarting verse-lsp. A second
