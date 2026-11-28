@@ -62,8 +62,8 @@ pub fn account_id_for(key: &str) -> String {
     format!("a_{}", digest[..8].iter().map(|byte| format!("{byte:02x}")).collect::<String>())
 }
 
-/// The account signed in now, read from the login row.
-pub async fn current(store: &Store) -> Result<Account> {
+/// The login row (`duckyos_account._load_blob`): an object, or null signed out.
+pub async fn login(store: &Store) -> Result<Value> {
     let login = store
         .readers
         .read(|conn| {
@@ -71,8 +71,13 @@ pub async fn current(store: &Store) -> Result<Account> {
             let opened = secrets::blob(conn, secrets::LOGIN_NAME)?.and_then(|blob| seal::unprotect_secret(&blob).ok());
             Ok(opened.and_then(|text| serde_json::from_str::<Value>(&text).ok()).filter(Value::is_object))
         })
-        .await?
-        .unwrap_or(Value::Null);
+        .await?;
+    Ok(login.unwrap_or(Value::Null))
+}
+
+/// The account signed in now, read from the login row.
+pub async fn current(store: &Store) -> Result<Account> {
+    let login = login(store).await?;
     let key = key_of(&login);
     Ok(Account { id: account_id_for(&key), key, device_token: text(&login["device_key"]) })
 }

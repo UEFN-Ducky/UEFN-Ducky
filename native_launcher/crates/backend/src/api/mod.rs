@@ -6,12 +6,14 @@
 mod chat_doc;
 pub mod chats;
 pub mod file_kinds;
+pub mod plugin_store;
 pub mod project_files;
 pub mod project_paths;
 pub mod push;
 pub mod router;
 pub mod settings;
 pub mod shared;
+pub mod site;
 
 use std::collections::HashMap;
 
@@ -73,6 +75,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         project_files::project_file_media_url => Anyone,
         project_files::stat_project_file => Anyone,
         project_files::fingerprint_project_dirs => Anyone,
+        plugin_store::list_uefn_plugins => Anyone,
+        plugin_store::duckyos_store_versions => Anyone,
     }
 }
 
