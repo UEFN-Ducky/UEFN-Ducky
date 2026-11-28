@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use super::teams::{member, roster_rows};
 use super::{chat_changed, sidebar, text, Api, Fields, Sidebar};
 
-fn refused(why: &str) -> Value {
+pub(super) fn refused(why: &str) -> Value {
     json!({"ok": false, "error": why})
 }
 
@@ -18,7 +18,7 @@ fn roster(group: &Fields) -> Vec<Value> {
     rows.filter(|(_, row)| row.is_object()).map(|(index, row)| member(row, index)).collect()
 }
 
-fn arg(args: &Fields, name: &str) -> String {
+pub(super) fn arg(args: &Fields, name: &str) -> String {
     text(args.get(name).unwrap_or(&Value::Null))
 }
 
