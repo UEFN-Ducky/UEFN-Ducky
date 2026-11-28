@@ -19,7 +19,8 @@ use crate::store::now;
 use crate::store::pyjson::{float, int, pystr, truthy};
 
 mod moves;
-pub use moves::{delete_conversation, delete_folder};
+mod teams;
+pub use moves::{delete_conversation, delete_folder, move_conversation};
 
 type Fields = Map<String, Value>;
 

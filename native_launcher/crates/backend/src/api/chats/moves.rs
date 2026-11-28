@@ -1,6 +1,8 @@
-//! Deleting folders and chats (`chats/folders.py::delete_folder`, `chats/groups.py::_remove_folder`,
-//! `chats/conversations.py::delete_conversation`). A deleted group goes to Archive, with
-//! its duckies when asked; a deleted chat takes the chats it started with it.
+//! Moving and deleting folders and chats (`chats/folders.py::delete_folder`,
+//! `chats/groups.py::_remove_folder` and `restore_archived_group`,
+//! `chats/conversations.py::move_conversation` and `delete_conversation`). A deleted group
+//! goes to Archive, with its duckies when asked, and comes back whole; a deleted chat
+//! takes the chats it started with it.
 //!
 //! ponytail: only what is stored changes here. A running agent, its terminals, its
 //! "Allow everything" and its sandbox are stopped and cleared by the Python backend,
@@ -13,7 +15,9 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
+use super::teams::Teams;
 use super::{failed, is_archive, normalise, pystr, sidebar, text, truthy, Api, Fields, Folder, Sidebar, ARCHIVE, ONE_LIST};
+use crate::store::pyjson::repr;
 
 /// `root` and everything under it, parents first; a loop in the data ends the walk.
 fn tree(root: &str, children: impl Fn(&str) -> Vec<String>) -> Vec<String> {
@@ -105,6 +109,105 @@ impl Sidebar<'_> {
         let started = self.chats.conv_ids_by_parent(self.who.id.clone(), home.unwrap_or_else(|| ONE_LIST.into())).await.map_err(failed)?;
         let children = |id: &str| started.get(id).and_then(Value::as_array).into_iter().flatten().map(pystr).collect();
         Ok(tree(conv_id, children).split_off(1))
+    }
+
+    /// `sync_membership`: the teams of these chats follow where they are filed now.
+    pub(super) async fn sync_teams(&self, conv_ids: &[String], keep_hub: &str) -> Result<(), String> {
+        let mut ids: Vec<String> = Vec::new();
+        for id in conv_ids.iter().map(|id| id.trim()).filter(|id| !id.is_empty()) {
+            if !ids.iter().any(|seen| seen == id) {
+                ids.push(id.to_string());
+            }
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+        // The folders as stored: this read never adds Archive or numbers anything.
+        let stored = self.chats.folders_get(self.who.clone(), ONE_LIST.into()).await.map_err(failed)?;
+        let folders: Vec<Folder> = stored.iter().map(Folder::from).collect();
+        let mut teams = Teams::new(self.docs().await?, &folders);
+        teams.sync(&ids, keep_hub);
+        for chat in teams.changed() {
+            self.save_chat(chat, true).await?;
+        }
+        Ok(())
+    }
+
+    /// `_folder_is_known`: the top level, Archive or a folder of the list.
+    async fn folder_known(&self, folder_id: &str) -> Result<bool, String> {
+        Ok(folder_id.is_empty() || is_archive(folder_id) || self.folders().await?.iter().any(|folder| folder.id == folder_id))
+    }
+
+    /// `restore_archived_group`: the group gets a folder again, its duckies go back in
+    /// it and its nested groups come back inside it, each with its own folder.
+    async fn restore_group(&self, hub_id: &str, parent_folder: &str) -> Result<(), String> {
+        let docs = self.docs().await?;
+        let Some(hub) = docs.iter().find(|chat| field(chat, "id") == hub_id) else { return Ok(()) };
+        let archived_under = |parent: &str| {
+            let child = |chat: &&Fields| is_archive(&field(chat, "folder_id")) && field(chat, "id") != hub_id && field(chat, "parent_conv_id").trim() == parent;
+            docs.iter().filter(child).collect::<Vec<_>>()
+        };
+        let top = if self.folder_known(parent_folder).await? && !is_archive(parent_folder) { parent_folder } else { "" };
+        // (chat, the folder it goes in, whether it comes back as a group with a folder of its own)
+        let (mut stack, mut restored) = (vec![(hub, top.to_string(), true)], Vec::new());
+        while let Some((chat, folder_id, as_group)) = stack.pop() {
+            let id = field(chat, "id");
+            if restored.contains(&id) {
+                continue;
+            }
+            let mut doc = chat.clone();
+            let into = if as_group {
+                let title = field(chat, "title");
+                // Active nesting is the folder tree: the parent link was only for Archive.
+                put(&mut doc, [("parent_conv_id", "")]);
+                self.new_folder(if title.is_empty() { "Group" } else { &title }, folder_id, id.clone()).await?.id
+            } else {
+                folder_id
+            };
+            put(&mut doc, [("folder_id", &into)]);
+            self.save_chat(doc, true).await?;
+            // What a ducky started comes along as chats, a group's nested groups as groups.
+            for child in archived_under(&id).into_iter().rev() {
+                stack.push((child, into.clone(), as_group && child["is_group"] == true));
+            }
+            restored.push(id);
+        }
+        self.sync_teams(&restored, "").await
+    }
+
+    /// `chats.conversations.move_conversation`: file a chat in a folder. Into Archive or
+    /// back out, the chats it started go with it; a group goes and comes back whole.
+    async fn place(&self, conv_id: &str, folder_id: &str) -> Result<(), String> {
+        let Some(mut chat) = self.chat(conv_id).await? else { return Err(format!("Conversation not found: {}", repr(&json!(conv_id)))) };
+        if !self.folder_known(folder_id).await? {
+            return Err(format!("Unknown folder: {}", repr(&json!(folder_id))));
+        }
+        let archiving = is_archive(folder_id);
+        let restoring = is_archive(&field(&chat, "folder_id")) && !archiving;
+        if chat["is_group"] == true && restoring {
+            return self.restore_group(conv_id, folder_id).await;
+        }
+        if chat["is_group"] == true && archiving {
+            if let Some(own) = self.folders().await?.into_iter().find(|folder| folder.group_hub_id == conv_id) {
+                return self.remove_folder(&own.id, true).await.map(|_| ());
+            }
+        }
+        let parent = field(&chat, "parent_conv_id").trim().to_string();
+        if restoring && !parent.is_empty() && self.chat(&parent).await?.is_some_and(|group| group["is_group"] == true && is_archive(&field(&group, "folder_id"))) {
+            // Out of an archived group: a ducky on its own.
+            put(&mut chat, [("parent_conv_id", "")]);
+        }
+        put(&mut chat, [("folder_id", folder_id)]);
+        self.save_chat(chat, true).await?;
+        if archiving || restoring {
+            for id in self.descendants(conv_id).await? {
+                if let Some(mut started) = self.chat(&id).await? {
+                    put(&mut started, [("folder_id", folder_id)]);
+                    self.save_chat(started, true).await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// `chats.folders.delete_folder`: gives the groups that went to Archive.
@@ -251,6 +354,39 @@ pub async fn delete_folder(api: Arc<Api>, args: Fields) -> Result<Value, String>
     let folders = if scope.is_empty() { vec![folder_id] } else { scope };
     api.publish(vec![removed(&[archived.clone(), leaving].concat(), &folders)]);
     Ok(json!(archived))
+}
+
+/// File a chat in a folder ("" is the top level). Archived chats leave every open
+/// window's tree at once; outside Archive the teams follow the move.
+pub async fn move_conversation(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let conv_id = text(args.get("conv_id").unwrap_or(&Value::Null));
+    let folder_id = text(args.get("folder_id").unwrap_or(&Value::Null));
+    let sidebar = sidebar(&api).await?;
+    let archiving = is_archive(&folder_id);
+    let mut leaving = Vec::new();
+    if archiving {
+        leaving = [vec![conv_id.clone()], sidebar.descendants(&conv_id).await?].concat();
+        let group = sidebar.chat(&conv_id).await?.is_some_and(|chat| chat["is_group"] == true);
+        // The folders are read for a group only: a read adds Archive when it is missing.
+        let own = if group { sidebar.folders().await?.into_iter().find(|folder| folder.group_hub_id == conv_id) } else { None };
+        if let Some(own) = own {
+            // A group goes to Archive with its duckies and nested groups.
+            let nested = subtree(&sidebar.folders().await?, &own.id);
+            for hub in hubs_in(&sidebar.folders().await?, &nested) {
+                let started = sidebar.descendants(&hub).await?;
+                leaving.push(hub);
+                leaving.extend(started);
+            }
+        }
+        let mut seen = HashSet::new();
+        leaving.retain(|id| seen.insert(id.clone()));
+    }
+    sidebar.place(&conv_id, &folder_id).await?;
+    if !archiving {
+        sidebar.sync_teams(std::slice::from_ref(&conv_id), "").await?;
+    }
+    api.publish(vec![removed(&leaving, &[])]);
+    Ok(Value::Null)
 }
 
 /// Delete a chat for good, with the chats it started. `keep_inside`: only the group

@@ -52,6 +52,7 @@ pub fn methods() -> HashMap<&'static str, Method> {
         chats::set_muted => Anyone,
         chats::delete_folder => Anyone,
         chats::delete_conversation => Anyone,
+        chats::move_conversation => Anyone,
         chats::list_local_chats => Anyone,
     }
 }
