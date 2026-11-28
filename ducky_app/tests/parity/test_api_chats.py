@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from backend.store import db
 from backend.store.repos import chats
 
 from .parity_harness import plain
@@ -51,6 +52,9 @@ def seed(rust_store, python):
     (ducky_assets.custom_duckies_dir(for_write=True) / "mine.png").write_bytes(b"png")
 
     def put(folders: list, docs: list) -> None:
+        conn = db.connect()
+        with db.write_txn(conn):  # what an earlier call deleted can be stored again
+            conn.execute("DELETE FROM workspace_state WHERE key LIKE 'deleted_%'")
         chats.folders_replace(_LIST, folders)
         for doc in docs:
             chats.conv_save(_LIST, dict(doc), messages=None)
@@ -153,7 +157,12 @@ class _Both:
         self.seed, self.python, self.rust = seed, python, rust
         self.pushed: list[dict] = []
         monkeypatch.setattr(push, "_panel_push", self.pushed.append)  # never the live app's panel
+        # No agent runs here; Python's stop of an archived chat would start its terminal manager.
+        monkeypatch.setattr("frontend.ui_web.chats.archive_stop.stop_archived", lambda *args, **kwargs: None)
         self.cursor = 0
+        self.before = lambda: None  # runs after each seed
+        self.after = lambda: None  # its answer after each call must match too
+        self.deleted: list = []  # the ids the last call marked deleted
 
     def _rust_events(self) -> list[dict]:
         # A marker ends the page, so a call that pushed nothing does not wait out a poll.
@@ -170,7 +179,8 @@ class _Both:
         docs = plain(chats.conv_list(_LIST, with_messages=False))
         for doc in docs:
             doc["updated"] = "now" if doc["updated"] >= started else doc["updated"]
-        text = json.dumps((answer, events, folders, docs))
+        marks = [row[0] for row in db.connect().execute("SELECT key FROM workspace_state WHERE key LIKE 'deleted_%' ORDER BY key")]
+        text = json.dumps((answer, events, folders, docs, marks, self.after()))
         for folder in folders:
             if len(folder["id"]) == 36:  # a new folder's random id
                 text = text.replace(folder["id"], "folder of " + folder["group_hub_id"])
@@ -187,15 +197,17 @@ class _Both:
             saves._forget_saved()  # what Python remembers it stored is replaced below
             conversations._sort_migrated_slugs.clear()
             self.seed(folders, docs)
+            self.before()
             self.pushed.clear()
             started = time.time()
             answer = backend.call(method, *args)
             events = list(self.pushed) if backend is self.python else self._rust_events()
             seen.append(self._seen(answer, events, started))
         theirs, ours = seen
-        for name, mine, yours in zip(("answer", "events", "folders", "chats"), ours, theirs):
+        for name, mine, yours in zip(("answer", "events", "folders", "chats", "deleted", "after"), ours, theirs):
             assert mine == yours, f"{method}{args} {name}: rust {mine} != python {yours}"
-        return tuple(theirs)
+        self.deleted = theirs[4]
+        return tuple(theirs[:4])
 
 
 @pytest.fixture
@@ -279,6 +291,107 @@ def test_a_group_from_before_group_folders_gets_its_folder(both) -> None:
     assert {doc["id"]: (doc["folder_id"], doc["updated"]) for doc in docs} == {
         "old": ("folder of old", "now"), "unnamed": ("folder of unnamed", "now"), "gone": ("archive", 20.0),
     }
+
+
+# --------------------------------------------------------------------------- deletes
+
+
+def _folder(folder_id: str, parent_id: str = "", hub: str = "", sort_order: float = 0) -> dict:
+    return {"id": folder_id, "name": folder_id.upper(), "parent_id": parent_id, "sort_order": sort_order, "group_hub_id": hub}
+
+
+# top > [ g1 (group hub) > [ g2 (group hub2), in1 ] ], side > [ g3 (group hub3) ], plain > [ deep ]
+_TREE = [
+    _folder("top", sort_order=1), _folder("g1", "top", "hub"), _folder("g2", "g1", "hub2", 1), _folder("in1", "g1", sort_order=2),
+    _folder("side", sort_order=2), _folder("g3", "side", "hub3"), _folder("plain", sort_order=3), _folder("deep", "plain"),
+]
+_TEAM = [
+    _doc("hub", folder_id="g1", is_group=True, leader_conv_id="lead", group_members=[{"member_conv_id": "lead", "name": "Lead: build"}]),
+    _doc("hub2", folder_id="g2", is_group=True, leader_conv_id="m2"),
+    _doc("hub3", folder_id="g3", is_group=True),
+    _doc("lead", folder_id="g1", parent_conv_id=" hub ", leader_conv_id="hub"),  # the spaces: not found as one it started
+    _doc("m1", folder_id="g1"),
+    _doc("m2", folder_id="g2", parent_conv_id="hub2"),
+    _doc("sub", parent_conv_id="m1"),
+    _doc("subsub", parent_conv_id="sub", folder_id="plain"),
+    _doc("far", parent_conv_id="hub"),  # the group's, but filed at the top
+    _doc("loose", folder_id="in1"),
+    _doc("other", folder_id="plain"),
+    _doc("deepest", folder_id="deep"),
+    _doc("free"),
+]
+
+
+def _placed(docs: list) -> dict:
+    return {doc["id"]: (doc["folder_id"], (doc.get("parent_conv_id") or "").strip()) for doc in docs}
+
+
+@pytest.mark.parametrize(
+    ("folder_id", "archive_members"),
+    [("plain", False), ("plain", True), ("g1", False), ("g1", True), ("g2", 1), ("g3", False), ("top", True), ("in1", ""), ("nope", False), ("nope", True), ("", False)],
+)
+def test_a_folder_is_deleted_the_same(both, folder_id: str, archive_members: Any) -> None:
+    answer, events, folders, docs = both.call(_TREE, _TEAM, "delete_folder", folder_id, archive_members)
+    assert answer[1]["ok"] is True, answer
+    assert folder_id not in {folder["id"] for folder in folders}
+    assert len(docs) == len(_TEAM), "a deleted folder never deletes a chat"
+    assert [event["type"] for event in events] == ["chats_changed"]
+
+
+def test_a_deleted_group_goes_to_archive_and_its_duckies_stay_or_go_with_it(both) -> None:
+    answer, events, folders, docs = both.call(_TREE, _TEAM, "delete_folder", "g1", False)
+    assert answer[1]["result"] == ["hub"] and events == [{"type": "chats_changed", "open": False, "removed_conv_ids": ["hub", "hub"], "removed_folder_ids": ["g1"]}]
+    placed = _placed(docs)
+    # Its duckies move up to where the group was, on their own; the nested group stays a group.
+    assert (placed["hub"], placed["lead"], placed["m1"], placed["far"]) == (("archive", ""), ("top", ""), ("top", ""), ("", ""))
+    assert {folder["id"]: folder["parent_id"] for folder in folders if folder["id"] in ("g2", "in1")} == {"g2": "top", "in1": "top"}
+    assert both.deleted == ["deleted_folder:g1"]
+
+    answer, events, folders, docs = both.call(_TREE, _TEAM, "delete_folder", "g1", True)
+    assert answer[1]["result"] == ["hub", "hub2"]
+    assert events[0]["removed_folder_ids"] == ["g1", "g2", "in1"] and set(events[0]["removed_conv_ids"]) == {"hub", "hub2", "far", "m2"}
+    placed = _placed(docs)
+    in_archive = {conv_id: parent for conv_id, (folder, parent) in placed.items() if folder == "archive"}
+    # Archive keeps the team's shape: each ducky under its group, the nested group under the outer one.
+    assert in_archive == {"hub": "", "hub2": "hub", "lead": "hub", "m1": "hub", "m2": "hub2", "sub": "m1", "subsub": "sub", "far": "hub", "loose": "hub"}
+    # "top" held only the group: it goes too.
+    assert {folder["id"] for folder in folders} == {"side", "g3", "plain", "deep", "archive"}
+    assert both.deleted == ["deleted_folder:g1", "deleted_folder:g2", "deleted_folder:in1", "deleted_folder:top"]
+
+
+def test_archive_is_never_deleted(both) -> None:
+    answer, events, folders, _ = both.call(_TREE, _TEAM, "delete_folder", " archive ")
+    assert answer == [200, {"ok": False, "error": "Cannot delete the Archive folder"}] and events == []
+    assert "archive" in {folder["id"] for folder in folders}
+
+
+@pytest.mark.parametrize(
+    ("conv_id", "keep_inside", "gone"),
+    [
+        ("m1", False, {"m1", "sub", "subsub"}), ("hub", False, {"hub", "far"}), ("hub", True, {"hub"}),
+        ("free", 1, {"free"}), ("nope", False, set()), ("", False, set()),
+    ],
+)
+def test_a_chat_is_deleted_the_same_with_the_chats_it_started(both, conv_id: str, keep_inside: Any, gone: set) -> None:
+    from frontend.ui_web.chats import store
+
+    files = store._conversations_dir(None)
+
+    def attach() -> None:
+        for name in ("m1", "sub", "free", "lead"):
+            (files / name / "attachments").mkdir(parents=True, exist_ok=True)
+            (files / name / "attachments" / "shot.png").write_bytes(b"png")
+
+    both.before = attach
+    both.after = lambda: sorted(path.name for path in files.iterdir())
+    answer, events, _, docs = both.call(_TREE, _TEAM, "delete_conversation", conv_id, keep_inside)
+    assert answer == [200, {"ok": True, "result": None}]
+    assert {doc["id"] for doc in _TEAM} - {doc["id"] for doc in docs} == gone
+    assert set(events[0]["removed_conv_ids"]) == (gone or {conv_id}) - {""}
+    assert both.deleted == sorted("deleted_chat:" + name for name in gone)
+    assert set(both.after()) == {"m1", "sub", "free", "lead"} - gone
+    if keep_inside and conv_id == "hub":
+        assert _placed(docs)["far"] == ("", "")
 
 
 def test_chats_that_were_never_ordered_are_numbered_newest_first(seed, python, rust_store) -> None:
