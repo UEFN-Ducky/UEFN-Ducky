@@ -3,6 +3,7 @@ backends. Tests taking ``account`` run signed out and signed in."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -127,23 +128,150 @@ def test_no_folder_is_created_inside_archive(seed, python, rust_store) -> None:
     assert plain(chats.folders_get(_LIST)) == before
 
 
-def test_rust_leaves_the_one_time_moves_to_python(seed, rust_store) -> None:
-    """Three old layouts are put right by a chat save, which is still Python's: Rust says
-    so instead of listing them unfixed."""
-
-    def refused(method: str, error: str) -> None:
-        assert rust_store.call(method) == (200, {"ok": False, "error": error})
-
-    seed(_FOLDERS, [_doc("old-group", is_group=True)])
-    refused("list_folders", "a group has no folder yet")
-    chats.conv_delete("old-group")
-
-    seed(_FOLDERS, [_doc("x", sort_order=0), _doc("y", sort_order=0)])
-    refused("list_all_conversations", "chats are not numbered yet")
-    chats.conv_save(_LIST, _doc("y", sort_order=1.0), messages=None)
-
+def test_rust_leaves_the_one_list_merge_to_python(seed, rust_store) -> None:
+    """Rows an older version stored per island move with their attachment folders, which
+    is still Python's: Rust says so instead of listing without them."""
+    seed(_FOLDERS, [_doc("x")])
     chats.conv_save("an-island", _doc("elsewhere"), messages=None)
-    refused("list_all_conversations", "chats are not merged into one list yet")
-    refused("list_folders", "chats are not merged into one list yet")
+    for method in ("list_all_conversations", "list_folders"):
+        assert rust_store.call(method) == (200, {"ok": False, "error": "chats are not merged into one list yet"})
     chats.conv_delete("elsewhere")
-    assert [row["id"] for row in rust_store.call("list_all_conversations")[1]["result"]] == ["x", "y"]
+    assert [row["id"] for row in rust_store.call("list_all_conversations")[1]["result"]] == ["x"]
+
+
+# --------------------------------------------------------------------------- saves
+
+
+class _Both:
+    """One call on each backend from the same folders and chats: the answer, the events
+    and what is stored after must match. ``updated`` is the save's time and a new
+    folder's id is random: both are compared as given names."""
+
+    def __init__(self, seed: Any, python: Any, rust: Any, monkeypatch: Any) -> None:
+        from frontend.ui_web.agent_turns import push
+
+        self.seed, self.python, self.rust = seed, python, rust
+        self.pushed: list[dict] = []
+        monkeypatch.setattr(push, "_panel_push", self.pushed.append)  # never the live app's panel
+        self.cursor = 0
+
+    def _rust_events(self) -> list[dict]:
+        # A marker ends the page, so a call that pushed nothing does not wait out a poll.
+        self.rust.call("push_appearance_live", {"marker": 1})
+        _, page = self.rust.request(f"/__panel_events?since={self.cursor}")
+        self.cursor = page["cursor"]
+        return page["events"][:-1]
+
+    def _seen(self, answer: Any, events: list, started: float) -> list:
+        from frontend.ui_web.chats import saves
+
+        saves.flush_chat_saves()
+        folders = plain(chats.folders_get(_LIST))
+        docs = plain(chats.conv_list(_LIST, with_messages=False))
+        for doc in docs:
+            doc["updated"] = "now" if doc["updated"] >= started else doc["updated"]
+        text = json.dumps((answer, events, folders, docs))
+        for folder in folders:
+            if len(folder["id"]) == 36:  # a new folder's random id
+                text = text.replace(folder["id"], "folder of " + folder["group_hub_id"])
+        return json.loads(text)
+
+    def call(self, folders: list, docs: list, method: str, *args: Any) -> tuple[Any, list, list, list]:
+        import time
+
+        from frontend.ui_web.chats import conversations, saves
+
+        seen = []
+        for backend in (self.python, self.rust):
+            saves.flush_chat_saves()
+            saves._forget_saved()  # what Python remembers it stored is replaced below
+            conversations._sort_migrated_slugs.clear()
+            self.seed(folders, docs)
+            self.pushed.clear()
+            started = time.time()
+            answer = backend.call(method, *args)
+            events = list(self.pushed) if backend is self.python else self._rust_events()
+            seen.append(self._seen(answer, events, started))
+        theirs, ours = seen
+        for name, mine, yours in zip(("answer", "events", "folders", "chats"), ours, theirs):
+            assert mine == yours, f"{method}{args} {name}: rust {mine} != python {yours}"
+        return tuple(theirs)
+
+
+@pytest.fixture
+def both(seed, python, rust_store, monkeypatch) -> _Both:
+    return _Both(seed, python, rust_store, monkeypatch)
+
+
+_ODD = _doc(
+    "odd", title="Old name", folder_id="f1", created="3", provider=None, coding_agent=" ", thinking_effort=" High ",
+    enabled_skills=["a", 2], enabled_subskills={"p": ["x", 1]}, token_usage={"calls": []}, agent_allow_rules=["Bash:ls", " "],
+    ducky_name=" Dev ", extra={"dropped": True}, settings_edited=5,
+)
+
+
+@pytest.mark.parametrize(
+    ("title", "stored"),
+    [("  New name é ", "New name é"), ("", "Old name"), ("   ", "Old name"), ("New ducky 3", "Old name"), ("Group", "Old name")],
+)
+def test_a_chat_is_renamed_the_same(both, title: str, stored: str) -> None:
+    answer, events, _, docs = both.call(_FOLDERS, [_ODD, _doc("other")], "rename_conversation", "odd", title)
+    assert answer == [200, {"ok": True, "result": None}]
+    assert events == [{"type": "chats_changed", "conv_id": "odd", "title": stored, "folder_id": "f1", "open": False}]
+    by_id = {doc["id"]: doc for doc in docs}
+    assert (by_id["odd"]["title"], by_id["odd"]["updated"], by_id["other"]["updated"]) == (stored, "now", 20.0)
+    assert by_id["odd"]["coding_agent"] == "ducky" and "extra" not in by_id["odd"]
+
+
+def test_a_placeholder_title_is_renamed_to_another_and_an_unknown_chat_is_left(both) -> None:
+    _, events, _, docs = both.call([], [_doc("c", title="New ducky")], "rename_conversation", "c", "Ducky 2")
+    assert events[0]["title"] == docs[0]["title"] == "Ducky 2"
+    answer, events, _, docs = both.call([], [_doc("c")], "rename_conversation", "nope", "X")
+    assert (answer, events, docs[0]["updated"]) == ([200, {"ok": True, "result": None}], [], 20.0)
+
+
+@pytest.mark.parametrize(("folder_id", "name", "title"), [("f2", " Fun ", "Hub"), ("g1", " Crew ", "Crew"), ("g1", "  ", "Team"), ("nope", "X", "Hub")])
+def test_a_folder_is_renamed_the_same_and_a_groups_chat_with_it(both, folder_id: str, name: str, title: str) -> None:
+    hub = _doc("hub", title="Hub", folder_id="g1", is_group=True)
+    answer, events, folders, docs = both.call(_FOLDERS, [hub, _doc("member", folder_id="g1")], "rename_folder", folder_id, name)
+    assert (answer, events) == ([200, {"ok": True, "result": None}], [])
+    assert {doc["id"]: doc["title"] for doc in docs} == {"hub": title, "member": "Chat member"}
+    assert name.strip() in {f["name"] for f in folders} or folder_id == "nope" or not name.strip()
+
+
+def test_archive_is_never_renamed(both) -> None:
+    answer, _, folders, _ = both.call(_FOLDERS, [], "rename_folder", " archive ", "Bin")
+    assert answer == [200, {"ok": False, "error": "Cannot rename the Archive folder"}]
+    assert "Bin" not in {f["name"] for f in folders}
+
+
+def test_a_group_from_before_group_folders_gets_its_folder(both) -> None:
+    old = [_doc("old", title="Raiders", folder_id="f1", is_group=True), _doc("unnamed", title="", is_group=True, sort_order=3.0)]
+    _, _, folders, docs = both.call(_FOLDERS, [*old, _doc("gone", folder_id="archive", is_group=True)], "list_folders")
+    made = {f["id"]: (f["name"], f["parent_id"], f["sort_order"]) for f in folders if f["group_hub_id"] in ("old", "unnamed")}
+    # Each is last among its siblings: after g1 (numbered 1 by then) and after Archive.
+    assert made == {"folder of old": ("Raiders", "f1", 2.0), "folder of unnamed": ("Group", "", 1_000_001.0)}
+    assert {doc["id"]: (doc["folder_id"], doc["updated"]) for doc in docs} == {
+        "old": ("folder of old", "now"), "unnamed": ("folder of unnamed", "now"), "gone": ("archive", 20.0),
+    }
+
+
+def test_chats_that_were_never_ordered_are_numbered_newest_first(seed, python, rust_store) -> None:
+    from frontend.ui_web.chats import conversations, saves
+
+    docs = [
+        _doc("a", sort_order=0, updated=1.0), _doc("b", sort_order=0, updated=9.0), _doc("c", sort_order=0, updated=5.0),
+        _doc("kept", folder_id="f1", sort_order=0), _doc("d", folder_id="f2", sort_order=0), _doc("e", folder_id="f2", sort_order=4.0),
+    ]
+    listed = []
+    for backend in (python, rust_store):
+        saves._forget_saved()
+        conversations._sort_migrated_slugs.clear()
+        seed(_FOLDERS, docs)
+        status, reply = backend.call("list_conversations", None)
+        assert (status, reply["ok"]) == (200, True), reply
+        saves.flush_chat_saves()
+        stored = {doc["id"]: (doc["sort_order"], doc["updated"]) for doc in chats.conv_list(_LIST, with_messages=False)}
+        listed.append((plain(reply["result"]), stored))
+    assert listed[1] == listed[0]
+    assert listed[0][1] == {"b": (0.0, 9.0), "c": (1.0, 5.0), "a": (2.0, 1.0), "kept": (0.0, 20.0), "d": (0.0, 20.0), "e": (4.0, 20.0)}
