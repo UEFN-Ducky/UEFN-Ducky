@@ -248,6 +248,7 @@ interface ComposerDraftProps {
   inputRef?: Ref<HTMLDivElement>;
   onChange: (value: string, caret: number) => void;
   onCaret: (caret: number) => void;
+  onPasteImages?: (files: File[]) => void;
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   onFocus?: () => void;
   onBlur?: () => void;
@@ -285,6 +286,7 @@ export function ComposerDraft({
   inputRef,
   onChange,
   onCaret,
+  onPasteImages,
   onKeyDown,
   onFocus,
   onBlur,
@@ -350,8 +352,23 @@ export function ComposerDraft({
       onClick={() => onCaret(composerCaret(ref.current))}
       onPaste={(event) => {
         event.preventDefault();
+        const clipboard = event.clipboardData;
+        if (onPasteImages) {
+          let images = Array.from(clipboard.files ?? []).filter((file) => file.type.startsWith("image/"));
+          if (images.length === 0) {
+            images = Array.from(clipboard.items ?? []).flatMap((item) => {
+              if (item.kind !== "file" || !item.type.startsWith("image/")) return [];
+              const file = item.getAsFile();
+              return file ? [file] : [];
+            });
+          }
+          if (images.length > 0) {
+            onPasteImages(images);
+            return;
+          }
+        }
         // Windows copies line ends as \r\n; the box keeps \n only.
-        const text = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
+        const text = clipboard.getData("text/plain").replace(/\r\n?/g, "\n");
         if (!text || !ref.current) return;
         const current = readComposer(ref.current);
         const range = composerRange(ref.current);

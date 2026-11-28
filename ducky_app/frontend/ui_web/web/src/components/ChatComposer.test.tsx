@@ -22,11 +22,15 @@ import { ChatComposer, composerSend, noteQueuedSend, type ChatComposerProps, typ
 import { _resetChatReferenceStoreForTests } from "./chatReferenceStore";
 import { _resetAskUserForTests, runAskUser } from "../ask-user/runAskUser";
 import { ConfirmModalProvider } from "../contexts/ConfirmModalContext";
+import { useComposerAttachments } from "../hooks/useComposerAttachments";
 
 const chat: ChatTab = { id: "composer-chat", name: "Builder" };
 const noop = () => {};
 
-function Composer({ onSend }: { onSend: (text?: string) => void }) {
+function Composer({ onSend, attachmentState }: {
+  onSend: (text?: string) => void;
+  attachmentState?: Pick<ChatComposerProps, "attachments" | "addFiles">;
+}) {
   const [inputText, setInputText] = useState("hello");
   const [caret, setCaret] = useState(5);
   const textareaRef = useRef<HTMLDivElement>(null);
@@ -43,6 +47,7 @@ function Composer({ onSend }: { onSend: (text?: string) => void }) {
     slashStatus: "", availableCommands: [], runSlashCommand: noop,
     attachments: [], readInParts: false, removeAttachment: noop, retryVideo: noop,
     updateAttachmentImage: noop, addFiles: noop, clearAttachments: noop,
+    ...attachmentState,
     sessionFiles: [], contextPanelOpen: false, onToggleContextPanel: noop, onCloseContextPanel: noop,
     onContextChanged: noop, onOpenFile: noop, onOpenChat: noop, groupMemberCount: 0,
     agentRunning: false, noModelsAvailable: false, modelsUnavailable: false, streamBuffer: "",
@@ -79,6 +84,30 @@ it("renders the draft and sends from the Send button", () => {
   expect(screen.getByRole("textbox").textContent).toBe("hello");
   fireEvent.click(screen.getByTitle("Send"));
   expect(onSend).toHaveBeenCalledTimes(1);
+});
+
+function ComposerWithAttachments() {
+  const attachmentState = useComposerAttachments();
+  return <Composer onSend={noop} attachmentState={attachmentState} />;
+}
+
+it.each(["files", "items"] as const)("attaches pasted images from clipboard %s without editing the draft", async (source) => {
+  render(<ConfirmModalProvider><ComposerWithAttachments /></ConfirmModalProvider>);
+  const box = screen.getByRole("textbox");
+  const image = new File(["image bytes"], "screenshot.png", { type: "image/png" });
+  const textFile = new File(["text"], "note.txt", { type: "text/plain" });
+  const imageItem = { kind: "file", type: image.type, getAsFile: () => image };
+  const clipboardData = {
+    files: source === "files" ? [image, textFile] : [],
+    items: [imageItem],
+    getData: () => "text supplied alongside the image",
+  };
+
+  expect(fireEvent.paste(box, { clipboardData })).toBe(false);
+  const thumbnail = await screen.findByRole("img", { name: image.name });
+  expect(thumbnail.getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+  expect(screen.queryByText(textFile.name)).toBeNull();
+  expect(box.textContent).toBe("hello");
 });
 
 it("a grown box keeps its cap: the input area is never counted as room above it", () => {
