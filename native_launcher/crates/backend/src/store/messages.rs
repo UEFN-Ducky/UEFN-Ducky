@@ -185,7 +185,19 @@ fn decode_parts(envelope: Value, part_text: &mut dyn FnMut(&str) -> rusqlite::Re
     Ok(Some(message))
 }
 
-fn seal_part(text: &str, who: &Who) -> Result<(Vec<u8>, i64)> {
+/// The compact form of a stored `fmt` 0 body, only if it reads back as the same JSON.
+pub(super) fn compact_stored(body: &str, key: &Key) -> Option<(String, Parts)> {
+    let message: Value = serde_json::from_str(body).ok()?;
+    let (stored, fmt, parts) = compact(&message, body, key);
+    if fmt != FMT_PARTS {
+        return None;
+    }
+    let mut part = |digest: &str| Ok(parts.iter().find(|(have, _)| have == digest).map(|(_, text)| text.clone()));
+    let again = decode_parts(serde_json::from_str(&stored).ok()?, &mut part).ok()??;
+    (dumps(&again) == dumps(&message)).then_some((stored, parts))
+}
+
+pub(super) fn seal_part(text: &str, who: &Who) -> Result<(Vec<u8>, i64)> {
     let mut packer = ZlibEncoder::new(Vec::new(), Compression::new(6));
     // Writing into a Vec cannot fail.
     let packed = packer.write_all(text.as_bytes()).and_then(|()| packer.finish()).unwrap_or_default();
@@ -215,7 +227,7 @@ pub fn seal_new_parts(conn: &Connection, parts: &Parts, who: &Who) -> rusqlite::
 
 /// Point the row at exactly `parts`: store new ones (sealed, from `sealed` when it has
 /// them), drop refs it no longer uses.
-fn write_parts(conn: &Connection, message_id: i64, parts: &Parts, who: &Who, sealed: &SealedParts) -> rusqlite::Result<()> {
+pub(super) fn write_parts(conn: &Connection, message_id: i64, parts: &Parts, who: &Who, sealed: &SealedParts) -> rusqlite::Result<()> {
     let old: HashSet<String> = conn
         .prepare("SELECT hash FROM message_part_refs WHERE message_id=?1")?
         .query_map([message_id], |r| r.get(0))?

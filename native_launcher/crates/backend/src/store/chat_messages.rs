@@ -326,6 +326,30 @@ impl Chats {
             .await
     }
 
+    /// A page for the chat view (`repos/chat_display.py`): `(seq, last seq, message)`,
+    /// newest first, at most `limit` from `before_seq` (or the end) back, from one
+    /// snapshot. Empty when the chat isn't this account's.
+    ///
+    /// ponytail: every field of the page's rows is opened here; Python opens a stored
+    /// field only when the view renders it. Open on demand if a trace shows a page of
+    /// big tool results being slow.
+    pub async fn display_messages(&self, who: Who, conv_id: String, before_seq: Option<i64>, limit: i64) -> Result<Vec<(i64, i64, Value)>> {
+        self.store
+            .readers
+            .read(move |conn| {
+                let _snapshot = conn.unchecked_transaction()?;
+                if msg_rev(conn, &conv_id, &who.id)?.is_none() {
+                    return Ok(Vec::new());
+                }
+                let last: Option<i64> = conn.query_row("SELECT max(seq) FROM messages WHERE conv_id=?1", [&conv_id], |r| r.get(0))?;
+                let Some(last) = last else { return Ok(Vec::new()) };
+                let end = before_seq.map_or(last, |before| before.min(last));
+                let rows = messages::messages(conn, &conv_id, &who, (end + 1 - limit).max(0), Some(end + 1))?;
+                Ok(rows.into_iter().rev().map(|(seq, _, message)| (seq, last, message)).collect())
+            })
+            .await
+    }
+
     /// The messages from `seq` on, the chat's `msg_rev`, its row count and the rows'
     /// hashes, from one read snapshot: a copy refreshes its tail without loading the
     /// whole chat. `([], None, 0, [])` when the chat isn't this account's.

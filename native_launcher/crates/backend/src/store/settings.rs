@@ -17,7 +17,7 @@ pub type Fields = Map<String, Value>;
 
 /// Duckies lived in these fields before they got their own table. They are never saved
 /// again: a stale copy in memory must not write them back.
-const LEGACY_DUCKY_KEYS: [&str; 5] = [
+pub(super) const LEGACY_DUCKY_KEYS: [&str; 5] = [
     "agent_profiles",
     "agent_profile_overrides",
     "archived_agent_profile_ids",

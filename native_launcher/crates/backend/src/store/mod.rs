@@ -5,6 +5,7 @@
 //! backend still owns the schema: nothing here creates or upgrades tables.
 
 pub mod account;
+pub mod account_rows;
 pub mod automations;
 pub mod chat_messages;
 pub mod chats;

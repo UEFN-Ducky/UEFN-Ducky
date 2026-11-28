@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{automations, memory, plans, plugin_data, workflows};
+use super::{account_rows, automations, memory, plans, plugin_data, workflows};
 use super::{account, blocking, duckies, ducky_mirrors, events, history, kv, ledger, misc, plugin_kv, projects, seal, search, usage, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
@@ -170,6 +170,7 @@ async fn chats(open: &Open, data_dir: &std::path::Path, function: &str, a: &Valu
         "messages_get_rev" => json!(c.messages_get_rev(who(s, data_dir).await?, conv).await?),
         "messages_range" => json!(c.messages_range(who(s, data_dir).await?, conv, int("start"), a["stop"].as_i64()).await?),
         "messages_since" => json!(c.messages_since(who(s, data_dir).await?, conv, int("seq")).await?),
+        "display_messages" => json!(c.display_messages(who(s, data_dir).await?, conv, a["before_seq"].as_i64(), a["limit"].as_i64().unwrap_or(32)).await?),
         "last_reply" => json!(c.last_reply(who(s, data_dir).await?, conv).await?),
         "search_messages" => {
             let limit = a["limit"].as_i64().unwrap_or(200);
@@ -177,6 +178,26 @@ async fn chats(open: &Open, data_dir: &std::path::Path, function: &str, a: &Valu
         }
         "conv_if_settings_newer" => {
             json!(c.conv_if_settings_newer(who(s, data_dir).await?, conv, a["edited"].as_f64().unwrap_or(0.0)).await?)
+        }
+        _ => return Ok(None),
+    }))
+}
+
+/// Rows from before accounts: claimed, then sealed for the account signed in now.
+async fn account_rows(open: &Open, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
+    let s = &open.store;
+    let batch = a["batch"].as_i64().unwrap_or(40);
+    let flag = |name: &str| a[name].as_bool().unwrap_or(false);
+    Ok(Some(match function {
+        "claimer" => json!(account_rows::claimer(s).await?),
+        "claim" => json!(account_rows::claim(s, text(a, "account")).await?),
+        "owned_ids" => json!(account_rows::owned_ids(s, text(a, "account")).await?),
+        "plaintext_left" => json!(account_rows::plaintext_left(s, text(a, "account"), flag("claimer_pass")).await?),
+        "seal_table" => json!(account_rows::seal_table(s, who(s, data_dir).await?, text(a, "table"), flag("parked"), batch).await?),
+        "seal_stored_messages" => {
+            let who = who(s, data_dir).await?;
+            let key = open.chats.chat_key(&who).await?;
+            account_rows::seal_stored_messages(s, who, key, batch, std::time::Duration::ZERO).await?
         }
         _ => return Ok(None),
     }))
@@ -583,6 +604,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "duckies" => return duckies(&open.store, data_dir, function, a).await,
         "chats" => return chats(open, data_dir, function, a).await,
         "local_chats" => return local_chats(open, data_dir, function, a).await,
+        "account_rows" => return account_rows(open, data_dir, function, a).await,
         "events" | "perf" => return events(&open.store, repo, function, a).await,
         "ledger" => return ledger(&open.store, function, a).await,
         "search" => return search(&open.store, data_dir, function, a).await,
