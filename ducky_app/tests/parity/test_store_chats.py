@@ -11,7 +11,7 @@ import pytest
 from backend.store import account_rows, db
 from backend.store.repos import chats
 
-from parity_harness import plain
+from .parity_harness import plain
 
 _KEY = bytes(range(32))
 _TEXTS = [

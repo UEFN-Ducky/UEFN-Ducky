@@ -12,8 +12,8 @@ import zlib
 from backend.store import account_rows, db
 from backend.store.repos import chat_display, chats, duckies, ducky_mirrors
 
-from parity_harness import plain
-from test_store_chats import _doc, _sql
+from .parity_harness import plain
+from .test_store_chats import _doc, _sql
 
 _RESULT = {"ok": True, "text": "pelican notes é\n" * 1500}
 _USER = {"role": "user", "text": "about the pelican", "ts": 1.0}

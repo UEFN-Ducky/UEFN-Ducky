@@ -13,10 +13,10 @@ import pytest
 from backend.store.repos import chats, duckies, local_chats
 from backend.uefn_plugins import data_crypto
 
-from conftest import LOGIN
-from parity_harness import plain
-from test_store_chat_messages import _ALL, _payloads, _rows
-from test_store_chats import _doc, _sql
+from .conftest import LOGIN
+from .parity_harness import plain
+from .test_store_chat_messages import _ALL, _payloads, _rows
+from .test_store_chats import _doc, _sql
 
 _SETS = ("r", "p")
 _NAMES = ("hub", "seat-1", "seat-2", "alone", "child", "arch")

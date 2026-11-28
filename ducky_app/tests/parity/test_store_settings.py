@@ -7,7 +7,7 @@ import time
 from backend.store import db
 from backend.store.repos import misc, settings
 
-from parity_harness import plain
+from .parity_harness import plain
 
 _VALUES = {"theme": "dark", "n": 3, "ratio": 0.25, "tags": [1, {"a": None, "ok": True}], "name": 'é "q"\n'}
 _DEFAULTS = {"theme": "light", "n": 3}

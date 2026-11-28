@@ -1,5 +1,8 @@
 //! `Ducky-Backend [--port N]`: bind loopback, say hello on stdout, serve until stdin closes
 //! (the launcher went away) or a `bye` line arrives.
+//!
+//! `Ducky-Backend migrate <ducky.db> [--to N]`: bring that database to this build's schema,
+//! print one JSON line and end.
 
 use std::io::{BufRead, Write};
 use std::process::ExitCode;
@@ -34,8 +37,18 @@ fn launcher_gone() -> oneshot::Receiver<()> {
     rx
 }
 
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "migrate") {
+        let (ok, line) = backend::store::migrate::cli(&args[1..]);
+        println!("{line}");
+        return if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+    }
+    serve()
+}
+
 #[tokio::main]
-async fn main() -> ExitCode {
+async fn serve() -> ExitCode {
     let listener = match TcpListener::bind(("127.0.0.1", port_arg())).await {
         Ok(l) => l,
         Err(e) => {

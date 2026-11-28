@@ -5,8 +5,8 @@ from __future__ import annotations
 from backend.store import db
 from backend.store.repos import automations, memory, plans, workflows
 
-from parity_harness import callers, plain
-from test_store_chats import _sql
+from .parity_harness import callers, plain
+from .test_store_chats import _sql
 
 _TABLES = {
     "automations": "id, name, enabled, graph, runs, updated, last_run, kind, description",

@@ -8,8 +8,8 @@ import pytest
 
 from backend.store.repos import ledger
 
-from parity_harness import plain
-from test_store_chats import _sql
+from .parity_harness import plain
+from .test_store_chats import _sql
 
 _TABLES = {
     "runs": "*", "run_entries": "*", "run_seen": "*", "path_index": "*", "watch_index": "*",

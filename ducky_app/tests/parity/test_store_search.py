@@ -9,8 +9,8 @@ import pytest
 
 from backend.store.repos import search
 
-from parity_harness import plain
-from test_store_chats import _sql
+from .parity_harness import plain
+from .test_store_chats import _sql
 
 V1, V2, V3 = bytes(range(8)), bytes(range(8, 16)), b"\x00\xff" * 4
 

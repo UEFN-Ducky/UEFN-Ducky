@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from parity_harness import backend_exe, check_same
+from .parity_harness import backend_exe, check_same
 
 
 def test_python_answers_in_the_panel_api_envelope(python) -> None:

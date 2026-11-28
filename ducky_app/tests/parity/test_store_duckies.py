@@ -8,7 +8,7 @@ from __future__ import annotations
 from backend.store import db
 from backend.store.repos import duckies
 
-from parity_harness import plain
+from .parity_harness import plain
 
 _QUACKER = {"name": "Quacker", "prompt": "Be brief. é", "tools": ["verse", {"x": None}], "temp": 0.5}
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from backend.store.repos import history, projects, usage
 
-from parity_harness import callers, plain
-from test_store_chats import _sql
+from .parity_harness import callers, plain
+from .test_store_chats import _sql
 
 # --------------------------------------------------------------------------- usage
 

@@ -47,10 +47,8 @@ impl Repos {
         let path = self.data_dir.join("ducky.db");
         let opening = || async move {
             let store = tokio::task::spawn_blocking(move || {
-                // The Python backend creates the file and owns its schema.
-                if !path.is_file() {
-                    return Err(Error(format!("{} is not there yet", path.display())));
-                }
+                // Under the open lock every process takes: the file is made, or upgraded.
+                super::migrate::ensure(&path)?;
                 Store::open(&path)
             })
             .await

@@ -18,6 +18,10 @@ ALLOWLIST: dict[str, str] = {
         "a test: its child process holds an uncommitted write on a throwaway WAL database, then "
         "the test reads it back raw to prove shutdown checkpointed it; ducky.db is never opened"
     ),
+    "tests/parity/test_store_migrate.py": (
+        "a test: reads raw the throwaway databases the Python and the Rust migrator each leave, at "
+        "every schema version, to compare them"
+    ),
 }
 
 

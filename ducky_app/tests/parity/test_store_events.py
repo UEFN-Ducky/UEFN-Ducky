@@ -6,8 +6,8 @@ import pytest
 
 from backend.store.repos import events
 
-from parity_harness import plain
-from test_store_chats import _sql
+from .parity_harness import plain
+from .test_store_chats import _sql
 
 _ROWS = [
     {"ts": 10.0, "source": "a", "message": "first", "payload": {"n": 1, "é": [1.5, None, "x"]}},

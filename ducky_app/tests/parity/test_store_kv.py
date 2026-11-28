@@ -6,8 +6,8 @@ import pytest
 
 from backend.store.repos import kv
 
-from parity_harness import callers
-from test_store_chats import _sql
+from .parity_harness import callers
+from .test_store_chats import _sql
 
 _VALUES = [{"a": 1, "é": [1.5, None, True]}, [1, "two"], "text é", 0, None, 2.5, {}, {"nested": {"z": 1, "a": 2}}]
 

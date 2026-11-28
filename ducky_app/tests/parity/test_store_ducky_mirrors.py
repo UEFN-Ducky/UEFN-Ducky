@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from backend.store.repos import ducky_mirrors
 
-from test_store_chats import _sql
+from .test_store_chats import _sql
 
 _ROWS = [{"role": "user", "content": "hello é"}, {"role": "assistant", "content": "hi", "n": [1.5, None]}]
 

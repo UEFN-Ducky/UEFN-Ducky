@@ -12,7 +12,7 @@ from backend.store.repos import secrets as repo
 from backend.uefn_plugins import data_crypto, scopes
 from frontend import duckyos_account
 
-from conftest import ADK as _ADK, LOGIN as _LOGIN
+from .conftest import ADK as _ADK, LOGIN as _LOGIN
 
 _KEY = "https://uefnducky.org|alice@example.com"
 _LOCKED = "Waiting for this account's data key. Your chats open once you're online."

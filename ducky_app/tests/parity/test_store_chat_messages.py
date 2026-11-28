@@ -10,8 +10,8 @@ import copy
 
 from backend.store.repos import chats
 
-from parity_harness import plain
-from test_store_chats import _doc, _sql
+from .parity_harness import plain
+from .test_store_chats import _doc, _sql
 
 _USER = {"role": "user", "text": "hello world", "ts": 1.0}
 _REPLY = {"role": "assistant", "content": "  hi there é \n", "ts": 2.0, "run_id": "r1"}

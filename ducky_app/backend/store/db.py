@@ -20,6 +20,7 @@ import os
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -950,6 +951,9 @@ def migrate(conn: sqlite3.Connection) -> int:
         return current
     if current > 0:
         _refuse_source_upgrade_of_real_db(conn, current, head)
+    exe = rust_migrator()
+    if exe is not None:
+        return _rust_migrate(conn, [str(exe), "migrate"], head)
     if current > 0:
         # On the connection we already hold: snapshot() would re-enter connect()
         # and deadlock on _guard (1.2.90 hung every upgraded panel at boot).
@@ -982,6 +986,52 @@ def migrate(conn: sqlite3.Connection) -> int:
 
 
 BACKUP_FAILED_KEY = "pre_migrate_backup_failed"
+BACKEND_EXE_ENV = "DUCKY_BACKEND_EXE"
+
+
+def rust_migrator() -> Path | None:
+    """The Rust backend, which upgrades the schema where this install has it:
+    ``DUCKY_BACKEND_EXE``, or ``Ducky-Backend`` beside a built app's EXE."""
+    pinned = os.environ.get(BACKEND_EXE_ENV)
+    if pinned:
+        return Path(pinned) if Path(pinned).is_file() else None
+    if not getattr(sys, "frozen", False):
+        return None
+    exe = Path(sys.executable).with_name("Ducky-Backend.exe" if os.name == "nt" else "Ducky-Backend")
+    return exe if exe.is_file() else None
+
+
+def _rust_migrate(conn: sqlite3.Connection, command: list[str], head: int) -> int:
+    """Hand the upgrade to ``Ducky-Backend migrate <ducky.db> --to <head>``: the same steps
+    and the same copy first (``native_launcher/crates/backend/src/store/migrate.rs``).
+    This process holds the open lock meanwhile, and keeps saying it is still at it."""
+    path = str(conn.execute("PRAGMA database_list").fetchone()[2])
+    proc = subprocess.Popen(
+        [*command, path, "--to", str(head)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )  # fmt: skip
+    while True:
+        try:
+            out, err = proc.communicate(timeout=COPY_TICK_S)
+            break
+        except subprocess.TimeoutExpired:
+            try:
+                if still_copying is not None:
+                    still_copying()
+            except Exception:
+                pass
+    try:
+        reply = json.loads(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        reply = {}
+    if proc.returncode != 0 or not isinstance(reply, dict) or not reply.get("ok"):
+        why = (reply.get("error") if isinstance(reply, dict) else "") or err.strip() or f"exit code {proc.returncode}"
+        raise StoreError(f"Ducky-Backend could not upgrade ducky.db: {why}")
+    current = user_version(conn)
+    if current != head:
+        raise StoreError(f"Ducky-Backend left ducky.db at schema {current}, not {head}")
+    return current
 
 
 def _record_backup_failure(conn: sqlite3.Connection, current: int, head: int, exc: BaseException) -> None:

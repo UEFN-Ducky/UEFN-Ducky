@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from parity_harness import PythonBackend, RustBackend, backend_exe, check_same
+from .parity_harness import PythonBackend, RustBackend, backend_exe, check_same
 
 
 

@@ -9,8 +9,8 @@ import pytest
 
 from backend.store.repos import plugin_data
 
-from parity_harness import callers, plain
-from test_store_chats import _sql
+from .parity_harness import callers, plain
+from .test_store_chats import _sql
 
 _TABLES = {
     "plugin_data": "account_id, scope_id, plugin_id, kind, key, value, size, sha256, rev, dirty, deleted, sensitive, updated, group_id, "

@@ -1,8 +1,8 @@
 //! `ducky.db`, the same file the Python backend uses (`ducky_app/backend/store`).
 //!
 //! Reads run on pooled read-only connections; every write goes through one writer thread
-//! ([`writer`]), so no request ever waits on a lock inside an async worker. The Python
-//! backend still owns the schema: nothing here creates or upgrades tables.
+//! ([`writer`]), so no request ever waits on a lock inside an async worker. [`migrate`]
+//! creates and upgrades the tables, from the same SQL files the Python backend used.
 
 pub mod account;
 pub mod account_rows;
@@ -20,6 +20,7 @@ pub mod ledger;
 mod local_chats;
 pub mod memory;
 pub mod messages;
+pub mod migrate;
 pub mod misc;
 pub mod plans;
 pub mod plugin_data;

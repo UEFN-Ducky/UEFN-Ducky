@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from backend.store.repos import plugin_kv
 
-from parity_harness import callers, plain
-from test_store_chats import _sql
+from .parity_harness import callers, plain
+from .test_store_chats import _sql
 
 MINE = {"account": "acct", "scope": "s1", "plugin_id": "plug"}
 

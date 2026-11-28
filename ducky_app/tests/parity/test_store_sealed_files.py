@@ -16,8 +16,8 @@ from backend.store import db, sealed_files
 from backend.store.repos import chats
 from backend.uefn_plugins import data_crypto
 
-from conftest import LOGIN
-from test_store_chats import _doc, _sql
+from .conftest import LOGIN
+from .test_store_chats import _doc, _sql
 
 _MIB = 1024 * 1024
 _SIZES = (0, 1, _MIB - 1, _MIB, _MIB + 1, 2 * _MIB + 5)
