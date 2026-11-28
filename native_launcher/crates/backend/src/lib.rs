@@ -11,6 +11,7 @@
 #![deny(clippy::await_holding_lock, clippy::disallowed_methods)]
 
 pub mod guard;
+pub mod store;
 
 use std::future::Future;
 use std::io;
