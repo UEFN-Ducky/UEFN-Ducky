@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{automations, memory, plans, workflows};
+use super::{automations, memory, plans, plugin_data, workflows};
 use super::{account, blocking, duckies, ducky_mirrors, events, history, kv, ledger, misc, plugin_kv, projects, seal, search, usage, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
@@ -391,6 +391,68 @@ async fn docs(s: &Store, repo: &str, function: &str, a: &Value) -> Result<Option
     }))
 }
 
+/// Plugin docs and files, the spaces' sync rows and the plugins' links.
+async fn plugin_data(s: &Store, function: &str, a: &Value) -> Result<Option<Value>> {
+    use plugin_data as pd;
+    let (account, scope, plugin) = (text(a, "account"), text(a, "scope"), text(a, "plugin"));
+    let item = pd::Item { account: text(a, "account"), scope: text(a, "scope"), plugin: text(a, "plugin"), kind: text(a, "kind"), key: text(a, "key") };
+    let opt = |name: &str| a[name].as_str().map(str::to_string);
+    let path = |name: &str| a[name].as_str().map(PathBuf::from);
+    let flag = |name: &str| a[name].as_bool().unwrap_or(false);
+    let int = |name: &str, default: i64| a[name].as_i64().unwrap_or(default);
+    let expect = || a["expect"].as_object().cloned();
+    let write = || pd::Write {
+        value: opt("value"),
+        size: int("size", 0),
+        sha256: text(a, "sha256"),
+        dirty: flag("dirty"),
+        rev: a["rev"].as_i64(),
+        sensitive: flag("sensitive"),
+        group_id: text(a, "group_id"),
+    };
+    Ok(Some(match function {
+        "get" => json!(pd::get(s, item).await?),
+        "put" => json!(pd::put(s, item, write()).await?),
+        "put_file_row" => json!(pd::put_file_row(s, pd::Item { kind: "asset".into(), ..item }, write(), path("temp_path").unwrap_or_default(), path("target_path").unwrap_or_default()).await?),
+        "remove" => json!(pd::remove(s, item, flag("tombstone"), path("target_path"), text(a, "group_id")).await?),
+        "written_since" => json!(pd::written_since(s, account, scope, plugin, a["since"].as_f64().unwrap_or(0.0)).await?),
+        "plugin_ids" => json!(pd::plugin_ids(s, account, scope).await?),
+        "scope_ids" => json!(pd::scope_ids(s, account).await?),
+        "has_rows" => json!(pd::has_rows(s, account, plugin, opt("scope")).await?),
+        "rows" => json!(pd::rows(s, pd::Item { key: text(a, "prefix"), ..item }, a["values"].as_bool().unwrap_or(true)).await?),
+        "dirty" => json!(pd::dirty(s, account, scope, int("limit", 0)).await?),
+        "count_dirty" => json!(pd::count_dirty(s, account, scope, opt("plugin")).await?),
+        "unsent_spaces" => json!(pd::unsent_spaces(s, account).await?),
+        "mark_pushed" => json!(pd::mark_pushed(s, item, int("rev", 0), text(a, "sha256"), flag("pushed_delete")).await?),
+        "set_rev" => json!(pd::set_rev(s, item, int("rev", 0)).await?),
+        "mark_plugin_dirty" => json!(pd::mark_plugin_dirty(s, account, scope, plugin).await?),
+        "mark_dirty" => json!(pd::mark_dirty(s, item).await?),
+        "set_state" => json!(pd::set_state(s, item, text(a, "state"), text(a, "reason"), opt("expect_sha")).await?),
+        "clear_dirty" => json!(pd::clear_dirty(s, item).await?),
+        "note_attempt" => json!(pd::note_attempt(s, item, text(a, "error")).await?),
+        "note_attempts" => json!(pd::note_attempts(s, item, serde_json::from_value(a["items"].clone()).unwrap_or_default(), text(a, "error")).await?),
+        "requeue_refused" => json!(pd::requeue_refused(s, account, scope).await?),
+        "settle_reset" => json!(pd::settle_reset(s, account, scope, flag("keep")).await?),
+        "state_counts" => json!(pd::state_counts(s, account, scope, opt("plugin")).await?),
+        "state_items" => json!(pd::state_items(s, account, scope, opt("plugin"), int("limit", 50)).await?),
+        "pending_items" => json!(pd::pending_items(s, account, scope, plugin, int("limit", 200)).await?),
+        "apply_remote" => json!(pd::apply_remote(s, item, write(), expect(), path("temp_path"), path("target_path")).await?),
+        "remove_remote" => json!(pd::remove_remote(s, item, expect(), path("target_path")).await?),
+        "drop_held" => json!(pd::drop_held(s, item, expect().unwrap_or_default(), path("target_path")).await?),
+        "delete_plugin" => json!(pd::delete_plugin(s, account, plugin).await?),
+        "scope_plugin_ids" => json!(pd::scope_plugin_ids(s, account, scope).await?),
+        "delete_scope_plugin" => json!(pd::delete_scope_plugin(s, account, scope, plugin).await?),
+        "delete_scope" => json!(pd::delete_scope(s, account, scope).await?),
+        "sync_get" => json!(pd::sync_get(s, account, text(a, "space")).await?),
+        "sync_put" => json!(pd::sync_put(s, account, text(a, "space"), map(a, "fields")).await?),
+        "link_get" => json!(pd::link_get(s, account, plugin).await?),
+        "link_set" => json!(pd::link_set(s, account, plugin, scope).await?),
+        "links" => json!(pd::links(s, account).await?),
+        "totals" => pd::totals(s, account, scope, plugin).await?,
+        _ => return Ok(None),
+    }))
+}
+
 /// Copies of the other Duckies' chats, for the account signed in now.
 async fn ducky_mirrors(s: &Store, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
     let who = who(s, data_dir).await?;
@@ -526,6 +588,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "search" => return search(&open.store, data_dir, function, a).await,
         "kv" | "plugin_kv" | "usage" | "history" | "projects" => return small(&open.store, repo, function, a).await,
         "automations" | "workflows" | "memory" | "plans" => return docs(&open.store, repo, function, a).await,
+        "plugin_data" => return plugin_data(&open.store, function, a).await,
         "ducky_mirrors" => return ducky_mirrors(&open.store, data_dir, function, a).await,
         "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),

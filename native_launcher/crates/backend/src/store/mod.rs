@@ -21,6 +21,7 @@ pub mod memory;
 pub mod messages;
 pub mod misc;
 pub mod plans;
+pub mod plugin_data;
 pub mod plugin_kv;
 pub mod projects;
 pub mod pyjson;
