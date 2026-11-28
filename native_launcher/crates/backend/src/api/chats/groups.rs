@@ -13,9 +13,9 @@ pub(super) fn refused(why: &str) -> Value {
 }
 
 /// `group_orchestrator.group_members`: the roster's rows, each with every field.
-fn roster(group: &Fields) -> Vec<Value> {
+fn roster(group: &Fields, roots: &[String]) -> Vec<Value> {
     let rows = group["group_members"].as_array().into_iter().flatten().enumerate();
-    rows.filter(|(_, row)| row.is_object()).map(|(index, row)| member(row, index)).collect()
+    rows.filter(|(_, row)| row.is_object()).map(|(index, row)| member(row, index, roots)).collect()
 }
 
 pub(super) fn arg(args: &Fields, name: &str) -> String {
@@ -57,7 +57,7 @@ pub async fn group_set_leader(api: Arc<Api>, args: Fields) -> Result<Value, Stri
     if member_id.is_empty() {
         return Ok(refused("member_conv_id required"));
     }
-    let members = roster(&group);
+    let members = roster(&group, sidebar.lane_roots().await?);
     if !members.iter().any(|row| row["member_conv_id"] == *member_id) {
         return Ok(refused("Member not in this group"));
     }
@@ -75,14 +75,15 @@ pub async fn group_remove(api: Arc<Api>, args: Fields) -> Result<Value, String> 
     let Some(mut group) = sidebar.group(&arg(&args, "group_id")).await? else { return Ok(refused("Not a group chat")) };
     let member_id = arg(&args, "member_conv_id").trim().to_string();
     let stored = group["group_members"].as_array().cloned().unwrap_or_default();
-    let kept: Vec<Value> = roster(&group).into_iter().filter(|row| row["member_conv_id"] != *member_id).collect();
+    let roots = sidebar.lane_roots().await?;
+    let kept: Vec<Value> = roster(&group, roots).into_iter().filter(|row| row["member_conv_id"] != *member_id).collect();
     let mut leader = text(&group["leader_conv_id"]).trim().to_string();
     if !leader.is_empty() && leader == member_id {
         leader = kept.first().map(|row| text(&row["member_conv_id"])).unwrap_or_default();
         group.insert("leader_conv_id".into(), json!(leader));
     }
     // The roster is saved first, so no later folder sync can pull the member back.
-    group.insert("group_members".into(), json!(roster_rows(&kept, &stored)));
+    group.insert("group_members".into(), json!(roster_rows(&kept, &stored, roots)));
     let group = sidebar.save_chat(group, true).await?;
     sidebar.evict(&member_id).await?;
     api.publish(vec![chat_changed(&group)]);
@@ -96,10 +97,10 @@ mod tests {
     #[test]
     fn a_roster_is_its_rows_with_every_field_and_a_refusal_says_why() {
         let group = json!({"group_members": [{"member_conv_id": " a "}, "junk", {"member_conv_id": "b", "color": "#111111"}]});
-        let rows = roster(group.as_object().unwrap());
+        let rows = roster(group.as_object().unwrap(), &[]);
         // The colour is by the row's place in the stored list, junk rows counted.
         assert_eq!(rows.iter().map(|row| (text(&row["member_conv_id"]), text(&row["color"]))).collect::<Vec<_>>(), [("a".to_string(), "#7aa2f7".to_string()), ("b".to_string(), "#111111".to_string())]);
-        assert_eq!(roster(json!({"group_members": null}).as_object().unwrap()), Vec::<Value>::new());
+        assert_eq!(roster(json!({"group_members": null}).as_object().unwrap(), &[]), Vec::<Value>::new());
         assert_eq!(refused("Not a group chat"), json!({"ok": false, "error": "Not a group chat"}));
     }
 }

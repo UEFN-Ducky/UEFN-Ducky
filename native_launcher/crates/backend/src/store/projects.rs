@@ -72,6 +72,14 @@ pub async fn kind_for(store: &Store, slug: String) -> Result<String> {
     Ok(kind.flatten().unwrap_or_default())
 }
 
+/// Every project's stored kind by its slug, removed rows too ('' when none was recorded).
+pub async fn kinds(store: &Store) -> Result<Vec<(String, String)>> {
+    store
+        .readers
+        .read(|conn| conn.prepare("SELECT id, COALESCE(kind, '') FROM projects")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect())
+        .await
+}
+
 /// Drop from the recent list (the row stays, marked deleted, so history keeps its key).
 /// A discovered island never opened gets a deleted row so discovery leaves it out.
 pub async fn forget(store: &Store, slug: String, path: String) -> Result<()> {

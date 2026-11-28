@@ -107,6 +107,9 @@ fn by_order(a: f64, b: f64) -> Ordering {
 
 /// The account's chats and folders, for one call.
 struct Sidebar<'a> {
+    api: &'a Api,
+    /// [`Sidebar::lane_roots`], read once.
+    roots: tokio::sync::OnceCell<Vec<String>>,
     chats: &'a Chats,
     who: Who,
     /// The custom duckies that still have their picture.
@@ -116,10 +119,18 @@ struct Sidebar<'a> {
 async fn sidebar(api: &Api) -> Result<Sidebar<'_>, String> {
     imported(api, "chats", "chats").await?;
     let custom = custom_duckies(api.repos.data_dir()).await;
-    Ok(Sidebar { chats: api.repos.chats().await.map_err(failed)?, who: api.repos.who().await.map_err(failed)?, custom })
+    let roots = tokio::sync::OnceCell::new();
+    Ok(Sidebar { api, roots, chats: api.repos.chats().await.map_err(failed)?, who: api.repos.who().await.map_err(failed)?, custom })
 }
 
 impl Sidebar<'_> {
+    /// The folders a member's full-path lane may be in: the person's projects.
+    /// ponytail: read from the disk once per call that touches a roster; keep it between
+    /// calls if a trace shows it.
+    async fn lane_roots(&self) -> Result<&[String], String> {
+        self.roots.get_or_try_init(|| super::project_files::lane_roots(self.api)).await.map(Vec::as_slice)
+    }
+
     /// `chats.folders.load_folders`: the folders in sidebar order, Archive among them.
     async fn folders(&self) -> Result<Vec<Folder>, String> {
         let rows = self.chats.folders_get(self.who.clone(), ONE_LIST.into()).await.map_err(failed)?;

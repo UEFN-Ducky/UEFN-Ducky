@@ -72,7 +72,7 @@ fn kept(prev: &Value, name: &str) -> String {
 
 /// A ducky's roster row: what its chat says now, else what the roster had.
 /// `joins`: it sits in the group's folder, so its own profile counts too.
-fn ducky_row(chat: &Fields, prev: &Value, joins: bool, index: usize) -> Value {
+fn ducky_row(chat: &Fields, prev: &Value, joins: bool, index: usize, roots: &[String]) -> Value {
     let own = |name: &str| text(&chat[name]);
     let either = |name: &str| first([own(name), kept(prev, name)], "");
     let speed = [&chat["tts_speed"], &prev["tts_speed"]].into_iter().find(|speed| truthy(speed)).and_then(float).unwrap_or(0.0);
@@ -84,13 +84,13 @@ fn ducky_row(chat: &Fields, prev: &Value, joins: bool, index: usize) -> Value {
         "profile_id": first([kept(prev, "profile_id"), if joins { own("profile_id") } else { String::new() }], ""),
         "is_group": false,
     });
-    member(&over(prev, fields), index)
+    member(&over(prev, fields), index, roots)
 }
 
 /// A nested group's roster row: one representative speaks for the whole subgroup.
-fn group_row(hub: &str, label: &str, prev: &Value, index: usize) -> Value {
+fn group_row(hub: &str, label: &str, prev: &Value, index: usize, roots: &[String]) -> Value {
     let label = first([label.trim().to_string()], "Group");
-    member(&over(prev, json!({"member_conv_id": hub, "name": label, "ducky_name": label, "profile_id": kept(prev, "profile_id"), "is_group": true})), index)
+    member(&over(prev, json!({"member_conv_id": hub, "name": label, "ducky_name": label, "profile_id": kept(prev, "profile_id"), "is_group": true})), index, roots)
 }
 
 /// `stays_with_outer_group`: the chat leads the group whose folder it sits in, and
@@ -187,8 +187,9 @@ impl Sidebar<'_> {
         let Some(own) = folders.iter().find(|folder| folder.group_hub_id == group_id) else { return Ok(()) };
         let docs = self.docs().await?;
         let chat = |id: &str| docs.iter().find(|doc| text(&doc["id"]) == id);
+        let roots = self.lane_roots().await?;
         let roster = group["group_members"].as_array().cloned().unwrap_or_default();
-        let existing: Vec<Value> = roster.iter().enumerate().filter(|(_, row)| row.is_object()).map(|(index, row)| member(row, index)).filter(|row| row["member_conv_id"] != "").collect();
+        let existing: Vec<Value> = roster.iter().enumerate().filter(|(_, row)| row.is_object()).map(|(index, row)| member(row, index, roots)).filter(|row| row["member_conv_id"] != "").collect();
         let prev = |id: &str| existing.iter().rfind(|row| row["member_conv_id"] == id).cloned().unwrap_or_else(|| json!({}));
 
         let mut rows: Vec<Value> = Vec::new();
@@ -198,7 +199,7 @@ impl Sidebar<'_> {
             if !parent.is_empty() && chat(&parent).is_some_and(|parent| parent["is_group"] != true) {
                 continue;
             }
-            rows.push(ducky_row(doc, &prev(&text(&doc["id"])), true, rows.len()));
+            rows.push(ducky_row(doc, &prev(&text(&doc["id"])), true, rows.len(), roots));
             if parent.is_empty() {
                 let mut joined = doc.clone();
                 joined.insert("parent_conv_id".into(), json!(group_id));
@@ -208,7 +209,7 @@ impl Sidebar<'_> {
         for folder in folders.iter().filter(|folder| !folder.group_hub_id.is_empty() && folder.group_hub_id != group_id && folder.parent_id == own.id) {
             let prev = prev(&folder.group_hub_id);
             let label = first([folder.name.clone(), kept(&prev, "name")], "Group");
-            rows.push(group_row(&folder.group_hub_id, &label, &prev, rows.len()));
+            rows.push(group_row(&folder.group_hub_id, &label, &prev, rows.len(), roots));
         }
         // An outer group's lead on this roster is filed in its own group, not this folder.
         let mut seen = HashSet::new();
@@ -217,7 +218,7 @@ impl Sidebar<'_> {
             let last = prev(&id);
             let absent = !rows.iter().any(|row| row["member_conv_id"] == *id) && last["is_group"] != true;
             if absent && chat(&id).is_some_and(|chat| leads_from_outside(chat, &own.id, &folders, &docs)) {
-                rows.push(member(&last, rows.len()));
+                rows.push(member(&last, rows.len(), roots));
             }
         }
         // The leader stays on the roster, first: a leader is a pointer, not a folder
@@ -230,11 +231,11 @@ impl Sidebar<'_> {
             } else if let Some(doc) = chat(&leader) {
                 let prev = prev(&leader);
                 let label = first([kept(&prev, "name").trim().to_string(), text(&doc["ducky_name"]).trim().to_string(), text(&doc["title"]).trim().to_string()], "Group");
-                rows.insert(0, if doc["is_group"] == true { group_row(&leader, &label, &prev, 0) } else { ducky_row(doc, &prev, false, 0) });
+                rows.insert(0, if doc["is_group"] == true { group_row(&leader, &label, &prev, 0, roots) } else { ducky_row(doc, &prev, false, 0, roots) });
             }
         }
         let mut group = group;
-        group.insert("group_members".into(), json!(roster_rows(&rows, &roster)));
+        group.insert("group_members".into(), json!(roster_rows(&rows, &roster, roots)));
         self.save_chat(group, true).await.map(|_| ())
     }
 
@@ -326,13 +327,13 @@ mod tests {
     #[test]
     fn a_roster_row_takes_what_the_chat_says_now_and_keeps_the_rest() {
         let chat = json!({"id": "m", "title": "Chat m", "ducky_name": "", "ducky_style": "robot", "model": "", "coding_agent": "", "tts_voice": "", "tts_speed": 0.0, "profile_id": "dev"});
-        let prev = member(&json!({"member_conv_id": "m", "model": "x:y", "tts_speed": 1.5, "color": "#123456"}), 3);
-        let row = ducky_row(chat.as_object().unwrap(), &prev, true, 0);
+        let prev = member(&json!({"member_conv_id": "m", "model": "x:y", "tts_speed": 1.5, "color": "#123456"}), 3, &[]);
+        let row = ducky_row(chat.as_object().unwrap(), &prev, true, 0, &[]);
         // The stored name was blank, so it was "Ducky" already.
         assert_eq!((&row["name"], &row["ducky_style"], &row["model"], &row["tts_speed"], &row["color"], &row["profile_id"]), (&json!("Ducky"), &json!("robot"), &json!("x:y"), &json!(1.5), &json!("#123456"), &json!("dev")));
-        let fresh = ducky_row(chat.as_object().unwrap(), &json!({}), false, 1);
+        let fresh = ducky_row(chat.as_object().unwrap(), &json!({}), false, 1, &[]);
         assert_eq!((&fresh["name"], &fresh["profile_id"], &fresh["color"]), (&json!("Chat m"), &json!(""), &json!("#9ece6a")));
-        let nested = group_row("hub2", "  ", &json!({}), 0);
+        let nested = group_row("hub2", "  ", &json!({}), 0, &[]);
         assert_eq!((&nested["name"], &nested["ducky_name"], &nested["is_group"]), (&json!("Group"), &json!("Group"), &json!(true)));
     }
 }

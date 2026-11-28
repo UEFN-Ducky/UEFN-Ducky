@@ -5,6 +5,9 @@
 
 mod chat_doc;
 pub mod chats;
+pub mod file_kinds;
+pub mod project_files;
+pub mod project_paths;
 pub mod push;
 pub mod router;
 pub mod settings;
@@ -62,6 +65,14 @@ pub fn methods() -> HashMap<&'static str, Method> {
         chats::list_local_chats => Anyone,
         chats::adopt_local_chats => Anyone,
         chats::delete_local_chats => Anyone,
+        project_files::list_project_files => Anyone,
+        project_files::list_workspace_roots => Anyone,
+        project_files::list_project_file_paths => Anyone,
+        project_files::read_project_file => Anyone,
+        project_files::classify_project_file => Anyone,
+        project_files::project_file_media_url => Anyone,
+        project_files::stat_project_file => Anyone,
+        project_files::fingerprint_project_dirs => Anyone,
     }
 }
 

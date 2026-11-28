@@ -125,7 +125,7 @@ impl Sidebar<'_> {
         // The folders as stored: this read never adds Archive or numbers anything.
         let stored = self.chats.folders_get(self.who.clone(), ONE_LIST.into()).await.map_err(failed)?;
         let folders: Vec<Folder> = stored.iter().map(Folder::from).collect();
-        let mut teams = Teams::new(self.docs().await?, &folders);
+        let mut teams = Teams::new(self.docs().await?, &folders, self.lane_roots().await?.to_vec());
         teams.sync(&ids, keep_hub);
         for chat in teams.changed() {
             self.save_chat(chat, true).await?;

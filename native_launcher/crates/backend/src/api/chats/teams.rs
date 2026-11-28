@@ -25,10 +25,8 @@ fn member_id(row: &Value) -> String {
 }
 
 /// `normalize_glob`: one lane pattern in its canonical form, None when it can never be safe.
-/// ponytail: a full path is kept without checking it is inside one of the person's
-/// projects; check it when the project list is read here (the write itself is still
-/// checked against the projects by the lane guard).
-fn glob(pattern: &str) -> Option<String> {
+/// A full path must be inside one of `roots` (the person's projects, `/` between parts).
+fn glob(pattern: &str, roots: &[String]) -> Option<String> {
     let mut path = pattern.trim().replace('\\', "/");
     while let Some(rest) = path.strip_prefix("./") {
         path = rest.to_string();
@@ -47,13 +45,21 @@ fn glob(pattern: &str) -> Option<String> {
         let drive: String = rest.next().into_iter().flat_map(char::to_uppercase).collect();
         path = drive + rest.as_str();
     }
+    if absolute {
+        // Up to the first wildcard part, in any letter case.
+        let fixed = path.split('/').take_while(|part| !part.contains(['*', '?', '['])).collect::<Vec<_>>().join("/").to_lowercase();
+        let inside = |root: &String| fixed.strip_prefix(&root.to_lowercase()).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'));
+        if !roots.iter().any(inside) {
+            return None;
+        }
+    }
     let folder = !path.contains(['*', '?', '[']) && !path.rsplit('/').next().unwrap_or_default().contains('.');
     Some(if folder { path + "/**" } else { path })
 }
 
 /// `_normalize_lane_field`: None is unrestricted, `[]` read-only. A pattern that no
 /// longer parses is dropped; the lane never turns into unrestricted.
-fn lane(raw: &Value) -> Value {
+fn lane(raw: &Value, roots: &[String]) -> Value {
     let split = |text: &str| text.split(['\n', ',']).map(str::to_string).collect::<Vec<_>>();
     let items = match raw {
         Value::Null | Value::Bool(_) => return Value::Null,
@@ -61,15 +67,16 @@ fn lane(raw: &Value) -> Value {
         Value::Array(items) => items.iter().map(pystr).collect(),
         _ => return json!([]),
     };
-    let all = |items: &[String]| items.iter().filter(|item| !item.trim().is_empty()).map(|item| glob(item)).collect::<Option<BTreeSet<String>>>();
+    let all = |items: &[String]| items.iter().filter(|item| !item.trim().is_empty()).map(|item| glob(item, roots)).collect::<Option<BTreeSet<String>>>();
     // Python's second try reads each item of a list as a lane of its own (its commas
     // split too) and keeps the ones that parse whole; a text that failed stays failed.
     let each = || items.iter().filter(|_| raw.is_array()).filter_map(|item| all(&split(item))).flatten().collect();
     json!(all(&items).unwrap_or_else(each))
 }
 
-/// `normalize_member`: one roster row with every field it has.
-pub(super) fn member(raw: &Value, index: usize) -> Value {
+/// `normalize_member`: one roster row with every field it has. `roots`: the folders a
+/// full-path lane may be in (`Sidebar::lane_roots`).
+pub(super) fn member(raw: &Value, index: usize, roots: &[String]) -> Value {
     let number = |name: &str| raw.get(name).filter(|value| truthy(value)).and_then(float).unwrap_or(0.0);
     let or = |value: String, fallback: &str| if value.is_empty() { fallback.to_string() } else { value };
     json!({
@@ -84,7 +91,7 @@ pub(super) fn member(raw: &Value, index: usize) -> Value {
         "tts_speed": number("tts_speed"),
         "color": or(trimmed(raw, "color"), COLORS[index % COLORS.len()]),
         "is_group": raw.get("is_group").is_some_and(truthy),
-        "write_allowed": lane(raw.get("write_allowed").unwrap_or(&Value::Null)),
+        "write_allowed": lane(raw.get("write_allowed").unwrap_or(&Value::Null), roots),
         "lane_set_by": trimmed(raw, "lane_set_by"),
         "lane_set_at": number("lane_set_at"),
         "lane_root": trimmed(raw, "lane_root"),
@@ -103,8 +110,8 @@ fn stored_lanes(mut row: Value, stored: &[Value]) -> Value {
 }
 
 /// `save_group_roster`: the rows as they are stored, lanes never older than the stored ones.
-pub(super) fn roster_rows(rows: &[Value], stored: &[Value]) -> Vec<Value> {
-    rows.iter().enumerate().map(|(index, row)| stored_lanes(member(&stored_lanes(row.clone(), stored), index), stored)).collect()
+pub(super) fn roster_rows(rows: &[Value], stored: &[Value], roots: &[String]) -> Vec<Value> {
+    rows.iter().enumerate().map(|(index, row)| stored_lanes(member(&stored_lanes(row.clone(), stored), index, roots), stored)).collect()
 }
 
 /// Every chat and folder of the list, while the moved chats' teams are put right.
@@ -116,10 +123,12 @@ pub(super) struct Teams {
     /// Chats to save, in the order they first changed; with their stored roster when it changed.
     changed: Vec<String>,
     rosters: HashMap<String, Vec<Value>>,
+    /// The folders a full-path lane may be in.
+    roots: Vec<String>,
 }
 
 impl Teams {
-    pub(super) fn new(chats: Vec<Fields>, folders: &[Folder]) -> Teams {
+    pub(super) fn new(chats: Vec<Fields>, folders: &[Folder], roots: Vec<String>) -> Teams {
         let groups = folders.iter().filter(|folder| !folder.group_hub_id.is_empty() && !is_archive(&folder.id));
         Teams {
             chats: chats.into_iter().map(|chat| (text(&chat["id"]), chat)).collect(),
@@ -127,6 +136,7 @@ impl Teams {
             folders: folders.iter().map(|folder| (folder.id.clone(), folder.clone())).collect(),
             changed: Vec::new(),
             rosters: HashMap::new(),
+            roots,
         }
     }
 
@@ -283,7 +293,7 @@ impl Teams {
                         "member_conv_id": conv_id, "name": name, "ducky_name": named("ducky_name"), "ducky_style": named("ducky_style"),
                         "profile_id": named("profile_id"), "model": named("model"), "coding_agent": named("coding_agent"),
                     });
-                    let rows = [rows.clone(), vec![member(&joined, rows.len())]].concat();
+                    let rows = [rows.clone(), vec![member(&joined, rows.len(), &self.roots)]].concat();
                     self.set(&team, "group_members", json!(rows));
                 }
                 if parent.is_empty() || parent_follows {
@@ -308,7 +318,7 @@ impl Teams {
             let Some(mut chat) = self.chats.remove(conv_id) else { continue };
             if let Some(stored) = self.rosters.get(conv_id) {
                 let rows = chat["group_members"].as_array().cloned().unwrap_or_default();
-                chat.insert("group_members".into(), json!(roster_rows(&rows, stored)));
+                chat.insert("group_members".into(), json!(roster_rows(&rows, stored, &self.roots)));
             }
             out.push(chat);
         }
@@ -322,10 +332,13 @@ mod tests {
 
     #[test]
     fn a_lane_pattern_gets_its_canonical_form() {
+        let roots = ["C:/Repos".to_string(), "é:".to_string()];
         let cases = [("Content\\Verse\\Shop\\", "Content/Verse/Shop/**"), ("./src//a/./b.py", "src/a/b.py"), ("src/*.rs", "src/*.rs"), ("c:/Repos/x", "C:/Repos/x/**")];
         for (given, wanted) in cases {
-            assert_eq!(glob(given).as_deref(), Some(wanted), "{given}");
+            assert_eq!(glob(given, &roots).as_deref(), Some(wanted), "{given}");
         }
+        let glob = |pattern: &str| glob(pattern, &roots);
+        let lane = |raw: &Value| lane(raw, &roots);
         assert_eq!([glob(" "), glob("a/../b"), glob("./"), glob("/")], [None, None, None, None]);
         assert_eq!(lane(&json!(null)), json!(null));
         assert_eq!(lane(&json!(true)), json!(null));
@@ -340,15 +353,34 @@ mod tests {
     }
 
     #[test]
+    fn a_full_path_lane_is_inside_one_of_the_projects() {
+        let roots = ["C:/Repos/App".to_string(), "/home/me/isle".to_string()];
+        let glob = |pattern: &str| glob(pattern, &roots);
+        let kept = [
+            ("c:\\repos\\app", "C:/repos/app/**"), ("C:/Repos/App/src/*.rs", "C:/Repos/App/src/*.rs"), ("C:/Repos/App/a.py", "C:/Repos/App/a.py"),
+            ("/home/me/isle/Content/", "/home/me/isle/Content/**"), ("/home/me/isle/**", "/home/me/isle/**"),
+        ];
+        for (given, wanted) in kept {
+            assert_eq!(glob(given).as_deref(), Some(wanted), "{given}");
+        }
+        // Another folder, a longer name, a parent of a project, a wildcard before the project ends.
+        for outside in ["C:/Other/x", "C:/Repos/Apple/x", "C:/Repos", "C:/Repos/*/src", "/home/me", "D:/Repos/App/a.py"] {
+            assert_eq!(glob(outside), None, "{outside}");
+        }
+        assert_eq!(super::glob("C:/Repos/App/x", &[]), None);
+        assert_eq!(lane(&json!(["C:/Other/x", "C:/Repos/App/x", "src"]), &roots), json!(["C:/Repos/App/x/**", "src/**"]));
+    }
+
+    #[test]
     fn a_roster_row_has_every_field_and_keeps_its_stored_lane() {
-        let row = member(&json!({"member_conv_id": " m ", "name": " ", "tts_speed": "1.5", "is_group": 1, "write_allowed": ["src"], "extra": 1}), 9);
+        let row = member(&json!({"member_conv_id": " m ", "name": " ", "tts_speed": "1.5", "is_group": 1, "write_allowed": ["src"], "extra": 1}), 9, &[]);
         let wanted = json!({
             "member_conv_id": "m", "profile_id": "", "name": "Ducky", "ducky_name": "", "ducky_style": "", "model": "", "coding_agent": "", "tts_voice": "",
             "tts_speed": 1.5, "color": "#9ece6a", "is_group": true, "write_allowed": ["src/**"], "lane_set_by": "", "lane_set_at": 0.0, "lane_root": "",
         });
         assert_eq!(row, wanted);
         let stored = [json!({"member_conv_id": "m", "write_allowed": []})];
-        let rows = roster_rows(&[json!({"member_conv_id": "m", "write_allowed": ["src"]}), json!({"member_conv_id": "new"})], &stored);
+        let rows = roster_rows(&[json!({"member_conv_id": "m", "write_allowed": ["src"]}), json!({"member_conv_id": "new"})], &stored, &[]);
         // The stored member keeps its stored lane fields as they are; the new one gets the defaults.
         assert_eq!((&rows[0]["write_allowed"], &rows[0]["lane_set_by"], &rows[1]["write_allowed"], &rows[1]["lane_set_by"]), (&json!([]), &json!(null), &json!(null), &json!("")));
     }
@@ -373,7 +405,7 @@ mod tests {
             chat("lead", "g-old", json!({"parent_conv_id": "old"})),
             chat("other", "g-old", json!({"parent_conv_id": "old"})),
         ];
-        let mut teams = Teams::new(chats, &[folder("g-old", "", "old"), folder("g-new", "", "new")]);
+        let mut teams = Teams::new(chats, &[folder("g-old", "", "old"), folder("g-new", "", "new")], Vec::new());
         teams.sync(&["mover".to_string(), "gone".to_string()], "");
         let changed: HashMap<String, Fields> = teams.changed().into_iter().map(|chat| (text(&chat["id"]), chat)).collect();
         assert_eq!(changed.len(), 3);
@@ -391,7 +423,7 @@ mod tests {
             chat("m", "", json!({"parent_conv_id": "outer"})),
         ];
         // The inner group's folder is at the top now.
-        let mut teams = Teams::new(chats, &[folder("g-outer", "", "outer"), folder("g-inner", "", "inner")]);
+        let mut teams = Teams::new(chats, &[folder("g-outer", "", "outer"), folder("g-inner", "", "inner")], Vec::new());
         teams.sync(&["m".to_string(), "inner".to_string()], "");
         let changed: HashMap<String, Fields> = teams.changed().into_iter().map(|chat| (text(&chat["id"]), chat)).collect();
         assert_eq!((&changed["m"]["parent_conv_id"], &changed["inner"]["parent_conv_id"], &changed["outer"]["group_members"]), (&json!(""), &json!(""), &json!([])));
