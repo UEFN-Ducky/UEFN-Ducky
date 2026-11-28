@@ -28,7 +28,9 @@ pub fn norm_key(path: &str) -> String {
     path.trim().replace('\\', "/").trim_start_matches('/').to_lowercase()
 }
 
-fn walk(dir: &Path, root: &Path, out: &mut BTreeMap<String, PathBuf>) {
+/// As `os.walk` goes: a folder's files as the disk lists them, then each of its folders.
+fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) {
+    let mut folders = Vec::new();
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let (path, name) = (entry.path(), entry.file_name().to_string_lossy().into_owned());
         if path.is_dir() {
@@ -36,24 +38,32 @@ fn walk(dir: &Path, root: &Path, out: &mut BTreeMap<String, PathBuf>) {
             // no Verse), nor through a link.
             let link = entry.file_type().is_ok_and(|kind| kind.is_symlink());
             if !link && !name.starts_with("__External") {
-                walk(&path, root, out);
+                folders.push(path);
             }
         } else if name.to_lowercase().ends_with(".verse") {
             if let Ok(rel) = path.strip_prefix(root) {
-                out.insert(norm_key(&rel.to_string_lossy()), path);
+                out.push((norm_key(&rel.to_string_lossy()), path));
             }
         }
     }
+    for folder in folders {
+        walk(&folder, root, out);
+    }
 }
 
-/// Every Verse file under the project's `Content/`, by key.
-pub fn disk_files(root: &Path) -> BTreeMap<String, PathBuf> {
-    let mut out = BTreeMap::new();
+/// Every Verse file under the project's `Content/` with its key, in the disk's order.
+fn disk_list(root: &Path) -> Vec<(String, PathBuf)> {
+    let mut out = Vec::new();
     let content = root.join("Content");
     if content.is_dir() {
         walk(&content, root, &mut out);
     }
     out
+}
+
+/// Every Verse file under the project's `Content/`, by key.
+pub fn disk_files(root: &Path) -> BTreeMap<String, PathBuf> {
+    disk_list(root).into_iter().collect()
 }
 
 /// `(modified time in ns, size)`: a file with the same pair was not edited.
@@ -71,15 +81,22 @@ fn items(entry: &Value) -> Value {
     entry["items"].as_array().map_or_else(|| json!([]), |items| json!(items))
 }
 
-/// How many files need a check: new or edited ones, and every one that had problems (a
-/// wrong diagnosis would otherwise stay until the file is edited).
-fn stale_count(disk: &BTreeMap<String, PathBuf>, files: &Files) -> usize {
-    let stale = |(key, path): (&String, &PathBuf)| {
-        let Some(entry) = files.get(key).filter(|entry| entry.is_object()) else { return true };
-        let fresh = fingerprint(path).is_some_and(|(mtime_ns, size)| entry["mtime_ns"].as_i64() == Some(mtime_ns) && entry["size"].as_i64() == Some(size));
-        !fresh || count(entry, "errors") > 0 || count(entry, "warnings") > 0
-    };
-    disk.iter().filter(|file| stale(*file)).count()
+/// A file needs a check when it is new or edited, or had problems (a wrong diagnosis
+/// would otherwise stay until the file is edited).
+fn is_stale(key: &str, path: &Path, files: &Files) -> bool {
+    let Some(entry) = files.get(key).filter(|entry| entry.is_object()) else { return true };
+    let fresh = fingerprint(path).is_some_and(|(mtime_ns, size)| entry["mtime_ns"].as_i64() == Some(mtime_ns) && entry["size"].as_i64() == Some(size));
+    !fresh || count(entry, "errors") > 0 || count(entry, "warnings") > 0
+}
+
+/// `stale_keys`: the files that need a check, in the disk's order.
+pub fn stale_keys(root: &Path, files: &Files) -> Vec<String> {
+    disk_list(root).into_iter().filter(|(key, path)| is_stale(key, path, files)).map(|(key, _)| key).collect()
+}
+
+/// `_cached_file_result`: a file's kept result as the Problems list takes it.
+pub fn result(key: &str, entry: &Value) -> Value {
+    json!({"path": key, "errors": count(entry, "errors"), "warnings": count(entry, "warnings"), "items": items(entry)})
 }
 
 /// The entry a file's result is kept as.
@@ -100,9 +117,7 @@ pub fn for_ui(root: &Path, mut files: Files) -> Value {
     files.retain(|key, _| disk.contains_key(key));
     let mut keys: Vec<&String> = files.iter().filter(|(_, entry)| entry.is_object()).map(|(key, _)| key).collect();
     keys.sort();
-    let rows: Vec<Value> = keys
-        .into_iter()
-        .map(|key| json!({"path": key, "errors": count(&files[key], "errors"), "warnings": count(&files[key], "warnings"), "items": items(&files[key])}))
-        .collect();
-    json!({"files": rows, "stale_count": stale_count(&disk, &files), "from_cache": true})
+    let rows: Vec<Value> = keys.into_iter().map(|key| result(key, &files[key])).collect();
+    let stale = disk.iter().filter(|(key, path)| is_stale(key, path, &files)).count();
+    json!({"files": rows, "stale_count": stale, "from_cache": true})
 }

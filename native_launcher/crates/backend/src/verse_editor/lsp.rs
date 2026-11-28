@@ -190,11 +190,7 @@ impl Session {
 
     /// Start the process hidden, in the island's folder, with its three pipes read.
     fn spawn(self: &Arc<Self>, state: &mut State, program: &str) -> std::io::Result<()> {
-        let mut command = Command::new(program);
-        command.current_dir(&state.root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-        #[cfg(windows)]
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        let mut child = command.spawn()?;
+        let mut child = command(program, &state.root).spawn()?;
         let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
         let (Some(stdin), Some(stdout), Some(stderr)) = pipes else { return Err(std::io::Error::other("verse-lsp started without its pipes")) };
         state.made += 1;
@@ -323,6 +319,15 @@ impl Run {
     }
 }
 
+/// verse-lsp as Ducky starts it: no window, in the island's folder, its pipes ours.
+pub(super) fn command(program: &str, root: &str) -> Command {
+    let mut command = Command::new(program);
+    command.current_dir(root).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
+}
+
 /// Accept one page, shake hands and hand its messages to verse-lsp until it leaves.
 /// True when a page connected.
 async fn serve(listener: &TcpListener, stdin: &tokio::sync::Mutex<ChildStdin>, client: &Client) -> bool {
@@ -432,7 +437,7 @@ async fn pump(stdout: ChildStdout, client: Client) {
 }
 
 /// `_lsp_read_message`: one `Content-Length` framed message; None at the end.
-async fn message(from: &mut (impl AsyncBufReadExt + Unpin)) -> Option<Vec<u8>> {
+pub(super) async fn message(from: &mut (impl AsyncBufReadExt + Unpin)) -> Option<Vec<u8>> {
     let mut length = 0usize;
     loop {
         let mut line = Vec::new();

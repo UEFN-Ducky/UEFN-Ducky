@@ -123,6 +123,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         verse::is_verse_editor_enabled => Anyone,
         verse::load_verse_diagnostics_cache => Anyone,
         verse::save_verse_file_cache => Anyone,
+        verse::scan_verse_diagnostics => Anyone,
+        verse::stop_verse_diagnostics_scan => Anyone,
         verse::get_verse_lsp_status => ThisPc,
         verse::start_verse_lsp => ThisPc,
         verse::stop_verse_lsp => ThisPc,

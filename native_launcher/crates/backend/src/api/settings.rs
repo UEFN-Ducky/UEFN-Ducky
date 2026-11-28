@@ -132,7 +132,7 @@ pub(super) fn files_backend(store: &str) -> bool {
     if one.is_empty() { env("DUCKY_STORE_BACKEND".into()) == "files" } else { one == "files" }
 }
 
-pub(super) fn failed(err: crate::store::Error) -> String {
+pub(crate) fn failed(err: crate::store::Error) -> String {
     err.0
 }
 

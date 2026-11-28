@@ -1,7 +1,7 @@
 //! The Verse editor's calls (`frontend/ui_web/verse_editor/api.py`): its switch, the
-//! Problems list's cache and its verse-lsp.
-//! ponytail: the project scan, the workflow server and revision control are
-//! still the Python backend's; each moves here with its own methods.
+//! Problems list's cache, its verse-lsp and the project scan.
+//! ponytail: the workflow server and revision control are still the Python backend's;
+//! each moves here with its own methods.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use super::Api;
 use crate::store::misc;
 use crate::store::pyjson::{int, pystr, truthy};
 use crate::verse_editor::diagnostics::{self, Files};
-use crate::verse_editor::lsp;
+use crate::verse_editor::{lsp, scan};
 
 type Fields = Map<String, Value>;
 
@@ -113,6 +113,75 @@ pub async fn load_verse_diagnostics_cache(api: Arc<Api>, args: Fields) -> Result
     }
     let files = stored(&api, &place.slug).await?;
     tokio::task::spawn_blocking(move || diagnostics::for_ui(Path::new(&place.root), files)).await.map_err(|stopped| stopped.to_string())
+}
+
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    tokio::task::spawn_blocking(work).await.map_err(|stopped| stopped.to_string())
+}
+
+/// The island's rows as the Problems list shows them, told to every window as the
+/// whole truth (a file that was fixed, deleted or moved goes from their lists).
+async fn sync(api: &Api, root: &str, slug: &str) -> Result<Vec<Value>, String> {
+    let (files, at) = (stored(api, slug).await?, root.to_string());
+    let shown = blocking(move || diagnostics::for_ui(Path::new(&at), files)).await?;
+    let files = shown["files"].as_array().cloned().unwrap_or_default();
+    api.publish(vec![json!({"type": "verse_diagnostics_sync", "files": files, "replace": true, "project_root": root})]);
+    Ok(files)
+}
+
+/// Check the island's Verse files that need it (all of them with `full`). The answer
+/// comes at once; the windows hear the scan's steps and then its result.
+pub async fn scan_verse_diagnostics(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let place = place(&api, &args).await?;
+    if place.root.is_empty() {
+        return Ok(json!({"error": "No project root set", "files": [], "scanned": 0}));
+    }
+    if place.folder {
+        return Ok(json!({"ok": true, "pending": false, "files": [], "scanned": 0, "folder_project": true}));
+    }
+    let full = args.get("full").is_some_and(truthy);
+    let (files, at) = (stored(&api, &place.slug).await?, place.root.clone());
+    let listed = move || {
+        let root = Path::new(&at);
+        (diagnostics::stale_keys(root, &files), if full { scan::all_keys(root) } else { Vec::new() })
+    };
+    let (stale, all) = blocking(listed).await?;
+    if !full && stale.is_empty() {
+        let files = sync(&api, &place.root, &place.slug).await?;
+        let with = |name: &str| files.iter().filter(|file| truthy(&file[name])).count();
+        return Ok(json!({"ok": true, "pending": false, "scanned": 0, "with_errors": with("errors"), "with_warnings": with("warnings"), "files": files}));
+    }
+    let scan_id = scan::next_id();
+    // Told at once only when this scan starts right away: behind a running one, that
+    // one's events keep feeding the windows.
+    let announced = !scan::is_active(&place.root);
+    if announced {
+        let paths = if full { all } else { stale };
+        api.publish(vec![json!({"type": "verse_diagnostics_progress", "project_root": place.root, "phase": "started", "scan_id": scan_id, "total": paths.len(), "paths": paths, "index": 0, "path": ""})]);
+    }
+    tokio::spawn(async move {
+        let ask = scan::Ask { root: place.root, slug: place.slug, full, announced, scan_id };
+        if let Err(message) = scan::scan(&api, &ask).await {
+            api.publish(vec![json!({"type": "verse_diagnostics_progress", "project_root": ask.root, "phase": "error", "scan_id": scan_id, "message": message})]);
+        }
+        let _ = sync(&api, &ask.root, &ask.slug).await;
+    });
+    Ok(json!({"ok": true, "pending": true, "files": [], "scanned": 0}))
+}
+
+/// The Stop button: end the running scan and tell the windows.
+pub async fn stop_verse_diagnostics_scan(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let place = place(&api, &args).await?;
+    let session = scan::unhook();
+    if !place.root.is_empty() {
+        api.publish(vec![json!({"type": "verse_diagnostics_progress", "project_root": place.root, "phase": "error", "message": "Scan stopped"})]);
+        sync(&api, &place.root, &place.slug).await?;
+    }
+    // Last, as Python's stopped scan says its last words after these.
+    if let Some(session) = session {
+        session.stop();
+    }
+    Ok(json!({"ok": true}))
 }
 
 /// The editor's own verse-lsp checked one file: keep its result, and tell every window

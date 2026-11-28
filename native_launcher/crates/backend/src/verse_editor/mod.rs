@@ -4,3 +4,5 @@
 pub mod diagnostics;
 pub mod lsp;
 pub mod lsp_detect;
+pub mod scan;
+pub mod stdio;
