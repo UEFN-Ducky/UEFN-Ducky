@@ -1,0 +1,1926 @@
+{
+ "ui": [
+  "feature.open",
+  "setup.ai",
+  "setup.rating",
+  "setup.source",
+  "setup.step",
+  "tour.end"
+ ],
+ "events": {
+  "app.open": {
+   "version": [
+    "version"
+   ],
+   "os": [
+    "enum",
+    "win10",
+    "win11",
+    "linux",
+    "macos",
+    "other"
+   ],
+   "install_age": [
+    "bucket",
+    "install_age_s",
+    [
+     [
+      86400,
+      "day0"
+     ],
+     [
+      604800,
+      "week1"
+     ],
+     [
+      2592000,
+      "month1"
+     ],
+     [
+      null,
+      "older"
+     ]
+    ]
+   ]
+  },
+  "app.heartbeat": {
+   "uefn_up": [
+    "yes_no"
+   ]
+  },
+  "app.close": {
+   "uptime": [
+    "bucket",
+    "uptime_s",
+    [
+     [
+      300,
+      "5m"
+     ],
+     [
+      1800,
+      "30m"
+     ],
+     [
+      7200,
+      "2h"
+     ],
+     [
+      28800,
+      "8h"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ]
+  },
+  "app.ended": {
+   "how": [
+    "enum",
+    "closed",
+    "handoff",
+    "stopped",
+    "restart",
+    "signout",
+    "launcher",
+    "running",
+    "starting",
+    "native",
+    "fatal",
+    "stuck",
+    "alive"
+   ],
+   "uptime": [
+    "bucket",
+    "uptime_s",
+    [
+     [
+      60,
+      "1m"
+     ],
+     [
+      300,
+      "5m"
+     ],
+     [
+      1800,
+      "30m"
+     ],
+     [
+      7200,
+      "2h"
+     ],
+     [
+      28800,
+      "8h"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "v": [
+    "version"
+   ]
+  },
+  "launcher.start": {
+   "mode": [
+    "enum",
+    "native",
+    "python"
+   ],
+   "fallback": [
+    "enum",
+    "none",
+    "webview2",
+    "protocol",
+    "crash_loop",
+    "no_hello",
+    "start_error",
+    "timeout",
+    "spawn_error",
+    "no_exe",
+    "crash_loop_active",
+    "launcher_fallback",
+    "exit_other",
+    "other",
+    "crash_loop.port_blocked",
+    "crash_loop.import_error",
+    "crash_loop.permission",
+    "crash_loop.memory",
+    "crash_loop.other"
+   ],
+   "painted_ms": [
+    "bucket",
+    "painted_ms",
+    [
+     [
+      500,
+      "500ms"
+     ],
+     [
+      1100,
+      "1100ms"
+     ],
+     [
+      1300,
+      "1300ms"
+     ],
+     [
+      2000,
+      "2000ms"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "window_ms": [
+    "bucket",
+    "window_ms",
+    [
+     [
+      100,
+      "100ms"
+     ],
+     [
+      300,
+      "300ms"
+     ],
+     [
+      1000,
+      "1000ms"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ]
+  },
+  "update.installed": {
+   "from": [
+    "version"
+   ],
+   "to": [
+    "version"
+   ]
+  },
+  "update.download_fail": {
+   "host": [
+    "enum",
+    "main",
+    "alt"
+   ],
+   "stage": [
+    "enum",
+    "connect",
+    "read",
+    "http"
+   ],
+   "what": [
+    "enum",
+    "pack",
+    "setup"
+   ]
+  },
+  "sync.download_fail": {
+   "host": [
+    "enum",
+    "main",
+    "alt"
+   ],
+   "stage": [
+    "enum",
+    "connect",
+    "read"
+   ]
+  },
+  "update.check_recovered": {
+   "v": [
+    "version"
+   ]
+  },
+  "update.check": {
+   "status": [
+    "enum",
+    "none",
+    "no_release",
+    "up_to_date",
+    "update_available",
+    "paused",
+    "error"
+   ],
+   "channel": [
+    "enum",
+    "installed",
+    "portable",
+    "dev"
+   ],
+   "pack": [
+    "yes_no"
+   ]
+  },
+  "setup.step": {
+   "step": [
+    "enum",
+    "welcome",
+    "plugins",
+    "connect_ai",
+    "defaults",
+    "done",
+    "closed",
+    "skipped"
+   ]
+  },
+  "setup.first_message": {
+   "within": [
+    "enum",
+    "first_session",
+    "later"
+   ]
+  },
+  "setup.plugin": {
+   "plugin_id": [
+    "slug"
+   ],
+   "ok": [
+    "yes_no"
+   ]
+  },
+  "setup.ai": {
+   "provider": [
+    "enum",
+    "claude",
+    "codex",
+    "gemini",
+    "cursor",
+    "ollama",
+    "ducky_ai",
+    "other"
+   ],
+   "state": [
+    "enum",
+    "plan",
+    "key",
+    "account",
+    "not_logged_in",
+    "not_installed",
+    "none"
+   ]
+  },
+  "setup.source": {
+   "source": [
+    "enum",
+    "youtube",
+    "tiktok",
+    "discord",
+    "x",
+    "reddit",
+    "google",
+    "epic_forums",
+    "friend",
+    "other"
+   ]
+  },
+  "setup.rating": {
+   "stars": [
+    "enum",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5"
+   ]
+  },
+  "tour.end": {
+   "tour": [
+    "slug"
+   ],
+   "how": [
+    "enum",
+    "done",
+    "skipped"
+   ],
+   "at": [
+    "slug"
+   ]
+  },
+  "uefn.connect": {
+   "ok": [
+    "yes_no"
+   ],
+   "reason": [
+    "enum",
+    "lost",
+    "port_busy",
+    "not_running",
+    "listener_missing",
+    "timeout",
+    "other"
+   ]
+  },
+  "uefn.popup_watchdog": {
+   "kind": [
+    "enum",
+    "save",
+    "lone_ok",
+    "other"
+   ]
+  },
+  "agent.login": {
+   "provider": [
+    "enum",
+    "claude",
+    "codex",
+    "cursor",
+    "ollama",
+    "ducky_ai",
+    "other"
+   ],
+   "ok": [
+    "yes_no"
+   ],
+   "reason": [
+    "enum",
+    "no_cli",
+    "auth",
+    "network",
+    "other"
+   ]
+  },
+  "chat.turn": {
+   "provider": [
+    "enum",
+    "claude",
+    "codex",
+    "cursor",
+    "ollama",
+    "ducky_ai",
+    "other"
+   ],
+   "model_family": [
+    "enum",
+    "claude",
+    "gpt",
+    "gemini",
+    "ollama",
+    "ducky_ai",
+    "other"
+   ],
+   "outcome": [
+    "enum",
+    "ok",
+    "error",
+    "stopped",
+    "stuck",
+    "timeout",
+    "limit",
+    "login",
+    "interrupted",
+    "other"
+   ],
+   "duration": [
+    "bucket",
+    "duration_s",
+    [
+     [
+      10,
+      "10s"
+     ],
+     [
+      60,
+      "1m"
+     ],
+     [
+      300,
+      "5m"
+     ],
+     [
+      1200,
+      "20m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "tool_calls": [
+    "bucket",
+    "tool_calls_n",
+    [
+     [
+      0,
+      "0"
+     ],
+     [
+      5,
+      "1-5"
+     ],
+     [
+      20,
+      "6-20"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "kind": [
+    "enum",
+    "session_dead",
+    "busy",
+    "timeout",
+    "offline",
+    "rate_limit",
+    "auth",
+    "too_long",
+    "bad_picture",
+    "bad_request",
+    "server_error",
+    "memory",
+    "permission",
+    "not_found",
+    "crash",
+    "port_blocked",
+    "other"
+   ],
+   "reason": [
+    "slug"
+   ],
+   "v": [
+    "version"
+   ],
+   "tool_fails": [
+    "bucket",
+    "tool_fails_n",
+    [
+     [
+      0,
+      "0"
+     ],
+     [
+      5,
+      "1-5"
+     ],
+     [
+      20,
+      "6-20"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ]
+  },
+  "tool.call": {
+   "tool": [
+    "slug"
+   ],
+   "ok": [
+    "yes_no"
+   ],
+   "duration": [
+    "bucket",
+    "duration_s",
+    [
+     [
+      1,
+      "1s"
+     ],
+     [
+      10,
+      "10s"
+     ],
+     [
+      60,
+      "1m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "fail": [
+    "enum",
+    "exit_nonzero",
+    "busy",
+    "not_approved",
+    "timeout",
+    "not_found",
+    "refused",
+    "error"
+   ],
+   "cmd": [
+    "enum",
+    "test",
+    "build",
+    "git",
+    "install",
+    "script",
+    "other"
+   ],
+   "after_fail": [
+    "enum",
+    "yes"
+   ],
+   "why": [
+    "enum",
+    "exit_code",
+    "refused",
+    "error"
+   ],
+   "no": [
+    "enum",
+    "folder",
+    "missing",
+    "args",
+    "offline",
+    "busy",
+    "big",
+    "lane",
+    "rule",
+    "timeout",
+    "other"
+   ]
+  },
+  "turn.wait": {
+   "provider": [
+    "enum",
+    "claude",
+    "codex",
+    "cursor",
+    "ollama",
+    "ducky_ai",
+    "other"
+   ],
+   "first": [
+    "bucket",
+    "first_s",
+    [
+     [
+      3,
+      "3s"
+     ],
+     [
+      10,
+      "10s"
+     ],
+     [
+      30,
+      "30s"
+     ],
+     [
+      120,
+      "2m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "quiet": [
+    "bucket",
+    "quiet_s",
+    [
+     [
+      3,
+      "3s"
+     ],
+     [
+      10,
+      "10s"
+     ],
+     [
+      30,
+      "30s"
+     ],
+     [
+      120,
+      "2m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "why": [
+    "enum",
+    "start",
+    "model",
+    "tool",
+    "compacting",
+    "compacting_idle",
+    "other"
+   ],
+   "v": [
+    "version"
+   ]
+  },
+  "skill.used": {
+   "skill": [
+    "slug"
+   ]
+  },
+  "workflow.run": {
+   "outcome": [
+    "enum",
+    "ok",
+    "error",
+    "stopped"
+   ],
+   "nodes": [
+    "bucket",
+    "nodes_n",
+    [
+     [
+      5,
+      "1-5"
+     ],
+     [
+      20,
+      "6-20"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ]
+  },
+  "plugin.install": {
+   "plugin_id": [
+    "slug"
+   ]
+  },
+  "plugin.remove": {
+   "plugin_id": [
+    "slug"
+   ]
+  },
+  "feature.open": {
+   "tab": [
+    "enum",
+    "chat",
+    "editor",
+    "terminal",
+    "plan",
+    "usage",
+    "settings",
+    "discord",
+    "plugin",
+    "ducky-profile",
+    "changes",
+    "workflows",
+    "store",
+    "browser",
+    "forge"
+   ]
+  },
+  "error.code": {
+   "code": [
+    "slug"
+   ],
+   "where": [
+    "enum",
+    "agent",
+    "ui",
+    "bridge",
+    "uefn",
+    "store",
+    "sync",
+    "workflow",
+    "other"
+   ],
+   "kind": [
+    "enum",
+    "session_dead",
+    "busy",
+    "timeout",
+    "offline",
+    "rate_limit",
+    "auth",
+    "too_long",
+    "bad_picture",
+    "bad_request",
+    "server_error",
+    "memory",
+    "permission",
+    "not_found",
+    "crash",
+    "port_blocked",
+    "other"
+   ],
+   "version": [
+    "version"
+   ],
+   "at": [
+    "slug"
+   ],
+   "stage": [
+    "enum",
+    "launch",
+    "handoff",
+    "handoff_exit",
+    "reclaim_claim",
+    "webview_import_patches",
+    "import_panel_api",
+    "db_backup",
+    "panel_api_init",
+    "http_server",
+    "create_window",
+    "ready_for_webview_start",
+    "window_shown",
+    "page_started",
+    "other"
+   ],
+   "uptime": [
+    "bucket",
+    "uptime_s",
+    [
+     [
+      60,
+      "1m"
+     ],
+     [
+      300,
+      "5m"
+     ],
+     [
+      1800,
+      "30m"
+     ],
+     [
+      7200,
+      "2h"
+     ],
+     [
+      28800,
+      "8h"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "first_token": [
+    "enum",
+    "y",
+    "n"
+   ],
+   "attempt": [
+    "enum",
+    "first",
+    "later"
+   ],
+   "memory": [
+    "bucket",
+    "memory_mb",
+    [
+     [
+      500,
+      "500mb"
+     ],
+     [
+      1024,
+      "1gb"
+     ],
+     [
+      2048,
+      "2gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "webview": [
+    "bucket",
+    "webview_mb",
+    [
+     [
+      500,
+      "500mb"
+     ],
+     [
+      1024,
+      "1gb"
+     ],
+     [
+      2048,
+      "2gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "agents": [
+    "bucket",
+    "agents_mb",
+    [
+     [
+      500,
+      "500mb"
+     ],
+     [
+      1024,
+      "1gb"
+     ],
+     [
+      2048,
+      "2gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "net_stage": [
+    "enum",
+    "dns",
+    "connect",
+    "tls",
+    "proxy",
+    "timeout",
+    "http",
+    "other"
+   ],
+   "proxy": [
+    "enum",
+    "none",
+    "static",
+    "pac"
+   ],
+   "reason": [
+    "slug"
+   ]
+  },
+  "agent.stuck": {
+   "provider": [
+    "enum",
+    "claude",
+    "codex",
+    "cursor",
+    "ollama",
+    "ducky_ai",
+    "other"
+   ],
+   "after": [
+    "bucket",
+    "after_s",
+    [
+     [
+      60,
+      "60s"
+     ],
+     [
+      300,
+      "5m"
+     ],
+     [
+      1200,
+      "20m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "tool": [
+    "slug"
+   ],
+   "v": [
+    "version"
+   ],
+   "where": [
+    "enum",
+    "lease",
+    "connect",
+    "call",
+    "sequence"
+   ]
+  },
+  "ui.crash": {
+   "code": [
+    "slug"
+   ]
+  },
+  "revision.op": {
+   "op": [
+    "enum",
+    "push",
+    "pull"
+   ],
+   "outcome": [
+    "enum",
+    "ok",
+    "up_to_date",
+    "blocked",
+    "fail"
+   ],
+   "reason": [
+    "enum",
+    "behind",
+    "conflict_markers",
+    "locked",
+    "both_changed",
+    "conflict_dialog",
+    "needs_save",
+    "no_island",
+    "repo_read",
+    "check_in",
+    "save_failed",
+    "session_dead",
+    "busy",
+    "timeout",
+    "offline",
+    "rate_limit",
+    "auth",
+    "too_long",
+    "bad_picture",
+    "bad_request",
+    "server_error",
+    "memory",
+    "permission",
+    "not_found",
+    "crash",
+    "port_blocked",
+    "other"
+   ],
+   "took": [
+    "bucket",
+    "took_s",
+    [
+     [
+      10,
+      "10s"
+     ],
+     [
+      60,
+      "1m"
+     ],
+     [
+      180,
+      "3m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ]
+  },
+  "remote.connect": {
+   "outcome": [
+    "enum",
+    "ok",
+    "timeout",
+    "error",
+    "bad_offer",
+    "old_protocol"
+   ],
+   "client": [
+    "enum",
+    "android_app",
+    "phone_web",
+    "tablet_web",
+    "desktop_web"
+   ],
+   "net": [
+    "enum",
+    "wifi",
+    "cell",
+    "ethernet",
+    "unknown"
+   ],
+   "viewer_version": [
+    "version"
+   ]
+  },
+  "remote.link": {
+   "link": [
+    "enum",
+    "connecting",
+    "live",
+    "reconnecting",
+    "failed",
+    "other"
+   ],
+   "candidate": [
+    "enum",
+    "host",
+    "srflx",
+    "prflx",
+    "relay",
+    "other"
+   ],
+   "connect": [
+    "bucket",
+    "connect_ms",
+    [
+     [
+      1000,
+      "1s"
+     ],
+     [
+      3000,
+      "3s"
+     ],
+     [
+      10000,
+      "10s"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "client": [
+    "enum",
+    "android_app",
+    "phone_web",
+    "tablet_web",
+    "desktop_web"
+   ],
+   "net": [
+    "enum",
+    "wifi",
+    "cell",
+    "ethernet",
+    "unknown"
+   ],
+   "viewer_version": [
+    "version"
+   ]
+  },
+  "remote.quality": {
+   "fps": [
+    "bucket",
+    "fps_n",
+    [
+     [
+      14.99,
+      "under15"
+     ],
+     [
+      29.99,
+      "15-30"
+     ],
+     [
+      null,
+      "30+"
+     ]
+    ]
+   ],
+   "rtt": [
+    "bucket",
+    "rtt_ms",
+    [
+     [
+      50,
+      "50ms"
+     ],
+     [
+      150,
+      "150ms"
+     ],
+     [
+      400,
+      "400ms"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "jitter": [
+    "bucket",
+    "jitter_ms",
+    [
+     [
+      10,
+      "10ms"
+     ],
+     [
+      30,
+      "30ms"
+     ],
+     [
+      100,
+      "100ms"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "loss": [
+    "bucket",
+    "loss_pct",
+    [
+     [
+      0,
+      "0"
+     ],
+     [
+      1,
+      "1pct"
+     ],
+     [
+      5,
+      "5pct"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "freezes": [
+    "bucket",
+    "freezes_n",
+    [
+     [
+      0,
+      "0"
+     ],
+     [
+      3,
+      "1-3"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "bitrate": [
+    "bucket",
+    "bitrate_kbps",
+    [
+     [
+      500,
+      "500kbps"
+     ],
+     [
+      2000,
+      "2mbps"
+     ],
+     [
+      5000,
+      "5mbps"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "res": [
+    "bucket",
+    "height_px",
+    [
+     [
+      480,
+      "480p"
+     ],
+     [
+      720,
+      "720p"
+     ],
+     [
+      null,
+      "1080p"
+     ]
+    ]
+   ],
+   "client": [
+    "enum",
+    "android_app",
+    "phone_web",
+    "tablet_web",
+    "desktop_web"
+   ],
+   "net": [
+    "enum",
+    "wifi",
+    "cell",
+    "ethernet",
+    "unknown"
+   ],
+   "viewer_version": [
+    "version"
+   ]
+  },
+  "remote.input": {
+   "lag": [
+    "bucket",
+    "lag_ms",
+    [
+     [
+      50,
+      "50ms"
+     ],
+     [
+      150,
+      "150ms"
+     ],
+     [
+      400,
+      "400ms"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "dropped": [
+    "bucket",
+    "dropped_n",
+    [
+     [
+      0,
+      "0"
+     ],
+     [
+      5,
+      "1-5"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "client": [
+    "enum",
+    "android_app",
+    "phone_web",
+    "tablet_web",
+    "desktop_web"
+   ],
+   "net": [
+    "enum",
+    "wifi",
+    "cell",
+    "ethernet",
+    "unknown"
+   ],
+   "viewer_version": [
+    "version"
+   ]
+  },
+  "remote.load": {
+   "first_frame": [
+    "bucket",
+    "first_frame_ms",
+    [
+     [
+      1000,
+      "1s"
+     ],
+     [
+      3000,
+      "3s"
+     ],
+     [
+      10000,
+      "10s"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "page": [
+    "bucket",
+    "page_ms",
+    [
+     [
+      1000,
+      "1s"
+     ],
+     [
+      3000,
+      "3s"
+     ],
+     [
+      10000,
+      "10s"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "client": [
+    "enum",
+    "android_app",
+    "phone_web",
+    "tablet_web",
+    "desktop_web"
+   ],
+   "net": [
+    "enum",
+    "wifi",
+    "cell",
+    "ethernet",
+    "unknown"
+   ],
+   "viewer_version": [
+    "version"
+   ]
+  },
+  "remote.end": {
+   "why": [
+    "enum",
+    "user",
+    "network",
+    "pc_closed",
+    "background",
+    "crash",
+    "other"
+   ],
+   "length": [
+    "bucket",
+    "length_s",
+    [
+     [
+      10,
+      "10s"
+     ],
+     [
+      60,
+      "1m"
+     ],
+     [
+      300,
+      "5m"
+     ],
+     [
+      1200,
+      "20m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "fail_stage": [
+    "enum",
+    "signaling",
+    "ice_gather",
+    "ice_check",
+    "dtls",
+    "datachannel",
+    "none"
+   ],
+   "client": [
+    "enum",
+    "android_app",
+    "phone_web",
+    "tablet_web",
+    "desktop_web"
+   ],
+   "net": [
+    "enum",
+    "wifi",
+    "cell",
+    "ethernet",
+    "unknown"
+   ],
+   "viewer_version": [
+    "version"
+   ]
+  },
+  "pc.gpu_full": {
+   "total": [
+    "bucket",
+    "total_gb",
+    [
+     [
+      4,
+      "4gb"
+     ],
+     [
+      6,
+      "6gb"
+     ],
+     [
+      8,
+      "8gb"
+     ],
+     [
+      10,
+      "10gb"
+     ],
+     [
+      12,
+      "12gb"
+     ],
+     [
+      16,
+      "16gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "top": [
+    "enum",
+    "uefn",
+    "ducky",
+    "browser",
+    "game",
+    "overlay",
+    "other"
+   ],
+   "uefn": [
+    "bucket",
+    "uefn_gb",
+    [
+     [
+      1.99,
+      "<2gb"
+     ],
+     [
+      3.99,
+      "<4gb"
+     ],
+     [
+      5.99,
+      "<6gb"
+     ],
+     [
+      7.99,
+      "<8gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "ducky": [
+    "bucket",
+    "ducky_gb",
+    [
+     [
+      0.249,
+      "<0.25gb"
+     ],
+     [
+      0.499,
+      "<0.5gb"
+     ],
+     [
+      0.999,
+      "<1gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "muted": [
+    "enum",
+    "y",
+    "n"
+   ]
+  },
+  "gateway.connect": {
+   "provider": [
+    "slug"
+   ],
+   "result": [
+    "enum",
+    "ok",
+    "bad_key",
+    "no_access",
+    "network",
+    "rate_limit",
+    "plan",
+    "other"
+   ],
+   "plugin_v": [
+    "version"
+   ]
+  },
+  "gateway.turn_fail": {
+   "provider": [
+    "slug"
+   ],
+   "stage": [
+    "enum",
+    "before_output",
+    "after_output"
+   ],
+   "reason": [
+    "slug"
+   ],
+   "retried": [
+    "enum",
+    "0",
+    "1",
+    "2",
+    "3"
+   ],
+   "switched": [
+    "enum",
+    "y",
+    "n"
+   ],
+   "plugin_v": [
+    "version"
+   ]
+  },
+  "gateway.response": {
+   "provider": [
+    "slug"
+   ],
+   "stop": [
+    "enum",
+    "safety",
+    "max_tokens",
+    "recitation",
+    "other"
+   ],
+   "plugin_v": [
+    "version"
+   ]
+  },
+  "epic.deadline": {
+   "reason": [
+    "enum",
+    "popup",
+    "editor_busy",
+    "no_answer"
+   ],
+   "heavy": [
+    "enum",
+    "y",
+    "n"
+   ],
+   "steps": [
+    "enum",
+    "one",
+    "many"
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "uefn.popup": {
+   "kind": [
+    "enum",
+    "verse_error",
+    "save",
+    "checkout",
+    "message",
+    "crash",
+    "other"
+   ],
+   "during": [
+    "enum",
+    "call",
+    "build"
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "verse.build": {
+   "result": [
+    "enum",
+    "ok",
+    "errors",
+    "popup",
+    "still_building",
+    "offline"
+   ],
+   "took": [
+    "bucket",
+    "took_s",
+    [
+     [
+      30,
+      "30s"
+     ],
+     [
+      60,
+      "1m"
+     ],
+     [
+      180,
+      "3m"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "uefn.memory": {
+   "grown": [
+    "bucket",
+    "grown_gb",
+    [
+     [
+      1,
+      "1gb"
+     ],
+     [
+      4,
+      "4gb"
+     ],
+     [
+      16,
+      "16gb"
+     ],
+     [
+      64,
+      "64gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "freed": [
+    "bucket",
+    "freed_gb",
+    [
+     [
+      1,
+      "1gb"
+     ],
+     [
+      4,
+      "4gb"
+     ],
+     [
+      16,
+      "16gb"
+     ],
+     [
+      64,
+      "64gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "epic.status": {
+   "state": [
+    "enum",
+    "online",
+    "unreachable",
+    "disabled",
+    "port_taken",
+    "other_editor",
+    "other"
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "editor.lease": {
+   "outcome": [
+    "enum",
+    "waited",
+    "gave_up"
+   ],
+   "waited": [
+    "bucket",
+    "waited_s",
+    [
+     [
+      5,
+      "5s"
+     ],
+     [
+      30,
+      "30s"
+     ],
+     [
+      90,
+      "90s"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ]
+  },
+  "epic.describe": {
+   "tool": [
+    "enum",
+    "list_toolsets",
+    "describe_toolset"
+   ],
+   "size": [
+    "bucket",
+    "chars_n",
+    [
+     [
+      10000,
+      "10k"
+     ],
+     [
+      50000,
+      "50k"
+     ],
+     [
+      150000,
+      "150k"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "epic.answer": {
+   "kind": [
+    "enum",
+    "empty_props",
+    "verse_string"
+   ],
+   "uefn": [
+    "slug"
+   ]
+  },
+  "perf.sample": {
+   "startup": [
+    "bucket",
+    "startup_s",
+    [
+     [
+      2,
+      "2s"
+     ],
+     [
+      5,
+      "5s"
+     ],
+     [
+      15,
+      "15s"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "idle_cpu": [
+    "bucket",
+    "idle_cpu_pct",
+    [
+     [
+      1,
+      "1pct"
+     ],
+     [
+      5,
+      "5pct"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "memory": [
+    "bucket",
+    "memory_mb",
+    [
+     [
+      500,
+      "500mb"
+     ],
+     [
+      1024,
+      "1gb"
+     ],
+     [
+      2048,
+      "2gb"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "agents": [
+    "bucket",
+    "agents_running_n",
+    [
+     [
+      0,
+      "0"
+     ],
+     [
+      1,
+      "1"
+     ],
+     [
+      4,
+      "2-4"
+     ],
+     [
+      null,
+      "more"
+     ]
+    ]
+   ],
+   "hot": [
+    "slug"
+   ]
+  }
+ }
+}

@@ -16,6 +16,7 @@ pub mod router;
 pub mod settings;
 pub mod shared;
 pub mod site;
+pub mod usage;
 
 use std::collections::HashMap;
 
@@ -90,6 +91,7 @@ pub fn methods() -> HashMap<&'static str, Method> {
         account::duckyos_login => Anyone,
         account::duckyos_cancel_login => Anyone,
         account::duckyos_open_site => Anyone,
+        usage::usage_track => Anyone,
     }
 }
 

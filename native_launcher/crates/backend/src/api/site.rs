@@ -70,6 +70,9 @@ pub struct Call<'a> {
     pub body: Option<&'a Value>,
     /// With no login, ask as nobody instead of refusing.
     pub allow_anonymous: bool,
+    /// Never as the account, signed in or not: no key, no cookie, and no answer changes
+    /// the login (usage stats).
+    pub anonymous: bool,
     /// The longest wait for the site's next bytes.
     pub timeout: Duration,
 }
@@ -243,7 +246,8 @@ pub async fn request(api: &Api, call: Call<'_>) -> Result<Answer, Refused> {
     let url = Url::parse(&format!("{base}{path}")).map_err(network)?;
     let method = reqwest::Method::from_bytes(call.method.to_uppercase().as_bytes()).map_err(network)?;
 
-    let (device_key, session) = (text(&login["device_key"]), text(&login["session_value"]));
+    let secret = |name: &str| if call.anonymous { String::new() } else { text(&login[name]) };
+    let (device_key, session) = (secret("device_key"), secret("session_value"));
     let mut headers = HeaderMap::new();
     let mut put = |name: &'static str, value: &str| HeaderValue::from_str(value).map(|value| drop(headers.insert(name, value))).map_err(network);
     put("accept", "application/json")?;
@@ -262,7 +266,7 @@ pub async fn request(api: &Api, call: Call<'_>) -> Result<Answer, Refused> {
         if !csrf.is_empty() && ["POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
             put("x-csrf-token", &csrf)?;
         }
-    } else if !call.allow_anonymous {
+    } else if !call.allow_anonymous && !call.anonymous {
         return Err(Refused::new("Not logged in", "not_logged_in"));
     }
     if call.body.is_some() {
@@ -343,7 +347,7 @@ pub async fn collect(api: &Api, what: Collect<'_>, body: &Value) -> Result<Map<S
     let mut attempt = 0;
     let (answer, failure) = loop {
         let last = attempt >= what.retries;
-        let call = Call { method: "POST", path: &path, body: Some(body), allow_anonymous: what.allow_anonymous, timeout: what.timeout };
+        let call = Call { method: "POST", path: &path, body: Some(body), allow_anonymous: what.allow_anonymous, anonymous: false, timeout: what.timeout };
         match request(api, call).await {
             Ok(answer) => {
                 let failure = site_failure(&answer);

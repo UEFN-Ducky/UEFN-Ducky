@@ -72,6 +72,9 @@ fn routes(api: Arc<api::Api>) -> Router {
         // The account's agent limits are fetched after a sign-in, which only a real site answers.
         let caps = |State(api): State<Arc<api::Api>>| async move { Json(json!({"ok": api::account::fetch_agent_caps(&api).await.is_ok()})) };
         routes = routes.merge(Router::new().route("/__rs/account/agent_caps", post(caps)).with_state(Arc::clone(&api)));
+        // Any usage event and a batch sent now: the page may only report its own few events.
+        let usage = |State(api): State<Arc<api::Api>>, Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::usage::probe(&api, &what, &body).await) };
+        routes = routes.merge(Router::new().route("/__rs/usage/{what}", post(usage)).with_state(Arc::clone(&api)));
     }
     // A window's poll waits 20 s by design, and a sign-in waits for the person to approve
     // its code: each sets its own limit, and is no slow call.
@@ -109,8 +112,15 @@ pub fn hello_line(port: u16) -> String {
 pub async fn serve(listener: TcpListener, stop: impl Future<Output = ()> + Send + 'static) -> io::Result<()> {
     let repos = Arc::new(store::http::Repos::new(app_data_dir()));
     let perf = tokio::spawn(perf::run(Arc::clone(&repos)));
-    let served = axum::serve(listener, routes(api::Api::new(Arc::clone(&repos), api::methods()))).with_graceful_shutdown(stop).await;
+    let api = api::Api::new(Arc::clone(&repos), api::methods());
+    // ponytail: the Python backend sends the usage queue until its own sender goes (two
+    // senders would send every row twice); the launcher names this one then.
+    let usage = std::env::var("DUCKY_USAGE_SENDER").is_ok_and(|who| who == "rust").then(|| tokio::spawn(api::usage::run(Arc::clone(&api))));
+    let served = axum::serve(listener, routes(api)).with_graceful_shutdown(stop).await;
     perf.abort();
+    if let Some(usage) = usage {
+        usage.abort();
+    }
     // What the last seconds traced is stored before the process ends.
     if perf::waiting() {
         if let Ok(store) = repos.store().await {
