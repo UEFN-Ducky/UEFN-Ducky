@@ -1,0 +1,93 @@
+# The Mac quick installer (build/macos/quick_installer): build it once (universal), then on a
+# fresh Apple Silicon and Intel runner open it like a browser download and let it install the
+# Store's latest release. Uploads nothing to the Store. From Windows:
+#   gh workflow run macos-quick-installer.yml && gh run watch
+#   gh run download -n UEFN-Ducky-Installer-macos
+name: macos-quick-installer
+
+on:
+  push:
+    branches: [main]
+    paths: ["build/macos/quick_installer/**", ".github/workflows/macos-quick-installer.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 -m pip install --break-system-packages pillow
+      - run: bash build/macos/quick_installer/build.sh
+      - name: Universal binary
+        run: lipo -archs "dist/quick-installer/UEFN Ducky Installer.app/Contents/MacOS/UEFN Ducky Installer" | grep -q "x86_64 arm64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UEFN-Ducky-Installer-macos
+          path: dist/UEFN-Ducky-Installer-macos.zip
+          retention-days: 14
+
+  install:
+    name: install (${{ matrix.arch }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64 }
+          - { runner: macos-15-intel, arch: x64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      ARCH: ${{ matrix.arch }}
+      DUCKY_SANDBOX: "1"
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: UEFN-Ducky-Installer-macos }
+      - name: Open it like a browser download (quarantine, Gatekeeper)
+        run: |
+          ls -l UEFN-Ducky-Installer-macos.zip
+          xattr -w com.apple.quarantine "0081;$(date +%s);Safari;" UEFN-Ducky-Installer-macos.zip
+          ditto -x -k UEFN-Ducky-Installer-macos.zip .
+          inst="UEFN Ducky Installer.app"
+          xattr -w com.apple.quarantine "0081;$(date +%s);Safari;" "$inst"
+          # Ad-hoc: Gatekeeper refuses it until "Open Anyway", which lifts the quarantine.
+          if spctl -a -t exec -vv "$inst"; then echo "Gatekeeper accepted an ad-hoc installer"; exit 1; fi
+          xattr -dr com.apple.quarantine "$inst"
+      - name: Headless install into ~/Applications
+        run: |
+          mkdir -p out
+          "./UEFN Ducky Installer.app/Contents/MacOS/UEFN Ducky Installer" --headless --dest ~/Applications | tee out/headless.txt
+          read -r ok version chip _ < out/headless.txt
+          test "$ok" = ok
+          test "$chip" = "$ARCH"
+          app=~/Applications/"UEFN Ducky.app"
+          [ "$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString)" = "$version" ]
+          # Downloaded by the installer, not a browser: no quarantine, no second "Open Anyway".
+          if xattr -p com.apple.quarantine "$app" 2>/dev/null; then echo "the installed app is quarantined"; exit 1; fi
+          codesign --verify --deep "$app"
+          "$app/Contents/MacOS/UEFN-Ducky" --runtime-smoke "$PWD/out/smoke.json"
+          python3 -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['window'], r" out/smoke.json
+          echo "headless install ok: $version ($chip)"
+      - name: Window install into /Applications (screenshots)
+        run: |
+          "./UEFN Ducky Installer.app/Contents/MacOS/UEFN Ducky Installer" > out/window.log 2>&1 &
+          pid=$!
+          sleep 4; screencapture -x "out/installer-${ARCH}-1.png" || true
+          sleep 8; screencapture -x "out/installer-${ARCH}-2.png" || true
+          for i in $(seq 1 100); do kill -0 $pid 2>/dev/null || break; sleep 3; done
+          screencapture -x "out/installer-${ARCH}-3-opened.png" || true
+          if kill -0 $pid 2>/dev/null; then echo "the installer did not finish"; kill $pid; exit 1; fi
+          test -x "/Applications/UEFN Ducky.app/Contents/MacOS/UEFN-Ducky"
+          if xattr -p com.apple.quarantine "/Applications/UEFN Ducky.app" 2>/dev/null; then exit 1; fi
+          pkill -f "UEFN Ducky.app/Contents/MacOS" || true
+          echo "window install ok"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: macos-quick-installer-${{ matrix.arch }}
+          path: out/
+          retention-days: 7
