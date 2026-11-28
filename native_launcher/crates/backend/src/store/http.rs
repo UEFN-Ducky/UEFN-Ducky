@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{account, blocking, duckies, events, ledger, misc, seal, search, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
+use super::{account, blocking, duckies, ducky_mirrors, events, history, kv, ledger, misc, plugin_kv, projects, seal, search, usage, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -279,6 +279,86 @@ async fn ledger(s: &Store, function: &str, a: &Value) -> Result<Option<Value>> {
     }))
 }
 
+/// The small repos: documents by key, plugin keys, usage, file history, projects.
+async fn small(s: &Store, repo: &str, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (table, key, prefix) = (text(a, "table"), text(a, "key"), text(a, "prefix"));
+    let (account, scope, path) = (text(a, "account"), text(a, "scope"), text(a, "path"));
+    let of = || plugin_kv::Owner { account: text(a, "account"), scope: text(a, "scope"), plugin_id: text(a, "plugin_id") };
+    let file = || history::File { project_id: text(a, "project_id"), path: text(a, "path") };
+    let int = |name: &str| a[name].as_i64().unwrap_or(0);
+    Ok(Some(match (repo, function) {
+        ("kv", "get_doc") => json!(kv::get_doc(s, &table, key).await?),
+        ("kv", "set_doc") => json!(kv::set_doc(s, &table, key, a["value"].clone()).await?),
+        ("kv", "delete_doc") => json!(kv::delete_doc(s, &table, key).await?),
+        ("kv", "prune_docs") => json!(kv::prune_docs(s, &table, prefix, int("keep")).await?),
+        ("kv", "list_docs") => Value::Object(kv::list_docs(s, &table, prefix).await?),
+        ("kv", "meta_get") => json!(kv::meta_get(s, key).await?),
+        ("kv", "meta_set") => json!(kv::meta_set(s, key, text(a, "value")).await?),
+        ("plugin_kv", "get") => json!(plugin_kv::get(s, of(), key).await?),
+        ("plugin_kv", "set") => json!(plugin_kv::set(s, of(), key, a["value"].clone(), a["encrypted_b64"].as_str().map(str::to_string)).await?),
+        ("plugin_kv", "delete") => json!(plugin_kv::delete(s, of(), key).await?),
+        ("plugin_kv", "keys") => json!(plugin_kv::keys(s, of(), prefix).await?),
+        ("plugin_kv", "delete_prefix") => json!(plugin_kv::delete_prefix(s, of(), prefix).await?),
+        ("plugin_kv", "all_prefs") => Value::Object(plugin_kv::all_prefs(s, account, scope).await?),
+        ("plugin_kv", "set_prefs") => json!(plugin_kv::set_prefs(s, of(), text(a, "sealed")).await?),
+        ("plugin_kv", "has_rows") => json!(plugin_kv::has_rows(s).await?),
+        ("plugin_kv", "has_unclaimed") => json!(plugin_kv::has_unclaimed(s).await?),
+        ("plugin_kv", "claim_unclaimed") => json!(plugin_kv::claim_unclaimed(s, account).await?),
+        ("plugin_kv", "unsealed_rows") => json!(plugin_kv::unsealed_rows(s, account, prefix).await?),
+        ("plugin_kv", "replace_value") => json!(plugin_kv::replace_value(s, of(), key, text(a, "value"), text(a, "old")).await?),
+        ("plugin_kv", "delete_scope") => json!(plugin_kv::delete_scope(s, account, scope).await?),
+        ("usage", "insert") => json!(usage::insert(s, a["entry"].clone(), a["retention_s"].as_f64()).await?),
+        ("usage", "since") => json!(usage::since(s, a["ts"].as_f64().unwrap_or(0.0)).await?),
+        ("usage", "count") => json!(usage::count(s).await?),
+        ("history", "newest") => json!(history::newest(s, file()).await?),
+        ("history", "exists") => json!(history::exists(s, file(), text(a, "entry_id")).await?),
+        ("history", "put") => {
+            let version = history::Version {
+                entry_id: text(a, "entry_id"),
+                content: text(a, "content"),
+                preview: text(a, "preview"),
+                saved_at: int("saved_at"),
+                attribution: a["attribution"].clone(),
+                schema_version: a["schema_version"].as_i64().unwrap_or(2),
+                content_hash: a["content_hash"].as_str().map(str::to_string),
+            };
+            json!(history::put(s, file(), version).await?)
+        }
+        ("history", "list_rows") => json!(history::list_rows(s, file()).await?),
+        ("history", "content") => json!(history::content(s, file(), text(a, "entry_id")).await?),
+        ("projects", "recent_paths") => json!(projects::recent_paths(s, a["limit"].as_i64().unwrap_or(projects::MAX_RECENT)).await?),
+        ("projects", "opened_rows") => json!(projects::opened_rows(s).await?),
+        ("projects", "removed_paths") => json!(projects::removed_paths(s).await?),
+        ("projects", "touch") => {
+            let open = projects::Open { slug: text(a, "slug"), path, name: text(a, "name"), when: a["when"].as_f64(), kind: text(a, "kind") };
+            json!(projects::touch(s, open).await?)
+        }
+        ("projects", "kind_for") => json!(projects::kind_for(s, text(a, "slug")).await?),
+        ("projects", "forget") => json!(projects::forget(s, text(a, "slug"), path).await?),
+        ("projects", "replace_recent") => json!(projects::replace_recent(s, serde_json::from_value(a["projects"].clone()).unwrap_or_default()).await?),
+        ("projects", "has_rows") => json!(projects::has_rows(s).await?),
+        _ => return Ok(None),
+    }))
+}
+
+/// Copies of the other Duckies' chats, for the account signed in now.
+async fn ducky_mirrors(s: &Store, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
+    let who = who(s, data_dir).await?;
+    let (account, ducky) = (who.id.clone(), text(a, "ducky"));
+    let chat = ducky_mirrors::Chat { ducky: ducky.clone(), conv_id: text(a, "conv_id") };
+    let at = |name: &str| a[name].as_f64().unwrap_or(0.0);
+    Ok(Some(match function {
+        "note_chat" => json!(ducky_mirrors::note_chat(s, who, chat, text(a, "title"), at("updated")).await?),
+        "put_rows" => json!(ducky_mirrors::put_rows(s, who, chat, a["rows"].as_array().cloned().unwrap_or_default(), at("of")).await?),
+        "mark_gone" => json!(ducky_mirrors::mark_gone(s, account, ducky, texts(a, "listed")).await?),
+        "note_peer" => json!(ducky_mirrors::note_peer(s, account, ducky, text(a, "name")).await?),
+        "forget_peer" => json!(ducky_mirrors::forget_peer(s, account, ducky).await?),
+        "peers" => json!(ducky_mirrors::peers(s, who).await?),
+        "rows" => json!(ducky_mirrors::rows(s, who, chat).await?),
+        _ => return Ok(None),
+    }))
+}
+
 /// The search index. Vectors travel as base64.
 async fn search(s: &Store, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
     let (source, model, doc_key, plugin) = (text(a, "source_key"), text(a, "model"), text(a, "doc_key"), text(a, "plugin_id"));
@@ -394,6 +474,8 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "events" | "perf" => return events(&open.store, repo, function, a).await,
         "ledger" => return ledger(&open.store, function, a).await,
         "search" => return search(&open.store, data_dir, function, a).await,
+        "kv" | "plugin_kv" | "usage" | "history" | "projects" => return small(&open.store, repo, function, a).await,
+        "ducky_mirrors" => return ducky_mirrors(&open.store, data_dir, function, a).await,
         "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
         _ => {}

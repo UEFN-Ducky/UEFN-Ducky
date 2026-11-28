@@ -20,17 +20,17 @@ use super::{now, Error, Result, Store};
 pub static STARTED: LazyLock<f64> = LazyLock::new(now);
 
 /// The first 16 hex characters of a SHA-256: an entry's change hash and a blob's name.
-fn hash(text: &str) -> String {
+pub(super) fn hash(text: &str) -> String {
     Sha256::digest(text.as_bytes()).iter().take(8).map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Python's `str(value or default)`.
-fn text_or(value: &Value, default: &str) -> String {
+pub(super) fn text_or(value: &Value, default: &str) -> String {
     if truthy(value) { pystr(value) } else { default.to_string() }
 }
 
 /// A JSON value as sqlite3 binds it.
-fn sql(value: &Value) -> Sql {
+pub(super) fn sql(value: &Value) -> Sql {
     match value {
         Value::Null => Sql::Null,
         Value::Bool(b) => Sql::Integer(i64::from(*b)),
@@ -371,17 +371,16 @@ pub async fn index_replace(store: &Store, project_id: String, index: Map<String,
 
 // --------------------------------------------------------------------------- blobs
 
-/// Store a text under its content hash (or `digest`): the name it is read back by.
-pub async fn blob_put(store: &Store, text: String, digest: Option<String>) -> Result<String> {
-    let name = digest.filter(|digest| !digest.is_empty()).unwrap_or_else(|| hash(&text));
-    let stored = name.clone();
-    store
-        .writer
-        .write("ledger::blob_put", move |conn| {
-            conn.execute("INSERT OR IGNORE INTO blobs(hash, text, size, created) VALUES (?1, ?2, ?3, ?4)", params![stored, text, text.len() as i64, now()])
-        })
-        .await?;
+/// Inside a write: store a text under its content hash (or `digest`), the name it is
+/// read back by. A blob already there stays.
+pub(super) fn put_blob(conn: &Connection, text: &str, digest: Option<&str>) -> rusqlite::Result<String> {
+    let name = digest.filter(|digest| !digest.is_empty()).map_or_else(|| hash(text), str::to_string);
+    conn.execute("INSERT OR IGNORE INTO blobs(hash, text, size, created) VALUES (?1, ?2, ?3, ?4)", params![name, text, text.len() as i64, now()])?;
     Ok(name)
+}
+
+pub async fn blob_put(store: &Store, text: String, digest: Option<String>) -> Result<String> {
+    store.writer.write("ledger::blob_put", move |conn| put_blob(conn, &text, digest.as_deref())).await
 }
 
 pub async fn blob_get(store: &Store, digest: String) -> Result<Option<String>> {

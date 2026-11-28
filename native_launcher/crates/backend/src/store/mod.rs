@@ -9,12 +9,17 @@ pub mod chat_messages;
 pub mod chats;
 pub mod conn;
 pub mod duckies;
+pub mod ducky_mirrors;
 pub mod events;
+pub mod history;
 pub mod http;
+pub mod kv;
 pub mod ledger;
 mod local_chats;
 pub mod messages;
 pub mod misc;
+pub mod plugin_kv;
+pub mod projects;
 pub mod pyjson;
 pub mod seal;
 pub mod search;
@@ -23,6 +28,7 @@ pub mod sealed_files;
 pub mod secrets;
 pub mod settings;
 pub mod tokens;
+pub mod usage;
 pub mod writer;
 
 use std::fmt;
@@ -72,6 +78,23 @@ impl From<Error> for rusqlite::Error {
 /// Seconds since 1970, as Python's `time.time()` stamps rows.
 pub(crate) fn now() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}
+
+/// A row as Python's `dict(row)`: every selected column by name (a blob is null).
+pub(crate) fn record(r: &rusqlite::Row) -> rusqlite::Result<serde_json::Map<String, serde_json::Value>> {
+    use rusqlite::types::ValueRef;
+    use serde_json::{json, Value};
+    let mut out = serde_json::Map::new();
+    for (i, name) in r.as_ref().column_names().into_iter().enumerate() {
+        let value = match r.get_ref(i)? {
+            ValueRef::Integer(n) => json!(n),
+            ValueRef::Real(n) => json!(n),
+            ValueRef::Text(text) => json!(String::from_utf8_lossy(text)),
+            ValueRef::Null | ValueRef::Blob(_) => Value::Null,
+        };
+        out.insert(name.to_string(), value);
+    }
+    Ok(out)
 }
 
 /// One open database: its writer and its readers. Cheap to clone.

@@ -83,6 +83,13 @@ class RustBackend:
         self.proc.wait(timeout=10)
 
 
+def callers(rust_store: Any, repo: str, module: Any) -> tuple[Any, Any]:
+    """``(python, rust)``: each a ``call(function, **args)`` on one repo module."""
+    return (lambda function, **args: getattr(module, function)(**args)), (
+        lambda function, **args: rust_store.store(repo, function, **args)
+    )
+
+
 def plain(value: Any) -> Any:
     """A Python result as it looks after JSON: tuples are lists, sets are sorted lists."""
     return json.loads(json.dumps(value, default=sorted))
