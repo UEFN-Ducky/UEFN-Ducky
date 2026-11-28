@@ -18,7 +18,7 @@ pub const MIGRATIONS: &[(i64, &str)] = include!(concat!(env!("OUT_DIR"), "/migra
 
 const OPEN_LOCK_NAME: &str = "ducky.db.open-lock";
 const RESTORE_PENDING_NAME: &str = "ducky.db.restore-pending";
-const SNAPSHOT_DIR_NAME: &str = "snapshots";
+pub(crate) const SNAPSHOT_DIR_NAME: &str = "snapshots";
 const KEEP_SNAPSHOTS: usize = 3;
 /// A first open may copy a large database before it upgrades it.
 pub const OPEN_LOCK_WAIT: Duration = Duration::from_secs(120);
@@ -88,7 +88,7 @@ fn folder_of(conn: &Connection) -> Result<PathBuf> {
 }
 
 /// The copies under `dir` (`ducky-*.db`), newest first.
-fn snapshots(dir: &Path) -> Vec<(PathBuf, SystemTime)> {
+pub(crate) fn snapshots(dir: &Path) -> Vec<(PathBuf, SystemTime)> {
     let Ok(listing) = fs::read_dir(dir) else { return Vec::new() };
     let mut found: Vec<(PathBuf, SystemTime)> = listing
         .flatten()
@@ -116,7 +116,7 @@ fn pre_migrate_copy(conn: &Connection, current: i64) -> Result<()> {
     Ok(())
 }
 
-fn vacuum_into(conn: &Connection, folder: &Path, suffix: &str) -> Result<PathBuf> {
+pub(crate) fn vacuum_into(conn: &Connection, folder: &Path, suffix: &str) -> Result<PathBuf> {
     let dir = folder.join(SNAPSHOT_DIR_NAME);
     fs::create_dir_all(&dir)?;
     // SQLite knows the PC's local time; the name is the one Python gives its copies.

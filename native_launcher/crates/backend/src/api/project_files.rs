@@ -25,7 +25,7 @@ use disk::Project;
 type Fields = Map<String, Value>;
 
 /// `(value or "")` as text.
-fn given(args: &Fields, name: &str) -> String {
+pub(super) fn given(args: &Fields, name: &str) -> String {
     args.get(name).filter(|value| truthy(value)).map(pystr).unwrap_or_default()
 }
 
