@@ -29,6 +29,9 @@ blake2 = "0.10"
 flate2 = "1"
 caseless = "0.2"
 unicode-normalization = "0.1"
+# Sealed files (store/sealed_file.rs): the file's key is wrapped for an account's X25519 key.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
 unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 
 [target.'cfg(windows)'.dependencies]

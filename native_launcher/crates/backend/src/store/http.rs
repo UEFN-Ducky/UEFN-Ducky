@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{account, duckies, misc, seal, secrets, tokens, Error, Result, Store};
+use super::{account, blocking, duckies, misc, seal, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -66,11 +66,6 @@ fn map(args: &Value, name: &str) -> Map<String, Value> {
 /// A bytes argument, sent as base64.
 fn bytes(args: &Value, name: &str) -> Vec<u8> {
     BASE64.decode(args[name].as_str().unwrap_or_default()).unwrap_or_default()
-}
-
-/// Work that blocks (sealing is a system call), off the async workers.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
-    tokio::task::spawn_blocking(work).await.unwrap_or_else(|_| Err(Error("the call panicked".into())))
 }
 
 fn texts(args: &Value, name: &str) -> Vec<String> {
@@ -194,6 +189,34 @@ async fn local_chats(open: &Open, data_dir: &std::path::Path, function: &str, a:
     }))
 }
 
+/// Sealed files, for the account signed in now.
+async fn sealed_files(open: &Open, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
+    let files = sealed_files::Files { store: &open.store, root: data_dir };
+    let path = |name: &str| PathBuf::from(text(a, name));
+    let account = a["account"].as_str();
+    let me = || who(&open.store, data_dir);
+    Ok(Some(match function {
+        "ensure_keypair" => json!(files.ensure_keypair(&me().await?).await?),
+        "public_key" => json!(files.public_key(account.unwrap_or_default()).await?.map(|key| BASE64.encode(key))),
+        "sealed_for" => {
+            let path = path("path");
+            json!(blocking(move || Ok(sealed_file::sealed_for(&path))).await?)
+        }
+        "seal_file" => json!(files.seal_file(path("path"), text(a, "account")).await?),
+        "open_file" => json!(files.open_file(path("path"), account, &me().await?).await?),
+        "open_to" => json!(files.open_to(path("path"), path("dest"), account, &me().await?).await?),
+        "read_bytes" => json!(BASE64.encode(files.read_bytes(path("path"), account, &me().await?).await?)),
+        "open_chat_folder" => json!(files.open_chat_folder(path("folder"), account.unwrap_or_default(), &me().await?).await?),
+        "open_local_folder" => json!(files.open_local_folder(path("folder")).await?),
+        "arrange_chat_files" => Value::Object(files.arrange_chat_files(&me().await?).await?),
+        "sweep_leftovers" => {
+            let (root, older) = (data_dir.to_path_buf(), a["older_than_s"].as_f64().unwrap_or(600.0));
+            json!(blocking(move || Ok(sealed_file::sweep_leftovers(&root, older))).await?)
+        }
+        _ => return Ok(None),
+    }))
+}
+
 /// Search tokens under a key the test hands over.
 fn tokens(function: &str, a: &Value) -> Result<Option<Value>> {
     let key = || tokens::Key::new(bytes(a, "key"));
@@ -236,6 +259,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "duckies" => return duckies(&open.store, data_dir, function, a).await,
         "chats" => return chats(open, data_dir, function, a).await,
         "local_chats" => return local_chats(open, data_dir, function, a).await,
+        "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
         _ => {}
     }

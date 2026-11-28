@@ -15,6 +15,8 @@ pub mod messages;
 pub mod misc;
 pub mod pyjson;
 pub mod seal;
+pub mod sealed_file;
+pub mod sealed_files;
 pub mod secrets;
 pub mod settings;
 pub mod tokens;
@@ -42,6 +44,17 @@ impl From<rusqlite::Error> for Error {
     fn from(err: rusqlite::Error) -> Self {
         Error(err.to_string())
     }
+}
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Error(err.to_string())
+    }
+}
+
+/// Work that blocks (a file, a system call), off the async workers.
+pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+    tokio::task::spawn_blocking(work).await.unwrap_or_else(|_| Err(Error("the call panicked".into())))
 }
 
 /// A store refusal raised inside a database closure (a row that would not open): it
