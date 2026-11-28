@@ -818,7 +818,7 @@ def _remove_chat_folder(conv_id: str, folder: Path) -> None:
 def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
     """Delete a chat and its sub-agent chats. Raises OSError when a chat's files can't be
     removed (the caller shows it); it never reports success with the chat still stored."""
-    from frontend.ui_web.conversation_attachments import conversation_dir
+    from frontend.ui_web.conversation_attachments import _CONV_ID_RE, conversation_dir
 
     # A spawned chat is owned by its parent. Permanently deleting the parent must
     # not leave orphaned sub-agent conversations behind.
@@ -850,6 +850,8 @@ def delete_conversation(conv_id: str, project_root: str | None = None) -> None:
                 sandbox_service.clear(target_id)  # its sandbox, programs and worktrees go too
         except Exception:
             pass
+        if not _CONV_ID_RE.match(target_id) or target_id in (".", ".."):
+            continue  # "" or "..": its folder would be every chat's
         conv_folder = conversation_dir(target_id, project_root, _store._conversations_dir(project_root))
         if not conv_folder.is_dir():
             meta = _find_conversation_meta(target_id, project_root)
