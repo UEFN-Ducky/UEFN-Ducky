@@ -89,6 +89,9 @@ fn routes(api: Arc<api::Api>) -> Router {
         // The lore calls, and the changelist drops on a changelist the test makes up.
         let lore = |Path(what): Path<String>, Json(body): Json<Value>| async move { Json(verse_editor::lore::probe(&what, &body).await) };
         routes = routes.merge(Router::new().route("/__rs/lore/{what}", post(lore)));
+        // One round of the island watch on the island a test names, and what agents read of it.
+        let watch = |State(api): State<Arc<api::Api>>, Path(what): Path<String>, Json(body): Json<Value>| async move { Json(verse_editor::island_watch::probe(&api, &what, &body).await) };
+        routes = routes.merge(Router::new().route("/__rs/island_watch/{what}", post(watch)).with_state(Arc::clone(&api)));
     }
     // A window's poll waits 20 s by design, a sign-in waits for the person to approve its
     // code, and a Verse build or push takes UEFN up to two minutes: each sets its own

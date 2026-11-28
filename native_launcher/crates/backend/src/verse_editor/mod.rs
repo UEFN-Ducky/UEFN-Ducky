@@ -2,6 +2,7 @@
 //! Its panel methods are `api::verse`.
 
 pub mod diagnostics;
+pub mod island_watch;
 pub mod lore;
 pub mod lore_ffi;
 pub mod lore_host;
