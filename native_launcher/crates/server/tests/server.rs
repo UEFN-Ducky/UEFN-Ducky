@@ -1,5 +1,5 @@
 use server::port::{choose_listener_port, parse_saved_port, saved_port, PortChoice};
-use server::{is_backend, is_rust, origin_addr, parse_head, resolve_static, Server};
+use server::{goes_to_rust, is_backend, is_rust, origin_addr, parse_head, resolve_static, Server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -81,6 +81,16 @@ fn routing_rules() {
     assert_eq!(origin_addr("http://127.0.0.1:4321").unwrap().port(), 4321);
     assert!(is_rust("/__rs/health"));
     assert!(!is_rust("/api/settings") && !is_rust("/__panel_event") && !is_rust("/__rs"));
+    // A panel call goes to Rust from this PC only, and only a method that moved.
+    let call = |method: &str, host: &str| parse_head(format!("POST /__panel_api/{method} HTTP/1.1\r\nhost: {host}\r\n\r\n").as_bytes()).unwrap();
+    for host in ["127.0.0.1:4199", "LocalHost", "[::1]:4199"] {
+        assert!(goes_to_rust(&call("get_appearance", host)), "{host}");
+        assert!(!goes_to_rust(&call("get_appearance_x", host)) && !goes_to_rust(&call("send_message", host)), "{host}");
+    }
+    for host in ["pc.uefnducky.org", "192.168.1.20:4199", "127.0.0.1.evil.org", ""] {
+        assert!(!goes_to_rust(&call("get_appearance", host)), "{host}");
+    }
+    assert!(!goes_to_rust(&h) && goes_to_rust(&parse_head(b"GET /__rs/health HTTP/1.1\r\n\r\n").unwrap()));
 }
 
 // ---- the Rust backend's paths ----

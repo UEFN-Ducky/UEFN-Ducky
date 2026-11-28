@@ -43,6 +43,16 @@ impl Repos {
         Ok(&self.open().await?.store)
     }
 
+    /// The settings repo: one per process, so every load and save shares its snapshots.
+    pub async fn settings(&self) -> Result<&Settings> {
+        Ok(&self.open().await?.settings)
+    }
+
+    /// The folder `ducky.db` is in.
+    pub fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
+    }
+
     async fn open(&self) -> Result<&Open> {
         let path = self.data_dir.join("ducky.db");
         let opening = || async move {

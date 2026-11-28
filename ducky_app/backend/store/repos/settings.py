@@ -12,6 +12,7 @@ overwrite each other (the lost update ``PanelSettings.load()`` used to cause).
 
 from __future__ import annotations
 
+import copy
 import itertools
 import json
 import threading
@@ -97,17 +98,19 @@ def load_fields_versioned() -> tuple[dict[str, Any], int]:
         version = _snapshot_version.get(key)
         seen = _seen_map().get(key)
         if version is not None and key in _snapshot and seen and seen[0] is conn and seen[1:] == (version, dv):
-            return dict(_snapshot[key]), version
+            return copy.deepcopy(_snapshot[key]), version
     sig = _signature(conn)
     with _lock:
         version = _snapshot_version.get(key)
         if version is not None and key in _snapshot and _snapshot_sig.get(key) == sig:
             _seen_map()[key] = (conn, version, dv)
-            return dict(_snapshot[key]), version
+            return copy.deepcopy(_snapshot[key]), version
     rows = _read_rows(conn)
     with _lock:
         version = _remember(key, conn, dv, rows, sig)
-    return dict(rows), version
+    # A deep copy: a caller that edits a list or dict in place (renaming an appearance
+    # profile) must not edit the snapshot its save is compared with, or nothing is saved.
+    return copy.deepcopy(rows), version
 
 
 def load_fields() -> dict[str, Any]:

@@ -65,6 +65,7 @@ fn routes(api: Arc<api::Api>) -> Router {
     if std::env::var_os("DUCKY_TESTS_ISOLATED_APPDATA").is_some() {
         let store = Router::new().route("/__rs/store/{repo}/{function}", post(store::http::call));
         routes = routes.merge(store.with_state(Arc::clone(&api.repos)));
+        routes = routes.merge(Router::new().route("/__rs/api/methods", get(api::router::reaches)).with_state(Arc::clone(&api)));
     }
     // A window's poll waits 20 s by design: it sets its own limit, and is no slow call.
     let events = Router::new().route("/__panel_events", get(api::router::events)).with_state(api);

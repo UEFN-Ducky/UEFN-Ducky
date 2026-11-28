@@ -25,11 +25,30 @@ pub const DEFAULT_HOLD: Duration = Duration::from_secs(30);
 /// Paths the Rust backend answers: an entry ending in `/` is a prefix, any other the whole
 /// path (`/__panel_api/get_settings`). A call moves to Rust by adding its path here, and
 /// back to Python by removing it.
-pub const RUST_PATHS: &[&str] = &["/__rs/"];
+pub const RUST_PATHS: &[&str] = &["/__rs/", "/__panel_api/get_appearance"];
 
 /// True when the Rust backend answers this path.
 pub fn is_rust(path: &str) -> bool {
     routed(RUST_PATHS, path)
+}
+
+/// True when the Rust backend answers this request. It answers a panel call from this PC
+/// only: a phone or the website (any other Host) is signed in with the Python backend.
+pub fn goes_to_rust(head: &Head) -> bool {
+    is_rust(&head.path) && (head.local || !head.path.starts_with("/__panel_api/"))
+}
+
+/// The Host header names this PC (`panel_httpd.host_is_local`).
+fn host_is_local(host: &str) -> bool {
+    let host = host.split('/').next().unwrap_or_default().trim().to_lowercase();
+    let name = if host.starts_with('[') {
+        format!("{}]", host.split(']').next().unwrap_or_default())
+    } else if host.matches(':').count() == 1 {
+        host.split(':').next().unwrap_or_default().to_string()
+    } else {
+        host
+    };
+    ["127.0.0.1", "localhost", "::1", "[::1]"].contains(&name.as_str())
 }
 
 fn routed(paths: &[&str], path: &str) -> bool {
@@ -206,6 +225,8 @@ pub struct Head {
     pub method: String,
     pub path: String,
     pub websocket: bool,
+    /// The Host header names this PC.
+    pub local: bool,
 }
 
 pub fn parse_head(head: &[u8]) -> Option<Head> {
@@ -215,13 +236,15 @@ pub fn parse_head(head: &[u8]) -> Option<Head> {
     let method = first.next()?.to_string();
     let target = first.next()?;
     let path = target.split(['?', '#']).next().unwrap_or("/").to_string();
-    let websocket = lines.any(|l| {
+    let (mut websocket, mut local) = (false, false);
+    for l in lines {
         let mut kv = l.splitn(2, ':');
         let k = kv.next().unwrap_or("").trim();
         let v = kv.next().unwrap_or("").trim();
-        k.eq_ignore_ascii_case("upgrade") && v.eq_ignore_ascii_case("websocket")
-    });
-    Some(Head { method, path, websocket })
+        websocket |= k.eq_ignore_ascii_case("upgrade") && v.eq_ignore_ascii_case("websocket");
+        local |= k.eq_ignore_ascii_case("host") && host_is_local(v);
+    }
+    Some(Head { method, path, websocket, local })
 }
 
 /// True when the backend answers this request (held until hello).
@@ -252,7 +275,7 @@ fn handle(mut client: TcpStream, roots: &[PathBuf], gate: &Gate, rust: &Gate) ->
     };
     client.set_read_timeout(None)?;
     // Rust down or mid-restart: the connect fails and Python answers, as before the move.
-    if let Some(upstream) = rust.now().filter(|_| is_rust(&head.path)).and_then(connect) {
+    if let Some(upstream) = rust.now().filter(|_| goes_to_rust(&head)).and_then(connect) {
         return tunnel(client, upstream, &buf);
     }
     let backend = is_backend(&head);

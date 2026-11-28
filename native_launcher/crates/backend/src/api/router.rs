@@ -2,6 +2,7 @@
 //! (`panel_httpd.py`, `remote_link/requests.py`, `duckyos_account.call_panel_method`).
 //!
 //! - body `{"args": [...]}` or `{"args": {...}}` (or the arguments object itself);
+//! - 403 for a caller that is not a page on this PC ([`caller_ok`]);
 //! - 404 `{"ok": false, "error": "method not allowed"}` for a method that is not here,
 //!   403 with the same body for one the caller may not reach;
 //! - 200 `{"ok": true, "result": ...}`, or `{"ok": false, "error": ...}` when it refused;
@@ -151,6 +152,34 @@ fn host_is_local(headers: &HeaderMap) -> bool {
     ["127.0.0.1", "localhost", "::1", "[::1]"].contains(&name.as_str())
 }
 
+/// True for a caller this backend may answer: the Host names this PC, and a browser's
+/// Origin (when it sends one) is that same host, so no other site's page can call in
+/// (`panel_httpd.request_is_authorized`, `webview.panel_post_origin_allowed`).
+/// ponytail: a signed-in phone or website (a non-local Host with the remote cookie) is
+/// refused here; the launcher sends those to the Python backend, which knows the
+/// sessions. Check the cookie here when the remote link moves.
+fn caller_ok(headers: &HeaderMap) -> bool {
+    let header = |name: &str| headers.get(name).and_then(|h| h.to_str().ok()).map(|h| h.trim().to_lowercase());
+    let same_host = |origin: String| origin.split_once("://").is_some_and(|(_, at)| Some(at) == header("host").as_deref());
+    host_is_local(headers) && (!headers.contains_key("origin") || header("origin").is_some_and(same_host))
+}
+
+impl Reach {
+    fn name(self) -> &'static str {
+        match self {
+            Reach::Anyone => "anyone",
+            Reach::ThisPc => "this_pc",
+            Reach::Window => "window",
+        }
+    }
+}
+
+/// `GET /__rs/api/methods`: each method here and who may reach it. For the parity tests,
+/// which hold it against the Python backend's deny lists.
+pub async fn reaches(State(api): State<Arc<Api>>) -> Json<Value> {
+    Json(api.methods.iter().map(|(name, method)| (name.to_string(), Value::from(method.reach.name()))).collect::<Map<_, _>>().into())
+}
+
 /// `requests.clean_request_id`: the caller's id for this request, or none.
 fn request_id(headers: &HeaderMap, payload: &Value) -> Option<String> {
     let header = headers.get("x-ducky-request-id").and_then(|h| h.to_str().ok()).unwrap_or_default();
@@ -235,6 +264,9 @@ pub async fn call(
     headers: HeaderMap,
     body: Bytes,
 ) -> (StatusCode, Json<Value>) {
+    if !caller_ok(&headers) {
+        return refused(StatusCode::FORBIDDEN, "forbidden");
+    }
     let method = method.trim().trim_matches('/').to_string();
     let payload = match body.is_empty() {
         true => Value::Null,
@@ -279,14 +311,17 @@ pub async fn call(
 }
 
 /// `GET /__panel_events?since=N`: a window's long-poll.
-pub async fn events(State(api): State<Arc<Api>>, uri: Uri) -> Json<Value> {
+pub async fn events(State(api): State<Arc<Api>>, headers: HeaderMap, uri: Uri) -> (StatusCode, Json<Value>) {
+    if !host_is_local(&headers) {
+        return refused(StatusCode::FORBIDDEN, "forbidden");
+    }
     let since = uri.query().and_then(|q| q.split('&').find_map(|pair| pair.strip_prefix("since=")));
     let since = since.and_then(|n| n.trim().parse::<i64>().ok()).map_or(0, |n| n.max(0) as u64);
     // head: the newest event when the poll arrived. A page that just loaded replays the
     // backlog up to its first head as history, not live.
     let head = api.push.head();
     let page = api.push.poll(since, POLL_WAIT).await;
-    Json(json!({"cursor": page.cursor, "events": page.events, "head": head}))
+    (StatusCode::OK, Json(json!({"cursor": page.cursor, "events": page.events, "head": head})))
 }
 
 /// `POST /__panel_event`: another process on this PC (an agent's MCP bridge) publishes
@@ -363,7 +398,11 @@ mod tests {
         pairs.iter().map(|(name, value)| (axum::http::HeaderName::from_static(name), value.parse().unwrap())).collect()
     }
 
-    async fn post(api: &Arc<Api>, method: &str, headers: HeaderMap, body: Value) -> (u16, Value) {
+    /// A call from a page on this PC, unless `headers` name another Host.
+    async fn post(api: &Arc<Api>, method: &str, mut headers: HeaderMap, body: Value) -> (u16, Value) {
+        if !headers.contains_key("host") {
+            headers.insert("host", "127.0.0.1:8765".parse().unwrap());
+        }
         let body = if body.is_null() { Bytes::new() } else { Bytes::from(body.to_string()) };
         let (status, Json(reply)) = call(State(Arc::clone(api)), Path(method.to_string()), headers, body).await;
         (status.as_u16(), reply)
@@ -377,7 +416,8 @@ mod tests {
         assert_eq!(post(&api, "rename_conversation", none(), json!({"args": ["c", "t"]})).await, (200, json!({"ok": false, "error": "boom"})));
         let (status, reply) = post(&api, "agent_send", none(), json!({"args": ["a", "b", "hi"]})).await;
         assert_eq!((status, &reply["ok"], reply.as_object().unwrap().len()), (200, &json!(true), 2), "{reply}");
-        let (status, Json(reply)) = call(State(Arc::clone(&api)), Path("agent_send".into()), none(), Bytes::from("{not json")).await;
+        let local = headers(&[("host", "localhost")]);
+        let (status, Json(reply)) = call(State(Arc::clone(&api)), Path("agent_send".into()), local, Bytes::from("{not json")).await;
         assert_eq!((status.as_u16(), &reply["ok"]), (400, &json!(false)));
     }
 
@@ -407,15 +447,33 @@ mod tests {
     async fn a_method_answers_only_the_callers_it_may_reach() {
         let api = api();
         let denied = (403, json!({"ok": false, "error": "method not allowed"}));
+        let forbidden = (403, json!({"ok": false, "error": "forbidden"}));
         for host in ["127.0.0.1:8765", "localhost", "[::1]:8765", "LOCALHOST:1"] {
             assert_eq!(post(&api, "start_verse_lsp", headers(&[("host", host)]), Value::Null).await.0, 200, "{host}");
             assert_eq!(post(&api, "pick_project_path", headers(&[("host", host)]), Value::Null).await, denied, "{host}");
         }
+        // Not this PC: the Python backend's to answer, it knows who is signed in.
         for host in ["pc.uefnducky.org", "192.168.1.20:8765", "127.0.0.1.evil.org", ""] {
-            assert_eq!(post(&api, "start_verse_lsp", headers(&[("host", host)]), Value::Null).await, denied, "{host}");
-            assert_eq!(post(&api, "agent_send", headers(&[("host", host)]), json!(["a", "b", "c"])).await.0, 200, "{host}");
+            assert_eq!(post(&api, "agent_send", headers(&[("host", host)]), json!(["a", "b", "c"])).await, forbidden, "{host}");
+            let Json(page) = events(State(Arc::clone(&api)), headers(&[("host", host)]), "/__panel_events".parse().unwrap()).await.1;
+            assert_eq!(page["ok"], false, "{host}");
         }
-        assert_eq!(post(&api, "start_verse_lsp", HeaderMap::new(), Value::Null).await, denied);
+        let (status, _) = call(State(Arc::clone(&api)), Path("agent_send".into()), HeaderMap::new(), Bytes::new()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "no Host");
+    }
+
+    #[tokio::test]
+    async fn another_sites_page_cannot_call_in() {
+        let api = api();
+        let from = |origin: &str| headers(&[("host", "127.0.0.1:8765"), ("origin", origin)]);
+        for origin in ["http://127.0.0.1:8765", "HTTP://127.0.0.1:8765 "] {
+            assert_eq!(post(&api, "agent_send", from(origin), json!(["a", "b", "c"])).await.0, 200, "{origin}");
+        }
+        for origin in ["null", "", "https://evil.org", "http://127.0.0.1:9999", "http://localhost:8765", "http://127.0.0.1:8765.evil.org"] {
+            assert_eq!(post(&api, "agent_send", from(origin), json!(["a", "b", "c"])).await.0, 403, "{origin}");
+        }
+        let Json(table) = reaches(State(Arc::clone(&api))).await;
+        assert_eq!((&table["agent_send"], &table["start_verse_lsp"], &table["pick_project_path"]), (&json!("anyone"), &json!("this_pc"), &json!("window")));
     }
 
     #[tokio::test]
@@ -494,13 +552,13 @@ mod tests {
         assert_eq!(publish(State(Arc::clone(&api)), local(), Bytes::from(body)).await, StatusCode::NO_CONTENT);
         assert_ne!(post(&api, "list_workflows", local(), Value::Null).await.1, first);
 
-        let Json(page) = events(State(Arc::clone(&api)), "/__panel_events?x=1&since=0".parse().unwrap()).await;
+        let Json(page) = events(State(Arc::clone(&api)), local(), "/__panel_events?x=1&since=0".parse().unwrap()).await.1;
         assert_eq!(page, json!({"cursor": 1, "events": [event], "head": 1}));
         let one = Bytes::from(json!({"type": "chats_changed"}).to_string());
         assert_eq!(publish(State(Arc::clone(&api)), headers(&[("host", "evil.org")]), one.clone()).await, StatusCode::FORBIDDEN);
         assert_eq!(publish(State(Arc::clone(&api)), local(), Bytes::from("nope")).await, StatusCode::BAD_REQUEST);
         assert_eq!(publish(State(Arc::clone(&api)), local(), one).await, StatusCode::NO_CONTENT);
-        let Json(page) = events(State(Arc::clone(&api)), "/__panel_events?since=1".parse().unwrap()).await;
+        let Json(page) = events(State(Arc::clone(&api)), local(), "/__panel_events?since=1".parse().unwrap()).await.1;
         assert_eq!(page, json!({"cursor": 2, "events": [{"type": "chats_changed"}], "head": 2}));
     }
 }

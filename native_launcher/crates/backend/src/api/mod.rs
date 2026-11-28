@@ -5,6 +5,7 @@
 
 pub mod push;
 pub mod router;
+pub mod settings;
 pub mod shared;
 
 use std::collections::HashMap;
@@ -13,7 +14,22 @@ pub use router::{Api, Method, Reach};
 
 /// Every method this backend answers, by its name in `api_contract.json`.
 pub fn methods() -> HashMap<&'static str, Method> {
-    HashMap::new()
+    macro_rules! table {
+        ($($module:ident :: $name:ident => $reach:ident,)*) => {
+            HashMap::from([$((stringify!($name), Method { run: |api, args| Box::pin($module::$name(api, args)), reach: Reach::$reach }),)*])
+        };
+    }
+    table! {
+        settings::get_settings => Anyone,
+        settings::get_appearance => Anyone,
+        settings::save_appearance => Anyone,
+        settings::push_appearance_live => Anyone,
+        settings::save_appearance_profile => Anyone,
+        settings::load_appearance_profile => Anyone,
+        settings::rename_appearance_profile => Anyone,
+        settings::delete_appearance_profile => Anyone,
+        settings::update_active_appearance_profile => Anyone,
+    }
 }
 
 #[cfg(test)]
