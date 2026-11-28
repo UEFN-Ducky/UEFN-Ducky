@@ -7,6 +7,7 @@ mod chat_doc;
 pub mod account;
 pub mod app_info;
 pub mod chats;
+pub mod file_history;
 pub mod file_kinds;
 pub mod health;
 pub mod maintenance;
@@ -122,6 +123,10 @@ pub fn methods() -> HashMap<&'static str, Method> {
         verse::is_verse_editor_enabled => Anyone,
         verse::load_verse_diagnostics_cache => Anyone,
         verse::save_verse_file_cache => Anyone,
+        file_history::list_file_history => Anyone,
+        file_history::read_file_history_entry => Anyone,
+        file_history::snapshot_file_history => Anyone,
+        file_history::record_external_file_change => Anyone,
     }
 }
 

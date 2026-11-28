@@ -20,7 +20,7 @@ use super::{now, Error, Result, Store};
 pub static STARTED: LazyLock<f64> = LazyLock::new(now);
 
 /// The first 16 hex characters of a SHA-256: an entry's change hash and a blob's name.
-pub(super) fn hash(text: &str) -> String {
+pub fn hash(text: &str) -> String {
     Sha256::digest(text.as_bytes()).iter().take(8).map(|byte| format!("{byte:02x}")).collect()
 }
 
