@@ -28,6 +28,20 @@ pub fn dumps(value: &Value) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+/// The value with every object's keys in order: `dumps(&sorted(v))` is
+/// `json.dumps(v, ensure_ascii=False, sort_keys=True)`.
+pub fn sorted(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            Value::Object(keys.into_iter().map(|key| (key.clone(), sorted(&map[key]))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 /// Python's `==` on parsed JSON: `1 == 1.0 == True`, and key order never matters.
 pub fn py_eq(a: &Value, b: &Value) -> bool {
     let bit = |b: bool| if b { 1.0 } else { 0.0 };

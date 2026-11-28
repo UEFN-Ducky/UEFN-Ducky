@@ -6,6 +6,7 @@
 
 pub mod account;
 pub mod conn;
+pub mod duckies;
 pub mod http;
 pub mod misc;
 pub mod pyjson;
@@ -35,6 +36,15 @@ impl std::error::Error for Error {}
 impl From<rusqlite::Error> for Error {
     fn from(err: rusqlite::Error) -> Self {
         Error(err.to_string())
+    }
+}
+
+/// A store refusal raised inside a database closure (a row that would not open): it
+/// comes back out of the read or write with its message.
+impl From<Error> for rusqlite::Error {
+    fn from(err: Error) -> Self {
+        // The one always-built variant that carries a message and prints only it.
+        rusqlite::Error::ToSqlConversionFailure(Box::new(err))
     }
 }
 

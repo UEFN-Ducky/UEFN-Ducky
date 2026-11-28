@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 
 import pytest
@@ -13,9 +12,9 @@ from backend.store.repos import secrets as repo
 from backend.uefn_plugins import data_crypto, scopes
 from frontend import duckyos_account
 
-_LOGIN = {"base_url": "https://uefnducky.org/", "email": " Alice@Example.com", "device_key": "device-token-1"}
+from conftest import ADK as _ADK, LOGIN as _LOGIN
+
 _KEY = "https://uefnducky.org|alice@example.com"
-_ADK = hashlib.sha256(b"adk/alice").digest()
 _LOCKED = "Waiting for this account's data key. Your chats open once you're online."
 
 
@@ -23,30 +22,10 @@ def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
-def _forget() -> None:
-    """What this process remembers of the login: as if it had just started."""
-    agent_secrets.clear_memory_cache()
-    agent_secrets._FRESH.clear()
-    agent_secrets.forget_login_stamp()
-    duckyos_account.forget_account_key()
-    scopes.forget_claims()
-    data_crypto.reset_for_tests()
-
-
 @pytest.fixture(autouse=True)
-def _fresh_login(rust_store, monkeypatch):
-    _forget()
-    monkeypatch.setattr(data_crypto, "_fetch_adk", lambda: _ADK)  # the server's answer
-    yield
-    _forget()
-
-
-def _sign_in(login: dict) -> str:
-    """Store a login row as the app does; returns the account id Python gives it."""
-    agent_secrets.set_key(repo.LOGIN_NAME, json.dumps(login))
-    agent_secrets.forget_login_stamp()
-    duckyos_account.forget_account_key()
-    return scopes.account_id()
+def _sign_in(login):
+    """Every test starts signed out; ``_sign_in(blob)`` stores a login row."""
+    return login
 
 
 def _entropy_error(rust_store) -> str:
@@ -64,7 +43,7 @@ def test_signed_out_is_the_local_account_for_both(rust_store) -> None:
     assert rust_store.store("account", "entropy") == {"id": "_local", "entropy": _b64(b"local")}
 
 
-def test_rust_names_the_account_python_signed_in(rust_store) -> None:
+def test_rust_names_the_account_python_signed_in(rust_store, _sign_in) -> None:
     account = _sign_in(_LOGIN)
     assert duckyos_account.account_key() == _KEY
     assert rust_store.store("account", "current") == {"key": _KEY, "id": account}
@@ -78,7 +57,7 @@ def test_python_names_the_account_rust_signed_in(rust_store) -> None:
     assert rust_store.store("account", "current")["id"] == scopes.account_id()
 
 
-def test_a_login_without_a_token_or_session_is_signed_out(rust_store) -> None:
+def test_a_login_without_a_token_or_session_is_signed_out(rust_store, _sign_in) -> None:
     assert _sign_in({"base_url": "https://uefnducky.org", "email": "alice@example.com"}) == "_local"
     assert rust_store.store("account", "current") == {"key": "", "id": "_local"}
 
@@ -86,14 +65,14 @@ def test_a_login_without_a_token_or_session_is_signed_out(rust_store) -> None:
 # --------------------------------------------------------------------------- the account data key
 
 
-def test_an_account_is_locked_until_python_has_cached_its_key(rust_store) -> None:
+def test_an_account_is_locked_until_python_has_cached_its_key(rust_store, _sign_in) -> None:
     account = _sign_in(_LOGIN)
     assert _entropy_error(rust_store) == _LOCKED
     assert data_crypto.adk(account) == _ADK  # fetched, and cached on disk for the next start
     assert rust_store.store("account", "entropy") == {"id": account, "entropy": _b64(b"adk:" + _ADK)}
 
 
-def test_rows_sealed_for_the_account_open_in_the_other_backend(rust_store) -> None:
+def test_rows_sealed_for_the_account_open_in_the_other_backend(rust_store, _sign_in) -> None:
     account = _sign_in(_LOGIN)
     by_python = data_crypto.seal_text("pelican harbour é", account)
     entropy = rust_store.store("account", "entropy")["entropy"]
@@ -105,7 +84,7 @@ def test_rows_sealed_for_the_account_open_in_the_other_backend(rust_store) -> No
     assert status == 200 and reply["ok"] is False
 
 
-def test_the_cached_key_is_only_for_the_login_that_cached_it(rust_store) -> None:
+def test_the_cached_key_is_only_for_the_login_that_cached_it(rust_store, _sign_in) -> None:
     account = _sign_in(_LOGIN)
     assert data_crypto.adk(account) == _ADK
     # Another device token (signed in again): the cache was wrapped with the old one.

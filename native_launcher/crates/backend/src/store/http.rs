@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use tokio::sync::OnceCell;
 
 use super::settings::Settings;
-use super::{account, misc, seal, secrets, Error, Result, Store};
+use super::{account, duckies, misc, seal, secrets, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -95,7 +95,36 @@ fn named(blobs: Vec<(String, Vec<u8>)>) -> Value {
     json!(blobs.into_iter().map(|(name, blob)| (name, BASE64.encode(blob))).collect::<Vec<_>>())
 }
 
+/// The duckies repo, for the account signed in now.
+async fn duckies(s: &Store, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (account, entropy) = account::entropy(s, data_dir).await?;
+    let who = duckies::Who { id: account.id, entropy };
+    let (id, kind) = (text(a, "ducky_id"), text(a, "kind"));
+    let flag = |name: &str| a[name].as_bool().unwrap_or(false);
+    Ok(Some(match function {
+        "list_all" => json!(duckies::list_all(s, who, flag("include_deleted")).await?),
+        "get" => json!(duckies::get(s, who, id).await?),
+        "history" => json!(duckies::history(s, who, id).await?),
+        "save" => json!(duckies::save(s, who, id, kind, a["data"].clone()).await?),
+        "save_synced" => {
+            json!(duckies::save_synced(s, who, id, kind, a["data"].clone(), a["updated"].as_f64().unwrap_or(0.0)).await?)
+        }
+        "set_archived" => json!(duckies::set_archived(s, who, id, kind, flag("archived")).await?),
+        "set_deleted" => {
+            let kind = if kind.is_empty() { "custom".to_string() } else { kind };
+            json!(duckies::set_deleted(s, who, id, flag("deleted"), kind).await?)
+        }
+        "insert_missing" => {
+            json!(duckies::insert_missing(s, who, a["rows"].as_array().cloned().unwrap_or_default()).await?)
+        }
+        _ => return Ok(None),
+    }))
+}
+
 async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function: &str, a: &Value) -> Result<Option<Value>> {
+    if repo == "duckies" {
+        return duckies(&open.store, data_dir, function, a).await;
+    }
     let (s, settings) = (&open.store, &open.settings);
     Ok(Some(match (repo, function) {
         ("settings", "load_fields") => Value::Object(settings.load_fields().await?),
