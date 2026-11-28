@@ -18,8 +18,10 @@ use crate::store::duckies::Who;
 use crate::store::now;
 use crate::store::pyjson::{float, int, pystr, truthy};
 
+mod layout;
 mod moves;
 mod teams;
+pub use layout::apply_sidebar_layout;
 pub use moves::{delete_conversation, delete_folder, move_conversation};
 
 type Fields = Map<String, Value>;
