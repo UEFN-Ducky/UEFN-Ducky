@@ -1,0 +1,19 @@
+[package]
+name = "backend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Ducky's backend in Rust: answers the paths the launcher's UI server routes to it"
+
+[[bin]]
+name = "Ducky-Backend"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+serde_json = "1"
+
+[dev-dependencies]
+supervisor = { path = "../supervisor" }
+tokio = { version = "1", features = ["io-util"] }

@@ -1,0 +1,18 @@
+# Calls that block the thread they run on. On an async worker that stalls every request
+# sharing it, so they are only allowed inside spawn_blocking, in a function marked
+# #[allow(clippy::disallowed_methods)].
+disallowed-methods = [
+    { path = "std::thread::sleep", reason = "blocks an async worker: tokio::time::sleep" },
+    { path = "std::fs::read", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::read_to_string", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::read_dir", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::write", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::copy", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::remove_file", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::remove_dir_all", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::File::open", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::fs::File::create", reason = "blocks an async worker: spawn_blocking" },
+    { path = "std::process::Command::output", reason = "blocks an async worker: tokio::process" },
+    { path = "std::process::Command::status", reason = "blocks an async worker: tokio::process" },
+    { path = "std::process::Child::wait", reason = "blocks an async worker: tokio::process" },
+]

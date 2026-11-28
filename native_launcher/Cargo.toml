@@ -12,3 +12,10 @@ opt-level = "s"
 panic = "abort"
 codegen-units = 1
 strip = true
+
+# Ducky-Backend (`cargo build --profile backend -p backend`): a server, so speed over
+# size, and a panic ends the one request it happened in, not the process.
+[profile.backend]
+inherits = "release"
+opt-level = 3
+panic = "unwind"

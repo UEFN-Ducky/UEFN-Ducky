@@ -24,8 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy }
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: native_launcher }
+      # The backend's no-freeze rules (crates/backend/clippy.toml) are errors, not advice.
+      - run: cargo clippy -p backend --all-targets --target ${{ matrix.target }} -- -D warnings
       - run: cargo test --workspace --target ${{ matrix.target }}
       - run: cargo build --release --target ${{ matrix.target }} -p ducky-launcher
       - uses: actions/upload-artifact@v4
