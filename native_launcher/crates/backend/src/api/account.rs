@@ -6,9 +6,12 @@
 //! windows who is signed in now.
 //! ponytail: an unpair does not stop the presence beat or the remote mailbox; both are
 //! the Python backend's until they move here.
-//! ponytail: plugins that listen for account changes, the spaces and the new account's
-//! data key fetch are told by the Python backend only; they move with the plugin host
-//! and the data key.
+//! A new account's data key is fetched then ([`settle`]), and what it still has in
+//! plaintext on this PC is sealed.
+//! ponytail: plugins that listen for account changes and the spaces are told by the
+//! Python backend only; they move with the plugin host.
+//! ponytail: a website session with no device key keeps no copy of its data key (Python
+//! keeps it in memory): its data stays locked here until this PC is paired.
 
 mod login;
 
@@ -16,6 +19,8 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Method, Url};
 use serde_json::{json, Map, Value};
@@ -24,8 +29,8 @@ use super::chats::removed;
 use super::settings::failed;
 use super::site::{collect, network, resolve_base_url, send, session_cookies, text, Answer, Collect, Refused, DEFAULT_BASE_URL, USER_AGENT};
 use super::Api;
-use crate::store::pyjson::{int, pystr, truthy};
-use crate::store::{account, account_rows, seal, secrets};
+use crate::store::pyjson::{dumps, int, pystr, truthy};
+use crate::store::{account, account_rows, seal, seal_pending, sealed_file, secrets};
 
 pub use login::{duckyos_cancel_login, duckyos_login, fetch_agent_caps};
 
@@ -58,6 +63,11 @@ pub(super) async fn save_login(api: &Api, mut login: Value) -> Result<(), String
         let copy = api.repos.data_dir().join(account::KEY_CACHE_NAME);
         #[allow(clippy::disallowed_methods)] // on a blocking thread
         let _ = tokio::task::spawn_blocking(move || std::fs::remove_file(copy)).await;
+        // The tests start this themselves: it calls the site after the call has answered.
+        let quiet = std::env::var_os("DUCKY_TESTS_ISOLATED_APPDATA").is_some() && std::env::var_os("DUCKY_TESTS_ACCOUNT_SETTLE").is_none();
+        if let Some(api) = api.handle().filter(|_| !quiet) {
+            settle_later(api);
+        }
     }
     if was != now {
         // Chats are the signed-in account's: every window drops the old account's at once.
@@ -65,6 +75,79 @@ pub(super) async fn save_login(api: &Api, mut login: Value) -> Result<(), String
         api.publish(vec![json!({"type": "duckyos_account_changed", "account": now}), removed(&chats, &folders)]);
     }
     Ok(())
+}
+
+/// How long a data key the site did not give waits for the next try (`FETCH_RETRY_S`).
+const KEY_RETRY: Duration = Duration::from_secs(60);
+
+/// `data_crypto._fetch_adk` and `_write_cache`: the account's data key from the site,
+/// kept on this PC wrapped for this OS user and the login's device token.
+async fn fetch_data_key(api: &Api, who: &account::Account) -> Result<(), String> {
+    let call = Collect { plugin: "uefn-ducky", event: "account-data-key", unavailable_code: "adk_unavailable", error_code: "adk_error", allow_anonymous: false, timeout: Duration::from_secs(10), retries: 0 };
+    let answer = collect(api, call, &json!({})).await.map_err(|refused| refused.message)?;
+    let said = |name: &str| answer.get(name).unwrap_or(&Value::Null);
+    let key = BASE64.decode(text(said("key"))).ok().filter(|key| key.len() == 32 && int(said("version")) == 1).ok_or("unexpected account data key")?;
+    let store = api.repos.store().await.map_err(failed)?;
+    // Signed out or switched while the site answered: this key is nobody's here now.
+    if account::current(store).await.map_err(failed)? != *who {
+        return Err("the login changed".into());
+    }
+    let token = [b"device:", who.device_token.as_bytes()].concat();
+    let (copy, id) = (api.repos.data_dir().join(account::KEY_CACHE_NAME), who.id.clone());
+    let kept = tokio::task::spawn_blocking(move || {
+        let wrapped = seal::protect(&key, Some(&token))?;
+        sealed_file::write_whole(&copy, dumps(&json!({"account": id, "wrapped": BASE64.encode(wrapped)})).as_bytes())
+    });
+    kept.await.map_err(|stopped| stopped.to_string())?.map_err(failed)
+}
+
+/// One sealing pass for the account signed in now (`account_rows.seal_pending`).
+async fn seal_now(api: &Api) -> crate::store::Result<()> {
+    let repos = &api.repos;
+    let pass = seal_pending::Pass {
+        store: repos.store().await?,
+        chats: repos.chats().await?,
+        settings: repos.settings().await?,
+        root: repos.data_dir(),
+        batch: 40,
+        pause: Duration::from_millis(50),
+        settle_s: seal_pending::SETTLE_S,
+    };
+    pass.run().await.map(drop)
+}
+
+/// `data_crypto.prefetch`: after a sign-in, a sign-out or a switch, off the call's own
+/// path: the new account's data key is fetched, then what the account still has in
+/// plaintext here is sealed and chat attachments are arranged for it (the other
+/// accounts' sealed). A key the site did not give is asked for again every minute
+/// while that account stays signed in.
+async fn settle(api: Arc<Api>) {
+    let mut first = true;
+    loop {
+        let Ok(store) = api.repos.store().await else { return };
+        let Ok(who) = account::current(store).await else { return };
+        let paired = !who.device_token.is_empty();
+        let have = account::entropy(store, api.repos.data_dir()).await.is_ok() || (paired && fetch_data_key(&api, &who).await.is_ok());
+        // Locked still seals the other accounts' attachments; the rest waits for the key.
+        if have || first {
+            let _ = seal_now(&api).await;
+        }
+        if have || !paired {
+            return;
+        }
+        first = false;
+        tokio::time::sleep(KEY_RETRY).await;
+        // Someone else signed in meanwhile: that sign-in's own pass goes on.
+        if account::current(store).await.ok().as_ref() != Some(&who) {
+            return;
+        }
+    }
+}
+
+/// [`settle`] as its own task. Not `async`: a refused key signs this PC out, which
+/// starts the next one from inside this one.
+fn settle_later(api: Arc<Api>) {
+    tokio::spawn(settle(api));
 }
 
 /// `_unpair_this_pc`: this PC's device key goes, a website session stays.

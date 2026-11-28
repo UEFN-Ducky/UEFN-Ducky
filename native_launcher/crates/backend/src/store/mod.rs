@@ -7,6 +7,7 @@
 pub mod account;
 pub mod account_rows;
 pub mod automations;
+pub mod backups;
 pub mod chat_messages;
 pub mod chats;
 pub mod conn;
@@ -28,6 +29,7 @@ pub mod plugin_kv;
 pub mod projects;
 pub mod pyjson;
 pub mod seal;
+pub mod seal_pending;
 pub mod search;
 pub mod sealed_file;
 pub mod sealed_files;

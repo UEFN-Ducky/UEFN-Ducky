@@ -15,7 +15,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
@@ -62,6 +62,7 @@ pub struct Api {
     pub push: Push,
     methods: HashMap<&'static str, Method>,
     ledger: Mutex<Ledger>,
+    me: Weak<Api>,
 }
 
 #[derive(Default)]
@@ -204,7 +205,12 @@ async fn finished(work: impl Future<Output = Outcome> + Send + 'static) -> Outco
 
 impl Api {
     pub fn new(repos: Arc<Repos>, methods: HashMap<&'static str, Method>) -> Arc<Api> {
-        Arc::new(Api { repos, shared: Arc::default(), push: Push::default(), methods, ledger: Mutex::default() })
+        Arc::new_cyclic(|me| Api { repos, shared: Arc::default(), push: Push::default(), methods, ledger: Mutex::default(), me: me.clone() })
+    }
+
+    /// This API, for a task that outlives the call starting it.
+    pub fn handle(&self) -> Option<Arc<Api>> {
+        self.me.upgrade()
     }
 
     /// Send `events` to the windows, dropping the kept answers each one makes stale.

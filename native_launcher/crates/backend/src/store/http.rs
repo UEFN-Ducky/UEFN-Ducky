@@ -19,7 +19,7 @@ use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
 use super::{account_rows, automations, memory, plans, plugin_data, workflows};
-use super::{account, blocking, duckies, ducky_mirrors, events, history, kv, ledger, misc, plugin_kv, projects, seal, search, usage, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
+use super::{account, blocking, duckies, seal_pending, ducky_mirrors, events, history, kv, ledger, misc, plugin_kv, projects, seal, search, usage, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -216,6 +216,11 @@ async fn account_rows(open: &Open, data_dir: &std::path::Path, function: &str, a
             let who = who(s, data_dir).await?;
             let key = open.chats.chat_key(&who).await?;
             account_rows::seal_stored_messages(s, who, key, batch, std::time::Duration::ZERO).await?
+        }
+        "seal_pending" => {
+            let settle_s = a["settle_s"].as_f64().unwrap_or(seal_pending::SETTLE_S);
+            let pass = seal_pending::Pass { store: s, chats: &open.chats, settings: &open.settings, root: data_dir, batch, pause: std::time::Duration::ZERO, settle_s };
+            Value::Object(pass.run().await?)
         }
         _ => return Ok(None),
     }))

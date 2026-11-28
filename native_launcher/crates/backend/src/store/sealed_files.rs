@@ -9,8 +9,7 @@
 //!
 //! ponytail: an opened private key is not kept between calls as Python keeps it; each
 //! call opens it once. Keep it (and forget it at sign-in) if that shows up in a trace.
-//! ponytail: sealing ducky.db backups (`seal_backups`) stays in Python until the
-//! backups themselves move (the schema hand-over).
+//! Sealing ducky.db backups is `backups`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

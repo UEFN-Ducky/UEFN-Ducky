@@ -43,7 +43,7 @@ fn bad(what: &str) -> Error {
     Error(what.to_string())
 }
 
-fn random<const N: usize>() -> [u8; N] {
+pub(super) fn random<const N: usize>() -> [u8; N] {
     let mut out = [0u8; N];
     OsRng.fill_bytes(&mut out);
     out
@@ -206,7 +206,7 @@ pub fn replace(tmp: &Path, dest: &Path) -> io::Result<()> {
     }
 }
 
-fn keep_times(path: &Path, times: &Metadata) {
+pub(super) fn keep_times(path: &Path, times: &Metadata) {
     let (Ok(accessed), Ok(modified)) = (times.accessed(), times.modified()) else { return };
     if let Ok(file) = OpenOptions::new().write(true).open(path) {
         let _ = file.set_times(FileTimes::new().set_accessed(accessed).set_modified(modified));

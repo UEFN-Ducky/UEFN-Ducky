@@ -6,9 +6,7 @@
 //!
 //! Sealing, search tokens and the chat key are in `seal`, `tokens` and `chats`.
 //!
-//! ponytail: the pass that strings these together at boot and sign-in (Python's
-//! `seal_pending`: old duckies settings, plugin search records, the one rebuild, the
-//! backups, chat attachments) moves with the migrator, which owns upgrades.
+//! The pass that strings these together at sign-in is `seal_pending`.
 
 use std::time::Duration;
 
@@ -20,14 +18,14 @@ use super::duckies::Who;
 use super::messages::{self, Parts, SealedParts, FMT_PARTS, FMT_PLAIN, PART_MIN_CHARS};
 use super::settings::LEGACY_DUCKY_KEYS;
 use super::tokens::{blind_text, Key};
-use super::{blocking, now, seal, Error, Result, Store};
+use super::{blocking, now, seal, search, Error, Result, Store};
 
 /// Owner of an old row the claiming account already had a copy of (the same folder or
 /// ducky): the account keeps its own, the old copy stays in the table under an owner
 /// nobody reads.
 pub const PARKED: &str = "_parked:";
 /// The account the rows from before went to.
-const CLAIMED_BY: &str = "rows_claimed_by";
+pub(super) const CLAIMED_BY: &str = "rows_claimed_by";
 const SEALED: &str = "enc1:";
 /// Columns holding what the person wrote, sealed in place by [`seal_table`] (messages
 /// and their payloads: [`seal_stored_messages`]).
@@ -38,7 +36,7 @@ pub const SEALED_COLUMNS: [(&str, &[&str]); 5] = [
     ("duckies_history", &["data"]),
     ("ducky_mirror_chats", &["title", "rows"]),
 ];
-const HAS_PARKED: [&str; 2] = ["folders", "duckies"];
+pub(super) const HAS_PARKED: [&str; 2] = ["folders", "duckies"];
 const PARKED_ROWS: &str = "substr(account_id, 1, 8) = '_parked:'";
 const UNCLAIMED_ROWS: &str = "SELECT EXISTS(SELECT 1 FROM conversations WHERE account_id='') \
                               OR EXISTS(SELECT 1 FROM folders WHERE account_id='') \
@@ -46,7 +44,7 @@ const UNCLAIMED_ROWS: &str = "SELECT EXISTS(SELECT 1 FROM conversations WHERE ac
                               OR EXISTS(SELECT 1 FROM duckies_history WHERE account_id='')";
 
 /// `work` with the space it frees zeroed.
-fn zeroing<T>(conn: &Connection, work: impl FnOnce() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+pub(super) fn zeroing<T>(conn: &Connection, work: impl FnOnce() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
     let before: i64 = conn.query_row("PRAGMA secure_delete", [], |r| r.get(0))?;
     conn.execute_batch("PRAGMA secure_delete=ON")?;
     let out = work();
@@ -170,9 +168,9 @@ pub async fn seal_table(store: &Store, who: Who, table: String, parked: bool, ba
     }
 }
 
-/// Anything of `account` the chat and ducky tables still hold in plaintext (with the
-/// parked copies and the old duckies settings when it is the account that claimed the
-/// rows from before: `claimer_pass`). Plugin search records are the search store's.
+/// Anything of `account` ducky.db still holds in plaintext (with the parked copies and
+/// the old duckies settings when it is the account that claimed the rows from before:
+/// `claimer_pass`).
 pub async fn plaintext_left(store: &Store, account: String, claimer_pass: bool) -> Result<bool> {
     store
         .readers
@@ -190,6 +188,9 @@ pub async fn plaintext_left(store: &Store, account: String, claimer_pass: bool) 
                          SELECT 1 FROM message_part_refs r JOIN messages m ON m.id = r.message_id \
                          JOIN conversations c ON c.id = m.conv_id WHERE r.hash = p.hash AND c.account_id=?)";
             if any(bodies, vec![account.clone().into(), SEALED.to_string().into()])? || any(parts, vec![seal::FILE_MAGIC.to_vec().into(), account.clone().into()])? {
+                return Ok(true);
+            }
+            if any(&format!("SELECT 1 FROM search_docs WHERE {}", search::plain_records()), vec![account.clone().into(), account.clone().into()])? {
                 return Ok(true);
             }
             let marks = vec!["?"; LEGACY_DUCKY_KEYS.len()].join(", ");

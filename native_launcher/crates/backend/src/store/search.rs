@@ -22,7 +22,8 @@ use unicode_properties::{GeneralCategoryGroup, UnicodeGeneralCategory};
 
 use super::duckies::Who;
 use super::pyjson::{dumps, pystr, sorted, truthy};
-use super::{now, seal, tokens, Error, Result, Store};
+use super::account_rows::zeroing;
+use super::{blocking, now, seal, sealed_file, tokens, Error, Result, Store};
 
 pub const KINDS: [&str; 5] = ["pack", "subskill", "section", "tool", "record"];
 /// bm25 column weights: title, heading path, body, summary.
@@ -511,13 +512,101 @@ fn owner(scope: &str) -> &str {
     scope.split_once('~').map_or("", |(account, _)| account)
 }
 
+/// `hashlib.blake2b(text, key=<the chat key>, digest_size=32, person=person)`.
+fn keyed(key: &tokens::Key, person: &[u8], text: &[u8]) -> Option<Vec<u8>> {
+    let mut mac = Blake2bMac::<U32>::new_with_salt_and_personal(key.as_bytes(), &[], person).ok()?;
+    mac.update(text);
+    Some(mac.finalize().into_bytes().to_vec())
+}
+
+fn vec_cipher(key: &tokens::Key) -> Option<Aes256Gcm> {
+    Aes256Gcm::new_from_slice(&keyed(key, b"search-vec", b"")?).ok()
+}
+
 /// A sealed vector, opened with the account's chat key.
 fn open_vec(raw: &[u8], key: &tokens::Key) -> Option<Vec<u8>> {
-    let mut mac = Blake2bMac::<U32>::new_with_salt_and_personal(key.as_bytes(), &[], b"search-vec").ok()?;
-    mac.update(b"");
-    let key = mac.finalize().into_bytes();
     let (nonce, sealed) = raw.get(4..)?.split_at_checked(12)?;
-    Aes256Gcm::new(&key).decrypt(Nonce::from_slice(nonce), Payload { msg: sealed, aad: VEC_MAGIC }).ok()
+    vec_cipher(key)?.decrypt(Nonce::from_slice(nonce), Payload { msg: sealed, aad: VEC_MAGIC }).ok()
+}
+
+fn seal_vec(vec: &[u8], key: &tokens::Key) -> Option<Vec<u8>> {
+    let nonce = sealed_file::random::<12>();
+    let sealed = vec_cipher(key)?.encrypt(Nonce::from_slice(&nonce), Payload { msg: vec, aad: VEC_MAGIC }).ok()?;
+    Some([VEC_MAGIC, &nonce, &sealed].concat())
+}
+
+/// The record rows a seal pass still has to seal for one account (two `?`: that account).
+pub(super) fn plain_records() -> String {
+    let sealed = SEALED_PREFIX.len();
+    format!("kind='record' AND substr(scope, 1, length(?) + 1) = ? || '~' AND substr(meta, 1, {sealed}) <> '{SEALED_PREFIX}'")
+}
+
+/// How many of the account's records are still stored as their plugin wrote them.
+pub async fn plain_left(store: &Store, account: String) -> Result<i64> {
+    store.readers.read(move |conn| conn.query_row(&format!("SELECT count(*) FROM search_docs WHERE {}", plain_records()), [&account, &account], |r| r.get(0))).await
+}
+
+/// A record's row as it is stored sealed: `[title, path, body, summary, meta, content_hash]`,
+/// the words as one keyed token each, what the plugin wrote sealed in `meta`, and the
+/// change hash keyed (a plain one would let anyone test a guess at the text).
+fn sealed_row([title, path, body, summary, meta, hash]: &[String; 6], who: &Who, key: &tokens::Key) -> Result<[String; 6]> {
+    let meta = Some(parsed_meta(meta)).filter(Value::is_object).unwrap_or_else(|| json!({}));
+    let payload = dumps(&json!({"title": title, "path": path, "body": body, "summary": summary, "meta": meta}));
+    let keyed = keyed(key, b"search-rec", hash.as_bytes()).ok_or_else(|| Error("the chat key is damaged".into()))?;
+    let blind = |text: &String| tokens::blind_text(text, key);
+    let meta = dumps(&json!({"sealed": seal::seal_text(&payload, &who.entropy)?}));
+    Ok([blind(title), blind(path), blind(body), blind(summary), meta, keyed.iter().map(|byte| format!("{byte:02x}")).collect()])
+}
+
+/// Seal in place the account's records written before they were sealed (and their
+/// vectors). Resumable; a row rewritten meanwhile is left to the write that did it.
+pub async fn seal_existing(store: &Store, who: Who, key: tokens::Key, batch: i64) -> Result<usize> {
+    let select = format!("SELECT id, title, path, body, summary, meta, content_hash FROM search_docs WHERE id > ? AND {} ORDER BY id LIMIT ?", plain_records());
+    let (mut sealed, mut cursor) = (0, 0i64);
+    loop {
+        let (select, account) = (select.clone(), who.id.clone());
+        let rows: Vec<(i64, [String; 6])> = store
+            .readers
+            .read(move |conn| {
+                let row = |r: &Row| {
+                    let text = |at: usize| Ok::<_, rusqlite::Error>(r.get::<_, Option<String>>(at)?.unwrap_or_default());
+                    Ok((r.get(0)?, [text(1)?, text(2)?, text(3)?, text(4)?, text(5)?, text(6)?]))
+                };
+                conn.prepare(&select)?.query_map(params![cursor, account, account, batch], row)?.collect()
+            })
+            .await?;
+        let Some((last, _)) = rows.last() else { break };
+        cursor = *last;
+        let (owner, words) = (who.clone(), key.clone());
+        let todo: Vec<(i64, [String; 6], String)> =
+            blocking(move || rows.into_iter().map(|(id, old)| Ok((id, sealed_row(&old, &owner, &words)?, old[5].clone()))).collect()).await?;
+        let words = key.clone();
+        sealed += store
+            .writer
+            .write("search::seal_existing", move |conn| {
+                zeroing(conn, || {
+                    let mut done = 0;
+                    for (id, [title, path, body, summary, meta, hash], old_hash) in &todo {
+                        let sql = "UPDATE search_docs SET title=?1, path=?2, body=?3, summary=?4, meta=?5, content_hash=?6 WHERE id=?7 AND content_hash=?8";
+                        if conn.execute(sql, params![title, path, body, summary, meta, hash, id, old_hash])? == 0 {
+                            continue; // written again since it was read; that write sealed it
+                        }
+                        let vec: Option<Vec<u8>> = conn.query_row("SELECT vec FROM search_vecs WHERE doc_id=?1", [id], |r| r.get(0)).optional()?;
+                        if let Some(vec) = vec.filter(|vec| !vec.starts_with(VEC_MAGIC)).and_then(|vec| seal_vec(&vec, &words)) {
+                            conn.execute("UPDATE search_vecs SET vec=?1 WHERE doc_id=?2", params![vec, id])?;
+                        }
+                        done += 1;
+                    }
+                    Ok(done)
+                })
+            })
+            .await?;
+    }
+    if sealed > 0 {
+        // The index still holds the old rows' words in segments it marked deleted.
+        store.writer.write("search::optimize", |conn| zeroing(conn, || conn.execute("INSERT INTO search_fts(search_fts) VALUES('optimize')", []).map(|_| ()))).await?;
+    }
+    Ok(sealed)
 }
 
 /// Every vector of `model`: `(doc ids, kinds, concatenated float32 bytes)` in id order.
