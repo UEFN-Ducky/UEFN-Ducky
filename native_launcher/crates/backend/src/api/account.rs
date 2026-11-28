@@ -4,14 +4,15 @@
 //! Every write of the login row goes through [`save_login`], so a sign-out, an expired
 //! session and an unpaired PC all drop the old account's data key copy and tell the
 //! windows who is signed in now.
-//! ponytail: signing in is still the Python backend's, so `browser_pending` and
-//! `user_code` (a sign-in waiting in the browser) are always empty here, and an unpair
-//! does not stop the presence beat or the remote mailbox; they move here with sign-in.
+//! ponytail: an unpair does not stop the presence beat or the remote mailbox; both are
+//! the Python backend's until they move here.
 //! ponytail: plugins that listen for account changes, the spaces and the new account's
 //! data key fetch are told by the Python backend only; they move with the plugin host
 //! and the data key.
-//! ponytail: `duckyos_open_site` opens the person's browser and stays Python's.
 
+mod login;
+
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,6 +26,8 @@ use super::site::{collect, network, resolve_base_url, send, session_cookies, tex
 use super::Api;
 use crate::store::pyjson::{int, pystr, truthy};
 use crate::store::{account, account_rows, seal, secrets};
+
+pub use login::{duckyos_cancel_login, duckyos_login, fetch_agent_caps};
 
 type Fields = Map<String, Value>;
 
@@ -91,11 +94,13 @@ async fn status(api: &Api, login: &Value) -> Result<Value, String> {
     let said = |name: &str| if logged_in { text(&login[name]) } else { String::new() };
     // ponytail: a list saved as anything but a list reads as none (Python lists a string's letters).
     let list = |name: &str| if logged_in && login[name].is_array() { login[name].clone() } else { json!([]) };
+    // The code of a sign-in that waits for the person to approve it in their browser.
+    let user_code = login::pending_code();
     Ok(json!({
         "logged_in": logged_in,
         "needs_code": false,
-        "browser_pending": false,
-        "user_code": "",
+        "browser_pending": !user_code.is_empty(),
+        "user_code": user_code,
         "base_url": base,
         "default_base_url": DEFAULT_BASE_URL,
         "email": said("email"),
@@ -243,7 +248,7 @@ fn stripped(value: &Value) -> String {
 }
 
 fn pcs_call<'a>(event: &'a str, error_code: &'a str) -> Collect<'a> {
-    Collect { plugin: "uefn-ducky", event, unavailable_code: "rpc_unavailable", error_code, allow_anonymous: false, timeout: Duration::from_secs(20) }
+    Collect { plugin: "uefn-ducky", event, unavailable_code: "rpc_unavailable", error_code, allow_anonymous: false, timeout: Duration::from_secs(20), retries: 0 }
 }
 
 /// The PCs linked to this account (`list_account_pcs`).
@@ -287,6 +292,42 @@ pub async fn duckyos_revoke_pc(api: Arc<Api>, args: Fields) -> Result<Value, Str
         answer.extend(status);
     }
     Ok(answer)
+}
+
+/// Hand `url` to the person's browser. Only a secure web address goes to the OS, and
+/// nothing opens under the tests (they mark their environment).
+/// ponytail: a browser that did not open is not reported, as Python's `webbrowser.open`
+/// is not asked; the opener holds one blocking thread until it returns.
+fn open_in_browser(url: String) {
+    if !url.starts_with("https://") || std::env::var_os("DUCKY_TESTS_ISOLATED_APPDATA").is_some() {
+        return;
+    }
+    let (program, first): (&str, &[&str]) = if cfg!(windows) {
+        ("rundll32", &["url.dll,FileProtocolHandler"])
+    } else if cfg!(target_os = "macos") {
+        ("open", &[])
+    } else {
+        ("xdg-open", &[])
+    };
+    // Not waited for: some openers return only when the browser closes.
+    #[allow(clippy::disallowed_methods)] // on a blocking thread
+    tokio::task::spawn_blocking(move || Command::new(program).args(first).arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status());
+}
+
+/// A page of the account's website in the person's browser (`open_site_path`).
+pub async fn duckyos_open_site(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let path = text(args.get("path").unwrap_or(&Value::Null));
+    let login = stored(&api).await?;
+    let base = match truthy(&login["base_url"]) {
+        true => pystr(&login["base_url"]),
+        false => match resolve_base_url(&api).await {
+            Ok(base) => base,
+            Err(refused) => return Ok(json!({"ok": false, "error": refused.message, "code": refused.code})),
+        },
+    };
+    let url = format!("{}{}{path}", base.trim_end_matches('/'), if path.starts_with('/') { "" } else { "/" });
+    open_in_browser(url.clone());
+    Ok(json!({"ok": true, "url": url}))
 }
 
 #[cfg(test)]

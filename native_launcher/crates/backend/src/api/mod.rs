@@ -87,6 +87,9 @@ pub fn methods() -> HashMap<&'static str, Method> {
         account::duckyos_get_status => Anyone,
         account::duckyos_list_pcs => Anyone,
         account::duckyos_revoke_pc => Anyone,
+        account::duckyos_login => Anyone,
+        account::duckyos_cancel_login => Anyone,
+        account::duckyos_open_site => Anyone,
     }
 }
 

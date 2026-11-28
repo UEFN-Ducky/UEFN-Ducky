@@ -75,6 +75,7 @@ pub async fn duckyos_store_versions(api: Arc<Api>, args: Fields) -> Result<Value
         error_code: "store_error",
         allow_anonymous: true,
         timeout: Duration::from_secs(20),
+        retries: 0,
     };
     let payload = match collect(&api, ask, &json!({"slug": slug})).await {
         Ok(payload) => payload,

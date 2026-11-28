@@ -21,6 +21,9 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use axum::body::Bytes;
+use axum::extract::{Path, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
@@ -66,10 +69,18 @@ fn routes(api: Arc<api::Api>) -> Router {
         let store = Router::new().route("/__rs/store/{repo}/{function}", post(store::http::call));
         routes = routes.merge(store.with_state(Arc::clone(&api.repos)));
         routes = routes.merge(Router::new().route("/__rs/api/methods", get(api::router::reaches)).with_state(Arc::clone(&api)));
+        // The account's agent limits are fetched after a sign-in, which only a real site answers.
+        let caps = |State(api): State<Arc<api::Api>>| async move { Json(json!({"ok": api::account::fetch_agent_caps(&api).await.is_ok()})) };
+        routes = routes.merge(Router::new().route("/__rs/account/agent_caps", post(caps)).with_state(Arc::clone(&api)));
     }
-    // A window's poll waits 20 s by design: it sets its own limit, and is no slow call.
-    let events = Router::new().route("/__panel_events", get(api::router::events)).with_state(api);
-    guard::wrap(routes, guard::CALL_LIMIT).merge(events)
+    // A window's poll waits 20 s by design, and a sign-in waits for the person to approve
+    // its code: each sets its own limit, and is no slow call.
+    let waits = Router::new().route("/__panel_events", get(api::router::events)).route("/__panel_api/duckyos_login", post(sign_in)).with_state(api);
+    guard::wrap(routes, guard::CALL_LIMIT).merge(waits)
+}
+
+async fn sign_in(api: State<Arc<api::Api>>, headers: HeaderMap, body: Bytes) -> (StatusCode, Json<Value>) {
+    api::router::call(api, Path("duckyos_login".to_string()), headers, body).await
 }
 
 async fn health() -> Json<Value> {

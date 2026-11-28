@@ -330,19 +330,41 @@ pub struct Collect<'a> {
     pub error_code: &'a str,
     pub allow_anonymous: bool,
     pub timeout: Duration,
+    /// Extra tries (1 s, 2 s apart) when the site cannot be reached or answers with an
+    /// outage, a firewall page or a 404: only for calls that are safe to send twice.
+    pub retries: u32,
 }
 
 /// `_plugin_collect`: post one event and answer its payload.
-/// ponytail: one try. Python's `retries` are for its sign-in calls only; add them with
-/// sign-in.
+/// ponytail: a retried call's failure is not written to the support log (Python's
+/// `record_activity`); it is, once that log is written here.
 pub async fn collect(api: &Api, what: Collect<'_>, body: &Value) -> Result<Map<String, Value>, Refused> {
     let path = format!("/api/v1/plugins/{}/collect/{}", what.plugin, what.event);
-    let call = Call { method: "POST", path: &path, body: Some(body), allow_anonymous: what.allow_anonymous, timeout: what.timeout };
-    let answer = request(api, call).await.map_err(|refused| match refused.code == "network" && refused.message.to_lowercase().contains("timed out") {
-        true => Refused::new("uefnducky.org didn't answer in time. Check your internet and try again.", what.error_code),
-        false => refused,
-    })?;
-    if let Some((kind, mut message)) = site_failure(&answer) {
+    let mut attempt = 0;
+    let (answer, failure) = loop {
+        let last = attempt >= what.retries;
+        let call = Call { method: "POST", path: &path, body: Some(body), allow_anonymous: what.allow_anonymous, timeout: what.timeout };
+        match request(api, call).await {
+            Ok(answer) => {
+                let failure = site_failure(&answer);
+                // The site's own refusal is its answer: asking again changes nothing.
+                if last || failure.as_ref().is_none_or(|(kind, _)| kind == "refused") {
+                    break (answer, failure);
+                }
+            }
+            Err(refused) if refused.code != "network" => return Err(refused),
+            Err(refused) if last => {
+                return Err(match refused.message.to_lowercase().contains("timed out") {
+                    true => Refused::new("uefnducky.org didn't answer in time. Check your internet and try again.", what.error_code),
+                    false => refused,
+                })
+            }
+            Err(_) => {}
+        }
+        attempt += 1;
+        tokio::time::sleep(Duration::from_secs(attempt.into())).await;
+    };
+    if let Some((kind, mut message)) = failure {
         if kind == "refused" {
             let body = answer.parsed.as_ref();
             let inner = body.and_then(|body| body.get("payload")).and_then(Value::as_object).and_then(|payload| payload.get("error")).filter(|error| truthy(error));

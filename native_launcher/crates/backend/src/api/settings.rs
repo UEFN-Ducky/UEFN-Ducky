@@ -195,6 +195,19 @@ async fn save(api: &Api, s: &Loaded) -> Result<(), String> {
     repo.save_fields(s.fields.clone(), DEFAULTS.clone(), Some(s.origin)).await.map(drop).map_err(failed)
 }
 
+/// Save each of `fields` that is not already what is kept.
+pub(super) async fn set_fields(api: &Api, fields: Vec<(&str, Value)>) -> Result<(), String> {
+    let mut s = load(api).await?;
+    let changed: Vec<_> = fields.into_iter().filter(|(key, value)| s.get(key) != value).collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    for (key, value) in changed {
+        s.set(key, value);
+    }
+    save(api, &s).await
+}
+
 /// `coding_agents_dict`: each saved agent's row with its defaults filled in.
 /// ponytail: an installed gateway's own defaults (its `register()`) are known to the
 /// plugin host only, so `get_settings` is not routed here until the host can be asked.
