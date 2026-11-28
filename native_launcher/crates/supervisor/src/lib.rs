@@ -48,6 +48,10 @@ pub struct Config {
     pub hello_cap: Duration,
     /// `%LOCALAPPDATA%/UEFN-Ducky`; `crash_loop.json` goes in its `launcher/` folder.
     pub app_data: PathBuf,
+    /// The backend the window waits for: its start shows on the loading screen and its
+    /// crash loop is recorded (the next launch opens the Python window). False for a
+    /// helper backend the app also works without.
+    pub primary: bool,
 }
 
 impl Config {
@@ -55,7 +59,12 @@ impl Config {
     pub fn ducky(exe: impl Into<PathBuf>, argv: &[String], app_data: impl Into<PathBuf>) -> Config {
         let mut args = vec!["--backend".to_string()];
         args.extend(argv.iter().cloned());
-        Config { exe: exe.into(), args, env: Vec::new(), hello_silence: HELLO_SILENCE, hello_cap: HELLO_CAP, app_data: app_data.into() }
+        Config { exe: exe.into(), args, env: Vec::new(), hello_silence: HELLO_SILENCE, hello_cap: HELLO_CAP, app_data: app_data.into(), primary: true }
+    }
+
+    /// `Ducky-Backend` (the Rust backend): no arguments, and Ducky runs without it.
+    pub fn helper(exe: impl Into<PathBuf>, app_data: impl Into<PathBuf>) -> Config {
+        Config { args: Vec::new(), primary: false, ..Config::ducky(exe, &[], app_data) }
     }
 }
 
@@ -286,6 +295,11 @@ impl Backend {
         let mut last_line = spawned;
         let mut stage: Option<String> = None;
         let mut last_err = String::new();
+        let set_starting = |v| {
+            if cfg.primary {
+                set_starting(v)
+            }
+        };
         set_starting(Some((None, spawned)));
         loop {
             let deadline = hello_deadline(spawned, last_line, cfg.hello_silence, cfg.hello_cap);
@@ -385,7 +399,9 @@ impl Supervisor {
     fn spawn_until_hello(&mut self) -> Result<&Hello, StartError> {
         loop {
             let spawned = Backend::spawn(&self.cfg);
-            set_starting(None);
+            if self.cfg.primary {
+                set_starting(None);
+            }
             match spawned {
                 Ok(b) => {
                     self.backend = Some(b);
@@ -401,7 +417,9 @@ impl Supervisor {
         match self.policy.on_crash(Instant::now()) {
             Decision::Restart => Ok(()),
             Decision::GiveUp => {
-                record_crash_loop_failure(&self.cfg.app_data, crash_slug(&reason));
+                if self.cfg.primary {
+                    record_crash_loop_failure(&self.cfg.app_data, crash_slug(&reason));
+                }
                 Err(StartError::new(exit::CRASH_LOOP, format!("backend crashed 3 times in 60 s ({reason})")))
             }
         }
@@ -471,6 +489,24 @@ impl Drop for Supervisor {
     fn drop(&mut self) {
         self.shutdown("launcher exit");
     }
+}
+
+/// Run a backend for as long as it lives: `up` gets every hello (the first and each
+/// restart's), `gone` is called once when it ended or was given up on. Blocks.
+pub fn keep_alive(cfg: Config, mut up: impl FnMut(&Hello), gone: impl FnOnce()) {
+    if let Ok(mut sup) = Supervisor::start(cfg) {
+        if let Some(h) = sup.hello() {
+            up(h);
+        }
+        loop {
+            match sup.next(Duration::from_secs(1)) {
+                Step::Restarted(h) => up(&h),
+                Step::Exited | Step::Fatal(_) => break,
+                Step::Msg(_) | Step::Idle => {}
+            }
+        }
+    }
+    gone();
 }
 
 #[cfg(test)]

@@ -119,6 +119,28 @@ fn backend_exe() -> PathBuf {
     dir.join("UEFN-Ducky.exe")
 }
 
+/// Start `Ducky-Backend.exe` (beside the Python backend's EXE) when this build ships it:
+/// its hello opens the UI server's Rust gate. Without it, or once it is given up on, the
+/// gate is shut and Python answers every path.
+fn start_rust_backend(app_data: PathBuf, gate: std::sync::Arc<server::Gate>) {
+    let exe = backend_exe().with_file_name("Ducky-Backend.exe");
+    if !exe.is_file() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let up = gate.clone();
+        supervisor::keep_alive(
+            supervisor::Config::helper(exe, app_data),
+            |hello| {
+                if let Some(addr) = server::origin_addr(&hello.origin) {
+                    up.release(addr);
+                }
+            },
+            || gate.close(),
+        );
+    });
+}
+
 pub struct UiHost {
     args: Vec<OsString>,
     lock: Option<InstanceLock>,
@@ -260,6 +282,9 @@ impl Host for UiHost {
             u.app_data.clone()
         })
         .unwrap_or_default();
+        if let Some(gate) = with(|u| u.server.as_ref().map(|s| s.rust_gate().clone())).flatten() {
+            start_rust_backend(app_data.clone(), gate);
+        }
         let mut cfg = supervisor::Config::ducky(backend_exe(), &plan.argv[1..], app_data);
         cfg.env = plan.backend_env.clone();
         cfg.env.push((NATIVE_CHILD_ENV.to_string(), "1".to_string()));

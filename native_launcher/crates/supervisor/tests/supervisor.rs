@@ -141,6 +141,7 @@ fn fake_slow(mode: &str, dir: &Path, hello_silence: Duration, hello_cap: Duratio
         hello_silence,
         hello_cap,
         app_data: dir.to_path_buf(),
+        primary: true,
     }
 }
 
@@ -288,6 +289,33 @@ fn third_crash_in_60s_gives_22_and_records_crash_loop() {
     };
     assert_eq!((code, restarts, spawns(&dir)), (exit::CRASH_LOOP, 2, 3));
     assert_eq!(CrashLoop::load(&dir).failures.len(), 1);
+}
+
+#[test]
+fn a_helper_backends_crash_loop_is_not_recorded() {
+    // crash_loop.json sends the next launch to the Python window: only the backend the
+    // window depends on may write it.
+    let dir = scratch("helper_crash_loop");
+    let cfg = Config { primary: false, ..fake("crash", &dir, Duration::from_secs(15)) };
+    assert_eq!(Supervisor::start(cfg).err().unwrap().code, exit::CRASH_LOOP);
+    assert_eq!(spawns(&dir), 3);
+    assert!(!dir.join("launcher").join("crash_loop.json").exists());
+    let helper = Config::helper("x/Ducky-Backend.exe", &dir);
+    assert!(!helper.primary && helper.args.is_empty());
+}
+
+#[test]
+fn keep_alive_reports_each_hello_then_gone() {
+    let dir = scratch("keep_alive");
+    let (mut ups, mut gone) = (0, false);
+    supervisor::keep_alive(fake("crash_after_hello", &dir, Duration::from_secs(15)), |h| ups += h.protocol_ok() as u32, || gone = true);
+    assert_eq!((ups, gone, spawns(&dir)), (3, true, 3));
+    // A backend that never starts is gone at once, with no hello.
+    let mut cfg = Config::helper(dir.join("nope").join("Ducky-Backend.exe"), &dir);
+    cfg.hello_silence = Duration::from_secs(2);
+    let (mut ups, mut gone) = (0, false);
+    supervisor::keep_alive(cfg, |_| ups += 1, || gone = true);
+    assert_eq!((ups, gone), (0, true));
 }
 
 #[test]

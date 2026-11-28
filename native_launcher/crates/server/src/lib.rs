@@ -6,6 +6,9 @@
 //! generated images) are held until the backend's hello gives its origin, then tunnelled
 //! to it byte for byte. Requests still held when the hold window (30 s from start) ends get
 //! a 503 (a missing file a 404).
+//!
+//! Paths under [`RUST_PATHS`] go to the Rust backend (`Ducky-Backend`) while it is up;
+//! without it they go to the Python backend like every other path.
 
 pub mod port;
 
@@ -18,6 +21,20 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_HOLD: Duration = Duration::from_secs(30);
+
+/// Paths the Rust backend answers: an entry ending in `/` is a prefix, any other the whole
+/// path (`/__panel_api/get_settings`). A call moves to Rust by adding its path here, and
+/// back to Python by removing it.
+pub const RUST_PATHS: &[&str] = &["/__rs/"];
+
+/// True when the Rust backend answers this path.
+pub fn is_rust(path: &str) -> bool {
+    routed(RUST_PATHS, path)
+}
+
+fn routed(paths: &[&str], path: &str) -> bool {
+    paths.iter().any(|p| if p.ends_with('/') { path.starts_with(p) } else { path == *p })
+}
 const MAX_HEAD: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +74,14 @@ impl Gate {
         *self.state.lock().unwrap() = GateState::Waiting;
     }
 
+    /// The backend address when released, without waiting.
+    pub fn now(&self) -> Option<SocketAddr> {
+        match &*self.state.lock().unwrap() {
+            GateState::Open(a) => Some(*a),
+            _ => None,
+        }
+    }
+
     /// The backend address, waiting until release or the hold deadline.
     pub fn wait(&self) -> Option<SocketAddr> {
         let mut st = self.state.lock().unwrap();
@@ -92,6 +117,7 @@ type Roots = Arc<Mutex<Vec<PathBuf>>>;
 pub struct Server {
     addr: SocketAddr,
     gate: Arc<Gate>,
+    rust: Arc<Gate>,
     stop: Arc<AtomicBool>,
     roots: Roots,
 }
@@ -106,23 +132,25 @@ impl Server {
     pub fn start(listener: TcpListener, root: PathBuf, hold: Duration) -> Server {
         let addr = listener.local_addr().expect("local addr");
         let gate = Arc::new(Gate::new(hold));
+        // Never waited on: a request only goes to Rust when it is up right now.
+        let rust = Arc::new(Gate::new(Duration::ZERO));
         let stop = Arc::new(AtomicBool::new(false));
         let roots: Roots = Arc::new(Mutex::new(vec![root]));
-        let (g, s, r) = (gate.clone(), stop.clone(), roots.clone());
+        let (g, rs, s, r) = (gate.clone(), rust.clone(), stop.clone(), roots.clone());
         thread::spawn(move || {
             for conn in listener.incoming() {
                 if s.load(Ordering::SeqCst) {
                     break;
                 }
                 if let Ok(stream) = conn {
-                    let (g, roots) = (g.clone(), r.lock().unwrap().clone());
+                    let (g, rs, roots) = (g.clone(), rs.clone(), r.lock().unwrap().clone());
                     thread::spawn(move || {
-                        let _ = handle(stream, &roots, &g);
+                        let _ = handle(stream, &roots, &g, &rs);
                     });
                 }
             }
         });
-        Server { addr, gate, stop, roots }
+        Server { addr, gate, rust, stop, roots }
     }
 
     /// Serve `root` first from now on (the build the backend runs); earlier roots stay as
@@ -140,6 +168,12 @@ impl Server {
 
     pub fn gate(&self) -> &Arc<Gate> {
         &self.gate
+    }
+
+    /// Where [`RUST_PATHS`] go: release it to the Rust backend's address, close it when
+    /// that backend is gone.
+    pub fn rust_gate(&self) -> &Arc<Gate> {
+        &self.rust
     }
 
     /// Release backend requests to the hello `origin`; false when it does not parse.
@@ -195,7 +229,7 @@ pub fn is_backend(head: &Head) -> bool {
     head.websocket || head.path == "/api" || head.path.starts_with("/api/") || head.path.starts_with("/__")
 }
 
-fn handle(mut client: TcpStream, roots: &[PathBuf], gate: &Gate) -> io::Result<()> {
+fn handle(mut client: TcpStream, roots: &[PathBuf], gate: &Gate, rust: &Gate) -> io::Result<()> {
     client.set_read_timeout(Some(Duration::from_secs(30)))?;
     let mut buf = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
@@ -217,6 +251,10 @@ fn handle(mut client: TcpStream, roots: &[PathBuf], gate: &Gate) -> io::Result<(
         None => return respond(&mut client, 400, "text/plain", b"bad request", false),
     };
     client.set_read_timeout(None)?;
+    // Rust down or mid-restart: the connect fails and Python answers, as before the move.
+    if let Some(upstream) = rust.now().filter(|_| is_rust(&head.path)).and_then(connect) {
+        return tunnel(client, upstream, &buf);
+    }
     let backend = is_backend(&head);
     // The Python server answers more than /api and /__ (plugin panels' kit CSS/JS sat on 404:
     // every plugin drew as bare HTML), so anything without a file here is the backend's.
@@ -224,7 +262,10 @@ fn handle(mut client: TcpStream, roots: &[PathBuf], gate: &Gate) -> io::Result<(
     match root {
         Some(root) if !backend => serve_static(&mut client, root, &head),
         _ => match gate.wait() {
-            Some(addr) => tunnel(client, addr, &buf),
+            Some(addr) => match connect(addr) {
+                Some(upstream) => tunnel(client, upstream, &buf),
+                None => respond(&mut client, 502, "text/plain", b"Ducky backend unreachable", false),
+            },
             None if backend => respond(&mut client, 503, "text/plain", b"Ducky backend not ready", false),
             None => respond(&mut client, 404, "text/plain", b"not found", false),
         },
@@ -235,15 +276,12 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
+fn connect(addr: SocketAddr) -> Option<TcpStream> {
+    TcpStream::connect_timeout(&addr, Duration::from_secs(5)).ok()
+}
+
 /// Raw two-way copy: the backend sees the exact request (and websocket frames).
-fn tunnel(client: TcpStream, addr: SocketAddr, already: &[u8]) -> io::Result<()> {
-    let mut upstream = match TcpStream::connect_timeout(&addr, Duration::from_secs(5)) {
-        Ok(s) => s,
-        Err(_) => {
-            let mut c = client;
-            return respond(&mut c, 502, "text/plain", b"Ducky backend unreachable", false);
-        }
-    };
+fn tunnel(client: TcpStream, mut upstream: TcpStream, already: &[u8]) -> io::Result<()> {
     let _ = upstream.set_nodelay(true);
     let _ = client.set_nodelay(true);
     upstream.write_all(already)?;
@@ -360,4 +398,18 @@ fn respond(client: &mut TcpStream, status: u16, ctype: &str, body: &[u8], head_o
     client.flush()?;
     let _ = client.shutdown(Shutdown::Write);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::routed;
+
+    #[test]
+    fn a_routed_entry_is_a_prefix_or_one_whole_path() {
+        let paths = ["/__rs/", "/__panel_api/get_settings"];
+        assert!(routed(&paths, "/__rs/health") && routed(&paths, "/__panel_api/get_settings"));
+        // One method moving must not take the methods that start with its name.
+        assert!(!routed(&paths, "/__panel_api/get_settings_schema"));
+        assert!(!routed(&paths, "/__panel_api/") && !routed(&paths, "/__rs"));
+    }
 }

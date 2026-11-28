@@ -1,5 +1,5 @@
 use server::port::{choose_listener_port, parse_saved_port, saved_port, PortChoice};
-use server::{is_backend, origin_addr, parse_head, resolve_static, Server};
+use server::{is_backend, is_rust, origin_addr, parse_head, resolve_static, Server};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -79,6 +79,58 @@ fn routing_rules() {
     assert!(resolve_static(Path::new("r"), "/%2e%2e/secret").is_none());
     assert_eq!(resolve_static(Path::new("r"), "/"), Some(Path::new("r").join("index.html")));
     assert_eq!(origin_addr("http://127.0.0.1:4321").unwrap().port(), 4321);
+    assert!(is_rust("/__rs/health"));
+    assert!(!is_rust("/api/settings") && !is_rust("/__panel_event") && !is_rust("/__rs"));
+}
+
+// ---- the Rust backend's paths ----
+
+fn first_line(seen: thread::JoinHandle<Vec<u8>>) -> String {
+    String::from_utf8(seen.join().unwrap()).unwrap().lines().next().unwrap_or_default().to_string()
+}
+
+#[test]
+fn rust_paths_go_to_the_rust_backend_and_the_rest_to_python() {
+    let srv = Server::bind(0, fixtures().join("ui"), Duration::from_secs(30)).unwrap();
+    let (python, py_seen) = fake_backend();
+    let (rust, rs_seen) = fake_backend();
+    srv.release_origin(&format!("http://{python}"));
+    srv.rust_gate().release(rust);
+    assert!(get(srv.addr(), "GET /__rs/health HTTP/1.1\r\n\r\n").ends_with("from-backend"));
+    assert!(get(srv.addr(), "GET /api/settings HTTP/1.1\r\n\r\n").ends_with("from-backend"));
+    assert_eq!(first_line(rs_seen), "GET /__rs/health HTTP/1.1");
+    assert_eq!(first_line(py_seen), "GET /api/settings HTTP/1.1");
+}
+
+#[test]
+fn without_a_rust_backend_its_paths_are_pythons() {
+    // Never started (a build without Ducky-Backend), given up on, or dead mid-restart:
+    // each time Python answers, as it did before the path moved.
+    let dead = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    for name in ["never started", "closed", "dead address"] {
+        let srv = Server::bind(0, fixtures().join("ui"), Duration::from_secs(30)).unwrap();
+        let (python, py_seen) = fake_backend();
+        srv.release_origin(&format!("http://{python}"));
+        match name {
+            "closed" => srv.rust_gate().close(),
+            "dead address" => srv.rust_gate().release(dead),
+            _ => {}
+        }
+        let resp = get(srv.addr(), "GET /__rs/health HTTP/1.1\r\n\r\n");
+        assert!(resp.starts_with("HTTP/1.1 200") && resp.ends_with("from-backend"), "{name}: {resp}");
+        assert_eq!(first_line(py_seen), "GET /__rs/health HTTP/1.1", "{name}");
+    }
+}
+
+#[test]
+fn rust_paths_are_not_held_for_the_python_hello() {
+    // Python still starting (its gate holds), Rust already up: Rust answers at once.
+    let srv = Server::bind(0, fixtures().join("ui"), Duration::from_secs(30)).unwrap();
+    let (rust, _seen) = fake_backend();
+    srv.rust_gate().release(rust);
+    let started = Instant::now();
+    assert!(get(srv.addr(), "GET /__rs/health HTTP/1.1\r\n\r\n").ends_with("from-backend"));
+    assert!(started.elapsed() < Duration::from_secs(5));
 }
 
 // ---- live server ----
