@@ -18,6 +18,9 @@ use crate::store::duckies::Who;
 use crate::store::now;
 use crate::store::pyjson::{float, int, pystr, truthy};
 
+mod moves;
+pub use moves::{delete_conversation, delete_folder};
+
 type Fields = Map<String, Value>;
 
 /// Where every chat and folder is stored (`chats.store.ONE_LIST_SLUG`).
@@ -163,9 +166,12 @@ impl Sidebar<'_> {
     /// `save_conversation` for a chat read in this call: its names and placement are
     /// stored where the chat is, its messages and counts are left alone.
     /// ponytail: nothing is merged with a newer stored copy (`_keep_newer_settings`,
-    /// `_keep_newer_placement`, `_keep_stored_lanes`): those are for a copy held across
-    /// a turn, which the agent runner needs when it moves here.
+    /// `_keep_newer_placement`, a newer lane in `_keep_stored_lanes`): those are for a
+    /// copy held across a turn, which the agent runner needs when it moves here.
     async fn save_chat(&self, mut chat: Map<String, Value>, touch_updated: bool) -> Result<Map<String, Value>, String> {
+        if chat["is_group"] == true {
+            name_lanes(&mut chat["group_members"]);
+        }
         if touch_updated {
             chat.insert("updated".into(), json!(now()));
         }
@@ -211,6 +217,20 @@ impl Sidebar<'_> {
         }
         ORDER_CHECKED.store(true, Relaxed);
         if moved.is_empty() { Ok(chats) } else { self.chats().await }
+    }
+}
+
+/// `keep_stored_lanes` for a group read in this call: every saved member row names its
+/// four lane fields (null when it has none); rows sharing an id share the last one's.
+fn name_lanes(members: &mut Value) {
+    let id = |row: &Value| row.get("member_conv_id").filter(|id| truthy(id)).map(pystr).unwrap_or_default();
+    let Some(rows) = members.as_array_mut() else { return };
+    let stored = rows.clone();
+    for row in rows.iter_mut().filter(|row| row.is_object() && !id(row).is_empty()) {
+        let lanes = stored.iter().rfind(|other| other.is_object() && id(other) == id(row)).cloned().unwrap_or_default();
+        for key in ["write_allowed", "lane_set_by", "lane_set_at", "lane_root"] {
+            row[key] = lanes[key].clone();
+        }
     }
 }
 
@@ -497,6 +517,14 @@ mod tests {
         chat.insert("title".into(), json!("Chat"));
         retitle(&mut chat, "New ducky 2");
         assert_eq!(chat["title"], "New ducky 2");
+    }
+
+    #[test]
+    fn a_saved_group_names_each_members_lane_fields() {
+        let mut members = json!([{"member_conv_id": "a", "write_allowed": ["x"]}, "junk", {"name": "no id"}, {"member_conv_id": "a", "lane_set_at": 5.0}]);
+        name_lanes(&mut members);
+        let last = json!({"member_conv_id": "a", "lane_set_at": 5.0, "write_allowed": null, "lane_set_by": null, "lane_root": null});
+        assert_eq!(members, json!([{"member_conv_id": "a", "write_allowed": null, "lane_set_by": null, "lane_set_at": 5.0, "lane_root": null}, "junk", {"name": "no id"}, last]));
     }
 
     #[test]
