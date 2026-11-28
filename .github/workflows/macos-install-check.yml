@@ -62,14 +62,16 @@ jobs:
           url = f"{base}/api/v1/plugins/uefn-ducky-store/collect/app-version"
           if os.environ["CHANNEL"] == "beta":
               url += "?channel=beta"  # ponytail: beta records have no client feed yet
-          req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json"})
+          # The Store answers 403 without the app's Origin + User-Agent (Python's default UA is refused).
+          ua = {"User-Agent": "UEFN-Ducky/install-check"}
+          req = urllib.request.Request(url, data=b"{}", headers={"Content-Type": "application/json", "Origin": base, **ua})
           doc = json.load(urllib.request.urlopen(req, timeout=30))
           payload = doc.get("payload", doc)
           want = ("macos", os.environ["ARCH"], "dmg")
           row = next((r for r in payload.get("assets") or [] if (r.get("os"), r.get("arch"), r.get("package")) == want), None)
           assert row, f"no {want} row in the feed (version {payload.get('currentVersion')})"
           link = row["url"] if row["url"].startswith("https://") else base + row["url"]
-          data = urllib.request.urlopen(link, timeout=900).read()
+          data = urllib.request.urlopen(urllib.request.Request(link, headers=ua), timeout=900).read()
           got = hashlib.sha256(data).hexdigest()
           assert got == str(row["sha256"]).lower(), f"sha256 {got} != {row['sha256']}"
           open("ducky.dmg", "wb").write(data)
