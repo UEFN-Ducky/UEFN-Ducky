@@ -490,6 +490,72 @@ def test_a_group_returns_from_archive_whole(both) -> None:
     }
 
 
+# --------------------------------------------------------------------------- drag and drop
+
+
+def _chat(conv_id: str, folder_id: str, sort_order: Any = 1) -> dict:
+    return {"id": conv_id, "folder_id": folder_id, "sort_order": sort_order}
+
+
+_STALE = {  # rows a window that is behind can send: none of them may change or create anything
+    "folders": [
+        {"id": "nope", "parent_id": "", "sort_order": 1}, {"id": "archive", "parent_id": "top", "sort_order": 1}, {"id": "top", "parent_id": "g2"},
+        {"id": "plain", "parent_id": "gone"}, {"id": "deep", "parent_id": "archive"}, {"id": "side", "parent_id": "side"}, {"id": " "}, "junk",
+    ],
+    "chats": [_chat("nope", "plain"), _chat("free", "archive"), _chat("m1", "gone"), {"id": ""}, "junk", {"id": "other", "sort_order": "x"}],
+}
+
+
+@pytest.mark.parametrize(
+    "layout",
+    [
+        {"folders": [], "chats": []},
+        {"folders": [], "chats": [_chat("free", "g1", 5)]},
+        {"folders": [], "chats": [_chat("lead", ""), _chat("m1", "g2", "0.5"), _chat("m2", "plain", True)]},
+        {"folders": [], "chats": [_chat("free", "plain"), _chat("free", "g3", 2), {"id": "other", "sort_order": 9}]},
+        {"folders": [{"id": "plain", "parent_id": "top", "sort_order": 0.5}, {"id": "deep", "sort_order": "7"}], "chats": []},
+        {"folders": [{"id": "g2", "parent_id": "", "sort_order": 4, "group_hub_id": "hub2"}], "chats": [_chat("lead", "g2")]},
+        {"folders": [{"id": "g3", "parent_id": "g1", "sort_order": 3, "group_hub_id": "hub3"}, {"id": "g1", "parent_id": "g3"}], "chats": [_chat("sub", "g3")]},
+        {"folders": [{"id": "in1", "parent_id": None, "sort_order": None}, {"id": "in1", "parent_id": "plain", "sort_order": 2}], "chats": [_chat("loose", "in1", 3)]},
+        _STALE,
+        {"folders": [], "chats": [], "project_slug": " _no_project "},
+    ],
+)
+def test_a_dragged_layout_is_saved_the_same_and_the_teams_follow(both, layout: dict) -> None:
+    answer, events, _, docs = both.call(_TREE, _MOVES, "apply_sidebar_layout", layout)
+    assert answer == [200, {"ok": True, "result": None}]
+    assert events == [{"type": "chats_changed", "open": False}] and len(docs) == len(_MOVES)
+
+
+def test_a_stale_layout_changes_no_place_and_a_drag_rebuilds_the_rosters(both) -> None:
+    _, _, folders, docs = both.call(_TREE, _MOVES, "apply_sidebar_layout", _STALE)
+    assert {folder["id"]: folder["parent_id"] for folder in folders if folder["id"] != "archive"} == {folder["id"]: folder["parent_id"] for folder in _TREE}
+    assert {doc["id"]: doc["folder_id"] for doc in docs} == {doc["id"]: doc["folder_id"] for doc in _MOVES}
+    # Every roster is what its folder holds, the leader first and the nested group as one row;
+    # a ducky filed outside its group's folder is on its own.
+    assert _teams(docs) == {"hub": (["lead", "m1", "hub2"], "lead"), "hub2": (["m2"], "m2"), "hub3": ([], "")}
+    assert (_placed(docs)["m1"], _placed(docs)["far"]) == (("g1", "hub"), ("", ""))
+
+    _, _, _, docs = both.call(_TREE, _MOVES, "apply_sidebar_layout", {"folders": [], "chats": [_chat("free", "g3", 5), _chat("lead", "")]})
+    assert (_placed(docs)["free"], _placed(docs)["lead"]) == (("g3", "hub3"), ("", ""))
+    # A leader dragged out of its group's folder still leads it, from outside.
+    assert _teams(docs) == {"hub": (["lead", "m1", "hub2"], "lead"), "hub2": (["m2"], "m2"), "hub3": (["free"], "")}
+
+
+@pytest.mark.parametrize(
+    ("layout", "error"),
+    [
+        ({"folders": []}, "layout payload must include folders and chats arrays"),
+        ({"folders": [], "chats": {}}, "layout payload must include folders and chats arrays"),
+        ({"folders": [], "chats": [_chat("free", "plain")], "project_slug": "nope"}, "Unknown project: nope"),
+    ],
+)
+def test_a_layout_that_cannot_be_saved_says_why(both, layout: dict, error: str) -> None:
+    answer, events, _, docs = both.call(_TREE, _MOVES, "apply_sidebar_layout", layout)
+    assert answer == [200, {"ok": False, "error": error}] and events == []
+    assert _placed(docs)["free"] == ("", "")
+
+
 def test_chats_that_were_never_ordered_are_numbered_newest_first(seed, python, rust_store) -> None:
     from frontend.ui_web.chats import conversations, saves
 
