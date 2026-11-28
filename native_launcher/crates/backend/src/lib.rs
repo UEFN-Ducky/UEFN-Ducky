@@ -10,6 +10,7 @@
 
 #![deny(clippy::await_holding_lock, clippy::disallowed_methods)]
 
+pub mod api;
 pub mod guard;
 pub mod perf;
 pub mod store;
@@ -20,7 +21,6 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
@@ -51,24 +51,24 @@ pub fn app_data_dir() -> PathBuf {
 
 /// Every route, under the no-freeze guard. `data_dir` holds `ducky.db`.
 pub fn router(data_dir: PathBuf) -> Router {
-    routes(Arc::new(store::http::Repos::new(data_dir)))
+    routes(api::Api::new(Arc::new(store::http::Repos::new(data_dir)), api::methods()))
 }
 
-fn routes(repos: Arc<store::http::Repos>) -> Router {
-    let mut routes = Router::new().route("/__rs/health", get(health)).route("/__panel_api/{method}", post(panel_call));
+fn routes(api: Arc<api::Api>) -> Router {
+    let mut routes = Router::new()
+        .route("/__rs/health", get(health))
+        .route("/__panel_api/{method}", post(api::router::call))
+        .route("/__panel_event", post(api::router::publish))
+        .with_state(Arc::clone(&api));
     // The repo route opens sealed rows for whoever asks: only under the parity tests,
     // which mark their environment with this.
     if std::env::var_os("DUCKY_TESTS_ISOLATED_APPDATA").is_some() {
-        routes = routes.route("/__rs/store/{repo}/{function}", post(store::http::call));
+        let store = Router::new().route("/__rs/store/{repo}/{function}", post(store::http::call));
+        routes = routes.merge(store.with_state(Arc::clone(&api.repos)));
     }
-    guard::wrap(routes.with_state(repos), guard::CALL_LIMIT)
-}
-
-/// A panel call (`POST /__panel_api/<method>`, body `{"args": [...]}`), answered in the
-/// Python backend's envelope. No method has moved here yet, so each one is unknown:
-/// Python's 404.
-async fn panel_call() -> (StatusCode, Json<Value>) {
-    (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "method not allowed"})))
+    // A window's poll waits 20 s by design: it sets its own limit, and is no slow call.
+    let events = Router::new().route("/__panel_events", get(api::router::events)).with_state(api);
+    guard::wrap(routes, guard::CALL_LIMIT).merge(events)
 }
 
 async fn health() -> Json<Value> {
@@ -97,7 +97,7 @@ pub fn hello_line(port: u16) -> String {
 pub async fn serve(listener: TcpListener, stop: impl Future<Output = ()> + Send + 'static) -> io::Result<()> {
     let repos = Arc::new(store::http::Repos::new(app_data_dir()));
     let perf = tokio::spawn(perf::run(Arc::clone(&repos)));
-    let served = axum::serve(listener, routes(Arc::clone(&repos))).with_graceful_shutdown(stop).await;
+    let served = axum::serve(listener, routes(api::Api::new(Arc::clone(&repos), api::methods()))).with_graceful_shutdown(stop).await;
     perf.abort();
     // What the last seconds traced is stored before the process ends.
     if perf::waiting() {
