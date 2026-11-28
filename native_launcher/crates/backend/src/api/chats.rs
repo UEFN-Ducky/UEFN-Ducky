@@ -3,17 +3,19 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
+use super::chat_doc::{custom_duckies, ducky_style, file_path, is_placeholder, normalise, sort_order, text};
 use super::router::Api;
 use super::settings::{failed, imported};
 use super::uuid4;
+use crate::store::chat_messages::Save;
 use crate::store::chats::Chats;
 use crate::store::duckies::Who;
+use crate::store::now;
 use crate::store::pyjson::{float, int, pystr, truthy};
 
 type Fields = Map<String, Value>;
@@ -23,71 +25,9 @@ const ONE_LIST: &str = "_no_project";
 const ARCHIVE: &str = "archive";
 const ARCHIVE_SORT_ORDER: f64 = 1_000_000.0;
 
-/// The duckies in the build: `(ids, the default style)` (`frontend/ducky_assets.py`).
-/// ponytail: only `bundled_duckies.json` is read; Python's fallback scan of the web
-/// bundle's `duckies/` folder is for a checkout without that file.
-static BUNDLED: LazyLock<(HashSet<String>, String)> = LazyLock::new(|| {
-    let file: Value = serde_json::from_str(include_str!("../../../../../ducky_app/frontend/bundled_duckies.json")).unwrap_or_default();
-    let field = |item: &Value, name: &str| item.get(name).map(|v| pystr(v).trim().to_string()).unwrap_or_default();
-    let listed = file["duckies"].as_array().into_iter().flatten().filter(|item| item.is_object());
-    let ids: Vec<String> = listed.filter(|item| !field(item, "file").is_empty()).map(|item| field(item, "id")).filter(|id| !id.is_empty()).collect();
-    let default = field(&file, "default_style");
-    let default = if default.is_empty() { ids.first().cloned().unwrap_or_else(|| "classic".into()) } else { default };
-    (ids.into_iter().collect(), default)
-});
-
-/// `str(value or "")`.
-fn text(value: &Value) -> String {
-    if truthy(value) { pystr(value) } else { String::new() }
-}
-
 fn is_archive(folder_id: &str) -> bool {
     folder_id.trim() == ARCHIVE
 }
-
-/// `float(raw) if raw is not None and raw != "" else 0.0`.
-fn sort_order(raw: &Value) -> f64 {
-    match raw {
-        Value::Null => 0.0,
-        Value::String(text) if text.is_empty() => 0.0,
-        Value::String(text) => text.trim().parse().unwrap_or(0.0),
-        other => float(other).unwrap_or(0.0),
-    }
-}
-
-/// `ducky_assets.normalize_ducky_style`: a bundled id, a custom ducky that still has its
-/// picture (`custom`, the slugs found in the data folder), else the default.
-fn ducky_style(raw: &str, custom: &HashSet<String>) -> String {
-    let raw = raw.trim();
-    if let Some(slug) = raw.strip_prefix("custom:") {
-        let slug = slug.trim().to_lowercase();
-        return if custom.contains(&slug) { raw.to_string() } else { BUNDLED.1.clone() };
-    }
-    let lowered = raw.to_lowercase();
-    if BUNDLED.0.contains(&lowered) { lowered } else { BUNDLED.1.clone() }
-}
-
-/// The custom duckies' slugs: `<data folder>/duckies/<slug>.png`, the slug as
-/// `ducky_assets._SLUG_RE` allows it.
-async fn custom_duckies(data_dir: &Path) -> HashSet<String> {
-    let folder = data_dir.join("duckies");
-    #[allow(clippy::disallowed_methods)] // runs in spawn_blocking, below
-    let scan = move || {
-        let mut slugs = HashSet::new();
-        for entry in std::fs::read_dir(folder).into_iter().flatten().flatten() {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            let Some(slug) = name.strip_suffix(".png") else { continue };
-            let ok = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-';
-            let first = slug.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-            if first && slug.len() <= 64 && slug.chars().all(ok) && entry.path().is_file() {
-                slugs.insert(slug.to_string());
-            }
-        }
-        slugs
-    };
-    tokio::task::spawn_blocking(scan).await.unwrap_or_default()
-}
-
 // --------------------------------------------------------------------------- folders
 
 /// `ChatFolder`: one sidebar folder; with `group_hub_id` it is a group.
@@ -153,15 +93,18 @@ fn by_order(a: f64, b: f64) -> Ordering {
     a.partial_cmp(&b).unwrap_or(Ordering::Equal)
 }
 
-/// The account's chats, once the Python backend's one-time moves are done.
+/// The account's chats and folders, for one call.
 struct Sidebar<'a> {
     chats: &'a Chats,
     who: Who,
+    /// The custom duckies that still have their picture.
+    custom: HashSet<String>,
 }
 
 async fn sidebar(api: &Api) -> Result<Sidebar<'_>, String> {
     imported(api, "chats", "chats").await?;
-    Ok(Sidebar { chats: api.repos.chats().await.map_err(failed)?, who: api.repos.who().await.map_err(failed)? })
+    let custom = custom_duckies(api.repos.data_dir()).await;
+    Ok(Sidebar { chats: api.repos.chats().await.map_err(failed)?, who: api.repos.who().await.map_err(failed)?, custom })
 }
 
 impl Sidebar<'_> {
@@ -184,10 +127,21 @@ impl Sidebar<'_> {
         self.chats.folders_replace(self.who.clone(), ONE_LIST.into(), rows).await.map_err(failed)
     }
 
+    /// `chats.folders.create_folder`: a new folder, last among its siblings.
+    async fn new_folder(&self, name: &str, parent_id: String, group_hub_id: String) -> Result<Folder, String> {
+        let mut folders = self.folders().await?;
+        let last = folders.iter().filter(|folder| folder.parent_id == parent_id).map(|folder| folder.sort_order).fold(-1.0, f64::max);
+        let name = if name.trim().is_empty() { "Folder" } else { name.trim() }.to_string();
+        let folder = Folder { id: uuid4(), name, parent_id, sort_order: last + 1.0, group_hub_id };
+        folders.push(folder.clone());
+        self.save(&folders).await?;
+        Ok(folder)
+    }
+
     /// `merge_into_one_list`: rows an older version stored per project move into the
     /// one list first.
     /// ponytail: the move (rows and each chat's attachment folder) is the Python
-    /// backend's; port it with the chat saves, until then such a list is left to Python.
+    /// backend's; port it with the attachments, until then such a list is left to Python.
     async fn one_list(&self) -> Result<(), String> {
         match self.chats.rows_outside(self.who.id.clone(), ONE_LIST.into()).await.map_err(failed)? {
             true => Err("chats are not merged into one list yet".to_string()),
@@ -199,40 +153,91 @@ impl Sidebar<'_> {
     async fn chats(&self) -> Result<Vec<Value>, String> {
         self.chats.conv_list(self.who.clone(), ONE_LIST.into(), false).await.map_err(failed)
     }
-}
 
-/// `ensure_group_folder_hubs`: a group from before group folders has no folder yet.
-/// ponytail: making that folder saves the chat, which the Python backend still does;
-/// port it with the chat saves.
-fn groups_have_folders(folders: &[Folder], chats: &[Value]) -> Result<(), String> {
-    let linked: HashSet<&str> = folders.iter().map(|folder| folder.group_hub_id.as_str()).collect();
-    let unlinked = |chat: &&Value| truthy(&chat["is_group"]) && !linked.contains(pystr(&chat["id"]).as_str()) && !is_archive(&text(&chat["folder_id"]));
-    match chats.iter().find(unlinked) {
-        Some(_) => Err("a group has no folder yet".to_string()),
-        None => Ok(()),
+    /// `load_conversation`, without its messages: the chat on any island, None when unknown.
+    async fn chat(&self, conv_id: &str) -> Result<Option<Map<String, Value>>, String> {
+        let stored = self.chats.conv_get(self.who.clone(), conv_id.to_string(), None, false).await.map_err(failed)?;
+        Ok(stored.map(|doc| normalise(&doc, &self.custom)))
+    }
+
+    /// `save_conversation` for a chat read in this call: its names and placement are
+    /// stored where the chat is, its messages and counts are left alone.
+    /// ponytail: nothing is merged with a newer stored copy (`_keep_newer_settings`,
+    /// `_keep_newer_placement`, `_keep_stored_lanes`): those are for a copy held across
+    /// a turn, which the agent runner needs when it moves here.
+    async fn save_chat(&self, mut chat: Map<String, Value>, touch_updated: bool) -> Result<Map<String, Value>, String> {
+        if touch_updated {
+            chat.insert("updated".into(), json!(now()));
+        }
+        let stored_in = self.chats.conv_project_id(self.who.id.clone(), pystr(&chat["id"])).await.map_err(failed)?;
+        let project_id = stored_in.unwrap_or_else(|| ONE_LIST.to_string());
+        let save = Save { project_id, doc: chat.clone(), messages: None, dirty_from: None, expect_rev: None, base_hashes: None, dirty_rows: Vec::new() };
+        self.chats.conv_save(self.who.clone(), save).await.map_err(failed)?;
+        Ok(chat)
+    }
+
+    /// `ensure_group_folder_hubs`: a group from before group folders gets its folder,
+    /// named as the group and where its chat was. One in Archive is a deleted group's
+    /// leftover and stays as it is.
+    async fn link_groups(&self) -> Result<(), String> {
+        let mut linked: HashSet<String> = self.folders().await?.into_iter().map(|folder| folder.group_hub_id).collect();
+        for stored in self.chats().await? {
+            let (id, parent) = (pystr(&stored["id"]), text(&stored["folder_id"]).trim().to_string());
+            if !truthy(&stored["is_group"]) || linked.contains(&id) || is_archive(&parent) {
+                continue;
+            }
+            let mut chat = normalise(&stored, &self.custom);
+            let title = pystr(&chat["title"]);
+            let folder = self.new_folder(if title.is_empty() { "Group" } else { &title }, parent, id.clone()).await?;
+            chat.insert("folder_id".into(), json!(folder.id));
+            self.save_chat(chat, true).await?;
+            linked.insert(id);
+        }
+        Ok(())
+    }
+
+    /// The chats for a list; the first list of this process numbers them first
+    /// (`_maybe_migrate_conversation_sort_orders`).
+    async fn numbered_chats(&self) -> Result<Vec<Value>, String> {
+        let chats = self.chats().await?;
+        if ORDER_CHECKED.load(Relaxed) {
+            return Ok(chats);
+        }
+        let moved = number_unsorted_chats(&chats);
+        for (index, order) in &moved {
+            let mut chat = normalise(&chats[*index], &self.custom);
+            chat.insert("sort_order".into(), json!(order));
+            self.save_chat(chat, false).await?;
+        }
+        ORDER_CHECKED.store(true, Relaxed);
+        if moved.is_empty() { Ok(chats) } else { self.chats().await }
     }
 }
 
 /// Checked once per process, as `_maybe_migrate_conversation_sort_orders` is.
 static ORDER_CHECKED: AtomicBool = AtomicBool::new(false);
 
-/// `_migrate_conversation_sort_orders`: chats in one folder that are all still at 0 get
-/// numbered by age.
-/// ponytail: numbering saves each chat, which the Python backend still does; port it
-/// with the chat saves.
-fn chats_are_ordered(chats: &[Value]) -> Result<(), String> {
-    if ORDER_CHECKED.load(Relaxed) {
-        return Ok(());
-    }
-    let folders: HashSet<String> = chats.iter().map(|chat| text(&chat["folder_id"])).collect();
-    for folder in folders {
-        let inside = || chats.iter().filter(|chat| text(&chat["folder_id"]) == folder);
-        if inside().count() > 1 && inside().all(|chat| sort_order(&chat["sort_order"]) == 0.0) {
-            return Err("chats are not numbered yet".to_string());
+/// `_migrate_conversation_sort_orders`: chats of one folder that are all still at 0 are
+/// numbered, the newest first. Gives `(index, new sort order)` of each chat that moves.
+/// ponytail: Python saves the first one too (0 again); that save changes nothing.
+fn number_unsorted_chats(chats: &[Value]) -> Vec<(usize, f64)> {
+    let folder = |chat: &Value| text(&chat["folder_id"]);
+    let mut folders: Vec<String> = Vec::new();
+    for chat in chats {
+        if !folders.contains(&folder(chat)) {
+            folders.push(folder(chat));
         }
     }
-    ORDER_CHECKED.store(true, Relaxed);
-    Ok(())
+    let mut moved = Vec::new();
+    for name in folders {
+        let mut inside: Vec<usize> = (0..chats.len()).filter(|index| folder(&chats[*index]) == name).collect();
+        if inside.iter().all(|index| sort_order(&chats[*index]["sort_order"]) == 0.0) {
+            let updated = |index: &usize| float(&chats[*index]["updated"]).unwrap_or(0.0);
+            inside.sort_by(|a, b| by_order(updated(b), updated(a)));
+            moved.extend(inside.into_iter().enumerate().skip(1).map(|(place, index)| (index, place as f64)));
+        }
+    }
+    moved
 }
 
 // --------------------------------------------------------------------------- chat rows
@@ -311,16 +316,10 @@ fn chat_row(chat: &Value, custom: &HashSet<String>) -> Value {
     })
 }
 
-/// `norm_file_path`.
-fn file_path(path: &str) -> String {
-    path.trim().replace('\\', "/")
-}
-
 /// The chats `keep` picks, as sidebar rows in `_sort_conversations` order.
-async fn rows(api: &Api, mut chats: Vec<Value>, keep: impl Fn(&Value) -> bool) -> Value {
-    let custom = custom_duckies(api.repos.data_dir()).await;
+fn rows(mut chats: Vec<Value>, custom: &HashSet<String>, keep: impl Fn(&Value) -> bool) -> Value {
     chats.retain(keep);
-    let mut rows: Vec<Value> = chats.iter().map(|chat| chat_row(chat, &custom)).collect();
+    let mut rows: Vec<Value> = chats.iter().map(|chat| chat_row(chat, custom)).collect();
     let key = |row: &Value| (row["sort_order"].as_f64().unwrap_or(0.0), -row["updated"].as_f64().unwrap_or(0.0), pystr(&row["id"]));
     rows.sort_by(|a, b| {
         let (a, b) = (key(a), key(b));
@@ -329,13 +328,26 @@ async fn rows(api: &Api, mut chats: Vec<Value>, keep: impl Fn(&Value) -> bool) -
     Value::Array(rows)
 }
 
+/// A new title, unless it is a placeholder and the chat has a chosen name:
+/// `save_conversation` never saves "New ducky" over one.
+fn retitle(chat: &mut Map<String, Value>, title: &str) {
+    if !is_placeholder(title) || is_placeholder(&pystr(&chat["title"])) {
+        chat.insert("title".into(), json!(title));
+    }
+}
+
+/// `notify_chats_changed(conv.id, conv.title, conv.folder_id, open_tab=False)`.
+fn chat_changed(chat: &Map<String, Value>) -> Value {
+    json!({"type": "chats_changed", "conv_id": chat["id"], "title": chat["title"], "folder_id": chat["folder_id"], "open": false})
+}
+
 // --------------------------------------------------------------------------- methods
 
 pub async fn list_folders(api: Arc<Api>, _args: Fields) -> Result<Value, String> {
     let sidebar = sidebar(&api).await?;
     sidebar.one_list().await?;
-    groups_have_folders(&sidebar.folders().await?, &sidebar.chats().await?)?;
-    // Loaded again, as Python does after its group check: the load after the one that
+    sidebar.link_groups().await?;
+    // Loaded again after the group check, as Python does: the load after the one that
     // added Archive numbers the folders.
     Ok(sidebar.folders().await?.iter().map(Folder::row).collect())
 }
@@ -343,17 +355,15 @@ pub async fn list_folders(api: Arc<Api>, _args: Fields) -> Result<Value, String>
 pub async fn list_all_conversations(api: Arc<Api>, _args: Fields) -> Result<Value, String> {
     let sidebar = sidebar(&api).await?;
     sidebar.one_list().await?;
-    let chats = sidebar.chats().await?;
-    chats_are_ordered(&chats)?;
-    Ok(rows(&api, chats, |_| true).await)
+    Ok(rows(sidebar.numbered_chats().await?, &sidebar.custom, |_| true))
 }
 
 pub async fn list_conversations(api: Arc<Api>, args: Fields) -> Result<Value, String> {
-    let chats = sidebar(&api).await?.chats().await?;
-    chats_are_ordered(&chats)?;
+    let sidebar = sidebar(&api).await?;
     // None lists every chat; a folder id that is no text matches none.
     let folder = args.get("folder_id").cloned().unwrap_or_default();
-    Ok(rows(&api, chats, |chat| folder.is_null() || folder.as_str() == Some(text(&chat["folder_id"]).as_str())).await)
+    let inside = |chat: &Value| folder.is_null() || folder.as_str() == Some(text(&chat["folder_id"]).as_str());
+    Ok(rows(sidebar.numbered_chats().await?, &sidebar.custom, inside))
 }
 
 pub async fn list_conversations_for_file(api: Arc<Api>, args: Fields) -> Result<Value, String> {
@@ -361,24 +371,57 @@ pub async fn list_conversations_for_file(api: Arc<Api>, args: Fields) -> Result<
     if target.is_empty() {
         return Ok(json!([]));
     }
-    let chats = sidebar(&api).await?.chats().await?;
-    Ok(rows(&api, chats, |chat| file_path(&text(&chat["file_path"])) == target).await)
+    let sidebar = sidebar(&api).await?;
+    Ok(rows(sidebar.chats().await?, &sidebar.custom, |chat| file_path(&text(&chat["file_path"])) == target))
 }
 
 pub async fn create_folder(api: Arc<Api>, args: Fields) -> Result<Value, String> {
-    let name = args.get("name").and_then(Value::as_str).ok_or("a folder needs a name")?.trim();
+    let name = args.get("name").and_then(Value::as_str).ok_or("a folder needs a name")?;
     let parent_id = text(args.get("parent_id").unwrap_or(&Value::Null));
     if is_archive(&parent_id) {
         return Err("Cannot create folders inside Archive".to_string());
     }
+    let folder = sidebar(&api).await?.new_folder(name, parent_id, String::new()).await?;
+    Ok(json!({"id": folder.id, "name": folder.name}))
+}
+
+pub async fn rename_folder(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let name = args.get("name").and_then(Value::as_str).ok_or("a folder needs a name")?.trim();
+    let folder_id = text(args.get("folder_id").unwrap_or(&Value::Null));
+    if is_archive(&folder_id) {
+        return Err("Cannot rename the Archive folder".to_string());
+    }
     let sidebar = sidebar(&api).await?;
     let mut folders = sidebar.folders().await?;
-    let last = folders.iter().filter(|folder| folder.parent_id == parent_id).map(|folder| folder.sort_order).fold(-1.0, f64::max);
-    let name = if name.is_empty() { "Folder" } else { name }.to_string();
-    let folder = Folder { id: uuid4(), name, parent_id, sort_order: last + 1.0, group_hub_id: String::new() };
-    folders.push(folder.clone());
+    let mut group = None;
+    if let Some(folder) = folders.iter_mut().find(|folder| folder.id == folder_id) {
+        if !name.is_empty() {
+            folder.name = name.to_string();
+        }
+        group = Some((folder.group_hub_id.clone(), folder.name.clone())).filter(|(hub, name)| !hub.is_empty() && !name.is_empty());
+    }
     sidebar.save(&folders).await?;
-    Ok(json!({"id": folder.id, "name": folder.name}))
+    // A group's folder and its chat share one name.
+    if let Some((hub_id, name)) = group {
+        if let Some(mut hub) = sidebar.chat(&hub_id).await?.filter(|hub| hub["is_group"] == true) {
+            retitle(&mut hub, &name);
+            sidebar.save_chat(hub, true).await?;
+        }
+    }
+    Ok(Value::Null)
+}
+
+pub async fn rename_conversation(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let title = args.get("title").and_then(Value::as_str).ok_or("a chat needs a title")?.trim();
+    let conv_id = text(args.get("conv_id").unwrap_or(&Value::Null));
+    let sidebar = sidebar(&api).await?;
+    let Some(mut chat) = sidebar.chat(&conv_id).await? else { return Ok(Value::Null) };
+    if !title.is_empty() {
+        retitle(&mut chat, title);
+    }
+    // Other windows, @ mentions and search show the new name at once.
+    api.publish(vec![chat_changed(&sidebar.save_chat(chat, true).await?)]);
+    Ok(Value::Null)
 }
 
 #[cfg(test)]
@@ -415,16 +458,26 @@ mod tests {
     }
 
     #[test]
-    fn a_ducky_style_is_a_bundled_one_a_custom_one_with_its_picture_or_the_default() {
-        let (ids, default) = &*BUNDLED;
-        assert!(ids.contains(default) && !ids.is_empty(), "{default}");
-        let custom = HashSet::from(["mine".to_string()]);
-        let known = ids.iter().next().unwrap();
-        assert_eq!(ducky_style(&format!("  {} ", known.to_uppercase()), &custom), *known);
-        assert_eq!(ducky_style("custom:Mine", &custom), "custom:Mine");
-        for unknown in ["", "nope", "custom:gone", "custom:../x"] {
-            assert_eq!(ducky_style(unknown, &custom), *default, "{unknown}");
-        }
+    fn chats_of_a_folder_that_are_all_at_zero_are_numbered_newest_first() {
+        let chat = |id: &str, folder: &str, order: f64, updated: f64| json!({"id": id, "folder_id": folder, "sort_order": order, "updated": updated});
+        let chats = [chat("a", "", 0.0, 1.0), chat("b", "f", 0.0, 5.0), chat("c", "", 0.0, 9.0), chat("d", "f", 2.0, 1.0), chat("e", "", 0.0, 1.0), chat("f", "g", 0.0, 1.0)];
+        // "" is c, a, e (the tie keeps its order); f has a numbered chat; g has one chat.
+        assert_eq!(number_unsorted_chats(&chats), [(0, 1.0), (4, 2.0)]);
+        assert_eq!(number_unsorted_chats(&chats[3..4]), []);
+    }
+
+    #[test]
+    fn a_placeholder_title_never_replaces_a_chosen_one() {
+        let mut chat = normalise(&json!({"id": "c", "title": "My plan", "folder_id": "f"}), &HashSet::new());
+        retitle(&mut chat, "New ducky 2");
+        assert_eq!(chat["title"], "My plan");
+        retitle(&mut chat, "Group");
+        assert_eq!(chat["title"], "My plan");
+        retitle(&mut chat, "Better plan");
+        assert_eq!(chat_changed(&chat), json!({"type": "chats_changed", "conv_id": "c", "title": "Better plan", "folder_id": "f", "open": false}));
+        chat.insert("title".into(), json!("Chat"));
+        retitle(&mut chat, "New ducky 2");
+        assert_eq!(chat["title"], "New ducky 2");
     }
 
     #[test]
@@ -446,7 +499,7 @@ mod tests {
         let row = chat_row(&json!({"id": "c", "title": "T", "coding_agent": "", "thinking_effort": " HIGH ", "file_path": " a\\b ", "group_members": [{"n": 1}, 2]}), &HashSet::new());
         assert_eq!(row["coding_agent"], "ducky");
         assert_eq!((&row["thinking_effort"], &row["file_path"], &row["group_members"]), (&json!("high"), &json!("a/b"), &json!([{"n": 1}])));
-        assert_eq!((&row["provider"], &row["is_subagent"], &row["ducky_style"]), (&json!("anthropic"), &json!(false), &json!(BUNDLED.1)));
+        assert_eq!((&row["provider"], &row["is_subagent"], &row["ducky_style"]), (&json!("anthropic"), &json!(false), &json!(super::super::chat_doc::BUNDLED.1)));
         assert_eq!(row.as_object().unwrap().len(), 26);
     }
 }

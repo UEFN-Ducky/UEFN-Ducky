@@ -3,6 +3,7 @@
 //! [`methods`] is the route table: a method is answered here once it is in it, and by the
 //! Python backend until then.
 
+mod chat_doc;
 pub mod chats;
 pub mod push;
 pub mod router;
@@ -46,6 +47,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         chats::list_all_conversations => Anyone,
         chats::list_conversations_for_file => Anyone,
         chats::create_folder => Anyone,
+        chats::rename_folder => Anyone,
+        chats::rename_conversation => Anyone,
     }
 }
 
