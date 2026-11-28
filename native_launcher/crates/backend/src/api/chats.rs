@@ -424,6 +424,25 @@ pub async fn rename_conversation(api: Arc<Api>, args: Fields) -> Result<Value, S
     Ok(Value::Null)
 }
 
+/// Mute or unmute a chat or a group. Only the flag is stored: its agent keeps running.
+pub async fn set_muted(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let conv_id = text(args.get("conv_id").unwrap_or(&Value::Null));
+    let sidebar = sidebar(&api).await?;
+    let Some(mut chat) = sidebar.chat(conv_id.trim()).await? else { return Ok(json!({"ok": false, "error": "Conversation not found"})) };
+    chat.insert("muted".into(), truthy(args.get("muted").unwrap_or(&Value::Null)).into());
+    let chat = sidebar.save_chat(chat, true).await?;
+    api.publish(vec![chat_changed(&chat)]);
+    Ok(json!({"ok": true, "id": chat["id"], "muted": chat["muted"], "is_group": chat["is_group"]}))
+}
+
+/// `{ok, chats: [{id, title, updated, chats, group}]}`: what was made on this PC signed
+/// out, for the account signed in now. Never an error: the sidebar section just isn't there.
+pub async fn list_local_chats(api: Arc<Api>, _args: Fields) -> Result<Value, String> {
+    let sidebar = sidebar(&api).await?;
+    let waiting = sidebar.chats.waiting(sidebar.who.id.clone()).await.unwrap_or_default();
+    Ok(json!({"ok": true, "chats": waiting}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

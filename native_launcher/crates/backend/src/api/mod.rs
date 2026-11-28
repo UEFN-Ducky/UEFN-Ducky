@@ -49,6 +49,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         chats::create_folder => Anyone,
         chats::rename_folder => Anyone,
         chats::rename_conversation => Anyone,
+        chats::set_muted => Anyone,
+        chats::list_local_chats => Anyone,
     }
 }
 
