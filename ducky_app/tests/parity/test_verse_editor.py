@@ -1,5 +1,5 @@
-"""The Verse editor's calls: its switch, the Problems list's cache and the shadow
-``.vproject``. The same answer, the same rows, the same events and the same files from
+"""The Verse editor's calls: its switch, the Problems list's cache, a file's history and
+the shadow ``.vproject``. The same answer, the same rows, the same events and the same files from
 both backends on a fixture island. No verse-lsp
 runs here, and nothing reads the person's own islands."""
 
@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +94,7 @@ def editor(tmp_path, rust_store, python, monkeypatch):
             assert mine == yours, f"{name}:\n rust   {mine}\n python {yours}"
         return theirs
 
-    Editor.island, Editor.folder = island, folder
+    Editor.island, Editor.folder, Editor.python, Editor.rust = island, folder, python, rust_store
     Editor.each, Editor.open = staticmethod(each), staticmethod(open_)
     _forget()
     yield Editor
@@ -160,6 +161,70 @@ def test_the_problems_cache_is_empty_without_an_island(editor):
     told, rows, events = editor.each(story)
     off = {"files": [], "stale_count": 0, "from_cache": False}
     assert told == [off, off, off, {"ok": False, "error": "No project root set"}] and rows == [] and events == []
+
+
+def _anon(value: Any, ids: list[str]) -> Any:
+    """An answer without what differs by the clock: a version's id becomes its place in
+    the list, and its time is only checked to be now."""
+    if isinstance(value, dict):
+        if "saved_at" in value:
+            assert abs(value["saved_at"] - time.time()) < 600, value
+        return {key: 0 if key == "saved_at" else _anon(item, ids) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_anon(item, ids) for item in value]
+    if isinstance(value, str):
+        for place, entry in enumerate(ids):
+            value = value.replace(entry, f"#{place}")
+    return value
+
+
+def test_a_files_history_keeps_each_text_once_and_lists_the_newest_first(editor):
+    first, long = "\n\n  first line  \nsecond\n", "é" * 200
+    path = "Content/a.verse"
+
+    def story(backend: Any) -> tuple:
+        def call(method: str, *args: Any) -> Any:
+            return plain(backend.call(method, *args))
+
+        _sql("DELETE FROM file_versions")
+        _sql("DELETE FROM blobs")
+        editor.open(editor.island)
+        told = [call("list_file_history", path), call("snapshot_file_history", " Content\\a.verse ", first)]
+        told.append(call("snapshot_file_history", path, first))  # the same text again: no new version
+        told.append(call("snapshot_file_history", path, long))
+        told.append(call("record_external_file_change", path, "old text\n", "new text\n"))
+        told.append(call("record_external_file_change", path, "same", "same"))
+        told.append(call("record_external_file_change", "", "same", "same"))
+        listed = call("list_file_history", path)
+        ids = [row["id"] for row in listed[1]["result"]]
+        assert len(set(ids)) == 3 and ids == sorted(ids, key=int, reverse=True), ids
+        told += [listed, *(call("read_file_history_entry", path, entry) for entry in ids)]
+        # What is asked for wrongly gets the same refusal.
+        told.append(call("read_file_history_entry", path, "12"))
+        told.append(call("read_file_history_entry", path, " "))
+        told.append(call("read_file_history_entry", "", ids[0]))
+        told += [call("list_file_history", "Content/other.verse"), call("list_file_history", " ")]
+        told += [call("snapshot_file_history", "", "x"), call("record_external_file_change", "", "a", "b")]
+        editor.open("")
+        told += [call("list_file_history", path), call("snapshot_file_history", path, "x"), call("read_file_history_entry", path, ids[0])]
+        told += [call("record_external_file_change", path, "a", "b"), call("record_external_file_change", path, "a", "a")]
+        rows = _sql("SELECT path, bytes, preview, content_hash, schema_version, source, tool FROM file_versions ORDER BY entry_id")
+        blobs = _sql("SELECT hash, text, size FROM blobs ORDER BY hash")
+        return _anon(told, ids), plain(rows), plain(blobs)
+
+    theirs, ours = story(editor.python), story(editor.rust)
+    for name, mine, yours in zip(("answers", "versions", "texts"), ours, theirs):
+        assert mine == yours, f"{name}:\n rust   {mine}\n python {yours}"
+    told, rows, blobs = theirs
+    listed = told[7][1]["result"]
+    assert [(row["id"], row["bytes"], row["preview"]) for row in listed] == [("#0", 9, "old text"), ("#1", 400, "é" * 120), ("#2", len(first), "first line")]
+    assert told[1][1] == {"ok": True, "result": {"id": "#2", "path": path}} and told[2] == told[1]
+    assert told[4][1]["result"] == {"ok": True, "snapshotted": True} and told[6][1]["result"] == {"ok": True, "snapshotted": False}
+    assert [reply[1]["result"]["content"] for reply in told[8:11]] == ["old text\n", long, first]
+    refused = [reply[1].get("error") for reply in told[11:14] + told[15:22]]
+    assert all(refused) and refused[0] == "History entry not found: 12" and refused[-1] == "No project selected.", refused
+    assert told[14][1] == {"ok": True, "result": []} and told[22][1]["result"]["snapshotted"] is False
+    assert len(rows) == 3 and len(blobs) == 3
 
 
 _BUILT_IN = ("Verse", "UnrealEngine", "Fortnite")
