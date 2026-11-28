@@ -519,7 +519,7 @@ pub fn verse_workspace(root: &Path, data_dir: &Path, include_watch_files: bool) 
 }
 
 #[cfg(test)]
-pub(super) mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A fresh folder under the system's temp one, removed when dropped.

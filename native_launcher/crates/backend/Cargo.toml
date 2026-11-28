@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "process", "io-util"] }
 serde = "1"
 # preserve_order: a JSON object keeps its keys in the order Python wrote them.
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
@@ -40,6 +40,10 @@ unicode-properties = { version = "0.1", default-features = false, features = ["g
 # Calls to the account's website (api/site.rs). Certificates are checked against the OS
 # store, as the Python backend does: a PC whose antivirus re-signs HTTPS still connects.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "macos-system-configuration"] }
+# The editor's verse-lsp (verse_editor/lsp.rs): the WebSocket handshake's hash, and
+# UEFN's Verse.vsix, which holds the program when no copy of it is found.
+sha1 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_Security_Cryptography", "Win32_System_Com", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Shell"] }

@@ -1,6 +1,6 @@
-//! The Verse editor's calls (`frontend/ui_web/verse_editor/api.py`): its switch and the
-//! Problems list's cache.
-//! ponytail: verse-lsp, the project scan, the workflow server and revision control are
+//! The Verse editor's calls (`frontend/ui_web/verse_editor/api.py`): its switch, the
+//! Problems list's cache and its verse-lsp.
+//! ponytail: the project scan, the workflow server and revision control are
 //! still the Python backend's; each moves here with its own methods.
 
 use std::path::Path;
@@ -9,12 +9,13 @@ use std::sync::Arc;
 use serde_json::{json, Map, Value};
 
 use super::project_files::{given, known};
-use super::project_paths::{normalize, project_slug, FOLDER};
+use super::project_paths::{normalize, project_slug, verse_workspace, FOLDER};
 use super::settings::{failed, files_backend, load};
 use super::Api;
 use crate::store::misc;
 use crate::store::pyjson::{int, pystr, truthy};
 use crate::verse_editor::diagnostics::{self, Files};
+use crate::verse_editor::lsp;
 
 type Fields = Map<String, Value>;
 
@@ -33,7 +34,13 @@ async fn place(api: &Api, args: &Fields) -> Result<Place, String> {
     if files_backend("diagnostics") {
         return Err("diagnostics are kept in files here (DUCKY_STORE_BACKEND)".into());
     }
+    Ok(named(api, args).await?.0)
+}
+
+/// The project named by the call, else the open one; and whether the editor is on.
+async fn named(api: &Api, args: &Fields) -> Result<(Place, bool), String> {
     let (settings, known) = known(api).await?;
+    let enabled = truthy(settings.get("verse_editor_enabled"));
     let asked = given(args, "project_root").trim().to_string();
     let open = Some(settings.get("uefn_project_root")).filter(|root| truthy(root)).map(pystr).unwrap_or_default();
     let raw = if asked.is_empty() { open.trim().to_string() } else { asked };
@@ -41,7 +48,51 @@ async fn place(api: &Api, args: &Fields) -> Result<Place, String> {
         let root = normalize(&raw);
         Place { slug: project_slug(&root), folder: !root.is_empty() && known.kind(&root) == FOLDER, root }
     };
-    tokio::task::spawn_blocking(found).await.map_err(|stopped| stopped.to_string())
+    Ok((tokio::task::spawn_blocking(found).await.map_err(|stopped| stopped.to_string())?, enabled))
+}
+
+/// `_with_workspace`: the island's workspace roots and watch files, added to a status.
+async fn with_workspace(api: &Api, mut status: Fields, root: String) -> Result<Value, String> {
+    if !root.is_empty() {
+        let data_dir = api.repos.data_dir().to_path_buf();
+        let found = move || verse_workspace(Path::new(&root), &data_dir, true);
+        let found = tokio::task::spawn_blocking(found).await.map_err(|stopped| stopped.to_string())?;
+        let folders: Vec<Value> = found.folders.iter().map(|folder| json!({"name": folder.name, "path": folder.path})).collect();
+        status.insert("workspace_folders".into(), folders.into());
+        status.insert("watch_files".into(), found.watch_files.into());
+        status.insert("vproject_shadow".into(), found.vproject_shadow.into());
+    }
+    Ok(Value::Object(status))
+}
+
+pub async fn get_verse_lsp_status(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let enabled = truthy(load(&api).await?.get("verse_editor_enabled"));
+    let mut status = lsp::session(&given(&args, "client_id")).await.status(api.repos.data_dir()).await?;
+    status.insert("enabled".into(), enabled.into());
+    let root = status["project_root"].as_str().unwrap_or_default().to_string();
+    with_workspace(&api, status, root).await
+}
+
+/// Start (or find running) the window's verse-lsp for an island.
+pub async fn start_verse_lsp(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    let (place, _) = named(&api, &args).await?;
+    let session = lsp::session(&given(&args, "client_id")).await;
+    if place.root.is_empty() || place.folder {
+        let mut status = session.status(api.repos.data_dir()).await?;
+        let off = if place.folder { "Verse tools are off for folder projects (no .uefnproject)." } else { "No project root set" };
+        status.insert("error".into(), off.into());
+        if place.folder {
+            status.insert("folder_project".into(), true.into());
+        }
+        return Ok(Value::Object(status));
+    }
+    let status = session.start(&place.root, api.repos.data_dir()).await?;
+    with_workspace(&api, status, place.root).await
+}
+
+pub async fn stop_verse_lsp(_api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    lsp::stop(&given(&args, "client_id")).await;
+    Ok(Value::Null)
 }
 
 /// The project's cache rows; none when they can't be read (as Python treats it).

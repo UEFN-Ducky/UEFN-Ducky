@@ -2,3 +2,5 @@
 //! Its panel methods are `api::verse`.
 
 pub mod diagnostics;
+pub mod lsp;
+pub mod lsp_detect;
