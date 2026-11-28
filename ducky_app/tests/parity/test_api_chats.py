@@ -649,6 +649,38 @@ def test_a_member_is_removed_the_same_and_a_leader_hands_over(both, group_id: st
         assert next(folder["parent_id"] for folder in folders if folder["id"] == "g2") == ""
 
 
+def test_a_full_path_lane_is_kept_only_inside_one_of_the_projects(both, tmp_path, monkeypatch) -> None:
+    from backend.store.repos import projects, settings
+    from frontend import project_kind
+    from frontend.ui_web import known_projects
+
+    # As in the app's own process: no agent's project in the environment.
+    for name in ("DUCKY_CONV_ID", "DUCKY_RUN_ID", "UEFN_VSCODE_WORKSPACE_FOLDERS", "UEFN_DUCKY_PROJECT_ROOT"):
+        monkeypatch.delenv(name, raising=False)
+    opened, known, outside = (tmp_path / name for name in ("Open Repo", "Known Repo", "Elsewhere"))
+    found = tmp_path / "Documents" / "Fortnite Projects" / "FoundIsle"
+    for folder in (opened / "src", known, outside / "src", found / "Content"):
+        folder.mkdir(parents=True)
+    (found / "FoundIsle.uefnproject").write_text("{}")
+    projects.touch(str(opened), kind="folder")
+    projects.touch(str(known), kind="folder")
+    settings.replace_all({"uefn_project_root": str(opened)}, {})
+    known_projects.forget_cache()
+    project_kind.forget_cached_kind()
+    inside = [str(opened / "src"), str(known).replace("\\", "/") + "/*.py", str(found / "Content").upper(), "rel/x"]
+    roster = [
+        {"member_conv_id": "lead", "write_allowed": [*inside, str(outside / "src")]},
+        {"member_conv_id": "m1", "write_allowed": [str(outside), str(tmp_path)]},
+    ]
+    docs = [dict(doc, group_members=roster) if doc["id"] == "hub" else doc for doc in _TEAM]
+    answer, _, _, _ = both.call(_TREE, docs, "group_set_leader", "hub", "m1")
+    lanes = {row["member_conv_id"]: row["write_allowed"] for row in answer[1]["result"]["group_members"]}
+    assert len(lanes["lead"]) == len(inside) and not any("Elsewhere" in lane for lane in lanes["lead"]), lanes
+    assert lanes["m1"] == []
+    known_projects.forget_cache()
+    project_kind.forget_cached_kind()
+
+
 def test_only_a_group_has_members_to_remove(both) -> None:
     answer, events, _, _ = both.call(_TREE, _NESTED, "group_remove", "free", "m1")
     assert answer == [200, {"ok": True, "result": {"ok": False, "error": "Not a group chat"}}] and events == []

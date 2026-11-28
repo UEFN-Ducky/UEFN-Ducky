@@ -30,6 +30,8 @@ def rust_store(tmp_path, monkeypatch):
         pytest.skip("Ducky-Backend is not built: run `cargo build -p backend` in native_launcher/")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("DUCKY_TESTS_ISOLATED_APPDATA", "1")
+    # Neither backend looks for islands in the person's own Documents folder.
+    monkeypatch.setenv("UEFN_DUCKY_DOCUMENTS_DIR", str(tmp_path / "Documents"))
     db.reset_for_tests()
     settings.reset_for_tests()
     db.connect()
