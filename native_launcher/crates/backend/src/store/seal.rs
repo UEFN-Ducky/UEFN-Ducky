@@ -66,6 +66,19 @@ pub fn open_bytes(raw: &[u8], entropy: &[u8]) -> Result<Vec<u8>> {
     unprotect(sealed, Some(entropy))
 }
 
+/// One row of the `secrets` table (`secrets.protect_text`): `UMCP`, version 1, then the
+/// value sealed for this OS user.
+const SECRET_MAGIC: &[u8] = b"UMCP\x01";
+
+pub fn protect_secret(value: &str) -> Result<Vec<u8>> {
+    Ok([SECRET_MAGIC, &protect(value.as_bytes(), Some(b""))?].concat())
+}
+
+pub fn unprotect_secret(blob: &[u8]) -> Result<String> {
+    let sealed = blob.strip_prefix(SECRET_MAGIC).ok_or_else(|| Error("Invalid secret blob".into()))?;
+    String::from_utf8(unprotect(sealed, Some(b""))?).map_err(|_| Error("Invalid secret blob".into()))
+}
+
 #[cfg(windows)]
 fn os_seal(data: &[u8], entropy: Option<&[u8]>, protect: bool) -> Result<Vec<u8>> {
     use std::ptr::{null, null_mut};

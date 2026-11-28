@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 use tokio::sync::OnceCell;
 
 use super::settings::Settings;
-use super::{misc, seal, Error, Result, Store};
+use super::{account, misc, seal, secrets, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -80,7 +80,7 @@ pub async fn call(
     Json(args): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
     let out = match repos.open().await {
-        Ok(open) => dispatch(open, &repo, &function, &args).await,
+        Ok(open) => dispatch(open, &repos.data_dir, &repo, &function, &args).await,
         Err(err) => Err(err),
     };
     match out {
@@ -90,7 +90,12 @@ pub async fn call(
     }
 }
 
-async fn dispatch(open: &Open, repo: &str, function: &str, a: &Value) -> Result<Option<Value>> {
+/// Named blobs, as `[[name, base64], ...]`.
+fn named(blobs: Vec<(String, Vec<u8>)>) -> Value {
+    json!(blobs.into_iter().map(|(name, blob)| (name, BASE64.encode(blob))).collect::<Vec<_>>())
+}
+
+async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function: &str, a: &Value) -> Result<Option<Value>> {
     let (s, settings) = (&open.store, &open.settings);
     Ok(Some(match (repo, function) {
         ("settings", "load_fields") => Value::Object(settings.load_fields().await?),
@@ -118,6 +123,32 @@ async fn dispatch(open: &Open, repo: &str, function: &str, a: &Value) -> Result<
         ("misc", "digest_search") => {
             let limit = a["limit"].as_i64().unwrap_or(2000);
             json!(misc::digest_search(s, text(a, "query"), texts(a, "paths"), limit).await?)
+        }
+        ("secrets", "login_version") => json!(secrets::login_version(s).await?),
+        ("secrets", "get_blob") => json!(secrets::get_blob(s, text(a, "name")).await?.map(|blob| BASE64.encode(blob))),
+        ("secrets", "all_blobs") => named(secrets::all_blobs(s).await?),
+        ("secrets", "set_blob") => json!(secrets::set_blob(s, text(a, "name"), bytes(a, "blob")).await?),
+        ("secrets", "delete") => json!(secrets::delete(s, text(a, "name")).await?),
+        ("secrets", "replace_all") => {
+            let blobs = map(a, "blobs").iter().map(|(name, blob)| (name.clone(), bytes(&json!({"b": blob}), "b"))).collect();
+            json!(secrets::replace_all(s, blobs).await?)
+        }
+        ("secrets", "has_rows") => json!(secrets::has_rows(s).await?),
+        ("account", "current") => {
+            let who = account::current(s).await?;
+            json!({"key": who.key, "id": who.id})
+        }
+        ("account", "entropy") => {
+            let (who, entropy) = account::entropy(s, data_dir).await?;
+            json!({"id": who.id, "entropy": BASE64.encode(entropy)})
+        }
+        ("seal", "protect_secret") => {
+            let value = text(a, "value");
+            json!(BASE64.encode(blocking(move || seal::protect_secret(&value)).await?))
+        }
+        ("seal", "unprotect_secret") => {
+            let blob = bytes(a, "blob");
+            json!(blocking(move || seal::unprotect_secret(&blob)).await?)
         }
         ("seal", "seal_text") => {
             let (text, entropy) = (text(a, "text"), bytes(a, "entropy"));

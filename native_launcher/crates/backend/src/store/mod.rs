@@ -4,11 +4,13 @@
 //! ([`writer`]), so no request ever waits on a lock inside an async worker. The Python
 //! backend still owns the schema: nothing here creates or upgrades tables.
 
+pub mod account;
 pub mod conn;
 pub mod http;
 pub mod misc;
 pub mod pyjson;
 pub mod seal;
+pub mod secrets;
 pub mod settings;
 pub mod writer;
 
