@@ -79,6 +79,9 @@ fn routes(api: Arc<api::Api>) -> Router {
         // The health report's rules, on the processes and command lines a test makes up.
         let health = |Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::health::check(&what, &body)) };
         routes = routes.merge(Router::new().route("/__rs/health/{what}", post(health)).with_state(Arc::clone(&api)));
+        // The scrubber and the error words, on any text.
+        let reports = |Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::reports::check(&what, body["text"].as_str().unwrap_or_default())) };
+        routes = routes.merge(Router::new().route("/__rs/reports/{what}", post(reports)));
     }
     // A window's poll waits 20 s by design, and a sign-in waits for the person to approve
     // its code: each sets its own limit, and is no slow call.

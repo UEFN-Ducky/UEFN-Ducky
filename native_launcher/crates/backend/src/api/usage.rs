@@ -15,6 +15,8 @@
 //! (`HKCU\Software\UEFN Ducky`) are read and kept by the Python backend only, and an Intel
 //! build under Rosetta says `macos-x64`; both move with the app-open event.
 
+pub mod words;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, LazyLock};

@@ -51,6 +51,20 @@ pub fn dumps(value: &Value) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+/// `json.dumps(value)`: [`dumps`] with everything outside printable ASCII as `\uXXXX`
+/// (two of them for a character past the 16-bit range).
+pub fn dumps_ascii(value: &Value) -> String {
+    let mut out = String::new();
+    for ch in dumps(value).chars() {
+        if (' '..='~').contains(&ch) {
+            out.push(ch);
+        } else {
+            out.extend(ch.encode_utf16(&mut [0; 2]).iter().map(|unit| format!("\\u{unit:04x}")));
+        }
+    }
+    out
+}
+
 /// The value with every object's keys in order: `dumps(&sorted(v))` is
 /// `json.dumps(v, ensure_ascii=False, sort_keys=True)`.
 pub fn sorted(value: &Value) -> Value {
@@ -168,6 +182,9 @@ mod tests {
     fn dumps_is_pythons_text() {
         let value = json!({"b": [1, 2.5, "é\n\"x\""], "a": {"k": null, "t": true}, "e": [], "o": {}});
         assert_eq!(dumps(&value), r#"{"b": [1, 2.5, "é\n\"x\""], "a": {"k": null, "t": true}, "e": [], "o": {}}"#);
+        // `@` stands for the backslash of each escape.
+        let escaped = r#"{"@u00e9": "a@u007f@n@ud83d@ude00 ~"}"#.replace('@', "\\");
+        assert_eq!(dumps_ascii(&json!({"é": "a\u{7f}\n😀 ~"})), escaped);
     }
 
     #[test]

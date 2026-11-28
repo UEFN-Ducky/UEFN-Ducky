@@ -34,13 +34,15 @@ unicode-normalization = "0.1"
 # Sealed files (store/sealed_file.rs): the file's key is wrapped for an account's X25519 key.
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 hkdf = "0.12"
+# The privacy scrubber's and the error kinds' rules are Python's patterns (api/privacy.rs).
+regex = "1"
 unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 # Calls to the account's website (api/site.rs). Certificates are checked against the OS
 # store, as the Python backend does: a PC whose antivirus re-signs HTTPS still connects.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "macos-system-configuration"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_Security_Cryptography", "Win32_System_Com", "Win32_System_Registry", "Win32_UI_Shell"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Networking_WinHttp", "Win32_Security_Cryptography", "Win32_System_Com", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_Shell"] }
 
 [dev-dependencies]
 supervisor = { path = "../supervisor" }

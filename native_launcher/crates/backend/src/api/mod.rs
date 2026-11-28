@@ -11,9 +11,11 @@ pub mod file_kinds;
 pub mod health;
 pub mod maintenance;
 pub mod plugin_store;
+pub mod privacy;
 pub mod project_files;
 pub mod project_paths;
 pub mod push;
+pub mod reports;
 pub mod router;
 pub mod settings;
 pub mod shared;
@@ -104,6 +106,11 @@ pub fn methods() -> HashMap<&'static str, Method> {
         maintenance::appdata_projects => Anyone,
         maintenance::appdata_delete_project => Anyone,
         maintenance::appdata_clear_caches => Anyone,
+        reports::crash_reports => Anyone,
+        reports::crash_report_send => Anyone,
+        reports::crash_report_delete => Anyone,
+        reports::report_ui_error => Anyone,
+        reports::report_ui_crash => Anyone,
     }
 }
 
