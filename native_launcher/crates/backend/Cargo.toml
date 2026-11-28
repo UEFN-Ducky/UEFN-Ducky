@@ -12,7 +12,9 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync"] }
-serde_json = "1"
+serde = "1"
+# preserve_order: a JSON object keeps its keys in the order Python wrote them.
+serde_json = { version = "1", features = ["preserve_order"] }
 # bundled: one SQLite on every PC, built with FTS5 and JSON (chat and memory search need them).
 rusqlite = { version = "0.37", features = ["bundled"] }
 

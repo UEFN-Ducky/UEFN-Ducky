@@ -71,10 +71,21 @@ class RustBackend:
     def call(self, method: str, *args: Any) -> Answer:
         return self.request(f"/__panel_api/{method}", {"args": list(args)})
 
+    def store(self, repo: str, function: str, **args: Any) -> Any:
+        """One repo function of the Rust store (``/__rs/store/<repo>/<function>``)."""
+        status, reply = self.request(f"/__rs/store/{repo}/{function}", args)
+        assert status == 200 and reply.get("ok") is True, f"{repo}.{function}{args}: {status} {reply}"
+        return reply["result"]
+
     def close(self) -> None:
         if self.proc.stdin is not None:
             self.proc.stdin.close()  # the backend's signal to quit
         self.proc.wait(timeout=10)
+
+
+def plain(value: Any) -> Any:
+    """A Python result as it looks after JSON: tuples are lists, sets are sorted lists."""
+    return json.loads(json.dumps(value, default=sorted))
 
 
 def _without(answer: Answer, ignore: tuple[str, ...]) -> Answer:

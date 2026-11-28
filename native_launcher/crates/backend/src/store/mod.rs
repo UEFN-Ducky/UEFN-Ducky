@@ -5,6 +5,10 @@
 //! backend still owns the schema: nothing here creates or upgrades tables.
 
 pub mod conn;
+pub mod http;
+pub mod misc;
+pub mod pyjson;
+pub mod settings;
 pub mod writer;
 
 use std::fmt;
@@ -29,6 +33,11 @@ impl From<rusqlite::Error> for Error {
     fn from(err: rusqlite::Error) -> Self {
         Error(err.to_string())
     }
+}
+
+/// Seconds since 1970, as Python's `time.time()` stamps rows.
+pub(crate) fn now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
 /// One open database: its writer and its readers. Cheap to clone.
