@@ -1089,7 +1089,7 @@ def api_request(
                     parsed = obj
             except (TypeError, ValueError, json.JSONDecodeError):
                 parsed = None
-        if int(exc.code) == 401 and (blob.get("device_key") or blob.get("session_value")):
+        if int(exc.code) == 401 and not anonymous and (blob.get("device_key") or blob.get("session_value")):
             used_bearer = bool(extra_headers.get("Authorization"))
             # A paired PC's device key is only valid on the desktop plugin.
             # /auth/me, Store, and Stripe answer 401 because they want a
