@@ -1,5 +1,5 @@
 """The Verse editor's calls: its switch, the Problems list's cache, a file's history, the
-shadow ``.vproject`` and its verse-lsp sessions. The same answer, the same rows, the same
+shadow ``.vproject``, its verse-lsp sessions and the project scan. The same answer, the same rows, the same
 events and the same files from both backends on a fixture island. The verse-lsp is a
 stand-in built with the backend (never Epic's, never one found on this PC), and nothing
 reads the person's own islands."""
@@ -59,13 +59,19 @@ def editor(tmp_path, rust_store, python, monkeypatch):
     projects.touch(str(island), name="Isle", when=2.0, kind="uefn")
     projects.touch(str(folder), name="Plain Folder", when=1.0, kind="folder")
     cursor = [0]
+    running = [python]
 
-    def rust_events() -> list[dict]:
+    def rust_events(peek: bool = False) -> list[dict]:
         # A marker ends the page, so a story that pushed nothing does not wait out a poll.
         assert rust_store.call("push_appearance_live", _MARK) == (200, {"ok": True, "result": None})
         _, page = rust_store.request(f"/__panel_events?since={cursor[0]}")
-        cursor[0] = page["cursor"]
-        return page["events"][:-1]
+        if not peek:
+            cursor[0] = page["cursor"]
+        return [event for event in page["events"] if event != page["events"][-1]]
+
+    def seen() -> list[dict]:
+        """The events the running story's backend pushed so far."""
+        return list(pushed) if running[0] is python else rust_events(peek=True)
 
     class Editor:
         pass
@@ -77,6 +83,7 @@ def editor(tmp_path, rust_store, python, monkeypatch):
     def each(story: Any) -> tuple[Any, list, list]:
         seen = []
         for backend in (python, rust_store):
+            running[0] = backend
             _write(island, _VERSE)
             _sql("DELETE FROM verse_diagnostics")
             diagnostics_cache._MEM.clear()
@@ -91,14 +98,15 @@ def editor(tmp_path, rust_store, python, monkeypatch):
 
             told = story(call)
             rows = plain(_sql("SELECT path, mtime_ns, size, errors, warnings, items FROM verse_diagnostics ORDER BY path"))
-            seen.append((plain(told), rows, list(pushed) if backend is python else rust_events()))
+            seen.append((plain(told), rows, Editor.order(list(pushed) if backend is python else rust_events())))
         theirs, ours = seen
         for name, mine, yours in zip(("answers", "rows", "events"), ours, theirs):
             assert mine == yours, f"{name}:\n rust   {mine}\n python {yours}"
         return theirs
 
     Editor.island, Editor.folder, Editor.python, Editor.rust = island, folder, python, rust_store
-    Editor.each, Editor.open = staticmethod(each), staticmethod(open_)
+    Editor.each, Editor.open, Editor.seen = staticmethod(each), staticmethod(open_), staticmethod(seen)
+    Editor.order = staticmethod(lambda events: events)  # a story whose events race says how they compare
     _forget()
     yield Editor
     _forget()
@@ -479,3 +487,160 @@ def test_no_verse_lsp_outlives_the_rust_backend(lsp):
     assert _runs(port)
     lsp.rust.close()
     assert _until(lambda: not _runs(port), 10)
+
+
+# What the stand-in says of a file is written in the file: see its first lines.
+_SCAN = {
+    "Content/err.verse": "ok := 1\nERR Unknown identifier `é`\nWARN unused\nINFO a note\n",
+    "Content/twice.verse": "ERR2 said twice\n",
+    "Content/flake.verse": "ONCE not real\n",
+    "Content/syntax.verse": "x := 1\nSYNTAXONCE\n",
+    "Content/await.verse": "AWAIT\n",
+    "Content/crlf.verse": "a := 1\r\nERR after a line end of Windows\r\n",
+    "Content/pull.verse": "PULL from the pull\n",
+    **{f"Content/Many/f{number:02}.verse": f"f{number} := {number}\n" for number in range(8)},  # more than one batch of 16
+}
+_PENDING = {"ok": True, "pending": True, "files": [], "scanned": 0}
+
+
+def _error(line: int, column: int, message: str) -> dict:
+    return {"line": line, "column": column, "message": message, "severity": "error"}
+
+
+def _newer(path: Path, seconds: int) -> None:
+    os.utime(path, ns=(_WHEN + seconds * 10**9, _WHEN + seconds * 10**9))
+
+
+@pytest.fixture
+def scans(lsp, monkeypatch):
+    """``lsp``, with Python's scan ids starting at 1 as a new Rust backend's do.
+    ``scans.ended(n)`` waits until the windows were told the whole list ``n`` times."""
+    from frontend.ui_web.verse_editor.lsp import diagnostics_scan
+
+    monkeypatch.setattr(diagnostics_scan, "_scan_seq", 0)
+
+    def ended(times: int) -> None:
+        _until(lambda: sum(event.get("replace") is True for event in lsp.seen()) >= times, 40)
+
+    lsp.ended = staticmethod(ended)
+    yield lsp
+    diagnostics_scan.abort_active_scan()
+
+
+def _phases(events: list[dict]) -> list[str]:
+    return [event.get("phase", "sync") for event in events]
+
+
+def _by_scan(events: list[dict]) -> list[dict]:
+    """Each scan's events together: a scan's last word (the whole list) and the first of
+    the scan that waited for it come in either order."""
+    ended, keyed = 0, []
+    for event in events:
+        ended += event.get("phase") == "done"
+        keyed.append((event.get("scan_id", ended), event))
+    return [event for _, event in sorted(keyed, key=lambda pair: pair[0])]
+
+
+def test_a_scan_checks_the_stale_files_and_a_second_one_waits_for_it(scans):
+    island, scans.order = scans.island, staticmethod(_by_scan)
+
+    def story(call):
+        _write(island, _SCAN)
+        _newer(island / "Content/Sub/B.verse", 5)
+        told = [call("scan_verse_diagnostics")]
+        # Asked for again while it runs: it waits its turn, then checks what still needs it.
+        _until(lambda: "opening" in _phases(scans.seen()))
+        told.append(call("scan_verse_diagnostics", str(island)))
+        scans.ended(2)
+        told.append(call("load_verse_diagnostics_cache"))
+        return told
+
+    told, rows, events = scans.each(story)
+    assert told[:2] == [_PENDING, _PENDING]
+    files = {row["path"]: row for row in told[2]["files"]}
+    assert len(files) == 17 and told[2]["stale_count"] == 5 and len(rows) == 17
+    assert files["content/err.verse"]["items"] == [_error(2, 3, "Unknown identifier `é`"), {"line": 3, "column": 1, "message": "unused", "severity": "warning"}]
+    assert files["content/twice.verse"]["items"] == [_error(1, 5, "said twice")]  # once, at its leftmost place
+    assert files["content/syntax.verse"]["items"] == [_error(2, 4, "vErr:S77: Expected expression")]  # said once, and stands
+    assert files["content/crlf.verse"]["items"] == [_error(2, 3, "after a line end of Windows")]
+    assert files["content/pull.verse"]["items"] == [_error(1, 3, "from the pull"), _error(7, 1, "bare")]
+    clean = [path for path, row in files.items() if not row["items"]]
+    assert len(clean) == 12 and {"content/flake.verse", "content/await.verse"} < set(clean)
+    # The first scan, then the second: each says what it checks, each file, and its end.
+    first, second = [at for at, event in enumerate(events) if event.get("phase") == "started"]
+    one, two = events[first:second], events[second:]
+    assert one[0]["total"] == 17 and one[0]["scan_id"] == 1 and sorted(one[0]["paths"]) == sorted(files)
+    assert [event["path"] for event in one if event.get("phase") == "opening"][:2] == ["content/sub/b.verse", "content/a.verse"]  # the newest first
+    assert _phases(one).count("analyzing") == 2 and _phases(one).count("file") == 17
+    assert one[-2:] == [{**one[-2], "phase": "done", "index": 17, "total": 17}, {**one[-1], "replace": True, "files": one[-1]["files"]}]
+    assert two[0]["total"] == 5 and two[0]["scan_id"] == 2 and _phases(two).count("file") == 5
+    assert two[-2]["phase"] == "done" and two[-2]["total"] == 17 and two[-1]["files"] == told[2]["files"]
+    assert all(Path(event["project_root"]) == island for event in events)
+
+
+def test_a_scan_with_nothing_to_check_answers_at_once_and_a_full_one_checks_every_file(scans):
+    island = scans.island
+
+    def story(call):
+        told = [call("scan_verse_diagnostics")]
+        scans.ended(1)
+        told.append(call("scan_verse_diagnostics"))
+        told.append(call("scan_verse_diagnostics", "", True))
+        scans.ended(3)
+        told.append(call("stop_verse_diagnostics_scan", str(island)))  # none runs: the windows are still told
+        shutil.rmtree(island / "Content")
+        told.append(call("scan_verse_diagnostics", "", True))
+        scans.ended(5)
+        told.append(call("scan_verse_diagnostics", str(scans.folder)))
+        scans.open("")
+        told += [call("scan_verse_diagnostics"), call("stop_verse_diagnostics_scan")]
+        return told
+
+    told, rows, events = scans.each(story)
+    checked = [{"path": path, "errors": 0, "warnings": 0, "items": []} for path in ("content/a.verse", "content/sub/b.verse")]
+    assert told[0] == _PENDING and told[1] == {"ok": True, "pending": False, "files": checked, "scanned": 0, "with_errors": 0, "with_warnings": 0}
+    assert told[2] == _PENDING and told[3] == {"ok": True} and told[4] == _PENDING
+    assert told[5] == {"ok": True, "pending": False, "files": [], "scanned": 0, "folder_project": True}
+    assert told[6] == {"error": "No project root set", "files": [], "scanned": 0} and told[7] == {"ok": True}
+    assert [row[0] for row in rows] == ["content/a.verse", "content/sub/b.verse"]  # a scan of no files writes nothing
+    full = [event for event in events if event.get("scan_id") == 2]
+    # A full scan checks the file the list does not cover too, and never keeps it.
+    assert sorted(full[0]["paths"]) == ["content/__externalactors__/x.verse", "content/a.verse", "content/sub/b.verse"]
+    assert _phases(full).count("file") == 3 and full[-1]["phase"] == "done" and full[-1]["total"] == 3
+    stopped = events.index({"type": "verse_diagnostics_progress", "project_root": events[0]["project_root"], "phase": "error", "message": "Scan stopped"})
+    assert events[stopped + 1]["files"] == checked
+    assert [(event["phase"], event["total"]) for event in events if event.get("scan_id") == 3] == [("started", 0), ("done", 0)]
+    assert events[-1]["files"] == [] and _phases(events).count("sync") == 5
+
+
+def test_a_stopped_scan_keeps_what_it_checked_and_a_file_that_gets_no_answer_keeps_its_result(scans):
+    island = scans.island
+
+    def story(call):
+        _write(island, {"Content/hang.verse": "HANG\n"})
+        _newer(island / "Content/a.verse", 5)
+        _newer(island / "Content/hang.verse", 1)
+        told = [call("save_verse_file_cache", "Content/hang.verse", 1, 0, [_ITEM])]
+        told.append(call("scan_verse_diagnostics"))
+        _until(lambda: any(event.get("phase") == "checking" and event["path"] == "content/hang.verse" for event in scans.seen()))
+        time.sleep(0.6)  # it now waits for an answer that never comes
+        told.append(call("stop_verse_diagnostics_scan"))
+        scans.ended(2)
+        told.append(call("load_verse_diagnostics_cache"))
+        told.append(call("scan_verse_diagnostics"))
+        scans.ended(3)
+        return told
+
+    told, rows, events = scans.each(story)
+    known = {"path": "content/hang.verse", "errors": 1, "warnings": 0, "items": [_ITEM]}
+    assert told[1:3] == [_PENDING, {"ok": True}] and told[4] == _PENDING
+    assert told[3]["files"] == [{"path": "content/a.verse", "errors": 0, "warnings": 0, "items": []}, known] and told[3]["stale_count"] == 2
+    assert [row[0] for row in rows] == ["content/a.verse", "content/hang.verse", "content/sub/b.verse"] and rows[1][3] == 1
+    phases = _phases(events)
+    assert phases[:10] == ["sync", "started", "opening", "opening", "opening", "analyzing", "checking", "file", "checking", "error"]
+    assert events[9]["message"] == "Scan stopped" and phases[10:14] == ["sync", "file", "done", "sync"]
+    # Never a false "0 errors": the file that got no answer is told with what was known.
+    assert events[11]["file"] == known and events[12]["total"] == 2
+    again = [event for event in events if event.get("scan_id") == 2]
+    assert [event["path"] for event in again if event["phase"] == "file"] == ["content/hang.verse", "content/sub/b.verse"]
+    assert again[5]["phase"] == "file" and again[5]["file"] == known and again[-1]["total"] == 3
