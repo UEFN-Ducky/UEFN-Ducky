@@ -71,7 +71,44 @@ jobs:
           codesign --verify --deep "$app"
           "$app/Contents/MacOS/UEFN-Ducky" --runtime-smoke "$PWD/out/smoke.json"
           python3 -c "import json,sys; r=json.load(open(sys.argv[1])); assert r['ok'] and r['window'], r" out/smoke.json
-          echo "headless install ok: $version ($chip)"
+          # Again over the installed copy: it is replaced, not nested or refused.
+          "./UEFN Ducky Installer.app/Contents/MacOS/UEFN Ducky Installer" --headless --dest ~/Applications | grep -q "^ok $version $ARCH"
+          test ! -e "$app/UEFN Ducky.app"
+          echo "headless install ok: $version ($chip), reinstall ok"
+      - name: Refuses a bad download, a paused Store, a missing build and no Store
+        run: |
+          inst="./UEFN Ducky Installer.app/Contents/MacOS/UEFN Ducky Installer"
+          printf 'not the app' > bad.zip
+          cat > feed.py <<'EOF'
+          import json, sys
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+          mode, arch = sys.argv[1], sys.argv[2]
+          row = {"os": "macos", "arch": arch, "package": "app-zip", "url": "http://127.0.0.1:8766/bad.zip", "sha256": "0" * 64}
+          payload = {"currentVersion": "9.9.9", "assets": [] if mode == "nobuild" else [row], "downloadsPaused": mode == "paused"}
+          body = json.dumps({"payload": payload}).encode()
+          class Handler(BaseHTTPRequestHandler):
+              def _reply(self):
+                  out = body if self.path.startswith("/api/") else open("bad.zip", "rb").read()
+                  self.send_response(200)
+                  self.send_header("Content-Length", str(len(out)))
+                  self.end_headers()
+                  self.wfile.write(out)
+              do_GET = do_POST = _reply
+          HTTPServer(("127.0.0.1", 8766), Handler).serve_forever()
+          EOF
+          for mode in badsha paused nobuild; do
+            python3 feed.py "$mode" "$ARCH" & srv=$!
+            sleep 1
+            out="$(DUCKY_STORE_URL=http://127.0.0.1:8766 "$inst" --headless --dest "$PWD/never" || true)"
+            kill $srv; wait $srv 2>/dev/null || true
+            echo "$mode: $out"
+            case $mode in badsha) want="checksum";; paused) want="paused";; nobuild) want="no build for this Mac";; esac
+            echo "$out" | grep -q "^failed: .*$want"
+            test ! -e "$PWD/never/UEFN Ducky.app"
+          done
+          out="$(DUCKY_STORE_URL=http://127.0.0.1:9 "$inst" --headless --dest "$PWD/never" || true)"
+          echo "offline: $out"
+          echo "$out" | grep -q "Can't reach the UEFN Ducky Store"
       - name: Window install into /Applications (screenshots)
         run: |
           "./UEFN Ducky Installer.app/Contents/MacOS/UEFN Ducky Installer" > out/window.log 2>&1 &
