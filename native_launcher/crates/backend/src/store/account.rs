@@ -22,7 +22,7 @@ use super::{seal, secrets, Error, Result, Store};
 pub const LOCAL: &str = "_local";
 /// What a caller is told while the account data key is not on this PC.
 pub const LOCKED: &str = "Waiting for this account's data key. Your chats open once you're online.";
-const KEY_CACHE_NAME: &str = "account_data_key.bin";
+pub const KEY_CACHE_NAME: &str = "account_data_key.bin";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {

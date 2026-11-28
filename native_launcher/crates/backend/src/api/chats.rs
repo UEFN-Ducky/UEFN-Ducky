@@ -24,6 +24,7 @@ mod local;
 mod messages;
 mod moves;
 mod teams;
+pub(super) use moves::removed;
 pub use groups::{group_remove, group_set_leader};
 pub use local::{adopt_local_chats, delete_local_chats};
 pub use layout::apply_sidebar_layout;

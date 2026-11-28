@@ -7,9 +7,6 @@
 //! ponytail: an address that cuts the secure handshake is not skipped for the host's next
 //! one (`net_access.FallbackHTTPSConnection`); that guards the update downloads' storage
 //! host and moves here with them.
-//! ponytail: a 401 answers with Python's error, but the login row is left as it is: Python
-//! also drops the dead session or device key. Sign-in is still the Python backend's, which
-//! does it on its next call.
 
 mod proxy;
 
@@ -33,11 +30,16 @@ const PAC_CACHE: Duration = Duration::from_secs(300);
 const PAC_WAIT: Duration = Duration::from_secs(3);
 
 /// `UEFN-Ducky/<the app's version>`.
-static USER_AGENT: LazyLock<String> = LazyLock::new(|| {
+pub static USER_AGENT: LazyLock<String> = LazyLock::new(|| {
     let source = include_str!("../../../../../ducky_app/frontend/__init__.py");
     let version = source.split("__version__ = \"").nth(1).and_then(|rest| rest.split('"').next());
     format!("UEFN-Ducky/{}", version.expect("frontend/__init__.py names __version__"))
 });
+
+/// The running app's version (`frontend.__version__`).
+pub fn app_version() -> &'static str {
+    USER_AGENT.split('/').nth(1).unwrap_or_default()
+}
 
 /// Why a call has no answer to use (`DuckyOSAccountError`): a sentence for the person
 /// and a code for the page.
@@ -73,7 +75,7 @@ pub struct Call<'a> {
 }
 
 /// `str(value or "")`.
-fn text(value: &Value) -> String {
+pub(super) fn text(value: &Value) -> String {
     if truthy(value) {
         pystr(value)
     } else {
@@ -105,7 +107,7 @@ pub fn normalize_base_url(raw: &str) -> Result<String, Refused> {
 }
 
 /// `resolve_base_url()`: `DUCKYOS_BASE_URL`, then the saved setting, then the site.
-async fn resolve_base_url(api: &Api) -> Result<String, Refused> {
+pub async fn resolve_base_url(api: &Api) -> Result<String, Refused> {
     if let Some(env) = std::env::var("DUCKYOS_BASE_URL").ok().filter(|url| !url.trim().is_empty()) {
         return normalize_base_url(&env);
     }
@@ -121,7 +123,7 @@ async fn resolve_base_url(api: &Api) -> Result<String, Refused> {
     }
 }
 
-fn network(error: impl std::fmt::Display) -> Refused {
+pub(super) fn network(error: impl std::fmt::Display) -> Refused {
     Refused::new(format!("Network error: {error}"), "network")
 }
 
@@ -135,6 +137,8 @@ fn broken(error: reqwest::Error) -> Refused {
     if error.is_timeout() {
         return timed_out();
     }
+    // The address is the caller's own: without it the cause fits where the words are cut short.
+    let error = error.without_url();
     let mut said = error.to_string();
     let mut cause = std::error::Error::source(&error);
     while let Some(inner) = cause {
@@ -194,6 +198,35 @@ fn parsed(raw: &str) -> Option<Map<String, Value>> {
     }
 }
 
+/// One request sent and its answer read, by the route the PC's network gives its host.
+/// Each wait has the limit, as a socket timeout does: a big answer on a slow link is
+/// fine while its bytes keep coming.
+pub async fn send(method: reqwest::Method, url: Url, headers: HeaderMap, body: Option<String>, timeout: Duration) -> Result<Answer, Refused> {
+    let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']).to_lowercase();
+    let route = if ["localhost", "127.0.0.1", "::1"].contains(&host.as_str()) || host.starts_with("127.") { "direct".to_string() } else { auto_proxy(&url).await };
+    let mut sending = client(route).await?.request(method, url).headers(headers);
+    if let Some(body) = body {
+        sending = sending.body(body);
+    }
+    let mut response = tokio::time::timeout(timeout, sending.send()).await.map_err(|_| timed_out())?.map_err(broken)?;
+    let (status, headers) = (response.status().as_u16(), response.headers().clone());
+    let mut bytes = Vec::new();
+    while let Some(chunk) = tokio::time::timeout(timeout, response.chunk()).await.map_err(|_| timed_out())?.map_err(broken)? {
+        bytes.extend_from_slice(&chunk);
+    }
+    let raw = String::from_utf8_lossy(&bytes).into_owned();
+    Ok(Answer { status, parsed: parsed(&raw), raw, headers })
+}
+
+/// `_session_cookie_header`: the website session's cookies, empty with none.
+pub(super) fn session_cookies(login: &Value) -> String {
+    let pair = |name: &str, value: &str| {
+        let (name, value) = (text(&login[name]), text(&login[value]));
+        (!name.is_empty() && !value.is_empty()).then(|| format!("{name}={value}"))
+    };
+    [pair("session_name", "session_value"), pair("csrf_name", "csrf_value")].into_iter().flatten().collect::<Vec<_>>().join("; ")
+}
+
 /// `api_request`: one call as the signed-in account (its device key first, then its
 /// website session), or as nobody when `allow_anonymous` and there is no login.
 pub async fn request(api: &Api, call: Call<'_>) -> Result<Answer, Refused> {
@@ -221,13 +254,9 @@ pub async fn request(api: &Api, call: Call<'_>) -> Result<Answer, Refused> {
     if used_bearer {
         put("authorization", &format!("Bearer {device_key}"))?;
     } else if !session.is_empty() {
-        let pair = |name: &str, value: &str| {
-            let (name, value) = (text(&login[name]), text(&login[value]));
-            (!name.is_empty() && !value.is_empty()).then(|| format!("{name}={value}"))
-        };
-        let cookies: Vec<String> = [pair("session_name", "session_value"), pair("csrf_name", "csrf_value")].into_iter().flatten().collect();
+        let cookies = session_cookies(&login);
         if !cookies.is_empty() {
-            put("cookie", &cookies.join("; "))?;
+            put("cookie", &cookies)?;
         }
         let csrf = text(&login["csrf_value"]);
         if !csrf.is_empty() && ["POST", "PUT", "PATCH", "DELETE"].contains(&method.as_str()) {
@@ -240,32 +269,24 @@ pub async fn request(api: &Api, call: Call<'_>) -> Result<Answer, Refused> {
         put("content-type", "application/json")?;
     }
 
-    let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']).to_lowercase();
-    let route = if ["localhost", "127.0.0.1", "::1"].contains(&host.as_str()) || host.starts_with("127.") { "direct".to_string() } else { auto_proxy(&url).await };
-    let mut sending = client(route).await?.request(method, url).headers(headers);
-    if let Some(body) = call.body {
-        sending = sending.body(dumps(body));
-    }
-    // Each wait has the limit, as a socket timeout does: a big answer on a slow link
-    // is fine while its bytes keep coming.
-    let mut response = tokio::time::timeout(call.timeout, sending.send()).await.map_err(|_| timed_out())?.map_err(broken)?;
-    let (status, headers) = (response.status().as_u16(), response.headers().clone());
-    let mut bytes = Vec::new();
-    while let Some(chunk) = tokio::time::timeout(call.timeout, response.chunk()).await.map_err(|_| timed_out())?.map_err(broken)? {
-        bytes.extend_from_slice(&chunk);
-    }
-    let raw = String::from_utf8_lossy(&bytes).into_owned();
-
-    if status == 401 && (used_bearer || !session.is_empty()) {
+    let answer = send(method, url, headers, call.body.map(dumps), call.timeout).await?;
+    if answer.status == 401 && (used_bearer || !session.is_empty()) {
         // A paired PC's device key is only valid on the desktop plugin; the Store and the
-        // account pages answer 401 because they want a website cookie.
+        // account pages answer 401 because they want a website cookie. A key the plugin
+        // itself refuses is dead, and so is a refused session: neither is kept.
         return Err(match used_bearer {
-            true if path.contains("/api/v1/plugins/uefn-ducky/collect/") => Refused::new("This PC was disconnected", "device_unpaired"),
+            true if path.contains("/api/v1/plugins/uefn-ducky/collect/") => {
+                let _ = super::account::unpair(api).await;
+                Refused::new("This PC was disconnected", "device_unpaired")
+            }
             true => Refused::new("That page needs a website sign-in. This PC stays connected.", "session_required"),
-            false => Refused::new("Session expired — log in again", "session_expired"),
+            false => {
+                let _ = super::account::sign_out(api).await;
+                Refused::new("Session expired — log in again", "session_expired")
+            }
         });
     }
-    Ok(Answer { status, parsed: parsed(&raw), raw, headers })
+    Ok(answer)
 }
 
 /// `(kind, sentence)` for an answer that is not a usable one (`_site_failure`). Kind

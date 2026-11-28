@@ -82,6 +82,12 @@ fn folders(root: &Path) -> Vec<PathBuf> {
     found
 }
 
+/// The ids of the folders that hold a plugin, read or not (`_installed_plugin_ids`).
+pub fn on_disk(root: &Path) -> Vec<String> {
+    let id = |folder: PathBuf| folder.join(MANIFEST).is_file().then(|| plugin_id(&folder.file_name()?.to_string_lossy())).flatten();
+    folders(root).into_iter().filter_map(id).collect()
+}
+
 /// `value or fallback`, as text.
 fn text_or(value: Option<&Value>, fallback: &str) -> String {
     value.filter(|value| truthy(value)).map_or_else(|| fallback.to_string(), pystr)

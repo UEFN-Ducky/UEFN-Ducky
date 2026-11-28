@@ -4,6 +4,8 @@
 //! Python backend until then.
 
 mod chat_doc;
+pub mod account;
+pub mod app_info;
 pub mod chats;
 pub mod file_kinds;
 pub mod plugin_store;
@@ -77,6 +79,14 @@ pub fn methods() -> HashMap<&'static str, Method> {
         project_files::fingerprint_project_dirs => Anyone,
         plugin_store::list_uefn_plugins => Anyone,
         plugin_store::duckyos_store_versions => Anyone,
+        app_info::get_version => Anyone,
+        app_info::get_app_patch_notes => Anyone,
+        app_info::get_whats_new => Anyone,
+        app_info::mark_whats_new_seen => Anyone,
+        app_info::get_install_info => Anyone,
+        account::duckyos_get_status => Anyone,
+        account::duckyos_list_pcs => Anyone,
+        account::duckyos_revoke_pc => Anyone,
     }
 }
 

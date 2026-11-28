@@ -56,7 +56,7 @@ fn put<const N: usize>(chat: &mut Fields, fields: [(&str, &str); N]) {
 
 /// `notify_chats_changed(open_tab=False, removed_conv_ids=…, removed_folder_ids=…)`:
 /// every open window drops these rows at once.
-pub(super) fn removed(conv_ids: &[String], folder_ids: &[String]) -> Value {
+pub(in crate::api) fn removed(conv_ids: &[String], folder_ids: &[String]) -> Value {
     let mut event = Map::from_iter([("type".to_string(), json!("chats_changed")), ("open".to_string(), json!(false))]);
     for (name, ids) in [("removed_conv_ids", conv_ids), ("removed_folder_ids", folder_ids)] {
         if !ids.is_empty() {

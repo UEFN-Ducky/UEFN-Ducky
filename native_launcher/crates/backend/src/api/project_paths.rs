@@ -225,15 +225,22 @@ pub fn documents_dir() -> PathBuf {
 /// Where the shell says Documents is (OneDrive moves it).
 #[cfg(windows)]
 fn known_documents() -> Option<PathBuf> {
+    known_folder(&windows_sys::Win32::UI::Shell::FOLDERID_Documents)
+}
+
+/// Where the shell says one of the person's folders is: from their logon, never from
+/// this process's environment.
+#[cfg(windows)]
+pub fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
-    use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath};
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
 
     let mut out = std::ptr::null_mut();
     // SAFETY: the shell writes one pointer to a NUL-ended string it allocated; it is
     // copied up to that NUL and freed once, also when the call failed.
     unsafe {
-        let found = SHGetKnownFolderPath(&FOLDERID_Documents, 0, std::ptr::null_mut(), &mut out) >= 0 && !out.is_null();
+        let found = SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut out) >= 0 && !out.is_null();
         let path = found.then(|| {
             let len = (0..).take_while(|&i| *out.add(i) != 0).count();
             PathBuf::from(std::ffi::OsString::from_wide(std::slice::from_raw_parts(out, len)))

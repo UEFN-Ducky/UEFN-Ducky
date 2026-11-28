@@ -5,7 +5,7 @@
 //! merges in the skill packs and what a signed Store plugin says about private items,
 //! which live with the plugin host. Install, update and remove stay there with it.
 
-mod installed;
+pub(super) mod installed;
 
 use std::sync::Arc;
 use std::time::Duration;
