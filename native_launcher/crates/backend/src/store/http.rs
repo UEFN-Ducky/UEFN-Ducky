@@ -48,6 +48,16 @@ impl Repos {
         Ok(&self.open().await?.settings)
     }
 
+    /// The chats repo: one per process, it keeps each account's chat key.
+    pub async fn chats(&self) -> Result<&Chats> {
+        Ok(&self.open().await?.chats)
+    }
+
+    /// The account signed in now, with the secret its rows are sealed with.
+    pub async fn who(&self) -> Result<duckies::Who> {
+        who(self.store().await?, &self.data_dir).await
+    }
+
     /// The folder `ducky.db` is in.
     pub fn data_dir(&self) -> &std::path::Path {
         &self.data_dir

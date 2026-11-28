@@ -5,11 +5,10 @@
 
 use std::sync::{Arc, LazyLock};
 
-use aes_gcm::aead::rand_core::RngCore;
-use aes_gcm::aead::OsRng;
 use serde_json::{json, Map, Value};
 
 use super::router::Api;
+use super::uuid4;
 use crate::store::kv;
 use crate::store::pyjson::{int, py_eq, pystr, repr, truthy};
 use crate::store::settings::Fields;
@@ -126,14 +125,31 @@ fn py_float(value: &Value) -> Option<f64> {
     }
 }
 
-fn files_backend() -> bool {
-    let env = |name: &str| std::env::var(name).unwrap_or_default().trim().to_lowercase();
-    let one = env("DUCKY_STORE_BACKEND_SETTINGS");
-    if one.is_empty() { env("DUCKY_STORE_BACKEND") == "files" } else { one == "files" }
+/// `store.switch.use_db` says no: this store is kept in files, the Python backend's to read.
+pub(super) fn files_backend(store: &str) -> bool {
+    let env = |name: String| std::env::var(name).unwrap_or_default().trim().to_lowercase();
+    let one = env(format!("DUCKY_STORE_BACKEND_{}", store.to_uppercase()));
+    if one.is_empty() { env("DUCKY_STORE_BACKEND".into()) == "files" } else { one == "files" }
 }
 
-fn failed(err: crate::store::Error) -> String {
+pub(super) fn failed(err: crate::store::Error) -> String {
     err.0
+}
+
+/// Refuse while the Python backend has not moved `store`'s old files (`legacy`, under
+/// the data folder) into ducky.db: it imports them once, on its first read.
+pub(super) async fn imported(api: &Api, store: &str, legacy: &str) -> Result<(), String> {
+    if files_backend(store) {
+        return Err(format!("{store} are kept in files here (DUCKY_STORE_BACKEND)"));
+    }
+    let db = api.repos.store().await.map_err(failed)?;
+    if kv::meta_get(db, format!("imported:{store}")).await.map_err(failed)?.is_none() {
+        let old = api.repos.data_dir().join(legacy);
+        if tokio::task::spawn_blocking(move || old.exists()).await.unwrap_or(true) {
+            return Err(format!("{store} are not imported yet"));
+        }
+    }
+    Ok(())
 }
 
 /// `PanelSettings._finish_load`: the rows over the defaults, with the load-time fixups.
@@ -165,17 +181,7 @@ fn finish_load(rows: Fields) -> Fields {
 
 /// `PanelSettings.load()`.
 pub async fn load(api: &Api) -> Result<Loaded, String> {
-    if files_backend() {
-        return Err("settings are kept in files here (DUCKY_STORE_BACKEND)".to_string());
-    }
-    let store = api.repos.store().await.map_err(failed)?;
-    // The Python backend imports an old panel_settings.json into the rows, once.
-    if kv::meta_get(store, "imported:settings".to_string()).await.map_err(failed)?.is_none() {
-        let file = api.repos.data_dir().join("panel_settings.json");
-        if tokio::task::spawn_blocking(move || file.is_file()).await.unwrap_or(true) {
-            return Err("settings are not imported yet".to_string());
-        }
-    }
+    imported(api, "settings", "panel_settings.json").await?;
     let (rows, origin) = api.repos.settings().await.map_err(failed)?.load_fields_versioned().await.map_err(failed)?;
     Ok(Loaded { fields: finish_load(rows), origin })
 }
@@ -401,16 +407,6 @@ pub async fn push_appearance_live(api: Arc<Api>, args: Fields) -> Result<Value, 
         api.publish(vec![json!({"type": "appearance_changed", "appearance": look})]);
     }
     Ok(Value::Null)
-}
-
-/// A random id as Python's `uuid.uuid4()` prints one.
-fn uuid4() -> String {
-    let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
 }
 
 fn profiles(s: &Loaded) -> Vec<Value> {

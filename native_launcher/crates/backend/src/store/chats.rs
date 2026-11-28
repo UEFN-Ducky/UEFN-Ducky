@@ -326,6 +326,19 @@ impl Chats {
             .await
     }
 
+    /// True while the account has a chat, or a folder other than Archive, outside
+    /// `project_id`: rows the one-list merge has not moved yet.
+    pub async fn rows_outside(&self, account: String, project_id: String) -> Result<bool> {
+        self.store
+            .readers
+            .read(move |conn| {
+                let found = |sql: &str| conn.prepare(sql)?.exists([&account, &project_id]);
+                Ok(found("SELECT 1 FROM conversations WHERE account_id=?1 AND project_id<>?2")?
+                    || found("SELECT 1 FROM folders WHERE account_id=?1 AND project_id<>?2 AND trim(id)<>'archive'")?)
+            })
+            .await
+    }
+
     /// Folders the person deleted: never written back by a stale folder list.
     pub async fn folders_mark_deleted(&self, folder_ids: Vec<String>) -> Result<()> {
         let ids: Vec<String> = folder_ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
