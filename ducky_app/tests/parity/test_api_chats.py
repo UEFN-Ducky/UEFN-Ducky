@@ -673,3 +673,71 @@ def test_chats_that_were_never_ordered_are_numbered_newest_first(seed, python, r
         listed.append((plain(reply["result"]), stored))
     assert listed[1] == listed[0]
     assert listed[0][1] == {"b": (0.0, 9.0), "c": (1.0, 5.0), "a": (2.0, 1.0), "kept": (0.0, 20.0), "d": (0.0, 20.0), "e": (4.0, 20.0)}
+
+
+# --------------------------------------------------------------------------- messages
+
+_TURNS = [
+    {"role": "user", "text": "hello", "attachments": [{"kind": "image", "name": "a.png", "data_base64": "QQ=="}, "junk"]},
+    {
+        "role": "assistant", "content": "Done é", "thinking": "plan", "tours": ["intro", " ", 3],
+        "author": {"name": " Dev ", "tts_speed": "1.5", "color": None},
+        "blocks": [
+            {"type": "thinking", "text": "first"}, {"type": "text", "text": "  "}, {"type": "text", "text": "Looking"},
+            {"type": "tool_call", "id": "t1", "name": "ducky_find", "arguments": {"query": "x" * 200}, "status": "success",
+             "duration_ms": 12, "result": {"data": "é" * 8001, "hint": "narrow it", "exit_code": 0}, "llm_tokens": 40},
+            {"type": "user", "text": "also this"},
+            {"type": "tool_call", "id": "t2", "name": "Write", "arguments": {}, "status": "error", "result": {"error": "no"},
+             "file_edits": [{"path": "a.verse", "before": "a" * 3000, "after": "b" * 1001, "linesAdded": 1, "linesRemoved": 1},
+                            {"path": "b.verse", "before": "", "after": "x"}]},
+            {"type": "tool_call", "id": "t3", "name": "Edit", "arguments": {"path": "c"}, "status": "success",
+             "result": {"ok": True, "n": 1.5}, "file_edit": {"path": "c", "before": "1", "after": "2"}},
+        ],
+    },
+    {"role": "system", "content": "never a row"},
+    {"role": "user", "content": "an older message"},
+    {"role": "assistant", "content": "", "incomplete": True, "error": "boom", "run_id": "r1",
+     "blocks": [{"type": "tool_call", "name": "x", "status": "pending"}]},
+    {"role": "assistant", "content": "half", "incomplete": True, "run_id": "r2"},
+]
+
+
+def test_a_chats_messages_are_the_same_rows_page_by_page(seed, python, rust_store) -> None:
+    """No attachment here is a stored file and every write tool has its edits stored:
+    opening those is still Python's (the note in `api/chats/messages.rs`)."""
+    seed(_FOLDERS, [])
+    chats.conv_save(_LIST, _doc("m"), messages=_TURNS)
+    chats.conv_save(_LIST, _doc("long"), messages=[{"role": "user", "text": f"message {n}"} for n in range(80)])
+
+    rows = _same(python, rust_store, "load_messages", "m")
+    assert [row["role"] for row in rows] == [
+        "user", "assistant", "assistant", "tool", "success", "user", "tool", "error", "tool", "success", "assistant",
+        "user", "tool", "error", "assistant", "assistant",
+    ]
+    found = rows[4]["tool"]
+    assert (len(found["result"]), found["resultTruncated"], found["resultBytes"], found["exitCode"]) == (8000, True, 16002, 0)
+    assert rows[7]["tool"]["fileEdits"][0]["contentOmitted"] is True and rows[7]["tool"]["fileEdit"]["before"] == ""
+    assert rows[9]["tool"]["result"] == '{"ok": true, "n": 1.5}' and rows[9]["tool"]["fileEdit"]["after"] == "2"
+    assert (rows[14]["error"], rows[14]["live_run"], rows[15]["text"]) == ("boom", False, "half")
+
+    whole = _same(python, rust_store, "load_messages", "m", None, None, True)
+    assert len(whole[4]["tool"]["result"]) == 8001 and whole[7]["tool"]["fileEdit"]["before"] == "a" * 3000
+    for limit in (1, 3, 16, 100, 0, -2):
+        _same(python, rust_store, "load_messages", "m", None, limit)
+    for row in rows:
+        assert _same(python, rust_store, "load_messages", "m", row["id"], 2) == [r for r in rows if r["id"] < row["id"]][-2:]
+        _same(python, rust_store, "load_messages", "m", row["id"])
+        _same(python, rust_store, "load_tool_result", "m", row["id"])
+        _same(python, rust_store, "load_tool_file_edits", "m", row["id"])
+    assert _same(python, rust_store, "load_tool_result", "m", rows[4]["id"]) == {"ok": True, "result": "é" * 8001}
+    assert _same(python, rust_store, "load_tool_file_edits", "m", rows[7]["id"])["fileEdits"][0]["before"] == "a" * 3000
+    assert _same(python, rust_store, "load_tool_file_edits", "m", rows[4]["id"]) == {"ok": False, "error": "No file edit in that row"}
+    assert _same(python, rust_store, "load_tool_result", "m", rows[0]["id"]) == {"ok": False, "error": "No tool result in that row"}
+
+    # A page wider than the first read reads further back.
+    assert [row["text"] for row in _same(python, rust_store, "load_messages", "long", None, 70)] == [f"message {n}" for n in range(10, 80)]
+    assert len(_same(python, rust_store, "load_messages", "long", 60 * 2**32, 40)) == 40
+
+    assert _same(python, rust_store, "load_messages", "nope") == _same(python, rust_store, "load_messages", "nope", None, 5) == []
+    for method in ("load_tool_result", "load_tool_file_edits"):
+        assert _same(python, rust_store, method, "nope", 0) == {"ok": False, "error": "Chat not found"}
