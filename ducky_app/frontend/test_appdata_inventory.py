@@ -28,6 +28,18 @@ def test_resolve_jail(tmp_path: Path) -> None:
     assert resolve_appdata_rel("", root) == root.resolve()
 
 
+def test_a_dot_part_or_an_odd_project_name_never_names_the_folder_itself(tmp_path: Path) -> None:
+    root = tmp_path / "UEFN-Ducky"
+    (root / "chats" / "projects" / "p").mkdir(parents=True)
+    (root / "keep.txt").write_text("x", encoding="utf-8")
+    for rel in ("chats/.", ".", "chats/. ", "chats/.. ", "chats/...", "chats//projects", " "):
+        assert resolve_appdata_rel(rel, root) is None, rel
+        assert appdata_delete(rel, root)["ok"] is False and appdata_clear(rel, root)["ok"] is False, rel
+    for slug in ("..", ".", "C:", "a/b", "a\\b", " ", ".. ", ""):
+        assert delete_project_appdata(slug, root) == 0, slug
+    assert (root / "keep.txt").is_file() and (root / "chats" / "projects" / "p").is_dir()
+
+
 def test_overview_sizes_and_flags(tmp_path: Path) -> None:
     root = tmp_path / "UEFN-Ducky"
     (root / "tool_captures").mkdir(parents=True)

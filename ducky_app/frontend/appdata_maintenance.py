@@ -307,7 +307,8 @@ _PROTECTED_NAMES = frozenset(
 
 def delete_project_appdata(slug: str, app_root: Path | None = None) -> int:
     """Remove all AppData for a project slug (chats, workspace, history, diagnostics, …)."""
-    if not (slug or "").strip():
+    # One plain folder name: ".." or "C:" here would name the whole area, or all of AppData.
+    if not (slug or "").rstrip(". ") or any(c in slug for c in "/\\:"):
         return 0
     if app_root is None:
         app_root = default_app_data_dir()
@@ -670,7 +671,9 @@ def resolve_appdata_rel(rel: str, app_root: Path | None = None) -> Path | None:
     raw = (rel or "").replace("\\", "/").strip("/")
     if not raw:
         return root
-    if any(part in ("..", "") for part in raw.split("/")):
+    # No empty part, "." or "..", nor a name Windows reads as one (it drops trailing dots
+    # and spaces): "chats/." resolved to the AppData folder itself.
+    if any(not part.rstrip(". ") for part in raw.split("/")):
         return None
     # The last part is never resolved: a plugin folder that is a junction to its copy
     # under scopes/ is that link (deleting it removes the link, not the copy).
