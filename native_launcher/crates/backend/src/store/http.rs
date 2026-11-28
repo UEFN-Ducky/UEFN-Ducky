@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{account, blocking, duckies, misc, seal, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
+use super::{account, blocking, duckies, events, misc, seal, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -35,6 +35,11 @@ struct Open {
 impl Repos {
     pub fn new(data_dir: PathBuf) -> Repos {
         Repos { data_dir, open: OnceCell::new() }
+    }
+
+    /// The store, once ducky.db is there.
+    pub async fn store(&self) -> Result<&Store> {
+        Ok(&self.open().await?.store)
     }
 
     async fn open(&self) -> Result<&Open> {
@@ -217,6 +222,33 @@ async fn sealed_files(open: &Open, data_dir: &std::path::Path, function: &str, a
     }))
 }
 
+/// The events repo, and the perf events this process traced.
+async fn events(s: &Store, repo: &str, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (kind, limit, since) = (text(a, "kind"), a["limit"].as_i64().unwrap_or(0), a["since"].as_f64());
+    Ok(Some(match (repo, function) {
+        ("perf", "trace") => {
+            json!(crate::perf::trace(&kind, &text(a, "name"), a["duration_ms"].as_f64().unwrap_or(0.0), a["meta"].clone()))
+        }
+        ("perf", "flush") => json!(crate::perf::flush(s).await?),
+        ("events", "insert") => {
+            let ts = a["ts"].as_f64().unwrap_or(0.0);
+            json!(events::insert(s, kind, ts, text(a, "source"), text(a, "message"), a["payload"].clone()).await?)
+        }
+        ("events", "insert_many") => json!(events::insert_many(s, kind, a["rows"].as_array().cloned().unwrap_or_default()).await?),
+        ("events", "newest") => json!(events::newest(s, kind, limit, since).await?),
+        ("events", "newest_from") => json!(events::newest_from(s, kind, text(a, "source"), limit, since).await?),
+        ("events", "last_message") => json!(events::last_message(s, kind).await?),
+        ("events", "clear") => json!(events::clear(s, kind).await?),
+        ("events", "trim") => {
+            json!(events::trim(s, kind, a["older_than"].as_f64().unwrap_or(0.0), a["keep"].as_i64().unwrap_or(0)).await?)
+        }
+        ("events", "count") => json!(events::count(s, kind).await?),
+        ("events", "oldest") => json!(events::oldest(s, kind, limit).await?),
+        ("events", "delete_ids") => json!(events::delete_ids(s, serde_json::from_value(a["ids"].clone()).unwrap_or_default()).await?),
+        _ => return Ok(None),
+    }))
+}
+
 /// Search tokens under a key the test hands over.
 fn tokens(function: &str, a: &Value) -> Result<Option<Value>> {
     let key = || tokens::Key::new(bytes(a, "key"));
@@ -259,6 +291,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "duckies" => return duckies(&open.store, data_dir, function, a).await,
         "chats" => return chats(open, data_dir, function, a).await,
         "local_chats" => return local_chats(open, data_dir, function, a).await,
+        "events" | "perf" => return events(&open.store, repo, function, a).await,
         "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
         _ => {}

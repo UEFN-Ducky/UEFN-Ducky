@@ -50,12 +50,13 @@ impl Default for Options {
         Options {
             busy: conn::BUSY_TIMEOUT,
             trace_limit: Duration::from_millis(500),
-            // ponytail: stderr until the events repo exists here; then a perf event.
+            // The Python backend's `db_write` perf event, field for field.
             on_slow: Box::new(|w| {
-                eprintln!(
-                    "db_write {} wait_local_ms={} wait_sqlite_ms={} held_ms={}",
-                    w.caller, w.wait_local_ms, w.wait_sqlite_ms, w.held_ms
-                )
+                let total = (w.wait_local_ms + w.wait_sqlite_ms + w.held_ms) as f64;
+                let meta = serde_json::json!({
+                    "wait_local_ms": w.wait_local_ms, "wait_sqlite_ms": w.wait_sqlite_ms, "held_ms": w.held_ms, "thread": "rs-writer",
+                });
+                crate::perf::trace("db_write", w.caller, total, meta);
             }),
         }
     }

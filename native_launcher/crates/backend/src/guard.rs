@@ -1,7 +1,7 @@
 //! The no-freeze guard every route sits behind.
 //!
 //! A request that runs past its limit is dropped and answered with a JSON 504, so a caller
-//! never hangs on it. One that ran longer than [`SLOW`] is counted and named on stderr.
+//! never hangs on it. One that ran longer than [`SLOW`] is counted and kept as a perf event.
 //! Streams that stay open on purpose (agent turns, terminals) are websockets: the limit
 //! covers the upgrade request only.
 
@@ -34,8 +34,7 @@ async fn guarded(req: Request, next: Next, limit: Duration) -> Response {
     let took = started.elapsed();
     if took >= SLOW.min(limit) {
         SLOW_CALLS.fetch_add(1, Ordering::Relaxed);
-        // ponytail: stderr until the store is here; then a perf event in ducky.db like Python's.
-        eprintln!("rs_slow {path} {} ms", took.as_millis());
+        crate::perf::trace("rs_slow", &path, took.as_secs_f64() * 1000.0, json!({"route": path}));
     }
     answer.unwrap_or_else(|_| timed_out(&path, limit))
 }

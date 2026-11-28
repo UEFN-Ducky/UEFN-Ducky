@@ -250,3 +250,29 @@ async fn commits_are_checkpointed_into_the_database_file() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn trimming_60000_events_never_holds_the_writer_for_long() {
+    let db = Db::new("trim");
+    let (store, seen) = traced(&db, Duration::from_secs(5));
+    store
+        .writer
+        .write("fill", |conn| {
+            // The table and index of migration 0005.
+            conn.execute_batch(
+                "CREATE TABLE events (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, ts REAL NOT NULL, \
+                 source TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '', payload TEXT); \
+                 CREATE INDEX ix_events_kind_ts ON events(kind, ts); \
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 60000) \
+                 INSERT INTO events(kind, ts, message, payload) SELECT 'perf', i, 'm', '{\"k\": 1}' FROM n",
+            )
+        })
+        .await
+        .unwrap();
+    // Half go for their age, then all but the newest 100.
+    assert_eq!(backend::store::events::trim(&store, "perf".into(), 30000.5, 100).await, Ok(59_900));
+    assert_eq!(backend::store::events::count(&store, "perf".into()).await, Ok(100));
+    let seen = seen.lock().unwrap();
+    let slow: Vec<_> = seen.iter().filter(|w| w.caller == "events::trim" && w.held_ms > 100).collect();
+    assert!(slow.is_empty(), "{slow:?}");
+}

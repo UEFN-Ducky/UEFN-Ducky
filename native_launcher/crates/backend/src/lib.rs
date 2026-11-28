@@ -11,6 +11,7 @@
 #![deny(clippy::await_holding_lock, clippy::disallowed_methods)]
 
 pub mod guard;
+pub mod perf;
 pub mod store;
 
 use std::future::Future;
@@ -50,13 +51,17 @@ pub fn app_data_dir() -> PathBuf {
 
 /// Every route, under the no-freeze guard. `data_dir` holds `ducky.db`.
 pub fn router(data_dir: PathBuf) -> Router {
+    routes(Arc::new(store::http::Repos::new(data_dir)))
+}
+
+fn routes(repos: Arc<store::http::Repos>) -> Router {
     let mut routes = Router::new().route("/__rs/health", get(health)).route("/__panel_api/{method}", post(panel_call));
     // The repo route opens sealed rows for whoever asks: only under the parity tests,
     // which mark their environment with this.
     if std::env::var_os("DUCKY_TESTS_ISOLATED_APPDATA").is_some() {
         routes = routes.route("/__rs/store/{repo}/{function}", post(store::http::call));
     }
-    guard::wrap(routes.with_state(Arc::new(store::http::Repos::new(data_dir))), guard::CALL_LIMIT)
+    guard::wrap(routes.with_state(repos), guard::CALL_LIMIT)
 }
 
 /// A panel call (`POST /__panel_api/<method>`, body `{"args": [...]}`), answered in the
@@ -90,5 +95,15 @@ pub fn hello_line(port: u16) -> String {
 
 /// Serve until `stop` resolves; requests in flight finish first.
 pub async fn serve(listener: TcpListener, stop: impl Future<Output = ()> + Send + 'static) -> io::Result<()> {
-    axum::serve(listener, router(app_data_dir())).with_graceful_shutdown(stop).await
+    let repos = Arc::new(store::http::Repos::new(app_data_dir()));
+    let perf = tokio::spawn(perf::run(Arc::clone(&repos)));
+    let served = axum::serve(listener, routes(Arc::clone(&repos))).with_graceful_shutdown(stop).await;
+    perf.abort();
+    // What the last seconds traced is stored before the process ends.
+    if perf::waiting() {
+        if let Ok(store) = repos.store().await {
+            let _ = perf::flush(store).await;
+        }
+    }
+    served
 }
