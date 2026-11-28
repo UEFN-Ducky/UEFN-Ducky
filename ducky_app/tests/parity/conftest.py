@@ -50,11 +50,11 @@ _SENT = ("authorization", "origin", "accept", "user-agent", "content-type", "coo
 
 class FakeSite:
     """The site, on this PC: answers every call with ``answer`` (status, headers, body), or
-    with its path's own answer, and keeps what it was sent."""
+    with its path's own answer (or answers, one per call), and keeps what it was sent."""
 
     def __init__(self) -> None:
         self.answer: tuple[int, dict[str, Any], bytes] = (200, {}, b"{}")
-        self.paths: dict[str, tuple[int, dict[str, Any], bytes]] = {}
+        self.paths: dict[str, Any] = {}
         self.calls: list[dict[str, Any]] = []
         self.hold = threading.Event()  # cleared: a request waits before it is answered
         self.hold.set()
@@ -69,7 +69,10 @@ class FakeSite:
                 call = {"path": self.path, "headers": sent, "body": json.loads(raw or b"null")}
                 fake.calls.append(call if self.command == "POST" else {"method": self.command, **call})
                 fake.hold.wait(30)
-                status, headers, body = fake.paths.get(self.path, fake.answer)
+                answer = fake.paths.get(self.path, fake.answer)
+                if isinstance(answer, list):  # one per call, the last one from then on
+                    answer = answer.pop(0) if len(answer) > 1 else answer[0]
+                status, headers, body = answer
                 self.send_response(status)
                 for name, values in {"Content-Type": "application/json", **headers}.items():
                     for value in values if isinstance(values, list) else [values]:  # a list: the header once per value
@@ -96,6 +99,10 @@ class FakeSite:
             self.paths[path] = answer
         else:
             self.answer = answer
+
+    def says_in_turn(self, path: str, *bodies: Any) -> None:
+        """``path``'s answers, one per call; the last one stays."""
+        self.paths[path] = [(200, {}, json.dumps(body).encode()) for body in bodies]
 
     def close(self) -> None:
         self.hold.set()
