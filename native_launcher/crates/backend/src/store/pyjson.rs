@@ -78,6 +78,28 @@ pub fn int(value: &Value) -> i64 {
     }
 }
 
+/// `str(value)` for what a JSON document holds.
+/// ponytail: a list or object prints as JSON, not as Python's repr; nothing stores one.
+pub fn pystr(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        Value::Null => "None".into(),
+        Value::Bool(b) => if *b { "True" } else { "False" }.into(),
+        other => other.to_string(),
+    }
+}
+
+/// `float(value or 0.0)`; None where Python raises (text that is not a number, a list).
+pub fn float(value: &Value) -> Option<f64> {
+    match value {
+        _ if !truthy(value) => Some(0.0),
+        Value::Bool(_) => Some(1.0),
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +117,7 @@ mod tests {
         assert!(!py_eq(&json!([1, 2]), &json!([1, 3])) && !py_eq(&json!("1"), &json!(1)) && !py_eq(&json!(null), &json!(0)));
         assert!(!truthy(&json!([])) && !truthy(&json!(0)) && !truthy(&json!("")) && truthy(&json!([0])));
         assert_eq!((int(&json!(7.9)), int(&json!("12")), int(&json!(null)), int(&json!(true))), (7, 12, 0, 1));
+        assert_eq!((pystr(&json!("a")), pystr(&json!(null)), pystr(&json!(true)), pystr(&json!(1.5))), ("a".into(), "None".into(), "True".into(), "1.5".into()));
+        assert_eq!((float(&json!(null)), float(&json!(" 2.5 ")), float(&json!("x")), float(&json!(3))), (Some(0.0), Some(2.5), None, Some(3.0)));
     }
 }

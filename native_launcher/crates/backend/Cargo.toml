@@ -22,6 +22,12 @@ aes-gcm = "0.10"
 base64 = "0.22"
 # Account ids are a SHA-256 of who is signed in (store/account.rs).
 sha2 = "0.10"
+# Search tokens and payload names are keyed BLAKE2b; words are folded as Python folds
+# them (store/tokens.rs).
+blake2 = "0.10"
+caseless = "0.2"
+unicode-normalization = "0.1"
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

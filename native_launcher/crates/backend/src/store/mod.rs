@@ -5,6 +5,7 @@
 //! backend still owns the schema: nothing here creates or upgrades tables.
 
 pub mod account;
+pub mod chats;
 pub mod conn;
 pub mod duckies;
 pub mod http;
@@ -13,6 +14,7 @@ pub mod pyjson;
 pub mod seal;
 pub mod secrets;
 pub mod settings;
+pub mod tokens;
 pub mod writer;
 
 use std::fmt;

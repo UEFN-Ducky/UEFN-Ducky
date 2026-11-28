@@ -50,12 +50,13 @@ pub fn app_data_dir() -> PathBuf {
 
 /// Every route, under the no-freeze guard. `data_dir` holds `ducky.db`.
 pub fn router(data_dir: PathBuf) -> Router {
-    let routes = Router::new()
-        .route("/__rs/health", get(health))
-        .route("/__rs/store/{repo}/{function}", post(store::http::call))
-        .route("/__panel_api/{method}", post(panel_call))
-        .with_state(Arc::new(store::http::Repos::new(data_dir)));
-    guard::wrap(routes, guard::CALL_LIMIT)
+    let mut routes = Router::new().route("/__rs/health", get(health)).route("/__panel_api/{method}", post(panel_call));
+    // The repo route opens sealed rows for whoever asks: only under the parity tests,
+    // which mark their environment with this.
+    if std::env::var_os("DUCKY_TESTS_ISOLATED_APPDATA").is_some() {
+        routes = routes.route("/__rs/store/{repo}/{function}", post(store::http::call));
+    }
+    guard::wrap(routes.with_state(Arc::new(store::http::Repos::new(data_dir))), guard::CALL_LIMIT)
 }
 
 /// A panel call (`POST /__panel_api/<method>`, body `{"args": [...]}`), answered in the

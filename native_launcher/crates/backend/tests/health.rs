@@ -30,6 +30,8 @@ fn the_supervisor_starts_it_health_answers_and_closing_stdin_ends_it() {
     let body: serde_json::Value = serde_json::from_str(resp.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!((&body["ok"], &body["pid"]), (&true.into(), &hello.pid.into()), "{body}");
     assert!(get(&hello.origin, "/nope").starts_with("HTTP/1.1 404"));
+    // The repo route (it opens sealed rows) is there only under the parity tests.
+    assert!(get(&hello.origin, "/__rs/store/account/entropy").starts_with("HTTP/1.1 404"));
 
     let asked = Instant::now();
     let status = sup.shutdown("test").expect("exit status");
