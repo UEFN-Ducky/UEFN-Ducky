@@ -18,6 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
+use super::{automations, memory, plans, workflows};
 use super::{account, blocking, duckies, ducky_mirrors, events, history, kv, ledger, misc, plugin_kv, projects, seal, search, usage, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
@@ -341,6 +342,55 @@ async fn small(s: &Store, repo: &str, function: &str, a: &Value) -> Result<Optio
     }))
 }
 
+/// Workflows (legacy rows, saved versions, per-account state), memory notes, plans and tasks.
+async fn docs(s: &Store, repo: &str, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (id, old, new) = (text(a, "workflow_id"), text(a, "old_id"), text(a, "new_id"));
+    let (account, space, project, name, key) = (text(a, "account"), text(a, "space"), text(a, "project_id"), text(a, "name"), text(a, "key"));
+    let number = |name: &str| a[name].as_f64().unwrap_or(0.0);
+    Ok(Some(match (repo, function) {
+        ("automations", "put") => json!(automations::put(s, a["doc"].clone()).await?),
+        ("automations", "delete") => json!(automations::delete(s, id).await?),
+        ("automations", "has_legacy") => json!(automations::has_legacy(s).await?),
+        ("automations", "list_all") => json!(automations::list_all(s).await?),
+        ("automations", "archive") => json!(automations::archive(s, id, number("saved_at"), text(a, "snapshot")).await?),
+        ("automations", "copy_versions") => json!(automations::copy_versions(s, old, new).await?),
+        ("automations", "has_versions") => json!(automations::has_versions(s, id).await?),
+        ("automations", "version_rows") => json!(automations::version_rows(s, id).await?),
+        ("automations", "version_row") => json!(automations::version_row(s, id, text(a, "version_id")).await?),
+        ("automations", "reseal_versions") => {
+            json!(automations::reseal_versions(s, old, new, serde_json::from_value(a["converted"].clone()).unwrap_or_default()).await?)
+        }
+        ("workflows", "runtime_get") => workflows::runtime_get(s, account, id).await?,
+        ("workflows", "runtime_put") => json!(workflows::runtime_put(s, account, id, map(a, "fields")).await?),
+        ("workflows", "runtime_delete") => json!(workflows::runtime_delete(s, account, texts(a, "workflow_ids")).await?),
+        ("workflows", "workflows_writable") => json!(workflows::workflows_writable(s, account, space).await?),
+        ("workflows", "meta_put") => {
+            json!(workflows::meta_put(s, account, space, a["workflows_writable"].as_bool().unwrap_or(false), text(a, "web_slug")).await?)
+        }
+        ("workflows", "web_slug") => json!(workflows::web_slug(s, account, space).await?),
+        ("workflows", "synced_spaces") => json!(workflows::synced_spaces(s, account).await?),
+        ("memory", "get") => json!(memory::get(s, project, name).await?),
+        ("memory", "put") => {
+            let entry = memory::Entry { name, description: text(a, "description"), author: text(a, "author"), updated: text(a, "updated"), body: text(a, "body") };
+            json!(memory::put(s, project, entry).await?)
+        }
+        ("memory", "delete") => json!(memory::delete(s, project, name, a["with_subs"].as_bool().unwrap_or(false)).await?),
+        ("memory", "index") => json!(memory::index(s, project).await?),
+        ("memory", "subs_of") => json!(memory::subs_of(s, project, text(a, "entry")).await?),
+        ("memory", "search") => json!(memory::search(s, project, text(a, "query"), a["limit"].as_i64().unwrap_or(20)).await?),
+        ("memory", "has_rows") => json!(memory::has_rows(s, project).await?),
+        ("plans", "merge_into_one_list") => json!(plans::merge_into_one_list(s).await?),
+        ("plans", "plan_get") => json!(plans::plan_get(s, project, key).await?),
+        ("plans", "plan_put") => json!(plans::plan_put(s, project, key, text(a, "kind"), a["doc"].clone()).await?),
+        ("plans", "plan_delete") => json!(plans::plan_delete(s, project, key).await?),
+        ("plans", "plan_docs") => json!(plans::plan_docs(s, project, text(a, "kind")).await?),
+        ("plans", "task_get") => json!(plans::task_get(s, project, text(a, "task_id")).await?),
+        ("plans", "task_put") => json!(plans::task_put(s, project, a["doc"].clone()).await?),
+        ("plans", "task_docs") => json!(plans::task_docs(s, project).await?),
+        _ => return Ok(None),
+    }))
+}
+
 /// Copies of the other Duckies' chats, for the account signed in now.
 async fn ducky_mirrors(s: &Store, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
     let who = who(s, data_dir).await?;
@@ -475,6 +525,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "ledger" => return ledger(&open.store, function, a).await,
         "search" => return search(&open.store, data_dir, function, a).await,
         "kv" | "plugin_kv" | "usage" | "history" | "projects" => return small(&open.store, repo, function, a).await,
+        "automations" | "workflows" | "memory" | "plans" => return docs(&open.store, repo, function, a).await,
         "ducky_mirrors" => return ducky_mirrors(&open.store, data_dir, function, a).await,
         "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
