@@ -291,3 +291,78 @@ def test_search_finds_the_same_messages(rust_store, account) -> None:
         found("p1", query)
     assert len(found("p1", "hello", limit=1)) == 1
     assert found("p1", "nothing here") == [] and found("p1", "") == []
+
+
+def _append(run_id: str) -> dict:
+    return {"role": "assistant", "content": run_id, "run_id": run_id}
+
+
+def _appended_in_order(rust_store, count: int) -> list:
+    """What chat ``r`` holds after its first message: no gap in the numbers, the count
+    right, and both backends reading the same rows."""
+    assert _sql("SELECT seq FROM messages WHERE conv_id='r' ORDER BY seq") == [(n,) for n in range(count + 1)]
+    assert _sql("SELECT message_count FROM conversations WHERE id='r'") == [(count + 1,)]
+    stored = plain(chats.messages_get("r"))
+    assert rust_store.store("chats", "messages_get", conv_id="r") == stored
+    return [message["content"] for message in stored[1:]]
+
+
+def test_appends_from_both_backends_at_once_keep_every_message_in_order(rust_store, account) -> None:
+    """While the agent runner is Python's, both backends append to one chat: each append
+    takes its number inside the write, so none is lost and none lands on another."""
+    import threading
+
+    _save(rust_store, "r", [_USER])
+    at: dict[int, str] = {}
+    order: dict[str, list] = {"rs": [], "py": []}
+
+    def took(side: str, n: int, answer: dict) -> None:
+        at[answer["seq"]] = f"{side}{n}"
+        order[side].append(answer["seq"])
+
+    def from_rust() -> None:
+        for n in range(30):
+            took("rs", n, rust_store.store("chats", "upsert_run_message", conv_id="r", run_id=f"rs{n}", message=_append(f"rs{n}"), updated=float(n)))
+
+    thread = threading.Thread(target=from_rust)
+    thread.start()
+    for n in range(30):
+        took("py", n, chats.upsert_run_message("r", f"py{n}", _append(f"py{n}"), updated=float(n)))
+    thread.join()
+    assert sorted(at) == list(range(1, 61))
+    assert order["rs"] == sorted(order["rs"]) and order["py"] == sorted(order["py"])
+    assert _appended_in_order(rust_store, 60) == [at[seq] for seq in range(1, 61)]
+
+
+def test_a_backend_killed_mid_write_keeps_every_append_it_answered(rust_store, account) -> None:
+    """An append is answered after its commit: whatever the backend said was saved is
+    there when it is killed with other appends still waiting, and the chat has no gap."""
+    import contextlib
+    import threading
+
+    from .parity_harness import RustBackend, backend_exe
+
+    _save(rust_store, "r", [_USER])
+    doomed = RustBackend(backend_exe())
+    answered: list[str] = []
+
+    def append(n: int) -> None:
+        try:
+            doomed.store("chats", "upsert_run_message", conv_id="r", run_id=f"run{n}", message={**_append(f"run{n}"), "long": "é" * 9000}, updated=float(n))
+        except Exception:  # noqa: BLE001 — killed before it answered: never said to be saved
+            return
+        answered.append(f"run{n}")
+        if len(answered) >= 10:
+            with contextlib.suppress(OSError):
+                doomed.proc.kill()
+
+    threads = [threading.Thread(target=append, args=(n,)) for n in range(60)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    doomed.proc.wait(timeout=10)
+    for pipe in (doomed.proc.stdin, doomed.proc.stdout):
+        pipe.close()
+    kept = _appended_in_order(rust_store, _sql("SELECT count(*) FROM messages WHERE conv_id='r'")[0][0] - 1)
+    assert len(answered) >= 10 and set(answered) <= set(kept) and len(kept) == len(set(kept))
