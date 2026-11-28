@@ -87,14 +87,19 @@ fn routes(api: Arc<api::Api>) -> Router {
         let update = |State(api): State<Arc<api::Api>>, Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::update::probe(&api, &what, &body).await) };
         routes = routes.merge(Router::new().route("/__rs/update/{what}", post(update)).with_state(Arc::clone(&api)));
     }
-    // A window's poll waits 20 s by design, and a sign-in waits for the person to approve
-    // its code: each sets its own limit, and is no slow call.
-    let waits = Router::new().route("/__panel_events", get(api::router::events)).route("/__panel_api/duckyos_login", post(sign_in)).with_state(api);
-    guard::wrap(routes, guard::CALL_LIMIT).merge(waits)
+    // A window's poll waits 20 s by design, a sign-in waits for the person to approve its
+    // code, and a Verse build or push takes UEFN up to two minutes: each sets its own
+    // limit, and is no slow call.
+    let mut waits = Router::new().route("/__panel_events", get(api::router::events));
+    for method in ["duckyos_login", "compile_verse_project", "push_verse_changes"] {
+        let call = move |api: State<Arc<api::Api>>, headers: HeaderMap, body: Bytes| own_limit(api, method, headers, body);
+        waits = waits.route(&format!("/__panel_api/{method}"), post(call));
+    }
+    guard::wrap(routes, guard::CALL_LIMIT).merge(waits.with_state(api))
 }
 
-async fn sign_in(api: State<Arc<api::Api>>, headers: HeaderMap, body: Bytes) -> (StatusCode, Json<Value>) {
-    api::router::call(api, Path("duckyos_login".to_string()), headers, body).await
+async fn own_limit(api: State<Arc<api::Api>>, method: &str, headers: HeaderMap, body: Bytes) -> (StatusCode, Json<Value>) {
+    api::router::call(api, Path(method.to_string()), headers, body).await
 }
 
 async fn health() -> Json<Value> {

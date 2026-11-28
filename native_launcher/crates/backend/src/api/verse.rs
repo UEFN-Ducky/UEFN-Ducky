@@ -1,7 +1,7 @@
 //! The Verse editor's calls (`frontend/ui_web/verse_editor/api.py`): its switch, the
-//! Problems list's cache, its verse-lsp and the project scan.
-//! ponytail: the workflow server and revision control are still the Python backend's;
-//! each moves here with its own methods.
+//! Problems list's cache, its verse-lsp, the project scan and UEFN's workflow server.
+//! ponytail: revision control is still the Python backend's; it moves here with its
+//! own methods.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use super::Api;
 use crate::store::misc;
 use crate::store::pyjson::{int, pystr, truthy};
 use crate::verse_editor::diagnostics::{self, Files};
-use crate::verse_editor::{lsp, scan};
+use crate::verse_editor::{lsp, scan, workflow};
 
 type Fields = Map<String, Value>;
 
@@ -182,6 +182,40 @@ pub async fn stop_verse_diagnostics_scan(api: Arc<Api>, args: Fields) -> Result<
         session.stop();
     }
     Ok(json!({"ok": true}))
+}
+
+pub async fn connect_verse_workflow(api: Arc<Api>, _args: Fields) -> Result<Value, String> {
+    Ok(workflow::connect(&api).await)
+}
+
+pub async fn disconnect_verse_workflow(api: Arc<Api>, _args: Fields) -> Result<Value, String> {
+    Ok(workflow::disconnect(&api))
+}
+
+pub async fn get_verse_workflow_status(_api: Arc<Api>, _args: Fields) -> Result<Value, String> {
+    Ok(workflow::status())
+}
+
+/// Build Verse: the build's own answer, and the scan of the island started after it.
+pub async fn compile_verse_project(api: Arc<Api>, _args: Fields) -> Result<Value, String> {
+    if !workflow::connected() {
+        return Err("Not connected to Verse Workflow Server — open project in UEFN".into());
+    }
+    let Value::Object(mut built) = workflow::request(&api, "compileProject", json!({}), workflow::LIMIT).await? else {
+        return Err("Unexpected compileProject result".into());
+    };
+    workflow::after_build().await;
+    built.insert("diagnostics_scan".into(), scan_verse_diagnostics(Arc::clone(&api), Fields::new()).await?);
+    Ok(Value::Object(built))
+}
+
+pub async fn push_verse_changes(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    if !workflow::connected() {
+        return Err("Not connected to Verse Workflow Server".into());
+    }
+    let verse_only = args.get("verse_only").cloned().unwrap_or(Value::Bool(true));
+    let message = workflow::request(&api, "pushChanges", verse_only, workflow::LIMIT).await?;
+    Ok(json!({"message": pystr(&message), "status": workflow::status()}))
 }
 
 /// The editor's own verse-lsp checked one file: keep its result, and tell every window
