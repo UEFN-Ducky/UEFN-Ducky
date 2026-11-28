@@ -16,7 +16,7 @@ use serde_json::{Map, Value};
 
 use super::file_kinds::classify;
 use super::project_paths::{documents_dir, Known};
-use super::settings::{failed, imported, load};
+use super::settings::{failed, imported, load, Loaded};
 use super::Api;
 use crate::store::projects;
 use crate::store::pyjson::{int, pystr, truthy};
@@ -29,17 +29,24 @@ pub(super) fn given(args: &Fields, name: &str) -> String {
     args.get(name).filter(|value| truthy(value)).map(pystr).unwrap_or_default()
 }
 
-/// Run `work` on the open project, off the async workers.
-async fn on_disk<T: Send + 'static>(api: &Api, work: impl FnOnce(&Project) -> T + Send + 'static) -> Result<T, String> {
+/// The settings and the project rows a call starts from (`documents` is not filled in:
+/// finding it reads the disk).
+pub(super) async fn known(api: &Api) -> Result<(Loaded, Known), String> {
     let settings = load(api).await?;
     imported(api, "projects", "recent_projects.json").await?;
     let store = api.repos.store().await.map_err(failed)?;
-    let mut known = Known {
+    let known = Known {
         kinds: projects::kinds(store).await.map_err(failed)?.into_iter().collect(),
         opened: projects::opened_rows(store).await.map_err(failed)?.into_iter().map(|(path, _opened)| path).collect(),
         removed: projects::removed_paths(store).await.map_err(failed)?,
         ..Known::default()
     };
+    Ok((settings, known))
+}
+
+/// Run `work` on the open project, off the async workers.
+async fn on_disk<T: Send + 'static>(api: &Api, work: impl FnOnce(&Project) -> T + Send + 'static) -> Result<T, String> {
+    let (settings, mut known) = known(api).await?;
     let root = if truthy(settings.get("uefn_project_root")) { pystr(settings.get("uefn_project_root")) } else { String::new() };
     let show_hidden = truthy(settings.get("show_hidden_project_files"));
     let data_dir = api.repos.data_dir().to_path_buf();

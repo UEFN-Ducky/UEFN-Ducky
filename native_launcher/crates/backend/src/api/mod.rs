@@ -22,6 +22,7 @@ pub mod shared;
 pub mod site;
 pub mod update;
 pub mod usage;
+pub mod verse;
 
 use std::collections::HashMap;
 
@@ -118,6 +119,9 @@ pub fn methods() -> HashMap<&'static str, Method> {
         reports::crash_report_delete => Anyone,
         reports::report_ui_error => Anyone,
         reports::report_ui_crash => Anyone,
+        verse::is_verse_editor_enabled => Anyone,
+        verse::load_verse_diagnostics_cache => Anyone,
+        verse::save_verse_file_cache => Anyone,
     }
 }
 

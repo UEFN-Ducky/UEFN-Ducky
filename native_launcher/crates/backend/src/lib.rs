@@ -15,6 +15,7 @@ pub mod guard;
 pub mod perf;
 pub mod proc;
 pub mod store;
+pub mod verse_editor;
 
 use std::future::Future;
 use std::io;
