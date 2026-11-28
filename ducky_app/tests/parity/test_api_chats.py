@@ -289,6 +289,56 @@ def test_chats_made_signed_out_are_listed_the_same(seed, python, rust_store, log
     assert [(chat["id"], chat["title"]) for chat in waiting["chats"]] == [("mine", "Made signed out")]
 
 
+def test_chats_made_signed_out_are_added_or_deleted_the_same(both, seed, python, rust_store, login) -> None:
+    """Every chat exists twice: Rust acts on the ``r-`` set, Python on the ``p-`` set."""
+    from backend.store import sealed_files
+    from backend.uefn_plugins import data_crypto
+    from frontend.ui_web.chats import store
+
+    from .conftest import ADK, LOGIN
+
+    docs = []
+    for x in "rp":
+        docs += [
+            _doc(f"{x}-hub", folder_id=f"{x}-team", is_group=True), _doc(f"{x}-seat", folder_id=f"{x}-team", parent_conv_id=f"{x}-hub"),
+            _doc(f"{x}-alone", updated=30.0), _doc(f"{x}-child", parent_conv_id=f"{x}-alone"), _doc(f"{x}-bin", updated=25.0),
+        ]
+    seed([_folder(f"{x}-team", hub=f"{x}-hub") for x in "rp"], docs)
+    files = store._conversations_dir(None)
+    sealed_files.ensure_keypair("_local")
+    notes = {name: files / name / "attachments" / "note.txt" for name in ("r-alone", "p-alone", "r-bin", "p-bin")}
+    for note in notes.values():  # what a signed-out chat keeps on disk is sealed for this PC
+        note.parent.mkdir(parents=True)
+        note.write_bytes(b"hello")
+        assert sealed_files.seal_file(note, "_local") and sealed_files.is_sealed_file(note)
+
+    def each(method: str, *names: str) -> tuple[Any, Any]:
+        bare = lambda seen: json.loads(json.dumps(plain(seen)).replace('"p-', '"').replace('"r-', '"'))  # noqa: E731
+        both.pushed.clear()
+        theirs = python.call(method, [f"p-{name}" for name in names])
+        pushed = list(both.pushed)
+        ours, events = rust_store.call(method, [f"r-{name}" for name in names]), both._rust_events()
+        assert (bare(ours), bare(events)) == (bare(theirs), bare(pushed)), (ours, events, theirs, pushed)
+        return bare(theirs)[1]["result"], bare(pushed)
+
+    assert each("adopt_local_chats", "child") == ({"ok": True, "moved": [], "failed": []}, [])  # signed out: nothing waits
+    assert each("delete_local_chats", "bin") == ({"ok": True, "deleted": []}, [])
+    assert data_crypto.adk(login(LOGIN)) == ADK
+
+    answer, events = each("adopt_local_chats", "child", "", "nope")  # a chat brings the chat that started it
+    assert (answer["ok"], sorted(answer["moved"]), answer["failed"]) == (True, ["alone", "child"], []) and events == [{"type": "chats_changed", "open": False}]
+    assert [notes[name].read_bytes() for name in ("r-alone", "p-alone")] == [b"hello", b"hello"]  # opened: the account's now
+    assert sealed_files.is_sealed_file(notes["r-bin"]) and sealed_files.is_sealed_file(notes["p-bin"])
+
+    answer, events = each("delete_local_chats", "bin", "seat")  # a seat takes its whole group
+    assert sorted(answer["deleted"]) == ["bin", "hub", "seat"] and sorted(events[0]["removed_conv_ids"]) == ["bin", "hub", "seat"]
+    assert sorted(path.name for path in files.iterdir()) == ["p-alone", "r-alone"]
+    assert each("delete_local_chats") == ({"ok": True, "deleted": []}, [])
+
+    assert sorted(doc["id"] for doc in chats.conv_list(_LIST, with_messages=False)) == ["p-alone", "p-child", "r-alone", "r-child"]
+    assert _same(python, rust_store, "list_local_chats") == {"ok": True, "chats": []}
+
+
 def test_archive_is_never_renamed(both) -> None:
     answer, _, folders, _ = both.call(_FOLDERS, [], "rename_folder", " archive ", "Bin")
     assert answer == [200, {"ok": False, "error": "Cannot rename the Archive folder"}]
