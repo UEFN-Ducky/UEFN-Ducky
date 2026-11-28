@@ -1,7 +1,8 @@
 # A clean Mac for every install check: a fresh GitHub runner (Apple Silicon macos-26, Intel
 # macos-15-intel) installs the released DMG like a user, updates N-1 -> N in place and rolls
 # back from a broken update. Nobody has a Mac; run it from Windows:
-#   gh workflow run macos-install-check.yml -f job=all -f from_version=2.31.0
+#   gh workflow run macos-install-check.yml -f job=all -f from_version=2.31.0 \
+#     -f from_dmg_arm64=<store file id> -f from_dmg_x64=<store file id>   # ids: empty when N-1 is the feed's current
 #   gh run watch && gh run download -n macos-install-arm64
 name: macos-install-check
 
@@ -21,7 +22,17 @@ on:
         type: choice
         options: [install, update, rollback, all]
       from_version:
-        description: "update/rollback: the N-1 version to start from (its DMG on uefnducky.org/downloads/macos)"
+        description: "update/rollback: the N-1 version to start from"
+        required: false
+        default: ""
+        type: string
+      from_dmg_arm64:
+        description: "N-1 arm64 DMG Store file id (empty: N-1 is the feed's current release)"
+        required: false
+        default: ""
+        type: string
+      from_dmg_x64:
+        description: "N-1 x64 DMG Store file id (empty: N-1 is the feed's current release)"
         required: false
         default: ""
         type: string
@@ -35,7 +46,6 @@ env:
   DUCKY_SANDBOX: "1"
   CHANNEL: ${{ inputs.channel }}
   FROM_VERSION: ${{ inputs.from_version }}
-  DOWNLOADS: https://uefnducky.org/downloads/macos
 
 jobs:
   install:
@@ -134,11 +144,12 @@ jobs:
     timeout-minutes: 30
     env:
       ARCH: ${{ matrix.arch }}
+      FROM_DMG: ${{ matrix.arch == 'arm64' && inputs.from_dmg_arm64 || inputs.from_dmg_x64 }}
     steps:
+      - uses: actions/checkout@v5
       - name: Install N-1 into ~/Applications
         run: |
-          [ -n "$FROM_VERSION" ] || { echo "update needs from_version (N-1)"; exit 1; }
-          curl -fsSL -o old.dmg "$DOWNLOADS/UEFN-Ducky-$FROM_VERSION-macos-$ARCH.dmg"
+          python3 build/macos/fetch_old_dmg.py
           hdiutil attach -nobrowse -mountpoint /Volumes/ducky old.dmg
           mkdir -p ~/Applications && cp -R "/Volumes/ducky/UEFN Ducky.app" ~/Applications/
           hdiutil detach /Volumes/ducky
@@ -171,11 +182,12 @@ jobs:
     timeout-minutes: 30
     env:
       ARCH: ${{ matrix.arch }}
+      FROM_DMG: ${{ matrix.arch == 'arm64' && inputs.from_dmg_arm64 || inputs.from_dmg_x64 }}
     steps:
+      - uses: actions/checkout@v5
       - name: Install N-1 into ~/Applications
         run: |
-          [ -n "$FROM_VERSION" ] || { echo "rollback needs from_version (N-1)"; exit 1; }
-          curl -fsSL -o old.dmg "$DOWNLOADS/UEFN-Ducky-$FROM_VERSION-macos-$ARCH.dmg"
+          python3 build/macos/fetch_old_dmg.py
           hdiutil attach -nobrowse -mountpoint /Volumes/ducky old.dmg
           mkdir -p ~/Applications && cp -R "/Volumes/ducky/UEFN Ducky.app" ~/Applications/
           hdiutil detach /Volumes/ducky
