@@ -1,13 +1,16 @@
-"""The Verse editor's calls: its switch, the Problems list's cache, a file's history and
-the shadow ``.vproject``. The same answer, the same rows, the same events and the same files from
-both backends on a fixture island. No verse-lsp
-runs here, and nothing reads the person's own islands."""
+"""The Verse editor's calls: its switch, the Problems list's cache, a file's history, the
+shadow ``.vproject`` and its verse-lsp sessions. The same answer, the same rows, the same
+events and the same files from both backends on a fixture island. The verse-lsp is a
+stand-in built with the backend (never Epic's, never one found on this PC), and nothing
+reads the person's own islands."""
 
 from __future__ import annotations
 
 import json
 import os
 import shutil
+import socket
+import struct
 import time
 from pathlib import Path
 from typing import Any
@@ -16,7 +19,7 @@ import pytest
 
 from backend.store.repos import projects, settings
 
-from .parity_harness import plain
+from .parity_harness import backend_exe, plain
 from .test_api_project_files import _forget, _put
 from .test_store_chats import _sql
 
@@ -288,3 +291,191 @@ def test_an_island_without_its_digests_gets_the_same_shadow_vproject(tmp_path, r
     assert "FortniteGame" in paths["Verse"] and "FortniteGame" in paths["UnrealEngine"]
     assert paths["Fortnite"] == (own / "Fortnite").as_posix() and copy["packages"][3]["desc"]["settings"] == mine
     assert "FortniteGame" not in real.read_text(encoding="utf-8")  # UEFN's own file is never touched
+
+
+_KEY, _ACCEPT = "dGhlIHNhbXBsZSBub25jZQ==", b"s3pPLMBiTxaQ9kYGzzhZRbK+xOo="  # the WebSocket standard's own example
+_PORT_FILE = "fake-verse-lsp.port"  # the stand-in holds this loopback port open while it runs
+
+
+def _until(check: Any, seconds: float = 20.0) -> Any:
+    """What ``check`` answers once it answers something."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if found := check():
+            return found
+        time.sleep(0.05)
+    raise AssertionError("waited too long")
+
+
+def _started(file: Path, last: int = 0) -> int:
+    """The port of the stand-in started after the one on ``last``."""
+
+    def port() -> int:
+        text = file.read_text() if file.is_file() else ""
+        return int(text) if text and int(text) != last else 0
+
+    return _until(port)
+
+
+def _runs(port: int) -> bool:
+    try:
+        socket.create_connection(("127.0.0.1", port), 0.3).close()
+    except OSError:
+        return False
+    return True
+
+
+def _page(url: str) -> socket.socket:
+    """An editor page, connected to a session's WebSocket."""
+    page = socket.create_connection(("127.0.0.1", int(url.rsplit(":", 1)[1])), 10)
+    page.sendall(f"GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nsec-websocket-key: {_KEY}\r\n\r\n".encode())
+    head = b""
+    while not head.endswith(b"\r\n\r\n"):
+        head += page.recv(1)
+    assert head.startswith(b"HTTP/1.1 101") and _ACCEPT in head, head
+    return page
+
+
+def _say(page: socket.socket, text: str) -> None:
+    """One masked text frame, as a browser sends it."""
+    data, mask = text.encode(), b"\x01\x02\x03\x04"
+    size = bytes([0x80 | len(data)]) if len(data) < 126 else b"\xfe" + struct.pack("!H", len(data))
+    page.sendall(b"\x81" + size + mask + bytes(byte ^ mask[at % 4] for at, byte in enumerate(data)))
+
+
+def _ask(page: socket.socket, text: str) -> str:
+    """verse-lsp's answer to ``text``."""
+    from frontend.ui_web.terminal.ws_util import parse_ws_frame_ex
+
+    _say(page, text)
+    opcode, answer = parse_ws_frame_ex(page)
+    assert opcode == 1
+    return answer.decode()
+
+
+def _shown(status: dict) -> dict:
+    """A status without what differs by run: its port, and stderr lines still on their way."""
+    return {**status, "ws_url": status["ws_url"] and "ws://127.0.0.1:#", "stderr_tail": None}
+
+
+@pytest.fixture
+def idle(monkeypatch):
+    """A verse-lsp no page is connected to is stopped after 0.3 s, not five minutes. Ask
+    for it before ``lsp``: the Rust backend reads it when it starts."""
+    from frontend.ui_web.verse_editor.lsp import bridge
+
+    monkeypatch.setenv("DUCKY_VERSE_LSP_IDLE_MS", "300")
+    monkeypatch.setattr(bridge, "_IDLE_STOP_S", 0.3)
+
+
+@pytest.fixture
+def lsp(editor, monkeypatch):
+    """``editor``, with the stand-in verse-lsp as the copy both backends find first (so
+    neither looks for one on this PC). Every session is stopped at the end."""
+    from frontend.settings import default_app_data_dir
+    from frontend.ui_web.verse_editor.lsp import detect
+
+    exe = backend_exe()
+    fake = exe.parent / "examples" / f"fake_verse_lsp{exe.suffix}"
+    assert fake.is_file(), "the stand-in verse-lsp is not built: run `cargo build -p backend --examples` in native_launcher/"
+    cache = default_app_data_dir() / "verse-lsp"
+    cache.mkdir(parents=True, exist_ok=True)
+    shutil.copy(fake, cache / "verse-lsp.exe")
+    monkeypatch.setattr(detect, "_CACHE_DIR", cache)
+    yield editor
+    editor.python.api._verse_editor.stop_lsp()
+    if editor.rust.proc.poll() is None:
+        editor.rust.call("stop_verse_lsp")
+
+
+def test_a_windows_verse_lsp_serves_its_page_keeps_running_over_a_reload_and_says_how_it_ended(lsp):
+    island, port_file = lsp.island, lsp.island / _PORT_FILE
+
+    def story(call):
+        port_file.unlink(missing_ok=True)
+
+        def status() -> dict:
+            return call("get_verse_lsp_status", "w1")
+
+        def start(root: Any = "") -> dict:
+            return call("start_verse_lsp", str(root), "w1")
+
+        told: list[Any] = [status()]
+        first = start()
+        process = _started(port_file)
+        page = _page(first["ws_url"])
+        told += [_shown(first), _ask(page, '{"id":1,"method":"initialize"}')]
+        told.append(_ask(page, json.dumps({"id": 2, "text": "é" * 200}, ensure_ascii=False)))
+        told.append(_until(lambda: status()["stderr_tail"]))
+        # A second start finds it running.
+        again = start(island)
+        told += [_shown(again), again["ws_url"] == first["ws_url"]]
+        # The page reloads: the same process, on a new listener.
+        page.close()
+        told.append(_until(lambda: (now := status()) and not now["bridge_up"] and now))
+        back = start()
+        page = _page(back["ws_url"])
+        told += [_shown(back), back["ws_url"] != first["ws_url"], _ask(page, '{"id":3}'), int(port_file.read_text()) == process]
+        # It ends by itself: the status says how, and the next start runs a new one.
+        _say(page, '{"method":"exit"}')
+        told.append(_until(lambda: (now := status()) and now["last_exit_code"] == 3 and not now["bridge_up"] and now))
+        page.close()
+        told += [start(lsp.folder), _shown(start())]
+        fresh = _started(port_file, process)
+        told += [_until(lambda: status()["stderr_tail"]), _runs(fresh), call("stop_verse_lsp", "w1")]
+        told += [_until(lambda: not _runs(fresh)), status()]
+        lsp.open("")
+        told.append(start())
+        return told
+
+    told = lsp.each(story)[0]
+    off, started, hello, long, stderr = told[:5]
+    assert off["available"] and off["enabled"] and not off["running"] and off["project_root"] == ""
+    assert started["running"] and started["source"] == "appdata_cache" and started["project_root"] == str(island)
+    assert hello == '{"id":1,"method":"initialize"}' and "é" * 200 in long and stderr == ["fake verse-lsp up"]
+    assert told[6] is True and told[7]["proc_alive"] and told[9:12] == [True, '{"id":3}', True]
+    assert told[12]["error"] == "verse-lsp exited (code 3) — reopen a .verse file to reconnect"
+    assert told[13]["folder_project"] is True and told[14]["running"] and told[14]["last_exit_code"] is None
+    assert told[16:19] == [True, None, True] and not told[19]["proc_alive"] and told[20]["error"] == "No project root set"
+
+
+def test_a_verse_lsp_no_page_is_connected_to_is_stopped_and_three_windows_keep_theirs(idle, lsp):
+    port_file = lsp.island / _PORT_FILE
+
+    def story(call):
+        port_file.unlink(missing_ok=True)
+        ports: list[int] = []
+
+        def start(window: str) -> dict:
+            answer = call("start_verse_lsp", "", window)
+            ports.append(_started(port_file, ports[-1] if ports else 0))
+            return answer
+
+        page = _page(start("w1")["ws_url"])
+        _ask(page, "{}")
+        page.close()
+        told: list[Any] = [_until(lambda: not _runs(ports[0])), _shown(call("get_verse_lsp_status", "w1"))]
+        # A fourth window's start stops the window used longest ago.
+        for window in ("w1", "w2", "w3"):
+            start(window)
+        call("get_verse_lsp_status", "w1")
+        start("w4")
+        told += [_until(lambda: not _runs(ports[2])), [_runs(port) for port in ports[1:]], call("stop_verse_lsp")]
+        told.append(_until(lambda: not any(_runs(port) for port in ports)))
+        return told
+
+    told = lsp.each(story)[0]
+    assert told[0] is True and not told[1]["proc_alive"] and told[1]["last_exit_code"] is None
+    assert told[2:] == [True, [True, False, True, True], None, True]
+
+
+def test_no_verse_lsp_outlives_the_rust_backend(lsp):
+    """The stand-in stays 30 s after its input closes, so only being stopped ends it here."""
+    _write(lsp.island, _VERSE)
+    lsp.open(lsp.island)
+    status, reply = lsp.rust.call("start_verse_lsp", "", "w1")
+    assert status == 200 and reply["result"]["running"], reply
+    port = _started(lsp.island / _PORT_FILE)
+    assert _runs(port)
+    lsp.rust.close()
+    assert _until(lambda: not _runs(port), 10)
