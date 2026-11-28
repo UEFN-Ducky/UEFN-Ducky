@@ -700,6 +700,7 @@ def test_the_idle_loop_never_polls_the_queue_and_samples_cpu_once_a_day(monkeypa
     real_wait = us._wake.wait
     monkeypatch.setattr(us._wake, "wait", lambda t: counts["waits"].append(t) or real_wait(min(t, 0.05)))
     us._stop.clear()
+    us._wake.clear()  # an earlier test's stop() leaves it set: that first wake is not an idle one
     t = threading.Thread(target=us._loop, daemon=True)
     t.start()
     # Wait for a few heartbeat wakes, not a fixed 0.6 s: a loaded full-suite run starved the thread.
