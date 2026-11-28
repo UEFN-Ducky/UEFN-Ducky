@@ -105,6 +105,19 @@ def test_saving_the_other_backends_rows_again_writes_nothing(rust_store, account
     _same_chats(rust_store)
 
 
+def test_a_5000_message_chat_loads_the_same(rust_store, account) -> None:
+    long = [
+        {"role": "assistant" if i % 2 else "user", "content": f"message {i} é " + "word " * (i % 40), "ts": float(i),
+         "blocks": [{"name": "read_file", "arguments": {"n": i}, "result": {"text": "Z" * 9000 if i % 500 == 0 else "ok"}}]}
+        for i in range(5000)
+    ]
+    stats = _both(rust_store, long)  # saved by each, read by both, row for row
+    assert stats["inserted"] == 5000 and len(_payloads("r")) == 10
+    assert rust_store.store("chats", "messages_get", conv_id="p") == plain(long) and chats.messages_get("r") == long
+    tail = rust_store.store("chats", "messages_range", conv_id="p", start=4990, stop=None)
+    assert tail == plain(chats.messages_range("p", 4990, None)) and [m for _, m in tail[0]] == plain(long[4990:])
+
+
 def test_pages_tails_and_the_last_reply(rust_store, account) -> None:
     _both(rust_store, _ALL + [{"role": "assistant", "content": "   "}, {"role": "assistant", "content": 7}])
     for conv_id in ("r", "p", "missing"):
