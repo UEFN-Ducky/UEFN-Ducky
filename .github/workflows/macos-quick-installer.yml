@@ -83,7 +83,7 @@ jobs:
           import json, sys
           from http.server import BaseHTTPRequestHandler, HTTPServer
           mode, arch = sys.argv[1], sys.argv[2]
-          row = {"os": "macos", "arch": arch, "package": "app-zip", "url": "http://127.0.0.1:8766/bad.zip", "sha256": "0" * 64}
+          row = {"os": "macos", "arch": arch, "package": "app-zip", "url": "/files/bad.zip", "sha256": "0" * 64}
           payload = {"currentVersion": "9.9.9", "assets": [] if mode == "nobuild" else [row], "downloadsPaused": mode == "paused"}
           body = json.dumps({"payload": payload}).encode()
           class Handler(BaseHTTPRequestHandler):
@@ -98,7 +98,7 @@ jobs:
           EOF
           for mode in badsha paused nobuild; do
             python3 feed.py "$mode" "$ARCH" & srv=$!
-            sleep 1
+            for i in $(seq 1 30); do curl -s -o /dev/null http://127.0.0.1:8766/files/x && break; sleep 0.5; done
             out="$(DUCKY_STORE_URL=http://127.0.0.1:8766 "$inst" --headless --dest "$PWD/never" || true)"
             kill $srv; wait $srv 2>/dev/null || true
             echo "$mode: $out"
