@@ -556,6 +556,54 @@ def test_a_layout_that_cannot_be_saved_says_why(both, layout: dict, error: str) 
     assert _placed(docs)["free"] == ("", "")
 
 
+# --------------------------------------------------------------------------- group rosters
+
+# The outer group lists its nested group, and the outer lead is on the nested group's roster too.
+_NESTED = [
+    dict(doc, group_members=[*_ROSTER, {"member_conv_id": "hub2", "name": "Sub", "is_group": True}]) if doc["id"] == "hub"
+    else dict(doc, group_members=[{"member_conv_id": "m2", "write_allowed": []}, {"member_conv_id": " lead ", "name": "Lead: build"}]) if doc["id"] == "hub2"
+    else doc
+    for doc in _TEAM
+]
+
+
+@pytest.mark.parametrize(
+    ("group_id", "member_id", "error"),
+    [
+        ("hub", "m1", ""), ("hub", " lead ", ""), ("hub2", "lead", ""), ("hub2", "m2", ""), ("hub", "hub2", ""),
+        ("hub", "free", "Member not in this group"), ("hub", " ", "member_conv_id required"), ("hub", None, "member_conv_id required"),
+        ("free", "m1", "Not a group chat"), ("nope", "m1", "Not a group chat"), ("hub3", "m1", "Member not in this group"),
+    ],
+)
+def test_a_groups_leader_is_set_the_same(both, group_id: str, member_id: Any, error: str) -> None:
+    answer, events, _, docs = both.call(_TREE, _NESTED, "group_set_leader", group_id, member_id)
+    result = answer[1]["result"]
+    assert answer[1]["ok"] is True and result.get("error", "") == error, answer
+    assert [event["type"] for event in events] == ([] if error else ["chats_changed"])
+    if not error:
+        assert result["leader_conv_id"] == member_id.strip() == _teams(docs)[group_id][1]
+
+
+@pytest.mark.parametrize(
+    ("group_id", "member_id", "leader"),
+    [("hub", "lead", "m1"), ("hub", " m1 ", "lead"), ("hub", "hub2", "lead"), ("hub", "nope", "lead"), ("hub", "", "lead"), ("hub2", "m2", "lead"), ("hub2", "lead", "m2"), ("hub3", "x", "")],
+)
+def test_a_member_is_removed_the_same_and_a_leader_hands_over(both, group_id: str, member_id: str, leader: str) -> None:
+    answer, events, folders, docs = both.call(_TREE, _NESTED, "group_remove", group_id, member_id)
+    result = answer[1]["result"]
+    assert result["ok"] is True and result["leader_conv_id"] == leader == _teams(docs)[group_id][1], answer
+    assert member_id.strip() not in _teams(docs)[group_id][0] and [event["conv_id"] for event in events] == [group_id]
+    if member_id.strip() in ("lead", "m1", "m2"):  # out of the group's folder, on its own
+        assert _placed(docs)[member_id.strip()] == ("", "")
+    if member_id == "hub2":  # a nested group's folder goes to the top level
+        assert next(folder["parent_id"] for folder in folders if folder["id"] == "g2") == ""
+
+
+def test_only_a_group_has_members_to_remove(both) -> None:
+    answer, events, _, _ = both.call(_TREE, _NESTED, "group_remove", "free", "m1")
+    assert answer == [200, {"ok": True, "result": {"ok": False, "error": "Not a group chat"}}] and events == []
+
+
 def test_chats_that_were_never_ordered_are_numbered_newest_first(seed, python, rust_store) -> None:
     from frontend.ui_web.chats import conversations, saves
 
