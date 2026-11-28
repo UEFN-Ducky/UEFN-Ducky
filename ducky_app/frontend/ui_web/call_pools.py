@@ -135,6 +135,12 @@ _PLUGINS = frozenset({"list_mcp_servers", "get_skill_info", "list_coding_agents"
 _TERMINALS = frozenset({"terminal_list", "terminal_busy_many"})
 
 LANE_WAIT_TRACE_S = 2.0
+# Calls running right now: {lane: {worker thread id: (method, started)}}. A traced wait names
+# them: 566 waits in a week (Nov 27 2026) came in bursts with every bg worker busy, and only
+# the calls that waited were on record, never the ones that held the workers.
+_inflight: dict[str, dict[int, tuple[str, float]]] = {}
+_inflight_lock = threading.Lock()
+HOLDERS_MAX = 8
 
 _clock = time.monotonic
 
@@ -222,10 +228,23 @@ def submit(method: str, fn: Callable[..., Any], *args: Any) -> None:
     queued = _clock()
 
     def run() -> None:
-        waited = _clock() - queued
+        started = _clock()
+        waited = started - queued
         if waited > LANE_WAIT_TRACE_S:
-            _trace("ui_lane_wait", method, waited * 1000.0, lane=name, method=method, wait_ms=round(waited * 1000.0))
-        fn(*args)
+            _trace("ui_lane_wait", method, waited * 1000.0, lane=name, method=method, wait_ms=round(waited * 1000.0),
+                   holders=_holders(name, started))
+        me = threading.get_ident()
+        with _inflight_lock:
+            _inflight.setdefault(name, {})[me] = (method, started)
+        try:
+            fn(*args)
+        finally:
+            with _inflight_lock:
+                _inflight.get(name, {}).pop(me, None)
+            ran = _clock() - started
+            # The block lane is where calls are meant to take long (dialogs, voice, network).
+            if ran > LANE_WAIT_TRACE_S and name != "block":
+                _trace("ui_lane_run", method, ran * 1000.0, lane=name, method=method)
 
     if name == "input":
         from frontend.ui_web.remote_link.input_lane import input_lane
@@ -233,6 +252,13 @@ def submit(method: str, fn: Callable[..., Any], *args: Any) -> None:
         input_lane().submit(run)
         return
     lane(name).submit(run)
+
+
+def _holders(name: str, now: float) -> str:
+    """"method:seconds" of the calls ``name``'s workers are running, longest first."""
+    with _inflight_lock:
+        held = sorted(_inflight.get(name, {}).values(), key=lambda h: h[1])[:HOLDERS_MAX]
+    return ",".join(f"{m}:{now - t:.1f}" for m, t in held)
 
 
 def _trace(kind: str, name: str, ms: float, **meta: Any) -> None:

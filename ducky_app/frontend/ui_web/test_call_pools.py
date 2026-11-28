@@ -18,6 +18,7 @@ def fresh(monkeypatch):
     monkeypatch.setattr(call_pools, "_pools", {})
     monkeypatch.setattr(call_pools, "_flights", {})
     monkeypatch.setattr(call_pools, "_cache", {})
+    monkeypatch.setattr(call_pools, "_inflight", {})
     yield
 
 
@@ -353,3 +354,60 @@ def test_lane_wait_over_2s_is_traced(monkeypatch):
     assert ran.wait(5)
     waits = [m for k, m in traced if k == "ui_lane_wait"]
     assert waits and waits[-1]["lane"] == "urgent" and waits[-1]["method"] == "set_conversation_coding_agent"
+
+
+def test_a_traced_wait_names_the_calls_holding_the_lane(monkeypatch):
+    from frontend import perf_trace
+
+    assert call_pools.POOL_SIZES["urgent"] == 2
+    traced: list[tuple] = []
+    monkeypatch.setattr(perf_trace, "trace", lambda kind, name="", ms=0.0, **meta: traced.append((kind, meta)))
+    now = [0.0]
+    monkeypatch.setattr(call_pools, "_clock", lambda: now[0])
+    first, second, ran = threading.Event(), threading.Event(), threading.Event()
+    call_pools.submit("send_message", first.wait, 5)
+    call_pools.submit("plan_progress", second.wait, 5)
+    call_pools.submit("set_conversation_coding_agent", ran.set)
+    time.sleep(0.1)
+    now[0] = 3.0
+    first.set()  # one worker frees: the waiting call runs while plan_progress still holds the other
+    assert ran.wait(5)
+    wait = [m for k, m in traced if k == "ui_lane_wait"][-1]
+    assert wait["holders"] == "plan_progress:3.0"
+    # The call that freed the worker is on record too, with how long it held it.
+    assert ("ui_lane_run", "send_message") in [(k, m["method"]) for k, m in traced]
+    second.set()
+
+
+def test_a_call_that_raises_leaves_no_holder_behind():
+    done = threading.Event()
+
+    def boom():
+        try:
+            raise ValueError("nope")
+        finally:
+            done.set()
+
+    call_pools.submit("list_workflows", boom)
+    assert done.wait(5)
+    deadline = time.monotonic() + 5
+    while call_pools._inflight.get("bg") and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert not call_pools._inflight.get("bg")
+
+
+def test_a_long_call_on_the_block_lane_is_not_traced(monkeypatch):
+    from frontend import perf_trace
+
+    traced: list[str] = []
+    monkeypatch.setattr(perf_trace, "trace", lambda kind, name="", ms=0.0, **meta: traced.append(kind))
+    now = [0.0]
+    monkeypatch.setattr(call_pools, "_clock", lambda: now[0])
+    gate, done = threading.Event(), threading.Event()
+    call_pools.submit("pick_project_path", lambda: (gate.wait(5), done.set()))
+    time.sleep(0.1)
+    now[0] = 60.0  # a file dialog left open for a minute
+    gate.set()
+    assert done.wait(5)
+    time.sleep(0.1)
+    assert "ui_lane_run" not in traced
