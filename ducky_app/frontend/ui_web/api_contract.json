@@ -1,0 +1,2131 @@
+{
+ "add_gateway_account": [
+  "provider",
+  "label=''",
+  "kind='key'"
+ ],
+ "add_workflow_folder": [
+  "owner",
+  "path"
+ ],
+ "adopt_default_model": [
+  "conv_id",
+  "keep_agent=False"
+ ],
+ "adopt_local_chats": [
+  "conv_ids=None"
+ ],
+ "adopt_tab_into_this_focus_window": [
+  "focus_id",
+  "title",
+  "wid=''"
+ ],
+ "agent_broker_call": [
+  "operation",
+  "args=None",
+  "kwargs=None"
+ ],
+ "agent_send": [
+  "sender",
+  "to",
+  "message",
+  "expect_reply=False",
+  "response_id=''"
+ ],
+ "answer_late_question": [
+  "conv_id",
+  "text"
+ ],
+ "appdata_children": [
+  "rel=''"
+ ],
+ "appdata_clear": [
+  "rel"
+ ],
+ "appdata_clear_caches": [],
+ "appdata_delete": [
+  "rel"
+ ],
+ "appdata_delete_project": [
+  "slug"
+ ],
+ "appdata_open": [
+  "rel=''"
+ ],
+ "appdata_overview": [],
+ "appdata_projects": [],
+ "appdata_sweep": [],
+ "apply_auto_update_now": [],
+ "apply_ducky_config": [
+  "conv_id",
+  "config"
+ ],
+ "apply_ide": [
+  "kind"
+ ],
+ "apply_sidebar_layout": [
+  "payload"
+ ],
+ "apply_update": [],
+ "approve_workflow_node_code": [
+  "workflow_id",
+  "node_id",
+  "code_sha"
+ ],
+ "archive_agent_profile": [
+  "profile_id"
+ ],
+ "archive_changesets": [
+  "conv_id=''",
+  "group_id=''",
+  "run_id=''",
+  "archived=True"
+ ],
+ "begin_native_window_move": [],
+ "begin_native_window_resize": [
+  "edge"
+ ],
+ "bind_tk_root": [
+  "root"
+ ],
+ "bind_window": [
+  "window",
+  "on_hide",
+  "on_exit"
+ ],
+ "bridge_job_poll": [
+  "job_id"
+ ],
+ "bridge_job_start": [
+  "name",
+  "args=None"
+ ],
+ "browser_clear_browsing_data": [
+  "kinds='all'"
+ ],
+ "browser_pane_close": [
+  "pane_id"
+ ],
+ "browser_pane_command": [
+  "pane_id",
+  "command"
+ ],
+ "browser_pane_hide_all": [],
+ "browser_pane_list": [],
+ "browser_pane_navigate": [
+  "pane_id",
+  "url"
+ ],
+ "browser_pane_open": [
+  "pane_id",
+  "url=''",
+  "wid=''"
+ ],
+ "browser_pane_set_bounds": [
+  "pane_id",
+  "x",
+  "y",
+  "width",
+  "height",
+  "viewport_w=0.0",
+  "viewport_h=0.0",
+  "visible=True",
+  "why=''"
+ ],
+ "browser_pane_snapshot": [
+  "pane_id"
+ ],
+ "browser_pane_state": [
+  "pane_id"
+ ],
+ "browser_runtime_info": [],
+ "browser_site_security": [
+  "pane_id=''"
+ ],
+ "cache_font": [
+  "family=''"
+ ],
+ "cancel_agent": [
+  "conv_id=''"
+ ],
+ "cancel_update": [],
+ "capture_list_shield": [
+  "on=True"
+ ],
+ "chat_tool_view": [
+  "tool_names=None",
+  "paths=None"
+ ],
+ "check_auto_update_now": [],
+ "check_workflow_expression": [
+  "expression=''"
+ ],
+ "check_workflow_node_code": [
+  "code=''"
+ ],
+ "claim_tab": [
+  "tab_id",
+  "window_id=''"
+ ],
+ "classify_project_file": [
+  "relative_path"
+ ],
+ "clear_agent_permission_rules": [
+  "conv_id",
+  "agent=''"
+ ],
+ "clear_changesets": [
+  "conv_id=''",
+  "group_id=''",
+  "run_id=''",
+  "archived_only=False"
+ ],
+ "clear_chat_context_summary": [
+  "conv_id",
+  "project_root=None"
+ ],
+ "clear_errors": [],
+ "clear_log": [],
+ "clear_workflow_runs": [
+  "workflow_id"
+ ],
+ "close_all_focus_windows": [],
+ "close_focus_window": [
+  "focus_id",
+  "reason=''",
+  "wid=''"
+ ],
+ "close_this_window": [
+  "reason=''",
+  "wid=''",
+  "return_tabs=False"
+ ],
+ "close_uefn": [],
+ "coding_agent_login": [
+  "agent_id"
+ ],
+ "coding_agent_login_cancel": [
+  "agent_id"
+ ],
+ "coding_agent_login_status": [
+  "agent_id"
+ ],
+ "coding_agent_login_submit": [
+  "agent_id",
+  "code"
+ ],
+ "coding_agent_logout": [
+  "agent_id"
+ ],
+ "compile_verse_project": [],
+ "compress_chat_context": [
+  "conv_id",
+  "project_root=None",
+  "use_llm=True"
+ ],
+ "connect_verse_workflow": [],
+ "consume_dropped_file_paths": [
+  "names=None"
+ ],
+ "consume_pending_deep_links": [],
+ "consume_pending_open_files": [],
+ "continue_interrupted": [
+  "conv_id",
+  "mode",
+  "model",
+  "file_path=''",
+  "coding_agent=''"
+ ],
+ "copy_plan": [
+  "source_chat_id",
+  "dest_chat_id",
+  "source_project_root=None",
+  "dest_project_root=None"
+ ],
+ "copy_project_entry": [
+  "source_relative",
+  "dest_parent_relative"
+ ],
+ "copy_support_dump": [],
+ "copy_text": [
+  "text"
+ ],
+ "copy_workflow": [
+  "workflow_id",
+  "owner",
+  "move=False"
+ ],
+ "copy_workflow_folder": [
+  "owner_from",
+  "path",
+  "owner_to",
+  "parent_path=''",
+  "move=False"
+ ],
+ "crash_report_delete": [
+  "report_id=''"
+ ],
+ "crash_report_send": [
+  "report_id=''"
+ ],
+ "crash_reports": [],
+ "create_conversation": [
+  "folder_id",
+  "ducky_style=None",
+  "file_path=None",
+  "config=None"
+ ],
+ "create_folder": [
+  "name",
+  "parent_id=''"
+ ],
+ "create_mcp_plugin": [
+  "plugin_id",
+  "label",
+  "description=''",
+  "command=''",
+  "args=None",
+  "env=None",
+  "tool_prefix=''",
+  "intents=None",
+  "transport='stdio'",
+  "url=''",
+  "headers=None"
+ ],
+ "create_mcp_server": [
+  "server_id",
+  "label",
+  "description=''",
+  "command=''",
+  "args=None",
+  "env=None",
+  "tool_prefix=''",
+  "intents=None",
+  "transport='stdio'",
+  "url=''",
+  "headers=None"
+ ],
+ "create_plan": [
+  "chat_id",
+  "title",
+  "overview=''",
+  "body_markdown=''",
+  "todos=None",
+  "project_root=None",
+  "nodes=None"
+ ],
+ "create_plan_template": [
+  "title",
+  "overview=''",
+  "body_markdown=''",
+  "nodes=None"
+ ],
+ "create_project_file": [
+  "parent_relative",
+  "name",
+  "content=''"
+ ],
+ "create_project_folder": [
+  "parent_relative",
+  "name"
+ ],
+ "create_project_verse_file": [
+  "parent_relative",
+  "name",
+  "content=''"
+ ],
+ "create_skill_node": [
+  "pack_id",
+  "subskill_id",
+  "label",
+  "description=''",
+  "parent_id=''",
+  "load_condition=''"
+ ],
+ "create_skill_pack": [
+  "pack_id",
+  "label",
+  "description=''"
+ ],
+ "create_subskill": [
+  "pack_id",
+  "subskill_id",
+  "label",
+  "description=''",
+  "parent_id=''",
+  "load_condition=''"
+ ],
+ "create_task": [
+  "title",
+  "goal=''",
+  "conv_ids=None"
+ ],
+ "delete_agent_profile": [
+  "profile_id"
+ ],
+ "delete_appearance_profile": [
+  "profile_id"
+ ],
+ "delete_changeset_entries": [
+  "run_id",
+  "seqs"
+ ],
+ "delete_conversation": [
+  "conv_id",
+  "keep_inside=False"
+ ],
+ "delete_custom_ducky": [
+  "style_id"
+ ],
+ "delete_custom_verse_template": [
+  "template_id"
+ ],
+ "delete_folder": [
+  "folder_id",
+  "archive_members=False"
+ ],
+ "delete_local_chats": [
+  "conv_ids"
+ ],
+ "delete_mcp_plugin": [
+  "plugin_id"
+ ],
+ "delete_mcp_server": [
+  "server_id"
+ ],
+ "delete_memory_entry": [
+  "name",
+  "project_root=None"
+ ],
+ "delete_plan": [
+  "chat_id",
+  "project_root=None"
+ ],
+ "delete_plan_template": [
+  "template_id"
+ ],
+ "delete_project_entry": [
+  "relative_path"
+ ],
+ "delete_recent_project": [
+  "path"
+ ],
+ "delete_skill_pack": [
+  "pack_id"
+ ],
+ "delete_subskill": [
+  "pack_id",
+  "subskill_id"
+ ],
+ "delete_workflow": [
+  "workflow_id"
+ ],
+ "delete_workflow_template": [
+  "template_id"
+ ],
+ "deploy": [
+  "project_path=''"
+ ],
+ "detect_coding_agent_cli": [
+  "agent_id"
+ ],
+ "direct_rtc_answer": [
+  "session",
+  "answer=None",
+  "fingerprint=''",
+  "error=''"
+ ],
+ "direct_rtc_connect": [
+  "args=None"
+ ],
+ "disconnect_verse_workflow": [],
+ "discord_list_bots": [],
+ "discord_list_channels": [
+  "bot_id=''"
+ ],
+ "discord_list_members": [
+  "bot_id=''"
+ ],
+ "dismiss_workflow_run": [
+  "chat_id",
+  "run_id"
+ ],
+ "dock_focus_window_beside_main": [],
+ "draft_skill_pack": [
+  "description",
+  "model",
+  "provider=''"
+ ],
+ "draft_subskill": [
+  "pack_id",
+  "label",
+  "description",
+  "model",
+  "provider=''"
+ ],
+ "ducky_health_snapshot": [
+  "detail=False"
+ ],
+ "ducky_link_call": [
+  "to=''",
+  "method=''",
+  "args=None"
+ ],
+ "ducky_link_list": [],
+ "ducky_link_open": [
+  "key_id=''",
+  "name=''",
+  "chat_id=''"
+ ],
+ "ducky_link_rtc_connect": [
+  "args=None"
+ ],
+ "ducky_self_care_run": [
+  "action",
+  "target=''"
+ ],
+ "ducky_sync_copy": [
+  "key_id=''",
+  "chat_id=''"
+ ],
+ "ducky_sync_forget": [
+  "key_id=''"
+ ],
+ "ducky_sync_list": [],
+ "ducky_sync_now": [],
+ "duckyos_cancel_login": [],
+ "duckyos_get_status": [],
+ "duckyos_list_pcs": [],
+ "duckyos_login": [
+  "base_url=''",
+  "email=''",
+  "password=''"
+ ],
+ "duckyos_open_site": [
+  "path='/'"
+ ],
+ "duckyos_revoke_pc": [
+  "key_id=''"
+ ],
+ "duckyos_store_catalog": [
+  "etag=''"
+ ],
+ "duckyos_store_download": [
+  "slug",
+  "version=''",
+  "is_update=False"
+ ],
+ "duckyos_store_versions": [
+  "slug",
+  "latest_version=''"
+ ],
+ "duplicate_agent_profile": [
+  "profile_id"
+ ],
+ "edit_workflow_node_code": [
+  "workflow_id",
+  "node_id",
+  "code=None",
+  "edits=None",
+  "revert=False",
+  "expected_sha=None"
+ ],
+ "emit_workflow_trigger": [
+  "trigger_id",
+  "payload=None"
+ ],
+ "ensure_starter_llm_gateways": [
+  "force=False"
+ ],
+ "exit_all": [],
+ "export_skill_pack": [
+  "pack_id"
+ ],
+ "export_workflow_folder": [
+  "owner",
+  "path"
+ ],
+ "fingerprint_project_dirs": [
+  "relative_paths"
+ ],
+ "finish_first_run_setup": [],
+ "focus_tab": [
+  "tab_id",
+  "requesting_window=''"
+ ],
+ "gateway_account_status": [
+  "provider",
+  "account"
+ ],
+ "gateway_account_usage": [
+  "provider",
+  "account_id",
+  "refresh=False"
+ ],
+ "get_agent_permissions": [
+  "conv_id",
+  "agent=''"
+ ],
+ "get_agent_profile_editor_catalog": [],
+ "get_app_patch_notes": [],
+ "get_app_update_status": [],
+ "get_appearance": [],
+ "get_auto_update_status": [],
+ "get_changeset": [
+  "run_id"
+ ],
+ "get_changeset_entry_contents": [
+  "run_id",
+  "seq"
+ ],
+ "get_chat_account": [
+  "conv_id",
+  "provider"
+ ],
+ "get_chat_context_memory": [
+  "conv_id",
+  "project_root=None"
+ ],
+ "get_chat_mcp_plugins": [
+  "conv_id"
+ ],
+ "get_context_usage": [
+  "conv_id",
+  "model",
+  "mode='agent'",
+  "draft=''",
+  "include_content=False"
+ ],
+ "get_conversation_skills": [
+  "conv_id"
+ ],
+ "get_custom_verse_template": [
+  "template_id"
+ ],
+ "get_ducky_usage": [
+  "ducky_name=''",
+  "profile_id=''",
+  "days=7"
+ ],
+ "get_editor_workspace": [
+  "slug=''"
+ ],
+ "get_errors": [],
+ "get_ffmpeg_status": [],
+ "get_gateway_usage": [
+  "provider=''",
+  "model=''",
+  "refresh=False"
+ ],
+ "get_header_visibility": [],
+ "get_ide_statuses": [],
+ "get_install_info": [],
+ "get_key_status": [],
+ "get_listener_status": [
+  "refresh=False"
+ ],
+ "get_log": [],
+ "get_log_counts": [],
+ "get_mcp_config": [],
+ "get_mcp_diagnostics": [
+  "server_id=''",
+  "mode='agent'"
+ ],
+ "get_mcp_server_connection": [
+  "server_id"
+ ],
+ "get_mcp_server_tools": [
+  "server_id"
+ ],
+ "get_mcp_tools_catalog": [],
+ "get_memory_entry": [
+  "name",
+  "project_root=None"
+ ],
+ "get_memory_settings": [],
+ "get_models": [
+  "provider",
+  "refresh=False"
+ ],
+ "get_models_catalog": [
+  "refresh=False"
+ ],
+ "get_plan": [
+  "chat_id",
+  "project_root=None"
+ ],
+ "get_plan_template": [
+  "template_id"
+ ],
+ "get_project_info": [],
+ "get_provider_usage": [
+  "provider_id=''",
+  "days=7"
+ ],
+ "get_restore_tabs": [
+  "window_id=''"
+ ],
+ "get_session_files": [
+  "conv_id"
+ ],
+ "get_settings": [],
+ "get_sidebar_only_saved_bounds": [],
+ "get_skill_info": [],
+ "get_skill_pack_files": [
+  "pack_id"
+ ],
+ "get_skill_pack_graph": [
+  "pack_id"
+ ],
+ "get_tab_owner": [
+  "tab_id"
+ ],
+ "get_uefn_plugin_allowed_models": [
+  "plugin_id"
+ ],
+ "get_uefn_plugin_contributions": [],
+ "get_uefn_plugin_secret_labels": [
+  "plugin_id"
+ ],
+ "get_uefn_plugin_secret_status": [
+  "plugin_id",
+  "keys=None"
+ ],
+ "get_update_progress": [],
+ "get_urc_status": [
+  "project_root=''"
+ ],
+ "get_verse_lsp_status": [
+  "client_id=''"
+ ],
+ "get_verse_workflow_status": [],
+ "get_version": [],
+ "get_video_settings": [
+  "conv_id=''",
+  "model=''",
+  "coding_agent=''"
+ ],
+ "get_whats_new": [],
+ "get_window_bounds": [],
+ "get_workflow": [
+  "workflow_id"
+ ],
+ "get_workflow_node_code": [
+  "workflow_id",
+  "node_id",
+  "node=None"
+ ],
+ "get_workflow_tools_catalog": [],
+ "get_workflow_version": [
+  "workflow_id",
+  "version_id"
+ ],
+ "get_workspace_dock": [
+  "window_id='main'"
+ ],
+ "group_add_member": [
+  "group_id",
+  "conv_id",
+  "as_leader=False",
+  "move_folder=True"
+ ],
+ "group_check_lane": [
+  "group_id",
+  "member_conv_id",
+  "write_allowed"
+ ],
+ "group_create": [
+  "name=''",
+  "folder_id=''",
+  "open_tab=True",
+  "project_slug=''"
+ ],
+ "group_find_or_create": [
+  "name=''",
+  "folder_id=''",
+  "open_tab=False",
+  "caller_conv_id=''"
+ ],
+ "group_get_lanes": [
+  "group_id"
+ ],
+ "group_invite": [
+  "group_id",
+  "profile_id",
+  "model=''",
+  "write_allowed=None",
+  "name=''",
+  "for_agent=False"
+ ],
+ "group_lane_authorities": [
+  "group_id"
+ ],
+ "group_members": [
+  "group_id"
+ ],
+ "group_remove": [
+  "group_id",
+  "member_conv_id"
+ ],
+ "group_seat_profile": [
+  "group_id",
+  "profile_id",
+  "model=''",
+  "write_allowed=None",
+  "for_agent=False",
+  "exclude_conv_id=''",
+  "name=''"
+ ],
+ "group_set_leader": [
+  "group_id",
+  "member_conv_id"
+ ],
+ "group_set_member_lane": [
+  "group_id",
+  "member_conv_id",
+  "write_allowed",
+  "force=False",
+  "set_by='user'"
+ ],
+ "group_set_member_model": [
+  "group_id",
+  "member_conv_id",
+  "model=''"
+ ],
+ "group_stop": [
+  "group_id"
+ ],
+ "has_any_api_key": [],
+ "held_for_model": [
+  "conv_id"
+ ],
+ "hide_window": [],
+ "import_external_entries": [
+  "dest_parent_relative",
+  "source_paths"
+ ],
+ "import_local_workflows": [],
+ "import_skill_pack": [
+  "pack_id=''",
+  "replace=False"
+ ],
+ "import_skill_pack_bytes": [
+  "filename",
+  "data_base64",
+  "pack_id=''",
+  "replace=False"
+ ],
+ "import_sound_file": [],
+ "import_workflow_bundle": [
+  "bundle=None",
+  "owner='local'",
+  "parent_path=''",
+  "name=''"
+ ],
+ "inspect_project_folder": [
+  "path"
+ ],
+ "install_ffmpeg": [],
+ "install_uefn_plugin_bytes": [
+  "b64",
+  "source='local'"
+ ],
+ "instantiate_plan_template": [
+  "template_id",
+  "chat_id",
+  "project_root=None"
+ ],
+ "is_focus_window": [],
+ "is_verse_editor_enabled": [],
+ "is_window_maximized": [],
+ "keep_workflow_preview": [
+  "workflow_id",
+  "node_id"
+ ],
+ "launch_uefn": [],
+ "launch_uefn_project": [],
+ "launch_uninstall": [],
+ "list_agent_profiles": [],
+ "list_all_conversations": [
+  "all_projects=False"
+ ],
+ "list_changesets": [
+  "conv_id=''",
+  "group_id=''",
+  "limit=50",
+  "archived=False"
+ ],
+ "list_coding_agents": [],
+ "list_conversations": [
+  "folder_id"
+ ],
+ "list_conversations_for_file": [
+  "file_path"
+ ],
+ "list_custom_verse_templates": [],
+ "list_ducky_catalog": [],
+ "list_file_history": [
+  "relative_path"
+ ],
+ "list_focus_tab_ids": [],
+ "list_folders": [
+  "all_projects=False"
+ ],
+ "list_gateway_accounts": [
+  "provider"
+ ],
+ "list_generated_images": [],
+ "list_known_projects": [
+  "rescan=False"
+ ],
+ "list_local_chats": [],
+ "list_mcp_plugins": [],
+ "list_mcp_servers": [],
+ "list_media_makers": [],
+ "list_memory_entries": [
+  "project_root=None"
+ ],
+ "list_plan_templates": [],
+ "list_plans": [],
+ "list_plugin_references": [],
+ "list_project_file_paths": [
+  "query=''",
+  "limit=50"
+ ],
+ "list_project_files": [
+  "relative_path=''"
+ ],
+ "list_recent_projects": [],
+ "list_running_agents": [],
+ "list_saved_agent_permissions": [],
+ "list_tasks": [],
+ "list_uefn_plugins": [],
+ "list_window_views": [],
+ "list_workflow_nodes": [
+  "plugin=''",
+  "fields=''"
+ ],
+ "list_workflow_templates": [],
+ "list_workflow_versions": [
+  "workflow_id"
+ ],
+ "list_workflows": [],
+ "list_workspace_roots": [],
+ "live_overview": [],
+ "live_team_invite": [
+  "account=''",
+  "space=''",
+  "device=''"
+ ],
+ "live_team_join": [
+  "account=''",
+  "space=''",
+  "room=''"
+ ],
+ "live_team_leave": [
+  "account=''",
+  "space=''"
+ ],
+ "load_appearance_profile": [
+  "profile_id"
+ ],
+ "load_messages": [
+  "conv_id",
+  "before_id=None",
+  "limit=None",
+  "full_results=False"
+ ],
+ "load_tool_file_edits": [
+  "conv_id",
+  "row_id"
+ ],
+ "load_tool_result": [
+  "conv_id",
+  "row_id"
+ ],
+ "load_verse_diagnostics_cache": [
+  "project_root=''"
+ ],
+ "login_gateway_account": [
+  "provider",
+  "account",
+  "conv_id=''"
+ ],
+ "logout_gateway_account": [
+  "provider",
+  "account"
+ ],
+ "mark_whats_new_seen": [
+  "version=''"
+ ],
+ "memory_report": [
+  "start_trace=False",
+  "stop_trace=False",
+  "collect=True",
+  "top=30"
+ ],
+ "minimize_window": [],
+ "move_chats_to_project": [
+  "conv_ids",
+  "folder_ids",
+  "target_slug",
+  "folder_id=''"
+ ],
+ "move_conversation": [
+  "conv_id",
+  "folder_id"
+ ],
+ "move_project_entry": [
+  "source_relative",
+  "dest_parent_relative"
+ ],
+ "move_to_linux": [
+  "action",
+  "path",
+  "passphrase"
+ ],
+ "move_workflow_folder": [
+  "owner",
+  "path",
+  "new_path=''"
+ ],
+ "native_capture_start": [
+  "view",
+  "fps=30"
+ ],
+ "native_capture_stop": [
+  "view"
+ ],
+ "native_menu_pick": [
+  "token=''",
+  "command_id=-1"
+ ],
+ "notify_activity": [
+  "job=None"
+ ],
+ "notify_focus_tab_active": [
+  "focus_id",
+  "title"
+ ],
+ "open_appdata": [],
+ "open_asset_in_uefn": [
+  "relative_path"
+ ],
+ "open_custom_duckies_folder": [],
+ "open_devtools": [],
+ "open_download_page": [],
+ "open_external_url": [
+  "url"
+ ],
+ "open_focus_window": [
+  "focus_id",
+  "title",
+  "solo=False"
+ ],
+ "open_focus_window_at_point": [
+  "focus_id",
+  "title",
+  "screen_x",
+  "screen_y"
+ ],
+ "open_focus_window_group": [
+  "tabs=None"
+ ],
+ "open_mcp_plugins_folder": [],
+ "open_path_in_explorer": [
+  "path"
+ ],
+ "open_project_file": [
+  "relative_path"
+ ],
+ "open_project_path_in_explorer": [
+  "relative_path"
+ ],
+ "open_skill_pack_folder": [
+  "pack_id"
+ ],
+ "open_uefn_plugins_folder": [],
+ "pick_project_path": [],
+ "pick_workflow_files": [
+  "accept='any'",
+  "multiple=False"
+ ],
+ "pick_workflow_folder": [],
+ "plan_add_node": [
+  "chat_id=''",
+  "content=''",
+  "parent_id=''",
+  "index=None",
+  "project_root=None",
+  "template_id=''",
+  "kind=''",
+  "body_markdown=''"
+ ],
+ "plan_delete_node": [
+  "chat_id=''",
+  "node_id=''",
+  "project_root=None",
+  "template_id=''"
+ ],
+ "plan_launch": [
+  "chat_id"
+ ],
+ "plan_progress": [
+  "chat_ids",
+  "project_root=None"
+ ],
+ "plan_set_planned_assignee": [
+  "chat_id",
+  "node_id",
+  "who"
+ ],
+ "plan_update_node": [
+  "chat_id=''",
+  "node_id=''",
+  "content=''",
+  "status=''",
+  "project_root=None",
+  "template_id=''",
+  "kind=''",
+  "body_markdown=None",
+  "assignee=None"
+ ],
+ "plugin_cache_clear": [
+  "plugin_id",
+  "key=''"
+ ],
+ "plugin_cache_get": [
+  "plugin_id",
+  "key"
+ ],
+ "plugin_cache_set": [
+  "plugin_id",
+  "key",
+  "data=None"
+ ],
+ "plugin_call": [
+  "plugin_id",
+  "method",
+  "params=None"
+ ],
+ "plugin_data": [
+  "plugin_id",
+  "op",
+  "params=None"
+ ],
+ "plugin_data_copy_to_space": [
+  "plugin_id",
+  "space_id"
+ ],
+ "plugin_data_open_web": [
+  "plugin_id"
+ ],
+ "plugin_live_hold": [
+  "plugin_id",
+  "anchor",
+  "on=True",
+  "t=0.0",
+  "view=''"
+ ],
+ "plugin_live_holds": [
+  "plugin_id"
+ ],
+ "plugin_live_join": [
+  "plugin_id",
+  "room=''"
+ ],
+ "plugin_live_leave": [
+  "plugin_id"
+ ],
+ "plugin_live_member_states": [
+  "plugin_id"
+ ],
+ "plugin_live_send": [
+  "plugin_id",
+  "topic",
+  "data=None",
+  "to=''",
+  "fast=False"
+ ],
+ "plugin_live_set_my_state": [
+  "plugin_id",
+  "state=None"
+ ],
+ "plugin_live_share": [
+  "plugin_id",
+  "key",
+  "value=None"
+ ],
+ "plugin_live_shared": [
+  "plugin_id"
+ ],
+ "plugin_live_status": [
+  "plugin_id"
+ ],
+ "plugin_llm_cancel": [
+  "job_id"
+ ],
+ "plugin_llm_complete": [
+  "plugin_id",
+  "system=''",
+  "user=''",
+  "model=''"
+ ],
+ "plugin_llm_poll": [
+  "job_id"
+ ],
+ "plugin_llm_start": [
+  "plugin_id",
+  "system=''",
+  "user=''",
+  "model=''"
+ ],
+ "plugin_panel_error": [
+  "plugin_id",
+  "panel_id=''",
+  "kind=''",
+  "message=''",
+  "stack=''"
+ ],
+ "plugin_prefs_get_all": [],
+ "plugin_prefs_set": [
+  "plugin_id",
+  "prefs=None"
+ ],
+ "plugin_scope_activity": [
+  "plugin_id"
+ ],
+ "plugin_scope_ask": [
+  "plugin_id",
+  "unit"
+ ],
+ "plugin_scope_break": [
+  "plugin_id",
+  "unit"
+ ],
+ "plugin_scope_choices": [],
+ "plugin_scope_drop": [
+  "plugin_id",
+  "kind",
+  "key"
+ ],
+ "plugin_scope_history": [
+  "plugin_id",
+  "request=None"
+ ],
+ "plugin_scope_lock": [
+  "plugin_id",
+  "unit",
+  "name=''"
+ ],
+ "plugin_scope_mode": [
+  "plugin_id",
+  "mode"
+ ],
+ "plugin_scope_pull": [
+  "plugin_id",
+  "kind=''",
+  "key=''"
+ ],
+ "plugin_scope_push": [
+  "plugin_id",
+  "message=''"
+ ],
+ "plugin_scope_resolve": [
+  "plugin_id",
+  "kind",
+  "key",
+  "choice"
+ ],
+ "plugin_scope_restore": [
+  "plugin_id",
+  "request=None"
+ ],
+ "plugin_scope_retry": [
+  "plugin_id",
+  "key=''"
+ ],
+ "plugin_scope_save_unsent": [
+  "plugin_id",
+  "action='save'"
+ ],
+ "plugin_scope_set": [
+  "plugin_id",
+  "scope_id",
+  "options=None"
+ ],
+ "plugin_scope_set_all": [
+  "scope_id"
+ ],
+ "plugin_scope_status": [
+  "plugin_id"
+ ],
+ "plugin_scope_sync": [
+  "plugin_id",
+  "force=False"
+ ],
+ "plugin_scope_unlock": [
+  "plugin_id",
+  "unit"
+ ],
+ "plugin_team_overview": [
+  "space=''",
+  "etag=''"
+ ],
+ "plugin_translate_batch_poll": [
+  "job_id"
+ ],
+ "plugin_translate_batch_start": [
+  "plugin_id",
+  "language",
+  "strings=None",
+  "model=''"
+ ],
+ "plugin_tts_poll": [
+  "job_id"
+ ],
+ "plugin_tts_start": [
+  "plugin_id",
+  "text=''",
+  "voice_id=''"
+ ],
+ "plugin_tts_voices_poll": [
+  "job_id"
+ ],
+ "plugin_tts_voices_start": [
+  "plugin_id"
+ ],
+ "post_team_message": [
+  "sender_id",
+  "receiver_id",
+  "body=''"
+ ],
+ "project_file_media_url": [
+  "relative_path"
+ ],
+ "prompt_save_skill_pack_export": [
+  "filename",
+  "data_base64"
+ ],
+ "pull_editor_log": [],
+ "push_appearance_live": [
+  "data"
+ ],
+ "push_verse_changes": [
+  "verse_only=True"
+ ],
+ "queue_file_pick": [
+  "paths=None",
+  "cancel=False"
+ ],
+ "raise_focus_window": [
+  "focus_id"
+ ],
+ "read_file_history_entry": [
+  "relative_path",
+  "entry_id"
+ ],
+ "read_import_drop_target": [],
+ "read_project_file": [
+  "relative_path"
+ ],
+ "record_external_file_change": [
+  "relative_path",
+  "previous_content",
+  "new_content"
+ ],
+ "reload_uefn_plugin": [
+  "plugin_id"
+ ],
+ "remote_deny_methods": [],
+ "remote_device_remove": [
+  "viewer_id=''"
+ ],
+ "remote_devices_list": [],
+ "remote_pair_decide": [
+  "viewer_id=''",
+  "allow=False"
+ ],
+ "remote_set_enabled": [
+  "enabled=False"
+ ],
+ "remote_sign_out_all": [],
+ "remote_status": [],
+ "remove_agent_permission_rule": [
+  "conv_id",
+  "rule",
+  "agent=''"
+ ],
+ "remove_ffmpeg": [],
+ "remove_gateway_account": [
+  "provider",
+  "account"
+ ],
+ "rename_appearance_profile": [
+  "profile_id",
+  "name"
+ ],
+ "rename_conversation": [
+  "conv_id",
+  "title"
+ ],
+ "rename_folder": [
+  "folder_id",
+  "name"
+ ],
+ "rename_gateway_account": [
+  "provider",
+  "account",
+  "label"
+ ],
+ "rename_project_entry": [
+  "source_relative",
+  "new_name"
+ ],
+ "reorder_gateway_accounts": [
+  "provider",
+  "ids=None"
+ ],
+ "replace_workspace": [
+  "query",
+  "replacement",
+  "case_sensitive=False",
+  "whole_word=False"
+ ],
+ "report_editor_state": [
+  "relative_path",
+  "state"
+ ],
+ "report_focus_window_layout": [
+  "birth_tab_id",
+  "layout"
+ ],
+ "report_open_tabs": [
+  "window_id=''",
+  "tab_ids=None"
+ ],
+ "report_plugin_panel": [
+  "window_id=''",
+  "tab_id=''",
+  "visible=True",
+  "open=True"
+ ],
+ "report_ui_crash": [
+  "payload=None"
+ ],
+ "report_ui_error": [
+  "source='ui'",
+  "message=''"
+ ],
+ "report_ui_perf": [
+  "entries=None"
+ ],
+ "report_update_ui": [
+  "state=None"
+ ],
+ "resend_last_user_message": [
+  "conv_id",
+  "text",
+  "mode",
+  "model",
+  "file_path=''",
+  "attachments=None",
+  "coding_agent=''"
+ ],
+ "reset_context": [
+  "conv_id",
+  "segments",
+  "mode='agent'",
+  "model=''"
+ ],
+ "reset_skill_pack": [
+  "pack_id"
+ ],
+ "restart_listener": [],
+ "restart_uefn_project": [],
+ "restore_context": [
+  "conv_id",
+  "segments",
+  "mode='agent'",
+  "model=''"
+ ],
+ "restore_focus_windows": [
+  "groups=None"
+ ],
+ "restore_trashed_entry": [
+  "trash_token"
+ ],
+ "return_tab_to_main": [
+  "focus_id",
+  "title",
+  "wid=''"
+ ],
+ "revert_changeset": [
+  "run_id",
+  "force=False",
+  "program=''"
+ ],
+ "revert_changeset_entry": [
+  "run_id",
+  "seq",
+  "force=False",
+  "step=False"
+ ],
+ "revoke_saved_agent_permission": [
+  "conv_id",
+  "rule"
+ ],
+ "rewind_to_message": [
+  "conv_id",
+  "row_id",
+  "text=''"
+ ],
+ "rtc_event": [
+  "peer",
+  "kind",
+  "payload=None"
+ ],
+ "rtc_reply": [
+  "request_id",
+  "result=None"
+ ],
+ "rtc_signal": [
+  "session_id",
+  "payload"
+ ],
+ "run_held_messages": [
+  "conv_id",
+  "model",
+  "coding_agent=''"
+ ],
+ "run_network_test": [],
+ "run_workflow": [
+  "workflow_id",
+  "prompt=''",
+  "files=None",
+  "caller_conv_id=''",
+  "payload=None",
+  "trigger_id=''",
+  "starter_id=''"
+ ],
+ "run_workflow_node": [
+  "workflow_id",
+  "node_id",
+  "approve_spend=False"
+ ],
+ "sandbox_apps": [],
+ "sandbox_call": [
+  "name",
+  "args=None"
+ ],
+ "sandbox_delete": [
+  "conv_id"
+ ],
+ "sandbox_open_folder": [
+  "conv_id"
+ ],
+ "sandbox_relaunch": [
+  "conv_id",
+  "name"
+ ],
+ "sandbox_status": [
+  "conv_id"
+ ],
+ "sandbox_stop_program": [
+  "conv_id",
+  "pid=0"
+ ],
+ "save_agent_profile": [
+  "profile"
+ ],
+ "save_agent_profile_override": [
+  "bundled_id",
+  "patch"
+ ],
+ "save_agent_settings": [
+  "patch"
+ ],
+ "save_appearance": [
+  "patch"
+ ],
+ "save_appearance_profile": [
+  "name"
+ ],
+ "save_chat_file": [
+  "conv_id",
+  "name=''",
+  "data_base64=''"
+ ],
+ "save_custom_verse_template": [
+  "name",
+  "icon",
+  "content=''",
+  "template_id=''",
+  "folder=''",
+  "files_json=''"
+ ],
+ "save_editor_workspace": [
+  "payload"
+ ],
+ "save_first_run_progress": [
+  "step"
+ ],
+ "save_header_visibility": [
+  "payload"
+ ],
+ "save_mcp_server_connection": [
+  "server_id",
+  "transport",
+  "url=''",
+  "command=''",
+  "args=None",
+  "values=None"
+ ],
+ "save_memory_entry": [
+  "name",
+  "content",
+  "description=''",
+  "author=''",
+  "project_root=None"
+ ],
+ "save_pack_manifest": [
+  "pack_id",
+  "patch"
+ ],
+ "save_plan_as_template": [
+  "chat_id",
+  "project_root=None"
+ ],
+ "save_skill_layout": [
+  "pack_id",
+  "layout"
+ ],
+ "save_skill_node": [
+  "pack_id",
+  "node_id",
+  "patch"
+ ],
+ "save_subskill": [
+  "pack_id",
+  "subskill_id",
+  "text"
+ ],
+ "save_verse_file_cache": [
+  "relative_path",
+  "errors",
+  "warnings",
+  "items=None",
+  "project_root=''"
+ ],
+ "save_voice_lane_settings": [
+  "patch"
+ ],
+ "save_workflow": [
+  "doc=None",
+  "owner=''",
+  "**extra"
+ ],
+ "save_workflow_template": [
+  "name",
+  "description=''",
+  "icon='\u26a1'",
+  "graph_json=''",
+  "template_id=''",
+  "category=''",
+  "owner=''",
+  "folder=''"
+ ],
+ "save_workspace_dock": [
+  "payload"
+ ],
+ "scan_verse_diagnostics": [
+  "project_root=''",
+  "full=False"
+ ],
+ "search_query": [
+  "text",
+  "kind='skills'",
+  "limit=20"
+ ],
+ "search_rebuild": [],
+ "search_status": [],
+ "search_workspace": [
+  "query",
+  "scope='both'",
+  "case_sensitive=False",
+  "whole_word=False",
+  "max_results=500"
+ ],
+ "send_message": [
+  "conv_id",
+  "text",
+  "mode",
+  "model",
+  "file_path=''",
+  "attachments=None",
+  "coding_agent=''"
+ ],
+ "set_agent_allow_everything": [
+  "conv_id",
+  "on"
+ ],
+ "set_agent_permission_mode": [
+  "conv_id",
+  "mode",
+  "agent=''"
+ ],
+ "set_chat_account": [
+  "conv_id",
+  "provider",
+  "account_id=''"
+ ],
+ "set_conversation_coding_agent": [
+  "conv_id",
+  "coding_agent",
+  "model=''",
+  "provider=''"
+ ],
+ "set_conversation_ducky_style": [
+  "conv_id",
+  "ducky_style",
+  "ducky_personality=None"
+ ],
+ "set_conversation_skill_selection": [
+  "conv_id",
+  "enabled_packs",
+  "enabled_subskills"
+ ],
+ "set_conversation_skills": [
+  "conv_id",
+  "filenames"
+ ],
+ "set_conversation_thinking_effort": [
+  "conv_id",
+  "effort='off'"
+ ],
+ "set_default_enabled_skills": [
+  "filenames"
+ ],
+ "set_default_skill_selection": [
+  "enabled_packs",
+  "enabled_subskills"
+ ],
+ "set_gateway_account": [
+  "provider",
+  "account"
+ ],
+ "set_gateway_account_key": [
+  "provider",
+  "account",
+  "key=''",
+  "base_url=None"
+ ],
+ "set_gateway_auto_switch": [
+  "provider",
+  "on=True"
+ ],
+ "set_import_drop_target": [
+  "dest_parent_relative=''"
+ ],
+ "set_mcp_config": [
+  "text"
+ ],
+ "set_mcp_plugin_enabled": [
+  "plugin_id",
+  "enabled"
+ ],
+ "set_mcp_server_enabled": [
+  "server_id",
+  "enabled"
+ ],
+ "set_memory_settings": [
+  "patch=None"
+ ],
+ "set_model": [
+  "model_id",
+  "provider=''"
+ ],
+ "set_muted": [
+  "conv_id",
+  "muted"
+ ],
+ "set_project_root": [
+  "path"
+ ],
+ "set_sidebar_only_layout": [
+  "enabled"
+ ],
+ "set_skill_pack_enabled": [
+  "pack_id",
+  "enabled"
+ ],
+ "set_uefn_plugin_allowed_models": [
+  "plugin_id",
+  "models=None"
+ ],
+ "set_uefn_plugin_enabled": [
+  "plugin_id",
+  "enabled",
+  "trust_local=False"
+ ],
+ "set_uefn_plugin_secret": [
+  "plugin_id",
+  "key",
+  "value"
+ ],
+ "set_video_settings": [
+  "patch=None"
+ ],
+ "set_visible_chats": [
+  "ids=None",
+  "viewer_id=''"
+ ],
+ "set_visible_terminals": [
+  "ids=None",
+  "viewer_id=''"
+ ],
+ "set_window_bounds": [
+  "x",
+  "y",
+  "width",
+  "height"
+ ],
+ "set_workflow_editor_prefs": [
+  "prefs=None"
+ ],
+ "set_workflow_folder": [
+  "workflow_id",
+  "folder=''"
+ ],
+ "set_workflow_run_here": [
+  "workflow_id",
+  "on"
+ ],
+ "snapshot_file_history": [
+  "relative_path",
+  "content"
+ ],
+ "snip_screen": [
+  "conv_id=''"
+ ],
+ "space_reset_settle": [
+  "space_id",
+  "action"
+ ],
+ "stage_video_attachment": [
+  "conv_id=''",
+  "name=''",
+  "mime=''",
+  "data_base64=''"
+ ],
+ "start_verse_lsp": [
+  "project_root=''",
+  "client_id=''"
+ ],
+ "starter_llm_onboard_pending": [],
+ "starter_setup_status": [],
+ "stat_project_file": [
+  "relative_path"
+ ],
+ "steer_message": [
+  "conv_id",
+  "steer_id",
+  "text"
+ ],
+ "stop_verse_diagnostics_scan": [
+  "project_root=''"
+ ],
+ "stop_verse_lsp": [
+  "client_id=''"
+ ],
+ "stop_workflow": [
+  "workflow_id",
+  "run_id=''"
+ ],
+ "store_action": [
+  "action",
+  "arg=''"
+ ],
+ "store_overview": [],
+ "store_table_preview": [
+  "table",
+  "limit=50",
+  "offset=0"
+ ],
+ "submit_feedback": [
+  "payload=None"
+ ],
+ "swarm_preview": [
+  "goal",
+  "jobs",
+  "detail=2",
+  "agents='auto'",
+  "max_agents=8",
+  "per_group=5",
+  "edits=None"
+ ],
+ "swarm_suggest": [
+  "chat_id",
+  "project_root=None"
+ ],
+ "team_keeper_status": [
+  "chat_id"
+ ],
+ "terminal_approve_command": [
+  "request_id",
+  "scope='once'",
+  "answered_in=''"
+ ],
+ "terminal_busy": [
+  "session_id"
+ ],
+ "terminal_busy_many": [
+  "session_ids"
+ ],
+ "terminal_hold": [
+  "session_id"
+ ],
+ "terminal_kill": [
+  "session_id"
+ ],
+ "terminal_let_go": [
+  "session_id"
+ ],
+ "terminal_list": [],
+ "terminal_pending_commands": [],
+ "terminal_read_output": [
+  "session_id",
+  "max_chars=8000"
+ ],
+ "terminal_reject_command": [
+  "request_id",
+  "reason=''"
+ ],
+ "terminal_request_command": [
+  "session_id",
+  "command",
+  "source=''",
+  "conv_id=''",
+  "agent_run=False",
+  "wait=True",
+  "background=False",
+  "approval_timeout_s=120.0",
+  "command_timeout_s=300.0",
+  "auto_approve=False",
+  "expect_minutes=0.0",
+  "early_return=True"
+ ],
+ "terminal_resize": [
+  "session_id",
+  "cols",
+  "rows"
+ ],
+ "terminal_spawn": [
+  "shell='bash'",
+  "cwd=''",
+  "title=''",
+  "push_open=False",
+  "conv_id=''",
+  "reuse_idle=False",
+  "activate=True",
+  "from_agent=False"
+ ],
+ "test_ide": [
+  "kind"
+ ],
+ "test_key": [
+  "provider",
+  "key=''",
+  "base_url=''",
+  "for_account=False"
+ ],
+ "test_mcp_plugin": [
+  "plugin_id"
+ ],
+ "test_mcp_server": [
+  "server_id"
+ ],
+ "test_uefn_plugin_secret": [
+  "plugin_id",
+  "key",
+  "value=''"
+ ],
+ "test_workflow_node": [
+  "workflow_id",
+  "node_id",
+  "code=None",
+  "inputs=None",
+  "settings=None",
+  "dry_run=False"
+ ],
+ "tester_create_chat": [
+  "device_label=''"
+ ],
+ "tester_list_devices": [],
+ "tester_list_tests": [],
+ "tester_results": [
+  "last_n=500",
+  "since_offset=0"
+ ],
+ "tester_run_tests": [
+  "start_session=False"
+ ],
+ "tester_scaffold": [
+  "overwrite=False"
+ ],
+ "tester_simulate": [
+  "device",
+  "event='InteractedWithEvent'",
+  "snapshot_json=''"
+ ],
+ "toggle_maximize": [],
+ "ui_rpc_ack": [
+  "request_id"
+ ],
+ "ui_rpc_active": [
+  "client_id",
+  "active=True"
+ ],
+ "ui_rpc_claim": [
+  "request_id"
+ ],
+ "ui_rpc_pending_questions": [],
+ "ui_rpc_respond": [
+  "request_id",
+  "payload=None"
+ ],
+ "unarchive_agent_profile": [
+  "profile_id"
+ ],
+ "uninstall_uefn_plugin": [
+  "plugin_id",
+  "erase_data=False"
+ ],
+ "update_active_appearance_profile": [],
+ "update_agent_plugin": [
+  "conv_id",
+  "agent=''"
+ ],
+ "update_plan": [
+  "chat_id",
+  "todos=None",
+  "title=''",
+  "overview=''",
+  "body_markdown=''",
+  "merge=True",
+  "status=''",
+  "project_root=None",
+  "nodes=None"
+ ],
+ "update_plan_template": [
+  "template_id",
+  "title=''",
+  "overview=''",
+  "body_markdown=''",
+  "nodes=None"
+ ],
+ "upload_custom_ducky": [
+  "filename",
+  "png_base64"
+ ],
+ "urc_commit": [
+  "message=''",
+  "project_root=''"
+ ],
+ "urc_push": [
+  "project_root=''"
+ ],
+ "usage_track": [
+  "name",
+  "props=None"
+ ],
+ "use_workflow_template": [
+  "template_id",
+  "owner='local'",
+  "parent_path=''",
+  "name=''"
+ ],
+ "uses_native_window_chrome": [],
+ "voice_create_realtime_token": [],
+ "voice_lane_settings": [],
+ "voice_lane_turn": [
+  "conv_id",
+  "text",
+  "work_status=''",
+  "agent_running=False",
+  "model=''"
+ ],
+ "voice_open_windows_settings": [
+  "page"
+ ],
+ "voice_summarize_reply": [
+  "assistant_text",
+  "model=''"
+ ],
+ "voice_transcribe_audio": [
+  "b64_audio",
+  "mime='audio/webm'"
+ ],
+ "voice_whisper_install": [],
+ "voice_whisper_installed": [],
+ "voice_whisper_transcribe": [
+  "b64_audio"
+ ],
+ "voice_win_stt_cancel": [
+  "session"
+ ],
+ "voice_win_stt_poll": [
+  "session",
+  "cursor=0",
+  "wait_ms=400"
+ ],
+ "voice_win_stt_prewarm": [],
+ "voice_win_stt_start": [
+  "lang=''"
+ ],
+ "voice_win_stt_stop": [
+  "session"
+ ],
+ "voice_win_tts_poll": [
+  "job_id"
+ ],
+ "voice_win_tts_start": [
+  "text",
+  "voice_id=''"
+ ],
+ "voice_win_tts_voices_start": [],
+ "wait_for_agent_idle": [
+  "conv_id",
+  "timeout=2.0"
+ ],
+ "window_box": [
+  "hwnd"
+ ],
+ "window_input": [
+  "hwnd",
+  "event"
+ ],
+ "window_spotlight_replay": [
+  "args=None"
+ ],
+ "window_text_focus": [
+  "hwnd"
+ ],
+ "workflow_code_api": [
+  "tools=None"
+ ],
+ "workflow_editor_prefs": [],
+ "workflow_owners": [
+  "refresh=False"
+ ],
+ "workflow_run_snapshot": [],
+ "workflow_sync": [
+  "force=False",
+  "space_id=''",
+  "upload=False"
+ ],
+ "write_project_file": [
+  "relative_path",
+  "content"
+ ]
+}
