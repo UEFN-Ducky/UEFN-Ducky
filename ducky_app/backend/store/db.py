@@ -747,6 +747,25 @@ def reset_for_tests() -> None:
 # writing its meta row hung both threads for good.
 _write_lock = threading.RLock()
 _savepoints = itertools.count()
+# A write that took this long, waits included, goes to the perf log (kind ``db_write``):
+# chat saves spent 56% of a week's save time waiting for the write lock (Nov 27 2026) and
+# nothing said who held it, or whether the holder was this process or another one.
+WRITE_TRACE_S = 0.5
+
+
+def _note_slow_write(wait_local: float, wait_sqlite: float, held: float, caller: str) -> None:
+    """``wait_local``: queued behind this process's writers. ``wait_sqlite``: BEGIN waited on
+    another process. ``held``: BEGIN to COMMIT. Called after the lock is released."""
+    try:
+        from frontend.perf_trace import trace
+
+        trace(
+            "db_write", caller, (wait_local + wait_sqlite + held) * 1000.0,
+            wait_local_ms=round(wait_local * 1000.0), wait_sqlite_ms=round(wait_sqlite * 1000.0),
+            held_ms=round(held * 1000.0), thread=threading.current_thread().name,
+        )
+    except Exception:  # noqa: BLE001 — tracing never fails a write
+        pass
 
 
 @contextmanager
@@ -769,16 +788,41 @@ def write_txn(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
             else:
                 conn.execute(f"RELEASE {name}")
         return
-    with _write_lock:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield conn
-        except BaseException:
-            conn.execute("ROLLBACK")
-            raise
-        else:
-            conn.execute("COMMIT")
+    t0 = time.perf_counter()
+    t_locked = t_begun = 0.0
+    try:
+        with _write_lock:
+            t_locked = time.perf_counter()
+            conn.execute("BEGIN IMMEDIATE")
+            t_begun = time.perf_counter()
+            try:
+                yield conn
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+    finally:
+        t_end = time.perf_counter()
+        if t_end - t0 >= WRITE_TRACE_S:
+            # A BEGIN that gave up (busy timeout) never got the lock: all of it was waiting.
+            t_locked = t_locked or t_end
+            t_begun = t_begun or t_end
+            _note_slow_write(t_locked - t0, t_begun - t_locked, t_end - t_begun, _write_caller())
     _checkpoint_soon(conn)
+
+
+def _write_caller() -> str:
+    """"file.py:line" of the code that opened the outermost ``write_txn``."""
+    try:
+        frame = sys._getframe(2)  # 0 here, 1 write_txn
+        while frame is not None and frame.f_code.co_filename.endswith("contextlib.py"):
+            frame = frame.f_back
+        if frame is None:
+            return ""
+        return f"{os.path.basename(frame.f_code.co_filename)}:{frame.f_lineno}"
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 _ckpt_cv = threading.Condition()
