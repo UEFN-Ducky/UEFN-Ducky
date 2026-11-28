@@ -1,7 +1,6 @@
 //! The Verse editor's calls (`frontend/ui_web/verse_editor/api.py`): its switch, the
-//! Problems list's cache, its verse-lsp, the project scan and UEFN's workflow server.
-//! ponytail: revision control is still the Python backend's; it moves here with its
-//! own methods.
+//! Problems list's cache, its verse-lsp, the project scan, UEFN's workflow server and
+//! the source control pane's `urc.exe` calls.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,7 +14,7 @@ use super::Api;
 use crate::store::misc;
 use crate::store::pyjson::{int, pystr, truthy};
 use crate::verse_editor::diagnostics::{self, Files};
-use crate::verse_editor::{lsp, scan, workflow};
+use crate::verse_editor::{lsp, scan, urc, workflow};
 
 type Fields = Map<String, Value>;
 
@@ -216,6 +215,30 @@ pub async fn push_verse_changes(api: Arc<Api>, args: Fields) -> Result<Value, St
     let verse_only = args.get("verse_only").cloned().unwrap_or(Value::Bool(true));
     let message = workflow::request(&api, "pushChanges", verse_only, workflow::LIMIT).await?;
     Ok(json!({"message": pystr(&message), "status": workflow::status()}))
+}
+
+/// The island a revision control call is about, spelled as it was given: the one
+/// named, else the open one.
+async fn island(api: &Api, args: &Fields) -> Result<String, String> {
+    let asked = given(args, "project_root").trim().to_string();
+    if !asked.is_empty() {
+        return Ok(asked);
+    }
+    let settings = load(api).await?;
+    let open = settings.get("uefn_project_root");
+    Ok(if truthy(open) { pystr(open).trim().to_string() } else { String::new() })
+}
+
+pub async fn get_urc_status(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    urc::get_status(&island(&api, &args).await?).await
+}
+
+pub async fn urc_commit(api: Arc<Api>, args: Fields) -> Result<Value, String> {
+    urc::commit(&island(&api, &args).await?, &given(&args, "message")).await
+}
+
+pub async fn urc_push(_api: Arc<Api>, _args: Fields) -> Result<Value, String> {
+    Ok(urc::push())
 }
 
 /// The editor's own verse-lsp checked one file: keep its result, and tell every window

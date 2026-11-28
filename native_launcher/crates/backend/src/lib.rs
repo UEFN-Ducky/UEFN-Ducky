@@ -86,6 +86,9 @@ fn routes(api: Arc<api::Api>) -> Router {
         // An update check now, and the update status of a copy the test describes.
         let update = |State(api): State<Arc<api::Api>>, Path(what): Path<String>, Json(body): Json<Value>| async move { Json(api::update::probe(&api, &what, &body).await) };
         routes = routes.merge(Router::new().route("/__rs/update/{what}", post(update)).with_state(Arc::clone(&api)));
+        // The lore calls, and the changelist drops on a changelist the test makes up.
+        let lore = |Path(what): Path<String>, Json(body): Json<Value>| async move { Json(verse_editor::lore::probe(&what, &body).await) };
+        routes = routes.merge(Router::new().route("/__rs/lore/{what}", post(lore)));
     }
     // A window's poll waits 20 s by design, a sign-in waits for the person to approve its
     // code, and a Verse build or push takes UEFN up to two minutes: each sets its own
