@@ -146,6 +146,16 @@ def test_rust_leaves_the_one_list_merge_to_python(seed, rust_store) -> None:
 # --------------------------------------------------------------------------- saves
 
 
+def _differences(mine: Any, yours: Any, where: str = "") -> list:
+    """Only what differs, as ``(where, rust, python)``: a whole chat list is unreadable."""
+    if isinstance(mine, dict) and isinstance(yours, dict):
+        return [d for key in sorted({*mine, *yours}) for d in _differences(mine.get(key, "<absent>"), yours.get(key, "<absent>"), f"{where}.{key}")]
+    if isinstance(mine, list) and isinstance(yours, list) and len(mine) == len(yours):
+        named = lambda row, index: row["id"] if isinstance(row, dict) and "id" in row else index  # noqa: E731
+        return [d for index, (a, b) in enumerate(zip(mine, yours)) for d in _differences(a, b, f"{where}[{named(b, index)}]")]
+    return [] if mine == yours else [(where, repr(mine)[:160], repr(yours)[:160])]
+
+
 class _Both:
     """One call on each backend from the same folders and chats: the answer, the events
     and what is stored after must match. ``updated`` is the save's time and a new
@@ -159,6 +169,8 @@ class _Both:
         monkeypatch.setattr(push, "_panel_push", self.pushed.append)  # never the live app's panel
         # No agent runs here; Python's stop of an archived chat would start its terminal manager.
         monkeypatch.setattr("frontend.ui_web.chats.archive_stop.stop_archived", lambda *args, **kwargs: None)
+        # Nor is any agent told its team changed: that goes to the app's agent inboxes.
+        monkeypatch.setattr("frontend.ui_web.chats.nesting_notice._deliver", lambda *args, **kwargs: None)
         self.cursor = 0
         self.before = lambda: None  # runs after each seed
         self.after = lambda: None  # its answer after each call must match too
@@ -176,7 +188,8 @@ class _Both:
 
         saves.flush_chat_saves()
         folders = plain(chats.folders_get(_LIST))
-        docs = plain(chats.conv_list(_LIST, with_messages=False))
+        # By id: the stored order is by save time, and each backend saves in its own order.
+        docs = sorted(plain(chats.conv_list(_LIST, with_messages=False)), key=lambda doc: doc["id"])
         for doc in docs:
             doc["updated"] = "now" if doc["updated"] >= started else doc["updated"]
         marks = [row[0] for row in db.connect().execute("SELECT key FROM workspace_state WHERE key LIKE 'deleted_%' ORDER BY key")]
@@ -205,7 +218,7 @@ class _Both:
             seen.append(self._seen(answer, events, started))
         theirs, ours = seen
         for name, mine, yours in zip(("answer", "events", "folders", "chats", "deleted", "after"), ours, theirs):
-            assert mine == yours, f"{method}{args} {name}: rust {mine} != python {yours}"
+            assert mine == yours, f"{method}{args} {name}: rust != python: {_differences(mine, yours)}"
         self.deleted = theirs[4]
         return tuple(theirs[:4])
 
@@ -392,6 +405,89 @@ def test_a_chat_is_deleted_the_same_with_the_chats_it_started(both, conv_id: str
     assert set(both.after()) == {"m1", "sub", "free", "lead"} - gone
     if keep_inside and conv_id == "hub":
         assert _placed(docs)["far"] == ("", "")
+
+
+# --------------------------------------------------------------------------- moves
+
+_ROSTER = [
+    {"member_conv_id": "lead", "name": "Lead: build", "write_allowed": ["src\\", "a.py"], "lane_set_at": 5, "lane_set_by": "hub"},
+    {"member_conv_id": "m1", "name": "Worker", "color": "#123456", "tts_speed": "1.5"},
+    "junk",
+]
+_MOVES = [dict(doc, group_members=_ROSTER) if doc["id"] == "hub" else doc for doc in _TEAM]
+
+
+def _teams(docs: list) -> dict:
+    rows = lambda doc: [row["member_conv_id"] for row in doc.get("group_members") or [] if isinstance(row, dict)]  # noqa: E731
+    return {doc["id"]: (rows(doc), doc["leader_conv_id"]) for doc in docs if doc.get("is_group")}
+
+
+@pytest.mark.parametrize(
+    ("conv_id", "folder_id"),
+    [
+        ("free", "plain"), ("free", "g1"), ("free", "in1"), ("lead", ""), ("lead", "g2"), ("m1", "g2"), ("m1", None), ("m2", "plain"), ("m2", "g1"),
+        ("sub", "g3"), ("far", "g1"), ("hub2", "plain"), ("free", "archive"), ("m1", " archive "), ("lead", "archive"), ("hub", "archive"),
+        ("hub2", "archive"), ("hub3", "archive"),
+    ],
+)
+def test_a_chat_is_moved_the_same_and_its_team_follows(both, conv_id: str, folder_id: Any) -> None:
+    answer, events, _, docs = both.call(_TREE, _MOVES, "move_conversation", conv_id, folder_id)
+    assert answer == [200, {"ok": True, "result": None}]
+    assert len(docs) == len(_MOVES) and [event["type"] for event in events] == ["chats_changed"]
+    archiving = (folder_id or "").strip() == "archive"
+    assert ("removed_conv_ids" in events[0]) == archiving
+    if not archiving:
+        assert _placed(docs)[conv_id][0] == (folder_id or "")
+
+
+def test_a_ducky_joins_the_group_it_is_moved_into_and_a_group_its_leader_left_gets_another(both) -> None:
+    _, _, _, docs = both.call(_TREE, _MOVES, "move_conversation", "free", "g1")
+    assert _placed(docs)["free"] == ("g1", "hub") and _teams(docs)["hub"] == (["lead", "m1", "free"], "lead")
+    rows = {row["member_conv_id"]: row for row in next(doc for doc in docs if doc["id"] == "hub")["group_members"]}
+    # A stored member keeps its lane as it was stored; the new one has none.
+    assert (rows["lead"]["write_allowed"], rows["lead"]["lane_set_at"], rows["free"]["write_allowed"], rows["free"]["name"]) == (["src\\", "a.py"], 5, None, "Chat free")
+
+    _, _, _, docs = both.call(_TREE, _MOVES, "move_conversation", "lead", "")
+    assert _placed(docs)["lead"] == ("", "") and _teams(docs)["hub"] == (["m1"], "m1")
+
+
+def test_a_move_names_what_it_cannot_do(both) -> None:
+    answer, events, _, _ = both.call(_TREE, _MOVES, "move_conversation", "no'pe", "plain")
+    assert answer == [200, {"ok": False, "error": 'Conversation not found: "no\'pe"'}] and events == []
+    answer, _, _, docs = both.call(_TREE, _MOVES, "move_conversation", "free", "nope")
+    assert answer == [200, {"ok": False, "error": "Unknown folder: 'nope'"}] and _placed(docs)["free"] == ("", "")
+
+
+_ARCHIVED = [
+    _doc("hub", folder_id="archive", is_group=True, title="Raiders", leader_conv_id="lead", group_members=_ROSTER),
+    _doc("hub2", folder_id="archive", is_group=True, title="", parent_conv_id="hub"),
+    _doc("lead", folder_id="archive", parent_conv_id="hub"),
+    _doc("m2", folder_id="archive", parent_conv_id="hub2"),
+    _doc("sub", folder_id="archive", parent_conv_id="lead"),
+    _doc("solo", folder_id="archive"),
+    _doc("left", folder_id="plain", parent_conv_id="hub"),  # never archived: it stays where it is
+]
+_AROUND = [_folder("top", sort_order=1), _folder("plain", sort_order=2)]
+
+
+@pytest.mark.parametrize(
+    ("conv_id", "folder_id"),
+    [("hub", ""), ("hub", "plain"), ("hub", "nope"), ("hub2", "top"), ("lead", ""), ("lead", "plain"), ("m2", "top"), ("solo", "plain"), ("sub", "")],
+)
+def test_a_chat_returns_from_archive_the_same(both, conv_id: str, folder_id: str) -> None:
+    answer, _, _, docs = both.call(_AROUND, _ARCHIVED, "move_conversation", conv_id, folder_id)
+    assert answer[1]["ok"] is (folder_id != "nope"), answer
+    assert (_placed(docs)[conv_id][0] == "archive") is (folder_id == "nope")
+
+
+def test_a_group_returns_from_archive_whole(both) -> None:
+    _, _, folders, docs = both.call(_AROUND, _ARCHIVED, "move_conversation", "hub", "plain")
+    made = {folder["id"]: (folder["name"], folder["parent_id"]) for folder in folders if folder["group_hub_id"]}
+    assert made == {"folder of hub": ("Raiders", "plain"), "folder of hub2": ("Group", "folder of hub")}
+    assert _placed(docs) == {
+        "hub": ("folder of hub", ""), "hub2": ("folder of hub2", ""), "lead": ("folder of hub", "hub"), "m2": ("folder of hub2", "hub2"),
+        "sub": ("folder of hub", "lead"), "solo": ("archive", ""), "left": ("plain", "hub"),
+    }
 
 
 def test_chats_that_were_never_ordered_are_numbered_newest_first(seed, python, rust_store) -> None:
