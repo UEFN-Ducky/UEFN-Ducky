@@ -67,7 +67,7 @@ pub(super) fn removed(conv_ids: &[String], folder_ids: &[String]) -> Value {
 }
 
 /// A chat id that is safe as a folder name (`_CONV_ID_RE`).
-fn safe_id(conv_id: &str) -> bool {
+pub(super) fn safe_id(conv_id: &str) -> bool {
     let plain = |c: char| c.is_ascii_alphanumeric() || "._-".contains(c);
     (1..=80).contains(&conv_id.len()) && conv_id.chars().all(plain) && conv_id != "." && conv_id != ".."
 }
@@ -75,7 +75,7 @@ fn safe_id(conv_id: &str) -> bool {
 /// `_remove_chat_folder`: a chat's own files (its attachments) go with it. A file another
 /// program still reads gets about 1.5 s; leftovers of a chat that is gone are left behind.
 #[allow(clippy::disallowed_methods)] // only ever run by spawn_blocking: file removal and its short waits
-fn remove_chat_files(folders: Vec<PathBuf>) -> Result<(), String> {
+pub(super) fn remove_chat_files(folders: Vec<PathBuf>) -> Result<(), String> {
     for folder in folders.iter().filter(|folder| folder.is_dir()) {
         let mut delay = Duration::from_millis(50);
         for attempt in 0..6 {
@@ -93,8 +93,8 @@ fn remove_chat_files(folders: Vec<PathBuf>) -> Result<(), String> {
     Ok(())
 }
 
-fn chat_folder(data_dir: &Path, conv_id: &str) -> PathBuf {
-    data_dir.join("chats").join("projects").join(ONE_LIST).join("conversations").join(conv_id)
+pub(super) fn chat_folder(data_dir: &Path, project: &str, conv_id: &str) -> PathBuf {
+    data_dir.join("chats").join("projects").join(project).join("conversations").join(conv_id)
 }
 
 impl Sidebar<'_> {
@@ -406,7 +406,7 @@ pub async fn delete_conversation(api: Arc<Api>, args: Fields) -> Result<Value, S
     for id in doomed.iter().rev() {
         sidebar.chats.conv_delete(sidebar.who.id.clone(), id.clone()).await.map_err(failed)?;
     }
-    let folders = doomed.iter().filter(|id| safe_id(id)).map(|id| chat_folder(api.repos.data_dir(), id)).collect();
+    let folders = doomed.iter().filter(|id| safe_id(id)).map(|id| chat_folder(api.repos.data_dir(), ONE_LIST, id)).collect();
     tokio::task::spawn_blocking(move || remove_chat_files(folders)).await.map_err(|stopped| stopped.to_string())??;
     api.publish(vec![removed(&doomed, &[])]);
     Ok(Value::Null)
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn only_a_plain_chat_id_names_a_folder_to_remove() {
         assert!(safe_id("d0f7ed45-912d_4.x") && !safe_id("") && !safe_id("..") && !safe_id("a/b") && !safe_id("a\\b") && !safe_id(&"a".repeat(81)));
-        assert!(chat_folder(Path::new("data"), "c1").ends_with("chats/projects/_no_project/conversations/c1"));
+        assert!(chat_folder(Path::new("data"), ONE_LIST, "c1").ends_with("chats/projects/_no_project/conversations/c1"));
         assert_eq!(remove_chat_files(vec![PathBuf::from("no such folder")]), Ok(()));
     }
 }

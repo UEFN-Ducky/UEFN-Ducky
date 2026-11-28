@@ -20,9 +20,11 @@ use crate::store::pyjson::{float, int, pystr, truthy};
 
 mod groups;
 mod layout;
+mod local;
 mod moves;
 mod teams;
 pub use groups::{group_remove, group_set_leader};
+pub use local::{adopt_local_chats, delete_local_chats};
 pub use layout::apply_sidebar_layout;
 pub use moves::{delete_conversation, delete_folder, move_conversation};
 

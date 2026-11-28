@@ -57,6 +57,8 @@ pub fn methods() -> HashMap<&'static str, Method> {
         chats::group_set_leader => Anyone,
         chats::group_remove => Anyone,
         chats::list_local_chats => Anyone,
+        chats::adopt_local_chats => Anyone,
+        chats::delete_local_chats => Anyone,
     }
 }
 
