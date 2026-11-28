@@ -30,6 +30,13 @@ def test_personal_data_is_removed_and_the_rest_stays_readable() -> None:
         assert kept in out, kept
 
 
+def test_a_mac_or_linux_home_folder_never_names_its_person() -> None:
+    assert scrub('File "/home/alice/app.py", /Users/pat/x') == 'File "/home/<user>/app.py", /Users/<user>/x'
+    # A web address is no folder, and shared folders name nobody.
+    for line in ("https://example.com/home/page", "/Users/Public/x", "/home/default/x"):
+        assert scrub(line) == line
+
+
 def test_ordinary_log_lines_are_untouched() -> None:
     for line in (
         "[2026-10-09 10:00:00] (agent) max_tokens: 4096, tokens used 1200",

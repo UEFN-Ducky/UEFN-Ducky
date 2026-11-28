@@ -46,7 +46,10 @@ _SECRET_QUERY = re.compile(
 _URL_CREDENTIALS = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@")
 _EMAIL = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 # Other people's / other spellings of user folders: C:\Users\name, /Users/name, /home/name.
-_USER_DIR = re.compile(r"(?i)\b([A-Z]:[\\/]+Users[\\/]+|/Users/|/home/)(?!Public\b|Default\b)([^\\/\s\"':]+)")
+# Not after a word or ":" (example.com/home/page is a web address, "/home/name" a folder).
+_USER_DIR = re.compile(
+    r"(?i)(\b[A-Z]:[\\/]+Users[\\/]+|(?<![\w:])/Users/|(?<![\w:])/home/)(?!Public\b|Default\b)([^\\/\s\"':]+)"
+)
 # IPv4 that is not loopback / unspecified.
 _IPV4 = re.compile(r"\b(?!127\.)(?!0\.0\.0\.0\b)(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b")
 
