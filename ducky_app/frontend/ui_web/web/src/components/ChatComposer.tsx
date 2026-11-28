@@ -964,6 +964,7 @@ export const ChatComposer = memo(function ChatComposer({
                 setCaret(nextCaret);
               }}
               onCaret={setCaret}
+              onPasteImages={(files) => void addFiles(files, { imagesOnly: true })}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               onKeyDown={(e) => {
