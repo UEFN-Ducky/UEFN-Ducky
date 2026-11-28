@@ -65,6 +65,28 @@ pub fn dumps_ascii(value: &Value) -> String {
     out
 }
 
+/// `json.dumps(value, indent=4)`: one item per line, four spaces a level.
+pub fn dumps_indent4(value: &Value) -> String {
+    fn write(value: &Value, depth: usize, out: &mut String) {
+        let pad = "    ".repeat(depth + 1);
+        let (open, close, lines): (char, char, Vec<String>) = match value {
+            Value::Array(items) if !items.is_empty() => ('[', ']', items.iter().map(|item| nested(item, depth + 1)).collect()),
+            Value::Object(fields) if !fields.is_empty() => {
+                ('{', '}', fields.iter().map(|(key, item)| format!("{}: {}", dumps_ascii(&Value::String(key.clone())), nested(item, depth + 1))).collect())
+            }
+            scalar => return out.push_str(&dumps_ascii(scalar)),
+        };
+        let lines: Vec<String> = lines.into_iter().map(|line| format!("{pad}{line}")).collect();
+        out.push_str(&format!("{open}\n{}\n{}{close}", lines.join(",\n"), "    ".repeat(depth)));
+    }
+    fn nested(value: &Value, depth: usize) -> String {
+        let mut out = String::new();
+        write(value, depth, &mut out);
+        out
+    }
+    nested(value, 0)
+}
+
 /// The value with every object's keys in order: `dumps(&sorted(v))` is
 /// `json.dumps(v, ensure_ascii=False, sort_keys=True)`.
 pub fn sorted(value: &Value) -> Value {
@@ -185,6 +207,8 @@ mod tests {
         // `@` stands for the backslash of each escape.
         let escaped = r#"{"@u00e9": "a@u007f@n@ud83d@ude00 ~"}"#.replace('@', "\\");
         assert_eq!(dumps_ascii(&json!({"é": "a\u{7f}\n😀 ~"})), escaped);
+        let indented = "{\n    \"a\": [\n        1,\n        {\n            \"b\": []\n        }\n    ],\n    \"o\": {}\n}";
+        assert_eq!(dumps_indent4(&json!({"a": [1, {"b": []}], "o": {}})), indented);
     }
 
     #[test]

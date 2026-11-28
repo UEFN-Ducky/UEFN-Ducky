@@ -15,7 +15,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::file_kinds::{file_name, stem_suffix};
-use crate::store::pyjson::{pystr, truthy};
+use crate::store::pyjson::{dumps_indent4, pystr, truthy};
 
 pub const UEFN: &str = "uefn";
 pub const FOLDER: &str = "folder";
@@ -359,27 +359,112 @@ fn saved_layout_folders(root: &Path, saved: &Path) -> Vec<Folder> {
     folders
 }
 
-/// True when the island's `.vproject` names a built-in digest folder that holds no
-/// digest while FortniteGame's shared copy has one: Python then hands verse-lsp a copy
-/// of the file that points there (`shadow_vproject_for`).
-fn needs_shadow_vproject(vproject: &Path) -> bool {
-    let data: Value = std::fs::read(vproject).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
-    let missing = |package: &&Value| {
-        let field = |name: &str| Some(&package["desc"][name]).filter(|value| truthy(value)).map(pystr).unwrap_or_default();
-        let (name, dir) = (field("name"), field("dirPath"));
-        let built_in = DIGEST_PACKAGES.iter().any(|(known, _)| *known == name);
-        let shared = || digest_package_dir(&verse_saved_root("FortniteGame"), &name).is_some_and(|dir| has_digest(&dir));
-        built_in && !(!dir.is_empty() && has_digest(Path::new(&dir))) && shared()
-    };
-    data["packages"].as_array().into_iter().flatten().any(|package| missing(&package))
+/// `shadow_vproject_for`: the copy of the island's `.vproject` Ducky hands verse-lsp, or
+/// None to use the real one. It is kept under Ducky's data folder (never in UEFN's Saved
+/// tree) while the island's file names a built-in digest folder that holds no digest and
+/// FortniteGame's shared copy has one, and removed once UEFN wrote the island's own.
+fn shadow_vproject_for(name: &str, data_dir: &Path, vproject: &Path) -> Option<PathBuf> {
+    let mut data: Value = serde_json::from_str(&std::fs::read_to_string(vproject).ok()?).ok()?;
+    let mut changed = false;
+    for package in data.get_mut("packages").and_then(Value::as_array_mut).into_iter().flatten() {
+        let Some(desc) = package.get_mut("desc").filter(|desc| desc.is_object()) else { continue };
+        let field = |name: &str| Some(&desc[name]).filter(|value| truthy(value)).map(pystr).unwrap_or_default();
+        let (package, dir) = (field("name"), field("dirPath"));
+        if !DIGEST_PACKAGES.iter().any(|(known, _)| *known == package) || (!dir.is_empty() && has_digest(Path::new(&dir))) {
+            continue;
+        }
+        if let Some(shared) = digest_package_dir(&verse_saved_root("FortniteGame"), &package).filter(|dir| has_digest(dir)) {
+            desc["dirPath"] = Value::String(posix(&resolve(&shared)));
+            changed = true;
+        }
+    }
+    let folder = data_dir.join("verse-lsp").join("vproject-shadow").join(name);
+    if !changed {
+        if folder.is_dir() {
+            let _ = std::fs::remove_dir_all(&folder);
+        }
+        return None;
+    }
+    let shadow = folder.join("vproject").join(vproject.file_name()?);
+    // Python writes it as text: Windows line ends on Windows.
+    let rewritten = dumps_indent4(&data).replace('\n', if cfg!(windows) { "\r\n" } else { "\n" });
+    std::fs::create_dir_all(shadow.parent()?).ok()?;
+    if std::fs::read(&shadow).ok().as_deref() != Some(rewritten.as_bytes()) {
+        std::fs::write(&shadow, rewritten).ok()?;
+    }
+    Some(shadow)
 }
 
-/// `discover_verse_workspace(root, include_watch_files=False)`: an island's workspace
-/// roots, from UEFN's `*.code-workspace`, else its `Saved/VerseProject` layout, else
-/// `Content`. `Digests/BuiltIn` becomes one root per package.
-/// ponytail: the shadow `.vproject` folder is named here and written by the Python
-/// backend, which starts verse-lsp with it; writing it moves here with the Verse methods.
+/// `_collect_watch_files`: every `.vproject` and `.vpackage` under the workspace folders
+/// and UEFN's saved folder for the island; verse-lsp is told about each.
+/// ponytail: a linked folder is never entered; Python also stays out of Windows junctions.
+fn watch_files(folders: &[Folder]) -> Vec<String> {
+    const SKIP: [&str; 5] = [".git", ".urc", "__externalactors__", "__externalobjects__", "node_modules"];
+    let lower = |path: &Path| file_name(&text(path)).to_lowercase();
+    let wanted = |path: &Path| [".vproject", ".vpackage"].contains(&stem_suffix(&file_name(&text(path))).1.to_lowercase().as_str());
+    let mut bases: Vec<PathBuf> = folders.iter().map(|folder| PathBuf::from(&folder.path)).collect();
+    // The saved folder holds the island's vproject beside its digests.
+    let saved = bases.iter().find_map(|path| {
+        let parent = path.parent().map(lower).unwrap_or_default();
+        if lower(path) == "vproject" && !parent.is_empty() {
+            return path.parent().map(Path::to_path_buf);
+        }
+        let package = DIGEST_PACKAGES.iter().any(|(package, _)| package.to_lowercase() == lower(path));
+        (package && parent == "builtin").then(|| path.ancestors().nth(3).map(Path::to_path_buf)).flatten()
+    });
+    bases.extend(saved);
+    let mut bases: Vec<PathBuf> = bases.iter().map(|path| resolve(path)).collect();
+    bases.sort_by_key(|path| path.components().count());
+    let (mut roots, mut found): (Vec<PathBuf>, std::collections::BTreeSet<String>) = Default::default();
+    for base in bases {
+        // Each folder is walked once, also when one root is inside another.
+        if roots.iter().any(|root| under(&base, root)) {
+            continue;
+        }
+        if base.is_file() {
+            if wanted(&base) {
+                found.insert(text(&base));
+            }
+            continue;
+        }
+        roots.push(base.clone());
+        let mut pending = vec![base];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let (path, kind) = (entry.path(), entry.file_type().ok());
+                let link = kind.is_some_and(|kind| kind.is_symlink());
+                if path.is_dir() {
+                    if !link && !SKIP.contains(&lower(&path).as_str()) {
+                        pending.push(path);
+                    }
+                } else if wanted(&path) {
+                    found.insert(text(&resolve(&path)));
+                }
+            }
+        }
+    }
+    found.into_iter().collect()
+}
+
+/// An island's Verse workspace as verse-lsp is started with it.
+pub struct Workspace {
+    pub folders: Vec<Folder>,
+    /// The `.vproject` / `.vpackage` files, the one verse-lsp reads first.
+    pub watch_files: Vec<String>,
+    /// The shadow `.vproject` in use; empty when the island's own file is.
+    pub vproject_shadow: String,
+}
+
+/// `discover_verse_workspace(root, include_watch_files=False)["workspace_folders"]`.
 pub fn verse_workspace_folders(root: &Path, data_dir: &Path) -> Vec<Folder> {
+    verse_workspace(root, data_dir, false).folders
+}
+
+/// `discover_verse_workspace`: an island's workspace roots, from UEFN's
+/// `*.code-workspace`, else its `Saved/VerseProject` layout, else `Content`.
+/// `Digests/BuiltIn` becomes one root per package, and the shadow `.vproject` (written
+/// here when it is needed) takes the place of the island's own.
+pub fn verse_workspace(root: &Path, data_dir: &Path, include_watch_files: bool) -> Workspace {
     let root = resolve(root);
     let name = file_name(&text(&root));
     let mut folders = named(&root, ".code-workspace").iter().map(|file| code_workspace_folders(file)).find(|folders| !folders.is_empty()).unwrap_or_default();
@@ -406,8 +491,8 @@ pub fn verse_workspace_folders(root: &Path, data_dir: &Path) -> Vec<Folder> {
     };
     let mut folders: Vec<Folder> = folders.into_iter().flat_map(expand).collect();
     let vproject = saved.join("vproject").join(format!("{saved_name}.vproject"));
-    if vproject.is_file() && needs_shadow_vproject(&vproject) {
-        let shadow = text(&data_dir.join("verse-lsp").join("vproject-shadow").join(&name).join("vproject"));
+    let shadow_file = if vproject.is_file() { shadow_vproject_for(&name, data_dir, &vproject) } else { None };
+    if let Some(shadow) = shadow_file.as_deref().and_then(Path::parent).map(text) {
         let is_vproject = |root: &Folder| root.name.trim().to_lowercase().starts_with("vproject") || file_name(&root.path).to_lowercase() == "vproject";
         let mut replaced = false;
         for root in folders.iter_mut().filter(|root| is_vproject(root)) {
@@ -418,7 +503,19 @@ pub fn verse_workspace_folders(root: &Path, data_dir: &Path) -> Vec<Folder> {
             folders.push(Folder { name: "vproject (read-only)".into(), path: shadow, kind: "" });
         }
     }
-    folders
+    let mut watch = if include_watch_files { watch_files(&folders) } else { Vec::new() };
+    let real = text(&resolve(&vproject));
+    let first = match &shadow_file {
+        Some(shadow) => {
+            watch.retain(|file| *file != real);
+            Some(text(&resolve(shadow)))
+        }
+        None => vproject.is_file().then_some(real),
+    };
+    if let Some(first) = first.filter(|first| !watch.contains(first)) {
+        watch.insert(0, first);
+    }
+    Workspace { folders, watch_files: watch, vproject_shadow: shadow_file.as_deref().map(text).unwrap_or_default() }
 }
 
 #[cfg(test)]
@@ -492,6 +589,27 @@ pub(super) mod tests {
         let slug = project_slug(&at("Plain"));
         assert!(slug.starts_with("Plain_") && slug.len() == "Plain_".len() + 16 && project_slug(" ") == "_no_project");
         assert_eq!(project_slug("C:/x/My Game!"), project_slug("C:/x/My Game!").replace(' ', "_"));
+    }
+
+    #[test]
+    fn watch_files_are_the_vprojects_and_vpackages_with_each_folder_walked_once() {
+        let temp = Temp::new("watch");
+        let kept = [
+            temp.file("Saved/Isle/vproject/Isle.vproject", "{}"),
+            temp.file("Isle/Content/Isle.vpackage", "{}"),
+            temp.file("Isle/Content/Sub/Deep.VPACKAGE", "{}"),
+            // Beside the vproject folder: UEFN's saved folder is walked too.
+            temp.file("Saved/Isle/Digests/Isle-Assets/Assets.vpackage", "{}"),
+        ];
+        temp.file("Isle/Content/__ExternalActors__/x.vpackage", "{}");
+        temp.file("Isle/Content/.vproject", "{}");
+        temp.file("Isle/Content/Sub/b.verse", "");
+        let at = |rel: &str| temp.0.join(rel);
+        let folders = [folder("Isle", &at("Isle/Content")), folder("Sub", &at("Isle/Content/Sub")), folder("vproject", &at("Saved/Isle/vproject")), folder("gone", &at("missing"))];
+        let mut expected: Vec<String> = kept.iter().map(|file| text(&resolve(file))).collect();
+        expected.sort();
+        assert_eq!(watch_files(&folders), expected);
+        assert_eq!(watch_files(&[folder("one file", &kept[1]), folder("not one", &at("Isle/Content/Sub/b.verse"))]), [text(&resolve(&kept[1]))]);
     }
 
     #[test]
