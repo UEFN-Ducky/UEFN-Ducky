@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 import pytest
 
@@ -40,6 +43,76 @@ def rust_store(tmp_path, monkeypatch):
     backend.close()  # before the folder goes: it holds ducky.db open
     db.reset_for_tests()
     settings.reset_for_tests()
+
+
+_SENT = ("authorization", "origin", "accept", "user-agent", "content-type", "cookie", "x-csrf-token")
+
+
+class FakeSite:
+    """The site, on this PC: answers every call with ``answer`` (status, headers, body), or
+    with its path's own answer, and keeps what it was sent."""
+
+    def __init__(self) -> None:
+        self.answer: tuple[int, dict[str, Any], bytes] = (200, {}, b"{}")
+        self.paths: dict[str, tuple[int, dict[str, Any], bytes]] = {}
+        self.calls: list[dict[str, Any]] = []
+        self.hold = threading.Event()  # cleared: a request waits before it is answered
+        self.hold.set()
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self) -> None:  # noqa: N802 - the server's name for it
+                raw = self.rfile.read(int(self.headers.get("content-length") or 0))
+                sent = {name: self.headers.get(name) for name in _SENT if self.headers.get(name) is not None}
+                call = {"path": self.path, "headers": sent, "body": json.loads(raw or b"null")}
+                fake.calls.append(call if self.command == "POST" else {"method": self.command, **call})
+                fake.hold.wait(30)
+                status, headers, body = fake.paths.get(self.path, fake.answer)
+                self.send_response(status)
+                for name, values in {"Content-Type": "application/json", **headers}.items():
+                    for value in values if isinstance(values, list) else [values]:  # a list: the header once per value
+                        self.send_header(name, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_GET = do_DELETE = do_POST  # noqa: N815
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def says(self, body: Any, status: int = 200, path: str = "", **headers: Any) -> None:
+        """The answer to every call, or to ``path`` only."""
+        raw = body if isinstance(body, bytes) else body.encode() if isinstance(body, str) else json.dumps(body).encode()
+        answer = (status, {name.replace("_", "-"): value for name, value in headers.items()}, raw)
+        if path:
+            self.paths[path] = answer
+        else:
+            self.answer = answer
+
+    def close(self) -> None:
+        self.hold.set()
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def fake(monkeypatch):
+    """The fake site, started before the Rust backend. The app-version feed is asked there.
+    Signed out, the account's calls go to it over https (which it does not speak), so that
+    case never leaves this PC either."""
+    fake = FakeSite()
+    monkeypatch.setenv("DUCKYOS_BASE_URL", f"https://127.0.0.1:{fake.server.server_address[1]}")
+    monkeypatch.setenv("DUCKY_UPDATE_BASE_URL", fake.url + "/")
+    yield fake
+    fake.close()
 
 
 LOGIN = {"base_url": "https://uefnducky.org/", "email": " Alice@Example.com", "device_key": "device-token-1"}

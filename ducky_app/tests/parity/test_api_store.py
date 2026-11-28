@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import pytest
@@ -18,62 +17,6 @@ from .conftest import ADK
 from .parity_harness import plain
 
 _NOTES = "patch_notes:"
-_SENT = ("authorization", "origin", "accept", "user-agent", "content-type", "cookie", "x-csrf-token")
-
-
-class _FakeStore:
-    """Answers every POST with ``answer`` (status, headers, body) and keeps what it was sent."""
-
-    def __init__(self) -> None:
-        self.answer: tuple[int, dict[str, str], bytes] = (200, {}, b"{}")
-        self.calls: list[dict[str, Any]] = []
-        self.hold = threading.Event()  # cleared: a request waits before it is answered
-        self.hold.set()
-        fake = self
-
-        class Handler(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.1"
-
-            def do_POST(self) -> None:  # noqa: N802 - the server's name for it
-                raw = self.rfile.read(int(self.headers.get("content-length") or 0))
-                sent = {name: self.headers.get(name) for name in _SENT if self.headers.get(name) is not None}
-                fake.calls.append({"path": self.path, "headers": sent, "body": json.loads(raw or b"null")})
-                fake.hold.wait(30)
-                status, headers, body = fake.answer
-                self.send_response(status)
-                for name, value in {"Content-Type": "application/json", **headers}.items():
-                    self.send_header(name, value)
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *args: Any) -> None:
-                pass
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    def says(self, body: Any, status: int = 200, **headers: str) -> None:
-        raw = body if isinstance(body, bytes) else body.encode() if isinstance(body, str) else json.dumps(body).encode()
-        self.answer = (status, {name.replace("_", "-"): value for name, value in headers.items()}, raw)
-
-    def close(self) -> None:
-        self.hold.set()
-        self.server.shutdown()
-        self.server.server_close()
-
-
-@pytest.fixture
-def fake(monkeypatch):
-    """The fake Store, started before the Rust backend: signed out, both ask it over
-    https (which it does not speak), so that case never leaves this PC either."""
-    fake = _FakeStore()
-    monkeypatch.setenv("DUCKYOS_BASE_URL", f"https://127.0.0.1:{fake.server.server_address[1]}")
-    yield fake
-    fake.close()
-
 
 @pytest.fixture
 def store(fake, rust_store, python, login):
@@ -190,8 +133,8 @@ def test_a_website_session_sends_its_cookies_and_an_expired_one_says_so(store, p
     assert call["headers"]["cookie"] == "duckyos_session_x=sess=1=; duckyos_csrf_x=csrf-9" and call["headers"]["x-csrf-token"] == "csrf-9"
     assert "authorization" not in call["headers"]
 
-    # Python also signs the dead session out; Rust leaves the login row to it. So each
-    # backend is asked right after signing in.
+    # A dead session is signed out by the call, so each backend is asked right after
+    # signing in.
     store.site.says({"error": "expired"}, 401)
     answers = []
     for backend in (python, rust_store):
