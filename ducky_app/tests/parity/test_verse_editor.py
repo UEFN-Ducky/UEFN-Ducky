@@ -1,10 +1,13 @@
-"""The Verse editor's calls: its switch and the Problems list's cache. The same answer,
-the same rows and the same events from both backends on a fixture island. No verse-lsp
+"""The Verse editor's calls: its switch, the Problems list's cache and the shadow
+``.vproject``. The same answer, the same rows, the same events and the same files from
+both backends on a fixture island. No verse-lsp
 runs here, and nothing reads the person's own islands."""
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -157,3 +160,66 @@ def test_the_problems_cache_is_empty_without_an_island(editor):
     told, rows, events = editor.each(story)
     off = {"files": [], "stale_count": 0, "from_cache": False}
     assert told == [off, off, off, {"ok": False, "error": "No project root set"}] and rows == [] and events == []
+
+
+_BUILT_IN = ("Verse", "UnrealEngine", "Fortnite")
+
+
+def test_an_island_without_its_digests_gets_the_same_shadow_vproject(tmp_path, rust_store, python):
+    """verse-lsp reads its packages from the ``.vproject``: while UEFN has not written the
+    island's digests, both backends hand it the same copy pointing at FortniteGame's."""
+    from frontend.settings import default_app_data_dir
+
+    island = tmp_path / "work" / "Isle"
+    saved = tmp_path / "UnrealEditorFortnite" / "Saved" / "VerseProject"
+    own = saved / "Isle" / "Digests" / "BuiltIn"
+    digests = {f"{name}/{name}.digest.verse": "#\n" for name in _BUILT_IN}
+    _put(island, {"Isle.uefnproject": "{}", "Content/a.verse": "a := 1\n"})
+    _put(saved / "FortniteGame" / "Digests" / "BuiltIn", digests)
+    _put(own, {"Fortnite/Fortnite.digest.verse": "#\n"})
+    packages: list[Any] = [
+        {"desc": {"name": name, "dirPath": (own / name).as_posix(), "settings": {"role": "External"}}, "readOnly": True}
+        for name in _BUILT_IN
+    ]
+    mine = {"versePath": "/é@fortnite.com/Isle", "rate": 1.5, "tags": []}
+    packages += [{"desc": {"name": "Isle", "dirPath": (island / "Content").as_posix(), "settings": mine}}, "junk", {"desc": None}]
+    real = saved / "Isle" / "vproject" / "Isle.vproject"
+
+    def uefn_writes(extra: dict) -> None:
+        _put(real.parent, {real.name: json.dumps({"packages": packages, "extra": extra}, indent=2)})
+
+    projects.touch(str(island), name="Isle", when=1.0, kind="uefn")
+    settings.replace_all({"uefn_project_root": str(island)}, {})
+    kept = default_app_data_dir() / "verse-lsp" / "vproject-shadow" / "Isle"
+    shadow = kept / "vproject" / "Isle.vproject"
+    assert tmp_path in kept.parents  # never the person's own data folder
+
+    def roots(backend: Any) -> Any:
+        _forget()
+        assert rust_store.request("/__panel_event", {"type": "project_changed"})[0] == 204
+        status, reply = plain(backend.call("list_workspace_roots"))
+        assert status == 200 and reply["ok"] is True, reply
+        return reply["result"]
+
+    seen = []
+    for backend in (python, rust_store):
+        shutil.rmtree(kept, ignore_errors=True)
+        uefn_writes({})
+        first = (roots(backend), shadow.read_bytes())
+        # The copy follows the island's file.
+        uefn_writes({"edited": True})
+        second = (roots(backend), shadow.read_bytes())
+        # UEFN wrote the island's own digests: its file is used again and the copy goes.
+        _put(own, digests)
+        third = (roots(backend), kept.exists())
+        seen.append((first, second, third))
+        for name in ("Verse", "UnrealEngine"):
+            shutil.rmtree(own / name)
+    assert seen[1] == seen[0]
+    (found, text), (_, edited), (restored, still_there) = seen[0]
+    assert text.isascii() and edited != text and restored != found and still_there is False
+    copy = json.loads(text)
+    paths = {package["desc"]["name"]: package["desc"]["dirPath"] for package in copy["packages"][:4]}
+    assert "FortniteGame" in paths["Verse"] and "FortniteGame" in paths["UnrealEngine"]
+    assert paths["Fortnite"] == (own / "Fortnite").as_posix() and copy["packages"][3]["desc"]["settings"] == mine
+    assert "FortniteGame" not in real.read_text(encoding="utf-8")  # UEFN's own file is never touched
