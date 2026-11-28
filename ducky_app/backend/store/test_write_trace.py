@@ -46,7 +46,7 @@ def test_a_write_held_past_the_limit_is_traced_with_its_caller(traced) -> None:
     assert caller.startswith(_HERE) and int(caller.split(":")[1]) > 0
     assert meta["held_ms"] >= 100 and meta["wait_local_ms"] < 50 and meta["wait_sqlite_ms"] < 50
     assert meta["thread"] == threading.current_thread().name
-    assert meta["duration_ms"] >= meta["held_ms"]
+    assert meta["duration_ms"] >= meta["held_ms"] - 1  # held_ms is rounded, the duration is not
 
 
 def test_a_fast_write_is_not_traced(traced) -> None:
