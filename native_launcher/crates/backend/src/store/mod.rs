@@ -17,6 +17,7 @@ pub mod messages;
 pub mod misc;
 pub mod pyjson;
 pub mod seal;
+pub mod search;
 pub mod sealed_file;
 pub mod sealed_files;
 pub mod secrets;

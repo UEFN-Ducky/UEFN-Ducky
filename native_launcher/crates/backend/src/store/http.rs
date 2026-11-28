@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 use super::settings::Settings;
 use super::chat_messages::Save;
 use super::chats::Chats;
-use super::{account, blocking, duckies, events, ledger, misc, seal, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
+use super::{account, blocking, duckies, events, ledger, misc, seal, search, sealed_file, sealed_files, secrets, tokens, Error, Result, Store};
 
 /// The store and its repos, opened on the first call that needs them.
 pub struct Repos {
@@ -279,6 +279,76 @@ async fn ledger(s: &Store, function: &str, a: &Value) -> Result<Option<Value>> {
     }))
 }
 
+/// The search index. Vectors travel as base64.
+async fn search(s: &Store, data_dir: &std::path::Path, function: &str, a: &Value) -> Result<Option<Value>> {
+    let (source, model, doc_key, plugin) = (text(a, "source_key"), text(a, "model"), text(a, "doc_key"), text(a, "plugin_id"));
+    let unpacked = |blob: &Value| BASE64.decode(blob.as_str().unwrap_or_default()).unwrap_or_default();
+    let vectors = || map(a, "vectors").iter().map(|(key, blob)| (key.clone(), unpacked(blob))).collect::<Vec<_>>();
+    Ok(Some(match function {
+        "existing" => Value::Object(search::existing(s, source, model).await?),
+        "write_source" => {
+            let source = search::Source {
+                source_key: source,
+                docs: a["docs"].as_array().cloned().unwrap_or_default(),
+                vectors: vectors().into_iter().collect(),
+                model,
+                revision: text(a, "revision"),
+                replace: a["replace"].as_bool().unwrap_or(true),
+                keep: texts(a, "keep"),
+            };
+            search::write_source(s, source).await?
+        }
+        "missing_vectors" => json!(search::missing_vectors(s, model, a["limit"].as_i64().unwrap_or(5000)).await?),
+        "set_vectors" => {
+            let hashes = a["hashes"].is_object().then(|| map(a, "hashes").iter().map(|(key, hash)| (key.clone(), hash.as_str().unwrap_or_default().to_string())).collect());
+            json!(search::set_vectors(s, vectors(), model, hashes).await?)
+        }
+        "tool_owners" => Value::Object(search::tool_owners(s, source).await?),
+        "record_state" => json!(search::record_state(s, doc_key, model).await?),
+        "upsert_one" => {
+            let vec = a["vec"].is_string().then(|| bytes(a, "vec"));
+            json!(search::upsert_one(s, a["doc"].clone(), vec, model, a["max_in_source"].as_i64()).await?)
+        }
+        "find_doc" => json!(search::find_doc(s, doc_key).await?),
+        "count_source" => json!(search::count_source(s, source).await?),
+        "delete_docs" => json!(search::delete_docs(s, texts(a, "doc_keys")).await?),
+        "drop_source" => json!(search::drop_source(s, source).await?),
+        "drop_sources_like" => json!(search::drop_sources_like(s, text(a, "prefix")).await?),
+        "forget_records" => json!(search::forget_records(s, plugin).await?),
+        "clear_plugin_gone" => json!(search::clear_plugin_gone(s, plugin).await?),
+        "drop_scope_records" => json!(search::drop_scope_records(s, text(a, "account"), text(a, "scope_id")).await?),
+        "drop_stale_sandbox_records" => json!(search::drop_stale_sandbox_records(s, a["older_than_s"].as_f64().unwrap_or(0.0)).await?),
+        "source_keys" => json!(search::source_keys(s).await?),
+        "source_ids" => json!(search::source_ids(s, source).await?),
+        "tool_names" => json!(search::tool_names(s).await?),
+        "get_state" => json!(search::get_state(s, source).await?),
+        "states" => Value::Object(search::states(s).await?),
+        "wipe" => json!(search::wipe(s).await?),
+        "fts_query" => json!(search::fts_query(&text(a, "text"), a["prefix"].as_bool().unwrap_or(true))),
+        "title_words" => json!(search::title_words(&text(a, "text"))),
+        "keyword" => {
+            let (limit, matching) = (a["limit"].as_i64().unwrap_or(50), a["match"].as_str().map(str::to_string));
+            json!(search::keyword(s, text(a, "text"), texts(a, "kinds"), limit, source, matching).await?)
+        }
+        "load_vectors" => {
+            let key = a["key"].is_string().then(|| tokens::Key::new(bytes(a, "key"))).transpose()?;
+            let (ids, kinds, vecs) = search::load_vectors(s, model, text(a, "account"), key).await?;
+            json!([ids, kinds, BASE64.encode(vecs)])
+        }
+        "get_docs" => {
+            let ids = serde_json::from_value(a["ids"].clone()).unwrap_or_default();
+            Value::Object(search::get_docs(s, ids, who(s, data_dir).await.ok()).await?)
+        }
+        "find_ids" => {
+            json!(search::find_ids(s, text(a, "kind"), text(a, "pack_id"), text(a, "subskill_id"), text(a, "tool_name"), text(a, "title")).await?)
+        }
+        "has_docs" => json!(search::has_docs(s).await?),
+        "counts" => search::counts(s).await?,
+        "revision_token" => json!(search::revision_token(s).await?),
+        _ => return Ok(None),
+    }))
+}
+
 /// Search tokens under a key the test hands over.
 fn tokens(function: &str, a: &Value) -> Result<Option<Value>> {
     let key = || tokens::Key::new(bytes(a, "key"));
@@ -323,6 +393,7 @@ async fn dispatch(open: &Open, data_dir: &std::path::Path, repo: &str, function:
         "local_chats" => return local_chats(open, data_dir, function, a).await,
         "events" | "perf" => return events(&open.store, repo, function, a).await,
         "ledger" => return ledger(&open.store, function, a).await,
+        "search" => return search(&open.store, data_dir, function, a).await,
         "sealed_files" => return sealed_files(open, data_dir, function, a).await,
         "tokens" => return tokens(function, a),
         _ => {}
