@@ -239,6 +239,31 @@ def test_a_folder_is_renamed_the_same_and_a_groups_chat_with_it(both, folder_id:
     assert name.strip() in {f["name"] for f in folders} or folder_id == "nope" or not name.strip()
 
 
+@pytest.mark.parametrize(("conv_id", "muted"), [(" odd ", True), ("odd", 0), ("hub", "yes"), ("nope", True)])
+def test_a_chat_is_muted_the_same(both, conv_id: str, muted: Any) -> None:
+    hub = _doc("hub", folder_id="g1", is_group=True, muted=True)
+    answer, events, _, docs = both.call(_FOLDERS, [_ODD, hub], "set_muted", conv_id, muted)
+    if conv_id == "nope":
+        assert (answer[1]["result"], events) == ({"ok": False, "error": "Conversation not found"}, [])
+        return
+    assert answer[1]["result"] == {"ok": True, "id": conv_id.strip(), "muted": bool(muted), "is_group": conv_id == "hub"}
+    assert [event["conv_id"] for event in events] == [conv_id.strip()]
+    assert {doc["id"]: doc.get("muted") for doc in docs}[conv_id.strip()] is bool(muted)  # the other chat is as seeded
+
+
+def test_chats_made_signed_out_are_listed_the_same(seed, python, rust_store, login) -> None:
+    from backend.uefn_plugins import data_crypto
+
+    from .conftest import ADK, LOGIN
+
+    assert _same(python, rust_store, "list_local_chats") == {"ok": True, "chats": []}
+    seed([], [_doc("mine", title="Made signed out"), _doc("old", folder_id="archive")])
+    assert _same(python, rust_store, "list_local_chats") == {"ok": True, "chats": []}
+    assert data_crypto.adk(login(LOGIN)) == ADK
+    waiting = _same(python, rust_store, "list_local_chats")
+    assert [(chat["id"], chat["title"]) for chat in waiting["chats"]] == [("mine", "Made signed out")]
+
+
 def test_archive_is_never_renamed(both) -> None:
     answer, _, folders, _ = both.call(_FOLDERS, [], "rename_folder", " archive ", "Bin")
     assert answer == [200, {"ok": False, "error": "Cannot rename the Archive folder"}]
